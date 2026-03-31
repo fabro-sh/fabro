@@ -17,16 +17,16 @@ fn help() {
 
     Options:
           --before <BEFORE>            Only include runs started before this date (YYYY-MM-DD prefix match)
+          --json                       Output as JSON [env: FABRO_JSON=]
           --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --workflow <WORKFLOW>        Filter by workflow name (substring match)
           --label <KEY=VALUE>          Filter by label (KEY=VALUE, repeatable, AND semantics)
+          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --orphans                    Include orphan directories (no run.json)
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --json                       Output as JSON
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
       -a, --all                        Show all runs, not just running (like docker ps -a)
+          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
       -q, --quiet                      Only display run IDs
+          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
       -h, --help                       Print help
     ----- stderr -----
     ");

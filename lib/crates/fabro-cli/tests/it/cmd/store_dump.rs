@@ -21,8 +21,9 @@ fn help() {
       <RUN>  Run ID prefix or workflow name
 
     Options:
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --json                       Output as JSON [env: FABRO_JSON=]
       -o, --output <OUTPUT>            Output directory (must not exist or be empty)
+          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]

@@ -20,21 +20,21 @@ fn help() {
               Path to the .fabro workflow file, .toml task config, or project workflow name
 
     Options:
-          --debug
-              Enable DEBUG-level logging (default is INFO)
-              
-              [env: FABRO_DEBUG=]
-
           --format <FORMAT>
               Output format
               
               [default: svg]
               [possible values: svg, png]
 
-          --no-upgrade-check
-              Disable automatic upgrade check
+          --json
+              Output as JSON
               
-              [env: FABRO_NO_UPGRADE_CHECK=true]
+              [env: FABRO_JSON=]
+
+          --debug
+              Enable DEBUG-level logging (default is INFO)
+              
+              [env: FABRO_DEBUG=]
 
       -o, --output <OUTPUT>
               Output file path (defaults to stdout)
@@ -45,6 +45,11 @@ fn help() {
               Possible values:
               - lr: Left to right
               - tb: Top to bottom
+
+          --no-upgrade-check
+              Disable automatic upgrade check
+              
+              [env: FABRO_NO_UPGRADE_CHECK=true]
 
           --quiet
               Suppress non-essential output

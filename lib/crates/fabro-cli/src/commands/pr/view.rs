@@ -7,6 +7,7 @@ use tracing::info;
 use fabro_workflow::run_lookup::runs_base;
 
 use crate::args::{GlobalArgs, PrViewArgs};
+use crate::shared::print_json_pretty;
 use crate::user_config::load_user_settings_with_globals;
 
 pub(super) async fn view_command(
@@ -16,13 +17,14 @@ pub(super) async fn view_command(
 ) -> Result<()> {
     let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
-    view_from(&base, args, github_app).await
+    view_from(&base, args, github_app, globals).await
 }
 
 async fn view_from(
     base: &Path,
     args: PrViewArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
+    globals: &GlobalArgs,
 ) -> Result<()> {
     let (record, _run_dir) = super::load_pr_record(base, &args.run_id).await?;
 
@@ -41,6 +43,11 @@ async fn view_from(
     .map_err(|err| anyhow::anyhow!("{err}"))?;
 
     info!(number = detail.number, owner = %record.owner, repo = %record.repo, "Viewing pull request");
+
+    if globals.json {
+        print_json_pretty(&detail)?;
+        return Ok(());
+    }
 
     println!("#{} {}", detail.number, detail.title);
     let state_display = if detail.draft { "draft" } else { &detail.state };

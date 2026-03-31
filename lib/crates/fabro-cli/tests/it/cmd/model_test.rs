@@ -14,11 +14,12 @@ fn help() {
     Usage: fabro model test [OPTIONS]
 
     Options:
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --json                       Output as JSON [env: FABRO_JSON=]
       -p, --provider <PROVIDER>        Filter by provider
+          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
       -m, --model <MODEL>              Test a specific model
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --deep                       Run a multi-turn tool-use test (catches reasoning round-trip bugs)
+          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
           --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]

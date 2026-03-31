@@ -15,6 +15,7 @@ use fabro_workflow::operations::{ValidateInput, WorkflowInput, validate};
 
 use crate::args::{GlobalArgs, PreflightArgs};
 use crate::shared::github::build_github_app_credentials;
+use crate::shared::print_json_pretty;
 use crate::user_config::{load_user_settings_with_globals, user_layer_with_globals};
 
 pub(crate) async fn execute(mut args: PreflightArgs, globals: &GlobalArgs) -> anyhow::Result<()> {
@@ -50,12 +51,14 @@ pub(crate) async fn execute(mut args: PreflightArgs, globals: &GlobalArgs) -> an
         cwd,
         custom_transforms: Vec::new(),
     })?;
-    super::run::output::print_workflow_report(&validated, Some(&resolution.dot_path), styles);
-    if validated.has_errors() {
-        bail!("Validation failed");
+    if !globals.json {
+        super::run::output::print_workflow_report(&validated, Some(&resolution.dot_path), styles);
+        if validated.has_errors() {
+            bail!("Validation failed");
+        }
     }
 
-    run_preflight(
+    let (report, preflight_ok) = run_preflight(
         validated.graph(),
         &settings,
         args.model.as_deref(),
@@ -66,8 +69,36 @@ pub(crate) async fn execute(mut args: PreflightArgs, globals: &GlobalArgs) -> an
         styles,
         github_app,
         origin_url.as_deref(),
+        !globals.json,
     )
-    .await
+    .await?;
+
+    if globals.json {
+        print_json_pretty(&serde_json::json!({
+            "workflow": {
+                "name": validated.graph().name,
+                "graph_path": resolution.dot_path,
+                "nodes": validated.graph().nodes.len(),
+                "edges": validated.graph().edges.len(),
+                "goal": validated.graph().goal(),
+                "diagnostics": validated.diagnostics(),
+            },
+            "checks": report,
+        }))?;
+    } else {
+        let term_width = console::Term::stderr().size().1;
+        print!("{}", report.render(styles, true, None, Some(term_width)));
+    }
+
+    if validated.has_errors() {
+        bail!("Validation failed");
+    }
+
+    if !preflight_ok {
+        std::process::exit(1);
+    }
+
+    Ok(())
 }
 
 fn resolve_model_provider(
@@ -173,19 +204,23 @@ async fn run_preflight(
     styles: &'static Styles,
     github_app: Option<fabro_github::GitHubAppCredentials>,
     origin_url: Option<&str>,
-) -> anyhow::Result<()> {
+    show_progress: bool,
+) -> anyhow::Result<(fabro_util::check_report::CheckReport, bool)> {
     use fabro_util::check_report::{
         CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus,
     };
 
-    let spinner = indicatif::ProgressBar::new_spinner();
-    spinner.set_style(
-        indicatif::ProgressStyle::with_template("{spinner:.cyan} {msg}")
-            .expect("valid template")
-            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", ""]),
-    );
-    spinner.set_message("Running preflight checks...");
-    spinner.enable_steady_tick(std::time::Duration::from_millis(80));
+    let spinner = show_progress.then(|| {
+        let spinner = indicatif::ProgressBar::new_spinner();
+        spinner.set_style(
+            indicatif::ProgressStyle::with_template("{spinner:.cyan} {msg}")
+                .expect("valid template")
+                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", ""]),
+        );
+        spinner.set_message("Running preflight checks...");
+        spinner.enable_steady_tick(std::time::Duration::from_millis(80));
+        spinner
+    });
 
     let mut checks: Vec<CheckResult> = Vec::new();
 
@@ -431,8 +466,6 @@ async fn run_preflight(
         }
     }
 
-    spinner.finish_and_clear();
-
     let report = CheckReport {
         title: "Run Preflight".into(),
         sections: vec![CheckSection {
@@ -440,13 +473,10 @@ async fn run_preflight(
             checks,
         }],
     };
-
-    let term_width = console::Term::stderr().size().1;
-    print!("{}", report.render(styles, true, None, Some(term_width)));
-
-    if sandbox_ok && llm_ok {
-        Ok(())
-    } else {
-        std::process::exit(1);
+    if let Some(spinner) = spinner {
+        spinner.finish_and_clear();
     }
+    let _ = styles;
+
+    Ok((report, sandbox_ok && llm_ok))
 }

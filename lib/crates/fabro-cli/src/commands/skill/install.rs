@@ -3,7 +3,8 @@ use std::path::Path;
 use anyhow::{Result, bail};
 use tracing::{debug, info};
 
-use crate::args::{SkillDir, SkillInstallArgs, SkillScope};
+use crate::args::{GlobalArgs, SkillDir, SkillInstallArgs, SkillScope};
+use crate::shared::{absolute_or_current, print_json_pretty};
 
 const SKILL_MD: &str = include_str!("../../../../../../skills/fabro-create-workflow/SKILL.md");
 const REF_DOT_LANGUAGE: &str =
@@ -37,9 +38,13 @@ pub(crate) fn install_skill_to(base_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn run_skill_install(args: &SkillInstallArgs) -> Result<()> {
+pub(super) fn run_skill_install(args: &SkillInstallArgs, globals: &GlobalArgs) -> Result<()> {
     let base_dir = resolve_base_dir(&args.scope, &args.dir)?;
     let skill_dir = base_dir.join("fabro-create-workflow");
+
+    if globals.json && skill_dir.exists() && !args.force {
+        globals.require_no_json()?;
+    }
 
     if skill_dir.exists() && !args.force {
         let confirm = dialoguer::Confirm::new()
@@ -55,7 +60,17 @@ pub(super) fn run_skill_install(args: &SkillInstallArgs) -> Result<()> {
         }
     }
 
-    install_skill_to(&base_dir)
+    install_skill_to(&base_dir)?;
+
+    if globals.json {
+        print_json_pretty(&serde_json::json!({
+            "skill": "fabro-create-workflow",
+            "path": absolute_or_current(&skill_dir),
+            "files": SKILL_FILES.iter().map(|(rel_path, _)| (*rel_path).to_string()).collect::<Vec<_>>(),
+        }))?;
+    }
+
+    Ok(())
 }
 
 fn resolve_base_dir(scope: &SkillScope, dir: &SkillDir) -> Result<std::path::PathBuf> {

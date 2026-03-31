@@ -1,4 +1,5 @@
 use fabro_test::{fabro_snapshot, test_context};
+use serde_json::Value;
 
 use super::support::{setup_completed_dry_run, setup_created_dry_run};
 
@@ -19,8 +20,9 @@ fn help() {
       <RUNS>...  Run IDs or workflow names to remove
 
     Options:
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
       -f, --force                      Force removal of active runs
+          --json                       Output as JSON [env: FABRO_JSON=]
+          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
@@ -135,6 +137,35 @@ fn rm_partial_failure_reports_which_identifiers_failed() {
     error: does-not-exist: No run found matching 'does-not-exist' (tried run ID prefix and workflow name)
     error: some runs could not be removed
     ");
+    assert!(
+        !run.run_dir.exists(),
+        "existing run should still be removed"
+    );
+}
+
+#[test]
+fn rm_partial_failure_json_includes_removed_and_errors() {
+    let context = test_context!();
+    let run = setup_completed_dry_run(&context);
+
+    let output = context
+        .command()
+        .args(["--json", "rm", &run.run_id, "does-not-exist"])
+        .output()
+        .expect("command should run");
+
+    assert!(!output.status.success());
+    let value: Value = serde_json::from_slice(&output.stdout).expect("rm JSON should parse");
+    assert_eq!(
+        value["removed"],
+        Value::Array(vec![Value::String(run.run_id.clone())])
+    );
+    assert_eq!(value["errors"][0]["identifier"], "does-not-exist");
+    assert!(
+        value["errors"][0]["error"]
+            .as_str()
+            .is_some_and(|error| error.contains("does-not-exist"))
+    );
     assert!(
         !run.run_dir.exists(),
         "existing run should still be removed"

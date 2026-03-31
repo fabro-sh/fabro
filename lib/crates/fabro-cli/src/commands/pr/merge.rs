@@ -7,6 +7,7 @@ use tracing::info;
 use fabro_workflow::run_lookup::runs_base;
 
 use crate::args::{GlobalArgs, PrMergeArgs};
+use crate::shared::print_json_pretty;
 use crate::user_config::load_user_settings_with_globals;
 
 pub(super) async fn merge_command(
@@ -16,13 +17,14 @@ pub(super) async fn merge_command(
 ) -> Result<()> {
     let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
-    merge_from(&base, args, github_app).await
+    merge_from(&base, args, github_app, globals).await
 }
 
 async fn merge_from(
     base: &Path,
     args: PrMergeArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
+    globals: &GlobalArgs,
 ) -> Result<()> {
     let (record, _run_dir) = super::load_pr_record(base, &args.run_id).await?;
 
@@ -42,7 +44,15 @@ async fn merge_from(
     .map_err(|err| anyhow::anyhow!("{err}"))?;
 
     info!(number = record.number, owner = %record.owner, repo = %record.repo, method = %args.method, "Merged pull request");
-    println!("Merged #{} ({})", record.number, record.html_url);
+    if globals.json {
+        print_json_pretty(&serde_json::json!({
+            "number": record.number,
+            "html_url": record.html_url,
+            "method": args.method,
+        }))?;
+    } else {
+        println!("Merged #{} ({})", record.number, record.html_url);
+    }
 
     Ok(())
 }

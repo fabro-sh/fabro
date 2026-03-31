@@ -9,6 +9,7 @@ use fabro_workflow::operations::{
 use git2::Repository;
 
 use crate::args::{ForkArgs, GlobalArgs};
+use crate::shared::print_json_pretty;
 use crate::store::{build_store, open_run_reader};
 use crate::user_config::load_user_settings_with_globals;
 
@@ -24,6 +25,10 @@ pub(crate) async fn run(args: &ForkArgs, styles: &Styles, globals: &GlobalArgs) 
     let timeline = build_timeline_or_rebuild(&store, run_store.as_deref(), &run_id).await?;
 
     if args.list {
+        if globals.json {
+            print_json_pretty(&super::rewind::timeline_entries_json(&timeline))?;
+            return Ok(());
+        }
         super::rewind::print_timeline(&timeline, styles);
         return Ok(());
     }
@@ -45,15 +50,24 @@ pub(crate) async fn run(args: &ForkArgs, styles: &Styles, globals: &GlobalArgs) 
     let run_id_string = run_id.to_string();
     let new_run_id_string = new_run_id.to_string();
 
-    eprintln!(
-        "\nForked run {} -> {}",
-        &run_id_string[..8.min(run_id_string.len())],
-        &new_run_id_string[..8.min(new_run_id_string.len())]
-    );
-    eprintln!(
-        "To resume: fabro resume {}",
-        &new_run_id_string[..8.min(new_run_id_string.len())]
-    );
+    if globals.json {
+        let target = args.target.clone().unwrap_or_else(|| "latest".to_string());
+        print_json_pretty(&serde_json::json!({
+            "source_run_id": run_id_string,
+            "new_run_id": new_run_id_string,
+            "target": target,
+        }))?;
+    } else {
+        eprintln!(
+            "\nForked run {} -> {}",
+            &run_id_string[..8.min(run_id_string.len())],
+            &new_run_id_string[..8.min(new_run_id_string.len())]
+        );
+        eprintln!(
+            "To resume: fabro resume {}",
+            &new_run_id_string[..8.min(new_run_id_string.len())]
+        );
+    }
 
     Ok(())
 }

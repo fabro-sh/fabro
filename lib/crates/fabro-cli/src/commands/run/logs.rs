@@ -65,9 +65,10 @@ pub(crate) async fn run(args: &LogsArgs, styles: &Styles, globals: &GlobalArgs) 
     let stdout = io::stdout();
     let is_tty = stdout.is_terminal();
     let mut out = stdout.lock();
+    let pretty = args.pretty && !globals.json;
 
     for line in &filtered {
-        if args.pretty {
+        if pretty {
             if let Some(formatted) = format_event_pretty(line, styles) {
                 writeln!(out, "{formatted}")?;
             }
@@ -82,7 +83,7 @@ pub(crate) async fn run(args: &LogsArgs, styles: &Styles, globals: &GlobalArgs) 
                 match follow_store_logs(
                     run_store.as_ref(),
                     if last_seq == 0 { 1 } else { last_seq + 1 },
-                    args.pretty,
+                    pretty,
                     styles,
                     is_tty,
                 )
@@ -103,7 +104,7 @@ pub(crate) async fn run(args: &LogsArgs, styles: &Styles, globals: &GlobalArgs) 
                             &progress_path,
                             &run.path,
                             lines_seen,
-                            args.pretty,
+                            pretty,
                             styles,
                             is_tty,
                         )?;
@@ -117,7 +118,7 @@ pub(crate) async fn run(args: &LogsArgs, styles: &Styles, globals: &GlobalArgs) 
                 &progress_path,
                 &run.path,
                 all_lines.len(),
-                args.pretty,
+                pretty,
                 styles,
                 is_tty,
             )?;

@@ -6,7 +6,7 @@ use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use tracing::info;
 
 use crate::args::{GlobalArgs, PreviewArgs};
-use crate::shared::validate_daytona_provider;
+use crate::shared::{print_json_pretty, validate_daytona_provider};
 use crate::store;
 use crate::user_config::load_user_settings_with_globals;
 
@@ -49,9 +49,13 @@ pub(crate) async fn run(args: PreviewArgs, globals: &GlobalArgs) -> Result<()> {
             .get_signed_preview_url(args.port, Some(args.ttl))
             .await
             .map_err(|e| anyhow::anyhow!("{e}"))?;
-        print!("{}", format_signed_output(&signed.url));
+        if globals.json {
+            print_json_pretty(&serde_json::json!({ "url": signed.url }))?;
+        } else {
+            print!("{}", format_signed_output(&signed.url));
+        }
 
-        if args.open {
+        if args.open && !globals.json {
             std::process::Command::new("open")
                 .arg(&signed.url)
                 .spawn()
@@ -62,7 +66,14 @@ pub(crate) async fn run(args: PreviewArgs, globals: &GlobalArgs) -> Result<()> {
             .get_preview_link(args.port)
             .await
             .map_err(|e| anyhow::anyhow!("{e}"))?;
-        print!("{}", format_standard_output(&preview.url, &preview.token));
+        if globals.json {
+            print_json_pretty(&serde_json::json!({
+                "url": preview.url,
+                "token": preview.token,
+            }))?;
+        } else {
+            print!("{}", format_standard_output(&preview.url, &preview.token));
+        }
     }
 
     Ok(())

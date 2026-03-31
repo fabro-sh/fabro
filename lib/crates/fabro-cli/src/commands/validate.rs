@@ -5,10 +5,14 @@ use fabro_util::terminal::Styles;
 use fabro_validate::Severity;
 use fabro_workflow::operations::{ValidateInput, WorkflowInput, validate};
 
-use crate::args::ValidateArgs;
-use crate::shared::{print_diagnostics, relative_path};
+use crate::args::{GlobalArgs, ValidateArgs};
+use crate::shared::{print_diagnostics, print_json_pretty, relative_path};
 
-pub(crate) fn run(args: &ValidateArgs, styles: &Styles) -> anyhow::Result<()> {
+pub(crate) fn run(
+    args: &ValidateArgs,
+    styles: &Styles,
+    globals: &GlobalArgs,
+) -> anyhow::Result<()> {
     let cwd = std::env::current_dir()?;
     let settings = ConfigLayer::for_workflow(&args.workflow, &cwd)?
         .combine(ConfigLayer::user()?)
@@ -22,6 +26,21 @@ pub(crate) fn run(args: &ValidateArgs, styles: &Styles) -> anyhow::Result<()> {
     })?;
     let graph = validated.graph();
     let diagnostics = validated.diagnostics();
+
+    if globals.json {
+        print_json_pretty(&serde_json::json!({
+            "workflow_name": graph.name,
+            "nodes": graph.nodes.len(),
+            "edges": graph.edges.len(),
+            "valid": !diagnostics.iter().any(|d| d.severity == Severity::Error),
+            "diagnostics": diagnostics,
+        }))?;
+
+        if diagnostics.iter().any(|d| d.severity == Severity::Error) {
+            bail!("Validation failed");
+        }
+        return Ok(());
+    }
 
     eprintln!(
         "{} ({} nodes, {} edges)",

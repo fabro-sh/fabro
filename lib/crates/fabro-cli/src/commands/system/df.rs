@@ -5,14 +5,45 @@ use chrono::{DateTime, Utc};
 use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Style, Table};
 use fabro_config::FabroSettingsExt;
+use serde::Serialize;
 
 use fabro_workflow::run_lookup::{logs_base, runs_base, scan_runs_combined};
 use fabro_workflow::run_status::RunStatus;
 
 use crate::args::{DfArgs, GlobalArgs};
-use crate::shared::format_size;
+use crate::shared::{format_size, print_json_pretty};
 use crate::store;
 use crate::user_config::load_user_settings_with_globals;
+
+#[derive(Serialize)]
+struct SummaryRow {
+    r#type: String,
+    count: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    active: Option<u64>,
+    size_bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reclaimable_bytes: Option<u64>,
+}
+
+#[derive(Serialize)]
+struct RunSizeRow {
+    run_id: String,
+    workflow_name: String,
+    status: RunStatus,
+    start_time: String,
+    size_bytes: u64,
+    reclaimable: bool,
+}
+
+#[derive(Serialize)]
+struct DfOutput {
+    summary: Vec<SummaryRow>,
+    total_size_bytes: u64,
+    total_reclaimable_bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runs: Option<Vec<RunSizeRow>>,
+}
 
 pub(super) async fn df_command(args: &DfArgs, globals: &GlobalArgs) -> Result<()> {
     let cli_settings = load_user_settings_with_globals(globals)?;
@@ -26,6 +57,7 @@ pub(super) async fn df_command(args: &DfArgs, globals: &GlobalArgs) -> Result<()
         &data_dir,
         &runs_base_dir,
         &logs_base_dir,
+        globals,
     )
     .await
 }
@@ -37,11 +69,13 @@ async fn df_from(
     data_dir: &Path,
     runs_base: &Path,
     logs_base: &Path,
+    globals: &GlobalArgs,
 ) -> Result<()> {
     struct RunSizeInfo {
         run_id: String,
         workflow_name: String,
         status: RunStatus,
+        start_time: String,
         start_time_dt: Option<DateTime<Utc>>,
         size: u64,
     }
@@ -65,6 +99,7 @@ async fn df_from(
                 run_id: run.run_id.to_string(),
                 workflow_name: run.workflow_name.clone(),
                 status: run.status,
+                start_time: run.start_time.clone(),
                 start_time_dt: run.start_time_dt,
                 size,
             });
@@ -121,6 +156,52 @@ async fn df_from(
         0
     };
     let log_reclaim_pct = if total_log_size > 0 { 100 } else { 0 };
+
+    if globals.json {
+        let summary = vec![
+            SummaryRow {
+                r#type: "runs".to_string(),
+                count: runs.len().try_into().unwrap(),
+                active: Some(active_count),
+                size_bytes: total_run_size,
+                reclaimable_bytes: Some(reclaimable_run_size),
+            },
+            SummaryRow {
+                r#type: "logs".to_string(),
+                count: log_count,
+                active: None,
+                size_bytes: total_log_size,
+                reclaimable_bytes: Some(total_log_size),
+            },
+            SummaryRow {
+                r#type: "databases".to_string(),
+                count: db_count,
+                active: None,
+                size_bytes: total_db_size,
+                reclaimable_bytes: Some(0),
+            },
+        ];
+        let runs = args.verbose.then(|| {
+            run_details
+                .iter()
+                .map(|detail| RunSizeRow {
+                    run_id: detail.run_id.clone(),
+                    workflow_name: detail.workflow_name.clone(),
+                    status: detail.status,
+                    start_time: detail.start_time.clone(),
+                    size_bytes: detail.size,
+                    reclaimable: !detail.status.is_active(),
+                })
+                .collect::<Vec<_>>()
+        });
+        print_json_pretty(&DfOutput {
+            summary,
+            total_size_bytes: total_run_size + total_log_size + total_db_size,
+            total_reclaimable_bytes: reclaimable_run_size + total_log_size,
+            runs,
+        })?;
+        return Ok(());
+    }
 
     let use_color = console::colors_enabled();
     let color_choice = if use_color {

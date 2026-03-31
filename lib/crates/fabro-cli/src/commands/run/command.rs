@@ -2,6 +2,7 @@ use anyhow::Result;
 use fabro_util::terminal::Styles;
 
 use crate::args::{GlobalArgs, RunArgs};
+use crate::shared::print_json_pretty;
 use crate::user_config::{self, user_layer_with_globals};
 
 pub(crate) async fn execute(mut args: RunArgs, globals: &GlobalArgs) -> Result<()> {
@@ -23,11 +24,24 @@ pub(crate) async fn execute(mut args: RunArgs, globals: &GlobalArgs) -> Result<(
     let child = super::start::start_run(&run_dir, false)?;
 
     if args.detach {
-        println!("{run_id}");
+        if globals.json {
+            print_json_pretty(&serde_json::json!({ "run_id": run_id }))?;
+        } else {
+            println!("{run_id}");
+        }
     } else {
-        let exit_code =
-            super::attach::attach_run(&run_dir, Some(&run_id), true, styles, Some(child)).await?;
-        super::output::print_run_summary(&run_dir, run_id, styles);
+        let exit_code = super::attach::attach_run(
+            &run_dir,
+            Some(&run_id),
+            true,
+            styles,
+            Some(child),
+            globals.json,
+        )
+        .await?;
+        if !globals.json {
+            super::output::print_run_summary(&run_dir, run_id, styles);
+        }
         if exit_code != std::process::ExitCode::SUCCESS {
             std::process::exit(1);
         }

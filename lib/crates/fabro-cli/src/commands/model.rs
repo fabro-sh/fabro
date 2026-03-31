@@ -35,5 +35,5 @@ pub(crate) async fn execute(command: Option<ModelsCommand>, globals: &GlobalArgs
         }
     };
 
-    run_models(command, server).await
+    run_models(command, server, globals.json).await
 }

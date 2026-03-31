@@ -14,11 +14,20 @@ use fabro_workflow::records::CheckpointExt;
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use fabro_workflow::run_status::{self, RunStatus};
 use git2::Repository;
+use serde::Serialize;
 
 use crate::args::{GlobalArgs, RewindArgs};
-use crate::shared::color_if;
+use crate::shared::{color_if, print_json_pretty};
 use crate::store::{build_store, open_run_reader};
 use crate::user_config::load_user_settings_with_globals;
+
+#[derive(Serialize)]
+pub(crate) struct TimelineEntryJson {
+    ordinal: usize,
+    node_name: String,
+    visit: usize,
+    run_commit_sha: Option<String>,
+}
 
 pub(crate) async fn run(args: &RewindArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
     let repo = Repository::discover(".").context("not in a git repository")?;
@@ -39,6 +48,10 @@ pub(crate) async fn run(args: &RewindArgs, styles: &Styles, globals: &GlobalArgs
     let timeline = build_timeline_or_rebuild(&store, run_store.as_deref(), &run_id).await?;
 
     if args.list || args.target.is_none() {
+        if globals.json {
+            print_json_pretty(&timeline_entries_json(&timeline))?;
+            return Ok(());
+        }
         print_timeline(&timeline, styles);
         return Ok(());
     }
@@ -59,12 +72,32 @@ pub(crate) async fn run(args: &RewindArgs, styles: &Styles, globals: &GlobalArgs
 
     let run_id_string = run_id.to_string();
 
-    eprintln!(
-        "\nTo resume: fabro resume {}",
-        &run_id_string[..8.min(run_id_string.len())]
-    );
+    if globals.json {
+        print_json_pretty(&serde_json::json!({
+            "run_id": run_id_string,
+            "target": args.target.as_deref().unwrap(),
+        }))?;
+    } else {
+        eprintln!(
+            "\nTo resume: fabro resume {}",
+            &run_id_string[..8.min(run_id_string.len())]
+        );
+    }
 
     Ok(())
+}
+
+pub(crate) fn timeline_entries_json(timeline: &RunTimeline) -> Vec<TimelineEntryJson> {
+    timeline
+        .entries
+        .iter()
+        .map(|entry| TimelineEntryJson {
+            ordinal: entry.ordinal,
+            node_name: entry.node_name.clone(),
+            visit: entry.visit,
+            run_commit_sha: entry.run_commit_sha.clone(),
+        })
+        .collect()
 }
 
 async fn reset_rewound_run_state(

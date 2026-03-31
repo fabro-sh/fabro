@@ -5,13 +5,13 @@ mod set;
 
 use anyhow::Result;
 
-use crate::args::{SecretCommand, SecretNamespace};
+use crate::args::{GlobalArgs, SecretCommand, SecretNamespace};
 
-pub(crate) fn dispatch(ns: SecretNamespace) -> Result<()> {
+pub(crate) fn dispatch(ns: SecretNamespace, globals: &GlobalArgs) -> Result<()> {
     match ns.command {
-        SecretCommand::Get(args) => get::get_command(&args),
-        SecretCommand::List(args) => list::list_command(&args),
-        SecretCommand::Rm(args) => rm::rm_command(&args),
-        SecretCommand::Set(args) => set::set_command(&args),
+        SecretCommand::Get(args) => get::get_command(&args, globals),
+        SecretCommand::List(args) => list::list_command(&args, globals),
+        SecretCommand::Rm(args) => rm::rm_command(&args, globals),
+        SecretCommand::Set(args) => set::set_command(&args, globals),
     }
 }

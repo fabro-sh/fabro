@@ -7,7 +7,7 @@ use fabro_workflow::assets::{AssetEntry, scan_assets};
 use fabro_workflow::run_lookup::{resolve_run, runs_base};
 
 use crate::args::{AssetCpArgs, GlobalArgs};
-use crate::shared::split_run_path;
+use crate::shared::{print_json_pretty, split_run_path};
 use crate::user_config::load_user_settings_with_globals;
 
 pub(super) fn cp_command(args: &AssetCpArgs, globals: &GlobalArgs) -> Result<()> {
@@ -64,10 +64,20 @@ pub(super) fn cp_command(args: &AssetCpArgs, globals: &GlobalArgs) -> Result<()>
                 dest_file.display()
             )
         })?;
-        println!("Copied {} to {}", entry.relative_path, dest_file.display());
+        if globals.json {
+            print_json_pretty(&serde_json::json!({
+                "copied": [{
+                    "relative_path": entry.relative_path,
+                    "destination": dest_file.display().to_string(),
+                }],
+            }))?;
+        } else {
+            println!("Copied {} to {}", entry.relative_path, dest_file.display());
+        }
         return Ok(());
     }
 
+    let mut copied = Vec::new();
     if args.tree {
         for entry in &entries {
             let relative_dest = PathBuf::from(&entry.node_slug)
@@ -84,6 +94,10 @@ pub(super) fn cp_command(args: &AssetCpArgs, globals: &GlobalArgs) -> Result<()>
                     dest_file.display()
                 )
             })?;
+            copied.push(serde_json::json!({
+                "relative_path": entry.relative_path,
+                "destination": dest_file.display().to_string(),
+            }));
         }
     } else {
         let mut by_filename: Vec<(String, &AssetEntry)> = Vec::with_capacity(entries.len());
@@ -116,14 +130,22 @@ pub(super) fn cp_command(args: &AssetCpArgs, globals: &GlobalArgs) -> Result<()>
                     dest_file.display()
                 )
             })?;
+            copied.push(serde_json::json!({
+                "relative_path": entry.relative_path,
+                "destination": dest_file.display().to_string(),
+            }));
         }
     }
 
-    println!(
-        "Copied {} asset(s) to {}",
-        entries.len(),
-        args.dest.display()
-    );
+    if globals.json {
+        print_json_pretty(&serde_json::json!({ "copied": copied }))?;
+    } else {
+        println!(
+            "Copied {} asset(s) to {}",
+            entries.len(),
+            args.dest.display()
+        );
+    }
     Ok(())
 }
 

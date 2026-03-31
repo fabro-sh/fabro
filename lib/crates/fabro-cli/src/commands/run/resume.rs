@@ -5,6 +5,7 @@ use fabro_workflow::records::{RunRecord, RunRecordExt};
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 
 use crate::args::{GlobalArgs, ResumeArgs};
+use crate::shared::print_json_pretty;
 use crate::store;
 use crate::user_config::load_user_settings_with_globals;
 
@@ -37,11 +38,24 @@ pub(crate) async fn resume_command(
     let child = super::start::start_run(&run_dir, true)?;
 
     if args.detach {
-        println!("{run_id}");
+        if globals.json {
+            print_json_pretty(&serde_json::json!({ "run_id": run_id }))?;
+        } else {
+            println!("{run_id}");
+        }
     } else {
-        let exit_code =
-            super::attach::attach_run(&run_dir, Some(&run_id), true, styles, Some(child)).await?;
-        super::output::print_run_summary(&run_dir, run_id, styles);
+        let exit_code = super::attach::attach_run(
+            &run_dir,
+            Some(&run_id),
+            true,
+            styles,
+            Some(child),
+            globals.json,
+        )
+        .await?;
+        if !globals.json {
+            super::output::print_run_summary(&run_dir, run_id, styles);
+        }
         if exit_code != std::process::ExitCode::SUCCESS {
             std::process::exit(1);
         }

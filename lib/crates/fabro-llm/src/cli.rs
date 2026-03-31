@@ -9,7 +9,7 @@ use clap::{Args, Subcommand};
 use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
 use futures::{StreamExt, stream};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::task;
 use tokio::time;
 
@@ -24,6 +24,34 @@ use crate::types::{ContentPart, GenerateResult, Message, ReasoningEffort, Stream
 pub struct ServerConnection {
     pub client: reqwest::Client,
     pub base_url: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ModelTestResultKind {
+    Pass,
+    Fail,
+    Skip,
+}
+
+#[derive(Serialize)]
+struct ModelTestRow {
+    model: String,
+    provider: Provider,
+    result: ModelTestResultKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ModelTestOutput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    deep_unsupported: Option<bool>,
+    results: Vec<ModelTestRow>,
+    total: usize,
+    failures: u32,
 }
 
 #[derive(Args)]
@@ -343,12 +371,14 @@ pub async fn run_chat(args: ChatArgs) -> Result<()> {
 }
 
 #[allow(clippy::print_stdout, clippy::print_stderr)]
-pub async fn run_prompt(args: PromptArgs) -> Result<()> {
+pub async fn run_prompt(args: PromptArgs, json_output: bool) -> Result<()> {
     let stdin_prompt = read_stdin_prompt();
     let prompt_text = resolve_prompt(args.prompt, stdin_prompt)?;
     let (model_id, provider) = resolve_model(args.model);
 
-    eprintln!("Using model: {model_id}");
+    if !json_output {
+        eprintln!("Using model: {model_id}");
+    }
 
     let mut params = GenerateParams::new(&model_id).prompt(&prompt_text);
     if let Some(p) = provider {
@@ -375,9 +405,20 @@ pub async fn run_prompt(args: PromptArgs) -> Result<()> {
         }
         (true, None) => {
             let result = generate::generate(params).await?;
-            print!("{}", result.text());
-            if args.usage {
-                print_usage(&result.usage);
+            if json_output {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "response": result.text(),
+                        "model": model_id,
+                        "usage": result.usage,
+                    }))?
+                );
+            } else {
+                print!("{}", result.text());
+                if args.usage {
+                    print_usage(&result.usage);
+                }
             }
         }
         (false, Some(schema)) => {
@@ -391,15 +432,33 @@ pub async fn run_prompt(args: PromptArgs) -> Result<()> {
         }
         (false, None) => {
             let mut stream_result = generate::stream(params).await?;
+            let mut full_text = String::new();
             while let Some(event) = stream_result.next().await {
                 if let StreamEvent::TextDelta { delta, .. } = event? {
-                    print!("{delta}");
+                    if json_output {
+                        full_text.push_str(&delta);
+                    } else {
+                        print!("{delta}");
+                    }
                 }
             }
-            println!();
-            if args.usage {
-                if let Some(response) = stream_result.response() {
-                    print_usage(&response.usage);
+            if json_output {
+                let usage = stream_result
+                    .response()
+                    .map(|response| response.usage.clone());
+                let mut value = serde_json::Map::new();
+                value.insert("response".to_string(), full_text.into());
+                value.insert("model".to_string(), model_id.into());
+                if let Some(usage) = usage {
+                    value.insert("usage".to_string(), serde_json::to_value(usage)?);
+                }
+                println!("{}", serde_json::to_string_pretty(&value)?);
+            } else {
+                println!();
+                if args.usage {
+                    if let Some(response) = stream_result.response() {
+                        print_usage(&response.usage);
+                    }
                 }
             }
         }
@@ -409,7 +468,11 @@ pub async fn run_prompt(args: PromptArgs) -> Result<()> {
 }
 
 #[allow(clippy::print_stdout, clippy::print_stderr)]
-pub async fn run_prompt_via_server(args: PromptArgs, server: &ServerConnection) -> Result<()> {
+pub async fn run_prompt_via_server(
+    args: PromptArgs,
+    server: &ServerConnection,
+    json_output: bool,
+) -> Result<()> {
     let stdin_prompt = read_stdin_prompt();
     let prompt_text = resolve_prompt(args.prompt, stdin_prompt)?;
 
@@ -494,19 +557,22 @@ pub async fn run_prompt_via_server(args: PromptArgs, server: &ServerConnection) 
 
         let show_usage = args.usage;
         let mut output_usage: Option<Usage> = None;
+        let mut full_text = String::new();
 
         parse_sse_frames(response, |event_type, data| {
             if event_type == "stream_event" {
                 if let Ok(event) = serde_json::from_str::<StreamEvent>(data) {
                     match event {
                         StreamEvent::TextDelta { delta, .. } => {
-                            print!("{delta}");
-                            let _ = io::stdout().flush();
+                            if json_output {
+                                full_text.push_str(&delta);
+                            } else {
+                                print!("{delta}");
+                                let _ = io::stdout().flush();
+                            }
                         }
                         StreamEvent::Finish { usage, .. } => {
-                            if show_usage {
-                                output_usage = Some(usage);
-                            }
+                            output_usage = Some(usage);
                         }
                         StreamEvent::Error { error, .. } => {
                             bail!("Server error: {error}");
@@ -518,11 +584,22 @@ pub async fn run_prompt_via_server(args: PromptArgs, server: &ServerConnection) 
             Ok(true)
         })
         .await?;
-        println!();
-
-        if show_usage {
+        if json_output {
+            let mut value = serde_json::Map::new();
+            value.insert("response".to_string(), full_text.into());
+            if let Some(model) = args.model {
+                value.insert("model".to_string(), model.into());
+            }
             if let Some(usage) = output_usage {
-                print_usage(&usage);
+                value.insert("usage".to_string(), serde_json::to_value(usage)?);
+            }
+            println!("{}", serde_json::to_string_pretty(&value)?);
+        } else {
+            println!();
+            if show_usage {
+                if let Some(usage) = output_usage {
+                    print_usage(&usage);
+                }
             }
         }
     } else {
@@ -553,11 +630,29 @@ pub async fn run_prompt_via_server(args: PromptArgs, server: &ServerConnection) 
                 // Extract text from message.content parts
                 print_message_text(&result["message"]);
             }
+        } else if json_output {
+            let mut value = serde_json::Map::new();
+            value.insert(
+                "response".to_string(),
+                extract_message_text(&result["message"]).into(),
+            );
+            let model = result
+                .get("model")
+                .and_then(serde_json::Value::as_str)
+                .map(ToOwned::to_owned)
+                .or(args.model.clone());
+            if let Some(model) = model {
+                value.insert("model".to_string(), model.into());
+            }
+            if let Some(usage) = result.get("usage") {
+                value.insert("usage".to_string(), usage.clone());
+            }
+            println!("{}", serde_json::to_string_pretty(&value)?);
         } else {
             print_message_text(&result["message"]);
         }
 
-        if args.usage {
+        if args.usage && !json_output {
             let input = result["usage"]["input_tokens"].as_i64().unwrap_or(0);
             let output = result["usage"]["output_tokens"].as_i64().unwrap_or(0);
             eprintln!(
@@ -575,14 +670,69 @@ pub async fn run_prompt_via_server(args: PromptArgs, server: &ServerConnection) 
 /// Extract and print text from a CompletionMessage JSON value.
 #[allow(clippy::print_stdout)]
 fn print_message_text(message: &serde_json::Value) {
+    print!("{}", extract_message_text(message));
+}
+
+fn extract_message_text(message: &serde_json::Value) -> String {
+    let mut text = String::new();
     if let Some(content) = message["content"].as_array() {
         for part in content {
             if part["kind"].as_str() == Some("text") {
-                if let Some(text) = part["data"].as_str() {
-                    print!("{text}");
+                if let Some(part_text) = part["data"].as_str() {
+                    text.push_str(part_text);
                 }
             }
         }
+    }
+    text
+}
+
+fn model_test_row_from_status(model: &Model, status: &str, result_color: Color) -> ModelTestRow {
+    let trimmed = status.trim();
+    match result_color {
+        Color::Green => ModelTestRow {
+            model: model.id.clone(),
+            provider: model.provider,
+            result: ModelTestResultKind::Pass,
+            detail: None,
+            error: None,
+        },
+        Color::Yellow => ModelTestRow {
+            model: model.id.clone(),
+            provider: model.provider,
+            result: ModelTestResultKind::Skip,
+            detail: Some(
+                trimmed
+                    .strip_prefix("deep: skipped (")
+                    .and_then(|rest| rest.strip_suffix(')'))
+                    .or_else(|| {
+                        trimmed
+                            .strip_prefix("deep: ok (")
+                            .and_then(|rest| rest.strip_suffix(')'))
+                    })
+                    .unwrap_or(trimmed)
+                    .to_string(),
+            ),
+            error: None,
+        },
+        _ => ModelTestRow {
+            model: model.id.clone(),
+            provider: model.provider,
+            result: ModelTestResultKind::Fail,
+            detail: None,
+            error: Some(
+                trimmed
+                    .strip_prefix("error: ")
+                    .or_else(|| trimmed.strip_prefix("deep: error: "))
+                    .or_else(|| {
+                        trimmed
+                            .strip_prefix("deep: fail (")
+                            .and_then(|rest| rest.strip_suffix(')'))
+                    })
+                    .unwrap_or(trimmed)
+                    .to_string(),
+            ),
+        },
     }
 }
 
@@ -937,9 +1087,12 @@ async fn test_models_via_server(
     model: Option<&str>,
     deep: bool,
     s: &Styles,
+    json_output: bool,
 ) -> Result<()> {
     if deep {
-        eprintln!("Warning: --deep is not supported in server mode");
+        if !json_output {
+            eprintln!("Warning: --deep is not supported in server mode");
+        }
     }
     let models_to_test = if let Some(model_id) = model {
         let all = fetch_models_from_server(&server.client, &server.base_url, None).await?;
@@ -961,11 +1114,16 @@ async fn test_models_via_server(
     title.push("RESULT".cell().bold(use_color));
 
     let mut rows: Vec<Vec<CellStruct>> = Vec::new();
+    let mut json_rows = Vec::new();
     let mut failures = 0u32;
     for info in &models_to_test {
-        eprint!("Testing {}...", info.id);
+        if !json_output {
+            eprint!("Testing {}...", info.id);
+        }
         let result = test_model_via_server(&server.client, &server.base_url, &info.id).await;
-        eprintln!(" done");
+        if !json_output {
+            eprintln!(" done");
+        }
 
         let (result_color, status) = match result {
             Ok(resp) if resp.status == "ok" => (Color::Green, "ok".to_string()),
@@ -985,10 +1143,28 @@ async fn test_models_via_server(
         let mut row = model_row(info, use_color);
         row.push(
             status
+                .clone()
                 .cell()
                 .foreground_color(color_if(use_color, result_color)),
         );
         rows.push(row);
+        json_rows.push(model_test_row_from_status(info, &status, result_color));
+    }
+
+    if json_output {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&ModelTestOutput {
+                deep_unsupported: deep.then_some(true),
+                total: json_rows.len(),
+                failures,
+                results: json_rows,
+            })?
+        );
+        if failures > 0 {
+            bail!("{failures} model(s) failed");
+        }
+        return Ok(());
     }
 
     let table = rows
@@ -1009,6 +1185,7 @@ async fn test_models_via_server(
 pub async fn run_models(
     command: Option<ModelsCommand>,
     server: Option<ServerConnection>,
+    json_output: bool,
 ) -> Result<()> {
     let command = command.unwrap_or(ModelsCommand::List {
         provider: None,
@@ -1037,7 +1214,11 @@ pub async fn run_models(
                 });
             }
 
-            print_models_table(&models, &styles);
+            if json_output {
+                println!("{}", serde_json::to_string_pretty(&models)?);
+            } else {
+                print_models_table(&models, &styles);
+            }
         }
         ModelsCommand::Test {
             provider,
@@ -1045,11 +1226,25 @@ pub async fn run_models(
             deep,
         } => match &server {
             Some(s) => {
-                test_models_via_server(s, provider.as_deref(), model.as_deref(), deep, &styles)
-                    .await?;
+                test_models_via_server(
+                    s,
+                    provider.as_deref(),
+                    model.as_deref(),
+                    deep,
+                    &styles,
+                    json_output,
+                )
+                .await?;
             }
             None => {
-                test_models(provider.as_deref(), model.as_deref(), deep, &styles).await?;
+                test_models(
+                    provider.as_deref(),
+                    model.as_deref(),
+                    deep,
+                    &styles,
+                    json_output,
+                )
+                .await?;
             }
         },
     }
@@ -1092,6 +1287,7 @@ async fn test_models(
     model: Option<&str>,
     deep: bool,
     s: &Styles,
+    json_output: bool,
 ) -> Result<()> {
     use rand::seq::SliceRandom;
 
@@ -1109,15 +1305,20 @@ async fn test_models(
         bail!("No models found");
     }
 
-    let test_kind = if deep { "Deep testing" } else { "Testing" };
-    let pb = indicatif::ProgressBar::new(models_to_test.len() as u64);
-    pb.set_style(
-        indicatif::ProgressStyle::with_template(&format!(
-            "{{spinner:.green}} {test_kind} {{pos}}/{{len}} models {{wide_bar}} {{eta}}"
-        ))
-        .unwrap(),
-    );
-    pb.enable_steady_tick(Duration::from_millis(100));
+    let pb = if json_output {
+        None
+    } else {
+        let test_kind = if deep { "Deep testing" } else { "Testing" };
+        let pb = indicatif::ProgressBar::new(models_to_test.len() as u64);
+        pb.set_style(
+            indicatif::ProgressStyle::with_template(&format!(
+                "{{spinner:.green}} {test_kind} {{pos}}/{{len}} models {{wide_bar}} {{eta}}"
+            ))
+            .unwrap(),
+        );
+        pb.enable_steady_tick(Duration::from_millis(100));
+        Some(pb)
+    };
 
     // Build (original_index, model_info) pairs, then shuffle for provider spread
     let mut indexed: Vec<(usize, &Model)> = models_to_test.iter().enumerate().collect();
@@ -1129,7 +1330,9 @@ async fn test_models(
             let pb = pb.clone();
             async move {
                 let (color, status) = test_one_model(info, deep).await;
-                pb.inc(1);
+                if let Some(pb) = pb {
+                    pb.inc(1);
+                }
                 (idx, color, status)
             }
         })
@@ -1137,7 +1340,9 @@ async fn test_models(
         .collect()
         .await;
 
-    pb.finish_and_clear();
+    if let Some(pb) = pb {
+        pb.finish_and_clear();
+    }
 
     // Sort back to original catalog order
     let mut sorted_results = results;
@@ -1148,11 +1353,17 @@ async fn test_models(
     title.push("RESULT".cell().bold(use_color));
 
     let mut rows: Vec<Vec<CellStruct>> = Vec::new();
+    let mut json_rows = Vec::new();
     let mut failures = 0u32;
     for (idx, result_color, status) in &sorted_results {
         if *result_color == Color::Red {
             failures += 1;
         }
+        json_rows.push(model_test_row_from_status(
+            &models_to_test[*idx],
+            status,
+            *result_color,
+        ));
         let mut row = model_row(&models_to_test[*idx], use_color);
         row.push(
             status
@@ -1160,6 +1371,22 @@ async fn test_models(
                 .foreground_color(color_if(use_color, *result_color)),
         );
         rows.push(row);
+    }
+
+    if json_output {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&ModelTestOutput {
+                deep_unsupported: None,
+                total: json_rows.len(),
+                failures,
+                results: json_rows,
+            })?
+        );
+        if failures > 0 {
+            bail!("{failures} model(s) failed");
+        }
+        return Ok(());
     }
 
     let table = rows

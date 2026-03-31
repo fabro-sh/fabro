@@ -19,7 +19,7 @@ pub(super) fn list_command(args: &AssetListArgs, globals: &GlobalArgs) -> Result
         args.retry,
     )?;
 
-    if args.json {
+    if globals.json {
         println!("{}", serde_json::to_string_pretty(&entries)?);
         return Ok(());
     }

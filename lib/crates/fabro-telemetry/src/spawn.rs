@@ -5,25 +5,26 @@
 ///
 /// `args` is the full argv (program + arguments).
 /// `env` is a list of (key, value) pairs to set in the child environment.
-pub fn spawn_detached(args: &[&str], env: &[(&str, &str)]) {
+/// `env_remove` is a list of environment variables to remove in the child.
+pub fn spawn_detached(args: &[&str], env: &[(&str, &str)], env_remove: &[&str]) {
     if args.is_empty() {
         return;
     }
 
     #[cfg(unix)]
     {
-        spawn_detached_unix(args, env);
+        spawn_detached_unix(args, env, env_remove);
     }
 
     #[cfg(windows)]
     {
-        spawn_detached_windows(args, env);
+        spawn_detached_windows(args, env, env_remove);
     }
 }
 
 #[cfg(unix)]
 #[allow(clippy::exit)]
-fn spawn_detached_unix(args: &[&str], env: &[(&str, &str)]) {
+fn spawn_detached_unix(args: &[&str], env: &[(&str, &str)], env_remove: &[&str]) {
     use fork::{Fork, fork, setsid};
 
     // Flush stdout/stderr before forking so the child process doesn't inherit
@@ -56,6 +57,9 @@ fn spawn_detached_unix(args: &[&str], env: &[(&str, &str)]) {
                     for (key, value) in env {
                         std::env::set_var(key, value);
                     }
+                    for key in env_remove {
+                        std::env::remove_var(key);
+                    }
 
                     // Replace the process with the target command.
                     let _err = exec::execvp(args[0], args);
@@ -72,7 +76,7 @@ fn spawn_detached_unix(args: &[&str], env: &[(&str, &str)]) {
 }
 
 #[cfg(windows)]
-fn spawn_detached_windows(args: &[&str], env: &[(&str, &str)]) {
+fn spawn_detached_windows(args: &[&str], env: &[(&str, &str)], env_remove: &[&str]) {
     use std::os::windows::process::CommandExt;
     const DETACHED_PROCESS: u32 = 0x00000008;
 
@@ -82,6 +86,9 @@ fn spawn_detached_windows(args: &[&str], env: &[(&str, &str)]) {
     }
     for (key, value) in env {
         cmd.env(key, value);
+    }
+    for key in env_remove {
+        cmd.env_remove(key);
     }
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -126,6 +133,7 @@ pub fn spawn_fabro_subcommand(subcommand: &str, filename: &str, json: &[u8]) {
     spawn_detached(
         &[&exe, subcommand, &path_str],
         &[("FABRO_TELEMETRY", "off")],
+        &["FABRO_JSON"],
     );
 }
 
@@ -136,7 +144,7 @@ mod tests {
     #[test]
     fn spawn_detached_empty_args_is_noop() {
         // Should not panic or do anything.
-        spawn_detached(&[], &[]);
+        spawn_detached(&[], &[], &[]);
     }
 
     #[cfg(unix)]
@@ -147,7 +155,7 @@ mod tests {
         let _ = std::fs::remove_file(&tmp);
 
         let tmp_str = tmp.to_str().unwrap();
-        spawn_detached(&["touch", tmp_str], &[]);
+        spawn_detached(&["touch", tmp_str], &[], &[]);
 
         // Wait a bit for the detached process to complete.
         std::thread::sleep(std::time::Duration::from_millis(500));

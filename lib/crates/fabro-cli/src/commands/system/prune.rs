@@ -4,20 +4,29 @@ use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use fabro_config::FabroSettingsExt;
 use fabro_store::Store;
+use serde::Serialize;
 use tracing::{debug, info};
 
 use fabro_workflow::run_lookup::{StatusFilter, filter_runs, runs_base, scan_runs_combined};
 
 use crate::args::{GlobalArgs, RunsPruneArgs};
-use crate::shared::format_size;
+use crate::shared::{format_size, print_json_pretty};
 use crate::store;
 use crate::user_config::load_user_settings_with_globals;
+
+#[derive(Serialize)]
+struct PruneRunRow {
+    run_id: String,
+    dir_name: String,
+    workflow_name: String,
+    size_bytes: u64,
+}
 
 pub(super) async fn prune_command(args: &RunsPruneArgs, globals: &GlobalArgs) -> Result<()> {
     let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
     let store = store::build_store(&cli_settings.storage_dir())?;
-    prune_from(args, store.as_ref(), &base).await
+    prune_from(args, store.as_ref(), &base, globals).await
 }
 
 pub(crate) fn parse_duration(s: &str) -> Result<chrono::Duration> {
@@ -36,7 +45,12 @@ pub(crate) fn parse_duration(s: &str) -> Result<chrono::Duration> {
     }
 }
 
-async fn prune_from(args: &RunsPruneArgs, store: &dyn Store, base: &Path) -> Result<()> {
+async fn prune_from(
+    args: &RunsPruneArgs,
+    store: &dyn Store,
+    base: &Path,
+    globals: &GlobalArgs,
+) -> Result<()> {
     let runs = scan_runs_combined(store, base).await?;
     let label_filters = parse_label_filters(&args.filter.label);
     let mut filtered = filter_runs(
@@ -70,11 +84,37 @@ async fn prune_from(args: &RunsPruneArgs, store: &dyn Store, base: &Path) -> Res
     filtered.retain(|run| !run.status.is_active());
 
     if filtered.is_empty() {
-        eprintln!("No matching runs to prune.");
+        if globals.json {
+            if args.yes {
+                print_json_pretty(&serde_json::json!({
+                    "dry_run": false,
+                    "deleted_count": 0,
+                    "freed_bytes": 0,
+                }))?;
+            } else {
+                print_json_pretty(&serde_json::json!({
+                    "dry_run": true,
+                    "runs": Vec::<PruneRunRow>::new(),
+                    "total_count": 0,
+                    "total_size_bytes": 0,
+                }))?;
+            }
+        } else {
+            eprintln!("No matching runs to prune.");
+        }
         return Ok(());
     }
 
-    let total_bytes: u64 = filtered.iter().map(|run| dir_size(&run.path)).sum();
+    let rows: Vec<PruneRunRow> = filtered
+        .iter()
+        .map(|run| PruneRunRow {
+            run_id: run.run_id.to_string(),
+            dir_name: run.dir_name.clone(),
+            workflow_name: run.workflow_name.clone(),
+            size_bytes: dir_size(&run.path),
+        })
+        .collect();
+    let total_bytes: u64 = rows.iter().map(|row| row.size_bytes).sum();
     info!(count = filtered.len(), bytes = total_bytes, "pruning runs");
 
     if args.yes {
@@ -86,11 +126,29 @@ async fn prune_from(args: &RunsPruneArgs, store: &dyn Store, base: &Path) -> Res
                 .await
                 .with_context(|| format!("failed to delete store state for {}", run.run_id))?;
         }
-        eprintln!(
-            "{} run(s) deleted ({} freed).",
-            filtered.len(),
-            format_size(total_bytes)
-        );
+        if globals.json {
+            print_json_pretty(&serde_json::json!({
+                "dry_run": false,
+                "deleted_count": filtered.len(),
+                "freed_bytes": total_bytes,
+            }))?;
+        } else {
+            eprintln!(
+                "{} run(s) deleted ({} freed).",
+                filtered.len(),
+                format_size(total_bytes)
+            );
+        }
+        return Ok(());
+    }
+
+    if globals.json {
+        print_json_pretty(&serde_json::json!({
+            "dry_run": true,
+            "runs": rows,
+            "total_count": filtered.len(),
+            "total_size_bytes": total_bytes,
+        }))?;
         return Ok(());
     }
 

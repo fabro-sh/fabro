@@ -1,4 +1,5 @@
 use fabro_test::{fabro_snapshot, test_context};
+use serde_json::Value;
 
 #[test]
 fn help() {
@@ -14,8 +15,9 @@ fn help() {
     Usage: fabro secret list [OPTIONS]
 
     Options:
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --json                       Output as JSON [env: FABRO_JSON=]
           --show-values                Show values alongside keys
+          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
@@ -23,4 +25,30 @@ fn help() {
       -h, --help                       Print help
     ----- stderr -----
     ");
+}
+
+#[test]
+fn secret_list_json_show_values_includes_values() {
+    let context = test_context!();
+    context
+        .command()
+        .args(["secret", "set", "ANTHROPIC_API_KEY", "test-value"])
+        .assert()
+        .success();
+
+    let output = context
+        .command()
+        .args(["--json", "secret", "list", "--show-values"])
+        .output()
+        .expect("command should run");
+
+    assert!(output.status.success());
+    let value: Value = serde_json::from_slice(&output.stdout).expect("secret list should parse");
+    assert_eq!(
+        value,
+        Value::Array(vec![serde_json::json!({
+            "key": "ANTHROPIC_API_KEY",
+            "value": "test-value",
+        })])
+    );
 }

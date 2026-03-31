@@ -263,6 +263,7 @@ fn user_workflows_dir() -> Option<PathBuf> {
 }
 
 /// Metadata about a discovered workflow.
+#[derive(Clone, Debug, Serialize)]
 pub struct WorkflowInfo {
     pub name: String,
     pub goal: Option<String>,
@@ -270,7 +271,8 @@ pub struct WorkflowInfo {
 }
 
 /// Where a workflow was discovered.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum WorkflowSource {
     Project,
     User,

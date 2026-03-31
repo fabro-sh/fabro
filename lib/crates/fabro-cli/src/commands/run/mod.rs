@@ -4,6 +4,7 @@ use fabro_util::terminal::Styles;
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 
 use crate::args::{GlobalArgs, RunCommands};
+use crate::shared::print_json_pretty;
 use crate::store;
 use crate::user_config::{load_user_settings_with_globals, user_layer_with_globals};
 
@@ -37,7 +38,11 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             let cli = user_layer_with_globals(globals)?;
             let (run_id, _run_dir) = create::create_run(&args, cli, styles, true)?;
-            println!("{run_id}");
+            if globals.json {
+                print_json_pretty(&serde_json::json!({ "run_id": run_id }))?;
+            } else {
+                println!("{run_id}");
+            }
             Ok(())
         }
         RunCommands::Start { run } => {
@@ -46,7 +51,11 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             let store = store::build_store(&cli_settings.storage_dir())?;
             let run_info = resolve_run_combined(store.as_ref(), &base, &run).await?;
             let child = start::start_run(&run_info.path, false)?;
-            eprintln!("Started engine process (PID {})", child.id());
+            if globals.json {
+                print_json_pretty(&serde_json::json!({ "run_id": run_info.run_id }))?;
+            } else {
+                eprintln!("Started engine process (PID {})", child.id());
+            }
             Ok(())
         }
         RunCommands::Attach { run } => {
@@ -55,9 +64,15 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             let base = runs_base(&cli_settings.storage_dir());
             let store = store::build_store(&cli_settings.storage_dir())?;
             let run_info = resolve_run_combined(store.as_ref(), &base, &run).await?;
-            let exit_code =
-                attach::attach_run(&run_info.path, Some(&run_info.run_id), false, styles, None)
-                    .await?;
+            let exit_code = attach::attach_run(
+                &run_info.path,
+                Some(&run_info.run_id),
+                false,
+                styles,
+                None,
+                globals.json,
+            )
+            .await?;
             if exit_code != std::process::ExitCode::SUCCESS {
                 std::process::exit(1);
             }

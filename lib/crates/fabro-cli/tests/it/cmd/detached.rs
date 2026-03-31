@@ -16,12 +16,13 @@ fn help() {
     Usage: fabro __detached [OPTIONS] --run-dir <RUN_DIR> --launcher-path <LAUNCHER_PATH>
 
     Options:
-          --debug                          Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --json                           Output as JSON [env: FABRO_JSON=]
           --run-dir <RUN_DIR>              Run directory
+          --debug                          Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --launcher-path <LAUNCHER_PATH>  Launcher metadata path
           --no-upgrade-check               Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet                          Suppress non-essential output [env: FABRO_QUIET=]
           --resume                         Resume from checkpoint instead of fresh start
+          --quiet                          Suppress non-essential output [env: FABRO_QUIET=]
           --verbose                        Enable verbose output [env: FABRO_VERBOSE=]
           --storage-dir <STORAGE_DIR>      Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
       -h, --help                           Print help

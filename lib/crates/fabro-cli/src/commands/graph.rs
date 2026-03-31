@@ -11,13 +11,19 @@ use fabro_validate::Severity;
 use fabro_workflow::operations::{ValidateInput, WorkflowInput, validate};
 use tracing::debug;
 
-use crate::args::{GraphArgs, GraphDirection};
-use crate::shared::{print_diagnostics, read_workflow_file, relative_path};
+use crate::args::{GlobalArgs, GraphArgs, GraphDirection};
+use crate::shared::{
+    absolute_or_current, print_diagnostics, print_json_pretty, read_workflow_file, relative_path,
+};
 
 static RANKDIR_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"rankdir\s*=\s*\w+").unwrap());
 
-pub(crate) fn run(args: &GraphArgs, styles: &Styles) -> anyhow::Result<()> {
+pub(crate) fn run(args: &GraphArgs, styles: &Styles, globals: &GlobalArgs) -> anyhow::Result<()> {
+    if globals.json && args.output.is_none() {
+        globals.require_no_json()?;
+    }
+
     let cwd = std::env::current_dir()?;
     let settings = ConfigLayer::for_workflow(&args.workflow, &cwd)?
         .combine(ConfigLayer::user()?)
@@ -43,6 +49,12 @@ pub(crate) fn run(args: &GraphArgs, styles: &Styles) -> anyhow::Result<()> {
 
     if let Some(ref output_path) = args.output {
         std::fs::write(output_path, &rendered)?;
+        if globals.json {
+            print_json_pretty(&serde_json::json!({
+                "path": absolute_or_current(output_path),
+                "format": args.format.to_string(),
+            }))?;
+        }
     } else {
         std::io::stdout().write_all(&rendered)?;
     }

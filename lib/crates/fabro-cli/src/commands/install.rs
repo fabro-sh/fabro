@@ -22,6 +22,7 @@ use tokio::sync::oneshot;
 use tokio::task::spawn_blocking;
 
 use super::doctor;
+use crate::args::GlobalArgs;
 use crate::shared::provider_auth::{
     prompt_and_validate_key, prompt_confirm, provider_display_name, run_openai_oauth_or_api_key,
     write_env_file,
@@ -486,7 +487,8 @@ async fn setup_github_app(
     Ok(env_pairs)
 }
 
-pub(crate) async fn run_install(web_url: &str) -> Result<()> {
+pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<()> {
+    globals.require_no_json()?;
     let s = Styles::detect_stderr();
     let emoji = console::Emoji("⚒️  ", "");
 
@@ -759,7 +761,7 @@ pub(crate) async fn run_install(web_url: &str) -> Result<()> {
         // Reload .env so doctor sees the values we just wrote
         let _ = dotenvy::from_path(&env_path);
         eprintln!();
-        doctor::run_doctor(true, true).await;
+        let _ = doctor::run_doctor(true, true, globals).await?;
     }
 
     eprintln!();

@@ -19,10 +19,11 @@ fn help() {
       <RUN>  Run ID or prefix
 
     Options:
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --json                       Output as JSON [env: FABRO_JSON=]
           --ttl <TTL>                  SSH access expiry in minutes (default 60) [default: 60]
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --print                      Print the SSH command instead of connecting
+          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
           --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
@@ -45,4 +46,18 @@ fn sandbox_ssh_rejects_non_daytona_run() {
     ----- stderr -----
     error: SSH access is only supported for Daytona sandboxes (this run uses 'local')
     ");
+}
+
+#[test]
+fn sandbox_ssh_json_without_print_is_rejected() {
+    let context = test_context!();
+    let output = context
+        .command()
+        .args(["--json", "sandbox", "ssh", "ignored-run"])
+        .output()
+        .expect("command should run");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("--json is not supported for this command"));
 }

@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 use tokio::task::spawn_blocking;
 
+use crate::args::GlobalArgs;
 use crate::shared::github::build_github_app_credentials;
 use crate::user_config::load_user_settings;
 
@@ -21,8 +22,9 @@ pub(super) fn git_repo_root() -> Result<PathBuf> {
     ))
 }
 
-pub(crate) async fn run_init() -> Result<()> {
+pub(crate) async fn run_init(globals: &GlobalArgs) -> Result<Vec<String>> {
     let repo_root = git_repo_root()?;
+    let mut created = Vec::new();
 
     let fabro_toml = repo_root.join("fabro.toml");
     if fabro_toml.exists() {
@@ -55,11 +57,14 @@ draft = true
 ",
     )
     .with_context(|| format!("failed to write {}", fabro_toml.display()))?;
+    created.push("fabro.toml".to_string());
 
     let green = console::Style::new().green();
     let bold = console::Style::new().bold();
     let dim = console::Style::new().dim();
-    eprintln!("  {} {}", green.apply_to("✔"), dim.apply_to("fabro.toml"));
+    if !globals.json {
+        eprintln!("  {} {}", green.apply_to("✔"), dim.apply_to("fabro.toml"));
+    }
 
     // Create hello workflow directory
     let workflow_dir = repo_root.join("fabro/workflows/hello");
@@ -84,11 +89,14 @@ draft = true
 "#,
     )
     .with_context(|| format!("failed to write {}", dot_path.display()))?;
-    eprintln!(
-        "  {} {}",
-        green.apply_to("✔"),
-        dim.apply_to("fabro/workflows/hello/workflow.fabro")
-    );
+    created.push("fabro/workflows/hello/workflow.fabro".to_string());
+    if !globals.json {
+        eprintln!(
+            "  {} {}",
+            green.apply_to("✔"),
+            dim.apply_to("fabro/workflows/hello/workflow.fabro")
+        );
+    }
 
     // Create workflow.toml
     let toml_path = workflow_dir.join("workflow.toml");
@@ -97,24 +105,31 @@ draft = true
         "version = 1\ngraph = \"workflow.fabro\"\n\n[sandbox]\nprovider = \"local\"\n",
     )
     .with_context(|| format!("failed to write {}", toml_path.display()))?;
-    eprintln!(
-        "  {} {}",
-        green.apply_to("✔"),
-        dim.apply_to("fabro/workflows/hello/workflow.toml")
-    );
+    created.push("fabro/workflows/hello/workflow.toml".to_string());
+    if !globals.json {
+        eprintln!(
+            "  {} {}",
+            green.apply_to("✔"),
+            dim.apply_to("fabro/workflows/hello/workflow.toml")
+        );
+    }
 
-    eprintln!(
-        "\n{} Run a workflow with:\n\n  {}",
-        bold.apply_to("Project initialized!"),
-        console::Style::new()
-            .cyan()
-            .bold()
-            .apply_to("fabro run hello")
-    );
+    if !globals.json {
+        eprintln!(
+            "\n{} Run a workflow with:\n\n  {}",
+            bold.apply_to("Project initialized!"),
+            console::Style::new()
+                .cyan()
+                .bold()
+                .apply_to("fabro run hello")
+        );
+    }
 
-    check_github_app_installation().await;
+    if !globals.json {
+        check_github_app_installation().await;
+    }
 
-    Ok(())
+    Ok(created)
 }
 
 async fn check_github_app_installation() {

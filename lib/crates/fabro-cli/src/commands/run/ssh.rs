@@ -6,11 +6,15 @@ use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use tracing::info;
 
 use crate::args::{GlobalArgs, SshArgs};
-use crate::shared::validate_daytona_provider;
+use crate::shared::{print_json_pretty, validate_daytona_provider};
 use crate::store;
 use crate::user_config::load_user_settings_with_globals;
 
 pub(crate) async fn run(args: SshArgs, globals: &GlobalArgs) -> Result<()> {
+    if globals.json && !args.print {
+        globals.require_no_json()?;
+    }
+
     let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
     let store = store::build_store(&cli_settings.storage_dir())?;
@@ -50,7 +54,11 @@ pub(crate) async fn run(args: SshArgs, globals: &GlobalArgs) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     if args.print {
-        print!("{}", format_output(&ssh_cmd));
+        if globals.json {
+            print_json_pretty(&serde_json::json!({ "command": ssh_cmd }))?;
+        } else {
+            print!("{}", format_output(&ssh_cmd));
+        }
     } else {
         exec_ssh(&ssh_cmd)?;
     }

@@ -1,4 +1,5 @@
 use fabro_test::{fabro_snapshot, test_context};
+use serde_json::Value;
 
 use super::support::fixture;
 
@@ -19,16 +20,17 @@ fn help() {
       <WORKFLOW>  Path to a .fabro workflow file or .toml task config
 
     Options:
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --goal <GOAL>                Override the workflow goal (exposed as $goal in prompts)
+          --json                       Output as JSON [env: FABRO_JSON=]
+          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --goal-file <GOAL_FILE>      Read the workflow goal from a file
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --model <MODEL>              Override default LLM model
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
+          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --provider <PROVIDER>        Override default LLM provider
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
       -v, --verbose                    Enable verbose output
           --sandbox <SANDBOX>          Sandbox for agent tools [possible values: local, docker, daytona]
+          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
       -h, --help                       Print help
     ----- stderr -----
     ");
@@ -52,4 +54,29 @@ fn preflight_invalid_workflow_fails_with_validation_output() {
     error [node: exit]: Exit node 'exit' has 1 outgoing edge(s) but must have none (exit_no_outgoing)
     error: Validation failed
     ");
+}
+
+#[test]
+fn preflight_invalid_workflow_json_emits_diagnostics() {
+    let context = test_context!();
+    let workflow = fixture("invalid.fabro");
+    let output = context
+        .command()
+        .args(["--json", "preflight", workflow.to_str().unwrap()])
+        .output()
+        .expect("command should run");
+
+    assert!(!output.status.success());
+    let value: Value =
+        serde_json::from_slice(&output.stdout).expect("preflight --json should parse");
+    assert_eq!(value["workflow"]["name"], "Invalid");
+    assert!(
+        value["workflow"]["diagnostics"]
+            .as_array()
+            .is_some_and(|diagnostics| !diagnostics.is_empty())
+    );
+    assert_eq!(value["checks"]["title"], "Run Preflight");
+
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("Validation failed"));
 }
