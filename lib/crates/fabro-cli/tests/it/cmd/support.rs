@@ -407,11 +407,19 @@ pub(crate) fn only_run(context: &TestContext) -> RunSetup {
 
 pub(crate) fn git_filters(context: &TestContext) -> Vec<(String, String)> {
     let mut filters = context.filters();
-    filters.push((
-        r"\b[0-9A-HJKMNP-TV-Z]{8}\b".to_string(),
-        "[RUN_PREFIX]".to_string(),
-    ));
     filters.push((r"\b[0-9a-f]{7,40}\b".to_string(), "[SHA]".to_string()));
+    filters.push((
+        r"(fabro resume )[0-9A-HJKMNP-TV-Z]{8}\b".to_string(),
+        "$1[RUN_PREFIX]".to_string(),
+    ));
+    filters.push((
+        r"(Forked run )[0-9A-HJKMNP-TV-Z]{8}\b".to_string(),
+        "$1[RUN_PREFIX]".to_string(),
+    ));
+    filters.push((
+        r"(-> )[0-9A-HJKMNP-TV-Z]{8}\b".to_string(),
+        "$1[RUN_PREFIX]".to_string(),
+    ));
     filters
 }
 
