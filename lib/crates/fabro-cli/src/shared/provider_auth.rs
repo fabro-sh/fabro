@@ -260,8 +260,7 @@ mod tests {
 
     // -- API key validation --
 
-    #[tokio::test]
-    #[ignore = "hits live Anthropic API"]
+    #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
     async fn validate_api_key_rejects_invalid_key() {
         let result = validate_api_key(Provider::Anthropic, "sk-invalid-key-12345").await;
         assert!(result.is_err(), "expected invalid key to be rejected");
