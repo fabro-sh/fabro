@@ -12,6 +12,7 @@ use fabro_util::terminal::Styles;
 use tokio::task::spawn_blocking;
 use tokio::time::timeout;
 
+use super::openai_jwt;
 use crate::commands::doctor;
 
 // ---------------------------------------------------------------------------
@@ -80,20 +81,27 @@ pub(crate) async fn run_openai_oauth_or_api_key(s: &Styles) -> Result<Vec<(Strin
         "  {}",
         s.dim.apply_to("Opening browser for OpenAI login...")
     );
-    match fabro_openai_oauth::run_browser_flow(
-        fabro_openai_oauth::DEFAULT_ISSUER,
-        fabro_openai_oauth::DEFAULT_CLIENT_ID,
+    match fabro_oauth::run_browser_flow(
+        openai_jwt::DEFAULT_ISSUER,
+        openai_jwt::DEFAULT_CLIENT_ID,
+        "openid profile email offline_access",
+        openai_jwt::OAUTH_PORT,
+        "/auth/callback",
     )
     .await
     {
         Ok(tokens) => {
             tracing::info!("OpenAI OAuth browser flow completed");
-            let account_id = fabro_openai_oauth::extract_account_id(&tokens);
-            let pairs = openai_oauth_env_pairs(
-                &tokens.access_token,
-                &tokens.refresh_token,
-                account_id.as_deref(),
-            );
+            let account_id = tokens
+                .id_token
+                .as_deref()
+                .and_then(openai_jwt::extract_account_id);
+            let refresh_token = tokens
+                .refresh_token
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("OpenAI did not return a refresh token"))?;
+            let pairs =
+                openai_oauth_env_pairs(&tokens.access_token, refresh_token, account_id.as_deref());
             eprintln!(
                 "  {} OpenAI configured via browser login",
                 s.green.apply_to("✔")

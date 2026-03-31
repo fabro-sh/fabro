@@ -1,10 +1,10 @@
 [package]
-name = "fabro-openai-oauth"
+name = "fabro-oauth"
 edition.workspace = true
 version.workspace = true
 publish = false
 license.workspace = true
-description = "OpenAI OAuth PKCE token acquisition for Fabro"
+description = "Generic OAuth 2.0 PKCE token acquisition for Fabro"
 
 [lib]
 doctest = false

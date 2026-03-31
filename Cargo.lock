@@ -1492,7 +1492,7 @@ dependencies = [
  "fabro-macros",
  "fabro-mcp",
  "fabro-model",
- "fabro-openai-oauth",
+ "fabro-oauth",
  "fabro-proctitle",
  "fabro-retro",
  "fabro-sandbox",
@@ -1726,7 +1726,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "fabro-openai-oauth"
+name = "fabro-oauth"
 version = "0.176.2"
 dependencies = [
  "axum",

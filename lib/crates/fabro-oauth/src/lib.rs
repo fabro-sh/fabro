@@ -10,11 +10,6 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
-use tokio::time;
-
-pub const DEFAULT_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
-pub const DEFAULT_ISSUER: &str = "https://auth.openai.com";
-pub const OAUTH_PORT: u16 = 1455;
 
 // ---------------------------------------------------------------------------
 // PKCE
@@ -79,6 +74,7 @@ pub fn build_authorize_url(
     issuer: &str,
     client_id: &str,
     redirect_uri: &str,
+    scope: &str,
     pkce: &PkceCodes,
     state: &str,
 ) -> String {
@@ -86,7 +82,7 @@ pub fn build_authorize_url(
         ("response_type", "code"),
         ("client_id", client_id),
         ("redirect_uri", redirect_uri),
-        ("scope", "openid profile email offline_access"),
+        ("scope", scope),
         ("code_challenge", &pkce.challenge),
         ("code_challenge_method", "S256"),
         ("state", state),
@@ -100,70 +96,10 @@ pub fn build_authorize_url(
 
 #[derive(Debug, Deserialize)]
 pub struct TokenResponse {
-    pub id_token: String,
+    pub id_token: Option<String>,
     pub access_token: String,
-    pub refresh_token: String,
+    pub refresh_token: Option<String>,
     pub expires_in: Option<u64>,
-}
-
-// ---------------------------------------------------------------------------
-// JWT claims
-// ---------------------------------------------------------------------------
-
-pub struct IdTokenClaims {
-    pub chatgpt_account_id: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct JwtPayload {
-    #[serde(default)]
-    chatgpt_account_id: Option<String>,
-    #[serde(default, rename = "https://api.openai.com/auth")]
-    auth_claim: Option<AuthClaim>,
-    #[serde(default)]
-    organizations: Option<Vec<Organization>>,
-}
-
-#[derive(Deserialize)]
-struct AuthClaim {
-    #[serde(default)]
-    chatgpt_account_id: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct Organization {
-    #[serde(default)]
-    id: Option<String>,
-}
-
-fn parse_jwt_payload(token: &str) -> Option<JwtPayload> {
-    let parts: Vec<&str> = token.split('.').collect();
-    if parts.len() != 3 {
-        return None;
-    }
-    let payload_bytes = URL_SAFE_NO_PAD.decode(parts[1]).ok()?;
-    serde_json::from_slice(&payload_bytes).ok()
-}
-
-pub fn parse_jwt_claims(token: &str) -> Option<IdTokenClaims> {
-    let payload = parse_jwt_payload(token)?;
-    let chatgpt_account_id = payload
-        .chatgpt_account_id
-        .or_else(|| payload.auth_claim.and_then(|a| a.chatgpt_account_id));
-    Some(IdTokenClaims { chatgpt_account_id })
-}
-
-pub fn extract_account_id(tokens: &TokenResponse) -> Option<String> {
-    let payload = parse_jwt_payload(&tokens.id_token)?;
-    payload
-        .chatgpt_account_id
-        .or_else(|| payload.auth_claim.and_then(|a| a.chatgpt_account_id))
-        .or_else(|| {
-            payload
-                .organizations
-                .and_then(|orgs| orgs.into_iter().next())
-                .and_then(|org| org.id)
-        })
 }
 
 // ---------------------------------------------------------------------------
@@ -257,107 +193,6 @@ pub async fn refresh_access_token(
 }
 
 // ---------------------------------------------------------------------------
-// Device flow
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Deserialize)]
-pub struct DeviceAuthResponse {
-    pub device_auth_id: String,
-    pub user_code: String,
-    pub interval: u64,
-}
-
-pub async fn initiate_device_flow(
-    client: &reqwest::Client,
-    issuer: &str,
-    client_id: &str,
-) -> Result<DeviceAuthResponse, String> {
-    let url = format!("{issuer}/api/accounts/deviceauth/usercode");
-    let resp = client
-        .post(&url)
-        .json(&serde_json::json!({ "client_id": client_id }))
-        .send()
-        .await
-        .map_err(|e| format!("Device flow initiation failed: {e}"))?;
-
-    let status = resp.status();
-    if !status.is_success() {
-        let body_text = resp.text().await.unwrap_or_default();
-        return Err(format!(
-            "Device flow initiation failed ({status}): {body_text}"
-        ));
-    }
-
-    let device: DeviceAuthResponse = resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse device flow response: {e}"))?;
-
-    tracing::info!("Device flow initiated");
-    Ok(device)
-}
-
-#[derive(Deserialize)]
-struct DevicePollResponse {
-    #[serde(default)]
-    code: Option<String>,
-    #[serde(default)]
-    error: Option<String>,
-}
-
-pub async fn poll_device_flow(
-    client: &reqwest::Client,
-    issuer: &str,
-    client_id: &str,
-    device: &DeviceAuthResponse,
-) -> Result<TokenResponse, String> {
-    let poll_url = format!("{issuer}/api/accounts/deviceauth/token");
-    let redirect_uri = format!("http://localhost:{OAUTH_PORT}/auth/callback");
-    let mut attempt = 0u32;
-
-    loop {
-        attempt += 1;
-        let resp = client
-            .post(&poll_url)
-            .json(&serde_json::json!({
-                "client_id": client_id,
-                "device_auth_id": device.device_auth_id,
-            }))
-            .send()
-            .await
-            .map_err(|e| format!("Device flow poll failed: {e}"))?;
-
-        let poll: DevicePollResponse = resp
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse device poll response: {e}"))?;
-
-        if let Some(code) = poll.code {
-            tracing::info!("Device flow completed");
-            return exchange_code_for_tokens(client, issuer, client_id, &code, &redirect_uri, "")
-                .await;
-        }
-
-        if let Some(ref error) = poll.error {
-            if error == "authorization_pending" {
-                tracing::debug!(attempt, "Device flow authorization pending");
-                if device.interval > 0 {
-                    time::sleep(std::time::Duration::from_secs(device.interval)).await;
-                }
-                continue;
-            }
-            if error == "expired_token" {
-                tracing::error!("Device flow expired");
-                return Err("Device flow authorization expired".to_string());
-            }
-            return Err(format!("Device flow error: {error}"));
-        }
-
-        return Err("Unexpected device poll response".to_string());
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Callback server
 // ---------------------------------------------------------------------------
 
@@ -369,10 +204,36 @@ struct CallbackParams {
     error_description: Option<String>,
 }
 
+fn validate_callback_path(path: &str) -> Result<(), String> {
+    if path.is_empty() {
+        return Err("Callback path must not be empty".to_string());
+    }
+    if !path.starts_with('/') {
+        return Err(format!("Callback path must start with '/': {path}"));
+    }
+    if path
+        .split('/')
+        .skip(1)
+        .any(|segment| segment.starts_with(':') || segment.starts_with('*'))
+    {
+        return Err(format!(
+            "Callback path must not contain route parameters: {path}"
+        ));
+    }
+    Ok(())
+}
+
+fn build_redirect_uri(port: u16, path: &str) -> String {
+    format!("http://localhost:{port}{path}")
+}
+
 pub async fn start_callback_server(
     port: u16,
+    path: &str,
     expected_state: String,
 ) -> Result<(u16, oneshot::Receiver<Result<String, String>>), String> {
+    validate_callback_path(path)?;
+
     let listener = TcpListener::bind(format!("localhost:{port}"))
         .await
         .map_err(|e| format!("Failed to bind callback server: {e}"))?;
@@ -387,9 +248,10 @@ pub async fn start_callback_server(
     let code_tx = std::sync::Arc::new(std::sync::Mutex::new(Some(code_tx)));
     let shutdown_tx = std::sync::Arc::new(std::sync::Mutex::new(Some(shutdown_tx)));
     let expected_state = std::sync::Arc::new(expected_state);
+    let callback_path = path.to_string();
 
     let app = axum::Router::new().route(
-        "/auth/callback",
+        callback_path.as_str(),
         get(
             move |Query(params): Query<CallbackParams>| async move {
                 if params.state != *expected_state {
@@ -463,7 +325,7 @@ pub async fn start_callback_server(
 <html>
 <head>
 <meta charset="utf-8">
-<title>Arc</title>
+<title>Authorization</title>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background: #f6f8fa; color: #1f2328; }
   .card { text-align: center; background: #fff; border: 1px solid #d1d9e0; border-radius: 12px; padding: 48px; max-width: 420px; }
@@ -503,15 +365,25 @@ pub async fn start_callback_server(
 // Browser flow
 // ---------------------------------------------------------------------------
 
-pub async fn run_browser_flow(issuer: &str, client_id: &str) -> Result<TokenResponse, String> {
+pub async fn run_browser_flow(
+    issuer: &str,
+    client_id: &str,
+    scope: &str,
+    port: u16,
+    callback_path: &str,
+) -> Result<TokenResponse, String> {
     let pkce = generate_pkce();
     let state = generate_state();
-    let redirect_uri = format!("http://localhost:{OAUTH_PORT}/auth/callback");
 
-    let (_port, code_rx) = start_callback_server(OAUTH_PORT, state.clone()).await?;
-    let auth_url = build_authorize_url(issuer, client_id, &redirect_uri, &pkce, &state);
+    let (actual_port, code_rx) = start_callback_server(port, callback_path, state.clone()).await?;
+    let redirect_uri = build_redirect_uri(actual_port, callback_path);
+    let auth_url = build_authorize_url(issuer, client_id, &redirect_uri, scope, &pkce, &state);
 
-    tracing::info!(port = OAUTH_PORT, "OAuth browser flow started");
+    tracing::info!(
+        port = actual_port,
+        callback_path,
+        "OAuth browser flow started"
+    );
 
     if let Err(e) = open::that(&auth_url) {
         tracing::warn!("Could not open browser: {e}");
@@ -607,17 +479,22 @@ mod tests {
     fn authorize_url_has_required_params() {
         let pkce = generate_pkce();
         let state = generate_state();
+        let scope = "openid profile email offline_access";
         let url = build_authorize_url(
             "https://auth.openai.com",
             "test-client",
             "http://127.0.0.1:1455/callback",
+            scope,
             &pkce,
             &state,
         );
         assert!(url.contains("response_type=code"), "missing response_type");
         assert!(url.contains("client_id=test-client"), "missing client_id");
         assert!(url.contains("redirect_uri="), "missing redirect_uri");
-        assert!(url.contains("scope="), "missing scope");
+        assert!(
+            url.contains(&format!("scope={}", percent_encode_param(scope))),
+            "missing scope"
+        );
         assert!(
             url.contains(&format!("code_challenge={}", pkce.challenge)),
             "missing code_challenge"
@@ -637,10 +514,10 @@ mod tests {
             "https://auth.openai.com",
             "test-client",
             "http://127.0.0.1:1455/callback",
+            "openid profile email offline_access",
             &pkce,
             &state,
         );
-        // Should only contain standard OAuth 2.0 PKCE params
         assert!(
             !url.contains("id_token_add_organizations"),
             "should not contain OpenAI-specific params"
@@ -663,6 +540,7 @@ mod tests {
             "https://auth.openai.com",
             "test-client",
             "http://127.0.0.1:1455/callback",
+            "openid profile email offline_access",
             &pkce,
             &state,
         );
@@ -672,108 +550,21 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------------
-    // Phase 4: JWT claims
-    // -----------------------------------------------------------------------
-
-    fn make_test_jwt(claims: &serde_json::Value) -> String {
-        let header = URL_SAFE_NO_PAD.encode(r#"{"alg":"RS256"}"#);
-        let payload = URL_SAFE_NO_PAD.encode(serde_json::to_string(claims).unwrap());
-        format!("{header}.{payload}.signature")
-    }
-
     #[test]
-    fn parse_jwt_with_chatgpt_account_id() {
-        let jwt = make_test_jwt(&serde_json::json!({
-            "chatgpt_account_id": "acct_123"
-        }));
-        let claims = parse_jwt_claims(&jwt).unwrap();
-        assert_eq!(claims.chatgpt_account_id.as_deref(), Some("acct_123"));
-    }
-
-    #[test]
-    fn parse_jwt_with_nested_auth_claim() {
-        let jwt = make_test_jwt(&serde_json::json!({
-            "https://api.openai.com/auth": {
-                "chatgpt_account_id": "acct_nested"
-            }
-        }));
-        let claims = parse_jwt_claims(&jwt).unwrap();
-        assert_eq!(claims.chatgpt_account_id.as_deref(), Some("acct_nested"));
-    }
-
-    #[test]
-    fn parse_jwt_with_organizations() {
-        let jwt = make_test_jwt(&serde_json::json!({
-            "organizations": [{"id": "org_456"}]
-        }));
-        let tokens = TokenResponse {
-            id_token: jwt,
-            access_token: String::new(),
-            refresh_token: String::new(),
-            expires_in: None,
-        };
-        assert_eq!(extract_account_id(&tokens).as_deref(), Some("org_456"));
-    }
-
-    #[test]
-    fn parse_jwt_invalid_format() {
-        assert!(parse_jwt_claims("not-a-jwt").is_none());
-    }
-
-    #[test]
-    fn parse_jwt_invalid_base64() {
-        assert!(parse_jwt_claims("header.!!!invalid!!!.sig").is_none());
-    }
-
-    #[test]
-    fn extract_account_id_prefers_top_level() {
-        let jwt = make_test_jwt(&serde_json::json!({
-            "chatgpt_account_id": "top_level",
-            "https://api.openai.com/auth": {
-                "chatgpt_account_id": "nested"
-            },
-            "organizations": [{"id": "org"}]
-        }));
-        let tokens = TokenResponse {
-            id_token: jwt,
-            access_token: String::new(),
-            refresh_token: String::new(),
-            expires_in: None,
-        };
-        assert_eq!(extract_account_id(&tokens).as_deref(), Some("top_level"));
-    }
-
-    #[test]
-    fn extract_account_id_falls_back_to_nested() {
-        let jwt = make_test_jwt(&serde_json::json!({
-            "https://api.openai.com/auth": {
-                "chatgpt_account_id": "nested"
-            }
-        }));
-        let tokens = TokenResponse {
-            id_token: jwt,
-            access_token: String::new(),
-            refresh_token: String::new(),
-            expires_in: None,
-        };
-        assert_eq!(extract_account_id(&tokens).as_deref(), Some("nested"));
-    }
-
-    #[test]
-    fn extract_account_id_none_when_missing() {
-        let jwt = make_test_jwt(&serde_json::json!({}));
-        let tokens = TokenResponse {
-            id_token: jwt,
-            access_token: String::new(),
-            refresh_token: String::new(),
-            expires_in: None,
-        };
-        assert!(extract_account_id(&tokens).is_none());
+    fn build_redirect_uri_constructs_expected_uri() {
+        assert_eq!(
+            build_redirect_uri(1455, "/auth/callback"),
+            "http://localhost:1455/auth/callback"
+        );
+        assert_eq!(
+            build_redirect_uri(8080, "/oauth/done"),
+            "http://localhost:8080/oauth/done"
+        );
+        assert_eq!(build_redirect_uri(1, "/"), "http://localhost:1/");
     }
 
     // -----------------------------------------------------------------------
-    // Phase 5: Token exchange
+    // Phase 4: Token exchange
     // -----------------------------------------------------------------------
 
     #[tokio::test]
@@ -816,12 +607,48 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(tokens.id_token, "id-tok");
+        assert_eq!(tokens.id_token.as_deref(), Some("id-tok"));
         assert_eq!(tokens.access_token, "access-tok");
-        assert_eq!(tokens.refresh_token, "refresh-tok");
+        assert_eq!(tokens.refresh_token.as_deref(), Some("refresh-tok"));
         assert_eq!(tokens.expires_in, Some(3600));
 
         mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn exchange_code_allows_missing_optional_tokens() {
+        let server = httpmock::MockServer::start_async().await;
+
+        server
+            .mock_async(|when, then| {
+                when.method("POST").path("/oauth/token");
+                then.status(200)
+                    .header("content-type", "application/json")
+                    .body(
+                        serde_json::json!({
+                            "access_token": "access-tok"
+                        })
+                        .to_string(),
+                    );
+            })
+            .await;
+
+        let client = reqwest::Client::new();
+        let tokens = exchange_code_for_tokens(
+            &client,
+            &server.url(""),
+            "test-client",
+            "test-code",
+            "http://localhost/cb",
+            "test-verifier",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(tokens.id_token, None);
+        assert_eq!(tokens.access_token, "access-tok");
+        assert_eq!(tokens.refresh_token, None);
+        assert_eq!(tokens.expires_in, None);
     }
 
     #[tokio::test]
@@ -851,7 +678,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Phase 6: Token refresh
+    // Phase 5: Token refresh
     // -----------------------------------------------------------------------
 
     #[tokio::test]
@@ -885,8 +712,9 @@ mod tests {
                 .await
                 .unwrap();
 
+        assert_eq!(tokens.id_token.as_deref(), Some("new-id"));
         assert_eq!(tokens.access_token, "new-access");
-        assert_eq!(tokens.refresh_token, "new-refresh");
+        assert_eq!(tokens.refresh_token.as_deref(), Some("new-refresh"));
         assert_eq!(tokens.expires_in, Some(7200));
 
         mock.assert_async().await;
@@ -912,150 +740,22 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Phase 7: Device flow
+    // Phase 6: Callback server
     // -----------------------------------------------------------------------
 
     #[tokio::test]
-    async fn initiate_device_flow_success() {
-        let server = httpmock::MockServer::start_async().await;
-
-        let mock = server
-            .mock_async(|when, then| {
-                when.method("POST")
-                    .path("/api/accounts/deviceauth/usercode");
-                then.status(200)
-                    .header("content-type", "application/json")
-                    .body(
-                        serde_json::json!({
-                            "device_auth_id": "dev-123",
-                            "user_code": "ABCD-1234",
-                            "interval": 5
-                        })
-                        .to_string(),
-                    );
-            })
-            .await;
-
-        let client = reqwest::Client::new();
-        let device = initiate_device_flow(&client, &server.url(""), "test-client")
+    async fn callback_server_binds_ephemeral_port_and_receives_code() {
+        let callback_path = "/custom/path";
+        let (port, code_rx) = start_callback_server(0, callback_path, "test-state".to_string())
             .await
             .unwrap();
 
-        assert_eq!(device.device_auth_id, "dev-123");
-        assert_eq!(device.user_code, "ABCD-1234");
-        assert_eq!(device.interval, 5);
-
-        mock.assert_async().await;
-    }
-
-    #[tokio::test]
-    async fn initiate_device_flow_error() {
-        let server = httpmock::MockServer::start_async().await;
-
-        server
-            .mock_async(|when, then| {
-                when.method("POST")
-                    .path("/api/accounts/deviceauth/usercode");
-                then.status(500).body("Internal Server Error");
-            })
-            .await;
-
-        let client = reqwest::Client::new();
-        let err = initiate_device_flow(&client, &server.url(""), "test-client")
-            .await
-            .unwrap_err();
-
-        assert!(err.contains("500"), "error should contain status: {err}");
-    }
-
-    #[tokio::test]
-    async fn poll_device_flow_success() {
-        let server = httpmock::MockServer::start_async().await;
-
-        server
-            .mock_async(|when, then| {
-                when.method("POST").path("/api/accounts/deviceauth/token");
-                then.status(200)
-                    .header("content-type", "application/json")
-                    .body(serde_json::json!({"code": "auth-code-123"}).to_string());
-            })
-            .await;
-
-        server
-            .mock_async(|when, then| {
-                when.method("POST").path("/oauth/token");
-                then.status(200)
-                    .header("content-type", "application/json")
-                    .body(
-                        serde_json::json!({
-                            "id_token": "dev-id",
-                            "access_token": "dev-access",
-                            "refresh_token": "dev-refresh",
-                            "expires_in": 3600
-                        })
-                        .to_string(),
-                    );
-            })
-            .await;
-
-        let device = DeviceAuthResponse {
-            device_auth_id: "dev-123".to_string(),
-            user_code: "ABCD-1234".to_string(),
-            interval: 0,
-        };
-
-        let client = reqwest::Client::new();
-        let tokens = poll_device_flow(&client, &server.url(""), "test-client", &device)
-            .await
-            .unwrap();
-
-        assert_eq!(tokens.access_token, "dev-access");
-    }
-
-    #[tokio::test]
-    async fn poll_device_flow_expired() {
-        let server = httpmock::MockServer::start_async().await;
-
-        server
-            .mock_async(|when, then| {
-                when.method("POST").path("/api/accounts/deviceauth/token");
-                then.status(200)
-                    .header("content-type", "application/json")
-                    .body(serde_json::json!({"error": "expired_token"}).to_string());
-            })
-            .await;
-
-        let device = DeviceAuthResponse {
-            device_auth_id: "dev-expired".to_string(),
-            user_code: "XXXX-0000".to_string(),
-            interval: 0,
-        };
-
-        let client = reqwest::Client::new();
-        let err = poll_device_flow(&client, &server.url(""), "test-client", &device)
-            .await
-            .unwrap_err();
-
-        assert!(
-            err.contains("expired"),
-            "error should mention expiry: {err}"
-        );
-    }
-
-    // -----------------------------------------------------------------------
-    // Phase 8: Callback server
-    // -----------------------------------------------------------------------
-
-    #[tokio::test]
-    async fn callback_server_receives_code() {
-        let (port, code_rx) = start_callback_server(0, "test-state".to_string())
-            .await
-            .unwrap();
+        assert_ne!(port, 0);
 
         let client = reqwest::Client::new();
         client
             .get(format!(
-                "http://localhost:{port}/auth/callback?code=abc&state=test-state"
+                "http://localhost:{port}{callback_path}?code=abc&state=test-state"
             ))
             .send()
             .await
@@ -1066,15 +766,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn callback_server_validates_state() {
-        let (port, _code_rx) = start_callback_server(0, "correct-state".to_string())
+    async fn callback_server_routes_non_default_path() {
+        let callback_path = "/oauth/done";
+        let (port, _code_rx) = start_callback_server(0, callback_path, "test-state".to_string())
             .await
             .unwrap();
 
         let client = reqwest::Client::new();
         let resp = client
             .get(format!(
-                "http://localhost:{port}/auth/callback?code=abc&state=wrong-state"
+                "http://localhost:{port}{callback_path}?code=abc&state=test-state"
+            ))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[tokio::test]
+    async fn callback_server_validates_state() {
+        let callback_path = "/oauth/done";
+        let (port, _code_rx) = start_callback_server(0, callback_path, "correct-state".to_string())
+            .await
+            .unwrap();
+
+        let client = reqwest::Client::new();
+        let resp = client
+            .get(format!(
+                "http://localhost:{port}{callback_path}?code=abc&state=wrong-state"
             ))
             .send()
             .await
@@ -1085,14 +805,15 @@ mod tests {
 
     #[tokio::test]
     async fn callback_server_returns_success_html() {
-        let (port, _code_rx) = start_callback_server(0, "test-state".to_string())
+        let callback_path = "/oauth/done";
+        let (port, _code_rx) = start_callback_server(0, callback_path, "test-state".to_string())
             .await
             .unwrap();
 
         let client = reqwest::Client::new();
         let resp = client
             .get(format!(
-                "http://localhost:{port}/auth/callback?code=abc&state=test-state"
+                "http://localhost:{port}{callback_path}?code=abc&state=test-state"
             ))
             .send()
             .await
@@ -1100,8 +821,22 @@ mod tests {
 
         let body = resp.text().await.unwrap();
         assert!(
+            body.contains("<title>Authorization</title>"),
+            "response should contain updated title: {body}"
+        );
+        assert!(
             body.contains("Authorization Successful"),
             "response should contain success message: {body}"
         );
+    }
+
+    #[tokio::test]
+    async fn callback_server_rejects_invalid_paths() {
+        for path in ["", "no-leading-slash", "/:param", "/*wildcard"] {
+            let err = start_callback_server(0, path, "test-state".to_string())
+                .await
+                .unwrap_err();
+            assert!(!err.is_empty(), "expected error for path {path}");
+        }
     }
 }
