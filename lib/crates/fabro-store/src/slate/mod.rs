@@ -71,7 +71,10 @@ impl SlateStore {
             db_prefix.to_string(),
             self.object_store.clone(),
             None,
-            DbReaderOptions::default(),
+            DbReaderOptions {
+                manifest_poll_interval: Duration::from_millis(100),
+                ..DbReaderOptions::default()
+            },
         )
         .await?)
     }
