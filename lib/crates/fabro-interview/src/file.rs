@@ -8,11 +8,6 @@ use tokio::time;
 use crate::{Answer, Interviewer, Question};
 
 #[cfg(test)]
-const REATTACH_WINDOW: Duration = Duration::from_millis(300);
-#[cfg(not(test))]
-const REATTACH_WINDOW: Duration = Duration::from_secs(30);
-
-#[cfg(test)]
 use std::path::Path;
 
 /// An interviewer that communicates via JSON files in the runtime directory.
@@ -25,6 +20,28 @@ pub struct FileInterviewer {
     request_path: PathBuf,
     response_path: PathBuf,
     claim_path: PathBuf,
+    poll_interval: Duration,
+    reattach_window: Duration,
+}
+
+#[cfg(test)]
+const DEFAULT_REATTACH_WINDOW: Duration = Duration::from_millis(300);
+#[cfg(not(test))]
+const DEFAULT_REATTACH_WINDOW: Duration = Duration::from_secs(30);
+
+const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+#[cfg(test)]
+const TEST_POLL_INTERVAL: Duration = Duration::from_millis(1);
+#[cfg(test)]
+const TEST_REATTACH_WINDOW: Duration = Duration::from_millis(5);
+
+fn default_reattach_window() -> Duration {
+    DEFAULT_REATTACH_WINDOW
+}
+
+fn default_poll_interval() -> Duration {
+    DEFAULT_POLL_INTERVAL
 }
 
 impl FileInterviewer {
@@ -33,6 +50,25 @@ impl FileInterviewer {
             request_path,
             response_path,
             claim_path,
+            poll_interval: default_poll_interval(),
+            reattach_window: default_reattach_window(),
+        }
+    }
+
+    #[cfg(test)]
+    fn with_timing(
+        request_path: PathBuf,
+        response_path: PathBuf,
+        claim_path: PathBuf,
+        poll_interval: Duration,
+        reattach_window: Duration,
+    ) -> Self {
+        Self {
+            request_path,
+            response_path,
+            claim_path,
+            poll_interval,
+            reattach_window,
         }
     }
 
@@ -110,7 +146,7 @@ impl Interviewer for FileInterviewer {
                     claim_was_seen = true;
                     reattach_deadline = None;
                 } else if claim_was_seen && reattach_deadline.is_none() {
-                    reattach_deadline = Some(time::Instant::now() + REATTACH_WINDOW);
+                    reattach_deadline = Some(time::Instant::now() + self.reattach_window);
                 }
 
                 if let Some(deadline) = reattach_deadline {
@@ -120,7 +156,7 @@ impl Interviewer for FileInterviewer {
                     }
                 }
 
-                time::sleep(Duration::from_millis(100)).await;
+                time::sleep(self.poll_interval).await;
             }
         };
 
@@ -147,6 +183,20 @@ mod tests {
     use super::*;
     use crate::{AnswerValue, QuestionType};
 
+    fn test_interviewer(
+        request_path: PathBuf,
+        response_path: PathBuf,
+        claim_path: PathBuf,
+    ) -> FileInterviewer {
+        FileInterviewer::with_timing(
+            request_path,
+            response_path,
+            claim_path,
+            TEST_POLL_INTERVAL,
+            TEST_REATTACH_WINDOW,
+        )
+    }
+
     fn interviewer_paths(run_dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
         let runtime_dir = run_dir.join("runtime");
         (
@@ -156,12 +206,22 @@ mod tests {
         )
     }
 
+    async fn wait_for_exists(path: &Path) {
+        for _ in 0..200 {
+            if path.exists() {
+                return;
+            }
+            time::sleep(TEST_POLL_INTERVAL).await;
+        }
+        panic!("{} should exist", path.display());
+    }
+
     #[tokio::test]
     async fn write_request_poll_response() {
         let dir = tempfile::tempdir().unwrap();
         let run_dir = dir.path().to_path_buf();
         let (request_path, response_path, claim_path) = interviewer_paths(&run_dir);
-        let interviewer = FileInterviewer::new(
+        let interviewer = test_interviewer(
             request_path.clone(),
             response_path.clone(),
             claim_path.clone(),
@@ -173,13 +233,7 @@ mod tests {
         let ask_handle = tokio::spawn(async move { interviewer.ask(question).await });
 
         // Wait for the request file to appear
-        for _ in 0..50 {
-            if request_path.exists() {
-                break;
-            }
-            time::sleep(Duration::from_millis(50)).await;
-        }
-        assert!(request_path.exists(), "interview_request.json should exist");
+        wait_for_exists(&request_path).await;
 
         // Verify the request contains valid Question JSON
         let request_data = fs::read_to_string(&request_path).await.unwrap();
@@ -205,10 +259,10 @@ mod tests {
     async fn timeout_returns_default() {
         let dir = tempfile::tempdir().unwrap();
         let (request_path, response_path, claim_path) = interviewer_paths(dir.path());
-        let interviewer = FileInterviewer::new(request_path, response_path, claim_path);
+        let interviewer = test_interviewer(request_path, response_path, claim_path);
 
         let mut question = Question::new("approve?", QuestionType::YesNo);
-        question.timeout_seconds = Some(0.1);
+        question.timeout_seconds = Some(0.02);
         question.default = Some(Answer::no());
 
         let answer = interviewer.ask(question).await;
@@ -220,41 +274,34 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let run_dir = dir.path().to_path_buf();
         let (request_path, response_path, claim_path) = interviewer_paths(&run_dir);
-        let interviewer =
-            FileInterviewer::new(request_path.clone(), response_path, claim_path.clone());
+        let interviewer = test_interviewer(request_path.clone(), response_path, claim_path.clone());
 
         let question = Question::new("approve?", QuestionType::YesNo);
 
         let ask_handle = tokio::spawn(async move { interviewer.ask(question).await });
 
         // Wait for request file to appear
-        for _ in 0..50 {
-            if request_path.exists() {
-                break;
-            }
-            time::sleep(Duration::from_millis(50)).await;
-        }
-        assert!(request_path.exists());
+        wait_for_exists(&request_path).await;
 
         // Simulate attacher creating claim file
         std::fs::write(&claim_path, "12345\n").unwrap();
 
         // Let the poll loop see the claim
-        time::sleep(Duration::from_millis(150)).await;
+        time::sleep(TEST_POLL_INTERVAL * 2).await;
 
         // Simulate attacher departing (deletes claim without writing response)
         std::fs::remove_file(&claim_path).unwrap();
 
         // Should return timeout within REATTACH_WINDOW
         let started = time::Instant::now();
-        let answer = time::timeout(Duration::from_secs(2), ask_handle)
+        let answer = time::timeout(Duration::from_millis(250), ask_handle)
             .await
-            .expect("should complete within 2s")
+            .expect("should complete quickly")
             .unwrap();
 
         assert_eq!(answer.value, AnswerValue::Timeout);
         assert!(
-            started.elapsed() <= Duration::from_secs(1),
+            started.elapsed() <= Duration::from_millis(100),
             "should resolve well within the reattach window"
         );
     }
@@ -264,8 +311,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let run_dir = dir.path().to_path_buf();
         let (request_path, response_path, claim_path) = interviewer_paths(&run_dir);
-        let interviewer =
-            FileInterviewer::new(request_path.clone(), response_path, claim_path.clone());
+        let interviewer = test_interviewer(request_path.clone(), response_path, claim_path.clone());
 
         let mut question = Question::new("approve?", QuestionType::YesNo);
         question.default = Some(Answer::no());
@@ -273,22 +319,16 @@ mod tests {
         let ask_handle = tokio::spawn(async move { interviewer.ask(question).await });
 
         // Wait for request file
-        for _ in 0..50 {
-            if request_path.exists() {
-                break;
-            }
-            time::sleep(Duration::from_millis(50)).await;
-        }
-        assert!(request_path.exists());
+        wait_for_exists(&request_path).await;
 
         // Simulate attacher creating then deleting claim
         std::fs::write(&claim_path, "12345\n").unwrap();
-        time::sleep(Duration::from_millis(150)).await;
+        time::sleep(TEST_POLL_INTERVAL * 2).await;
         std::fs::remove_file(&claim_path).unwrap();
 
-        let answer = time::timeout(Duration::from_secs(2), ask_handle)
+        let answer = time::timeout(Duration::from_millis(250), ask_handle)
             .await
-            .expect("should complete within 2s")
+            .expect("should complete quickly")
             .unwrap();
 
         assert_eq!(answer.value, AnswerValue::No);
@@ -299,7 +339,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let run_dir = dir.path().to_path_buf();
         let (request_path, response_path, claim_path) = interviewer_paths(&run_dir);
-        let interviewer = FileInterviewer::new(
+        let interviewer = test_interviewer(
             request_path.clone(),
             response_path.clone(),
             claim_path.clone(),
@@ -310,30 +350,24 @@ mod tests {
         let ask_handle = tokio::spawn(async move { interviewer.ask(question).await });
 
         // Wait for request file
-        for _ in 0..50 {
-            if request_path.exists() {
-                break;
-            }
-            time::sleep(Duration::from_millis(50)).await;
-        }
-        assert!(request_path.exists());
+        wait_for_exists(&request_path).await;
 
         // First attacher creates then releases claim
         std::fs::write(&claim_path, "12345\n").unwrap();
-        time::sleep(Duration::from_millis(150)).await;
+        time::sleep(TEST_POLL_INTERVAL * 2).await;
         std::fs::remove_file(&claim_path).unwrap();
 
         // Second attacher picks up and answers before reattach window expires
-        time::sleep(Duration::from_millis(50)).await;
+        time::sleep(TEST_POLL_INTERVAL * 2).await;
         std::fs::write(&claim_path, "12346\n").unwrap();
 
         let answer = Answer::yes();
         let response_json = serde_json::to_string_pretty(&answer).unwrap();
         fs::write(response_path, response_json).await.unwrap();
 
-        let result = time::timeout(Duration::from_secs(2), ask_handle)
+        let result = time::timeout(Duration::from_millis(250), ask_handle)
             .await
-            .expect("should complete within 2s")
+            .expect("should complete quickly")
             .unwrap();
 
         assert_eq!(result.value, AnswerValue::Yes);
@@ -343,10 +377,10 @@ mod tests {
     async fn timeout_without_default_returns_timeout() {
         let dir = tempfile::tempdir().unwrap();
         let (request_path, response_path, claim_path) = interviewer_paths(dir.path());
-        let interviewer = FileInterviewer::new(request_path, response_path, claim_path);
+        let interviewer = test_interviewer(request_path, response_path, claim_path);
 
         let mut question = Question::new("approve?", QuestionType::YesNo);
-        question.timeout_seconds = Some(0.1);
+        question.timeout_seconds = Some(0.02);
 
         let answer = interviewer.ask(question).await;
         assert_eq!(answer.value, AnswerValue::Timeout);

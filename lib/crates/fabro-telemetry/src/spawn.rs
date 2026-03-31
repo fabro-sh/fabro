@@ -150,6 +150,16 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn spawn_detached_unix_creates_marker_file() {
+        fn wait_for_file(path: &std::path::Path) {
+            for _ in 0..100 {
+                if path.exists() {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            panic!("detached process should have created {}", path.display());
+        }
+
         // Spawn a detached `touch <marker>` and verify the file appears.
         let tmp = std::env::temp_dir().join("fabro-spawn-detached-test-marker");
         let _ = std::fs::remove_file(&tmp);
@@ -157,13 +167,7 @@ mod tests {
         let tmp_str = tmp.to_str().unwrap();
         spawn_detached(&["touch", tmp_str], &[], &[]);
 
-        // Wait a bit for the detached process to complete.
-        std::thread::sleep(std::time::Duration::from_millis(500));
-
-        assert!(
-            tmp.exists(),
-            "detached process should have created the marker file"
-        );
+        wait_for_file(&tmp);
         std::fs::remove_file(&tmp).ok();
     }
 }

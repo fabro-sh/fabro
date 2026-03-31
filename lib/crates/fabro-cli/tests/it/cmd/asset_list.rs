@@ -1,6 +1,6 @@
 use fabro_test::{fabro_snapshot, test_context};
 
-use super::support::{setup_asset_sandbox_run, setup_completed_dry_run};
+use super::support::{setup_asset_run, setup_completed_dry_run};
 
 #[test]
 fn help() {
@@ -51,7 +51,7 @@ fn asset_list_empty_run_reports_no_assets() {
 #[test]
 fn asset_list_json_outputs_entries() {
     let context = test_context!();
-    let setup = setup_asset_sandbox_run(&context);
+    let setup = setup_asset_run(&context);
     let mut filters = context.filters();
     filters.push((
         r"\[STORAGE_DIR\]/runs/\d{8}-\[ULID\]".to_string(),
@@ -115,7 +115,7 @@ fn asset_list_json_outputs_entries() {
 #[test]
 fn asset_list_filters_by_node_and_retry() {
     let context = test_context!();
-    let setup = setup_asset_sandbox_run(&context);
+    let setup = setup_asset_run(&context);
     let mut filters = context.filters();
     filters.push((
         r"\[STORAGE_DIR\]/runs/\d{8}-\[ULID\]".to_string(),

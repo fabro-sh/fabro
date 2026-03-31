@@ -1,11 +1,13 @@
-use fabro_test::{fabro_snapshot, test_context};
+use std::time::Duration;
+
+use fabro_test::{fabro_snapshot, run_and_format, test_context};
 use serde_json::Value;
 
 use crate::support::{
     compact_progress_event, example_fixture, fabro_json_snapshot, run_output_filters,
 };
 
-use super::support::{output_stdout, write_sleep_workflow};
+use super::support::{output_stdout, resolve_run, wait_for_status, write_gated_workflow};
 
 #[test]
 fn help() {
@@ -100,12 +102,7 @@ fn attach_replays_completed_detached_run() {
 #[test]
 fn attach_before_completion_streams_to_finished_state() {
     let context = test_context!();
-    write_sleep_workflow(
-        &context.temp_dir.join("slow.fabro"),
-        "slow",
-        "Run slowly",
-        2,
-    );
+    let gate = write_gated_workflow(&context.temp_dir.join("slow.fabro"), "slow", "Run slowly");
 
     let mut run_cmd = context.command();
     run_cmd.current_dir(&context.temp_dir);
@@ -128,25 +125,32 @@ fn attach_before_completion_streams_to_finished_state() {
         String::from_utf8_lossy(&run_output.stderr)
     );
     let run_id = output_stdout(&run_output).trim().to_string();
+    let run = resolve_run(&context, &run_id);
+    wait_for_status(&run.run_dir, &["running"]);
 
     let mut filters = context.filters();
     filters.push((
         r"\b\d+(\.\d+)?(ms|s)\b".to_string(),
         "[DURATION]".to_string(),
     ));
+    let release_gate = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(300));
+        gate.release();
+    });
     let mut attach_cmd = context.command();
     attach_cmd.current_dir(&context.temp_dir);
     attach_cmd.args(["attach", &run_id]);
+    let (snapshot, _output) = run_and_format(&mut attach_cmd, &filters);
+    release_gate.join().expect("gate releaser should join");
+    wait_for_status(&run.run_dir, &["succeeded"]);
 
-    fabro_snapshot!(filters, attach_cmd, @"
+    insta::assert_snapshot!(snapshot, @"
     success: true
     exit_code: 0
     ----- stdout -----
     ----- stderr -----
         Sandbox: local (ready in [TIME])
         ✓ start  [DURATION]
-        ✓ wait  [DURATION]
-        ✓ exit  [DURATION]
     ");
 }
 

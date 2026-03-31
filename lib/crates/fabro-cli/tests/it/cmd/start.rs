@@ -2,7 +2,7 @@ use fabro_test::{fabro_snapshot, test_context};
 
 use crate::support::{example_fixture, fabro_json_snapshot, read_json};
 
-use super::support::{output_stdout, resolve_run, wait_for_status, write_sleep_workflow};
+use super::support::{output_stdout, resolve_run, wait_for_status, write_gated_workflow};
 
 #[test]
 fn help() {
@@ -160,12 +160,7 @@ digraph Smoke {
 #[test]
 fn start_rejects_already_active_or_completed_run() {
     let context = test_context!();
-    write_sleep_workflow(
-        &context.temp_dir.join("slow.fabro"),
-        "slow",
-        "Run slowly",
-        3,
-    );
+    let gate = write_gated_workflow(&context.temp_dir.join("slow.fabro"), "slow", "Run slowly");
 
     let mut create_cmd = context.command();
     create_cmd.current_dir(&context.temp_dir);
@@ -195,7 +190,7 @@ fn start_rejects_already_active_or_completed_run() {
     start_cmd.args(["start", &run_id]);
     start_cmd.assert().success();
 
-    wait_for_status(&run.run_dir, &["starting", "running"]);
+    wait_for_status(&run.run_dir, &["running"]);
 
     let mut active_cmd = context.command();
     active_cmd.current_dir(&context.temp_dir);
@@ -208,6 +203,7 @@ fn start_rejects_already_active_or_completed_run() {
     error: an engine process is still running for this run — cannot start
     ");
 
+    gate.release();
     wait_for_status(&run.run_dir, &["succeeded"]);
 
     let mut completed_cmd = context.command();

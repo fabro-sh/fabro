@@ -114,6 +114,16 @@ mod tests {
     use std::time::Duration;
     use tokio::time::sleep;
 
+    async fn wait_for_pending_count(interviewer: &WebInterviewer, expected: usize) {
+        for _ in 0..200 {
+            if interviewer.pending_questions().len() == expected {
+                return;
+            }
+            sleep(Duration::from_millis(1)).await;
+        }
+        panic!("pending question count did not reach {expected}");
+    }
+
     #[tokio::test]
     async fn ask_blocks_until_answer_submitted() {
         let interviewer = Arc::new(WebInterviewer::new());
@@ -124,10 +134,7 @@ mod tests {
             interviewer_clone.ask(q).await
         });
 
-        // Give the ask task a moment to register the question
-        sleep(Duration::from_millis(50)).await;
-
-        // Question should be pending
+        wait_for_pending_count(interviewer.as_ref(), 1).await;
         let pending = interviewer.pending_questions();
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].question.text, "approve?");
@@ -151,8 +158,7 @@ mod tests {
             interviewer_clone.ask(q).await
         });
 
-        sleep(Duration::from_millis(50)).await;
-
+        wait_for_pending_count(interviewer.as_ref(), 1).await;
         let pending = interviewer.pending_questions();
         assert_eq!(pending.len(), 1);
 
@@ -192,8 +198,7 @@ mod tests {
             i2.ask(q).await
         });
 
-        sleep(Duration::from_millis(50)).await;
-
+        wait_for_pending_count(interviewer.as_ref(), 2).await;
         let pending = interviewer.pending_questions();
         assert_eq!(pending.len(), 2);
 
@@ -245,8 +250,7 @@ mod tests {
             i_clone.ask(q).await
         });
 
-        sleep(Duration::from_millis(50)).await;
-
+        wait_for_pending_count(interviewer.as_ref(), 1).await;
         let pending = interviewer.pending_questions();
         assert_eq!(pending.len(), 1);
 
@@ -266,7 +270,7 @@ mod tests {
             interviewer_clone.ask(q).await
         });
 
-        sleep(Duration::from_millis(50)).await;
+        wait_for_pending_count(interviewer.as_ref(), 1).await;
 
         {
             let mut inner = interviewer

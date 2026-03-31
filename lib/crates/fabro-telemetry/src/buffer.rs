@@ -150,6 +150,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let mid_flushes: Arc<Mutex<Vec<Vec<String>>>> = Arc::new(Mutex::new(Vec::new()));
         let final_flushes: Arc<Mutex<Vec<Vec<String>>>> = Arc::new(Mutex::new(Vec::new()));
+        let (notify_tx, notify_rx) = mpsc::channel();
 
         let mid = mid_flushes.clone();
         let fin = final_flushes.clone();
@@ -165,7 +166,8 @@ mod tests {
                 },
                 move |tracks| {
                     let events: Vec<String> = tracks.iter().map(|t| t.event.clone()).collect();
-                    mid.lock().unwrap().push(events);
+                    mid.lock().unwrap().push(events.clone());
+                    let _ = notify_tx.send(events);
                 },
                 move |tracks| {
                     let events: Vec<String> = tracks.iter().map(|t| t.event.clone()).collect();
@@ -174,8 +176,10 @@ mod tests {
             );
         });
 
-        // Wait for time threshold to fire, then drop sender
-        std::thread::sleep(Duration::from_millis(150));
+        let flushed = notify_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("time-based flush should have fired");
+        assert_eq!(flushed, vec!["e1"]);
         drop(tx);
         handle.join().unwrap();
 

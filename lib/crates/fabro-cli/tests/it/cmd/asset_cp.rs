@@ -1,6 +1,6 @@
 use fabro_test::{fabro_snapshot, test_context};
 
-use super::support::{read_text, setup_asset_sandbox_run, setup_completed_dry_run, text_tree};
+use super::support::{read_text, setup_asset_run, setup_completed_dry_run, text_tree};
 
 #[test]
 fn help() {
@@ -54,7 +54,7 @@ fn asset_cp_empty_run_reports_no_assets() {
 #[test]
 fn asset_cp_specific_path_copies_single_asset() {
     let context = test_context!();
-    let setup = setup_asset_sandbox_run(&context);
+    let setup = setup_asset_run(&context);
     let dest = context.temp_dir.join("asset-one");
     let mut cmd = context.command();
     cmd.args([
@@ -79,7 +79,7 @@ fn asset_cp_specific_path_copies_single_asset() {
 #[test]
 fn asset_cp_ambiguous_path_requires_node_or_retry() {
     let context = test_context!();
-    let setup = setup_asset_sandbox_run(&context);
+    let setup = setup_asset_run(&context);
     let dest = context.temp_dir.join("asset-one");
     let mut cmd = context.command();
     cmd.args([
@@ -101,7 +101,7 @@ fn asset_cp_ambiguous_path_requires_node_or_retry() {
 #[test]
 fn asset_cp_tree_preserves_structure() {
     let context = test_context!();
-    let setup = setup_asset_sandbox_run(&context);
+    let setup = setup_asset_run(&context);
     let dest = context.temp_dir.join("asset-tree");
     let mut cmd = context.command();
     cmd.args([
@@ -135,7 +135,7 @@ fn asset_cp_tree_preserves_structure() {
 #[test]
 fn asset_cp_flat_mode_rejects_filename_collisions() {
     let context = test_context!();
-    let setup = setup_asset_sandbox_run(&context);
+    let setup = setup_asset_run(&context);
     let dest = context.temp_dir.join("asset-flat");
     let mut cmd = context.command();
     cmd.args(["asset", "cp", &setup.run.run_id, dest.to_str().unwrap()]);

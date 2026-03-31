@@ -1,6 +1,6 @@
 use fabro_test::{fabro_snapshot, test_context};
 
-use super::support::{read_text, setup_asset_sandbox_run, setup_created_dry_run, text_tree};
+use super::support::{read_text, setup_created_dry_run, setup_local_sandbox_run, text_tree};
 
 #[test]
 fn help() {
@@ -53,7 +53,7 @@ fn sandbox_cp_run_without_sandbox_json_errors_cleanly() {
 #[test]
 fn sandbox_cp_downloads_file_from_run() {
     let context = test_context!();
-    let setup = setup_asset_sandbox_run(&context);
+    let setup = setup_local_sandbox_run(&context);
     let dest = context.temp_dir.join("downloaded-root.txt");
     let mut cmd = context.cp();
     cmd.args([
@@ -73,7 +73,7 @@ fn sandbox_cp_downloads_file_from_run() {
 #[test]
 fn sandbox_cp_uploads_file_to_run() {
     let context = test_context!();
-    let setup = setup_asset_sandbox_run(&context);
+    let setup = setup_local_sandbox_run(&context);
     let local = context.temp_dir.join("upload.txt");
     std::fs::write(&local, "uploaded-root")
         .unwrap_or_else(|err| panic!("failed to write {}: {err}", local.display()));
@@ -98,7 +98,7 @@ fn sandbox_cp_uploads_file_to_run() {
 #[test]
 fn sandbox_cp_recursive_downloads_directory() {
     let context = test_context!();
-    let setup = setup_asset_sandbox_run(&context);
+    let setup = setup_local_sandbox_run(&context);
     let dest = context.temp_dir.join("download-dir");
     let mut cmd = context.cp();
     cmd.args([

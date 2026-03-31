@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use fabro_test::TestContext;
 use serde_json::Value;
+use shlex::try_quote;
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -24,9 +25,13 @@ pub(crate) struct ProjectFixture {
     pub(crate) fabro_root: PathBuf,
 }
 
-pub(crate) struct AssetSandboxSetup {
+pub(crate) struct WorkspaceRunSetup {
     pub(crate) run: RunSetup,
     pub(crate) workspace_dir: PathBuf,
+}
+
+pub(crate) struct WorkflowGate {
+    gate_path: PathBuf,
 }
 
 #[derive(Clone, Copy)]
@@ -187,20 +192,26 @@ pub(crate) fn setup_project_fixture(context: &TestContext) -> ProjectFixture {
     }
 }
 
-pub(crate) fn setup_asset_sandbox_run(context: &TestContext) -> AssetSandboxSetup {
-    let workspace_dir = context.temp_dir.join("asset-sandbox");
+impl WorkflowGate {
+    pub(crate) fn release(&self) {
+        write_text_file(&self.gate_path, "open\n");
+    }
+}
+
+pub(crate) fn setup_asset_run(context: &TestContext) -> WorkspaceRunSetup {
+    let workspace_dir = context.temp_dir.join("asset-run");
     std::fs::create_dir_all(&workspace_dir)
         .unwrap_or_else(|err| panic!("failed to create {}: {err}", workspace_dir.display()));
 
     write_text_file(
-        &workspace_dir.join("asset_sandbox.fabro"),
-        r#"digraph AssetSandbox {
-  graph [goal="Exercise asset and sandbox commands", default_max_retries=0]
+        &workspace_dir.join("asset_run.fabro"),
+        r#"digraph AssetRun {
+  graph [goal="Exercise asset commands", default_max_retries=0]
   start [shape=Mdiamond]
   exit [shape=Msquare]
-  create_assets [shape=parallelogram, script="mkdir -p assets/shared assets/node_a sandbox_dir/download_me/nested && printf one > assets/shared/report.txt && printf alpha > assets/node_a/summary.txt && printf keep > sandbox_dir/download_me/root.txt && printf nested > sandbox_dir/download_me/nested/child.txt && sleep 1", max_retries=0]
-  retry_assets [shape=parallelogram, script="mkdir -p assets/retry && if [ ! -f .retry-sentinel ]; then printf first > assets/retry/report.txt && touch .retry-sentinel && sleep 1; else printf second > assets/retry/report.txt; fi", retry_policy="linear", timeout="50ms"]
-  create_colliding [shape=parallelogram, script="mkdir -p assets/other assets/retry && printf beta > assets/other/summary.txt && printf second > assets/retry/report.txt", max_retries=0]
+  create_assets [shape=parallelogram, script="mkdir -p assets/shared assets/node_a && printf one > assets/shared/report.txt && printf alpha > assets/node_a/summary.txt", max_retries=0]
+  retry_assets [shape=parallelogram, script="mkdir -p assets/retry && touch -c -t 200001010000 assets/shared/report.txt assets/node_a/summary.txt && if [ ! -f .retry-sentinel ]; then printf first > assets/retry/report.txt && touch .retry-sentinel && sleep 0.2; else printf second > assets/retry/report.txt; fi", retry_policy="linear", timeout="50ms"]
+  create_colliding [shape=parallelogram, script="mkdir -p assets/other assets/retry && touch -c -t 200001010000 assets/shared/report.txt assets/node_a/summary.txt assets/retry/report.txt && printf beta > assets/other/summary.txt && printf second > assets/retry/report.txt", max_retries=0]
   start -> create_assets -> retry_assets -> create_colliding -> exit
 }
 "#,
@@ -208,8 +219,8 @@ pub(crate) fn setup_asset_sandbox_run(context: &TestContext) -> AssetSandboxSetu
     write_text_file(
         &workspace_dir.join("run.toml"),
         r#"version = 1
-graph = "asset_sandbox.fabro"
-goal = "Exercise asset and sandbox commands"
+graph = "asset_run.fabro"
+goal = "Exercise asset commands"
 
 [sandbox]
 provider = "local"
@@ -223,8 +234,60 @@ include = ["assets/**"]
 "#,
     );
 
+    let run = run_local_workflow(context, &workspace_dir, "run.toml");
+    assert!(
+        run.run_dir
+            .join("cache/artifacts/assets/retry_assets/retry_2/manifest.json")
+            .exists(),
+        "setup_asset_run should materialize retry_2 assets"
+    );
+
+    WorkspaceRunSetup { run, workspace_dir }
+}
+
+pub(crate) fn setup_local_sandbox_run(context: &TestContext) -> WorkspaceRunSetup {
+    let workspace_dir = context.temp_dir.join("local-sandbox");
+    std::fs::create_dir_all(&workspace_dir)
+        .unwrap_or_else(|err| panic!("failed to create {}: {err}", workspace_dir.display()));
+
+    write_text_file(
+        &workspace_dir.join("sandbox_run.fabro"),
+        r#"digraph SandboxRun {
+  graph [goal="Exercise sandbox commands", default_max_retries=0]
+  start [shape=Mdiamond]
+  exit [shape=Msquare]
+  populate_sandbox [shape=parallelogram, script="mkdir -p sandbox_dir/download_me/nested && printf keep > sandbox_dir/download_me/root.txt && printf nested > sandbox_dir/download_me/nested/child.txt", max_retries=0]
+  start -> populate_sandbox -> exit
+}
+"#,
+    );
+    write_text_file(
+        &workspace_dir.join("run.toml"),
+        r#"version = 1
+graph = "sandbox_run.fabro"
+goal = "Exercise sandbox commands"
+
+[sandbox]
+provider = "local"
+preserve = true
+
+[sandbox.local]
+worktree_mode = "never"
+"#,
+    );
+
+    let run = run_local_workflow(context, &workspace_dir, "run.toml");
+    assert!(
+        run.run_dir.join("sandbox.json").exists(),
+        "setup_local_sandbox_run should persist sandbox.json"
+    );
+
+    WorkspaceRunSetup { run, workspace_dir }
+}
+
+fn run_local_workflow(context: &TestContext, workspace_dir: &Path, workflow: &str) -> RunSetup {
     let mut cmd = context.command();
-    cmd.current_dir(&workspace_dir);
+    cmd.current_dir(workspace_dir);
     cmd.timeout(COMMAND_TIMEOUT);
     cmd.env("OPENAI_API_KEY", "test");
     cmd.args([
@@ -235,30 +298,18 @@ include = ["assets/**"]
         "local",
         "--provider",
         "openai",
-        "run.toml",
+        workflow,
     ]);
     let output = cmd.output().expect("command should execute");
     if !output.status.success() {
         panic!(
-            "command failed: fabro run --auto-approve --no-retro --sandbox local --provider openai run.toml\nstdout:\n{}\nstderr:\n{}",
+            "command failed: fabro run --auto-approve --no-retro --sandbox local --provider openai {workflow}\nstdout:\n{}\nstderr:\n{}",
             stdout(&output),
             stderr(&output)
         );
     }
 
-    let run = only_run(context);
-    assert!(
-        run.run_dir
-            .join("cache/artifacts/assets/retry_assets/retry_2/manifest.json")
-            .exists(),
-        "setup F should materialize retry_2 assets"
-    );
-    assert!(
-        run.run_dir.join("sandbox.json").exists(),
-        "setup F should persist sandbox.json"
-    );
-
-    AssetSandboxSetup { run, workspace_dir }
+    only_run(context)
 }
 
 pub(crate) fn add_project_workflow(
@@ -296,14 +347,20 @@ pub(crate) fn add_user_workflow(context: &TestContext, name: &str, goal: &str) -
     workflow_dir
 }
 
-pub(crate) fn write_sleep_workflow(path: &Path, name: &str, goal: &str, sleep_seconds: u64) {
+pub(crate) fn write_gated_workflow(path: &Path, name: &str, goal: &str) -> WorkflowGate {
+    let gate_path = path.with_extension("gate");
+    let _ = std::fs::remove_file(&gate_path);
+    let gate_path_str = gate_path.to_string_lossy().into_owned();
+    let quoted_gate_path = try_quote(&gate_path_str)
+        .unwrap_or_else(|_| panic!("failed to quote {}", gate_path.display()));
     write_text_file(
         path,
         &format!(
-            "digraph {} {{\n  graph [goal={goal:?}]\n  start [shape=Mdiamond]\n  exit [shape=Msquare]\n  wait [shape=parallelogram, script=\"sleep {sleep_seconds}\"]\n  start -> wait -> exit\n}}\n",
+            "digraph {} {{\n  graph [goal={goal:?}]\n  start [shape=Mdiamond]\n  exit [shape=Msquare]\n  wait [shape=parallelogram, script=\"while [ ! -f {quoted_gate_path} ]; do sleep 0.01; done; sleep 0.2\"]\n  start -> wait -> exit\n}}\n",
             to_pascal_case(name),
         ),
     );
+    WorkflowGate { gate_path }
 }
 
 pub(crate) fn wait_for_status(run_dir: &Path, expected: &[&str]) -> String {

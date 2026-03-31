@@ -448,6 +448,70 @@ mod server_lifecycle {
         serde_json::from_slice(&bytes).unwrap()
     }
 
+    const POLL_INTERVAL: Duration = Duration::from_millis(10);
+    const POLL_ATTEMPTS: usize = 500;
+
+    async fn run_json(app: &axum::Router, run_id: &str) -> serde_json::Value {
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{run_id}")))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        body_json(response.into_body()).await
+    }
+
+    async fn wait_for_question_id(app: &axum::Router, run_id: &str) -> String {
+        for _ in 0..POLL_ATTEMPTS {
+            let req = Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{run_id}/questions")))
+                .body(Body::empty())
+                .unwrap();
+            let response = app.clone().oneshot(req).await.unwrap();
+            let body = body_json(response.into_body()).await;
+            let arr = body["data"].as_array().unwrap();
+            if let Some(question_id) = arr
+                .first()
+                .and_then(|item| item["id"].as_str())
+                .map(ToOwned::to_owned)
+            {
+                return question_id;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+        panic!("question should have appeared");
+    }
+
+    async fn wait_for_run_status(app: &axum::Router, run_id: &str, expected: &[&str]) -> String {
+        for _ in 0..POLL_ATTEMPTS {
+            let body = run_json(app, run_id).await;
+            let status = body["status"].as_str().unwrap().to_string();
+            if expected.iter().any(|candidate| *candidate == status) {
+                return status;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+        panic!("run {run_id} did not reach any of {expected:?}");
+    }
+
+    async fn wait_for_run_status_not_in(
+        app: &axum::Router,
+        run_id: &str,
+        unexpected: &[&str],
+    ) -> String {
+        for _ in 0..POLL_ATTEMPTS {
+            let body = run_json(app, run_id).await;
+            let status = body["status"].as_str().unwrap().to_string();
+            if unexpected.iter().all(|candidate| *candidate != status) {
+                return status;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+        panic!("run {run_id} stayed in {unexpected:?}");
+    }
+
     const GATE_DOT: &str = r#"digraph GateTest {
         graph [goal="Test gate"]
         start [shape=Mdiamond]
@@ -489,23 +553,7 @@ mod server_lifecycle {
         let run_id = body["id"].as_str().unwrap().to_string();
 
         // 2. Poll for question to appear (run goes start -> work -> gate, then blocks)
-        let mut question_id = String::new();
-        for _ in 0..500 {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-            let req = Request::builder()
-                .method("GET")
-                .uri(api(&format!("/runs/{run_id}/questions")))
-                .body(Body::empty())
-                .unwrap();
-            let response = app.clone().oneshot(req).await.unwrap();
-            let body = body_json(response.into_body()).await;
-            let arr = body["data"].as_array().unwrap();
-            if !arr.is_empty() {
-                question_id = arr[0]["id"].as_str().unwrap().to_string();
-                break;
-            }
-        }
-        assert!(!question_id.is_empty(), "question should have appeared");
+        let question_id = wait_for_question_id(&app, &run_id).await;
 
         // 3. Submit answer selecting first option (Approve)
         let req = Request::builder()
@@ -522,22 +570,7 @@ mod server_lifecycle {
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
         // 4. Poll until completed
-        let mut final_status = String::new();
-        for _ in 0..500 {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-            let req = Request::builder()
-                .method("GET")
-                .uri(api(&format!("/runs/{run_id}")))
-                .body(Body::empty())
-                .unwrap();
-            let response = app.clone().oneshot(req).await.unwrap();
-            let body = body_json(response.into_body()).await;
-            let status = body["status"].as_str().unwrap().to_string();
-            if status == "completed" || status == "failed" {
-                final_status = status;
-                break;
-            }
-        }
+        let final_status = wait_for_run_status(&app, &run_id, &["completed", "failed"]).await;
         assert_eq!(final_status, "completed");
 
         // 5. Verify context endpoint returns an object
@@ -587,8 +620,7 @@ mod server_lifecycle {
         let body = body_json(response.into_body()).await;
         let run_id = body["id"].as_str().unwrap().to_string();
 
-        // Wait briefly for scheduler to pick up the run
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        wait_for_run_status_not_in(&app, &run_id, &["queued", "starting"]).await;
 
         // Cancel it
         let req = Request::builder()
@@ -637,6 +669,57 @@ mod sse_events {
         start -> work -> exit
     }"#;
 
+    const POLL_INTERVAL: Duration = Duration::from_millis(10);
+    const POLL_ATTEMPTS: usize = 500;
+
+    async fn body_json(body: Body) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    async fn run_status(app: &axum::Router, run_id: &str) -> String {
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{run_id}")))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        body["status"].as_str().unwrap().to_string()
+    }
+
+    async fn wait_for_run_status_not_in(
+        app: &axum::Router,
+        run_id: &str,
+        unexpected: &[&str],
+    ) -> String {
+        for _ in 0..POLL_ATTEMPTS {
+            let status = run_status(app, run_id).await;
+            if unexpected.iter().all(|candidate| *candidate != status) {
+                return status;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+        panic!("run {run_id} stayed in {unexpected:?}");
+    }
+
+    async fn wait_for_checkpoint(app: &axum::Router, run_id: &str) -> serde_json::Value {
+        for _ in 0..POLL_ATTEMPTS {
+            let req = Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{run_id}/checkpoint")))
+                .body(Body::empty())
+                .unwrap();
+            let response = app.clone().oneshot(req).await.unwrap();
+            if response.status() == StatusCode::OK {
+                return body_json(response.into_body()).await;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+        panic!("checkpoint did not become available for {run_id}");
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn sse_stream_contains_expected_event_types() {
         let state = create_app_state(test_db().await);
@@ -657,14 +740,10 @@ mod sse_events {
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::CREATED);
-        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let body = body_json(response.into_body()).await;
         let run_id = body["id"].as_str().unwrap().to_string();
 
-        // Wait for scheduler to pick up the run before subscribing to SSE
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        wait_for_run_status_not_in(&app, &run_id, &["queued", "starting"]).await;
 
         // Get SSE stream
         let req = Request::builder()
@@ -708,13 +787,8 @@ mod sse_events {
             if let Some(json_str) = line.strip_prefix("data:") {
                 let json_str = json_str.trim();
                 if let Ok(event) = serde_json::from_str::<serde_json::Value>(json_str) {
-                    // The event is serialized as a tagged enum, so the type is the first key
-                    if let Some(obj) = event.as_object() {
-                        for key in obj.keys() {
-                            event_types.push(key.clone());
-                        }
-                    } else if let Some(s) = event.as_str() {
-                        event_types.push(s.to_string());
+                    if let Some(event_name) = event["event"].as_str() {
+                        event_types.push(event_name.to_string());
                     }
                 }
             }
@@ -729,27 +803,13 @@ mod sse_events {
             assert!(
                 event_types
                     .iter()
-                    .any(|t| t == "StageStarted" || t == "StageCompleted"),
+                    .any(|t| t == "stage.started" || t == "stage.completed"),
                 "should contain stage events, got: {event_types:?}"
             );
         }
 
         // Pipeline is complete (SSE stream ended), verify checkpoint
-        // Small yield to let the spawned task update state
-        tokio::time::sleep(Duration::from_millis(10)).await;
-
-        let req = Request::builder()
-            .method("GET")
-            .uri(api(&format!("/runs/{run_id}/checkpoint")))
-            .body(Body::empty())
-            .unwrap();
-        let response = app.clone().oneshot(req).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let cp_body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let cp_body = wait_for_checkpoint(&app, &run_id).await;
         // If run completed, checkpoint should have completed_nodes
         if !cp_body.is_null() {
             let completed = cp_body["completed_nodes"].as_array();
@@ -802,6 +862,29 @@ mod serve_dry_run {
         serde_json::from_slice(&bytes).unwrap()
     }
 
+    const POLL_INTERVAL: Duration = Duration::from_millis(10);
+    const POLL_ATTEMPTS: usize = 500;
+
+    async fn wait_for_run_status(app: &axum::Router, run_id: &str, expected: &[&str]) -> String {
+        for _ in 0..POLL_ATTEMPTS {
+            let req = Request::builder()
+                .method("GET")
+                .uri(api(&format!("/runs/{run_id}")))
+                .body(Body::empty())
+                .unwrap();
+
+            let response = app.clone().oneshot(req).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = body_json(response.into_body()).await;
+            let status = body["status"].as_str().unwrap().to_string();
+            if expected.iter().any(|candidate| *candidate == status) {
+                return status;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+        panic!("run {run_id} did not reach any of {expected:?}");
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn dry_run_serve_starts_and_runs_workflow() {
         let app = dry_run_app().await;
@@ -823,21 +906,8 @@ mod serve_dry_run {
         let run_id = body["id"].as_str().unwrap().to_string();
         assert!(!run_id.is_empty());
 
-        // Wait for run to complete
-        tokio::time::sleep(Duration::from_millis(500)).await;
-
-        // GET /runs/{id} to verify completion
-        let req = Request::builder()
-            .method("GET")
-            .uri(api(&format!("/runs/{run_id}")))
-            .body(Body::empty())
-            .unwrap();
-
-        let response = app.oneshot(req).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let body = body_json(response.into_body()).await;
-        assert_eq!(body["status"].as_str().unwrap(), "completed");
+        let status = wait_for_run_status(&app, &run_id, &["completed", "failed"]).await;
+        assert_eq!(status, "completed");
     }
 
     #[tokio::test]

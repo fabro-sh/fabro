@@ -1,6 +1,6 @@
 use fabro_test::{fabro_snapshot, test_context};
 
-use super::support::setup_asset_sandbox_run;
+use super::support::setup_local_sandbox_run;
 
 #[test]
 fn help() {
@@ -37,7 +37,7 @@ fn help() {
 #[test]
 fn sandbox_preview_rejects_non_daytona_run() {
     let context = test_context!();
-    let setup = setup_asset_sandbox_run(&context);
+    let setup = setup_local_sandbox_run(&context);
     let mut cmd = context.preview();
     cmd.args([&setup.run.run_id, "3000"]);
 
