@@ -187,7 +187,6 @@ digraph Test {
 
     let run = context
         .command()
-        .current_dir(&context.temp_dir)
         .args([
             "run",
             "--dry-run",

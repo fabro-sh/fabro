@@ -14,7 +14,7 @@ fn dry_run_branching() {
     ----- stdout -----
     ----- stderr -----
     Workflow: Branch (6 nodes, 6 edges)
-    Graph: ../../../test/branching.fabro
+    Graph: [FIXTURES]/branching.fabro
     Goal: Implement and validate a feature
 
     warning [node: implement]: Node 'implement' has goal_gate=true but no retry_target or fallback_retry_target (goal_gate_has_retry)
@@ -49,7 +49,7 @@ fn dry_run_conditions() {
     ----- stdout -----
     ----- stderr -----
     Workflow: Conditions (5 nodes, 5 edges)
-    Graph: ../../../test/conditions.fabro
+    Graph: [FIXTURES]/conditions.fabro
     Goal: Test condition evaluation with OR and parentheses
 
         Sandbox: local (ready in [TIME])
@@ -81,7 +81,7 @@ fn dry_run_parallel() {
     ----- stdout -----
     ----- stderr -----
     Workflow: Parallel (7 nodes, 7 edges)
-    Graph: ../../../test/parallel.fabro
+    Graph: [FIXTURES]/parallel.fabro
     Goal: Test parallel and fan-in execution
 
         Sandbox: local (ready in [TIME])
@@ -114,7 +114,7 @@ fn dry_run_styled() {
     ----- stdout -----
     ----- stderr -----
     Workflow: Styled (5 nodes, 4 edges)
-    Graph: ../../../test/styled.fabro
+    Graph: [FIXTURES]/styled.fabro
     Goal: Build a styled pipeline
 
         Sandbox: local (ready in [TIME])
@@ -147,7 +147,7 @@ fn dry_run_legacy_tool() {
     ----- stdout -----
     ----- stderr -----
     Workflow: LegacyTool (3 nodes, 2 edges)
-    Graph: ../../../test/legacy_tool.fabro
+    Graph: [FIXTURES]/legacy_tool.fabro
     Goal: Verify backwards compatibility with old tool naming
 
         Sandbox: local (ready in [TIME])

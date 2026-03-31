@@ -2,7 +2,7 @@ use fabro_test::test_context;
 use serde_json::Value;
 
 use super::{fixture, read_json, timeout_for};
-use crate::support::fabro_json_snapshot;
+use crate::support::{example_fixture, fabro_json_snapshot};
 
 #[fabro_macros::e2e_test()]
 fn local_run_lifecycle() {
@@ -112,7 +112,7 @@ fn dry_run_create_start_attach_works_with_default_run_lookup() {
             "--auto-approve",
             "--run-id",
             run_id,
-            "../../../test/simple.fabro",
+            example_fixture("simple.fabro").to_str().unwrap(),
         ])
         .assert()
         .success();
@@ -155,7 +155,7 @@ fn dry_run_detach_attach_works_with_default_run_lookup() {
             "--auto-approve",
             "--run-id",
             run_id,
-            "../../../test/simple.fabro",
+            example_fixture("simple.fabro").to_str().unwrap(),
         ])
         .assert()
         .success();

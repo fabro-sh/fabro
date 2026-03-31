@@ -75,7 +75,6 @@ fn exec_missing_api_key_exits_with_error() {
     cmd.arg("test prompt");
     cmd.env_clear();
     cmd.env("HOME", &context.home_dir);
-    cmd.current_dir(&context.temp_dir);
     fabro_snapshot!(context.filters(), cmd, @"
     success: false
     exit_code: 1
@@ -99,7 +98,6 @@ fn exec_uses_user_config_defaults() {
     cmd.env("HOME", &context.home_dir);
     cmd.env("FABRO_STORAGE_DIR", &context.storage_dir);
     cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
-    cmd.current_dir(&context.temp_dir);
 
     fabro_snapshot!(context.filters(), cmd, @"
     success: false
@@ -125,7 +123,6 @@ fn exec_creates_file() {
             "claude-haiku-4-5",
             "Create a file called hello.txt containing exactly 'Hello'",
         ])
-        .current_dir(&context.temp_dir)
         .timeout(std::time::Duration::from_secs(120))
         .assert()
         .success();
@@ -153,7 +150,6 @@ fn exec_shell_command() {
             "claude-haiku-4-5",
             "Run the shell command `echo arc_test_marker_42` and tell me what it printed",
         ])
-        .current_dir(&context.temp_dir)
         .timeout(std::time::Duration::from_secs(120))
         .assert()
         .success();
@@ -174,7 +170,6 @@ fn exec_read_only_blocks_write() {
             "claude-haiku-4-5",
             "Create a file called forbidden.txt containing 'should not exist'",
         ])
-        .current_dir(&context.temp_dir)
         .timeout(std::time::Duration::from_secs(120))
         .assert()
         .success();
@@ -201,7 +196,6 @@ fn exec_json_output_format() {
             "claude-haiku-4-5",
             "Create a file called test.txt containing 'test'",
         ])
-        .current_dir(&context.temp_dir)
         .timeout(std::time::Duration::from_secs(120))
         .assert()
         .success()
@@ -237,7 +231,6 @@ fn exec_read_and_edit() {
             "claude-haiku-4-5",
             "Read data.txt then replace its entire content with 'new content'",
         ])
-        .current_dir(&context.temp_dir)
         .timeout(std::time::Duration::from_secs(120))
         .assert()
         .success();

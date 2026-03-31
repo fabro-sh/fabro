@@ -46,12 +46,7 @@ fn test_repo_deinit_removes_fabro_toml_and_dir() {
     assert!(context.temp_dir.join("fabro.toml").exists());
     assert!(context.temp_dir.join("fabro").exists());
 
-    context
-        .repo()
-        .arg("deinit")
-        .current_dir(&context.temp_dir)
-        .assert()
-        .success();
+    context.repo().arg("deinit").assert().success();
 
     assert!(
         !context.temp_dir.join("fabro.toml").exists(),
@@ -70,7 +65,6 @@ fn test_repo_deinit_fails_when_not_initialized() {
 
     let mut cmd = context.repo();
     cmd.arg("deinit");
-    cmd.current_dir(&context.temp_dir);
     fabro_snapshot!(context.filters(), cmd, @"
     success: false
     exit_code: 1
@@ -85,12 +79,7 @@ fn test_repo_init_skill_installs_skill_files() {
     let context = test_context!();
     context.git_init();
 
-    context
-        .repo()
-        .args(["init", "--skill"])
-        .current_dir(&context.temp_dir)
-        .assert()
-        .success();
+    context.repo().args(["init", "--skill"]).assert().success();
 
     // Skill files should be installed under .claude/skills/fabro-create-workflow/
     let skill_dir = context

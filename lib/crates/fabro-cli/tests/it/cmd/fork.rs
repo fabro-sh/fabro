@@ -42,7 +42,6 @@ fn help() {
 fn fork_outside_git_repo_errors() {
     let context = test_context!();
     let mut cmd = context.command();
-    cmd.current_dir(&context.temp_dir);
     cmd.args(["fork", "01ARZ3NDEKTSV4RRFFQ69G5FAW"]);
 
     fabro_snapshot!(context.filters(), cmd, @"

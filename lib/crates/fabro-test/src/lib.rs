@@ -1,8 +1,20 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Output;
 
 use assert_cmd::Command;
 use regex::Regex;
+
+/// Walk up from `start` to find the repo-level `test/` fixtures directory.
+pub fn find_test_fixtures_dir(start: &Path) -> Option<PathBuf> {
+    let mut dir = start;
+    loop {
+        let candidate = dir.join("test");
+        if candidate.is_dir() {
+            return candidate.canonicalize().ok();
+        }
+        dir = dir.parent()?;
+    }
+}
 
 /// Static filters applied to every snapshot.
 static INSTA_FILTERS: &[(&str, &str)] = &[
@@ -127,6 +139,12 @@ impl TestContext {
         }
     }
 
+    /// Register a custom filter (regex pattern → replacement).
+    pub fn add_filter(&mut self, pattern: &str, replacement: &str) {
+        self.filters
+            .push((regex::escape(pattern), replacement.to_string()));
+    }
+
     /// Returns the combined static + context-specific filters.
     pub fn filters(&self) -> Vec<(String, String)> {
         let mut filters = self.filters.clone();
@@ -139,8 +157,14 @@ impl TestContext {
     }
 
     /// Build a base `Command` with all isolation env vars set.
+    ///
+    /// The working directory defaults to `self.temp_dir` (a non-git temp
+    /// directory) so tests never accidentally interact with the real repo.
+    /// Tests that need a specific working directory can override this with
+    /// a subsequent `.current_dir(path)` call.
     pub fn command(&self) -> Command {
         let mut cmd = Command::new(&self.fabro_bin);
+        cmd.current_dir(&self.temp_dir);
         cmd.env("NO_COLOR", "1");
         cmd.env("HOME", &self.home_dir);
         cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
@@ -399,11 +423,21 @@ pub fn apply_filters(snapshot: &str, filters: &[(String, String)]) -> String {
 }
 
 /// Create a `TestContext` using the `fabro` binary built by cargo.
+///
+/// Automatically registers a `[FIXTURES]` snapshot filter for the `test/`
+/// directory at the repository root (found by walking up from `CARGO_MANIFEST_DIR`).
 #[macro_export]
 macro_rules! test_context {
-    () => {
-        $crate::TestContext::new(std::path::PathBuf::from(env!("CARGO_BIN_EXE_fabro")))
-    };
+    () => {{
+        let mut ctx =
+            $crate::TestContext::new(std::path::PathBuf::from(env!("CARGO_BIN_EXE_fabro")));
+        if let Some(fixtures_dir) =
+            $crate::find_test_fixtures_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
+        {
+            ctx.add_filter(fixtures_dir.to_str().unwrap(), "[FIXTURES]");
+        }
+        ctx
+    }};
 }
 
 /// Snapshot test macro that runs a command and compares output using insta.

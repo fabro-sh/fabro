@@ -43,7 +43,6 @@ fn list() {
 
     let mut cmd = context.command();
     cmd.args(["workflow", "list"]);
-    cmd.current_dir(&context.temp_dir);
     fabro_snapshot!(context.filters(), cmd, @"
     success: true
     exit_code: 0

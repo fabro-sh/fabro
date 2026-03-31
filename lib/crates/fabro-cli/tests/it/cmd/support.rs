@@ -41,7 +41,10 @@ enum GitWorkflowKind {
 }
 
 pub(crate) fn fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../../test/{name}"))
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(format!("../../../test/{name}"))
+        .canonicalize()
+        .expect("fixture path should exist")
 }
 
 pub(crate) fn output_stderr(output: &Output) -> String {

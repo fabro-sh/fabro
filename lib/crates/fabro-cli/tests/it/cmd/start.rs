@@ -163,7 +163,6 @@ fn start_rejects_already_active_or_completed_run() {
     let gate = write_gated_workflow(&context.temp_dir.join("slow.fabro"), "slow", "Run slowly");
 
     let mut create_cmd = context.command();
-    create_cmd.current_dir(&context.temp_dir);
     create_cmd.env("OPENAI_API_KEY", "test");
     create_cmd.args([
         "create",
@@ -185,7 +184,6 @@ fn start_rejects_already_active_or_completed_run() {
     let run = resolve_run(&context, &run_id);
 
     let mut start_cmd = context.command();
-    start_cmd.current_dir(&context.temp_dir);
     start_cmd.env("OPENAI_API_KEY", "test");
     start_cmd.args(["start", &run_id]);
     start_cmd.assert().success();
@@ -193,7 +191,6 @@ fn start_rejects_already_active_or_completed_run() {
     wait_for_status(&run.run_dir, &["running"]);
 
     let mut active_cmd = context.command();
-    active_cmd.current_dir(&context.temp_dir);
     active_cmd.args(["start", &run_id]);
     fabro_snapshot!(context.filters(), active_cmd, @"
     success: false
@@ -207,7 +204,6 @@ fn start_rejects_already_active_or_completed_run() {
     wait_for_status(&run.run_dir, &["succeeded"]);
 
     let mut completed_cmd = context.command();
-    completed_cmd.current_dir(&context.temp_dir);
     completed_cmd.args(["start", &run_id]);
     fabro_snapshot!(context.filters(), completed_cmd, @"
     success: false

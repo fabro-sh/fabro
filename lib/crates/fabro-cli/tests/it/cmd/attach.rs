@@ -103,7 +103,6 @@ fn attach_before_completion_streams_to_finished_state() {
     let gate = write_gated_workflow(&context.temp_dir.join("slow.fabro"), "slow", "Run slowly");
 
     let mut run_cmd = context.command();
-    run_cmd.current_dir(&context.temp_dir);
     run_cmd.env("OPENAI_API_KEY", "test");
     run_cmd.args([
         "run",
@@ -136,7 +135,6 @@ fn attach_before_completion_streams_to_finished_state() {
         gate.release();
     });
     let mut attach_cmd = context.command();
-    attach_cmd.current_dir(&context.temp_dir);
     attach_cmd.args(["attach", &run_id]);
     let (snapshot, _output) = run_and_format(&mut attach_cmd, &filters);
     release_gate.join().expect("gate releaser should join");
@@ -176,7 +174,6 @@ fn attach_json_errors_without_prompting_for_human_input() {
 
     let run_output = context
         .command()
-        .current_dir(&context.temp_dir)
         .env("OPENAI_API_KEY", "test")
         .args([
             "run",

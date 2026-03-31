@@ -31,7 +31,6 @@ fn help() {
 fn workflow_list_errors_without_project_config() {
     let context = test_context!();
     let mut cmd = context.command();
-    cmd.current_dir(&context.temp_dir);
     cmd.args(["workflow", "list"]);
 
     fabro_snapshot!(context.filters(), cmd, @"

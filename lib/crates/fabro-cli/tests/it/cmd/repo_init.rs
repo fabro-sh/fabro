@@ -33,7 +33,6 @@ fn repo_init_creates_fabro_toml_and_hello_workflow() {
     context.git_init();
 
     let mut cmd = context.command();
-    cmd.current_dir(&context.temp_dir);
     cmd.args(["repo", "init"]);
 
     fabro_snapshot!(context.filters(), cmd, @"
@@ -111,7 +110,6 @@ fn repo_init_rejects_already_initialized_repo() {
     std::fs::write(context.temp_dir.join("fabro.toml"), "version = 1\n").unwrap();
 
     let mut cmd = context.command();
-    cmd.current_dir(&context.temp_dir);
     cmd.args(["repo", "init"]);
 
     fabro_snapshot!(context.filters(), cmd, @"
@@ -127,7 +125,6 @@ fn repo_init_rejects_already_initialized_repo() {
 fn repo_init_errors_outside_git_repo() {
     let context = test_context!();
     let mut cmd = context.command();
-    cmd.current_dir(&context.temp_dir);
     cmd.args(["repo", "init"]);
 
     fabro_snapshot!(context.filters(), cmd, @"

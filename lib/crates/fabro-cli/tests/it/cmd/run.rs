@@ -56,7 +56,7 @@ fn dry_run_simple() {
     ----- stdout -----
     ----- stderr -----
     Workflow: Simple (4 nodes, 3 edges)
-    Graph: ../../../test/simple.fabro
+    Graph: [FIXTURES]/simple.fabro
     Goal: Run tests and report results
 
         Sandbox: local (ready in [TIME])
@@ -80,11 +80,9 @@ fn dry_run_simple() {
 fn dry_run_writes_jsonl_and_live_json() {
     let context = test_context!();
     let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FB8";
-    let workflow = example_fixture("simple.fabro");
 
     context
         .command()
-        .current_dir(&context.temp_dir)
         .args([
             "run",
             "--dry-run",
@@ -93,7 +91,7 @@ fn dry_run_writes_jsonl_and_live_json() {
             "local",
             "--run-id",
             run_id,
-            workflow.to_str().unwrap(),
+            example_fixture("simple.fabro").to_str().unwrap(),
         ])
         .assert()
         .success();
@@ -427,7 +425,7 @@ fn run_id_passthrough_uses_provided_ulid() {
             "--auto-approve",
             "--run-id",
             run_id,
-            "../../../test/simple.fabro",
+            example_fixture("simple.fabro").to_str().unwrap(),
         ])
         .assert()
         .success();
@@ -461,7 +459,6 @@ fn json_run_implies_auto_approve_for_human_gates() {
 
     let output = context
         .command()
-        .current_dir(&context.temp_dir)
         .args([
             "--json",
             "run",
@@ -811,7 +808,7 @@ fn detach_prints_ulid_and_exits() {
         "--detach",
         "--dry-run",
         "--auto-approve",
-        "../../../test/simple.fabro",
+        example_fixture("simple.fabro").to_str().unwrap(),
     ]);
     fabro_snapshot!(context.filters(), cmd, @"
     success: true
@@ -835,7 +832,7 @@ fn detach_creates_run_dir_with_detach_log() {
             "--auto-approve",
             "--run-id",
             run_id,
-            "../../../test/simple.fabro",
+            example_fixture("simple.fabro").to_str().unwrap(),
         ])
         .assert()
         .success();

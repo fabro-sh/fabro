@@ -36,7 +36,6 @@ fn parse_valid_workflow_prints_ast_json() {
         "digraph Tiny {\n  graph [goal=\"Parse a tiny workflow\"]\n  start [shape=Mdiamond]\n  exit [shape=Msquare]\n  main [label=\"Main\", prompt=\"Do the thing\"]\n  start -> main -> exit\n}\n",
     );
     let mut cmd = context.command();
-    cmd.current_dir(&context.temp_dir);
     cmd.args(["parse", "tiny.fabro"]);
 
     fabro_snapshot!(context.filters(), cmd, @r###"
@@ -125,7 +124,6 @@ fn parse_invalid_dot_fails_cleanly() {
         "digraph Bad {\n  start [shape=Mdiamond]\n  exit [shape=Msquare]\n  start -> exit\n",
     );
     let mut cmd = context.command();
-    cmd.current_dir(&context.temp_dir);
     cmd.args(["parse", "bad.fabro"]);
 
     fabro_snapshot!(context.filters(), cmd, @"

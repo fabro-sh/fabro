@@ -147,7 +147,6 @@ fn workflow_create_rejects_existing_workflow() {
 fn workflow_create_errors_without_project_config() {
     let context = test_context!();
     let mut cmd = context.command();
-    cmd.current_dir(&context.temp_dir);
     cmd.args(["workflow", "create", "hello-world"]);
 
     fabro_snapshot!(context.filters(), cmd, @"

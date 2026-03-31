@@ -1,7 +1,10 @@
 use fabro_test::{fabro_snapshot, test_context};
 
 fn fixture(name: &str) -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../../test/{name}"))
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(format!("../../../test/{name}"))
+        .canonicalize()
+        .expect("fixture path should exist")
 }
 
 #[test]
@@ -43,7 +46,7 @@ fn simple() {
     ----- stdout -----
     ----- stderr -----
     Workflow: Simple (4 nodes, 3 edges)
-    Graph: ../../../test/simple.fabro
+    Graph: [FIXTURES]/simple.fabro
     Validation: OK
     ");
 }
@@ -59,7 +62,7 @@ fn branching() {
     ----- stdout -----
     ----- stderr -----
     Workflow: Branch (6 nodes, 6 edges)
-    Graph: ../../../test/branching.fabro
+    Graph: [FIXTURES]/branching.fabro
     warning [node: implement]: Node 'implement' has goal_gate=true but no retry_target or fallback_retry_target (goal_gate_has_retry)
     Validation: OK
     ");
@@ -76,7 +79,7 @@ fn conditions() {
     ----- stdout -----
     ----- stderr -----
     Workflow: Conditions (5 nodes, 5 edges)
-    Graph: ../../../test/conditions.fabro
+    Graph: [FIXTURES]/conditions.fabro
     Validation: OK
     ");
 }
@@ -92,7 +95,7 @@ fn parallel() {
     ----- stdout -----
     ----- stderr -----
     Workflow: Parallel (7 nodes, 7 edges)
-    Graph: ../../../test/parallel.fabro
+    Graph: [FIXTURES]/parallel.fabro
     Validation: OK
     ");
 }
@@ -108,7 +111,7 @@ fn styled() {
     ----- stdout -----
     ----- stderr -----
     Workflow: Styled (5 nodes, 4 edges)
-    Graph: ../../../test/styled.fabro
+    Graph: [FIXTURES]/styled.fabro
     Validation: OK
     ");
 }
@@ -124,7 +127,7 @@ fn legacy_tool() {
     ----- stdout -----
     ----- stderr -----
     Workflow: LegacyTool (3 nodes, 2 edges)
-    Graph: ../../../test/legacy_tool.fabro
+    Graph: [FIXTURES]/legacy_tool.fabro
     Validation: OK
     ");
 }
@@ -140,7 +143,7 @@ fn invalid() {
     ----- stdout -----
     ----- stderr -----
     Workflow: Invalid (2 nodes, 1 edges)
-    Graph: ../../../test/invalid.fabro
+    Graph: [FIXTURES]/invalid.fabro
     error: Pipeline must have exactly one start node (shape=Mdiamond or id start/Start) (start_node)
     error [node: exit]: Exit node 'exit' has 1 outgoing edge(s) but must have none (exit_no_outgoing)
     error: Validation failed

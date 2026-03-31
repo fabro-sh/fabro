@@ -17,7 +17,6 @@ fn test_exec_creates_file() {
         "claude-haiku-4-5",
         "Create a file called hello.txt containing exactly 'Hello from exec scenario'",
     ]);
-    cmd.current_dir(&context.temp_dir);
     cmd.timeout(Duration::from_secs(120));
     cmd.assert().success();
 
