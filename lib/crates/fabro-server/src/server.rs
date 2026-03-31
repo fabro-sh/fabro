@@ -2057,7 +2057,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn run_completes_and_status_is_completed() {
-        let state = create_app_state(test_db().await);
+        let state = create_app_state_with_options(test_db().await, dry_run_settings(), 5);
         let app = test_app_with_scheduler(state);
 
         // Start a run
@@ -2235,7 +2235,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn aggregate_usage_increments_after_run_completes() {
-        let state = create_app_state(test_db().await);
+        let state = create_app_state_with_options(test_db().await, dry_run_settings(), 5);
         let app = test_app_with_scheduler(state);
 
         // Start a run

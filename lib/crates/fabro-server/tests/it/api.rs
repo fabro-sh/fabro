@@ -773,7 +773,7 @@ mod serve_dry_run {
 
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
-    use fabro_server::server::{build_router, create_app_state};
+    use fabro_server::server::{build_router, create_app_state_with_options};
     use tower::ServiceExt;
 
     const MINIMAL_DOT: &str = r#"digraph Test {
@@ -785,7 +785,14 @@ mod serve_dry_run {
 
     /// Build the router exactly as `serve_command` does in dry-run mode.
     async fn dry_run_app() -> axum::Router {
-        let state = create_app_state(test_db().await);
+        let state = create_app_state_with_options(
+            test_db().await,
+            fabro_config::FabroSettings {
+                dry_run: Some(true),
+                ..Default::default()
+            },
+            5,
+        );
         fabro_server::server::spawn_scheduler(Arc::clone(&state));
         build_router(state, fabro_server::jwt_auth::AuthMode::Disabled)
     }
