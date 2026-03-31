@@ -1089,10 +1089,8 @@ async fn test_models_via_server(
     s: &Styles,
     json_output: bool,
 ) -> Result<()> {
-    if deep {
-        if !json_output {
-            eprintln!("Warning: --deep is not supported in server mode");
-        }
+    if deep && !json_output {
+        eprintln!("Warning: --deep is not supported in server mode");
     }
     let models_to_test = if let Some(model_id) = model {
         let all = fetch_models_from_server(&server.client, &server.base_url, None).await?;
@@ -1182,6 +1180,7 @@ async fn test_models_via_server(
     Ok(())
 }
 
+#[allow(clippy::print_stdout)]
 pub async fn run_models(
     command: Option<ModelsCommand>,
     server: Option<ServerConnection>,

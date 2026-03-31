@@ -201,7 +201,7 @@ async fn main_inner() -> (String, Result<()>) {
             }
             Commands::Discord => {
                 if globals.json {
-                    crate::shared::print_json_pretty(&serde_json::json!({
+                    shared::print_json_pretty(&serde_json::json!({
                         "url": "https://fabro.sh/discord",
                     }))?;
                 } else {
@@ -210,7 +210,7 @@ async fn main_inner() -> (String, Result<()>) {
             }
             Commands::Docs => {
                 if globals.json {
-                    crate::shared::print_json_pretty(&serde_json::json!({
+                    shared::print_json_pretty(&serde_json::json!({
                         "url": "https://docs.fabro.sh/",
                     }))?;
                 } else {

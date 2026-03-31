@@ -9,6 +9,7 @@ use fabro_llm::client::Client as LlmClient;
 use fabro_model::{Catalog, Provider};
 use fabro_sandbox::daytona::{DaytonaConfig, detect_repo_info};
 use fabro_sandbox::{DockerSandboxConfig, Sandbox, SandboxProvider, SandboxSpec};
+use fabro_util::check_report::CheckReport;
 use fabro_util::terminal::Styles;
 use fabro_workflow::git::{GitSyncStatus, sync_status};
 use fabro_workflow::operations::{ValidateInput, WorkflowInput, validate};
@@ -205,7 +206,7 @@ async fn run_preflight(
     github_app: Option<fabro_github::GitHubAppCredentials>,
     origin_url: Option<&str>,
     show_progress: bool,
-) -> anyhow::Result<(fabro_util::check_report::CheckReport, bool)> {
+) -> anyhow::Result<(CheckReport, bool)> {
     use fabro_util::check_report::{
         CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus,
     };

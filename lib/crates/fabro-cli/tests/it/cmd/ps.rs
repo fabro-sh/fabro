@@ -61,6 +61,7 @@ fn ps_all_json_lists_created_and_completed_runs() {
         r#""duration_ms":\s*\d+"#.to_string(),
         r#""duration_ms": [DURATION_MS]"#.to_string(),
     ));
+    filters.push((r"\d{8}-dry-run-".to_string(), "[DATE]-dry-run-".to_string()));
     let mut cmd = context.ps();
     cmd.args(["-a", "--json"]);
 
@@ -71,7 +72,7 @@ fn ps_all_json_lists_created_and_completed_runs() {
     [
       {
         "run_id": "[ULID]",
-        "dir_name": "20260330-dry-run-[ULID]",
+        "dir_name": "[DATE]-dry-run-[ULID]",
         "workflow_name": "Simple",
         "workflow_slug": "simple",
         "status": "submitted",
@@ -82,7 +83,7 @@ fn ps_all_json_lists_created_and_completed_runs() {
       },
       {
         "run_id": "[ULID]",
-        "dir_name": "20260330-dry-run-[ULID]",
+        "dir_name": "[DATE]-dry-run-[ULID]",
         "workflow_name": "Simple",
         "workflow_slug": "simple",
         "status": "succeeded",
@@ -156,6 +157,7 @@ fn ps_filters_by_workflow_and_label() {
         r#""duration_ms":\s*\d+"#.to_string(),
         r#""duration_ms": [DURATION_MS]"#.to_string(),
     ));
+    filters.push((r"\d{8}-dry-run-".to_string(), "[DATE]-dry-run-".to_string()));
     let mut cmd = context.ps();
     cmd.args([
         "-a",
@@ -173,7 +175,7 @@ fn ps_filters_by_workflow_and_label() {
     [
       {
         "run_id": "[ULID]",
-        "dir_name": "20260330-dry-run-[ULID]",
+        "dir_name": "[DATE]-dry-run-[ULID]",
         "workflow_name": "Simple",
         "workflow_slug": "simple",
         "status": "succeeded",

@@ -38,10 +38,7 @@ fn system_prune_dry_run_lists_matching_runs_without_deleting() {
     let context = test_context!();
     let run = setup_completed_dry_run(&context);
     let mut filters = context.filters();
-    filters.push((
-        r"\b\d{8}-dry-run-[0-9A-HJKMNP-TV-Z]{26}\b".to_string(),
-        "[RUN_DIR]".to_string(),
-    ));
+    filters.push((r"\d{8}-dry-run-".to_string(), "[DATE]-dry-run-".to_string()));
     filters.push((
         r"\b\d+(\.\d+)?\s(?:[KMGT]?B|B)\b".to_string(),
         "[SIZE]".to_string(),
@@ -53,7 +50,7 @@ fn system_prune_dry_run_lists_matching_runs_without_deleting() {
     success: true
     exit_code: 0
     ----- stdout -----
-    would delete: 20260330-dry-run-[ULID] (Simple)
+    would delete: [DATE]-dry-run-[ULID] (Simple)
     ----- stderr -----
 
     1 run(s) would be deleted ([SIZE] freed). Pass --yes to confirm.
