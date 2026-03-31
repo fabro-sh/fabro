@@ -10,7 +10,8 @@ use tracing::debug;
 use tokio::process::Command as TokioCommand;
 use tokio::task::JoinHandle;
 
-use crate::args::UpgradeArgs;
+use crate::args::{GlobalArgs, UpgradeArgs};
+use crate::shared::print_json_pretty;
 
 // ── Download backend abstraction ───────────────────────────────────────────
 
@@ -223,7 +224,7 @@ impl UpgradeCheckState {
 
 // ── Main upgrade command ───────────────────────────────────────────────────
 
-pub(crate) async fn run_upgrade(args: UpgradeArgs) -> Result<()> {
+pub(crate) async fn run_upgrade(args: UpgradeArgs, globals: &GlobalArgs) -> Result<()> {
     let backend = select_backend().await;
 
     let current =
@@ -263,16 +264,31 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs) -> Result<()> {
             }
         }
         std::cmp::Ordering::Equal if !args.force => {
-            eprintln!("Already on version {current}");
+            if globals.json {
+                print_json_pretty(&serde_json::json!({
+                    "previous_version": current.to_string(),
+                    "installed_version": current.to_string(),
+                }))?;
+            } else {
+                eprintln!("Already on version {current}");
+            }
             return Ok(());
         }
         _ => {}
     }
 
     if args.dry_run {
-        eprintln!("Would upgrade fabro from {current} to {target}");
-        eprintln!("  tag: {tag}");
-        eprintln!("  target: {}", detect_target()?);
+        if globals.json {
+            print_json_pretty(&serde_json::json!({
+                "previous_version": current.to_string(),
+                "installed_version": target.to_string(),
+                "dry_run": true,
+            }))?;
+        } else {
+            eprintln!("Would upgrade fabro from {current} to {target}");
+            eprintln!("  tag: {tag}");
+            eprintln!("  target: {}", detect_target()?);
+        }
         return Ok(());
     }
 
@@ -337,7 +353,14 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs) -> Result<()> {
         let _ = fs::set_permissions(&current_exe, fs::Permissions::from_mode(0o755));
     }
 
-    eprintln!("Upgraded fabro to {target}");
+    if globals.json {
+        print_json_pretty(&serde_json::json!({
+            "previous_version": current.to_string(),
+            "installed_version": target.to_string(),
+        }))?;
+    } else {
+        eprintln!("Upgraded fabro to {target}");
+    }
     Ok(())
 }
 

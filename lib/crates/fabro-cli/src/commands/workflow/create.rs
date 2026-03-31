@@ -4,10 +4,10 @@ use anyhow::{Context, Result, bail};
 
 use fabro_config::project::{discover_project_config, resolve_fabro_root};
 
-use crate::args::WorkflowCreateArgs;
-use crate::shared::relative_path;
+use crate::args::{GlobalArgs, WorkflowCreateArgs};
+use crate::shared::{print_json_pretty, relative_path};
 
-pub(super) fn create_command(args: &WorkflowCreateArgs) -> Result<()> {
+pub(super) fn create_command(args: &WorkflowCreateArgs, globals: &GlobalArgs) -> Result<()> {
     let cwd = std::env::current_dir()?;
 
     let Some((config_path, config)) = discover_project_config(&cwd)? else {
@@ -18,7 +18,15 @@ pub(super) fn create_command(args: &WorkflowCreateArgs) -> Result<()> {
     };
 
     let fabro_root = resolve_fabro_root(&config_path, &config);
-    write_workflow_scaffold(args, &fabro_root)?;
+    let created = write_workflow_scaffold(args, &fabro_root)?;
+
+    if globals.json {
+        print_json_pretty(&serde_json::json!({
+            "name": args.name,
+            "created": created,
+        }))?;
+        return Ok(());
+    }
 
     let workflows_dir = fabro_root.join("workflows").join(&args.name);
     let green = console::Style::new().green();
@@ -55,7 +63,7 @@ pub(super) fn create_command(args: &WorkflowCreateArgs) -> Result<()> {
     Ok(())
 }
 
-fn write_workflow_scaffold(args: &WorkflowCreateArgs, fabro_root: &Path) -> Result<()> {
+fn write_workflow_scaffold(args: &WorkflowCreateArgs, fabro_root: &Path) -> Result<Vec<String>> {
     let workflows_dir = fabro_root.join("workflows").join(&args.name);
 
     if workflows_dir.exists() {
@@ -95,7 +103,10 @@ fn write_workflow_scaffold(args: &WorkflowCreateArgs, fabro_root: &Path) -> Resu
     std::fs::write(&toml_path, "version = 1\n")
         .with_context(|| format!("failed to write {}", toml_path.display()))?;
 
-    Ok(())
+    Ok(vec![
+        format!("fabro/workflows/{}/workflow.fabro", args.name),
+        format!("fabro/workflows/{}/workflow.toml", args.name),
+    ])
 }
 
 fn to_pascal_case(s: &str) -> String {

@@ -17,6 +17,10 @@ pub(crate) const LONG_VERSION: &str = concat!(
 
 #[derive(Args)]
 pub(crate) struct GlobalArgs {
+    /// Output as JSON
+    #[arg(long, global = true, env = "FABRO_JSON", value_parser = clap::builder::BoolishValueParser::new())]
+    pub json: bool,
+
     /// Enable DEBUG-level logging (default is INFO)
     #[arg(long, global = true, env = "FABRO_DEBUG", value_parser = clap::builder::BoolishValueParser::new())]
     pub debug: bool,
@@ -46,6 +50,13 @@ pub(crate) struct GlobalArgs {
         conflicts_with = "storage_dir"
     )]
     pub server_url: Option<String>,
+}
+
+impl GlobalArgs {
+    pub(crate) fn require_no_json(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(!self.json, "--json is not supported for this command");
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -188,10 +199,6 @@ pub(crate) struct RunsListArgs {
     #[command(flatten)]
     pub(crate) filter: RunFilterArgs,
 
-    /// Output as JSON
-    #[arg(long)]
-    pub(crate) json: bool,
-
     /// Show all runs, not just running (like docker ps -a)
     #[arg(short = 'a', long)]
     pub(crate) all: bool,
@@ -313,10 +320,6 @@ pub(crate) struct AssetListArgs {
     /// Filter to assets from a specific retry attempt
     #[arg(long)]
     pub(crate) retry: Option<u32>,
-
-    /// Output as JSON
-    #[arg(long)]
-    pub(crate) json: bool,
 }
 
 #[derive(Args)]
@@ -495,10 +498,6 @@ pub(crate) struct WaitArgs {
     /// Poll interval in milliseconds
     #[arg(long, value_name = "MS", default_value = "1000")]
     pub(crate) interval: u64,
-
-    /// Output conclusion as JSON
-    #[arg(long)]
-    pub(crate) json: bool,
 }
 
 #[derive(Args)]

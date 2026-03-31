@@ -13,6 +13,7 @@ use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use tracing::info;
 
 use crate::args::{GlobalArgs, PrCreateArgs};
+use crate::shared::print_json_pretty;
 use crate::store;
 use crate::user_config::load_user_settings_with_globals;
 
@@ -23,13 +24,14 @@ pub(super) async fn create_command(
 ) -> Result<()> {
     let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
-    create_from(&base, args, github_app).await
+    create_from(&base, args, github_app, globals).await
 }
 
 async fn create_from(
     base: &Path,
     args: PrCreateArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
+    globals: &GlobalArgs,
 ) -> Result<()> {
     let storage_dir = base.parent().unwrap_or(base);
     let store = store::build_store(storage_dir)?;
@@ -149,10 +151,18 @@ async fn create_from(
             if let Err(err) = record.save(&run_dir.join("pull_request.json")) {
                 tracing::warn!(error = %err, "Failed to save pull_request.json");
             }
-            println!("{}", record.html_url);
+            if globals.json {
+                print_json_pretty(&record)?;
+            } else {
+                println!("{}", record.html_url);
+            }
         }
         None => {
-            println!("No pull request created (empty diff).");
+            if globals.json {
+                print_json_pretty(&serde_json::Value::Null)?;
+            } else {
+                println!("No pull request created (empty diff).");
+            }
         }
     }
 

@@ -10,6 +10,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::args::{GlobalArgs, StoreDumpArgs};
+use crate::shared::{absolute_or_current, print_json_pretty};
 use crate::store;
 use crate::user_config::load_user_settings_with_globals;
 
@@ -28,11 +29,19 @@ pub(crate) async fn dump_command(args: &StoreDumpArgs, globals: &GlobalArgs) -> 
         })?;
 
     let file_count = export_run(run_store.as_ref(), &args.output).await?;
-    println!(
-        "Exported {file_count} files for run {} to {}",
-        run.run_id,
-        args.output.display()
-    );
+    if globals.json {
+        print_json_pretty(&serde_json::json!({
+            "run_id": run.run_id,
+            "output_dir": absolute_or_current(&args.output),
+            "file_count": file_count,
+        }))?;
+    } else {
+        println!(
+            "Exported {file_count} files for run {} to {}",
+            run.run_id,
+            args.output.display()
+        );
+    }
     Ok(())
 }
 

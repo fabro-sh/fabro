@@ -1,7 +1,7 @@
 use anyhow::Result;
 #[cfg(feature = "server")]
 use fabro_agent::cli::run_with_args_and_client;
-use fabro_agent::cli::{AgentArgs, run_with_args};
+use fabro_agent::cli::{AgentArgs, OutputFormat, run_with_args};
 use fabro_config::mcp::McpServerEntry;
 use fabro_mcp::config::McpServerConfig;
 
@@ -19,6 +19,9 @@ pub(crate) async fn execute(mut args: AgentArgs, globals: &GlobalArgs) -> Result
         exec_defaults.and_then(|a| a.permissions),
         exec_defaults.and_then(|a| a.output_format),
     );
+    if globals.json {
+        args.output_format = Some(OutputFormat::Json);
+    }
     #[cfg(feature = "server")]
     let resolved = user_config::resolve_mode(
         globals.storage_dir.as_deref(),

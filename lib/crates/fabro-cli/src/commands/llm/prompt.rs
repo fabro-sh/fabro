@@ -30,10 +30,10 @@ pub(super) async fn execute(
                     client,
                     base_url: resolved.server_base_url,
                 };
-                run_prompt_via_server(args, &server).await?;
+                run_prompt_via_server(args, &server, globals.json).await?;
             }
             crate::user_config::ExecutionMode::Standalone => {
-                run_prompt(args).await?;
+                run_prompt(args, globals.json).await?;
             }
         }
     }
@@ -41,7 +41,7 @@ pub(super) async fn execute(
     #[cfg(not(feature = "server"))]
     {
         let _ = globals;
-        run_prompt(args).await?;
+        run_prompt(args, globals.json).await?;
     }
 
     Ok(())

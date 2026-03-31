@@ -2,6 +2,7 @@ use std::io::Write;
 use std::path::Path;
 
 use crate::args::{GlobalArgs, SettingsArgs};
+use crate::shared::print_json_pretty;
 use crate::user_config;
 use fabro_config::{ConfigLayer, FabroSettings};
 
@@ -18,6 +19,10 @@ fn merged_config(workflow: Option<&Path>, globals: &GlobalArgs) -> anyhow::Resul
 
 pub(crate) fn execute(args: &SettingsArgs, globals: &GlobalArgs) -> anyhow::Result<()> {
     let config = merged_config(args.workflow.as_deref(), globals)?;
+    if globals.json {
+        print_json_pretty(&config)?;
+        return Ok(());
+    }
     let mut yaml = serde_yaml::to_string(&config)?;
     if !yaml.ends_with('\n') {
         yaml.push('\n');

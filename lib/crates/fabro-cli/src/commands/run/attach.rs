@@ -38,6 +38,7 @@ pub(crate) async fn attach_run(
     kill_on_detach: bool,
     styles: &'static Styles,
     engine_child: Option<std::process::Child>,
+    json_output: bool,
 ) -> Result<ExitCode> {
     let run_record = RunRecord::load(run_dir).ok();
     if let (Some(storage_dir), Some(run_id)) = (
@@ -61,6 +62,7 @@ pub(crate) async fn attach_run(
                         kill_on_detach,
                         styles,
                         engine_child,
+                        json_output,
                     )
                     .await;
                 }
@@ -83,7 +85,7 @@ pub(crate) async fn attach_run(
         }
     }
 
-    attach_run_files(run_dir, kill_on_detach, styles, engine_child).await
+    attach_run_files(run_dir, kill_on_detach, styles, engine_child, json_output).await
 }
 
 async fn attach_run_store(
@@ -94,6 +96,7 @@ async fn attach_run_store(
     kill_on_detach: bool,
     styles: &'static Styles,
     engine_child: Option<std::process::Child>,
+    json_output: bool,
 ) -> Result<ExitCode> {
     let runtime_state = RuntimeState::new(run_dir);
     let runtime_interview_paths = InterviewPaths::from_runtime_state(&runtime_state);
@@ -117,7 +120,7 @@ async fn attach_run_store(
     }
 
     for line in &existing_events {
-        progress_ui.handle_json_line(line);
+        emit_progress_line(&mut progress_ui, line, json_output)?;
     }
 
     let mut stream = run_store
@@ -163,7 +166,7 @@ async fn attach_run_store(
         match time::timeout(Duration::from_millis(100), stream.next()).await {
             Ok(Some(Ok(event))) => {
                 let line = event_payload_line(&event)?;
-                progress_ui.handle_json_line(&line);
+                emit_progress_line(&mut progress_ui, &line, json_output)?;
                 saw_event = true;
             }
             Ok(Some(Err(err))) => return Err(err.into()),
@@ -183,7 +186,7 @@ async fn attach_run_store(
                             serde_json::from_str::<fabro_interview::Question>(&request_data)
                         {
                             // Hide progress bars during interview
-                            progress_ui.hide_bars();
+                            hide_progress(&mut progress_ui, json_output);
 
                             // Prompt user via ConsoleInterviewer
                             let interviewer = ConsoleInterviewer::new(styles);
@@ -191,7 +194,7 @@ async fn attach_run_store(
                                 fabro_interview::Interviewer::ask(&interviewer, question).await;
 
                             // Show progress bars again before any return path.
-                            progress_ui.show_bars();
+                            show_progress(&mut progress_ui, json_output);
 
                             if answer_requires_reattach(&answer) {
                                 if let Some(guard) = engine_guard.as_mut() {
@@ -252,7 +255,7 @@ async fn attach_run_store(
         }
     }
 
-    progress_ui.finish();
+    finish_progress(&mut progress_ui, json_output);
 
     Ok(determine_exit_code_with_store(run_store, run_dir).await)
 }
@@ -262,6 +265,7 @@ async fn attach_run_files(
     kill_on_detach: bool,
     styles: &'static Styles,
     engine_child: Option<std::process::Child>,
+    json_output: bool,
 ) -> Result<ExitCode> {
     let progress_path = run_dir.join("progress.jsonl");
     let conclusion_path = run_dir.join("conclusion.json");
@@ -293,7 +297,7 @@ async fn attach_run_files(
 
         if let Some(record) = read_status_record(&status_path) {
             if record.status.is_terminal() {
-                progress_ui.finish();
+                finish_progress(&mut progress_ui, json_output);
                 return Ok(determine_exit_code(&conclusion_path, Some(record)));
             }
         }
@@ -301,7 +305,7 @@ async fn attach_run_files(
         if let Some(guard) = engine_guard.as_mut() {
             if let Some(child) = guard.inner() {
                 if matches!(child.try_wait(), Ok(Some(_))) {
-                    progress_ui.finish();
+                    finish_progress(&mut progress_ui, json_output);
                     return Ok(determine_exit_code(
                         &conclusion_path,
                         read_status_record(&status_path),
@@ -312,7 +316,7 @@ async fn attach_run_files(
 
         if let Some(pid) = read_launcher_pid(run_dir) {
             if !process_alive(pid) && wait_count > 5 {
-                progress_ui.finish();
+                finish_progress(&mut progress_ui, json_output);
                 return Ok(determine_exit_code(
                     &conclusion_path,
                     read_status_record(&status_path),
@@ -379,7 +383,7 @@ async fn attach_run_files(
             }
             let trimmed = line.trim();
             if !trimmed.is_empty() {
-                progress_ui.handle_json_line(trimmed);
+                emit_progress_line(&mut progress_ui, trimmed, json_output)?;
             }
         }
 
@@ -394,13 +398,13 @@ async fn attach_run_files(
                         if let Ok(question) =
                             serde_json::from_str::<fabro_interview::Question>(&request_data)
                         {
-                            progress_ui.hide_bars();
+                            hide_progress(&mut progress_ui, json_output);
 
                             let interviewer = ConsoleInterviewer::new(styles);
                             let answer =
                                 fabro_interview::Interviewer::ask(&interviewer, question).await;
 
-                            progress_ui.show_bars();
+                            show_progress(&mut progress_ui, json_output);
 
                             if answer_requires_reattach(&answer) {
                                 if let Some(guard) = engine_guard.as_mut() {
@@ -433,12 +437,12 @@ async fn attach_run_files(
 
         if let Some(child_alive) = child_alive_via_handle {
             if !child_alive {
-                drain_remaining(&mut reader, &mut line, &mut progress_ui);
+                drain_remaining(&mut reader, &mut line, &mut progress_ui, json_output)?;
                 break;
             }
         } else {
             if terminal_status.is_some() {
-                drain_remaining(&mut reader, &mut line, &mut progress_ui);
+                drain_remaining(&mut reader, &mut line, &mut progress_ui, json_output)?;
                 break;
             }
 
@@ -455,7 +459,7 @@ async fn attach_run_files(
                 }
             };
             if !engine_alive {
-                drain_remaining(&mut reader, &mut line, &mut progress_ui);
+                drain_remaining(&mut reader, &mut line, &mut progress_ui, json_output)?;
                 break;
             }
         }
@@ -463,7 +467,7 @@ async fn attach_run_files(
         sleep(Duration::from_millis(100)).await;
     }
 
-    progress_ui.finish();
+    finish_progress(&mut progress_ui, json_output);
 
     Ok(determine_exit_code(
         &conclusion_path,
@@ -475,7 +479,8 @@ fn drain_remaining(
     reader: &mut BufReader<std::fs::File>,
     line: &mut String,
     progress_ui: &mut run_progress::ProgressUI,
-) {
+    json_output: bool,
+) -> Result<()> {
     loop {
         line.clear();
         match reader.read_line(line) {
@@ -483,10 +488,44 @@ fn drain_remaining(
             Ok(_) => {
                 let trimmed = line.trim();
                 if !trimmed.is_empty() {
-                    progress_ui.handle_json_line(trimmed);
+                    emit_progress_line(progress_ui, trimmed, json_output)?;
                 }
             }
         }
+    }
+    Ok(())
+}
+
+fn emit_progress_line(
+    progress_ui: &mut run_progress::ProgressUI,
+    line: &str,
+    json_output: bool,
+) -> Result<()> {
+    if json_output {
+        let stdout = std::io::stdout();
+        let mut handle = stdout.lock();
+        writeln!(handle, "{line}")?;
+    } else {
+        progress_ui.handle_json_line(line);
+    }
+    Ok(())
+}
+
+fn finish_progress(progress_ui: &mut run_progress::ProgressUI, json_output: bool) {
+    if !json_output {
+        progress_ui.finish();
+    }
+}
+
+fn hide_progress(progress_ui: &mut run_progress::ProgressUI, json_output: bool) {
+    if !json_output {
+        progress_ui.hide_bars();
+    }
+}
+
+fn show_progress(progress_ui: &mut run_progress::ProgressUI, json_output: bool) {
+    if !json_output {
+        progress_ui.show_bars();
     }
 }
 
@@ -736,9 +775,16 @@ mod tests {
             .unwrap();
         let started = Instant::now();
 
-        let exit = attach_run(dir.path(), None, false, no_color_styles(), Some(child))
-            .await
-            .unwrap();
+        let exit = attach_run(
+            dir.path(),
+            None,
+            false,
+            no_color_styles(),
+            Some(child),
+            false,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(exit, ExitCode::from(0));
         assert!(
@@ -757,7 +803,7 @@ mod tests {
             Some(StatusReason::LaunchFailed),
         );
 
-        let exit = attach_run(dir.path(), None, false, no_color_styles(), None)
+        let exit = attach_run(dir.path(), None, false, no_color_styles(), None, false)
             .await
             .unwrap();
 

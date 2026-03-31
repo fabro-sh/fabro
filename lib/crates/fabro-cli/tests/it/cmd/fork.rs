@@ -25,8 +25,9 @@ fn help() {
       [TARGET]  Target checkpoint: node name, node@visit, or @ordinal (omit to fork from latest)
 
     Options:
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --json                       Output as JSON [env: FABRO_JSON=]
           --list                       Show the checkpoint timeline instead of forking
+          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --no-push                    Skip pushing new branches to the remote
           --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]

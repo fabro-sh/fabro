@@ -17,14 +17,15 @@ fn help() {
 
     Options:
           --before <BEFORE>            Only include runs started before this date (YYYY-MM-DD prefix match)
+          --json                       Output as JSON [env: FABRO_JSON=]
           --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --workflow <WORKFLOW>        Filter by workflow name (substring match)
           --label <KEY=VALUE>          Filter by label (KEY=VALUE, repeatable, AND semantics)
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
+          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --orphans                    Include orphan directories (no run.json)
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
+          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --older-than <DURATION>      Only prune runs older than this duration (e.g. 24h, 7d). Default: 24h when no explicit filters are set
+          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
           --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
           --yes                        Actually delete (default is dry-run)
       -h, --help                       Print help

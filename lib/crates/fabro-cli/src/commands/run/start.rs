@@ -44,6 +44,7 @@ pub(crate) fn start_run(run_dir: &Path, resume: bool) -> Result<std::process::Ch
     if resume {
         cmd.arg("--resume");
     }
+    cmd.env_remove("FABRO_JSON");
     cmd.stdout(stdout_log)
         .stderr(log_file)
         .stdin(std::process::Stdio::null());

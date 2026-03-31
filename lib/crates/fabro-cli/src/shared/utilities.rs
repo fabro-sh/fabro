@@ -1,14 +1,27 @@
 use std::path::Path;
 use std::time::Duration;
+use std::{io::Write, path::PathBuf};
 
 use anyhow::{Result, bail};
 use cli_table::Color;
 use fabro_util::terminal::Styles;
 use fabro_validate::{Diagnostic, Severity};
+use serde::Serialize;
 
 pub(crate) fn read_workflow_file(path: &Path) -> anyhow::Result<String> {
     std::fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("Failed to read {}: {e}", path.display()))
+}
+
+pub(crate) fn print_json_pretty<T>(value: &T) -> anyhow::Result<()>
+where
+    T: Serialize + ?Sized,
+{
+    let stdout = std::io::stdout();
+    let mut handle = stdout.lock();
+    serde_json::to_writer_pretty(&mut handle, value)?;
+    writeln!(handle)?;
+    Ok(())
 }
 
 pub(crate) fn print_diagnostics(diagnostics: &[Diagnostic], styles: &Styles) {
@@ -67,6 +80,16 @@ pub(crate) fn tilde_path(path: &Path) -> String {
         }
     }
     path.display().to_string()
+}
+
+pub(crate) fn absolute_or_current(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else if let Ok(cwd) = std::env::current_dir() {
+        cwd.join(path)
+    } else {
+        path.to_path_buf()
+    }
 }
 
 pub(crate) fn color_if(use_color: bool, color: Color) -> Option<Color> {

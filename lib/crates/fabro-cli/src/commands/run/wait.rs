@@ -75,7 +75,7 @@ pub(crate) async fn run(args: &WaitArgs, styles: &Styles, globals: &GlobalArgs) 
         None => Conclusion::load(&conclusion_path).ok(),
     };
 
-    if args.json {
+    if globals.json {
         let json_value = build_json_output(final_status, &run_info.run_id, conclusion.as_ref());
         let mut out = std::io::stdout().lock();
         serde_json::to_writer_pretty(&mut out, &json_value)?;

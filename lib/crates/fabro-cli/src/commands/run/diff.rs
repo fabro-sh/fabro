@@ -11,6 +11,7 @@ use fabro_workflow::sandbox_git::GIT_REMOTE;
 use tracing::{debug, info};
 
 use crate::args::{DiffArgs, GlobalArgs};
+use crate::shared::print_json_pretty;
 use crate::store;
 use crate::user_config::load_user_settings_with_globals;
 
@@ -23,6 +24,22 @@ pub(crate) async fn run(args: DiffArgs, globals: &GlobalArgs) -> Result<()> {
     let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await?;
 
     let patch = resolve_diff(&run.path, run_store.as_deref(), &args).await?;
+
+    if globals.json {
+        let mut value = serde_json::json!({
+            "run_id": run.run_id,
+            "node": args.node,
+        });
+        if args.shortstat {
+            value["shortstat"] = patch.trim_end().into();
+        } else if args.stat {
+            value["stat"] = patch.trim_end().into();
+        } else {
+            value["diff"] = patch.into();
+        }
+        print_json_pretty(&value)?;
+        return Ok(());
+    }
 
     let is_tty = io::stdout().is_terminal();
     let mut stdout = io::stdout().lock();

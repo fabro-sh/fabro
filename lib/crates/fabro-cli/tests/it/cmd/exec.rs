@@ -17,12 +17,13 @@ fn help() {
       <PROMPT>  Task prompt
 
     Options:
+          --json                           Output as JSON [env: FABRO_JSON=]
           --provider <PROVIDER>            LLM provider (anthropic, openai, gemini, kimi, zai, minimax, inception)
           --model <MODEL>                  Model name (defaults per provider)
           --no-upgrade-check               Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --permissions <PERMISSIONS>      Permission level for tool execution [possible values: read-only, read-write, full]
-          --quiet                          Suppress non-essential output [env: FABRO_QUIET=]
           --auto-approve                   Skip interactive prompts; deny tools outside permission level
+          --quiet                          Suppress non-essential output [env: FABRO_QUIET=]
           --debug                          Print LLM request/response debug info to stderr
           --storage-dir <STORAGE_DIR>      Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
           --verbose                        Print full LLM request/response JSON to stderr

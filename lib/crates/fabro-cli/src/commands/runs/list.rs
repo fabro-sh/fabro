@@ -42,15 +42,15 @@ pub(crate) async fn list_command(
         },
     );
 
+    if globals.json {
+        println!("{}", serde_json::to_string_pretty(&filtered)?);
+        return Ok(());
+    }
+
     if args.quiet {
         for run in &filtered {
             println!("{}", run.run_id);
         }
-        return Ok(());
-    }
-
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&filtered)?);
         return Ok(());
     }
 

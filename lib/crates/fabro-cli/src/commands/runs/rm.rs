@@ -11,6 +11,7 @@ use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use fabro_workflow::run_status::{RunStatus, RunStatusRecord, write_run_status};
 
 use crate::args::{GlobalArgs, RunsRemoveArgs};
+use crate::shared::print_json_pretty;
 use crate::store;
 use crate::user_config::load_user_settings_with_globals;
 
@@ -20,17 +21,30 @@ pub(crate) async fn remove_command(args: &RunsRemoveArgs, globals: &GlobalArgs) 
     let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
     let store = store::build_store(&cli_settings.storage_dir())?;
-    remove_from(args, store.as_ref(), &base).await
+    remove_from(args, store.as_ref(), &base, globals).await
 }
 
-async fn remove_from(args: &RunsRemoveArgs, store: &dyn Store, base: &Path) -> Result<()> {
+async fn remove_from(
+    args: &RunsRemoveArgs,
+    store: &dyn Store,
+    base: &Path,
+    globals: &GlobalArgs,
+) -> Result<()> {
     let mut had_errors = false;
+    let mut removed = Vec::new();
+    let mut errors = Vec::new();
 
     for identifier in &args.runs {
         let run = match resolve_run_combined(store, base, identifier).await {
             Ok(run) => run,
             Err(err) => {
-                eprintln!("error: {identifier}: {err}");
+                if !globals.json {
+                    eprintln!("error: {identifier}: {err}");
+                }
+                errors.push(serde_json::json!({
+                    "identifier": identifier,
+                    "error": err.to_string(),
+                }));
                 had_errors = true;
                 continue;
             }
@@ -38,11 +52,18 @@ async fn remove_from(args: &RunsRemoveArgs, store: &dyn Store, base: &Path) -> R
 
         if run.status.is_active() && !args.force {
             let run_id = run.run_id.to_string();
-            eprintln!(
+            let error = format!(
                 "cannot remove active run {} (status: {}, use -f to force)",
                 short_run_id(&run_id),
                 run.status
             );
+            if !globals.json {
+                eprintln!("{error}");
+            }
+            errors.push(serde_json::json!({
+                "identifier": identifier,
+                "error": error,
+            }));
             had_errors = true;
             continue;
         }
@@ -77,14 +98,46 @@ async fn remove_from(args: &RunsRemoveArgs, store: &dyn Store, base: &Path) -> R
             }
         }
 
-        std::fs::remove_dir_all(&run.path)
-            .with_context(|| format!("failed to delete {}", run.path.display()))?;
-        store
+        let run_id = run.run_id.to_string();
+        if let Err(err) = std::fs::remove_dir_all(&run.path)
+            .with_context(|| format!("failed to delete {}", run.path.display()))
+        {
+            if !globals.json {
+                eprintln!("error: {identifier}: {err}");
+            }
+            errors.push(serde_json::json!({
+                "identifier": identifier,
+                "error": err.to_string(),
+            }));
+            had_errors = true;
+            continue;
+        }
+        if let Err(err) = store
             .delete_run(&run.run_id)
             .await
-            .with_context(|| format!("failed to delete store state for {}", run.run_id))?;
-        let run_id = run.run_id.to_string();
-        eprintln!("{}", short_run_id(&run_id));
+            .with_context(|| format!("failed to delete store state for {}", run.run_id))
+        {
+            if !globals.json {
+                eprintln!("error: {identifier}: {err}");
+            }
+            errors.push(serde_json::json!({
+                "identifier": identifier,
+                "error": err.to_string(),
+            }));
+            had_errors = true;
+            continue;
+        }
+        removed.push(run_id.clone());
+        if !globals.json {
+            eprintln!("{}", short_run_id(&run_id));
+        }
+    }
+
+    if globals.json {
+        print_json_pretty(&serde_json::json!({
+            "removed": removed,
+            "errors": errors,
+        }))?;
     }
 
     if had_errors {

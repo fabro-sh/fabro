@@ -6,12 +6,12 @@ use fabro_config::project::{
     resolve_fabro_root,
 };
 
-use crate::args::WorkflowListArgs;
-use crate::shared::relative_path;
+use crate::args::{GlobalArgs, WorkflowListArgs};
+use crate::shared::{print_json_pretty, relative_path};
 
 const GOAL_MAX_LEN: usize = 60;
 
-pub(super) fn list_command(_args: &WorkflowListArgs) -> Result<()> {
+pub(super) fn list_command(_args: &WorkflowListArgs, globals: &GlobalArgs) -> Result<()> {
     let styles = Styles::detect_stderr();
     let cwd = std::env::current_dir()?;
 
@@ -27,6 +27,11 @@ pub(super) fn list_command(_args: &WorkflowListArgs) -> Result<()> {
     let user_wf_dir = dirs::home_dir().map(|h| h.join(".fabro").join("workflows"));
 
     let workflows = list_workflows_detailed(Some(&project_wf_dir), user_wf_dir.as_deref());
+
+    if globals.json {
+        print_json_pretty(&workflows)?;
+        return Ok(());
+    }
 
     let project: Vec<_> = workflows
         .iter()

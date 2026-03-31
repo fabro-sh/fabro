@@ -16,6 +16,7 @@ mod fork;
 mod graph;
 mod inspect;
 mod install;
+mod json_global;
 mod llm;
 mod llm_prompt;
 mod logs;

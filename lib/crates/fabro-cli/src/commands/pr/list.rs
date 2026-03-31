@@ -5,11 +5,22 @@ use fabro_config::FabroSettingsExt;
 use fabro_workflow::pull_request::PullRequestRecord;
 use fabro_workflow::run_lookup::{runs_base, scan_runs_combined};
 use futures::future::join_all;
+use serde::Serialize;
 use tracing::info;
 
 use crate::args::{GlobalArgs, PrListArgs};
+use crate::shared::print_json_pretty;
 use crate::store;
 use crate::user_config::load_user_settings_with_globals;
+
+#[derive(Serialize)]
+struct PrRow {
+    run_id: String,
+    number: u64,
+    state: String,
+    title: String,
+    url: String,
+}
 
 pub(super) async fn list_command(
     args: PrListArgs,
@@ -19,7 +30,7 @@ pub(super) async fn list_command(
     let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
     let store = store::build_store(&cli_settings.storage_dir())?;
-    list_from(store.as_ref(), &base, args, github_app).await
+    list_from(store.as_ref(), &base, args, github_app, globals).await
 }
 
 async fn list_from(
@@ -27,15 +38,8 @@ async fn list_from(
     base: &Path,
     args: PrListArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
+    globals: &GlobalArgs,
 ) -> Result<()> {
-    struct PrRow {
-        run_id: String,
-        number: u64,
-        state: String,
-        title: String,
-        url: String,
-    }
-
     let creds = github_app.context(
         "GitHub App credentials required — set GITHUB_APP_PRIVATE_KEY and configure app_id",
     )?;
@@ -55,6 +59,10 @@ async fn list_from(
     }
 
     if entries.is_empty() {
+        if globals.json {
+            print_json_pretty(&Vec::<PrRow>::new())?;
+            return Ok(());
+        }
         println!("No pull requests found.");
         return Ok(());
     }
@@ -110,6 +118,11 @@ async fn list_from(
             .filter(|row| row.state == "open" || row.state == "draft" || row.state == "unknown")
             .collect()
     };
+
+    if globals.json {
+        print_json_pretty(&rows)?;
+        return Ok(());
+    }
 
     if rows.is_empty() {
         println!("No open pull requests found. Use --all to include closed/merged.");

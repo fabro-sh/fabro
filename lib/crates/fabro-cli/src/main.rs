@@ -173,14 +173,14 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::Preflight(args) => commands::preflight::execute(args, &globals).await?,
             Commands::Validate(args) => {
                 let styles = Styles::detect_stderr();
-                commands::validate::run(&args, &styles)?;
+                commands::validate::run(&args, &styles, &globals)?;
             }
             Commands::Graph(args) => {
                 let styles = Styles::detect_stderr();
-                commands::graph::run(&args, &styles)?;
+                commands::graph::run(&args, &styles, &globals)?;
             }
             Commands::Parse(args) => {
-                commands::parse::run(&args)?;
+                commands::parse::run(&args, &globals)?;
             }
             Commands::Asset(ns) => commands::asset::dispatch(ns, &globals)?,
             Commands::Store(ns) => commands::store::dispatch(ns, &globals).await?,
@@ -196,31 +196,44 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::Doctor { verbose, dry_run } => {
                 let cli_settings = user_config::load_user_settings()?;
                 let verbose = verbose || cli_settings.verbose_enabled();
-                let exit_code = commands::doctor::run_doctor(verbose, !dry_run).await;
+                let exit_code = commands::doctor::run_doctor(verbose, !dry_run, &globals).await?;
                 std::process::exit(exit_code);
             }
             Commands::Discord => {
-                open::that("https://fabro.sh/discord")?;
+                if globals.json {
+                    crate::shared::print_json_pretty(&serde_json::json!({
+                        "url": "https://fabro.sh/discord",
+                    }))?;
+                } else {
+                    open::that("https://fabro.sh/discord")?;
+                }
             }
             Commands::Docs => {
-                open::that("https://docs.fabro.sh/")?;
+                if globals.json {
+                    crate::shared::print_json_pretty(&serde_json::json!({
+                        "url": "https://docs.fabro.sh/",
+                    }))?;
+                } else {
+                    open::that("https://docs.fabro.sh/")?;
+                }
             }
-            Commands::Repo(ns) => commands::repo::dispatch(ns).await?,
+            Commands::Repo(ns) => commands::repo::dispatch(ns, &globals).await?,
             Commands::Install { web_url } => {
-                commands::install::run_install(&web_url).await?;
+                commands::install::run_install(&web_url, &globals).await?;
             }
             Commands::Pr(ns) => commands::pr::dispatch(ns, &globals).await?,
-            Commands::Secret(ns) => commands::secret::dispatch(ns)?,
+            Commands::Secret(ns) => commands::secret::dispatch(ns, &globals)?,
             Commands::Settings(args) => commands::config::execute(&args, &globals)?,
-            Commands::Workflow(ns) => commands::workflow::dispatch(ns)?,
-            Commands::Skill(ns) => commands::skill::dispatch(ns)?,
+            Commands::Workflow(ns) => commands::workflow::dispatch(ns, &globals)?,
+            Commands::Skill(ns) => commands::skill::dispatch(ns, &globals)?,
             Commands::Upgrade(args) => {
-                commands::upgrade::run_upgrade(args).await?;
+                commands::upgrade::run_upgrade(args, &globals).await?;
             }
-            Commands::Provider(ns) => commands::provider::dispatch(ns).await?,
+            Commands::Provider(ns) => commands::provider::dispatch(ns, &globals).await?,
             Commands::Sandbox { command } => commands::sandbox::dispatch(command, &globals).await?,
             Commands::System(ns) => commands::system::dispatch(ns, &globals).await?,
             Commands::Completion(args) => {
+                globals.require_no_json()?;
                 let mut cmd = Cli::command();
                 let shell = args.shell;
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

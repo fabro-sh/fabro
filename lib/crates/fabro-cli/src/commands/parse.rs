@@ -3,10 +3,11 @@ use std::io::Write;
 use fabro_config::project::resolve_workflow;
 use fabro_graphviz::parser::parse_ast;
 
-use crate::args::ParseArgs;
+use crate::args::{GlobalArgs, ParseArgs};
 use crate::shared::read_workflow_file;
 
-pub(crate) fn run(args: &ParseArgs) -> anyhow::Result<()> {
+pub(crate) fn run(args: &ParseArgs, globals: &GlobalArgs) -> anyhow::Result<()> {
+    let _ = globals;
     let stdout = std::io::stdout();
     run_to(args, stdout.lock())
 }

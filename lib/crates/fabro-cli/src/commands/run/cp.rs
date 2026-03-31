@@ -10,7 +10,7 @@ use tokio::fs;
 use tracing::{debug, info};
 
 use crate::args::{CpArgs, GlobalArgs};
-use crate::shared::split_run_path;
+use crate::shared::{print_json_pretty, split_run_path};
 use crate::user_config::load_user_settings_with_globals;
 
 enum CopyDirection {
@@ -39,15 +39,30 @@ pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs) -> Result<()>
         } => {
             let sandbox = load_sandbox(&base, &run_prefix).await?;
 
-            if args.recursive {
-                download_recursive(&*sandbox, &remote_path, &local_path).await?;
+            let file_count = if args.recursive {
+                Some(download_recursive(&*sandbox, &remote_path, &local_path).await?)
             } else {
                 debug!(path = %remote_path, "Downloading file from sandbox");
                 sandbox
                     .download_file_to_local(&remote_path, &local_path)
                     .await
                     .map_err(|err| anyhow::anyhow!("{err}"))?;
+                None
+            };
+
+            if globals.json {
+                let mut value = serde_json::json!({
+                    "direction": "download",
+                    "recursive": args.recursive,
+                    "remote_path": remote_path,
+                    "local_path": local_path,
+                });
+                if let Some(count) = file_count {
+                    value["file_count"] = count.into();
+                }
+                print_json_pretty(&value)?;
             }
+
             info!(direction = "download", path = %remote_path, "Copy complete");
         }
         CopyDirection::Upload {
@@ -57,14 +72,28 @@ pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs) -> Result<()>
         } => {
             let sandbox = load_sandbox(&base, &run_prefix).await?;
 
-            if args.recursive {
-                upload_recursive(&*sandbox, &local_path, &remote_path).await?;
+            let file_count = if args.recursive {
+                Some(upload_recursive(&*sandbox, &local_path, &remote_path).await?)
             } else {
                 debug!(path = %remote_path, "Uploading file to sandbox");
                 sandbox
                     .upload_file_from_local(&local_path, &remote_path)
                     .await
                     .map_err(|err| anyhow::anyhow!("{err}"))?;
+                None
+            };
+
+            if globals.json {
+                let mut value = serde_json::json!({
+                    "direction": "upload",
+                    "recursive": args.recursive,
+                    "remote_path": remote_path,
+                    "local_path": local_path,
+                });
+                if let Some(count) = file_count {
+                    value["file_count"] = count.into();
+                }
+                print_json_pretty(&value)?;
             }
             info!(direction = "upload", path = %remote_path, "Copy complete");
         }
@@ -111,7 +140,7 @@ async fn download_recursive(
     sandbox: &dyn Sandbox,
     remote_path: &str,
     local_path: &Path,
-) -> Result<()> {
+) -> Result<usize> {
     let entries = sandbox
         .list_directory(remote_path, Some(100))
         .await
@@ -137,14 +166,14 @@ async fn download_recursive(
         file_count += 1;
     }
     debug!(count = file_count, "Recursive download complete");
-    Ok(())
+    Ok(file_count)
 }
 
 async fn upload_recursive(
     sandbox: &dyn Sandbox,
     local_path: &Path,
     remote_path: &str,
-) -> Result<()> {
+) -> Result<usize> {
     let mut file_count = 0usize;
     let mut stack = vec![(local_path.to_path_buf(), remote_path.to_string())];
 
@@ -171,7 +200,7 @@ async fn upload_recursive(
         }
     }
     debug!(count = file_count, "Recursive upload complete");
-    Ok(())
+    Ok(file_count)
 }
 
 #[cfg(test)]

@@ -24,6 +24,7 @@ fn help() {
       [WORKFLOW]  Optional workflow name, .fabro path, or .toml run config to overlay
 
     Options:
+          --json                       Output as JSON [env: FABRO_JSON=]
           --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]

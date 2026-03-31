@@ -22,6 +22,8 @@ use regex::Regex;
 #[cfg(feature = "server")]
 use semver::Version;
 
+use crate::args::GlobalArgs;
+use crate::shared::print_json_pretty;
 use crate::user_config::load_user_settings;
 
 // ---------------------------------------------------------------------------
@@ -949,17 +951,25 @@ async fn probe_url(http: &reqwest::Client, url: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-pub(crate) async fn run_doctor(verbose: bool, live: bool) -> i32 {
+pub(crate) async fn run_doctor(
+    verbose: bool,
+    live: bool,
+    globals: &GlobalArgs,
+) -> Result<i32, anyhow::Error> {
     let styles = Styles::detect_stdout();
-
-    let spinner = indicatif::ProgressBar::new_spinner();
-    spinner.set_style(
-        indicatif::ProgressStyle::with_template("{spinner:.cyan} {msg}")
-            .expect("valid template")
-            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", ""]),
-    );
-    spinner.set_message("Running checks…");
-    spinner.enable_steady_tick(std::time::Duration::from_millis(80));
+    let spinner = if globals.json {
+        None
+    } else {
+        let spinner = indicatif::ProgressBar::new_spinner();
+        spinner.set_style(
+            indicatif::ProgressStyle::with_template("{spinner:.cyan} {msg}")
+                .expect("valid template")
+                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", ""]),
+        );
+        spinner.set_message("Running checks…");
+        spinner.enable_steady_tick(std::time::Duration::from_millis(80));
+        Some(spinner)
+    };
 
     // Gather state
     let cli_settings = load_user_settings().unwrap_or_default();
@@ -1209,15 +1219,21 @@ pub(crate) async fn run_doctor(verbose: bool, live: bool) -> i32 {
         sections,
     };
 
-    spinner.finish_and_clear();
+    if let Some(spinner) = spinner {
+        spinner.finish_and_clear();
+    }
 
-    let term_width = console::Term::stderr().size().1;
-    print!(
-        "{}",
-        report.render(&styles, verbose, None, Some(term_width))
-    );
+    if globals.json {
+        print_json_pretty(&report)?;
+    } else {
+        let term_width = console::Term::stderr().size().1;
+        print!(
+            "{}",
+            report.render(&styles, verbose, None, Some(term_width))
+        );
+    }
 
-    i32::from(report.has_errors())
+    Ok(i32::from(report.has_errors()))
 }
 
 // ---------------------------------------------------------------------------

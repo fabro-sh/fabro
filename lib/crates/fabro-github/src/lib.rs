@@ -1,6 +1,6 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub const GITHUB_API_BASE_URL: &str = "https://api.github.com";
 
@@ -10,7 +10,7 @@ pub fn github_api_base_url() -> String {
 }
 
 /// Detailed information about a pull request from the GitHub API.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PullRequestDetail {
     pub number: u64,
     pub title: String,
@@ -29,12 +29,12 @@ pub struct PullRequestDetail {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PullRequestUser {
     pub login: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PullRequestRef {
     #[serde(rename = "ref")]
     pub ref_name: String,

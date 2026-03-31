@@ -19,12 +19,13 @@ fn help() {
       <RUN>  Run ID or prefix
 
     Options:
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --json                       Output as JSON [env: FABRO_JSON=]
           --node <NODE>                Show diff for a specific node
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --stat                       Show diffstat instead of full patch (live diffs only)
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
+          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --shortstat                  Show only files-changed/insertions/deletions summary (live diffs only)
+          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
           --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
       -h, --help                       Print help

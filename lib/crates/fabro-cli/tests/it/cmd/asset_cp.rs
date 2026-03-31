@@ -20,12 +20,13 @@ fn help() {
       [DEST]    Destination directory (defaults to current directory) [default: .]
 
     Options:
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --json                       Output as JSON [env: FABRO_JSON=]
           --node <NODE>                Filter to assets from a specific node
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --retry <RETRY>              Filter to assets from a specific retry attempt
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
+          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --tree                       Preserve {node_slug}/retry_{N}/ directory structure
+          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
           --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
       -h, --help                       Print help

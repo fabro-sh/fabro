@@ -1,19 +1,22 @@
 use std::fmt::Write;
 
+use serde::Serialize;
+
 use crate::terminal::Styles;
 
 // ---------------------------------------------------------------------------
 // Core types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CheckStatus {
     Pass,
     Warning,
     Error,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CheckDetail {
     pub text: String,
     pub warn: bool,
@@ -25,7 +28,7 @@ impl CheckDetail {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CheckResult {
     pub name: String,
     pub status: CheckStatus,
@@ -34,11 +37,13 @@ pub struct CheckResult {
     pub remediation: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
 pub struct CheckSection {
     pub title: String,
     pub checks: Vec<CheckResult>,
 }
 
+#[derive(Debug, Clone, Serialize)]
 pub struct CheckReport {
     pub title: String,
     pub sections: Vec<CheckSection>,

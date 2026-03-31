@@ -24,16 +24,17 @@ fn help() {
       <WORKFLOW>  Path to a .fabro workflow file or .toml task config
 
     Options:
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --dry-run                    Execute with simulated LLM backend
+          --json                       Output as JSON [env: FABRO_JSON=]
           --auto-approve               Auto-approve all human gates
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --goal <GOAL>                Override the workflow goal (exposed as $goal in prompts)
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
+          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --goal-file <GOAL_FILE>      Read the workflow goal from a file
+          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --model <MODEL>              Override default LLM model
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
           --provider <PROVIDER>        Override default LLM provider
+          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
       -v, --verbose                    Enable verbose output
           --sandbox <SANDBOX>          Sandbox for agent tools [possible values: local, docker, daytona]
           --label <KEY=VALUE>          Attach a label to this run (repeatable, format: KEY=VALUE)

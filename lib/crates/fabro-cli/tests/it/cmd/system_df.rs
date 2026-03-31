@@ -1,4 +1,5 @@
 use fabro_test::{fabro_snapshot, test_context};
+use serde_json::Value;
 
 use super::support::setup_completed_dry_run;
 
@@ -16,8 +17,9 @@ fn help() {
     Usage: fabro system df [OPTIONS]
 
     Options:
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --json                       Output as JSON [env: FABRO_JSON=]
       -v, --verbose                    Show per-run breakdown
+          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
@@ -92,4 +94,25 @@ fn system_df_verbose_lists_runs_with_reclaimable_marker() {
     * = reclaimable
     ----- stderr -----
     ");
+}
+
+#[test]
+fn system_df_json_verbose_includes_runs() {
+    let context = test_context!();
+    let run = setup_completed_dry_run(&context);
+
+    let output = context
+        .command()
+        .args(["--json", "system", "df", "--verbose"])
+        .output()
+        .expect("command should run");
+
+    assert!(output.status.success());
+    let value: Value = serde_json::from_slice(&output.stdout).expect("system df JSON should parse");
+    assert!(value["summary"].is_array());
+    assert!(
+        value["runs"]
+            .as_array()
+            .is_some_and(|runs| runs.iter().any(|entry| entry["run_id"] == run.run_id))
+    );
 }

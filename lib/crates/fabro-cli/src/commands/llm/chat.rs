@@ -11,6 +11,7 @@ pub(super) async fn execute(
     cli_settings: &FabroSettings,
     globals: &GlobalArgs,
 ) -> Result<()> {
+    globals.require_no_json()?;
     let llm_defaults = cli_settings.llm.as_ref();
     if args.model.is_none() {
         args.model = llm_defaults.and_then(|l| l.model.clone());

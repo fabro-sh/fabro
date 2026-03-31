@@ -3,10 +3,11 @@ use fabro_model::Provider;
 use fabro_util::terminal::Styles;
 use tokio::task::spawn_blocking;
 
-use crate::args::ProviderLoginArgs;
+use crate::args::{GlobalArgs, ProviderLoginArgs};
 use crate::shared::provider_auth;
 
-pub(super) async fn login_command(args: ProviderLoginArgs) -> Result<()> {
+pub(super) async fn login_command(args: ProviderLoginArgs, globals: &GlobalArgs) -> Result<()> {
+    globals.require_no_json()?;
     let s = Styles::detect_stderr();
     let arc_dir = dirs::home_dir()
         .context("could not determine home directory")?
