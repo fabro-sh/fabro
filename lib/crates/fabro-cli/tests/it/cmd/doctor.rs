@@ -63,10 +63,8 @@ fn dry_run_flag() {
     ");
 }
 
-#[test]
-#[ignore = "scenario: requires ANTHROPIC_API_KEY"]
+#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 fn live_doctor() {
-    dotenvy::dotenv().ok();
     let context = test_context!();
     context.doctor().assert().success();
 }

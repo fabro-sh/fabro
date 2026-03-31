@@ -2,10 +2,9 @@ use fabro_test::test_context;
 
 use super::{completed_nodes, find_run_dir, fixture, read_conclusion, sandbox_tests, timeout_for};
 
-sandbox_tests!(human_gate);
+sandbox_tests!(human_gate, keys = ["ANTHROPIC_API_KEY"]);
 
 fn scenario_human_gate(sandbox: &str) {
-    dotenvy::dotenv().ok();
     let context = test_context!();
 
     context

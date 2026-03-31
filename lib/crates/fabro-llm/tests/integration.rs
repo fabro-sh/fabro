@@ -21,10 +21,8 @@ fn make_request(model: &str) -> Request {
     }
 }
 
-#[tokio::test]
-#[ignore = "requires ANTHROPIC_API_KEY"]
+#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 async fn anthropic_complete() {
-    dotenvy::dotenv().ok();
     let api_key = std::env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY must be set");
     let adapter = AnthropicAdapter::new(api_key);
     let request = make_request("claude-haiku-4-5");
@@ -40,10 +38,8 @@ async fn anthropic_complete() {
     assert_eq!(response.provider, "anthropic");
 }
 
-#[tokio::test]
-#[ignore = "requires OPENAI_API_KEY"]
+#[fabro_macros::e2e_test(live("OPENAI_API_KEY"))]
 async fn openai_complete() {
-    dotenvy::dotenv().ok();
     let api_key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set");
     let adapter = OpenAiAdapter::new(api_key);
     let request = make_request("gpt-4o-mini");
@@ -59,8 +55,7 @@ async fn openai_complete() {
     assert_eq!(response.provider, "openai");
 }
 
-#[tokio::test]
-#[ignore = "requires OPENAI_API_KEY"]
+#[fabro_macros::e2e_test(live("OPENAI_API_KEY"))]
 async fn openai_gpt_5_3_codex_complete() {
     let api_key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set");
     let adapter = OpenAiAdapter::new(api_key);
@@ -76,10 +71,8 @@ async fn openai_gpt_5_3_codex_complete() {
     assert_eq!(response.provider, "openai");
 }
 
-#[tokio::test]
-#[ignore = "requires GEMINI_API_KEY"]
+#[fabro_macros::e2e_test(live("GEMINI_API_KEY"))]
 async fn gemini_complete() {
-    dotenvy::dotenv().ok();
     let api_key = std::env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY must be set");
     let adapter = GeminiAdapter::new(api_key);
     let request = make_request("gemini-2.5-flash");
@@ -168,28 +161,22 @@ async fn run_multi_turn_cache_test(
     );
 }
 
-#[tokio::test]
-#[ignore = "requires ANTHROPIC_API_KEY"]
+#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 async fn anthropic_multi_turn_cache() {
-    dotenvy::dotenv().ok();
     let api_key = std::env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY must be set");
     let adapter = AnthropicAdapter::new(api_key);
     run_multi_turn_cache_test(&adapter, "claude-haiku-4-5", 0.5).await;
 }
 
-#[tokio::test]
-#[ignore = "requires OPENAI_API_KEY"]
+#[fabro_macros::e2e_test(live("OPENAI_API_KEY"))]
 async fn openai_multi_turn_cache() {
-    dotenvy::dotenv().ok();
     let api_key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set");
     let adapter = OpenAiAdapter::new(api_key);
     run_multi_turn_cache_test(&adapter, "gpt-4o-mini", 0.5).await;
 }
 
-#[tokio::test]
-#[ignore = "requires GEMINI_API_KEY"]
+#[fabro_macros::e2e_test(live("GEMINI_API_KEY"))]
 async fn gemini_multi_turn_cache() {
-    dotenvy::dotenv().ok();
     let api_key = std::env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY must be set");
     let adapter = GeminiAdapter::new(api_key);
     run_multi_turn_cache_test(&adapter, "gemini-2.5-flash", 0.5).await;

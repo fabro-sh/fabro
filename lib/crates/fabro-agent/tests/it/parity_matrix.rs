@@ -58,7 +58,6 @@ fn build_profile(provider: Provider, model: &str, client: &Client) -> Box<dyn Ag
 }
 
 async fn make_session(provider: Provider, model: &str, cwd: &Path) -> Session {
-    dotenvy::dotenv().ok();
     let client = Client::from_env().await.expect("Client::from_env failed");
     let mut profile = build_profile(provider, model, &client);
     let env = Arc::new(LocalSandbox::new(cwd.to_path_buf()));
@@ -117,7 +116,6 @@ async fn make_session_with_config(
     cwd: &Path,
     config: SessionConfig,
 ) -> Session {
-    dotenvy::dotenv().ok();
     let client = Client::from_env().await.expect("Client::from_env failed");
     let profile: Arc<dyn AgentProfile> = Arc::from(build_profile(provider, model, &client));
     let env = Arc::new(LocalSandbox::new(cwd.to_path_buf()));
@@ -125,10 +123,9 @@ async fn make_session_with_config(
 }
 
 macro_rules! provider_test {
-    ($scenario:ident, $provider:expr, $model:expr, $prefix:ident) => {
+    ($scenario:ident, $provider:expr, $model:expr, $prefix:ident, keys = [$($key:expr),+ $(,)?]) => {
         paste::paste! {
-            #[tokio::test]
-            #[ignore = "requires LLM API keys"]
+            #[fabro_macros::e2e_test($(live($key)),+)]
             async fn [<$prefix _ $scenario>]() {
                 let tmp = tempfile::tempdir().expect("failed to create tempdir");
                 let mut session = make_session($provider, $model, tmp.path()).await;
@@ -145,21 +142,53 @@ macro_rules! provider_tests {
             $scenario,
             Provider::Anthropic,
             "claude-haiku-4-5",
-            anthropic
+            anthropic,
+            keys = ["ANTHROPIC_API_KEY"]
         );
-        provider_test!($scenario, Provider::OpenAi, "gpt-5.4-mini", openai);
+        provider_test!(
+            $scenario,
+            Provider::OpenAi,
+            "gpt-5.4-mini",
+            openai,
+            keys = ["OPENAI_API_KEY"]
+        );
         provider_test!(
             $scenario,
             Provider::Gemini,
             "gemini-3-flash-preview",
-            gemini
+            gemini,
+            keys = ["GEMINI_API_KEY"]
         );
-        provider_test!($scenario, Provider::Kimi, "kimi-k2.5", kimi);
+        provider_test!(
+            $scenario,
+            Provider::Kimi,
+            "kimi-k2.5",
+            kimi,
+            keys = ["KIMI_API_KEY"]
+        );
         #[cfg(feature = "quarantine")]
-        provider_test!($scenario, Provider::Zai, "glm-4.7", zai);
-        provider_test!($scenario, Provider::Minimax, "minimax-m2.5", minimax);
+        provider_test!(
+            $scenario,
+            Provider::Zai,
+            "glm-4.7",
+            zai,
+            keys = ["ZAI_API_KEY"]
+        );
+        provider_test!(
+            $scenario,
+            Provider::Minimax,
+            "minimax-m2.5",
+            minimax,
+            keys = ["MINIMAX_API_KEY"]
+        );
         #[cfg(feature = "quarantine")]
-        provider_test!($scenario, Provider::Inception, "mercury-2", inception);
+        provider_test!(
+            $scenario,
+            Provider::Inception,
+            "mercury-2",
+            inception,
+            keys = ["INCEPTION_API_KEY"]
+        );
     };
 }
 
@@ -176,8 +205,109 @@ provider_tests!(steering_mid_task);
 provider_tests!(follow_up);
 provider_tests!(subagent_spawn);
 
-provider_tests!(web_fetch);
-provider_tests!(web_search);
+provider_test!(
+    web_fetch,
+    Provider::Anthropic,
+    "claude-haiku-4-5",
+    anthropic,
+    keys = ["ANTHROPIC_API_KEY"]
+);
+provider_test!(
+    web_fetch,
+    Provider::OpenAi,
+    "gpt-5.4-mini",
+    openai,
+    keys = ["OPENAI_API_KEY"]
+);
+provider_test!(
+    web_fetch,
+    Provider::Gemini,
+    "gemini-3-flash-preview",
+    gemini,
+    keys = ["GEMINI_API_KEY"]
+);
+provider_test!(
+    web_fetch,
+    Provider::Kimi,
+    "kimi-k2.5",
+    kimi,
+    keys = ["KIMI_API_KEY", "OPENAI_API_KEY"]
+);
+#[cfg(feature = "quarantine")]
+provider_test!(
+    web_fetch,
+    Provider::Zai,
+    "glm-4.7",
+    zai,
+    keys = ["ZAI_API_KEY", "OPENAI_API_KEY"]
+);
+provider_test!(
+    web_fetch,
+    Provider::Minimax,
+    "minimax-m2.5",
+    minimax,
+    keys = ["MINIMAX_API_KEY", "OPENAI_API_KEY"]
+);
+#[cfg(feature = "quarantine")]
+provider_test!(
+    web_fetch,
+    Provider::Inception,
+    "mercury-2",
+    inception,
+    keys = ["INCEPTION_API_KEY", "OPENAI_API_KEY"]
+);
+
+provider_test!(
+    web_search,
+    Provider::Anthropic,
+    "claude-haiku-4-5",
+    anthropic,
+    keys = ["ANTHROPIC_API_KEY", "BRAVE_SEARCH_API_KEY"]
+);
+provider_test!(
+    web_search,
+    Provider::OpenAi,
+    "gpt-5.4-mini",
+    openai,
+    keys = ["OPENAI_API_KEY", "BRAVE_SEARCH_API_KEY"]
+);
+provider_test!(
+    web_search,
+    Provider::Gemini,
+    "gemini-3-flash-preview",
+    gemini,
+    keys = ["GEMINI_API_KEY", "BRAVE_SEARCH_API_KEY"]
+);
+provider_test!(
+    web_search,
+    Provider::Kimi,
+    "kimi-k2.5",
+    kimi,
+    keys = ["KIMI_API_KEY", "BRAVE_SEARCH_API_KEY"]
+);
+#[cfg(feature = "quarantine")]
+provider_test!(
+    web_search,
+    Provider::Zai,
+    "glm-4.7",
+    zai,
+    keys = ["ZAI_API_KEY", "BRAVE_SEARCH_API_KEY"]
+);
+provider_test!(
+    web_search,
+    Provider::Minimax,
+    "minimax-m2.5",
+    minimax,
+    keys = ["MINIMAX_API_KEY", "BRAVE_SEARCH_API_KEY"]
+);
+#[cfg(feature = "quarantine")]
+provider_test!(
+    web_search,
+    Provider::Inception,
+    "mercury-2",
+    inception,
+    keys = ["INCEPTION_API_KEY", "BRAVE_SEARCH_API_KEY"]
+);
 
 // Scenarios below are only generated for providers where they are supported.
 // - multi_step_read_analyze_edit / provider_specific_editing: gpt-4o-mini is too
@@ -194,20 +324,46 @@ macro_rules! non_openai_provider_tests {
             $scenario,
             Provider::Anthropic,
             "claude-haiku-4-5",
-            anthropic
+            anthropic,
+            keys = ["ANTHROPIC_API_KEY"]
         );
         provider_test!(
             $scenario,
             Provider::Gemini,
             "gemini-3-flash-preview",
-            gemini
+            gemini,
+            keys = ["GEMINI_API_KEY"]
         );
-        provider_test!($scenario, Provider::Kimi, "kimi-k2.5", kimi);
+        provider_test!(
+            $scenario,
+            Provider::Kimi,
+            "kimi-k2.5",
+            kimi,
+            keys = ["KIMI_API_KEY"]
+        );
         #[cfg(feature = "quarantine")]
-        provider_test!($scenario, Provider::Zai, "glm-4.7", zai);
-        provider_test!($scenario, Provider::Minimax, "minimax-m2.5", minimax);
+        provider_test!(
+            $scenario,
+            Provider::Zai,
+            "glm-4.7",
+            zai,
+            keys = ["ZAI_API_KEY"]
+        );
+        provider_test!(
+            $scenario,
+            Provider::Minimax,
+            "minimax-m2.5",
+            minimax,
+            keys = ["MINIMAX_API_KEY"]
+        );
         #[cfg(feature = "quarantine")]
-        provider_test!($scenario, Provider::Inception, "mercury-2", inception);
+        provider_test!(
+            $scenario,
+            Provider::Inception,
+            "mercury-2",
+            inception,
+            keys = ["INCEPTION_API_KEY"]
+        );
     };
 }
 
@@ -430,9 +586,8 @@ async fn scenario_follow_up(session: &mut Session, dir: &Path) {
 // Scenario 11: reasoning_effort
 // ---------------------------------------------------------------------------
 macro_rules! reasoning_effort_tests {
-    ($provider:expr, $model:expr, $test_name:ident) => {
-        #[tokio::test]
-        #[ignore = "requires LLM API keys"]
+    ($provider:expr, $model:expr, $test_name:ident, keys = [$($key:expr),+ $(,)?]) => {
+        #[fabro_macros::e2e_test($(live($key)),+)]
         async fn $test_name() {
             let tmp = tempfile::tempdir().expect("failed to create tempdir");
             let config = SessionConfig {
@@ -453,20 +608,42 @@ macro_rules! reasoning_effort_tests {
 reasoning_effort_tests!(
     Provider::Anthropic,
     "claude-haiku-4-5",
-    anthropic_reasoning_effort
+    anthropic_reasoning_effort,
+    keys = ["ANTHROPIC_API_KEY"]
 );
 // gpt-5-mini does not support the reasoning.effort parameter, so no OpenAI test.
 reasoning_effort_tests!(
     Provider::Gemini,
     "gemini-3-flash-preview",
-    gemini_reasoning_effort
+    gemini_reasoning_effort,
+    keys = ["GEMINI_API_KEY"]
 );
-reasoning_effort_tests!(Provider::Kimi, "kimi-k2.5", kimi_reasoning_effort);
+reasoning_effort_tests!(
+    Provider::Kimi,
+    "kimi-k2.5",
+    kimi_reasoning_effort,
+    keys = ["KIMI_API_KEY"]
+);
 #[cfg(feature = "quarantine")]
-reasoning_effort_tests!(Provider::Zai, "glm-4.7", zai_reasoning_effort);
-reasoning_effort_tests!(Provider::Minimax, "minimax-m2.5", minimax_reasoning_effort);
+reasoning_effort_tests!(
+    Provider::Zai,
+    "glm-4.7",
+    zai_reasoning_effort,
+    keys = ["ZAI_API_KEY"]
+);
+reasoning_effort_tests!(
+    Provider::Minimax,
+    "minimax-m2.5",
+    minimax_reasoning_effort,
+    keys = ["MINIMAX_API_KEY"]
+);
 #[cfg(feature = "quarantine")]
-reasoning_effort_tests!(Provider::Inception, "mercury-2", inception_reasoning_effort);
+reasoning_effort_tests!(
+    Provider::Inception,
+    "mercury-2",
+    inception_reasoning_effort,
+    keys = ["INCEPTION_API_KEY"]
+);
 
 // ---------------------------------------------------------------------------
 // Scenario 12: subagent_spawn
@@ -486,9 +663,8 @@ async fn scenario_subagent_spawn(session: &mut Session, dir: &Path) {
 // Scenario 13: loop_detection
 // ---------------------------------------------------------------------------
 macro_rules! loop_detection_tests {
-    ($provider:expr, $model:expr, $test_name:ident) => {
-        #[tokio::test]
-        #[ignore = "requires LLM API keys"]
+    ($provider:expr, $model:expr, $test_name:ident, keys = [$($key:expr),+ $(,)?]) => {
+        #[fabro_macros::e2e_test($(live($key)),+)]
         async fn $test_name() {
             let tmp = tempfile::tempdir().expect("failed to create tempdir");
             let config = SessionConfig {
@@ -509,20 +685,47 @@ macro_rules! loop_detection_tests {
 loop_detection_tests!(
     Provider::Anthropic,
     "claude-haiku-4-5",
-    anthropic_loop_detection
+    anthropic_loop_detection,
+    keys = ["ANTHROPIC_API_KEY"]
 );
-loop_detection_tests!(Provider::OpenAi, "gpt-5.4-mini", openai_loop_detection);
+loop_detection_tests!(
+    Provider::OpenAi,
+    "gpt-5.4-mini",
+    openai_loop_detection,
+    keys = ["OPENAI_API_KEY"]
+);
 loop_detection_tests!(
     Provider::Gemini,
     "gemini-3-flash-preview",
-    gemini_loop_detection
+    gemini_loop_detection,
+    keys = ["GEMINI_API_KEY"]
 );
-loop_detection_tests!(Provider::Kimi, "kimi-k2.5", kimi_loop_detection);
+loop_detection_tests!(
+    Provider::Kimi,
+    "kimi-k2.5",
+    kimi_loop_detection,
+    keys = ["KIMI_API_KEY"]
+);
 #[cfg(feature = "quarantine")]
-loop_detection_tests!(Provider::Zai, "glm-4.7", zai_loop_detection);
-loop_detection_tests!(Provider::Minimax, "minimax-m2.5", minimax_loop_detection);
+loop_detection_tests!(
+    Provider::Zai,
+    "glm-4.7",
+    zai_loop_detection,
+    keys = ["ZAI_API_KEY"]
+);
+loop_detection_tests!(
+    Provider::Minimax,
+    "minimax-m2.5",
+    minimax_loop_detection,
+    keys = ["MINIMAX_API_KEY"]
+);
 #[cfg(feature = "quarantine")]
-loop_detection_tests!(Provider::Inception, "mercury-2", inception_loop_detection);
+loop_detection_tests!(
+    Provider::Inception,
+    "mercury-2",
+    inception_loop_detection,
+    keys = ["INCEPTION_API_KEY"]
+);
 
 // ---------------------------------------------------------------------------
 // Scenario 14: error_recovery

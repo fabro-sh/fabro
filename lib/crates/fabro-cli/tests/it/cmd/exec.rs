@@ -110,10 +110,8 @@ fn exec_uses_user_config_defaults() {
     ");
 }
 
-#[test]
-#[ignore = "requires API key"]
+#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 fn exec_creates_file() {
-    dotenvy::dotenv().ok();
     let context = test_context!();
     context
         .exec_cmd()
@@ -140,10 +138,8 @@ fn exec_creates_file() {
     );
 }
 
-#[test]
-#[ignore = "requires API key"]
+#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 fn exec_shell_command() {
-    dotenvy::dotenv().ok();
     let context = test_context!();
     context
         .exec_cmd()
@@ -163,10 +159,8 @@ fn exec_shell_command() {
         .success();
 }
 
-#[test]
-#[ignore = "requires API key"]
+#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 fn exec_read_only_blocks_write() {
-    dotenvy::dotenv().ok();
     let context = test_context!();
     context
         .exec_cmd()
@@ -190,10 +184,8 @@ fn exec_read_only_blocks_write() {
     );
 }
 
-#[test]
-#[ignore = "requires API key"]
+#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 fn exec_json_output_format() {
-    dotenvy::dotenv().ok();
     let context = test_context!();
     let output = context
         .exec_cmd()
@@ -229,10 +221,8 @@ fn exec_json_output_format() {
     );
 }
 
-#[test]
-#[ignore = "requires API key"]
+#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 fn exec_read_and_edit() {
-    dotenvy::dotenv().ok();
     let context = test_context!();
     context.write_temp("data.txt", "old content");
     context

@@ -100,3 +100,4 @@ serde_json.workspace = true
 tempfile = "3"
 httpmock = "0.8"
 fabro-test = { workspace = true }
+fabro-macros = { path = "../fabro-macros" }

@@ -70,15 +70,16 @@ pub(super) fn find_run_dir(storage_dir: &Path) -> PathBuf {
 
 macro_rules! sandbox_tests {
     ($name:ident) => {
+        sandbox_tests!($name, keys = []);
+    };
+    ($name:ident, keys = [$($key:expr),* $(,)?]) => {
         paste::paste! {
-            #[test]
-            #[ignore = "scenario: requires local sandbox"]
+            #[fabro_macros::e2e_test($(live($key)),*)]
             fn [<local_ $name>]() {
                 [<scenario_ $name>]("local");
             }
 
-            #[test]
-            #[ignore = "scenario: requires DAYTONA_API_KEY"]
+            #[fabro_macros::e2e_test(live("DAYTONA_API_KEY") $(, live($key))*)]
             fn [<daytona_ $name>]() {
                 [<scenario_ $name>]("daytona");
             }

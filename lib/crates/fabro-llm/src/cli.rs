@@ -1809,7 +1809,7 @@ mod tests {
             option: vec![],
         };
 
-        let result = run_prompt_via_server(args, &server).await;
+        let result = run_prompt_via_server(args, &server, false).await;
         assert!(result.is_ok());
         mock.assert_async().await;
     }
@@ -1849,7 +1849,7 @@ data: {\"type\":\"finish\",\"finish_reason\":\"stop\",\"usage\":{\"input_tokens\
             option: vec![],
         };
 
-        let result = run_prompt_via_server(args, &server).await;
+        let result = run_prompt_via_server(args, &server, false).await;
         assert!(result.is_ok());
         mock.assert_async().await;
     }

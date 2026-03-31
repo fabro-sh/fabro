@@ -22,6 +22,43 @@ static INSTA_FILTERS: &[(&str, &str)] = &[
     (r"\\([\w\d])", "/$1"),
 ];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TestMode {
+    #[default]
+    Off,
+    Live,
+    Strict,
+}
+
+impl TestMode {
+    #[must_use]
+    pub fn from_env() -> Self {
+        match std::env::var("FABRO_TEST_MODE").as_deref() {
+            Ok("live") => Self::Live,
+            Ok("strict") => Self::Strict,
+            _ => match std::env::var("NEXTEST_PROFILE").as_deref() {
+                Ok("e2e") => Self::Strict,
+                _ => Self::Off,
+            },
+        }
+    }
+}
+
+/// Read an env var required by an E2E test, with mode-aware skip/strict behavior.
+#[must_use]
+pub fn require_env(name: &str) -> Option<String> {
+    match std::env::var(name) {
+        Ok(value) => Some(value),
+        Err(_) => {
+            if TestMode::from_env() == TestMode::Strict {
+                panic!("{name} not set (FABRO_TEST_MODE=strict)");
+            }
+            eprintln!("skipping: {name} not set");
+            None
+        }
+    }
+}
+
 /// An isolated test context for running fabro CLI commands.
 ///
 /// Creates temporary directories for home, storage, and working directory,

@@ -43,6 +43,7 @@ fabro-util = { path = "../fabro-util" }
 http = "1"
 insta = { workspace = true }
 tokio = { workspace = true, features = ["test-util", "macros"] }
-dotenvy.workspace = true
 httpmock = "0.8"
 serde_json.workspace = true
+fabro-macros = { path = "../fabro-macros" }
+fabro-test = { workspace = true }

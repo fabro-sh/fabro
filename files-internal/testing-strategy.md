@@ -258,6 +258,19 @@ Tests should be stable on any developer machine.
 - Mark tests that require real providers, real sandboxes, or external services with `#[ignore]` and a clear reason.
 - Filter or normalize machine-specific output in snapshots.
 
+## E2E env vars
+
+Secret-backed E2E tests should use the shared test helpers instead of ad hoc env handling.
+
+- Use `#[e2e_test(live("VAR"))]` for tests that require one or more env vars.
+- Use `#[e2e_test()]` for sandbox-only E2E tests that do not require secrets.
+- `FABRO_TEST_MODE=off` skips all `#[e2e_test]` tests.
+- `FABRO_TEST_MODE=live` runs `#[e2e_test]` tests and skips any missing `live("VAR")` dependencies.
+- `FABRO_TEST_MODE=strict` runs `#[e2e_test]` tests and fails immediately if any required env var is missing.
+- `cargo nextest run --profile e2e ...` also implies strict mode through nextest's runtime `NEXTEST_PROFILE=e2e` environment variable.
+- Use `fabro_test::require_env()` inside helper functions that need to read E2E env vars after the test-level guard has run.
+- Do not call `dotenvy` from tests. E2E env vars must come from the shell or the test runner profile.
+
 If a test depends on `.env` or real credentials, it must be clearly marked and opt-in.
 
 ## Naming rules

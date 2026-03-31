@@ -88,10 +88,8 @@ fn prompt_concatenates_stdin_and_arg() {
     result.stderr(predicate::str::contains("no prompt provided").not());
 }
 
-#[test]
-#[ignore = "requires API key"]
+#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 fn prompt_no_stream_generates_response() {
-    dotenvy::dotenv().ok();
     let context = test_context!();
     context
         .llm()
@@ -107,10 +105,8 @@ fn prompt_no_stream_generates_response() {
         .stdout(predicate::str::is_empty().not());
 }
 
-#[test]
-#[ignore = "requires API key"]
+#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 fn prompt_stream_generates_response() {
-    dotenvy::dotenv().ok();
     let context = test_context!();
     context
         .llm()
@@ -125,10 +121,8 @@ fn prompt_stream_generates_response() {
         .stdout(predicate::str::is_empty().not());
 }
 
-#[test]
-#[ignore = "requires API key"]
+#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 fn prompt_usage_shows_tokens() {
-    dotenvy::dotenv().ok();
     let context = test_context!();
     context
         .llm()
@@ -145,10 +139,8 @@ fn prompt_usage_shows_tokens() {
         .stderr(predicate::str::contains("Tokens:"));
 }
 
-#[test]
-#[ignore = "requires API key"]
+#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 fn prompt_schema_no_stream_generates_json() {
-    dotenvy::dotenv().ok();
     let context = test_context!();
     let assert = context
         .llm()
@@ -169,10 +161,8 @@ fn prompt_schema_no_stream_generates_json() {
     );
 }
 
-#[test]
-#[ignore = "requires API key"]
+#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 fn prompt_schema_stream_generates_json() {
-    dotenvy::dotenv().ok();
     let context = test_context!();
     let assert = context
         .llm()
@@ -193,10 +183,8 @@ fn prompt_schema_stream_generates_json() {
     );
 }
 
-#[test]
-#[ignore = "requires API key"]
+#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 fn chat_multi_turn_with_system_prompt() {
-    dotenvy::dotenv().ok();
     let context = test_context!();
     let assert = context
         .command()

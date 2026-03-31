@@ -2,10 +2,9 @@ use fabro_test::test_context;
 
 use super::{completed_nodes, find_run_dir, fixture, read_conclusion, sandbox_tests, timeout_for};
 
-sandbox_tests!(agent_linear);
+sandbox_tests!(agent_linear, keys = ["ANTHROPIC_API_KEY"]);
 
 fn scenario_agent_linear(sandbox: &str) {
-    dotenvy::dotenv().ok();
     let context = test_context!();
 
     context

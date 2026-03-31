@@ -18,7 +18,6 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
-dotenvy.workspace = true
 fabro-agent = { path = "../fabro-agent" }
 fabro-config = { path = "../fabro-config" }
 fabro-graphviz = { path = "../fabro-graphviz" }
@@ -66,6 +65,7 @@ toml.workspace = true
 fabro-mcp = { path = "../fabro-mcp" }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 tempfile = "3"
-dotenvy.workspace = true
 assert_cmd = "2"
 predicates = "3"
+fabro-macros = { path = "../fabro-macros" }
+fabro-test = { workspace = true }

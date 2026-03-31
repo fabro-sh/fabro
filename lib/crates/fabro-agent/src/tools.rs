@@ -1414,8 +1414,7 @@ mod tests {
         assert_eq!(html_to_markdown(plain), plain);
     }
 
-    #[tokio::test]
-    #[ignore = "requires BRAVE_SEARCH_API_KEY env var"]
+    #[fabro_macros::e2e_test(live("BRAVE_SEARCH_API_KEY"))]
     async fn web_search_returns_results() {
         let api_key = std::env::var("BRAVE_SEARCH_API_KEY")
             .expect("BRAVE_SEARCH_API_KEY must be set to run this test");

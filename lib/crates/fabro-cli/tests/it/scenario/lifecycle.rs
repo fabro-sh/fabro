@@ -4,10 +4,8 @@ use serde_json::Value;
 use super::{fixture, read_json, timeout_for};
 use crate::support::fabro_json_snapshot;
 
-#[test]
-#[ignore = "scenario: requires local sandbox"]
+#[fabro_macros::e2e_test()]
 fn local_run_lifecycle() {
-    dotenvy::dotenv().ok();
     let context = test_context!();
 
     let cmd = |args: &[&str]| -> assert_cmd::assert::Assert {

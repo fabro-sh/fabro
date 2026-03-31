@@ -5895,10 +5895,7 @@ mod real_llm {
     }
 
     async fn make_llm_client() -> Option<Arc<Client>> {
-        let _ = dotenvy::dotenv();
-        if std::env::var("ANTHROPIC_API_KEY").is_err() {
-            return None;
-        }
+        fabro_test::require_env("ANTHROPIC_API_KEY")?;
         let client = Client::from_env()
             .await
             .expect("unified-llm client should initialize from env");
@@ -5925,15 +5922,9 @@ mod real_llm {
     use fabro_workflow::run_options::RunOptions;
     use fabro_workflow::test_support::WorkflowRunner;
 
-    #[tokio::test]
-    #[ignore]
+    #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
     async fn real_llm_linear_pipeline() {
-        let client = if let Some(c) = make_llm_client().await {
-            c
-        } else {
-            eprintln!("Skipping: ANTHROPIC_API_KEY not set");
-            return;
-        };
+        let client = make_llm_client().await.unwrap();
 
         let mut graph = Graph::new("RealLLMLinear");
         graph.attrs.insert(
@@ -6040,15 +6031,9 @@ mod real_llm {
         );
     }
 
-    #[tokio::test]
-    #[ignore]
+    #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
     async fn real_llm_two_stage_pipeline() {
-        let client = if let Some(c) = make_llm_client().await {
-            c
-        } else {
-            eprintln!("Skipping: ANTHROPIC_API_KEY not set");
-            return;
-        };
+        let client = make_llm_client().await.unwrap();
 
         let mut graph = Graph::new("RealLLMTwoStage");
         graph.attrs.insert(
@@ -6137,15 +6122,9 @@ mod real_llm {
         assert_eq!(last_stage, Some("review"));
     }
 
-    #[tokio::test]
-    #[ignore]
+    #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
     async fn real_llm_human_gate_auto_approve() {
-        let client = if let Some(c) = make_llm_client().await {
-            c
-        } else {
-            eprintln!("Skipping: ANTHROPIC_API_KEY not set");
-            return;
-        };
+        let client = make_llm_client().await.unwrap();
 
         let mut graph = Graph::new("RealLLMGate");
         graph.attrs.insert(
@@ -6286,15 +6265,9 @@ mod real_llm {
         );
     }
 
-    #[tokio::test]
-    #[ignore]
+    #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
     async fn real_llm_one_shot_pipeline() {
-        let client = if let Some(c) = make_llm_client().await {
-            c
-        } else {
-            eprintln!("Skipping: ANTHROPIC_API_KEY not set");
-            return;
-        };
+        let client = make_llm_client().await.unwrap();
 
         let mut graph = Graph::new("RealLLMOneShot");
         graph.attrs.insert(
@@ -8105,11 +8078,8 @@ timeout_ms = 120000
 
 // --- Prompt/Agent hook E2E with real LLM ---
 
-#[tokio::test]
-#[ignore = "requires ANTHROPIC_API_KEY"]
+#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 async fn hook_prompt_proceed_allows_run() {
-    dotenvy::dotenv().ok();
-
     let hooks = vec![fabro_hooks::HookDefinition {
         name: Some("prompt-proceed".into()),
         event: fabro_hooks::HookEvent::RunStart,
@@ -8132,11 +8102,8 @@ async fn hook_prompt_proceed_allows_run() {
     assert_eq!(outcome.status, StageStatus::Success);
 }
 
-#[tokio::test]
-#[ignore = "requires ANTHROPIC_API_KEY"]
+#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 async fn hook_prompt_block_prevents_run() {
-    dotenvy::dotenv().ok();
-
     // Use a factual question that evaluates to false: "Is 2+2=5?"
     let hooks = vec![fabro_hooks::HookDefinition {
         name: Some("prompt-block".into()),
@@ -8163,11 +8130,8 @@ async fn hook_prompt_block_prevents_run() {
     );
 }
 
-#[tokio::test]
-#[ignore = "requires ANTHROPIC_API_KEY"]
+#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 async fn hook_agent_proceed_allows_run() {
-    dotenvy::dotenv().ok();
-
     let hooks = vec![fabro_hooks::HookDefinition {
         name: Some("agent-proceed".into()),
         event: fabro_hooks::HookEvent::RunStart,
@@ -8191,11 +8155,8 @@ async fn hook_agent_proceed_allows_run() {
     assert_eq!(outcome.status, StageStatus::Success);
 }
 
-#[tokio::test]
-#[ignore = "requires ANTHROPIC_API_KEY"]
+#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 async fn hook_agent_with_tool_use() {
-    dotenvy::dotenv().ok();
-
     let dir = tempfile::tempdir().unwrap();
     let marker = dir.path().join("hook_check.txt");
     std::fs::write(&marker, "READY").unwrap();
@@ -8267,11 +8228,8 @@ async fn hooks_do_not_duplicate_workflow_events() {
 // E2E test with real LLM
 // ---------------------------------------------------------------------------
 
-#[tokio::test]
-#[ignore = "requires ANTHROPIC_API_KEY"]
+#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 async fn arc_e2e_with_real_llm() {
-    dotenvy::dotenv().ok();
-
     let dir = tempfile::tempdir().unwrap();
     let dir_path = dir.path().to_str().unwrap().to_string();
 

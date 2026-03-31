@@ -5,10 +5,9 @@ use super::{
     timeout_for,
 };
 
-sandbox_tests!(full_stack);
+sandbox_tests!(full_stack, keys = ["ANTHROPIC_API_KEY"]);
 
 fn scenario_full_stack(sandbox: &str) {
-    dotenvy::dotenv().ok();
     let context = test_context!();
 
     context

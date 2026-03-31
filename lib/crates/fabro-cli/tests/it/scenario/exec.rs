@@ -2,10 +2,8 @@ use std::time::Duration;
 
 use fabro_test::test_context;
 
-#[test]
-#[ignore = "scenario: requires ANTHROPIC_API_KEY"]
+#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 fn test_exec_creates_file() {
-    dotenvy::dotenv().ok();
     let context = test_context!();
 
     let mut cmd = context.exec_cmd();

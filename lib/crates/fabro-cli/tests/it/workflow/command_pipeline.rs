@@ -5,7 +5,6 @@ use super::{completed_nodes, find_run_dir, fixture, read_conclusion, sandbox_tes
 sandbox_tests!(command_pipeline);
 
 fn scenario_command_pipeline(sandbox: &str) {
-    dotenvy::dotenv().ok();
     let context = test_context!();
 
     context

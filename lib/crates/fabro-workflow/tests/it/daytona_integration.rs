@@ -52,18 +52,12 @@ async fn create_env() -> DaytonaSandbox {
 async fn create_env_with_github_app(
     github_app: Option<fabro_github::GitHubAppCredentials>,
 ) -> DaytonaSandbox {
-    dotenvy::dotenv().ok();
-    if let Some(home) = dirs::home_dir() {
-        dotenvy::from_path(home.join(".fabro/.env")).ok();
-    }
     DaytonaSandbox::new(DaytonaConfig::default(), github_app, None, None)
         .await
         .expect("Failed to create Daytona client — is DAYTONA_API_KEY set?")
 }
 
 fn load_github_app_credentials() -> fabro_github::GitHubAppCredentials {
-    dotenvy::dotenv().ok();
-
     // Read app_id from ~/.fabro/server.toml
     let home = dirs::home_dir().expect("No home directory");
     let config_path = home.join(".fabro/server.toml");
@@ -100,8 +94,7 @@ fn load_github_app_credentials() -> fabro_github::GitHubAppCredentials {
     }
 }
 
-#[tokio::test]
-#[ignore]
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_exec_command() {
     let creds = load_github_app_credentials();
     let env = create_env_with_github_app(Some(creds)).await;
@@ -117,8 +110,7 @@ async fn daytona_exec_command() {
     env.cleanup().await.unwrap();
 }
 
-#[tokio::test]
-#[ignore]
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_exec_command_with_pipe() {
     let creds = load_github_app_credentials();
     let env = create_env_with_github_app(Some(creds)).await;
@@ -134,8 +126,7 @@ async fn daytona_exec_command_with_pipe() {
     env.cleanup().await.unwrap();
 }
 
-#[tokio::test]
-#[ignore]
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_exec_command_cancelled() {
     let creds = load_github_app_credentials();
     let env = create_env_with_github_app(Some(creds)).await;
@@ -163,8 +154,7 @@ async fn daytona_exec_command_cancelled() {
     env.cleanup().await.unwrap();
 }
 
-#[tokio::test]
-#[ignore]
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_exec_command_local_timeout() {
     let creds = load_github_app_credentials();
     let env = create_env_with_github_app(Some(creds)).await;
@@ -197,8 +187,7 @@ async fn daytona_exec_command_local_timeout() {
     env.cleanup().await.unwrap();
 }
 
-#[tokio::test]
-#[ignore]
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_file_round_trip() {
     let env = create_env().await;
     env.initialize().await.unwrap();
@@ -223,8 +212,7 @@ async fn daytona_file_round_trip() {
     env.cleanup().await.unwrap();
 }
 
-#[tokio::test]
-#[ignore]
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_full_lifecycle() {
     let env = create_env().await;
 
@@ -249,12 +237,9 @@ async fn daytona_full_lifecycle() {
     env.cleanup().await.unwrap();
 }
 
-#[tokio::test]
-#[ignore]
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_snapshot_sandbox() {
     use fabro_sandbox::daytona::DaytonaSnapshotConfig;
-
-    dotenvy::dotenv().ok();
 
     let config = DaytonaConfig {
         auto_stop_interval: Some(60),
@@ -287,8 +272,7 @@ async fn daytona_snapshot_sandbox() {
     env.cleanup().await.unwrap();
 }
 
-#[tokio::test]
-#[ignore]
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_artifact_sync_uploads_and_rewrites_pointer() {
     let env = create_env().await;
     env.initialize().await.unwrap();
@@ -364,8 +348,7 @@ impl Handler for LargeOutputHandler {
     }
 }
 
-#[tokio::test]
-#[ignore]
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_pipeline_artifact_offload_and_sync() {
     let env = create_env().await;
     env.initialize().await.unwrap();
@@ -521,8 +504,7 @@ async fn setup_daytona_git(sandbox: &dyn Sandbox) -> (RunId, String, String) {
     (run_id, base_sha, branch_name)
 }
 
-#[tokio::test]
-#[ignore]
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_git_checkpoint_remote_emits_events() {
     let env = create_env().await;
     env.initialize().await.unwrap();
@@ -682,8 +664,7 @@ use fabro_workflow::handler::parallel::ParallelHandler;
 
 /// End-to-end: parallel branches get isolated worktrees in Daytona sandbox,
 /// fan-in fast-forwards to winner.
-#[tokio::test]
-#[ignore]
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_parallel_git_branching_e2e() {
     let env = create_env().await;
     env.initialize().await.unwrap();
@@ -909,7 +890,6 @@ use fabro_workflow::handler::llm::AgentCliBackend;
 /// Installs the CLI tool in the sandbox, then runs the AgentCliBackend against it.
 async fn run_daytona_cli_test(provider: Provider, model: &str, install_command: &str) {
     let creds = load_github_app_credentials();
-    dotenvy::dotenv().ok();
     let config = DaytonaConfig {
         snapshot: Some(DaytonaSnapshotConfig {
             name: "daytona-medium".into(),
@@ -1016,8 +996,7 @@ async fn run_daytona_cli_test(provider: Provider, model: &str, install_command: 
     env.cleanup().await.unwrap();
 }
 
-#[tokio::test]
-#[ignore] // requires DAYTONA_API_KEY + Claude CLI auth
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_cli_claude() {
     run_daytona_cli_test(
         Provider::Anthropic,
@@ -1027,14 +1006,12 @@ async fn daytona_cli_claude() {
     .await;
 }
 
-#[tokio::test]
-#[ignore] // requires DAYTONA_API_KEY + OpenAI/Codex auth
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_cli_codex() {
     run_daytona_cli_test(Provider::OpenAi, "o4-mini", "npm install -g @openai/codex").await;
 }
 
-#[tokio::test]
-#[ignore] // requires DAYTONA_API_KEY + Gemini auth
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_cli_gemini() {
     run_daytona_cli_test(
         Provider::Gemini,
@@ -1052,8 +1029,7 @@ use fabro_workflow::git::MetadataStore;
 
 /// End-to-end test: pipeline with git checkpointing enabled + `meta_branch`
 /// writes shadow branch on the host repo and includes `Fabro-Checkpoint` trailer in sandbox commits.
-#[tokio::test]
-#[ignore]
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_git_checkpoint_with_shadow_branch() {
     let env = create_env().await;
     env.initialize().await.unwrap();
@@ -1237,8 +1213,7 @@ impl Handler for AssetCreatorHandler {
 
 /// Daytona sandbox: asset collection discovers files on the remote sandbox and
 /// downloads them to the local logs directory.
-#[tokio::test]
-#[ignore]
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_asset_collection() {
     let env = create_env().await;
     env.initialize().await.unwrap();
@@ -1325,8 +1300,7 @@ async fn daytona_asset_collection() {
     env.cleanup().await.unwrap();
 }
 
-#[tokio::test]
-#[ignore]
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_ssh_access() {
     let env = create_env().await;
     env.initialize().await.unwrap();
@@ -1341,8 +1315,7 @@ async fn daytona_ssh_access() {
     env.cleanup().await.unwrap();
 }
 
-#[tokio::test]
-#[ignore]
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_ssh_access_before_init_fails() {
     let env = create_env().await;
 
@@ -1360,8 +1333,7 @@ async fn daytona_ssh_access_before_init_fails() {
 
 /// E2E: Clone the current (private) repo using GitHub App IAT credentials.
 /// Verifies the full flow: JWT signing, installation lookup, token creation, clone.
-#[tokio::test]
-#[ignore]
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_clone_private_repo_with_github_app_iat() {
     let creds = load_github_app_credentials();
     let env = create_env_with_github_app(Some(creds)).await;
@@ -1418,8 +1390,7 @@ async fn daytona_clone_private_repo_with_github_app_iat() {
 }
 
 /// E2E: Verify that repos in an installed org get credentials (needed for pushing).
-#[tokio::test]
-#[ignore]
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_clone_public_repo_gets_credentials() {
     let creds = load_github_app_credentials();
 
@@ -1441,8 +1412,7 @@ async fn daytona_clone_public_repo_gets_credentials() {
 
 /// E2E: Verify that requesting an IAT for a repo the app isn't installed on
 /// gives a clear error message.
-#[tokio::test]
-#[ignore]
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_iat_not_installed_gives_clear_error() {
     let creds = load_github_app_credentials();
 
@@ -1465,8 +1435,7 @@ async fn daytona_iat_not_installed_gives_clear_error() {
 
 /// E2E: After each remote checkpoint, the run branch is pushed to origin.
 /// Verifies the branch appears on the remote via `git ls-remote`.
-#[tokio::test]
-#[ignore]
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_git_push_run_branch_to_origin() {
     let creds = load_github_app_credentials();
     let env = create_env_with_github_app(Some(creds)).await;
@@ -1598,8 +1567,7 @@ async fn daytona_git_push_run_branch_to_origin() {
 /// underlying error that the SDK normally swallows.
 ///
 /// Run: cargo test -p arc-workflows -- --ignored daytona_toolbox_idle_diagnostic --nocapture
-#[tokio::test]
-#[ignore]
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_toolbox_idle_diagnostic() {
     let creds = load_github_app_credentials();
     let env = create_env_with_github_app(Some(creds)).await;
@@ -1733,8 +1701,7 @@ async fn daytona_toolbox_idle_diagnostic() {
 ///
 /// Creates a sandbox, saves a SandboxRecord, reconnects via `cp::reconnect`,
 /// uploads a file, downloads it back, and verifies the round-trip.
-#[tokio::test]
-#[ignore]
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_cp_upload_download_round_trip() {
     use fabro_sandbox::SandboxRecord;
     use fabro_sandbox::reconnect::reconnect;
@@ -1829,15 +1796,9 @@ async fn daytona_cp_upload_download_round_trip() {
     env.cleanup().await.unwrap();
 }
 
-#[tokio::test]
-#[ignore]
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"))]
 async fn daytona_computer_use_browser_screenshot() {
     use base64::Engine;
-
-    dotenvy::dotenv().ok();
-    if let Some(home) = dirs::home_dir() {
-        dotenvy::from_path(home.join(".fabro/.env")).ok();
-    }
     let config = DaytonaConfig {
         snapshot: Some(DaytonaSnapshotConfig {
             name: "daytona-medium".into(),
@@ -1987,16 +1948,11 @@ async fn daytona_computer_use_browser_screenshot() {
     env.cleanup().await.unwrap();
 }
 
-#[tokio::test]
-#[ignore]
+#[fabro_macros::e2e_test(live("DAYTONA_API_KEY"))]
 async fn daytona_playwright_mcp_sandbox_transport() {
     use fabro_agent::Sandbox;
 
     // Create sandbox from daytona-medium (has Node.js + Chromium)
-    dotenvy::dotenv().ok();
-    if let Some(home) = dirs::home_dir() {
-        dotenvy::from_path(home.join(".fabro/.env")).ok();
-    }
     let config = DaytonaConfig {
         snapshot: Some(DaytonaSnapshotConfig {
             name: "daytona-medium".into(),

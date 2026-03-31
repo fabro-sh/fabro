@@ -5,7 +5,6 @@ use super::{completed_nodes, find_run_dir, fixture, read_conclusion, sandbox_tes
 sandbox_tests!(conditional_branching);
 
 fn scenario_conditional_branching(sandbox: &str) {
-    dotenvy::dotenv().ok();
     let context = test_context!();
 
     context
