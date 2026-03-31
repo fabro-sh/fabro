@@ -1,6 +1,9 @@
 use fabro_test::{fabro_snapshot, test_context};
+use serde_json::Value;
 
-use crate::support::{example_fixture, run_output_filters};
+use crate::support::{
+    compact_progress_event, example_fixture, fabro_json_snapshot, run_output_filters,
+};
 
 use super::support::{output_stdout, write_sleep_workflow};
 
@@ -145,4 +148,150 @@ fn attach_before_completion_streams_to_finished_state() {
         ✓ wait  [DURATION]
         ✓ exit  [DURATION]
     ");
+}
+
+#[test]
+fn attach_json_errors_without_prompting_for_human_input() {
+    let context = test_context!();
+    let workflow = context.temp_dir.join("human-gate.fabro");
+    context.write_temp(
+        "human-gate.fabro",
+        r#"digraph HumanGate {
+  graph [goal="Wait for approval"]
+  start [shape=Mdiamond, label="Start"]
+  exit  [shape=Msquare, label="Exit"]
+  approve [shape=hexagon, label="Approve?"]
+  ship   [shape=parallelogram, script="echo shipped"]
+  revise [shape=parallelogram, script="echo revised"]
+  start -> approve
+  approve -> ship   [label="[A] Approve"]
+  approve -> revise [label="[R] Revise"]
+  ship -> exit
+  revise -> exit
+}
+"#,
+    );
+
+    let run_output = context
+        .command()
+        .current_dir(&context.temp_dir)
+        .env("OPENAI_API_KEY", "test")
+        .args([
+            "run",
+            "--detach",
+            "--no-retro",
+            "--sandbox",
+            "local",
+            "--provider",
+            "openai",
+            workflow.to_str().unwrap(),
+        ])
+        .output()
+        .expect("detached run should execute");
+    assert!(
+        run_output.status.success(),
+        "detached run failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&run_output.stdout),
+        String::from_utf8_lossy(&run_output.stderr)
+    );
+    let run_id = output_stdout(&run_output).trim().to_string();
+    let cleanup_run_id = run_id.clone();
+    scopeguard::defer! {
+        let _ = context.command().args(["rm", "--force", &cleanup_run_id]).output();
+    }
+    let run_dir = context.find_run_dir(&run_id);
+
+    let request_path = run_dir.join("runtime/interview_request.json");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !request_path.exists() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for interview request for {run_id}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    let output = context
+        .command()
+        .args(["--json", "attach", &run_id])
+        .timeout(std::time::Duration::from_secs(5))
+        .output()
+        .expect("attach should execute");
+
+    assert!(!output.status.success(), "attach --json should fail fast");
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
+    assert!(stderr.contains("--json is non-interactive"));
+    assert!(
+        !stderr.contains("Approve?"),
+        "attach should not prompt on stderr"
+    );
+    assert!(
+        request_path.exists(),
+        "the run should still be waiting on the interview request"
+    );
+    assert!(
+        !run_dir.join("runtime/interview_response.json").exists(),
+        "attach --json should not answer the interview"
+    );
+
+    let progress: Vec<Value> = String::from_utf8(output.stdout)
+        .expect("stdout should be UTF-8")
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str(line).expect("attach JSON output should be JSONL"))
+        .collect();
+    let progress_summary: Vec<_> = progress.iter().map(compact_progress_event).collect();
+    fabro_json_snapshot!(context, &progress_summary, @r#"
+    [
+      {
+        "event": "sandbox.initializing",
+        "provider": "local"
+      },
+      {
+        "event": "sandbox.ready",
+        "provider": "local"
+      },
+      {
+        "event": "sandbox.initialized"
+      },
+      {
+        "event": "run.started",
+        "name": "HumanGate",
+        "goal": "Wait for approval"
+      },
+      {
+        "event": "stage.started",
+        "node_id": "start",
+        "node_label": "Start",
+        "handler_type": "start",
+        "index": 0
+      },
+      {
+        "event": "stage.completed",
+        "node_id": "start",
+        "node_label": "Start",
+        "index": 0,
+        "status": "success"
+      },
+      {
+        "event": "edge.selected",
+        "from_node": "start",
+        "to_node": "approve",
+        "reason": "unconditional"
+      },
+      {
+        "event": "checkpoint.completed",
+        "node_id": "start",
+        "node_label": "start",
+        "status": "success"
+      },
+      {
+        "event": "stage.started",
+        "node_id": "approve",
+        "node_label": "Approve?",
+        "handler_type": "human",
+        "index": 1
+      }
+    ]
+    "#);
 }

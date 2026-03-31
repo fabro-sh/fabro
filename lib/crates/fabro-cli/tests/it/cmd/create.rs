@@ -252,6 +252,37 @@ fn create_persists_requested_overrides_into_run_json() {
 }
 
 #[test]
+fn create_json_implies_auto_approve() {
+    let context = test_context!();
+    let workflow = fixture("simple.fabro");
+    let output = context
+        .command()
+        .args(["--json", "create", "--dry-run", workflow.to_str().unwrap()])
+        .output()
+        .expect("command should execute");
+
+    assert!(
+        output.status.success(),
+        "command failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("create JSON should parse");
+    let run_id = value["run_id"]
+        .as_str()
+        .expect("create JSON should include run_id");
+    let run = resolve_run(&context, run_id);
+    let run_json = read_json(run.run_dir.join("run.json"));
+
+    assert_eq!(
+        run_json.pointer("/settings/auto_approve"),
+        Some(&json!(true))
+    );
+}
+
+#[test]
 fn create_invalid_workflow_fails_without_creating_run() {
     let context = test_context!();
     let workflow = fixture("invalid.fabro");

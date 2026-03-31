@@ -21,6 +21,7 @@ pub(super) fn create_command(args: &WorkflowCreateArgs, globals: &GlobalArgs) ->
     let created = write_workflow_scaffold(args, &fabro_root)?;
 
     if globals.json {
+        let created: Vec<_> = created.iter().map(|path| relative_path(path)).collect();
         print_json_pretty(&serde_json::json!({
             "name": args.name,
             "created": created,
@@ -63,7 +64,10 @@ pub(super) fn create_command(args: &WorkflowCreateArgs, globals: &GlobalArgs) ->
     Ok(())
 }
 
-fn write_workflow_scaffold(args: &WorkflowCreateArgs, fabro_root: &Path) -> Result<Vec<String>> {
+fn write_workflow_scaffold(
+    args: &WorkflowCreateArgs,
+    fabro_root: &Path,
+) -> Result<Vec<std::path::PathBuf>> {
     let workflows_dir = fabro_root.join("workflows").join(&args.name);
 
     if workflows_dir.exists() {
@@ -103,10 +107,7 @@ fn write_workflow_scaffold(args: &WorkflowCreateArgs, fabro_root: &Path) -> Resu
     std::fs::write(&toml_path, "version = 1\n")
         .with_context(|| format!("failed to write {}", toml_path.display()))?;
 
-    Ok(vec![
-        format!("fabro/workflows/{}/workflow.fabro", args.name),
-        format!("fabro/workflows/{}/workflow.toml", args.name),
-    ])
+    Ok(vec![dot_path, toml_path])
 }
 
 fn to_pascal_case(s: &str) -> String {

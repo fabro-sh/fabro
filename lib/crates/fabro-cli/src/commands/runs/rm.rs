@@ -112,6 +112,10 @@ async fn remove_from(
             had_errors = true;
             continue;
         }
+        removed.push(run_id.clone());
+        if !globals.json {
+            eprintln!("{}", short_run_id(&run_id));
+        }
         if let Err(err) = store
             .delete_run(&run.run_id)
             .await
@@ -126,10 +130,6 @@ async fn remove_from(
             }));
             had_errors = true;
             continue;
-        }
-        removed.push(run_id.clone());
-        if !globals.json {
-            eprintln!("{}", short_run_id(&run_id));
         }
     }
 
