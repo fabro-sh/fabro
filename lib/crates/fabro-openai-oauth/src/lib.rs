@@ -90,9 +90,6 @@ pub fn build_authorize_url(
         ("code_challenge", &pkce.challenge),
         ("code_challenge_method", "S256"),
         ("state", state),
-        ("id_token_add_organizations", "true"),
-        ("codex_cli_simplified_flow", "true"),
-        ("originator", "fabro"),
     ]);
     format!("{issuer}/oauth/authorize?{params}")
 }
@@ -633,7 +630,7 @@ mod tests {
     }
 
     #[test]
-    fn authorize_url_has_openai_params() {
+    fn authorize_url_has_no_extra_params() {
         let pkce = generate_pkce();
         let state = generate_state();
         let url = build_authorize_url(
@@ -643,15 +640,19 @@ mod tests {
             &pkce,
             &state,
         );
+        // Should only contain standard OAuth 2.0 PKCE params
         assert!(
-            url.contains("id_token_add_organizations=true"),
-            "missing id_token_add_organizations"
+            !url.contains("id_token_add_organizations"),
+            "should not contain OpenAI-specific params"
         );
         assert!(
-            url.contains("codex_cli_simplified_flow=true"),
-            "missing codex_cli_simplified_flow"
+            !url.contains("codex_cli_simplified_flow"),
+            "should not contain OpenAI-specific params"
         );
-        assert!(url.contains("originator=fabro"), "missing originator");
+        assert!(
+            !url.contains("originator"),
+            "should not contain OpenAI-specific params"
+        );
     }
 
     #[test]
