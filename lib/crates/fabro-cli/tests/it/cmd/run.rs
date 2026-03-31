@@ -1,4 +1,5 @@
 use fabro_test::{fabro_snapshot, test_context};
+use serde_json::Value;
 
 use crate::support::{
     compact_progress_event, example_fixture, fabro_json_snapshot, read_json, read_jsonl,
@@ -262,6 +263,193 @@ fn run_id_passthrough_uses_provided_ulid() {
     let run_dir = context.find_run_dir(run_id);
     let run_record = read_json(run_dir.join("run.json"));
     assert_eq!(run_record["run_id"].as_str(), Some(run_id));
+}
+
+#[test]
+fn json_run_implies_auto_approve_for_human_gates() {
+    let context = test_context!();
+    let workflow = context.temp_dir.join("human-gate.fabro");
+    context.write_temp(
+        "human-gate.fabro",
+        r#"digraph HumanGate {
+  graph [goal="Route through the default approval path"]
+  start [shape=Mdiamond, label="Start"]
+  exit  [shape=Msquare, label="Exit"]
+  approve [shape=hexagon, label="Approve?"]
+  ship   [shape=parallelogram, script="echo shipped"]
+  revise [shape=parallelogram, script="echo revised"]
+  start -> approve
+  approve -> ship   [label="[A] Approve"]
+  approve -> revise [label="[R] Revise"]
+  ship -> exit
+  revise -> exit
+}
+"#,
+    );
+
+    let output = context
+        .command()
+        .current_dir(&context.temp_dir)
+        .args([
+            "--json",
+            "run",
+            "--sandbox",
+            "local",
+            "--no-retro",
+            workflow.to_str().unwrap(),
+        ])
+        .output()
+        .expect("command should execute");
+
+    assert!(
+        output.status.success(),
+        "command failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let progress: Vec<Value> = String::from_utf8(output.stdout)
+        .expect("stdout should be UTF-8")
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str(line).expect("run JSON output should be JSONL"))
+        .collect();
+    let progress_summary: Vec<_> = progress.iter().map(compact_progress_event).collect();
+    fabro_json_snapshot!(context, &progress_summary, @r#"
+    [
+      {
+        "event": "sandbox.initializing",
+        "provider": "local"
+      },
+      {
+        "event": "sandbox.ready",
+        "provider": "local"
+      },
+      {
+        "event": "sandbox.initialized"
+      },
+      {
+        "event": "run.notice"
+      },
+      {
+        "event": "run.started",
+        "name": "HumanGate",
+        "goal": "Route through the default approval path"
+      },
+      {
+        "event": "stage.started",
+        "node_id": "start",
+        "node_label": "Start",
+        "handler_type": "start",
+        "index": 0
+      },
+      {
+        "event": "stage.completed",
+        "node_id": "start",
+        "node_label": "Start",
+        "index": 0,
+        "status": "success"
+      },
+      {
+        "event": "edge.selected",
+        "from_node": "start",
+        "to_node": "approve",
+        "reason": "unconditional"
+      },
+      {
+        "event": "checkpoint.completed",
+        "node_id": "start",
+        "node_label": "start",
+        "status": "success"
+      },
+      {
+        "event": "stage.started",
+        "node_id": "approve",
+        "node_label": "Approve?",
+        "handler_type": "human",
+        "index": 1
+      },
+      {
+        "event": "stage.completed",
+        "node_id": "approve",
+        "node_label": "Approve?",
+        "index": 1,
+        "status": "success"
+      },
+      {
+        "event": "edge.selected",
+        "from_node": "approve",
+        "to_node": "ship",
+        "reason": "preferred_label"
+      },
+      {
+        "event": "checkpoint.completed",
+        "node_id": "approve",
+        "node_label": "approve",
+        "status": "success"
+      },
+      {
+        "event": "stage.started",
+        "node_id": "ship",
+        "node_label": "ship",
+        "handler_type": "command",
+        "index": 2
+      },
+      {
+        "event": "stage.completed",
+        "node_id": "ship",
+        "node_label": "ship",
+        "index": 2,
+        "status": "success"
+      },
+      {
+        "event": "edge.selected",
+        "from_node": "ship",
+        "to_node": "exit",
+        "reason": "unconditional"
+      },
+      {
+        "event": "checkpoint.completed",
+        "node_id": "ship",
+        "node_label": "ship",
+        "status": "success"
+      },
+      {
+        "event": "stage.started",
+        "node_id": "exit",
+        "node_label": "Exit",
+        "handler_type": "exit",
+        "index": 3
+      },
+      {
+        "event": "stage.completed",
+        "node_id": "exit",
+        "node_label": "Exit",
+        "index": 3,
+        "status": "success"
+      },
+      {
+        "event": "run.completed",
+        "status": "success",
+        "artifact_count": 0
+      },
+      {
+        "event": "sandbox.cleanup.started",
+        "provider": "local"
+      },
+      {
+        "event": "sandbox.cleanup.completed",
+        "provider": "local"
+      }
+    ]
+    "#);
+
+    let run = context.single_run_dir();
+    let run_json = read_json(run.join("run.json"));
+    assert_eq!(
+        run_json.pointer("/settings/auto_approve"),
+        Some(&serde_json::json!(true))
+    );
 }
 
 #[test]

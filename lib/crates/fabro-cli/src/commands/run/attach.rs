@@ -28,6 +28,7 @@ const ATTACH_STARTUP_GRACE: Duration = Duration::from_millis(200);
 const ATTACH_STARTUP_GRACE: Duration = Duration::from_secs(3);
 const INTERVIEW_UNANSWERED_MESSAGE: &str =
     "Interview ended without an answer. The run is still waiting for input; reattach to answer it.";
+const JSON_INTERVIEW_MESSAGE: &str = "This run is waiting for human input, but --json is non-interactive. Reattach without --json to answer it.";
 
 /// Attach to a running (or finished) workflow run, rendering progress live.
 ///
@@ -177,6 +178,11 @@ async fn attach_run_store(
         if runtime_interview_paths.request_path.exists() {
             let interview_paths = &runtime_interview_paths;
             if !interview_paths.response_path.exists() {
+                if json_output {
+                    defuse_engine_child(&mut engine_guard);
+                    eprintln!("{JSON_INTERVIEW_MESSAGE}");
+                    return Ok(ExitCode::from(1));
+                }
                 if let Some(_claim_guard) =
                     InterviewClaimGuard::acquire(&interview_paths.claim_path)
                 {
@@ -390,6 +396,11 @@ async fn attach_run_files(
         if runtime_interview_paths.request_path.exists() {
             let interview_paths = &runtime_interview_paths;
             if !interview_paths.response_path.exists() {
+                if json_output {
+                    defuse_engine_child(&mut engine_guard);
+                    eprintln!("{JSON_INTERVIEW_MESSAGE}");
+                    return Ok(ExitCode::from(1));
+                }
                 if let Some(_claim_guard) =
                     InterviewClaimGuard::acquire(&interview_paths.claim_path)
                 {
@@ -602,6 +613,12 @@ impl EngineChildGuard {
 
     fn defuse(&mut self) {
         self.child.take();
+    }
+}
+
+fn defuse_engine_child(engine_guard: &mut Option<EngineChildGuard>) {
+    if let Some(guard) = engine_guard.as_mut() {
+        guard.defuse();
     }
 }
 

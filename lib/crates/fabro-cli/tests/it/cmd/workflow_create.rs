@@ -1,6 +1,9 @@
 use insta::assert_snapshot;
+use serde_json::Value;
 
 use fabro_test::{fabro_snapshot, test_context};
+
+use crate::support::fabro_json_snapshot;
 
 use super::support::setup_project_fixture;
 
@@ -154,4 +157,51 @@ fn workflow_create_errors_without_project_config() {
     ----- stderr -----
     error: No fabro.toml found in [TEMP_DIR] or any parent directory
     ");
+}
+
+#[test]
+fn workflow_create_json_uses_resolved_custom_root_paths() {
+    let context = test_context!();
+    let project_dir = context.temp_dir.join("project");
+    context.write_temp(
+        "project/fabro.toml",
+        "version = 1\n[fabro]\nroot = \"custom/fabro-data\"\n",
+    );
+
+    let output = context
+        .command()
+        .current_dir(&project_dir)
+        .args(["--json", "workflow", "create", "hello-world"])
+        .output()
+        .expect("command should run");
+
+    assert!(
+        output.status.success(),
+        "command failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let value: Value =
+        serde_json::from_slice(&output.stdout).expect("workflow create JSON should parse");
+    fabro_json_snapshot!(context, &value, @r#"
+    {
+      "name": "hello-world",
+      "created": [
+        "custom/fabro-data/workflows/hello-world/workflow.fabro",
+        "custom/fabro-data/workflows/hello-world/workflow.toml"
+      ]
+    }
+    "#);
+
+    assert!(
+        project_dir
+            .join("custom/fabro-data/workflows/hello-world/workflow.fabro")
+            .exists()
+    );
+    assert!(
+        project_dir
+            .join("custom/fabro-data/workflows/hello-world/workflow.toml")
+            .exists()
+    );
 }

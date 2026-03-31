@@ -3,7 +3,7 @@ use fabro_config::FabroSettingsExt;
 use fabro_util::terminal::Styles;
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 
-use crate::args::{GlobalArgs, RunCommands};
+use crate::args::{GlobalArgs, RunArgs, RunCommands};
 use crate::shared::print_json_pretty;
 use crate::store;
 use crate::user_config::{load_user_settings_with_globals, user_layer_with_globals};
@@ -31,10 +31,20 @@ pub(super) fn short_run_id(id: &str) -> &str {
     if id.len() > 12 { &id[..12] } else { id }
 }
 
+fn apply_json_defaults(args: &mut RunArgs, globals: &GlobalArgs) {
+    if globals.json {
+        args.auto_approve = true;
+    }
+}
+
 pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<()> {
     match cmd {
-        RunCommands::Run(args) => command::execute(args, globals).await,
-        RunCommands::Create(args) => {
+        RunCommands::Run(mut args) => {
+            apply_json_defaults(&mut args, globals);
+            command::execute(args, globals).await
+        }
+        RunCommands::Create(mut args) => {
+            apply_json_defaults(&mut args, globals);
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             let cli = user_layer_with_globals(globals)?;
             let (run_id, _run_dir) = create::create_run(&args, cli, styles, true)?;

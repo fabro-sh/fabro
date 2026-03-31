@@ -557,6 +557,7 @@ pub async fn run_prompt_via_server(
 
         let show_usage = args.usage;
         let mut output_usage: Option<Usage> = None;
+        let mut output_model = args.model.clone();
         let mut full_text = String::new();
 
         parse_sse_frames(response, |event_type, data| {
@@ -571,8 +572,13 @@ pub async fn run_prompt_via_server(
                                 let _ = io::stdout().flush();
                             }
                         }
-                        StreamEvent::Finish { usage, .. } => {
+                        StreamEvent::Finish {
+                            usage, response, ..
+                        } => {
                             output_usage = Some(usage);
+                            if output_model.is_none() {
+                                output_model = Some(response.model.clone());
+                            }
                         }
                         StreamEvent::Error { error, .. } => {
                             bail!("Server error: {error}");
@@ -587,7 +593,7 @@ pub async fn run_prompt_via_server(
         if json_output {
             let mut value = serde_json::Map::new();
             value.insert("response".to_string(), full_text.into());
-            if let Some(model) = args.model {
+            if let Some(model) = output_model {
                 value.insert("model".to_string(), model.into());
             }
             if let Some(usage) = output_usage {
