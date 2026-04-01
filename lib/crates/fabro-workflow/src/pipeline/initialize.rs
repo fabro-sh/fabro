@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use fabro_agent::Sandbox;
+use fabro_graphviz::graph;
 use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
 use fabro_llm::client::Client;
 use fabro_sandbox::{
@@ -259,23 +260,27 @@ async fn build_registry(
     spec: &LlmSpec,
     interviewer: Arc<dyn fabro_interview::Interviewer>,
     sandbox_env: &HashMap<String, String>,
-    emitter: &EventEmitter,
+    graph: &graph::Graph,
 ) -> Result<(Arc<HandlerRegistry>, Option<Client>, bool), FabroError> {
-    let build_dry_run = || Arc::new(default_registry(Arc::clone(&interviewer), || None));
+    let build_no_backend = || Arc::new(default_registry(Arc::clone(&interviewer), || None));
 
     if spec.dry_run {
-        return Ok((build_dry_run(), None, true));
+        return Ok((build_no_backend(), None, true));
     }
+
+    let graph_needs_llm = graph
+        .nodes
+        .values()
+        .any(|n| graph::is_llm_handler_type(n.handler_type()));
 
     match Client::from_env().await {
         Ok(client) if client.provider_names().is_empty() => {
-            emit_run_notice(
-                emitter,
-                RunNoticeLevel::Warn,
-                "dry_run_no_llm",
-                "No LLM providers configured. Running in dry-run mode.",
-            );
-            Ok((build_dry_run(), None, true))
+            if graph_needs_llm {
+                return Err(FabroError::Precondition(
+                    "No LLM providers configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY, or pass --dry-run to simulate.".to_string(),
+                ));
+            }
+            Ok((build_no_backend(), None, false))
         }
         Ok(client) => {
             let env = sandbox_env.clone();
@@ -293,13 +298,12 @@ async fn build_registry(
             Ok((registry, Some(client), false))
         }
         Err(e) => {
-            emit_run_notice(
-                emitter,
-                RunNoticeLevel::Warn,
-                "dry_run_llm_init_failed",
-                format!("Failed to initialize LLM client: {e}. Running in dry-run mode."),
-            );
-            Ok((build_dry_run(), None, true))
+            if graph_needs_llm {
+                return Err(FabroError::Precondition(format!(
+                    "Failed to initialize LLM client: {e}. Set ANTHROPIC_API_KEY or OPENAI_API_KEY, or pass --dry-run to simulate.",
+                )));
+            }
+            Ok((build_no_backend(), None, false))
         }
     }
 }
@@ -527,13 +531,7 @@ pub async fn initialize(
             // A caller-supplied registry owns execution behavior for its handlers.
             (registry, None, options.dry_run)
         } else {
-            build_registry(
-                &options.llm,
-                Arc::clone(&options.interviewer),
-                &env,
-                &options.emitter,
-            )
-            .await?
+            build_registry(&options.llm, Arc::clone(&options.interviewer), &env, &graph).await?
         };
     if effective_dry_run {
         options.dry_run = true;

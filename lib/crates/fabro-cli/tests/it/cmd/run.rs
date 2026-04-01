@@ -521,17 +521,6 @@ fn json_run_implies_auto_approve_for_human_gates() {
         "id": "[EVENT_ID]",
         "ts": "[TIMESTAMP]",
         "run_id": "[ULID]",
-        "event": "run.notice",
-        "properties": {
-          "level": "warn",
-          "code": "dry_run_no_llm",
-          "message": "No LLM providers configured. Running in dry-run mode."
-        }
-      },
-      {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "run.started",
         "properties": {
           "name": "HumanGate",
@@ -568,7 +557,7 @@ fn json_run_implies_auto_approve_for_human_gates() {
           "preferred_label": null,
           "suggested_next_ids": [],
           "usage": null,
-          "notes": "[Simulated] start",
+          "notes": null,
           "files_touched": []
         }
       },
@@ -630,7 +619,7 @@ fn json_run_implies_auto_approve_for_human_gates() {
             "ship"
           ],
           "usage": null,
-          "notes": "[Simulated] approve",
+          "notes": null,
           "files_touched": []
         }
       },
@@ -695,7 +684,7 @@ fn json_run_implies_auto_approve_for_human_gates() {
           "preferred_label": null,
           "suggested_next_ids": [],
           "usage": null,
-          "notes": "[Simulated] Command skipped: echo shipped",
+          "notes": "Script completed: echo shipped",
           "files_touched": []
         }
       },
