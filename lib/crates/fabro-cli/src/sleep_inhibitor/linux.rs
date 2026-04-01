@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command};
 use tracing::{debug, warn};

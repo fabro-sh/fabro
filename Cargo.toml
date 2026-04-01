@@ -71,7 +71,7 @@ slatedb = "0.11.2"
 object_store = "0.12.5"
 
 [workspace.lints.rust]
-unsafe_code = "warn"
+unsafe_code = "deny"
 unreachable_pub = "warn"
 
 [workspace.lints.clippy]
