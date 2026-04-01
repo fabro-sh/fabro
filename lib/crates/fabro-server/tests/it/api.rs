@@ -14,6 +14,7 @@ mod mtls_e2e {
     use super::api;
     use std::path::Path;
     use std::process::{Command, Stdio};
+    use std::sync::Arc;
 
     use fabro_server::jwt_auth::{AuthMode, AuthStrategy};
     use fabro_server::server::{build_router, create_app_state};
