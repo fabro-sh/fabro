@@ -5,6 +5,7 @@ mod conditional_branching;
 mod dry_run_examples;
 mod full_stack;
 mod human_gate;
+mod real_cli;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;

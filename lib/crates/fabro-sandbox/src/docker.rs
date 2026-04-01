@@ -455,8 +455,8 @@ impl Sandbox for DockerSandbox {
             return Ok(());
         };
 
-        // Stop with 5-second grace period; ignore "not running" errors
-        let stop_opts = StopContainerOptions { t: 5 };
+        // Stop with 1-second grace period; ignore "not running" errors
+        let stop_opts = StopContainerOptions { t: 1 };
         let _ = self
             .docker
             .stop_container(&container_id, Some(stop_opts))
@@ -877,7 +877,7 @@ mod tests {
         env.initialize().await.unwrap();
 
         let result = env
-            .exec_command("sleep 60", 1000, None, None, None)
+            .exec_command("sleep 2", 1000, None, None, None)
             .await
             .unwrap();
         assert!(result.timed_out);
