@@ -1,0 +1,30 @@
+[package]
+name = "twin-github"
+edition.workspace = true
+version.workspace = true
+publish = false
+license.workspace = true
+description = "Fake GitHub API server for local black-box testing"
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+axum = { workspace = true }
+base64 = { workspace = true }
+chrono = { workspace = true }
+jsonwebtoken = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tempfile = "3"
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+reqwest = { workspace = true }
+tokio = { workspace = true, features = ["test-util", "macros"] }

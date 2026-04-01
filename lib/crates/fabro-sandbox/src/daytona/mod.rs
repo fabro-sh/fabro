@@ -508,26 +508,29 @@ impl Sandbox for DaytonaSandbox {
                                     });
                                     err
                                 })?;
-                            fabro_github::resolve_clone_credentials(creds, &owner, &repo)
-                                .await
-                                .map_err(|e| {
-                                    let err = format!(
-                                        "Failed to get GitHub App credentials for clone: {e}"
-                                    );
-                                    self.emit(SandboxEvent::GitCloneFailed {
-                                        url: url.clone(),
-                                        error: err.clone(),
-                                    });
-                                    let duration_ms =
-                                        u64::try_from(init_start.elapsed().as_millis())
-                                            .unwrap_or(u64::MAX);
-                                    self.emit(SandboxEvent::InitializeFailed {
-                                        provider: "daytona".into(),
-                                        error: err.clone(),
-                                        duration_ms,
-                                    });
-                                    err
-                                })?
+                            fabro_github::resolve_clone_credentials(
+                                creds,
+                                &owner,
+                                &repo,
+                                &fabro_github::github_api_base_url(),
+                            )
+                            .await
+                            .map_err(|e| {
+                                let err =
+                                    format!("Failed to get GitHub App credentials for clone: {e}");
+                                self.emit(SandboxEvent::GitCloneFailed {
+                                    url: url.clone(),
+                                    error: err.clone(),
+                                });
+                                let duration_ms = u64::try_from(init_start.elapsed().as_millis())
+                                    .unwrap_or(u64::MAX);
+                                self.emit(SandboxEvent::InitializeFailed {
+                                    provider: "daytona".into(),
+                                    error: err.clone(),
+                                    duration_ms,
+                                });
+                                err
+                            })?
                         }
                         None => (None, None),
                     };
@@ -789,9 +792,13 @@ impl Sandbox for DaytonaSandbox {
             return Ok(());
         };
 
-        let auth_url = fabro_github::resolve_authenticated_url(creds, origin_url)
-            .await
-            .map_err(|e| format!("Failed to refresh GitHub App token: {e}"))?;
+        let auth_url = fabro_github::resolve_authenticated_url(
+            creds,
+            origin_url,
+            &fabro_github::github_api_base_url(),
+        )
+        .await
+        .map_err(|e| format!("Failed to refresh GitHub App token: {e}"))?;
 
         let cmd = format!(
             "git -c maintenance.auto=0 remote set-url origin {}",

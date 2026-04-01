@@ -10,4 +10,5 @@ __pycache__
 .ai/plans
 .ai/comments
 .ai/tmp
+.worktrees/
 **/*.pending-snap

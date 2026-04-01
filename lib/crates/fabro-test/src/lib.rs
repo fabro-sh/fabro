@@ -489,12 +489,31 @@ impl TestContext {
 use tokio::net::TcpListener as TokioTcpListener;
 use tokio::sync::OnceCell;
 use tokio::time;
+pub use twin_github::AppState as GitHubAppState;
+pub use twin_github::state::AppConfig as GitHubAppConfig;
 use twin_openai::config::Config as TwinConfig;
 
 /// A shared twin-openai server instance.
 pub struct TwinOpenAi {
     /// Base URL including `/v1`, e.g. `http://127.0.0.1:PORT/v1`.
     pub base_url: String,
+}
+
+pub struct TwinGitHub {
+    pub base_url: String,
+    server: twin_github::TestServer,
+}
+
+impl TwinGitHub {
+    pub async fn start(state: twin_github::AppState) -> Self {
+        let server = twin_github::TestServer::start(state).await;
+        let base_url = server.url().to_string();
+        Self { base_url, server }
+    }
+
+    pub async fn shutdown(self) {
+        self.server.shutdown().await;
+    }
 }
 
 static TWIN_OPENAI: OnceCell<TwinOpenAi> = OnceCell::const_new();

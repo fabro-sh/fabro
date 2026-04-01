@@ -21,3 +21,4 @@ reqwest = { workspace = true }
 tempfile = "3"
 tokio = { workspace = true }
 twin-openai = { workspace = true }
+twin-github = { workspace = true }

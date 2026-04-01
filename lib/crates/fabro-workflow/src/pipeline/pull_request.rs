@@ -485,6 +485,7 @@ pub async fn maybe_open_pull_request(
         &title,
         &body,
         draft,
+        &github_app::github_api_base_url(),
     )
     .await?;
 
@@ -496,8 +497,15 @@ pub async fn maybe_open_pull_request(
             MergeStrategy::Merge => github_app::AutoMergeMethod::Merge,
             MergeStrategy::Rebase => github_app::AutoMergeMethod::Rebase,
         };
-        match github_app::enable_auto_merge(creds, &owner, &repo, &created.node_id, merge_method)
-            .await
+        match github_app::enable_auto_merge(
+            creds,
+            &owner,
+            &repo,
+            &created.node_id,
+            merge_method,
+            &github_app::github_api_base_url(),
+        )
+        .await
         {
             Ok(()) => {
                 info!(pr_number = created.number, "Auto-merge enabled");
