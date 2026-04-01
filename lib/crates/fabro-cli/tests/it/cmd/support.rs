@@ -288,6 +288,66 @@ worktree_mode = "never"
     WorkspaceRunSetup { run, workspace_dir }
 }
 
+pub(crate) fn setup_failed_run(context: &TestContext) -> RunSetup {
+    let workspace_dir = context.temp_dir.join("failed-run");
+    std::fs::create_dir_all(&workspace_dir)
+        .unwrap_or_else(|err| panic!("failed to create {}: {err}", workspace_dir.display()));
+
+    write_text_file(
+        &workspace_dir.join("fail.fabro"),
+        r#"digraph Fail {
+  graph [goal="Always fail", default_max_retries=0]
+  start [shape=Mdiamond]
+  exit [shape=Msquare]
+  boom [shape=parallelogram, script="exit 1", goal_gate=true]
+  start -> boom -> exit
+}
+"#,
+    );
+    write_text_file(
+        &workspace_dir.join("run.toml"),
+        r#"version = 1
+graph = "fail.fabro"
+goal = "Always fail"
+
+[sandbox]
+provider = "local"
+
+[sandbox.local]
+worktree_mode = "never"
+"#,
+    );
+
+    let mut cmd = context.command();
+    cmd.current_dir(&workspace_dir);
+    cmd.timeout(COMMAND_TIMEOUT);
+    cmd.env("OPENAI_API_KEY", "test");
+    cmd.args([
+        "run",
+        "--auto-approve",
+        "--no-retro",
+        "--sandbox",
+        "local",
+        "--provider",
+        "openai",
+        "run.toml",
+    ]);
+    // The workflow is expected to fail (script exits 1), but the CLI may still
+    // exit 0.  We only care that conclusion.json records a non-success status.
+    let _output = cmd.output().expect("command should execute");
+
+    let run = only_run(context);
+    let conclusion = read_json(&run.run_dir.join("conclusion.json"));
+    let status = conclusion["status"]
+        .as_str()
+        .expect("conclusion.json should have a status field");
+    assert_eq!(
+        status, "fail",
+        "setup_failed_run should produce a failed conclusion"
+    );
+    run
+}
+
 fn run_local_workflow(context: &TestContext, workspace_dir: &Path, workflow: &str) -> RunSetup {
     let mut cmd = context.command();
     cmd.current_dir(workspace_dir);

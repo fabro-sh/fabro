@@ -75,6 +75,9 @@ async fn create_from(
 
     match conclusion.status {
         StageStatus::Success | StageStatus::PartialSuccess => {}
+        status if args.force => {
+            tracing::warn!("Run status is '{status}', proceeding because --force was specified");
+        }
         status => bail!("Run status is '{status}', expected success or partial_success"),
     }
 

@@ -585,6 +585,9 @@ pub(crate) struct PrCreateArgs {
     /// LLM model for generating PR description
     #[arg(long)]
     pub(crate) model: Option<String>,
+    /// Create PR even if the run status is not success/partial_success
+    #[arg(short, long)]
+    pub(crate) force: bool,
 }
 
 #[derive(Args)]
