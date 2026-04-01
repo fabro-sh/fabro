@@ -40,6 +40,7 @@ thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+object_store.workspace = true
 ulid.workspace = true
 uuid.workspace = true
 rand.workspace = true
@@ -64,6 +65,7 @@ base64.workspace = true
 toml.workspace = true
 fabro-mcp = { path = "../fabro-mcp" }
 tokio = { workspace = true, features = ["test-util", "macros"] }
+object_store.workspace = true
 tempfile = "3"
 assert_cmd = "2"
 predicates = "3"

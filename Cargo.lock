@@ -2041,6 +2041,7 @@ dependencies = [
  "hex",
  "md5",
  "mime_guess",
+ "object_store",
  "predicates",
  "rand 0.8.5",
  "regex",
