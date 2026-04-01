@@ -5817,6 +5817,7 @@ async fn fidelity_resume_preserves_context_values_across_checkpoint() {
 // ===========================================================================
 
 mod real_llm {
+    use std::collections::HashMap;
     use std::sync::Arc;
 
     use async_trait::async_trait;
@@ -5828,11 +5829,13 @@ mod real_llm {
     use fabro_workflow::handler::agent::{AgentHandler, CodergenBackend, CodergenResult};
 
     use fabro_llm::client::Client;
+    use fabro_llm::providers::OpenAiAdapter;
     use fabro_llm::types::{Message, Request};
 
     struct LlmCodergenBackend {
         client: Arc<Client>,
         model: String,
+        provider: String,
     }
 
     #[async_trait]
@@ -5867,7 +5870,7 @@ mod real_llm {
             let request = Request {
                 model: self.model.clone(),
                 messages: vec![Message::user(prompt)],
-                provider: Some("anthropic".to_string()),
+                provider: Some(self.provider.clone()),
                 tools: None,
                 tool_choice: None,
                 response_format: None,
@@ -5894,18 +5897,50 @@ mod real_llm {
         }
     }
 
+    fn test_llm_model() -> &'static str {
+        if fabro_test::TestMode::from_env().is_twin() {
+            "gpt-5.4-mini"
+        } else {
+            "claude-haiku-4-5"
+        }
+    }
+
+    fn test_llm_provider() -> &'static str {
+        if fabro_test::TestMode::from_env().is_twin() {
+            "openai"
+        } else {
+            "anthropic"
+        }
+    }
+
     async fn make_llm_client() -> Option<Arc<Client>> {
+        if fabro_test::TestMode::from_env().is_twin() {
+            let (base_url, api_key) = fabro_test::e2e_openai!();
+            let adapter: Arc<dyn fabro_llm::provider::ProviderAdapter> =
+                Arc::new(OpenAiAdapter::new(api_key).with_base_url(base_url));
+            let mut providers: HashMap<String, Arc<dyn fabro_llm::provider::ProviderAdapter>> =
+                HashMap::new();
+            providers.insert("openai".to_string(), adapter);
+            return Some(Arc::new(Client::new(
+                providers,
+                Some("openai".to_string()),
+                Vec::new(),
+            )));
+        }
+
         fabro_test::require_env("ANTHROPIC_API_KEY")?;
-        let client = Client::from_env()
-            .await
-            .expect("unified-llm client should initialize from env");
-        Some(Arc::new(client))
+        Some(Arc::new(
+            Client::from_env()
+                .await
+                .expect("unified-llm client should initialize from env"),
+        ))
     }
 
     fn make_llm_backend(client: Arc<Client>) -> Box<LlmCodergenBackend> {
         Box::new(LlmCodergenBackend {
             client,
-            model: "claude-haiku-4-5".to_string(),
+            model: test_llm_model().to_string(),
+            provider: test_llm_provider().to_string(),
         })
     }
 
@@ -5922,7 +5957,7 @@ mod real_llm {
     use fabro_workflow::run_options::RunOptions;
     use fabro_workflow::test_support::WorkflowRunner;
 
-    #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
+    #[fabro_macros::e2e_test(twin, live("ANTHROPIC_API_KEY"))]
     async fn real_llm_linear_pipeline() {
         let client = make_llm_client().await.unwrap();
 
@@ -6031,7 +6066,7 @@ mod real_llm {
         );
     }
 
-    #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
+    #[fabro_macros::e2e_test(twin, live("ANTHROPIC_API_KEY"))]
     async fn real_llm_two_stage_pipeline() {
         let client = make_llm_client().await.unwrap();
 
@@ -6122,7 +6157,7 @@ mod real_llm {
         assert_eq!(last_stage, Some("review"));
     }
 
-    #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
+    #[fabro_macros::e2e_test(twin, live("ANTHROPIC_API_KEY"))]
     async fn real_llm_human_gate_auto_approve() {
         let client = make_llm_client().await.unwrap();
 
@@ -6265,7 +6300,7 @@ mod real_llm {
         );
     }
 
-    #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
+    #[fabro_macros::e2e_test(twin, live("ANTHROPIC_API_KEY"))]
     async fn real_llm_one_shot_pipeline() {
         let client = make_llm_client().await.unwrap();
 
@@ -6301,7 +6336,7 @@ mod real_llm {
         );
         classify.attrs.insert(
             "model".to_string(),
-            AttrValue::String("claude-haiku-4-5".to_string()),
+            AttrValue::String(test_llm_model().to_string()),
         );
         graph.nodes.insert("classify".to_string(), classify);
 
@@ -7217,6 +7252,62 @@ fn simple_linear_dot() -> &'static str {
     }"#
 }
 
+struct EnvVarGuard {
+    saved: Vec<(&'static str, Option<String>)>,
+}
+
+impl EnvVarGuard {
+    fn new() -> Self {
+        Self { saved: Vec::new() }
+    }
+
+    fn set(&mut self, name: &'static str, value: Option<String>) {
+        self.saved.push((name, std::env::var(name).ok()));
+        match value {
+            Some(value) => unsafe { std::env::set_var(name, value) },
+            None => unsafe { std::env::remove_var(name) },
+        }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        while let Some((name, value)) = self.saved.pop() {
+            match value {
+                Some(value) => unsafe { std::env::set_var(name, value) },
+                None => unsafe { std::env::remove_var(name) },
+            }
+        }
+    }
+}
+
+fn test_hook_model() -> &'static str {
+    if fabro_test::TestMode::from_env().is_twin() {
+        "gpt-5.4-mini"
+    } else {
+        "haiku"
+    }
+}
+
+async fn configure_twin_hook_env(scenarios: Vec<fabro_test::TwinScenario>) -> Option<EnvVarGuard> {
+    if !fabro_test::TestMode::from_env().is_twin() {
+        return None;
+    }
+
+    let (base_url, api_key) = fabro_test::e2e_openai!();
+    let mut batch = fabro_test::TwinScenarios::new(api_key.clone());
+    for scenario in scenarios {
+        batch = batch.scenario(scenario);
+    }
+    batch.load(fabro_test::twin_openai().await).await;
+
+    let mut guard = EnvVarGuard::new();
+    guard.set("ANTHROPIC_API_KEY", None);
+    guard.set("OPENAI_API_KEY", Some(api_key));
+    guard.set("OPENAI_BASE_URL", Some(base_url));
+    Some(guard)
+}
+
 fn two_step_dot() -> &'static str {
     r#"digraph HookTest {
         graph [goal="Test hooks"]
@@ -8078,15 +8169,19 @@ timeout_ms = 120000
 
 // --- Prompt/Agent hook E2E with real LLM ---
 
-#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
+#[fabro_macros::e2e_test(twin, live("ANTHROPIC_API_KEY"))]
 async fn hook_prompt_proceed_allows_run() {
+    let _guard = configure_twin_hook_env(vec![
+        fabro_test::TwinScenario::responses("gpt-5.4-mini").text(r#"{"ok":true}"#),
+    ])
+    .await;
     let hooks = vec![fabro_hooks::HookDefinition {
         name: Some("prompt-proceed".into()),
         event: fabro_hooks::HookEvent::RunStart,
         command: None,
         hook_type: Some(fabro_hooks::HookType::Prompt {
             prompt: "A workflow is starting. Always approve. Respond with {\"ok\": true}.".into(),
-            model: Some("haiku".into()),
+            model: Some(test_hook_model().into()),
         }),
         matcher: None,
         blocking: None,
@@ -8102,8 +8197,13 @@ async fn hook_prompt_proceed_allows_run() {
     assert_eq!(outcome.status, StageStatus::Success);
 }
 
-#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
+#[fabro_macros::e2e_test(twin, live("ANTHROPIC_API_KEY"))]
 async fn hook_prompt_block_prevents_run() {
+    let _guard = configure_twin_hook_env(vec![
+        fabro_test::TwinScenario::responses("gpt-5.4-mini")
+            .text(r#"{"ok":false,"reason":"math check failed"}"#),
+    ])
+    .await;
     // Use a factual question that evaluates to false: "Is 2+2=5?"
     let hooks = vec![fabro_hooks::HookDefinition {
         name: Some("prompt-block".into()),
@@ -8111,7 +8211,7 @@ async fn hook_prompt_block_prevents_run() {
         command: None,
         hook_type: Some(fabro_hooks::HookType::Prompt {
             prompt: "Check: is 2+2 equal to 5? If the statement is true, respond {\"ok\": true}. If false, respond {\"ok\": false, \"reason\": \"math check failed\"}.".into(),
-            model: Some("haiku".into()),
+            model: Some(test_hook_model().into()),
         }),
         matcher: None,
         blocking: None,
@@ -8130,15 +8230,19 @@ async fn hook_prompt_block_prevents_run() {
     );
 }
 
-#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
+#[fabro_macros::e2e_test(twin, live("ANTHROPIC_API_KEY"))]
 async fn hook_agent_proceed_allows_run() {
+    let _guard = configure_twin_hook_env(vec![
+        fabro_test::TwinScenario::responses("gpt-5.4-mini").text(r#"{"ok":true}"#),
+    ])
+    .await;
     let hooks = vec![fabro_hooks::HookDefinition {
         name: Some("agent-proceed".into()),
         event: fabro_hooks::HookEvent::RunStart,
         command: None,
         hook_type: Some(fabro_hooks::HookType::Agent {
             prompt: "A workflow is starting. Always approve. Respond with {\"ok\": true}. Do not use any tools.".into(),
-            model: Some("haiku".into()),
+            model: Some(test_hook_model().into()),
             max_tool_rounds: Some(1),
         }),
         matcher: None,
@@ -8155,11 +8259,18 @@ async fn hook_agent_proceed_allows_run() {
     assert_eq!(outcome.status, StageStatus::Success);
 }
 
-#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
+#[fabro_macros::e2e_test(twin, live("ANTHROPIC_API_KEY"))]
 async fn hook_agent_with_tool_use() {
     let dir = tempfile::tempdir().unwrap();
     let marker = dir.path().join("hook_check.txt");
     std::fs::write(&marker, "READY").unwrap();
+    let _guard = configure_twin_hook_env(vec![
+        fabro_test::TwinScenario::responses("gpt-5.4-mini").tool_call(
+            fabro_test::TwinToolCall::read_file(marker.display().to_string()),
+        ),
+        fabro_test::TwinScenario::responses("gpt-5.4-mini").text(r#"{"ok":true}"#),
+    ])
+    .await;
 
     let hooks = vec![fabro_hooks::HookDefinition {
         name: Some("agent-tools".into()),
@@ -8170,7 +8281,7 @@ async fn hook_agent_with_tool_use() {
                 "Read the file at {} using the read_file tool. If it contains 'READY', respond with {{\"ok\": true}}. Otherwise respond with {{\"ok\": false, \"reason\": \"not ready\"}}.",
                 marker.display()
             ),
-            model: Some("haiku".into()),
+            model: Some(test_hook_model().into()),
             max_tool_rounds: Some(5),
         }),
         matcher: None,
@@ -8228,7 +8339,7 @@ async fn hooks_do_not_duplicate_workflow_events() {
 // E2E test with real LLM
 // ---------------------------------------------------------------------------
 
-#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
+#[fabro_macros::e2e_test(twin, live("ANTHROPIC_API_KEY"))]
 async fn arc_e2e_with_real_llm() {
     let dir = tempfile::tempdir().unwrap();
     let dir_path = dir.path().to_str().unwrap().to_string();
@@ -8252,15 +8363,37 @@ async fn arc_e2e_with_real_llm() {
     validate_or_raise(&graph, &[]).expect("validation should pass");
 
     let interviewer: Arc<dyn Interviewer> = Arc::new(AutoApproveInterviewer);
-    let model = "claude-haiku-4-5".to_string();
+    let (_guard, model, provider) = if fabro_test::TestMode::from_env().is_twin() {
+        let (base_url, api_key) = fabro_test::e2e_openai!();
+        fabro_test::TwinScenarios::new(api_key.clone())
+            .scenario(
+                fabro_test::TwinScenario::responses("gpt-5.4-mini")
+                    .input_contains(&format!(
+                        "Create a file called hello.txt in {dir_path} containing exactly 'Hello from LLM'. Do not output anything else."
+                    ))
+                    .tool_call(fabro_test::TwinToolCall::write_file(
+                        format!("{dir_path}/hello.txt"),
+                        "Hello from LLM",
+                    ))
+                    .text("Done."),
+            )
+            .load(fabro_test::twin_openai().await)
+            .await;
+
+        let mut guard = EnvVarGuard::new();
+        guard.set("ANTHROPIC_API_KEY", None);
+        guard.set("OPENAI_API_KEY", Some(api_key));
+        guard.set("OPENAI_BASE_URL", Some(base_url));
+        (Some(guard), "gpt-5.4-mini".to_string(), Provider::OpenAi)
+    } else {
+        (None, "claude-haiku-4-5".to_string(), Provider::Anthropic)
+    };
 
     let registry = default_registry(interviewer, move || {
-        Some(Box::new(AgentApiBackend::new(
-            model.clone(),
-            Provider::Anthropic,
-            Vec::new(),
-        ))
-            as Box<dyn fabro_workflow::handler::agent::CodergenBackend>)
+        Some(
+            Box::new(AgentApiBackend::new(model.clone(), provider, Vec::new()))
+                as Box<dyn fabro_workflow::handler::agent::CodergenBackend>,
+        )
     });
 
     let run_dir = tempfile::tempdir().unwrap();

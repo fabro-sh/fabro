@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::Arc;
@@ -8,9 +9,17 @@ use fabro_agent::{
     SessionConfig, SubAgentManager, WebFetchSummarizer,
 };
 use fabro_llm::client::Client;
-use fabro_llm::provider::Provider;
+use fabro_llm::provider::{Provider, ProviderAdapter};
+use fabro_llm::providers::OpenAiAdapter;
 use fabro_model::ModelRef;
+use fabro_test::{TwinScenario, TwinScenarios, TwinToolCall, twin_openai};
 use tokio::sync::Mutex as AsyncMutex;
+
+#[derive(Clone)]
+struct OpenAiTwinConfig {
+    base_url: String,
+    api_key: String,
+}
 
 fn summarizer_model_id(provider: Provider) -> ModelRef {
     match provider {
@@ -57,8 +66,13 @@ fn build_profile(provider: Provider, model: &str, client: &Client) -> Box<dyn Ag
     }
 }
 
-async fn make_session(provider: Provider, model: &str, cwd: &Path) -> Session {
-    let client = Client::from_env().await.expect("Client::from_env failed");
+async fn make_session(
+    provider: Provider,
+    model: &str,
+    cwd: &Path,
+    twin: Option<OpenAiTwinConfig>,
+) -> Session {
+    let client = make_client(provider, twin.as_ref()).await;
     let mut profile = build_profile(provider, model, &client);
     let env = Arc::new(LocalSandbox::new(cwd.to_path_buf()));
 
@@ -115,11 +129,28 @@ async fn make_session_with_config(
     model: &str,
     cwd: &Path,
     config: SessionConfig,
+    twin: Option<OpenAiTwinConfig>,
 ) -> Session {
-    let client = Client::from_env().await.expect("Client::from_env failed");
+    let client = make_client(provider, twin.as_ref()).await;
     let profile: Arc<dyn AgentProfile> = Arc::from(build_profile(provider, model, &client));
     let env = Arc::new(LocalSandbox::new(cwd.to_path_buf()));
     Session::new(client, profile, env, config, None)
+}
+
+async fn make_client(provider: Provider, twin: Option<&OpenAiTwinConfig>) -> Client {
+    if provider == Provider::OpenAi && fabro_test::TestMode::from_env().is_twin() {
+        return make_twin_client(twin.expect("openai twin config should be provided")).await;
+    }
+
+    Client::from_env().await.expect("Client::from_env failed")
+}
+
+async fn make_twin_client(twin: &OpenAiTwinConfig) -> Client {
+    let adapter: Arc<dyn ProviderAdapter> =
+        Arc::new(OpenAiAdapter::new(twin.api_key.clone()).with_base_url(twin.base_url.clone()));
+    let mut providers: HashMap<String, Arc<dyn ProviderAdapter>> = HashMap::new();
+    providers.insert("openai".to_string(), adapter);
+    Client::new(providers, Some("openai".to_string()), Vec::new())
 }
 
 macro_rules! provider_test {
@@ -128,7 +159,32 @@ macro_rules! provider_test {
             #[fabro_macros::e2e_test($(live($key)),+)]
             async fn [<$prefix _ $scenario>]() {
                 let tmp = tempfile::tempdir().expect("failed to create tempdir");
-                let mut session = make_session($provider, $model, tmp.path()).await;
+                let mut session = make_session($provider, $model, tmp.path(), None).await;
+                session.initialize().await;
+                [<scenario_ $scenario>](&mut session, tmp.path()).await;
+            }
+        }
+    };
+}
+
+macro_rules! openai_twin_provider_test {
+    ($scenario:ident) => {
+        paste::paste! {
+            #[fabro_macros::e2e_test(twin, live("OPENAI_API_KEY"))]
+            async fn [<openai_twin_ $scenario>]() {
+                let tmp = tempfile::tempdir().expect("failed to create tempdir");
+                let (base_url, api_key) = fabro_test::e2e_openai!();
+                let twin = OpenAiTwinConfig { base_url, api_key };
+                if fabro_test::TestMode::from_env().is_twin() {
+                    load_openai_twin_scenario(stringify!($scenario), &twin.api_key, tmp.path())
+                        .await;
+                }
+                let mut session = make_session(
+                    Provider::OpenAi,
+                    "gpt-5.4-mini",
+                    tmp.path(),
+                    Some(twin),
+                ).await;
                 session.initialize().await;
                 [<scenario_ $scenario>](&mut session, tmp.path()).await;
             }
@@ -144,13 +200,6 @@ macro_rules! provider_tests {
             "claude-haiku-4-5",
             anthropic,
             keys = ["ANTHROPIC_API_KEY"]
-        );
-        provider_test!(
-            $scenario,
-            Provider::OpenAi,
-            "gpt-5.4-mini",
-            openai,
-            keys = ["OPENAI_API_KEY"]
         );
         provider_test!(
             $scenario,
@@ -193,16 +242,26 @@ macro_rules! provider_tests {
 }
 
 provider_tests!(simple_file_creation);
+openai_twin_provider_test!(simple_file_creation);
 provider_tests!(read_and_edit_file);
+openai_twin_provider_test!(read_and_edit_file);
 provider_tests!(multi_file_edit);
+openai_twin_provider_test!(multi_file_edit);
 provider_tests!(shell_execution);
+openai_twin_provider_test!(shell_execution);
 provider_tests!(shell_timeout);
+openai_twin_provider_test!(shell_timeout);
 provider_tests!(grep_and_glob);
+openai_twin_provider_test!(grep_and_glob);
 provider_tests!(tool_output_truncation);
+openai_twin_provider_test!(tool_output_truncation);
 provider_tests!(parallel_tool_calls);
+openai_twin_provider_test!(parallel_tool_calls);
 provider_tests!(steering_before_input);
+openai_twin_provider_test!(steering_before_input);
 provider_tests!(steering_mid_task);
 provider_tests!(follow_up);
+openai_twin_provider_test!(follow_up);
 provider_tests!(subagent_spawn);
 
 provider_test!(
@@ -316,6 +375,7 @@ provider_test!(
 // - loop_detection: needs custom config, tested separately below.
 
 provider_tests!(error_recovery);
+openai_twin_provider_test!(error_recovery);
 
 // gpt-5-mini is too weak to reliably apply precise file edits (uses apply_patch, not edit_file).
 macro_rules! non_openai_provider_tests {
@@ -595,7 +655,8 @@ macro_rules! reasoning_effort_tests {
                 reasoning_effort: Some(fabro_llm::types::ReasoningEffort::Low),
                 ..SessionConfig::default()
             };
-            let mut session = make_session_with_config($provider, $model, tmp.path(), config).await;
+            let mut session =
+                make_session_with_config($provider, $model, tmp.path(), config, None).await;
             session.initialize().await;
             session
                 .process_input("Say hello")
@@ -672,7 +733,8 @@ macro_rules! loop_detection_tests {
                 loop_detection_window: 3,
                 ..SessionConfig::default()
             };
-            let mut session = make_session_with_config($provider, $model, tmp.path(), config).await;
+            let mut session =
+                make_session_with_config($provider, $model, tmp.path(), config, None).await;
             session.initialize().await;
             session
                 .process_input("Repeatedly read the file /dev/null")
@@ -726,6 +788,126 @@ loop_detection_tests!(
     inception_loop_detection,
     keys = ["INCEPTION_API_KEY"]
 );
+
+async fn load_openai_twin_scenario(name: &str, namespace: &str, cwd: &Path) {
+    let scenarios = match name {
+        "simple_file_creation" => TwinScenarios::new(namespace.to_string()).scenario(
+            TwinScenario::responses("gpt-5.4-mini")
+                .input_contains("Create a file called hello.txt containing 'Hello'")
+                .tool_call(TwinToolCall::write_file("hello.txt", "Hello"))
+                .text("Done."),
+        ),
+        "read_and_edit_file" => TwinScenarios::new(namespace.to_string())
+            .scenario(
+                TwinScenario::responses("gpt-5.4-mini")
+                    .input_contains("Read data.txt and replace its content with 'new content'")
+                    .tool_call(TwinToolCall::read_file("data.txt")),
+            )
+            .scenario(
+                TwinScenario::responses("gpt-5.4-mini")
+                    .tool_call(TwinToolCall::write_file("data.txt", "new content"))
+                    .text("Done."),
+            ),
+        "multi_file_edit" => TwinScenarios::new(namespace.to_string())
+            .scenario(
+                TwinScenario::responses("gpt-5.4-mini")
+                    .input_contains(
+                        "Read a.txt and b.txt, then replace the content of a.txt with 'AAA' and b.txt with 'BBB'",
+                    )
+                    .tool_calls(vec![
+                        TwinToolCall::read_file("a.txt"),
+                        TwinToolCall::read_file("b.txt"),
+                    ]),
+            )
+            .scenario(
+                TwinScenario::responses("gpt-5.4-mini")
+                    .tool_calls(vec![
+                        TwinToolCall::write_file("a.txt", "AAA"),
+                        TwinToolCall::write_file("b.txt", "BBB"),
+                    ])
+                    .text("Done."),
+            ),
+        "shell_execution" => TwinScenarios::new(namespace.to_string()).scenario(
+            TwinScenario::responses("gpt-5.4-mini")
+                .input_contains(
+                    "Run the command `echo hello_from_shell` in the shell and tell me what it printed",
+                )
+                .tool_call(TwinToolCall::shell("echo hello_from_shell"))
+                .text("It printed hello_from_shell."),
+        ),
+        "shell_timeout" => TwinScenarios::new(namespace.to_string()).scenario(
+            TwinScenario::responses("gpt-5.4-mini")
+                .input_contains("Run the command `sleep 999` with a 1-second timeout")
+                .tool_call(TwinToolCall::shell_with_timeout("sleep 999", 1000))
+                .text("The command timed out."),
+        ),
+        "grep_and_glob" => TwinScenarios::new(namespace.to_string())
+            .scenario(
+                TwinScenario::responses("gpt-5.4-mini")
+                    .input_contains(
+                        "Search for files containing 'needle_pattern_xyz' and tell me which file has it",
+                    )
+                    .tool_calls(vec![
+                        TwinToolCall::glob_pattern("*.txt", cwd.display().to_string()),
+                        TwinToolCall::grep_pattern("needle_pattern_xyz", "."),
+                    ]),
+            )
+            .scenario(
+                TwinScenario::responses("gpt-5.4-mini")
+                    .text("target.txt contains needle_pattern_xyz."),
+            ),
+        "tool_output_truncation" => TwinScenarios::new(namespace.to_string()).scenario(
+            TwinScenario::responses("gpt-5.4-mini")
+                .input_contains("Read the file big.txt and tell me how many lines it has")
+                .tool_call(TwinToolCall::read_file("big.txt"))
+                .text("The file has 10000 lines."),
+        ),
+        "parallel_tool_calls" => TwinScenarios::new(namespace.to_string()).scenario(
+            TwinScenario::responses("gpt-5.4-mini")
+                .input_contains("Read one.txt, two.txt, and three.txt and tell me what each contains")
+                .tool_calls(vec![
+                    TwinToolCall::read_file("one.txt"),
+                    TwinToolCall::read_file("two.txt"),
+                    TwinToolCall::read_file("three.txt"),
+                ])
+                .text("one: content_one, two: content_two, three: content_three"),
+        ),
+        "steering_before_input" => TwinScenarios::new(namespace.to_string()).scenario(
+            TwinScenario::responses("gpt-5.4-mini")
+                .input_contains("Count from 1 to 100, one number per line")
+                .text("DONE"),
+        ),
+        "follow_up" => TwinScenarios::new(namespace.to_string())
+            .scenario(
+                TwinScenario::responses("gpt-5.4-mini")
+                    .input_contains("Create a file called first.txt containing 'first'")
+                    .tool_call(TwinToolCall::write_file("first.txt", "first"))
+                    .text("Created first.txt."),
+            )
+            .scenario(
+                TwinScenario::responses("gpt-5.4-mini")
+                    .input_contains("Create a file called second.txt containing 'second'")
+                    .tool_call(TwinToolCall::write_file("second.txt", "second"))
+                    .text("Created second.txt."),
+            ),
+        "error_recovery" => TwinScenarios::new(namespace.to_string())
+            .scenario(
+                TwinScenario::responses("gpt-5.4-mini")
+                    .input_contains(
+                        "Try to read a file called nonexistent_file.txt. If it doesn't exist, create it with the content 'recovered'",
+                    )
+                    .tool_call(TwinToolCall::read_file("nonexistent_file.txt")),
+            )
+            .scenario(
+                TwinScenario::responses("gpt-5.4-mini")
+                    .tool_call(TwinToolCall::write_file("nonexistent_file.txt", "recovered"))
+                    .text("Created the file."),
+            ),
+        other => panic!("missing openai twin scenario for {other}"),
+    };
+
+    scenarios.load(twin_openai().await).await;
+}
 
 // ---------------------------------------------------------------------------
 // Scenario 14: error_recovery
