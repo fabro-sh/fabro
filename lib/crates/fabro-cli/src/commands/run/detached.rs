@@ -14,7 +14,7 @@ use fabro_workflow::records::{RunRecord, RunRecordExt};
 use crate::shared;
 use crate::store;
 pub(crate) async fn execute(run_dir: PathBuf, launcher_path: PathBuf, resume: bool) -> Result<()> {
-    let _ = fabro_proctitle::init();
+    let _ = fabro_proc::title_init();
 
     let _launcher_guard = scopeguard::guard(launcher_path.clone(), |path| {
         super::launcher::remove_launcher_record(&path);
@@ -24,9 +24,9 @@ pub(crate) async fn execute(run_dir: PathBuf, launcher_path: PathBuf, resume: bo
     let on_node: fabro_workflow::OnNodeCallback = Some({
         let run_id = run_record.run_id.to_string();
         let short_id = super::short_run_id(&run_id).to_string();
-        fabro_proctitle::set(&format!("fabro: {short_id}"));
+        fabro_proc::title_set(&format!("fabro: {short_id}"));
         Arc::new(move |node_id: &str| {
-            fabro_proctitle::set(&format!("fabro: {short_id} {node_id}"));
+            fabro_proc::title_set(&format!("fabro: {short_id} {node_id}"));
         }) as Arc<dyn Fn(&str) + Send + Sync>
     });
     let store = store::build_store(&run_record.settings.storage_dir())?;

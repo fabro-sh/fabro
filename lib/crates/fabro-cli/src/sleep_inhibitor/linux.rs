@@ -1,6 +1,3 @@
-#![allow(unsafe_code)]
-
-use std::os::unix::process::CommandExt;
 use std::process::{Child, Command};
 use tracing::{debug, warn};
 
@@ -24,12 +21,7 @@ impl LinuxSleepInhibitor {
     /// Spawn a command with `PR_SET_PDEATHSIG` so the child is automatically
     /// killed if the parent process dies (prevents orphan `sleep infinity`).
     fn spawn_with_pdeathsig(cmd: &mut Command) -> std::io::Result<Child> {
-        unsafe {
-            cmd.pre_exec(|| {
-                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
-                Ok(())
-            });
-        }
+        fabro_proc::pre_exec_pdeathsig(cmd);
         cmd.spawn()
     }
 

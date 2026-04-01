@@ -1,5 +1,3 @@
-#![allow(unsafe_code)]
-
 use std::sync::{Mutex, OnceLock};
 
 struct Buffer {

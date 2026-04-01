@@ -197,15 +197,7 @@ impl Sandbox for LocalSandbox {
             .stderr(std::process::Stdio::piped());
 
         #[cfg(unix)]
-        // SAFETY: setpgid(0, 0) is safe to call in a pre_exec hook — it places
-        // the child into its own process group so we can signal the whole group.
-        #[allow(unsafe_code)]
-        unsafe {
-            cmd.pre_exec(|| {
-                libc::setpgid(0, 0);
-                Ok(())
-            });
-        }
+        fabro_proc::pre_exec_setpgid(cmd.as_std_mut());
 
         let mut child = cmd
             .spawn()
@@ -481,15 +473,10 @@ impl Sandbox for LocalSandbox {
 }
 
 /// Send SIGTERM to the process group, wait 2s for graceful shutdown, then SIGKILL.
-#[allow(unsafe_code)]
 async fn sigterm_then_kill(child: &mut Child) {
     #[cfg(unix)]
     if let Some(pid) = child.id() {
-        // SAFETY: kill with a negative pid signals the entire process group.
-        // The pid is valid because we just obtained it from child.id().
-        unsafe {
-            libc::kill(-i32::try_from(pid).unwrap(), libc::SIGTERM);
-        }
+        fabro_proc::sigterm_process_group(pid);
         if time::timeout(std::time::Duration::from_secs(2), child.wait())
             .await
             .is_err()

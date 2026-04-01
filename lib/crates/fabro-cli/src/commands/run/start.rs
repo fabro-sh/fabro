@@ -15,7 +15,6 @@ use super::launcher::{
 ///
 /// The engine process reads `run.json` from the run directory and executes the
 /// workflow. Returns the child process handle (use `.id()` for the PID).
-#[allow(unsafe_code)]
 pub(crate) fn start_run(run_dir: &Path, resume: bool) -> Result<std::process::Child> {
     if !resume {
         ensure_startable_run(run_dir)?;
@@ -50,15 +49,7 @@ pub(crate) fn start_run(run_dir: &Path, resume: bool) -> Result<std::process::Ch
         .stdin(std::process::Stdio::null());
 
     #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        unsafe {
-            cmd.pre_exec(|| {
-                libc::setsid();
-                Ok(())
-            });
-        }
-    }
+    fabro_proc::pre_exec_setsid(&mut cmd);
 
     let mut child = cmd.spawn()?;
 

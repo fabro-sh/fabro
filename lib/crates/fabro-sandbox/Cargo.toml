@@ -28,6 +28,7 @@ serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 base64.workspace = true
+fabro-proc = { path = "../fabro-proc" }
 shlex = "1"
 
 # local
@@ -49,9 +50,6 @@ rand = { workspace = true, optional = true }
 daytona-sdk = { workspace = true, optional = true }
 daytona-api-client = { workspace = true, optional = true }
 git2 = { workspace = true, optional = true }
-
-[target.'cfg(unix)'.dependencies]
-libc = { version = "0.2" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }

@@ -715,28 +715,14 @@ async fn determine_exit_code_with_store(run_store: &dyn RunStore, run_dir: &Path
     }
 }
 
-#[allow(unsafe_code)]
 fn kill_engine(run_dir: &Path) {
-    if let Some(pid) = read_launcher_pid(run_dir).map(|pid| i32::try_from(pid).unwrap()) {
-        #[cfg(unix)]
-        unsafe {
-            libc::kill(pid, libc::SIGTERM);
-        }
-        let _ = pid;
+    if let Some(pid) = read_launcher_pid(run_dir) {
+        fabro_proc::sigterm(pid);
     }
 }
 
-#[allow(unsafe_code)]
 fn process_alive(pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        unsafe { libc::kill(i32::try_from(pid).unwrap(), 0) == 0 }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = pid;
-        true
-    }
+    fabro_proc::process_alive(pid)
 }
 
 #[cfg(test)]
@@ -887,7 +873,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(unsafe_code)]
     fn engine_child_guard_defuse_keeps_alive() {
         let child = std::process::Command::new("sleep")
             .arg("60")
@@ -908,9 +893,7 @@ mod tests {
 
         // Clean up
         #[cfg(unix)]
-        unsafe {
-            libc::kill(i32::try_from(pid).unwrap(), libc::SIGKILL);
-        }
+        fabro_proc::sigkill(pid);
     }
 
     #[test]

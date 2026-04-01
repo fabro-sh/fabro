@@ -1,10 +1,10 @@
 [package]
-name = "fabro-proctitle"
+name = "fabro-proc"
 edition.workspace = true
 version.workspace = true
 publish = false
 license.workspace = true
-description = "In-place process title updates for Fabro detached engines"
+description = "Safe wrappers for process management primitives (signals, pre-exec hooks, title rewriting)"
 
 [lints]
 workspace = true

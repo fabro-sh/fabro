@@ -1505,7 +1505,7 @@ dependencies = [
  "fabro-mcp",
  "fabro-model",
  "fabro-oauth",
- "fabro-proctitle",
+ "fabro-proc",
  "fabro-retro",
  "fabro-sandbox",
  "fabro-server",
@@ -1522,7 +1522,6 @@ dependencies = [
  "indicatif",
  "insta",
  "jsonwebtoken",
- "libc",
  "object_store",
  "open",
  "paste",
@@ -1758,7 +1757,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "fabro-proctitle"
+name = "fabro-proc"
 version = "0.176.2"
 dependencies = [
  "cc",
@@ -1796,11 +1795,11 @@ dependencies = [
  "daytona-sdk",
  "fabro-config",
  "fabro-github",
+ "fabro-proc",
  "fabro-types",
  "futures",
  "git2",
  "glob",
- "libc",
  "rand 0.8.5",
  "serde",
  "serde_json",

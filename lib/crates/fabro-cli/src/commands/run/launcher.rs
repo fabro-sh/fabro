@@ -62,21 +62,7 @@ pub(crate) fn active_launcher_record_for_run(run_dir: &Path) -> Option<LauncherR
 }
 
 pub(crate) fn launcher_record_is_running(record: &LauncherRecord) -> bool {
-    process_alive(record.pid) && launcher_process_matches(record)
-}
-
-#[cfg(unix)]
-#[allow(unsafe_code)]
-fn process_alive(pid: u32) -> bool {
-    let Ok(pid) = i32::try_from(pid) else {
-        return false;
-    };
-    unsafe { libc::kill(pid, 0) == 0 }
-}
-
-#[cfg(not(unix))]
-fn process_alive(_pid: u32) -> bool {
-    true
+    fabro_proc::process_alive(record.pid) && launcher_process_matches(record)
 }
 
 #[cfg(unix)]

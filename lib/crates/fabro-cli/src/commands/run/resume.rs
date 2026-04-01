@@ -65,20 +65,7 @@ pub(crate) async fn resume_command(
 
 fn launcher_pid_alive(run_dir: &std::path::Path) -> bool {
     super::launcher::active_launcher_record_for_run(run_dir)
-        .is_some_and(|record| process_alive(record.pid))
-}
-
-#[allow(unsafe_code)]
-fn process_alive(pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        unsafe { libc::kill(i32::try_from(pid).unwrap(), 0) == 0 }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = pid;
-        true
-    }
+        .is_some_and(|record| fabro_proc::process_alive(record.pid))
 }
 
 #[cfg(test)]
