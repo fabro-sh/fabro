@@ -225,6 +225,7 @@ async fn attach_run_store(
             .await
             .ok()
             .flatten()
+            .or_else(|| read_status_record(&run_dir.join("status.json")))
             .map(|record| record.status)
             .filter(|status| status.is_terminal());
 
@@ -251,7 +252,7 @@ async fn attach_run_store(
                         cached_pid = Some(pid);
                         process_alive(pid)
                     } else {
-                        attach_started.elapsed() < ATTACH_STARTUP_GRACE || last_seq > 0
+                        attach_started.elapsed() < ATTACH_STARTUP_GRACE
                     }
                 }
             };
@@ -465,7 +466,6 @@ async fn attach_run_files(
                         process_alive(pid)
                     } else {
                         attach_started.elapsed() < ATTACH_STARTUP_GRACE
-                            || !progress_file_is_empty(&progress_path)
                     }
                 }
             };
@@ -550,12 +550,6 @@ fn read_status_record(path: &Path) -> Option<RunStatusRecord> {
 
 fn read_launcher_pid(run_dir: &Path) -> Option<u32> {
     super::launcher::active_launcher_record_for_run(run_dir).map(|record| record.pid)
-}
-
-fn progress_file_is_empty(path: &Path) -> bool {
-    std::fs::metadata(path)
-        .map(|meta| meta.len() == 0)
-        .unwrap_or(true)
 }
 
 #[allow(clippy::struct_field_names)]
