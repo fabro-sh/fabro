@@ -5,7 +5,18 @@ digraph Smoke {
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare, label="Exit"]
 
-    main [label="Smoke Test", prompt="Run each of these commands in order and report the results. If any command fails, continue running the rest and report all results at the end.\n\n1. rustc --version && cargo --version\n2. bun --version\n3. cargo fmt --check --all\n4. cargo clippy -q --workspace -- -D warnings\n5. cargo nextest run --cargo-quiet --workspace --status-level fail\n6. cd apps/fabro-web && bun install && bun run typecheck\n7. cd apps/fabro-web && bun test\n\nReport a summary table of pass/fail for each step."]
+    toolchain          [label="Toolchain", shape=parallelogram, script="rustc --version && cargo --version && bun --version 2>&1", max_retries=0]
+    compile_rust       [label="Compile Rust", shape=parallelogram, script="cargo check -q --workspace 2>&1", max_retries=0]
+    compile_typescript [label="Compile TypeScript", shape=parallelogram, script="cd apps/fabro-web && bun install && bun run typecheck 2>&1", max_retries=0]
+    lint_rust          [label="Lint Rust", shape=parallelogram, script="cargo fmt --check --all 2>&1 && cargo clippy -q --workspace -- -D warnings 2>&1", max_retries=0]
+    test_rust          [label="Test Rust", shape=parallelogram, script="cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1", max_retries=0]
+    test_typescript    [label="Test TypeScript", shape=parallelogram, script="cd apps/fabro-web && bun test 2>&1", max_retries=0]
 
-    start -> main -> exit
+    start -> toolchain
+    toolchain -> compile_rust
+    compile_rust -> compile_typescript
+    compile_typescript -> lint_rust
+    lint_rust -> test_rust
+    test_rust -> test_typescript
+    test_typescript -> exit
 }
