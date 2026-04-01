@@ -242,46 +242,57 @@ pub(crate) fn check_config(
     }
 }
 
-pub(crate) fn check_storage_dir(path: &Path, readable: bool, writable: bool) -> CheckResult {
-    let summary = path.display().to_string();
-    let exists = path.is_dir();
+pub(crate) fn check_storage_dir(path: &Path) -> CheckResult {
+    let display = path.display();
+    let summary = display.to_string();
+    let name = "Storage directory".to_string();
 
-    let mut details = vec![
-        CheckDetail::new(format!("Exists: {}", if exists { "yes" } else { "no" })),
-        CheckDetail::new(format!("Readable: {}", if readable { "yes" } else { "no" })),
-        CheckDetail::new(format!("Writable: {}", if writable { "yes" } else { "no" })),
-    ];
-
-    if !exists {
-        return CheckResult {
-            name: "Storage directory".to_string(),
-            status: CheckStatus::Error,
-            summary,
-            details,
-            remediation: Some(format!("Create the directory: mkdir -p {}", path.display())),
+    let readable = std::fs::read_dir(path).is_ok();
+    if !readable {
+        // read_dir fails for both non-existent and permission-denied
+        let exists = path.is_dir();
+        let details = vec![CheckDetail::new(format!(
+            "Exists: {}",
+            if exists { "yes" } else { "no" }
+        ))];
+        return if exists {
+            CheckResult {
+                name,
+                status: CheckStatus::Error,
+                summary,
+                details,
+                remediation: Some(format!("Fix permissions on {display}")),
+            }
+        } else {
+            CheckResult {
+                name,
+                status: CheckStatus::Error,
+                summary,
+                details,
+                remediation: Some(format!("Create the directory: mkdir -p {display}")),
+            }
         };
     }
 
-    if !readable || !writable {
-        let mut issues = Vec::new();
-        if !readable {
-            issues.push("not readable");
-        }
-        if !writable {
-            issues.push("not writable");
-        }
-        details.push(CheckDetail::new(format!("Issues: {}", issues.join(", "))));
+    let writable = tempfile::tempfile_in(path).is_ok();
+    let details = vec![
+        CheckDetail::new("Exists: yes".to_string()),
+        CheckDetail::new("Readable: yes".to_string()),
+        CheckDetail::new(format!("Writable: {}", if writable { "yes" } else { "no" })),
+    ];
+
+    if !writable {
         return CheckResult {
-            name: "Storage directory".to_string(),
+            name,
             status: CheckStatus::Error,
             summary,
             details,
-            remediation: Some(format!("Fix permissions on {}", path.display())),
+            remediation: Some(format!("Fix permissions on {display}")),
         };
     }
 
     CheckResult {
-        name: "Storage directory".to_string(),
+        name,
         status: CheckStatus::Pass,
         summary,
         details,
@@ -1031,8 +1042,6 @@ pub(crate) async fn run_doctor(
         .storage_dir
         .clone()
         .unwrap_or_else(|| cli_settings.storage_dir());
-    let storage_readable = std::fs::read_dir(&storage_dir).is_ok();
-    let storage_writable = tempfile::tempfile_in(&storage_dir).is_ok();
 
     let llm_statuses: Vec<(Provider, bool)> = Provider::ALL
         .iter()
@@ -1245,7 +1254,7 @@ pub(crate) async fn run_doctor(
                         None
                     },
                 ),
-                check_storage_dir(&storage_dir, storage_readable, storage_writable),
+                check_storage_dir(&storage_dir),
                 check_llm_providers(&llm_statuses, llm_live_results.as_deref()),
                 check_github_app(&github_status),
             ],
@@ -1334,7 +1343,7 @@ mod tests {
     #[test]
     fn check_storage_dir_pass() {
         let dir = tempfile::tempdir().unwrap();
-        let result = check_storage_dir(dir.path(), true, true);
+        let result = check_storage_dir(dir.path());
         assert_eq!(result.status, CheckStatus::Pass);
         assert!(result.summary.contains(dir.path().to_str().unwrap()));
         assert!(result.remediation.is_none());
@@ -1343,24 +1352,10 @@ mod tests {
     #[test]
     fn check_storage_dir_not_exists() {
         let path = PathBuf::from("/tmp/nonexistent-fabro-doctor-test-xyz");
-        let result = check_storage_dir(&path, false, false);
+        let result = check_storage_dir(&path);
         assert_eq!(result.status, CheckStatus::Error);
         assert!(result.summary.contains("nonexistent-fabro-doctor-test-xyz"));
         assert!(result.remediation.as_deref().unwrap().contains("mkdir -p"));
-    }
-
-    #[test]
-    fn check_storage_dir_not_writable() {
-        let dir = tempfile::tempdir().unwrap();
-        let result = check_storage_dir(dir.path(), true, false);
-        assert_eq!(result.status, CheckStatus::Error);
-        assert!(
-            result
-                .remediation
-                .as_deref()
-                .unwrap()
-                .contains("Fix permissions")
-        );
     }
 
     // -- check_llm_providers --
