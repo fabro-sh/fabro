@@ -262,12 +262,13 @@ Tests should be stable on any developer machine.
 
 Secret-backed E2E tests should use the shared test helpers instead of ad hoc env handling.
 
-- Use `#[e2e_test(live("VAR"))]` for tests that require one or more env vars.
-- Use `#[e2e_test()]` for sandbox-only E2E tests that do not require secrets.
-- `FABRO_TEST_MODE=off` skips all `#[e2e_test]` tests.
-- `FABRO_TEST_MODE=live` runs `#[e2e_test]` tests and skips any missing `live("VAR")` dependencies.
-- `FABRO_TEST_MODE=strict` runs `#[e2e_test]` tests and fails immediately if any required env var is missing.
-- `cargo nextest run --profile e2e ...` also implies strict mode through nextest's runtime `NEXTEST_PROFILE=e2e` environment variable.
+- `#[e2e_test(twin, live("VAR"))]` — dual-mode test that runs against twin-openai (fake server) or the real API.
+- `#[e2e_test(twin)]` — twin-only test (e.g., scripted error scenarios). Skips in live/strict mode.
+- `#[e2e_test(live("VAR"))]` — live-only test requiring real secrets. Skips in twin mode.
+- `#[e2e_test()]` — sandbox test with no API deps. Runs in all modes.
+- `FABRO_TEST_MODE` controls behavior: default is `twin`, `live` skips missing env vars, `strict` fails on missing env vars.
+- `cargo nextest run --profile e2e ...` implies strict mode through nextest's runtime `NEXTEST_PROFILE=e2e` environment variable.
+- Use `fabro_test::e2e_openai!()` in twin/dual-mode tests to get `(base_url, api_key)`. In twin mode this starts an in-process fake server and generates a per-test API key for isolation.
 - Use `fabro_test::require_env()` inside helper functions that need to read E2E env vars after the test-level guard has run.
 - Do not call `dotenvy` from tests. E2E env vars must come from the shell or the test runner profile.
 

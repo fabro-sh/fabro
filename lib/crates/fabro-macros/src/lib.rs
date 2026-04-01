@@ -7,26 +7,29 @@ use syn::{
 };
 
 enum E2eRequirement {
+    Twin,
     Live(LitStr),
 }
 
 impl Parse for E2eRequirement {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let ident = input.parse::<Ident>()?;
-        if ident != "live" {
-            return Err(syn::Error::new(
-                ident.span(),
-                "expected `live(\"ENV_VAR\")`",
-            ));
+        if ident == "twin" {
+            return Ok(Self::Twin);
         }
-
-        let content;
-        parenthesized!(content in input);
-        let env_var = content.parse::<LitStr>()?;
-        if !content.is_empty() {
-            return Err(content.error("expected a single string literal"));
+        if ident == "live" {
+            let content;
+            parenthesized!(content in input);
+            let env_var = content.parse::<LitStr>()?;
+            if !content.is_empty() {
+                return Err(content.error("expected a single string literal"));
+            }
+            return Ok(Self::Live(env_var));
         }
-        Ok(Self::Live(env_var))
+        Err(syn::Error::new(
+            ident.span(),
+            "expected `twin` or `live(\"ENV_VAR\")`",
+        ))
     }
 }
 
@@ -90,22 +93,30 @@ pub fn e2e_test(attr: TokenStream, item: TokenStream) -> TokenStream {
     let sig = input.sig;
     let block = input.block;
 
+    let has_twin = requirements
+        .iter()
+        .any(|r| matches!(r, E2eRequirement::Twin));
     let env_vars: Vec<_> = requirements
-        .into_iter()
-        .map(|requirement| match requirement {
-            E2eRequirement::Live(env_var) => env_var,
+        .iter()
+        .filter_map(|r| match r {
+            E2eRequirement::Live(env_var) => Some(env_var.clone()),
+            E2eRequirement::Twin => None,
         })
         .collect();
+    let has_live = !env_vars.is_empty();
 
-    let ignore_reason = if env_vars.is_empty() {
+    // Build ignore reason
+    let ignore_reason = if !has_twin && !has_live {
         "e2e".to_string()
     } else {
-        let joined = env_vars
-            .iter()
-            .map(LitStr::value)
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("e2e: {joined}")
+        let mut parts = Vec::new();
+        if has_twin {
+            parts.push("twin".to_string());
+        }
+        for var in &env_vars {
+            parts.push(var.value());
+        }
+        format!("e2e: {}", parts.join(", "))
     };
 
     let test_attr = if sig.asyncness.is_some() {
@@ -114,20 +125,61 @@ pub fn e2e_test(attr: TokenStream, item: TokenStream) -> TokenStream {
         quote!(#[test])
     };
 
-    let env_guards = env_vars.iter().map(|env_var| {
-        let env_name = env_var.value();
-        let strict_message = format!("{env_name} not set (FABRO_TEST_MODE=strict)");
-        let skip_message = format!("skipping: {env_name} not set");
+    // Mode-based gating
+    let mode_guard = if has_twin && !has_live {
+        // twin-only: skip in live/strict
         quote! {
-            if ::std::env::var(#env_var).is_err() {
-                if __mode == ::fabro_test::TestMode::Strict {
-                    panic!(#strict_message);
-                }
-                eprintln!(#skip_message);
+            if __mode.is_live() {
+                eprintln!("skipping: twin-only test");
                 return;
             }
         }
-    });
+    } else if !has_twin && has_live {
+        // live-only: skip in twin
+        quote! {
+            if __mode.is_twin() {
+                eprintln!("skipping: live-only test");
+                return;
+            }
+        }
+    } else {
+        // bare or dual: no mode skip
+        quote! {}
+    };
+
+    // Env var guards (only checked when in live/strict mode)
+    let env_guards = if env_vars.is_empty() {
+        quote! {}
+    } else {
+        let guards = env_vars.iter().map(|env_var| {
+            let env_name = env_var.value();
+            let strict_message = format!("{env_name} not set (FABRO_TEST_MODE=strict)");
+            let skip_message = format!("skipping: {env_name} not set");
+            quote! {
+                if ::std::env::var(#env_var).is_err() {
+                    if __mode == ::fabro_test::TestMode::Strict {
+                        panic!(#strict_message);
+                    }
+                    eprintln!(#skip_message);
+                    return;
+                }
+            }
+        });
+
+        if has_twin {
+            // dual-mode: only check env vars when in live/strict
+            quote! {
+                if __mode.is_live() {
+                    #(#guards)*
+                }
+            }
+        } else {
+            // live-only: always check env vars (mode guard already skipped twin)
+            quote! {
+                #(#guards)*
+            }
+        }
+    };
 
     quote! {
         #(#attrs)*
@@ -136,12 +188,9 @@ pub fn e2e_test(attr: TokenStream, item: TokenStream) -> TokenStream {
         #vis #sig {
             let __mode = ::fabro_test::TestMode::from_env();
 
-            if __mode == ::fabro_test::TestMode::Off {
-                eprintln!("skipping: FABRO_TEST_MODE is off");
-                return;
-            }
+            #mode_guard
 
-            #(#env_guards)*
+            #env_guards
 
             #block
         }

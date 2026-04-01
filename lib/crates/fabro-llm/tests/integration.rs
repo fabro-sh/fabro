@@ -1,3 +1,4 @@
+use fabro_llm::error::ProviderErrorKind;
 use fabro_llm::provider::ProviderAdapter;
 use fabro_llm::providers::{AnthropicAdapter, GeminiAdapter, OpenAiAdapter};
 use fabro_llm::types::{FinishReason, Message, Request};
@@ -38,10 +39,10 @@ async fn anthropic_complete() {
     assert_eq!(response.provider, "anthropic");
 }
 
-#[fabro_macros::e2e_test(live("OPENAI_API_KEY"))]
+#[fabro_macros::e2e_test(twin, live("OPENAI_API_KEY"))]
 async fn openai_complete() {
-    let api_key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set");
-    let adapter = OpenAiAdapter::new(api_key);
+    let (base_url, api_key) = fabro_test::e2e_openai!();
+    let adapter = OpenAiAdapter::new(api_key).with_base_url(base_url);
     let request = make_request("gpt-4o-mini");
     let response = adapter.complete(&request).await.unwrap();
 
@@ -55,10 +56,10 @@ async fn openai_complete() {
     assert_eq!(response.provider, "openai");
 }
 
-#[fabro_macros::e2e_test(live("OPENAI_API_KEY"))]
+#[fabro_macros::e2e_test(twin, live("OPENAI_API_KEY"))]
 async fn openai_gpt_5_3_codex_complete() {
-    let api_key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY must be set");
-    let adapter = OpenAiAdapter::new(api_key);
+    let (base_url, api_key) = fabro_test::e2e_openai!();
+    let adapter = OpenAiAdapter::new(api_key).with_base_url(base_url);
     let request = make_request("gpt-5.3-codex");
     let response = adapter.complete(&request).await.unwrap();
 
@@ -69,6 +70,40 @@ async fn openai_gpt_5_3_codex_complete() {
     assert!(response.usage.input_tokens > 0);
     assert!(response.usage.output_tokens > 0);
     assert_eq!(response.provider, "openai");
+}
+
+#[fabro_macros::e2e_test(twin)]
+async fn openai_server_error() {
+    let (base_url, api_key) = fabro_test::e2e_openai!();
+    let admin_url = base_url
+        .strip_suffix("/v1")
+        .expect("OpenAI base URL should end with /v1");
+
+    reqwest::Client::new()
+        .post(format!("{admin_url}/__admin/scenarios"))
+        .bearer_auth(&api_key)
+        .json(&serde_json::json!({
+            "scenarios": [{
+                "matcher": { "endpoint": "responses" },
+                "script": {
+                    "kind": "error",
+                    "status": 500,
+                    "message": "internal server error",
+                    "error_type": "server_error",
+                    "code": "server_error"
+                }
+            }]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    let adapter = OpenAiAdapter::new(api_key).with_base_url(base_url);
+    let request = make_request("gpt-4o-mini");
+    let err = adapter.complete(&request).await.unwrap_err();
+
+    assert_eq!(err.provider_kind(), Some(ProviderErrorKind::Server));
+    assert_eq!(err.status_code(), Some(500));
 }
 
 #[fabro_macros::e2e_test(live("GEMINI_API_KEY"))]

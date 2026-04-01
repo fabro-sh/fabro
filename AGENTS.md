@@ -107,4 +107,4 @@ Never run `cargo insta accept` without first checking what's pending — it acce
 
 - `fabro run <name>` — run a workflow by name (resolves `fabro/workflows/<name>/workflow.toml`), e.g. `fabro run repl`
 - Use `--no-retro` to skip the retro step and finish faster
-- `#[e2e_test(live("VAR"))]` — use for tests requiring secrets; it generates `#[ignore]` plus env gating. Use `#[e2e_test()]` for sandbox-only E2E tests with no secret deps. Behavior is controlled by `FABRO_TEST_MODE` (`off`, `live`, `strict`), and `cargo nextest run --profile e2e ...` implies `strict`.
+- `#[e2e_test(twin, live("VAR"))]` — dual-mode test that runs against twin-openai or real API. `#[e2e_test(twin)]` for twin-only tests (e.g., scripted failures). `#[e2e_test(live("VAR"))]` for live-only tests requiring secrets. `#[e2e_test()]` for sandbox tests with no API deps. Behavior is controlled by `FABRO_TEST_MODE` (`live`, `strict`; default is `twin`), and `cargo nextest run --profile e2e ...` implies `strict`. Use `fabro_test::e2e_openai!()` in twin/dual-mode tests to get `(base_url, api_key)`.

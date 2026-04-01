@@ -37,7 +37,7 @@ static INSTA_FILTERS: &[(&str, &str)] = &[
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TestMode {
     #[default]
-    Off,
+    Twin,
     Live,
     Strict,
 }
@@ -50,9 +50,19 @@ impl TestMode {
             Ok("strict") => Self::Strict,
             _ => match std::env::var("NEXTEST_PROFILE").as_deref() {
                 Ok("e2e") => Self::Strict,
-                _ => Self::Off,
+                _ => Self::Twin,
             },
         }
+    }
+
+    #[must_use]
+    pub fn is_twin(self) -> bool {
+        matches!(self, Self::Twin)
+    }
+
+    #[must_use]
+    pub fn is_live(self) -> bool {
+        matches!(self, Self::Live | Self::Strict)
     }
 }
 
@@ -470,4 +480,82 @@ impl TestContext {
             .map(|(pat, rep)| ((*pat).to_string(), (*rep).to_string()))
             .collect()
     }
+}
+
+// ---------------------------------------------------------------------------
+// Twin server infrastructure
+// ---------------------------------------------------------------------------
+
+use tokio::net::TcpListener as TokioTcpListener;
+use tokio::sync::OnceCell;
+use tokio::time;
+use twin_openai::config::Config as TwinConfig;
+
+/// A shared twin-openai server instance.
+pub struct TwinOpenAi {
+    /// Base URL including `/v1`, e.g. `http://127.0.0.1:PORT/v1`.
+    pub base_url: String,
+}
+
+static TWIN_OPENAI: OnceCell<TwinOpenAi> = OnceCell::const_new();
+
+/// Returns a shared twin-openai server, starting it on first call.
+#[allow(clippy::missing_panics_doc)]
+pub async fn twin_openai() -> &'static TwinOpenAi {
+    TWIN_OPENAI
+        .get_or_init(|| async {
+            let listener = TokioTcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind twin-openai");
+            let addr = listener.local_addr().expect("local addr");
+            let base_url = format!("http://127.0.0.1:{}/v1", addr.port());
+
+            let config = TwinConfig {
+                bind_addr: addr,
+                require_auth: true,
+                enable_admin: true,
+            };
+            let app = twin_openai::build_app_with_config(config);
+
+            tokio::spawn(async move {
+                axum::serve(listener, app).await.expect("twin-openai serve");
+            });
+
+            // Wait for server readiness
+            let client = reqwest::Client::new();
+            let healthz_url = format!("http://127.0.0.1:{}/healthz", addr.port());
+            for _ in 0..50 {
+                if let Ok(resp) = client.get(&healthz_url).send().await {
+                    if resp.status().is_success() {
+                        return TwinOpenAi { base_url };
+                    }
+                }
+                time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            panic!("twin-openai failed to become ready");
+        })
+        .await
+}
+
+/// Returns `(base_url, api_key)` for the current test.
+///
+/// In twin mode: starts/reuses the twin server, generates a unique API key
+/// from `module_path!()` and `line!()` to ensure per-test isolation.
+/// In live mode: reads from environment.
+#[macro_export]
+macro_rules! e2e_openai {
+    () => {{
+        let mode = $crate::TestMode::from_env();
+        if mode.is_twin() {
+            let twin = $crate::twin_openai().await;
+            let api_key = format!("{}::{}", module_path!(), line!());
+            (twin.base_url.clone(), api_key)
+        } else {
+            let base_url = std::env::var("OPENAI_BASE_URL")
+                .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
+            let api_key = std::env::var("OPENAI_API_KEY")
+                .expect("OPENAI_API_KEY must be set in live/strict mode");
+            (base_url, api_key)
+        }
+    }};
 }

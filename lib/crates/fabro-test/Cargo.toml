@@ -14,6 +14,10 @@ workspace = true
 
 [dependencies]
 assert_cmd = "2"
+axum = { workspace = true }
 insta = { workspace = true, features = ["filters"] }
 regex = { workspace = true }
+reqwest = { workspace = true }
 tempfile = "3"
+tokio = { workspace = true }
+twin-openai = { workspace = true }

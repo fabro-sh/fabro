@@ -31,7 +31,7 @@ fabro-api-types = { path = "../fabro-api-types" }
 fabro-store = { path = "../fabro-store" }
 chrono.workspace = true
 futures-util.workspace = true
-axum = "0.8"
+axum.workspace = true
 dirs.workspace = true
 sqlx.workspace = true
 tower = "0.5"
