@@ -25,7 +25,7 @@ use semver::Version;
 
 use crate::args::GlobalArgs;
 use crate::shared::print_json_pretty;
-use crate::user_config::load_user_settings;
+use crate::user_config::load_user_settings_with_globals;
 
 // ---------------------------------------------------------------------------
 // System dependency types and parsers (server mode only)
@@ -242,61 +242,61 @@ pub(crate) fn check_config(
     }
 }
 
-pub(crate) fn check_storage_dir(path: &Path) -> CheckResult {
-    let display = path.display();
-    let summary = display.to_string();
-    let name = "Storage directory".to_string();
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StorageDirStatus {
+    path: PathBuf,
+    exists: bool,
+    readable: bool,
+    writable: bool,
+}
 
-    let readable = std::fs::read_dir(path).is_ok();
-    if !readable {
-        // read_dir fails for both non-existent and permission-denied
-        let exists = path.is_dir();
-        let details = vec![CheckDetail::new(format!(
-            "Exists: {}",
-            if exists { "yes" } else { "no" }
-        ))];
-        return if exists {
-            CheckResult {
-                name,
-                status: CheckStatus::Error,
-                summary,
-                details,
-                remediation: Some(format!("Fix permissions on {display}")),
-            }
-        } else {
-            CheckResult {
-                name,
-                status: CheckStatus::Error,
-                summary,
-                details,
-                remediation: Some(format!("Create the directory: mkdir -p {display}")),
-            }
-        };
+fn probe_storage_dir(path: &Path) -> StorageDirStatus {
+    let exists = path.is_dir();
+    let readable = exists && std::fs::read_dir(path).is_ok();
+    let writable = exists && tempfile::tempfile_in(path).is_ok();
+
+    StorageDirStatus {
+        path: path.to_path_buf(),
+        exists,
+        readable,
+        writable,
     }
+}
 
-    let writable = tempfile::tempfile_in(path).is_ok();
+fn check_storage_dir(status: &StorageDirStatus) -> CheckResult {
+    let display = status.path.display();
     let details = vec![
-        CheckDetail::new("Exists: yes".to_string()),
-        CheckDetail::new("Readable: yes".to_string()),
-        CheckDetail::new(format!("Writable: {}", if writable { "yes" } else { "no" })),
+        CheckDetail::new(format!(
+            "Exists: {}",
+            if status.exists { "yes" } else { "no" }
+        )),
+        CheckDetail::new(format!(
+            "Readable: {}",
+            if status.readable { "yes" } else { "no" }
+        )),
+        CheckDetail::new(format!(
+            "Writable: {}",
+            if status.writable { "yes" } else { "no" }
+        )),
     ];
-
-    if !writable {
-        return CheckResult {
-            name,
-            status: CheckStatus::Error,
-            summary,
-            details,
-            remediation: Some(format!("Fix permissions on {display}")),
-        };
-    }
+    let is_healthy = status.exists && status.readable && status.writable;
 
     CheckResult {
-        name,
-        status: CheckStatus::Pass,
-        summary,
+        name: "Storage directory".to_string(),
+        status: if is_healthy {
+            CheckStatus::Pass
+        } else {
+            CheckStatus::Error
+        },
+        summary: display.to_string(),
         details,
-        remediation: None,
+        remediation: if is_healthy {
+            None
+        } else if !status.exists {
+            Some(format!("Create the directory: mkdir -p {display}"))
+        } else {
+            Some(format!("Fix permissions on {display}"))
+        },
     }
 }
 
@@ -1031,17 +1031,14 @@ pub(crate) async fn run_doctor(
     };
 
     // Gather state
-    let cli_settings = load_user_settings().unwrap_or_default();
+    let cli_settings = load_user_settings_with_globals(globals).unwrap_or_default();
 
     let user_config_path = default_user_config_path();
     let user_config_exists = user_config_path.as_ref().is_some_and(|p| p.exists());
     let legacy_config_path = legacy_user_config_path();
     let legacy_config_exists = legacy_config_path.as_ref().is_some_and(|p| p.exists());
 
-    let storage_dir = globals
-        .storage_dir
-        .clone()
-        .unwrap_or_else(|| cli_settings.storage_dir());
+    let storage_dir = probe_storage_dir(&cli_settings.storage_dir());
 
     let llm_statuses: Vec<(Provider, bool)> = Provider::ALL
         .iter()
@@ -1341,21 +1338,83 @@ mod tests {
     // -- check_storage_dir --
 
     #[test]
-    fn check_storage_dir_pass() {
+    fn probe_storage_dir_existing_dir_is_readable_and_writable() {
         let dir = tempfile::tempdir().unwrap();
-        let result = check_storage_dir(dir.path());
+        let status = probe_storage_dir(dir.path());
+
+        assert_eq!(
+            status,
+            StorageDirStatus {
+                path: dir.path().to_path_buf(),
+                exists: true,
+                readable: true,
+                writable: true,
+            }
+        );
+    }
+
+    #[test]
+    fn probe_storage_dir_missing_dir_is_not_usable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing");
+        let status = probe_storage_dir(&path);
+
+        assert_eq!(
+            status,
+            StorageDirStatus {
+                path,
+                exists: false,
+                readable: false,
+                writable: false,
+            }
+        );
+    }
+
+    #[test]
+    fn check_storage_dir_pass() {
+        let result = check_storage_dir(&StorageDirStatus {
+            path: PathBuf::from("/home/user/.fabro"),
+            exists: true,
+            readable: true,
+            writable: true,
+        });
+
         assert_eq!(result.status, CheckStatus::Pass);
-        assert!(result.summary.contains(dir.path().to_str().unwrap()));
+        assert_eq!(result.summary, "/home/user/.fabro");
         assert!(result.remediation.is_none());
+        assert_eq!(result.details.len(), 3);
     }
 
     #[test]
     fn check_storage_dir_not_exists() {
-        let path = PathBuf::from("/tmp/nonexistent-fabro-doctor-test-xyz");
-        let result = check_storage_dir(&path);
+        let result = check_storage_dir(&StorageDirStatus {
+            path: PathBuf::from("/tmp/nonexistent-fabro-doctor-test-xyz"),
+            exists: false,
+            readable: false,
+            writable: false,
+        });
+
         assert_eq!(result.status, CheckStatus::Error);
         assert!(result.summary.contains("nonexistent-fabro-doctor-test-xyz"));
         assert!(result.remediation.as_deref().unwrap().contains("mkdir -p"));
+    }
+
+    #[test]
+    fn check_storage_dir_not_writable() {
+        let result = check_storage_dir(&StorageDirStatus {
+            path: PathBuf::from("/home/user/.fabro"),
+            exists: true,
+            readable: true,
+            writable: false,
+        });
+
+        assert_eq!(result.status, CheckStatus::Error);
+        assert_eq!(result.summary, "/home/user/.fabro");
+        assert_eq!(
+            result.remediation.as_deref(),
+            Some("Fix permissions on /home/user/.fabro")
+        );
+        assert!(result.details.iter().any(|detail| detail.text == "Writable: no"));
     }
 
     // -- check_llm_providers --

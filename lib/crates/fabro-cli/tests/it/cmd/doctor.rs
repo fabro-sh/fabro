@@ -65,6 +65,119 @@ fn dry_run_flag() {
 }
 
 #[test]
+fn storage_dir_shown_in_output() {
+    let context = test_context!();
+    let mut cmd = context.doctor();
+    cmd.args(["--dry-run", "--json"]);
+    cmd.env("ANTHROPIC_API_KEY", "sk-test-dummy");
+    fabro_snapshot!(context.filters(), cmd, @r#"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    {
+      "title": "Fabro Doctor",
+      "sections": [
+        {
+          "title": "Required",
+          "checks": [
+            {
+              "name": "Configuration",
+              "status": "warning",
+              "summary": "no user config file found",
+              "details": [
+                {
+                  "text": "Create ~/.fabro/user.toml to configure Fabro",
+                  "warn": false
+                }
+              ],
+              "remediation": "Create ~/.fabro/user.toml"
+            },
+            {
+              "name": "Storage directory",
+              "status": "pass",
+              "summary": "[STORAGE_DIR]",
+              "details": [
+                {
+                  "text": "Exists: yes",
+                  "warn": false
+                },
+                {
+                  "text": "Readable: yes",
+                  "warn": false
+                },
+                {
+                  "text": "Writable: yes",
+                  "warn": false
+                }
+              ],
+              "remediation": null
+            },
+            {
+              "name": "LLM providers",
+              "status": "pass",
+              "summary": "1 configured",
+              "details": [
+                {
+                  "text": "anthropic (ANTHROPIC_API_KEY): set",
+                  "warn": false
+                }
+              ],
+              "remediation": null
+            },
+            {
+              "name": "GitHub App",
+              "status": "warning",
+              "summary": "not configured",
+              "details": [
+                {
+                  "text": "git.app_id: not set",
+                  "warn": false
+                },
+                {
+                  "text": "GITHUB_APP_PRIVATE_KEY: not set",
+                  "warn": false
+                }
+              ],
+              "remediation": "Configure GitHub App in server.toml and set env vars to enable GitHub integration"
+            }
+          ]
+        },
+        {
+          "title": "Optional",
+          "checks": [
+            {
+              "name": "Cloud sandbox",
+              "status": "warning",
+              "summary": "no sandbox configured",
+              "details": [
+                {
+                  "text": "Daytona (DAYTONA_API_KEY): not configured",
+                  "warn": false
+                }
+              ],
+              "remediation": "Set DAYTONA_API_KEY to enable cloud sandbox execution"
+            },
+            {
+              "name": "Brave Search",
+              "status": "warning",
+              "summary": "not configured",
+              "details": [
+                {
+                  "text": "BRAVE_SEARCH_API_KEY is not set",
+                  "warn": false
+                }
+              ],
+              "remediation": "Set BRAVE_SEARCH_API_KEY to enable web search"
+            }
+          ]
+        }
+      ]
+    }
+    ----- stderr -----
+    "#);
+}
+
+#[test]
 fn storage_dir_missing_shows_error() {
     let context = test_context!();
     let mut cmd = context.doctor();
