@@ -17,7 +17,7 @@ mod mtls_e2e {
     use std::sync::Arc;
 
     use fabro_server::jwt_auth::{AuthMode, AuthStrategy};
-    use fabro_server::server::{build_router, create_app_state_with_options};
+    use fabro_server::server::{build_router, create_app_state};
     use fabro_server::server_config::TlsSettings;
     use fabro_server::tls::{ClientAuth, build_rustls_config};
     use tokio::net::TcpListener;
