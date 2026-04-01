@@ -851,19 +851,15 @@ mod tests {
     /// Mock sandbox that returns pre-configured ExecResults in FIFO order.
     struct CliMockSandbox {
         results: Mutex<VecDeque<ExecResult>>,
-        commands: Mutex<Vec<String>>,
+        commands: Arc<Mutex<Vec<String>>>,
     }
 
     impl CliMockSandbox {
-        fn new(results: Vec<ExecResult>) -> Self {
+        fn new(results: Vec<ExecResult>, commands: Arc<Mutex<Vec<String>>>) -> Self {
             Self {
                 results: Mutex::new(results.into()),
-                commands: Mutex::new(Vec::new()),
+                commands,
             }
-        }
-
-        fn commands(&self) -> Vec<String> {
-            self.commands.lock().unwrap().clone()
         }
     }
 
@@ -966,45 +962,53 @@ mod tests {
     }
 
     #[tokio::test]
-    #[allow(unsafe_code)]
     async fn ensure_cli_skips_install_when_present() {
-        let sandbox: Arc<dyn Sandbox> = Arc::new(CliMockSandbox::new(vec![ok_result()]));
+        let commands = Arc::new(Mutex::new(Vec::new()));
+        let sandbox: Arc<dyn Sandbox> = Arc::new(CliMockSandbox::new(
+            vec![ok_result()],
+            Arc::clone(&commands),
+        ));
         let emitter = Arc::new(EventEmitter::default());
 
         let result = ensure_cli(AgentCli::Claude, Provider::Anthropic, &sandbox, &emitter).await;
         assert!(result.is_ok());
 
-        let mock = sandbox.as_ref() as *const dyn Sandbox as *const CliMockSandbox;
-        let commands = unsafe { &*mock }.commands();
+        let commands = commands.lock().unwrap();
         assert_eq!(commands.len(), 1);
         assert!(commands[0].contains("claude --version"));
     }
 
     #[tokio::test]
-    #[allow(unsafe_code)]
     async fn ensure_cli_installs_when_missing() {
+        let commands = Arc::new(Mutex::new(Vec::new()));
         // version check fails, combined install succeeds
-        let sandbox: Arc<dyn Sandbox> = Arc::new(CliMockSandbox::new(vec![
-            fail_result(127), // claude --version
-            ok_result(),      // combined node + npm install
-        ]));
+        let sandbox: Arc<dyn Sandbox> = Arc::new(CliMockSandbox::new(
+            vec![
+                fail_result(127), // claude --version
+                ok_result(),      // combined node + npm install
+            ],
+            Arc::clone(&commands),
+        ));
         let emitter = Arc::new(EventEmitter::default());
 
         let result = ensure_cli(AgentCli::Claude, Provider::Anthropic, &sandbox, &emitter).await;
         assert!(result.is_ok());
 
-        let mock = sandbox.as_ref() as *const dyn Sandbox as *const CliMockSandbox;
-        let commands = unsafe { &*mock }.commands();
+        let commands = commands.lock().unwrap();
         assert_eq!(commands.len(), 2);
         assert!(commands[1].contains("npm install -g @anthropic-ai/claude-code"));
     }
 
     #[tokio::test]
     async fn ensure_cli_fails_on_install_failure() {
-        let sandbox: Arc<dyn Sandbox> = Arc::new(CliMockSandbox::new(vec![
-            fail_result(127), // claude --version
-            fail_result(1),   // combined install fails
-        ]));
+        let commands = Arc::new(Mutex::new(Vec::new()));
+        let sandbox: Arc<dyn Sandbox> = Arc::new(CliMockSandbox::new(
+            vec![
+                fail_result(127), // claude --version
+                fail_result(1),   // combined install fails
+            ],
+            Arc::clone(&commands),
+        ));
         let emitter = Arc::new(EventEmitter::default());
 
         let result = ensure_cli(AgentCli::Claude, Provider::Anthropic, &sandbox, &emitter).await;

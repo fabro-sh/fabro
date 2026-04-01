@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 use core_foundation::base::TCFType;
 use tracing::{debug, warn};
 
