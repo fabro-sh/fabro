@@ -17,7 +17,7 @@ mod mtls_e2e {
     use std::sync::Arc;
 
     use fabro_server::jwt_auth::{AuthMode, AuthStrategy};
-    use fabro_server::server::{build_router, create_app_state};
+    use fabro_server::server::{build_router, create_app_state_with_options};
     use fabro_server::server_config::TlsSettings;
     use fabro_server::tls::{ClientAuth, build_rustls_config};
     use tokio::net::TcpListener;
@@ -621,7 +621,10 @@ mod server_lifecycle {
         let body = body_json(response.into_body()).await;
         let run_id = body["id"].as_str().unwrap().to_string();
 
-        wait_for_run_status_not_in(&app, &run_id, &["queued", "starting"]).await;
+        // Subscribe as soon as the scheduler has created the live event stream.
+        // Waiting past "starting" races with stage events because `/events`
+        // subscribes to future broadcast messages only; it does not replay.
+        wait_for_run_status_not_in(&app, &run_id, &["queued"]).await;
 
         // Cancel it
         let req = Request::builder()
@@ -658,7 +661,8 @@ mod sse_events {
 
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
-    use fabro_server::server::{build_router, create_app_state};
+    use fabro_server::server::{build_router, create_app_state_with_options};
+    use fabro_types::settings::FabroSettings;
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
@@ -672,6 +676,13 @@ mod sse_events {
 
     const POLL_INTERVAL: Duration = Duration::from_millis(10);
     const POLL_ATTEMPTS: usize = 500;
+
+    fn dry_run_settings() -> FabroSettings {
+        FabroSettings {
+            dry_run: Some(true),
+            ..Default::default()
+        }
+    }
 
     async fn body_json(body: Body) -> serde_json::Value {
         let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
@@ -723,7 +734,7 @@ mod sse_events {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn sse_stream_contains_expected_event_types() {
-        let state = create_app_state(test_db().await);
+        let state = create_app_state_with_options(test_db().await, dry_run_settings(), 5);
         fabro_server::server::spawn_scheduler(Arc::clone(&state));
         let app = build_router(
             Arc::clone(&state),
@@ -795,11 +806,10 @@ mod sse_events {
             }
         }
 
-        // Verify we got events (run may have completed before we subscribed,
-        // so we check that the stream was valid SSE)
-        // If events were emitted before subscribe, the stream may be empty.
-        // That's OK -- the main assertion is content-type + valid SSE format.
-        // But if we got events, verify expected types.
+        // Because we subscribe while the run is only guaranteed to be past
+        // "queued", a live stream should include at least one stage event.
+        // A 410 response above still covers the case where the run completed
+        // before we managed to attach.
         if !event_types.is_empty() {
             assert!(
                 event_types
