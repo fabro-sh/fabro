@@ -10,6 +10,14 @@ macro_rules! fabro_json_snapshot {
             r"\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b".to_string(),
             "[TIMESTAMP]".to_string(),
         ));
+        filters.push((
+            r#""id":\s*"[0-9a-f-]+""#.to_string(),
+            r#""id": "[EVENT_ID]""#.to_string(),
+        ));
+        filters.push((
+            r#""duration_ms":\s*\d+"#.to_string(),
+            r#""duration_ms": "[DURATION_MS]""#.to_string(),
+        ));
         let filters: Vec<(&str, &str)> = filters
             .iter()
             .map(|(pattern, replacement)| (pattern.as_str(), replacement.as_str()))
@@ -38,41 +46,6 @@ pub(crate) fn read_jsonl(path: impl AsRef<Path>) -> Vec<Value> {
         .map(serde_json::from_str)
         .collect::<Result<Vec<_>, _>>()
         .unwrap()
-}
-
-pub(crate) fn compact_progress_event(event: &Value) -> Value {
-    fn event_value<'a>(event: &'a Value, key: &str) -> Option<&'a Value> {
-        event
-            .get(key)
-            .or_else(|| {
-                event
-                    .get("properties")
-                    .and_then(|properties| properties.get(key))
-            })
-            .filter(|value| !value.is_null())
-    }
-
-    let mut compact = serde_json::Map::new();
-    for key in [
-        "event",
-        "provider",
-        "name",
-        "goal",
-        "node_id",
-        "node_label",
-        "handler_type",
-        "index",
-        "status",
-        "from_node",
-        "to_node",
-        "reason",
-        "artifact_count",
-    ] {
-        if let Some(value) = event_value(event, key) {
-            compact.insert(key.to_string(), value.clone());
-        }
-    }
-    Value::Object(compact)
 }
 
 pub(crate) fn run_output_filters(context: &TestContext) -> Vec<(String, String)> {

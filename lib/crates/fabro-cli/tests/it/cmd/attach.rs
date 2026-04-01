@@ -3,9 +3,7 @@ use std::time::Duration;
 use fabro_test::{fabro_snapshot, run_and_format, test_context};
 use serde_json::Value;
 
-use crate::support::{
-    compact_progress_event, example_fixture, fabro_json_snapshot, run_output_filters,
-};
+use crate::support::{example_fixture, fabro_json_snapshot, run_output_filters};
 
 use super::support::{output_stdout, resolve_run, wait_for_status, write_gated_workflow};
 
@@ -244,57 +242,123 @@ fn attach_json_errors_without_prompting_for_human_input() {
         .filter(|line| !line.trim().is_empty())
         .map(|line| serde_json::from_str(line).expect("attach JSON output should be JSONL"))
         .collect();
-    let progress_summary: Vec<_> = progress.iter().map(compact_progress_event).collect();
-    fabro_json_snapshot!(context, &progress_summary, @r#"
+    fabro_json_snapshot!(context, &progress, @r#"
     [
       {
+        "id": "[EVENT_ID]",
+        "ts": "[TIMESTAMP]",
+        "run_id": "[ULID]",
         "event": "sandbox.initializing",
-        "provider": "local"
+        "properties": {
+          "provider": "local"
+        }
       },
       {
+        "id": "[EVENT_ID]",
+        "ts": "[TIMESTAMP]",
+        "run_id": "[ULID]",
         "event": "sandbox.ready",
-        "provider": "local"
+        "properties": {
+          "provider": "local",
+          "duration_ms": "[DURATION_MS]",
+          "name": null,
+          "cpu": null,
+          "memory": null,
+          "url": null
+        }
       },
       {
-        "event": "sandbox.initialized"
+        "id": "[EVENT_ID]",
+        "ts": "[TIMESTAMP]",
+        "run_id": "[ULID]",
+        "event": "sandbox.initialized",
+        "properties": {
+          "working_directory": "[TEMP_DIR]"
+        }
       },
       {
+        "id": "[EVENT_ID]",
+        "ts": "[TIMESTAMP]",
+        "run_id": "[ULID]",
         "event": "run.started",
-        "name": "HumanGate",
-        "goal": "Wait for approval"
+        "properties": {
+          "name": "HumanGate",
+          "goal": "Wait for approval"
+        }
       },
       {
+        "id": "[EVENT_ID]",
+        "ts": "[TIMESTAMP]",
+        "run_id": "[ULID]",
         "event": "stage.started",
         "node_id": "start",
         "node_label": "Start",
-        "handler_type": "start",
-        "index": 0
+        "properties": {
+          "max_attempts": 1,
+          "attempt": 1,
+          "index": 0,
+          "handler_type": "start"
+        }
       },
       {
+        "id": "[EVENT_ID]",
+        "ts": "[TIMESTAMP]",
+        "run_id": "[ULID]",
         "event": "stage.completed",
         "node_id": "start",
         "node_label": "Start",
-        "index": 0,
-        "status": "success"
+        "properties": {
+          "max_attempts": 1,
+          "attempt": 1,
+          "index": 0,
+          "duration_ms": "[DURATION_MS]",
+          "status": "success",
+          "preferred_label": null,
+          "suggested_next_ids": [],
+          "usage": null,
+          "notes": null,
+          "files_touched": []
+        }
       },
       {
+        "id": "[EVENT_ID]",
+        "ts": "[TIMESTAMP]",
+        "run_id": "[ULID]",
         "event": "edge.selected",
-        "from_node": "start",
-        "to_node": "approve",
-        "reason": "unconditional"
+        "properties": {
+          "from_node": "start",
+          "to_node": "approve",
+          "label": null,
+          "condition": null,
+          "reason": "unconditional",
+          "stage_status": "success",
+          "is_jump": false
+        }
       },
       {
+        "id": "[EVENT_ID]",
+        "ts": "[TIMESTAMP]",
+        "run_id": "[ULID]",
         "event": "checkpoint.completed",
         "node_id": "start",
         "node_label": "start",
-        "status": "success"
+        "properties": {
+          "status": "success"
+        }
       },
       {
+        "id": "[EVENT_ID]",
+        "ts": "[TIMESTAMP]",
+        "run_id": "[ULID]",
         "event": "stage.started",
         "node_id": "approve",
         "node_label": "Approve?",
-        "handler_type": "human",
-        "index": 1
+        "properties": {
+          "max_attempts": 1,
+          "attempt": 1,
+          "index": 1,
+          "handler_type": "human"
+        }
       }
     ]
     "#);
