@@ -1,0 +1,48 @@
+{
+  "timestamp": "2026-04-01T15:42:12.994194Z",
+  "current_node": "toolchain",
+  "completed_nodes": [
+    "start",
+    "toolchain"
+  ],
+  "node_retries": {},
+  "context_values": {
+    "current_node": "toolchain",
+    "graph.goal": "# Add `--force` flag to `fabro pr create`\n\n## Context\n`fabro pr create` rejects runs with non-success status. Users sometimes want to create PRs for failed runs (e.g. partial work worth reviewing). A `--force` flag bypasses the status check.\n\n## Changes\n\n### 1. Add `--force` flag to `PrCreateArgs` (`lib/crates/fabro-cli/src/args.rs:582-588`)\nAdd `#[arg(short, long)] pub(crate) force: bool` to `PrCreateArgs`.\n\n### 2. Pass `force` through and skip status check (`lib/crates/fabro-cli/src/commands/pr/create.rs:76-79`)\nReplace the hard bail with a warning when `--force` is set:\n```rust\nmatch conclusion.status {\n    StageStatus::Success | StageStatus::PartialSuccess => {}\n    status if args.force => {\n        tracing::warn!(\"Run status is '{status}', proceeding because --force was specified\");\n    }\n    status => bail!(\"Run status is '{status}', expected success or partial_success\"),\n}\n```\n\n### 3. Add `setup_failed_run` helper (`lib/crates/fabro-cli/tests/it/cmd/support.rs`)\nNew helper that runs a real (non-dry-run) workflow with a `shape=parallelogram, script=\"exit 1\"` node. This produces a genuine `conclusion.json` with `status: \"fail\"`. Pattern follows `run_local_workflow` — uses `--sandbox local --provider openai` with `OPENAI_API_KEY=test`. The helper won't assert CLI exit success since the workflow fails; instead it finds the run dir via `only_run`.\n\n### 4. Add integration tests (`lib/crates/fabro-cli/tests/it/cmd/pr_create.rs`)\n\n**a) `pr_create_failed_run_rejects_without_force`** — `setup_failed_run`, run `pr create <run_id>`, assert error \"Run status is 'fail', expected success or partial_success\"\n\n**b) `pr_create_failed_run_proceeds_with_force`** — `setup_failed_run`, run `pr create --force <run_id>`, assert it passes status check and hits next validation error (\"Run has no run_branch\"). Proves `--force` bypassed the status gate.\n\n## Verification\n- `cargo clippy -p fabro-cli -- -D warnings`\n- `cargo nextest run -p fabro-cli`\n- `./target/debug/fabro pr create --help` — confirm `-f`/`--force` appears\n",
+    "graph.rankdir": "LR",
+    "outcome": "success",
+    "failure_signature": "",
+    "internal.retry_count.start": 0,
+    "internal.fidelity": "compact",
+    "internal.run_id": "01KN4VB09T999RE1V2DD8Z3YC3",
+    "command.stderr": "",
+    "thread.start.current_node": "toolchain",
+    "failure_class": "",
+    "current.preamble": "Goal: # Add `--force` flag to `fabro pr create`\n\n## Context\n`fabro pr create` rejects runs with non-success status. Users sometimes want to create PRs for failed runs (e.g. partial work worth reviewing). A `--force` flag bypasses the status check.\n\n## Changes\n\n### 1. Add `--force` flag to `PrCreateArgs` (`lib/crates/fabro-cli/src/args.rs:582-588`)\nAdd `#[arg(short, long)] pub(crate) force: bool` to `PrCreateArgs`.\n\n### 2. Pass `force` through and skip status check (`lib/crates/fabro-cli/src/commands/pr/create.rs:76-79`)\nReplace the hard bail with a warning when `--force` is set:\n```rust\nmatch conclusion.status {\n    StageStatus::Success | StageStatus::PartialSuccess => {}\n    status if args.force => {\n        tracing::warn!(\"Run status is '{status}', proceeding because --force was specified\");\n    }\n    status => bail!(\"Run status is '{status}', expected success or partial_success\"),\n}\n```\n\n### 3. Add `setup_failed_run` helper (`lib/crates/fabro-cli/tests/it/cmd/support.rs`)\nNew helper that runs a real (non-dry-run) workflow with a `shape=parallelogram, script=\"exit 1\"` node. This produces a genuine `conclusion.json` with `status: \"fail\"`. Pattern follows `run_local_workflow` — uses `--sandbox local --provider openai` with `OPENAI_API_KEY=test`. The helper won't assert CLI exit success since the workflow fails; instead it finds the run dir via `only_run`.\n\n### 4. Add integration tests (`lib/crates/fabro-cli/tests/it/cmd/pr_create.rs`)\n\n**a) `pr_create_failed_run_rejects_without_force`** — `setup_failed_run`, run `pr create <run_id>`, assert error \"Run status is 'fail', expected success or partial_success\"\n\n**b) `pr_create_failed_run_proceeds_with_force`** — `setup_failed_run`, run `pr create --force <run_id>`, assert it passes status check and hits next validation error (\"Run has no run_branch\"). Proves `--force` bypassed the status gate.\n\n## Verification\n- `cargo clippy -p fabro-cli -- -D warnings`\n- `cargo nextest run -p fabro-cli`\n- `./target/debug/fabro pr create --help` — confirm `-f`/`--force` appears\n\n",
+    "internal.retry_count.toolchain": 0,
+    "internal.thread_id": "start",
+    "internal.node_visit_count": 1,
+    "graph.model_stylesheet": "\n            * { model: claude-opus-4-6; }\n        ",
+    "command.output": "cargo 1.94.0 (85eff7c80 2026-01-15)\n"
+  },
+  "node_outcomes": {
+    "toolchain": {
+      "status": "success",
+      "context_updates": {
+        "command.output": "cargo 1.94.0 (85eff7c80 2026-01-15)\n",
+        "command.stderr": ""
+      },
+      "notes": "Script completed: command -v cargo >/dev/null || { curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && sudo ln -sf $HOME/.cargo/bin/* /usr/local/bin/; }; cargo --version 2>&1",
+      "usage": null
+    },
+    "start": {
+      "status": "success",
+      "usage": null
+    }
+  },
+  "next_node_id": "preflight_compile",
+  "node_visits": {
+    "toolchain": 1,
+    "start": 1
+  }
+}
