@@ -1414,7 +1414,12 @@ mod tests {
             result.remediation.as_deref(),
             Some("Fix permissions on /home/user/.fabro")
         );
-        assert!(result.details.iter().any(|detail| detail.text == "Writable: no"));
+        assert!(
+            result
+                .details
+                .iter()
+                .any(|detail| detail.text == "Writable: no")
+        );
     }
 
     // -- check_llm_providers --
