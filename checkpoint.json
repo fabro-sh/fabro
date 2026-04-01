@@ -1,33 +1,45 @@
 {
-  "timestamp": "2026-04-01T15:17:53.133795Z",
-  "current_node": "compile_rust",
+  "timestamp": "2026-04-01T15:19:10.347860Z",
+  "current_node": "compile_typescript",
   "completed_nodes": [
     "start",
     "toolchain",
-    "compile_rust"
+    "compile_rust",
+    "compile_typescript"
   ],
   "node_retries": {},
   "context_values": {
+    "internal.thread_id": "compile_rust",
+    "internal.retry_count.compile_typescript": 0,
+    "graph.rankdir": "LR",
+    "internal.retry_count.compile_rust": 0,
+    "graph.goal": "Verify the sandbox can lint and test the project",
+    "failure_signature": "",
     "internal.fidelity": "compact",
-    "command.stderr": "",
+    "current.preamble": "Goal: Verify the sandbox can lint and test the project\n\n## Completed stages\n- **toolchain**: success\n  - Script: `rustc --version && cargo --version && bun --version 2>&1`\n  - Stdout:\n    ```\n    rustc 1.94.0 (4a4ef493e 2026-03-02)\n    cargo 1.94.0 (85eff7c80 2026-01-15)\n    1.3.10\n    ```\n  - Stderr: (empty)\n- **compile_rust**: success\n  - Script: `cargo check -q --workspace 2>&1`\n  - Stdout: (empty)\n  - Stderr: (empty)\n",
     "internal.retry_count.start": 0,
-    "outcome": "success",
     "internal.node_visit_count": 1,
     "thread.start.current_node": "toolchain",
-    "internal.retry_count.toolchain": 0,
-    "command.output": "",
-    "failure_signature": "",
-    "internal.run_id": "01KN4SSX5P9VNZZGRWXXNFH8S3",
-    "failure_class": "",
+    "current_node": "compile_typescript",
     "thread.toolchain.current_node": "compile_rust",
-    "internal.retry_count.compile_rust": 0,
-    "current_node": "compile_rust",
-    "graph.goal": "Verify the sandbox can lint and test the project",
-    "graph.rankdir": "LR",
-    "internal.thread_id": "toolchain",
-    "current.preamble": "Goal: Verify the sandbox can lint and test the project\n\n## Completed stages\n- **toolchain**: success\n  - Script: `rustc --version && cargo --version && bun --version 2>&1`\n  - Stdout:\n    ```\n    rustc 1.94.0 (4a4ef493e 2026-03-02)\n    cargo 1.94.0 (85eff7c80 2026-01-15)\n    1.3.10\n    ```\n  - Stderr: (empty)\n"
+    "internal.retry_count.toolchain": 0,
+    "internal.run_id": "01KN4SSX5P9VNZZGRWXXNFH8S3",
+    "command.output": "bun install v1.3.10 (30e609e0)\n\n+ @react-router/dev@7.12.0\n+ @tailwindcss/vite@4.2.1\n+ @types/better-sqlite3@7.6.13\n+ @types/node@22.19.13\n+ @types/react@19.2.14\n+ @types/react-dom@19.2.3\n+ tailwindcss@4.2.1\n+ typescript@5.9.3\n+ vite@7.3.1\n+ vite-tsconfig-paths@5.1.4\n+ @dnd-kit/core@6.3.1\n+ @dnd-kit/sortable@10.0.0\n+ @dnd-kit/utilities@3.2.2\n+ @headlessui/react@2.2.9\n+ @heroicons/react@2.2.0\n+ @pierre/diffs@1.0.11\n+ @react-router/node@7.12.0\n+ @react-router/serve@7.12.0\n+ @viz-js/viz@3.24.0\n+ arctic@3.7.0\n+ better-sqlite3@12.6.2\n+ isbot@5.1.35\n+ jose@6.1.3\n+ react@19.2.4\n+ react-dom@19.2.4\n+ react-router@7.12.0\n+ smol-toml@1.6.0\n\n1400 packages installed [68.85s]\n$ react-router typegen && tsc\n",
+    "command.stderr": "",
+    "thread.compile_rust.current_node": "compile_typescript",
+    "failure_class": "",
+    "outcome": "success"
   },
   "node_outcomes": {
+    "compile_typescript": {
+      "status": "success",
+      "context_updates": {
+        "command.stderr": "",
+        "command.output": "bun install v1.3.10 (30e609e0)\n\n+ @react-router/dev@7.12.0\n+ @tailwindcss/vite@4.2.1\n+ @types/better-sqlite3@7.6.13\n+ @types/node@22.19.13\n+ @types/react@19.2.14\n+ @types/react-dom@19.2.3\n+ tailwindcss@4.2.1\n+ typescript@5.9.3\n+ vite@7.3.1\n+ vite-tsconfig-paths@5.1.4\n+ @dnd-kit/core@6.3.1\n+ @dnd-kit/sortable@10.0.0\n+ @dnd-kit/utilities@3.2.2\n+ @headlessui/react@2.2.9\n+ @heroicons/react@2.2.0\n+ @pierre/diffs@1.0.11\n+ @react-router/node@7.12.0\n+ @react-router/serve@7.12.0\n+ @viz-js/viz@3.24.0\n+ arctic@3.7.0\n+ better-sqlite3@12.6.2\n+ isbot@5.1.35\n+ jose@6.1.3\n+ react@19.2.4\n+ react-dom@19.2.4\n+ react-router@7.12.0\n+ smol-toml@1.6.0\n\n1400 packages installed [68.85s]\n$ react-router typegen && tsc\n"
+      },
+      "notes": "Script completed: cd apps/fabro-web && bun install && bun run typecheck 2>&1",
+      "usage": null
+    },
     "compile_rust": {
       "status": "success",
       "context_updates": {
@@ -40,8 +52,8 @@
     "toolchain": {
       "status": "success",
       "context_updates": {
-        "command.output": "rustc 1.94.0 (4a4ef493e 2026-03-02)\ncargo 1.94.0 (85eff7c80 2026-01-15)\n1.3.10\n",
-        "command.stderr": ""
+        "command.stderr": "",
+        "command.output": "rustc 1.94.0 (4a4ef493e 2026-03-02)\ncargo 1.94.0 (85eff7c80 2026-01-15)\n1.3.10\n"
       },
       "notes": "Script completed: rustc --version && cargo --version && bun --version 2>&1",
       "usage": null
@@ -51,10 +63,11 @@
       "usage": null
     }
   },
-  "next_node_id": "compile_typescript",
+  "next_node_id": "lint_rust",
   "node_visits": {
     "compile_rust": 1,
     "toolchain": 1,
+    "compile_typescript": 1,
     "start": 1
   }
 }
