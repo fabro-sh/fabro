@@ -1,5 +1,13 @@
-use fabro_test::{fabro_snapshot, test_context};
+use std::process::Output;
+
+use fabro_test::{fabro_snapshot, test_context, twin_openai};
 use predicates::prelude::*;
+
+async fn run_success_output(mut cmd: assert_cmd::Command) -> Output {
+    tokio::task::spawn_blocking(move || cmd.assert().success().get_output().clone())
+        .await
+        .expect("blocking command task should complete")
+}
 
 #[test]
 fn help() {
@@ -226,6 +234,32 @@ fn storage_dir_missing_shows_error() {
 fn live_doctor() {
     let context = test_context!();
     context.doctor().assert().success();
+}
+
+#[fabro_macros::e2e_test(twin)]
+async fn twin_doctor() {
+    let context = test_context!();
+    let twin = twin_openai().await;
+    let namespace = format!("{}::{}", module_path!(), line!());
+    let mut cmd = context.doctor();
+    cmd.arg("--verbose");
+    cmd.env_clear();
+    cmd.env("NO_COLOR", "1");
+    cmd.env("HOME", &context.home_dir);
+    cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
+    cmd.env("FABRO_STORAGE_DIR", &context.storage_dir);
+    cmd.env(
+        "PATH",
+        "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+    );
+    twin.configure_command(&mut cmd, &namespace);
+
+    let output = run_success_output(cmd).await;
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(
+        stdout.to_lowercase().contains("openai connectivity: ok"),
+        "expected verbose doctor output to include openai probe success, got: {stdout}"
+    );
 }
 
 #[test]

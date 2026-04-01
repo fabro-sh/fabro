@@ -1395,9 +1395,14 @@ async fn daytona_clone_public_repo_gets_credentials() {
     let creds = load_github_app_credentials();
 
     // Directly test resolve_clone_credentials against a repo in an org where the app is installed
-    let (username, password) = fabro_github::resolve_clone_credentials(&creds, "fabro-sh", "fabro")
-        .await
-        .unwrap();
+    let (username, password) = fabro_github::resolve_clone_credentials(
+        &creds,
+        "fabro-sh",
+        "fabro",
+        &fabro_github::github_api_base_url(),
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         username.as_deref(),
@@ -1416,7 +1421,13 @@ async fn daytona_clone_public_repo_gets_credentials() {
 async fn daytona_iat_not_installed_gives_clear_error() {
     let creds = load_github_app_credentials();
 
-    let result = fabro_github::resolve_clone_credentials(&creds, "torvalds", "linux").await;
+    let result = fabro_github::resolve_clone_credentials(
+        &creds,
+        "torvalds",
+        "linux",
+        &fabro_github::github_api_base_url(),
+    )
+    .await;
 
     assert!(
         result.is_err(),

@@ -34,10 +34,8 @@ use fabro_workflow::event::{EventEmitter, RunEventEnvelope, WorkflowRunEvent};
 use fabro_workflow::handler::agent::{AgentHandler, CodergenBackend, CodergenResult};
 use fabro_workflow::handler::command::CommandHandler;
 use fabro_workflow::handler::conditional::ConditionalHandler;
-use fabro_workflow::handler::default_registry;
 use fabro_workflow::handler::exit::ExitHandler;
 use fabro_workflow::handler::human::HumanHandler;
-use fabro_workflow::handler::llm::AgentApiBackend;
 use fabro_workflow::handler::llm::cli::{AgentCliBackend, BackendRouter, parse_cli_response};
 use fabro_workflow::handler::manager_loop::SubWorkflowHandler;
 use fabro_workflow::handler::start::StartHandler;
@@ -5817,6 +5815,7 @@ async fn fidelity_resume_preserves_context_values_across_checkpoint() {
 // ===========================================================================
 
 mod real_llm {
+    use std::collections::HashMap;
     use std::sync::Arc;
 
     use async_trait::async_trait;
@@ -5828,11 +5827,13 @@ mod real_llm {
     use fabro_workflow::handler::agent::{AgentHandler, CodergenBackend, CodergenResult};
 
     use fabro_llm::client::Client;
+    use fabro_llm::providers::OpenAiAdapter;
     use fabro_llm::types::{Message, Request};
 
     struct LlmCodergenBackend {
         client: Arc<Client>,
         model: String,
+        provider: String,
     }
 
     #[async_trait]
@@ -5867,7 +5868,7 @@ mod real_llm {
             let request = Request {
                 model: self.model.clone(),
                 messages: vec![Message::user(prompt)],
-                provider: Some("anthropic".to_string()),
+                provider: Some(self.provider.clone()),
                 tools: None,
                 tool_choice: None,
                 response_format: None,
@@ -5894,18 +5895,50 @@ mod real_llm {
         }
     }
 
+    fn test_llm_model() -> &'static str {
+        if fabro_test::TestMode::from_env().is_twin() {
+            "gpt-5.4-mini"
+        } else {
+            "claude-haiku-4-5"
+        }
+    }
+
+    fn test_llm_provider() -> &'static str {
+        if fabro_test::TestMode::from_env().is_twin() {
+            "openai"
+        } else {
+            "anthropic"
+        }
+    }
+
     async fn make_llm_client() -> Option<Arc<Client>> {
+        if fabro_test::TestMode::from_env().is_twin() {
+            let (base_url, api_key) = fabro_test::e2e_openai!();
+            let adapter: Arc<dyn fabro_llm::provider::ProviderAdapter> =
+                Arc::new(OpenAiAdapter::new(api_key).with_base_url(base_url));
+            let mut providers: HashMap<String, Arc<dyn fabro_llm::provider::ProviderAdapter>> =
+                HashMap::new();
+            providers.insert("openai".to_string(), adapter);
+            return Some(Arc::new(Client::new(
+                providers,
+                Some("openai".to_string()),
+                Vec::new(),
+            )));
+        }
+
         fabro_test::require_env("ANTHROPIC_API_KEY")?;
-        let client = Client::from_env()
-            .await
-            .expect("unified-llm client should initialize from env");
-        Some(Arc::new(client))
+        Some(Arc::new(
+            Client::from_env()
+                .await
+                .expect("unified-llm client should initialize from env"),
+        ))
     }
 
     fn make_llm_backend(client: Arc<Client>) -> Box<LlmCodergenBackend> {
         Box::new(LlmCodergenBackend {
             client,
-            model: "claude-haiku-4-5".to_string(),
+            model: test_llm_model().to_string(),
+            provider: test_llm_provider().to_string(),
         })
     }
 
@@ -5922,7 +5955,7 @@ mod real_llm {
     use fabro_workflow::run_options::RunOptions;
     use fabro_workflow::test_support::WorkflowRunner;
 
-    #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
+    #[fabro_macros::e2e_test(twin, live("ANTHROPIC_API_KEY"))]
     async fn real_llm_linear_pipeline() {
         let client = make_llm_client().await.unwrap();
 
@@ -6031,7 +6064,7 @@ mod real_llm {
         );
     }
 
-    #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
+    #[fabro_macros::e2e_test(twin, live("ANTHROPIC_API_KEY"))]
     async fn real_llm_two_stage_pipeline() {
         let client = make_llm_client().await.unwrap();
 
@@ -6122,7 +6155,7 @@ mod real_llm {
         assert_eq!(last_stage, Some("review"));
     }
 
-    #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
+    #[fabro_macros::e2e_test(twin, live("ANTHROPIC_API_KEY"))]
     async fn real_llm_human_gate_auto_approve() {
         let client = make_llm_client().await.unwrap();
 
@@ -6265,7 +6298,7 @@ mod real_llm {
         );
     }
 
-    #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
+    #[fabro_macros::e2e_test(twin, live("ANTHROPIC_API_KEY"))]
     async fn real_llm_one_shot_pipeline() {
         let client = make_llm_client().await.unwrap();
 
@@ -6301,7 +6334,7 @@ mod real_llm {
         );
         classify.attrs.insert(
             "model".to_string(),
-            AttrValue::String("claude-haiku-4-5".to_string()),
+            AttrValue::String(test_llm_model().to_string()),
         );
         graph.nodes.insert("classify".to_string(), classify);
 
@@ -8076,116 +8109,6 @@ timeout_ms = 120000
     );
 }
 
-// --- Prompt/Agent hook E2E with real LLM ---
-
-#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
-async fn hook_prompt_proceed_allows_run() {
-    let hooks = vec![fabro_hooks::HookDefinition {
-        name: Some("prompt-proceed".into()),
-        event: fabro_hooks::HookEvent::RunStart,
-        command: None,
-        hook_type: Some(fabro_hooks::HookType::Prompt {
-            prompt: "A workflow is starting. Always approve. Respond with {\"ok\": true}.".into(),
-            model: Some("haiku".into()),
-        }),
-        matcher: None,
-        blocking: None,
-        timeout_ms: Some(30000),
-        sandbox: None,
-    }];
-    let engine = engine_with_hooks(hooks);
-    let graph = parse(simple_linear_dot()).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let run_options = make_run_options(dir.path());
-
-    let outcome = engine.run(&graph, &run_options).await.unwrap();
-    assert_eq!(outcome.status, StageStatus::Success);
-}
-
-#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
-async fn hook_prompt_block_prevents_run() {
-    // Use a factual question that evaluates to false: "Is 2+2=5?"
-    let hooks = vec![fabro_hooks::HookDefinition {
-        name: Some("prompt-block".into()),
-        event: fabro_hooks::HookEvent::RunStart,
-        command: None,
-        hook_type: Some(fabro_hooks::HookType::Prompt {
-            prompt: "Check: is 2+2 equal to 5? If the statement is true, respond {\"ok\": true}. If false, respond {\"ok\": false, \"reason\": \"math check failed\"}.".into(),
-            model: Some("haiku".into()),
-        }),
-        matcher: None,
-        blocking: None,
-        timeout_ms: Some(30000),
-        sandbox: None,
-    }];
-    let engine = engine_with_hooks(hooks);
-    let graph = parse(simple_linear_dot()).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let run_options = make_run_options(dir.path());
-
-    let result = engine.run(&graph, &run_options).await;
-    assert!(
-        result.is_err(),
-        "Prompt hook block should cause error, got: {result:?}"
-    );
-}
-
-#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
-async fn hook_agent_proceed_allows_run() {
-    let hooks = vec![fabro_hooks::HookDefinition {
-        name: Some("agent-proceed".into()),
-        event: fabro_hooks::HookEvent::RunStart,
-        command: None,
-        hook_type: Some(fabro_hooks::HookType::Agent {
-            prompt: "A workflow is starting. Always approve. Respond with {\"ok\": true}. Do not use any tools.".into(),
-            model: Some("haiku".into()),
-            max_tool_rounds: Some(1),
-        }),
-        matcher: None,
-        blocking: None,
-        timeout_ms: Some(60000),
-        sandbox: None,
-    }];
-    let engine = engine_with_hooks(hooks);
-    let graph = parse(simple_linear_dot()).unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let run_options = make_run_options(dir.path());
-
-    let outcome = engine.run(&graph, &run_options).await.unwrap();
-    assert_eq!(outcome.status, StageStatus::Success);
-}
-
-#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
-async fn hook_agent_with_tool_use() {
-    let dir = tempfile::tempdir().unwrap();
-    let marker = dir.path().join("hook_check.txt");
-    std::fs::write(&marker, "READY").unwrap();
-
-    let hooks = vec![fabro_hooks::HookDefinition {
-        name: Some("agent-tools".into()),
-        event: fabro_hooks::HookEvent::RunStart,
-        command: None,
-        hook_type: Some(fabro_hooks::HookType::Agent {
-            prompt: format!(
-                "Read the file at {} using the read_file tool. If it contains 'READY', respond with {{\"ok\": true}}. Otherwise respond with {{\"ok\": false, \"reason\": \"not ready\"}}.",
-                marker.display()
-            ),
-            model: Some("haiku".into()),
-            max_tool_rounds: Some(5),
-        }),
-        matcher: None,
-        blocking: None,
-        timeout_ms: Some(60000),
-        sandbox: None,
-    }];
-    let engine = engine_with_hooks(hooks);
-    let graph = parse(simple_linear_dot()).unwrap();
-    let run_options = make_run_options(dir.path());
-
-    let outcome = engine.run(&graph, &run_options).await.unwrap();
-    assert_eq!(outcome.status, StageStatus::Success);
-}
-
 // --- Events emitted correctly alongside hooks ---
 
 #[tokio::test]
@@ -8222,104 +8145,6 @@ async fn hooks_do_not_duplicate_workflow_events() {
     // No WorkflowRunFailed
     let run_failed = captured.iter().filter(|e| e.event == "run.failed").count();
     assert_eq!(run_failed, 0, "Should have 0 WorkflowRunFailed");
-}
-
-// ---------------------------------------------------------------------------
-// E2E test with real LLM
-// ---------------------------------------------------------------------------
-
-#[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
-async fn arc_e2e_with_real_llm() {
-    let dir = tempfile::tempdir().unwrap();
-    let dir_path = dir.path().to_str().unwrap().to_string();
-
-    let dot = format!(
-        r#"digraph E2E {{
-            graph [goal="Create a test file"]
-            start [shape=Mdiamond]
-            exit  [shape=Msquare]
-            work  [
-                shape=box,
-                label="Work",
-                prompt="Create a file called hello.txt in {dir_path} containing exactly 'Hello from LLM'. Do not output anything else.",
-                goal_gate=true
-            ]
-            start -> work -> exit
-        }}"#
-    );
-
-    let graph = parse(&dot).expect("parse should succeed");
-    validate_or_raise(&graph, &[]).expect("validation should pass");
-
-    let interviewer: Arc<dyn Interviewer> = Arc::new(AutoApproveInterviewer);
-    let model = "claude-haiku-4-5".to_string();
-
-    let registry = default_registry(interviewer, move || {
-        Some(Box::new(AgentApiBackend::new(
-            model.clone(),
-            Provider::Anthropic,
-            Vec::new(),
-        ))
-            as Box<dyn fabro_workflow::handler::agent::CodergenBackend>)
-    });
-
-    let run_dir = tempfile::tempdir().unwrap();
-    let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::default()), local_env());
-    let run_options = RunOptions {
-        settings: FabroSettings::default(),
-        run_dir: run_dir.path().to_path_buf(),
-        cancel_token: None,
-        run_id: test_run_id("test-run"),
-        labels: std::collections::HashMap::new(),
-        workflow_slug: None,
-        github_app: None,
-        base_branch: None,
-        display_base_sha: None,
-        host_repo_path: None,
-        git: None,
-    };
-    let outcome = engine
-        .run(&graph, &run_options)
-        .await
-        .expect("run should succeed");
-
-    // 1. Pipeline completed successfully
-    assert_eq!(outcome.status, StageStatus::Success);
-
-    // 2. Artifacts exist
-    let work_dir = run_dir.path().join("nodes").join("work");
-    assert!(
-        work_dir.join("prompt.md").exists(),
-        "prompt.md should exist"
-    );
-    assert!(
-        work_dir.join("response.md").exists(),
-        "response.md should exist"
-    );
-    assert!(
-        work_dir.join("status.json").exists(),
-        "status.json should exist"
-    );
-
-    // 3. Goal gate: check checkpoint node outcomes
-    let checkpoint =
-        Checkpoint::load(&run_dir.path().join("checkpoint.json")).expect("checkpoint should load");
-    let work_outcome = checkpoint
-        .node_outcomes
-        .get("work")
-        .expect("work outcome should exist");
-    assert!(
-        work_outcome.status == StageStatus::Success
-            || work_outcome.status == StageStatus::PartialSuccess,
-        "work goal gate should be Success or PartialSuccess, got {:?}",
-        work_outcome.status
-    );
-
-    // 4. Checkpoint: completed_nodes contains "work"
-    assert!(
-        checkpoint.completed_nodes.contains(&"work".to_string()),
-        "completed_nodes should contain 'work'"
-    );
 }
 
 // ---------------------------------------------------------------------------

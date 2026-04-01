@@ -403,6 +403,7 @@ pub async fn create_pull_request(
     title: &str,
     body: &str,
     draft: bool,
+    base_url: &str,
 ) -> Result<CreatedPullRequest, String> {
     #[derive(Deserialize)]
     struct PullRequestResponse {
@@ -414,9 +415,8 @@ pub async fn create_pull_request(
     let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
     let client = reqwest::Client::new();
 
-    let base_url = github_api_base_url();
     let token =
-        create_installation_access_token_for_pr(&client, &jwt, owner, repo, &base_url).await?;
+        create_installation_access_token_for_pr(&client, &jwt, owner, repo, base_url).await?;
 
     tracing::debug!(title = %title, head = %head, base = %base, draft, "Creating pull request");
 
@@ -502,13 +502,13 @@ pub async fn enable_auto_merge(
     repo: &str,
     pr_node_id: &str,
     merge_method: AutoMergeMethod,
+    base_url: &str,
 ) -> Result<(), String> {
     let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
     let client = reqwest::Client::new();
 
-    let base_url = github_api_base_url();
     let token =
-        create_installation_access_token_for_pr(&client, &jwt, owner, repo, &base_url).await?;
+        create_installation_access_token_for_pr(&client, &jwt, owner, repo, base_url).await?;
 
     let query = format!(
         r#"mutation {{
@@ -735,12 +735,12 @@ pub async fn resolve_clone_credentials(
     creds: &GitHubAppCredentials,
     owner: &str,
     repo: &str,
+    base_url: &str,
 ) -> Result<(Option<String>, Option<String>), String> {
     let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
     let client = reqwest::Client::new();
 
-    let base_url = github_api_base_url();
-    let token = create_installation_access_token(&client, &jwt, owner, repo, &base_url).await?;
+    let token = create_installation_access_token(&client, &jwt, owner, repo, base_url).await?;
     Ok((Some("x-access-token".to_string()), Some(token)))
 }
 
@@ -755,14 +755,14 @@ pub fn embed_token_in_url(url: &str, token: &str) -> String {
 /// Resolve an authenticated HTTPS URL for a GitHub repository.
 ///
 /// Parses owner/repo from the URL, obtains a fresh installation access token,
-/// and returns the URL with embedded credentials. Returns the original URL
-/// unchanged if it's not a GitHub URL.
+/// and returns the URL with embedded credentials.
 pub async fn resolve_authenticated_url(
     creds: &GitHubAppCredentials,
     url: &str,
+    base_url: &str,
 ) -> Result<String, String> {
     let (owner, repo) = parse_github_owner_repo(url)?;
-    let (_username, password) = resolve_clone_credentials(creds, &owner, &repo).await?;
+    let (_username, password) = resolve_clone_credentials(creds, &owner, &repo, base_url).await?;
     match password {
         Some(token) => Ok(embed_token_in_url(url, &token)),
         None => Ok(url.to_string()),

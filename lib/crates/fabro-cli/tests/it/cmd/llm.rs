@@ -1,5 +1,13 @@
-use fabro_test::{fabro_snapshot, test_context};
+use std::process::Output;
+
+use fabro_test::{TwinScenario, TwinScenarios, fabro_snapshot, test_context, twin_openai};
 use predicates::prelude::*;
+
+async fn run_success_output(mut cmd: assert_cmd::Command) -> Output {
+    tokio::task::spawn_blocking(move || cmd.assert().success().get_output().clone())
+        .await
+        .expect("blocking command task should complete")
+}
 
 #[test]
 fn prompt_bad_option() {
@@ -105,6 +113,22 @@ fn prompt_no_stream_generates_response() {
         .stdout(predicate::str::is_empty().not());
 }
 
+#[fabro_macros::e2e_test(twin)]
+async fn twin_prompt_no_stream() {
+    let context = test_context!();
+    let (base_url, api_key) = fabro_test::e2e_openai!();
+    let mut cmd = context.llm();
+    cmd.env("OPENAI_BASE_URL", base_url);
+    cmd.env("OPENAI_API_KEY", api_key);
+    cmd.args(["prompt", "--no-stream", "-m", "gpt-5.4-mini", "Say hello"]);
+    cmd.write_stdin("");
+    let output = run_success_output(cmd).await;
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap().trim(),
+        "deterministic: Say hello"
+    );
+}
+
 #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 fn prompt_stream_generates_response() {
     let context = test_context!();
@@ -119,6 +143,22 @@ fn prompt_stream_generates_response() {
         .assert()
         .success()
         .stdout(predicate::str::is_empty().not());
+}
+
+#[fabro_macros::e2e_test(twin)]
+async fn twin_prompt_stream() {
+    let context = test_context!();
+    let (base_url, api_key) = fabro_test::e2e_openai!();
+    let mut cmd = context.llm();
+    cmd.env("OPENAI_BASE_URL", base_url);
+    cmd.env("OPENAI_API_KEY", api_key);
+    cmd.args(["prompt", "-m", "gpt-5.4-mini", "Say hello"]);
+    cmd.write_stdin("");
+    let output = run_success_output(cmd).await;
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap().trim(),
+        "deterministic: Say hello"
+    );
 }
 
 #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
@@ -137,6 +177,35 @@ fn prompt_usage_shows_tokens() {
         .assert()
         .success()
         .stderr(predicate::str::contains("Tokens:"));
+}
+
+#[fabro_macros::e2e_test(twin)]
+async fn twin_prompt_usage() {
+    let context = test_context!();
+    let (base_url, api_key) = fabro_test::e2e_openai!();
+    let mut cmd = context.llm();
+    cmd.env("OPENAI_BASE_URL", base_url);
+    cmd.env("OPENAI_API_KEY", api_key);
+    cmd.args([
+        "prompt",
+        "--no-stream",
+        "-u",
+        "-m",
+        "gpt-5.4-mini",
+        "Say hello",
+    ]);
+    cmd.write_stdin("");
+    let output = run_success_output(cmd).await;
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap().trim(),
+        "deterministic: Say hello"
+    );
+    assert!(
+        String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("Tokens:"),
+        "stderr should include token usage"
+    );
 }
 
 #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
@@ -161,6 +230,41 @@ fn prompt_schema_no_stream_generates_json() {
     );
 }
 
+#[fabro_macros::e2e_test(twin)]
+async fn twin_prompt_schema_no_stream() {
+    let context = test_context!();
+    let twin = twin_openai().await;
+    let namespace = format!("{}::{}", module_path!(), line!());
+    TwinScenarios::new(namespace.clone())
+        .scenario(
+            TwinScenario::responses("gpt-5.4-mini")
+                .stream(false)
+                .input_contains("Return JSON")
+                .text(r#"{"greeting":"hello"}"#),
+        )
+        .load(twin)
+        .await;
+
+    let mut cmd = context.llm();
+    twin.configure_command(&mut cmd, &namespace);
+    cmd.args([
+        "prompt",
+        "--no-stream",
+        "-m",
+        "gpt-5.4-mini",
+        "--schema",
+        r#"{"type":"object","properties":{"greeting":{"type":"string"}},"required":["greeting"]}"#,
+        "Return JSON",
+    ]);
+    cmd.write_stdin("");
+    let output = run_success_output(cmd).await;
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout should be valid JSON");
+    assert_eq!(parsed["greeting"], "hello");
+}
+
 #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
 fn prompt_schema_stream_generates_json() {
     let context = test_context!();
@@ -181,6 +285,40 @@ fn prompt_schema_stream_generates_json() {
         parsed.get("greeting").is_some(),
         "expected 'greeting' key in output"
     );
+}
+
+#[fabro_macros::e2e_test(twin)]
+async fn twin_prompt_schema_stream() {
+    let context = test_context!();
+    let twin = twin_openai().await;
+    let namespace = format!("{}::{}", module_path!(), line!());
+    TwinScenarios::new(namespace.clone())
+        .scenario(
+            TwinScenario::responses("gpt-5.4-mini")
+                .stream(true)
+                .input_contains("Return JSON")
+                .text(r#"{"greeting":"hello"}"#),
+        )
+        .load(twin)
+        .await;
+
+    let mut cmd = context.llm();
+    twin.configure_command(&mut cmd, &namespace);
+    cmd.args([
+        "prompt",
+        "-m",
+        "gpt-5.4-mini",
+        "--schema",
+        r#"{"type":"object","properties":{"greeting":{"type":"string"}},"required":["greeting"]}"#,
+        "Return JSON",
+    ]);
+    cmd.write_stdin("");
+    let output = run_success_output(cmd).await;
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("stdout should be valid JSON");
+    assert_eq!(parsed["greeting"], "hello");
 }
 
 #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]
@@ -221,5 +359,32 @@ fn chat_multi_turn_with_system_prompt() {
             || stdout.to_lowercase().contains("asked")
             || stdout.to_lowercase().contains("pilot"),
         "second response should show multi-turn context, got: {stdout}"
+    );
+}
+
+#[fabro_macros::e2e_test(twin)]
+async fn twin_chat_multi_turn() {
+    let context = test_context!();
+    let (base_url, api_key) = fabro_test::e2e_openai!();
+    let mut cmd = context.command();
+    cmd.env("OPENAI_BASE_URL", base_url);
+    cmd.env("OPENAI_API_KEY", api_key);
+    cmd.args([
+        "llm",
+        "chat",
+        "-m",
+        "gpt-5.4-mini",
+        "-s",
+        "You are a pilot. End every response with 'Roger that.'",
+    ]);
+    cmd.write_stdin("What is your profession?\nWhat did I just ask you?\n");
+    let output = run_success_output(cmd).await;
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(!stdout.trim().is_empty(), "stdout should not be empty");
+    assert!(
+        stderr.contains("Using model:"),
+        "stderr should show model info"
     );
 }

@@ -1,4 +1,12 @@
+use std::process::Output;
+
 use fabro_test::{fabro_snapshot, test_context};
+
+async fn run_success_output(mut cmd: assert_cmd::Command) -> Output {
+    tokio::task::spawn_blocking(move || cmd.assert().success().get_output().clone())
+        .await
+        .expect("blocking command task should complete")
+}
 
 #[test]
 fn help() {
@@ -240,4 +248,164 @@ fn exec_read_and_edit() {
         content.contains("new content"),
         "Expected 'new content' in data.txt, got: {content}"
     );
+}
+
+#[fabro_macros::e2e_test(twin)]
+async fn twin_exec_creates_file() {
+    let context = test_context!();
+    let twin = fabro_test::twin_openai().await;
+    let namespace = format!("{}::{}", module_path!(), line!());
+    fabro_test::TwinScenarios::new(namespace.clone())
+        .scenario(
+            fabro_test::TwinScenario::responses("gpt-5.4-mini")
+                .input_contains("Create a file called hello.txt containing exactly 'Hello'")
+                .tool_call(fabro_test::TwinToolCall::write_file("hello.txt", "Hello"))
+                .text("Done."),
+        )
+        .load(twin)
+        .await;
+
+    let mut cmd = context.exec_cmd();
+    twin.configure_command(&mut cmd, &namespace);
+    cmd.args([
+        "--auto-approve",
+        "--permissions",
+        "full",
+        "--provider",
+        "openai",
+        "--model",
+        "gpt-5.4-mini",
+        "Create a file called hello.txt containing exactly 'Hello'",
+    ]);
+    let _output = run_success_output(cmd).await;
+
+    let content =
+        std::fs::read_to_string(context.temp_dir.join("hello.txt")).expect("read hello.txt");
+    assert_eq!(content, "Hello");
+}
+
+#[fabro_macros::e2e_test(twin)]
+async fn twin_exec_shell_command() {
+    let context = test_context!();
+    let twin = fabro_test::twin_openai().await;
+    let namespace = format!("{}::{}", module_path!(), line!());
+    fabro_test::TwinScenarios::new(namespace.clone())
+        .scenario(
+            fabro_test::TwinScenario::responses("gpt-5.4-mini")
+                .input_contains(
+                    "Run the shell command `echo hello_from_shell` and tell me what it printed",
+                )
+                .tool_call(fabro_test::TwinToolCall::shell("echo hello_from_shell"))
+                .text("It printed hello_from_shell."),
+        )
+        .load(twin)
+        .await;
+
+    let mut cmd = context.exec_cmd();
+    twin.configure_command(&mut cmd, &namespace);
+    cmd.args([
+        "--auto-approve",
+        "--permissions",
+        "full",
+        "--provider",
+        "openai",
+        "--model",
+        "gpt-5.4-mini",
+        "Run the shell command `echo hello_from_shell` and tell me what it printed",
+    ]);
+    let output = run_success_output(cmd).await;
+    let stdout = String::from_utf8(output.stdout).expect("valid utf8");
+    assert!(
+        stdout.contains("hello_from_shell"),
+        "expected shell marker in output, got: {stdout}"
+    );
+}
+
+#[fabro_macros::e2e_test(twin)]
+async fn twin_exec_json_output() {
+    let context = test_context!();
+    let twin = fabro_test::twin_openai().await;
+    let namespace = format!("{}::{}", module_path!(), line!());
+    fabro_test::TwinScenarios::new(namespace.clone())
+        .scenario(
+            fabro_test::TwinScenario::responses("gpt-5.4-mini")
+                .input_contains("Create a file called test.txt containing 'test'")
+                .tool_call(fabro_test::TwinToolCall::write_file("test.txt", "test"))
+                .text("Done."),
+        )
+        .load(twin)
+        .await;
+
+    let mut cmd = context.exec_cmd();
+    twin.configure_command(&mut cmd, &namespace);
+    cmd.args([
+        "--auto-approve",
+        "--permissions",
+        "full",
+        "--output-format",
+        "json",
+        "--provider",
+        "openai",
+        "--model",
+        "gpt-5.4-mini",
+        "Create a file called test.txt containing 'test'",
+    ]);
+    let output = run_success_output(cmd).await;
+    let stdout = String::from_utf8(output.stdout).expect("valid utf8");
+    let lines: Vec<&str> = stdout
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    assert!(!lines.is_empty(), "json output should not be empty");
+    let parsed: Vec<serde_json::Value> = lines
+        .iter()
+        .map(|line| serde_json::from_str(line).expect("each line should be valid JSON"))
+        .collect();
+    let first = &parsed[0];
+    assert!(
+        first.get("event").is_some() || first.get("type").is_some(),
+        "NDJSON line should have an event or type field, got: {first}"
+    );
+}
+
+#[fabro_macros::e2e_test(twin)]
+async fn twin_exec_read_and_edit() {
+    let context = test_context!();
+    context.write_temp("data.txt", "old content");
+    let twin = fabro_test::twin_openai().await;
+    let namespace = format!("{}::{}", module_path!(), line!());
+    fabro_test::TwinScenarios::new(namespace.clone())
+        .scenario(
+            fabro_test::TwinScenario::responses("gpt-5.4-mini")
+                .input_contains("Read data.txt then replace its entire content with 'new content'")
+                .tool_call(fabro_test::TwinToolCall::read_file("data.txt")),
+        )
+        .scenario(
+            fabro_test::TwinScenario::responses("gpt-5.4-mini")
+                .tool_call(fabro_test::TwinToolCall::write_file(
+                    "data.txt",
+                    "new content",
+                ))
+                .text("Done."),
+        )
+        .load(twin)
+        .await;
+
+    let mut cmd = context.exec_cmd();
+    twin.configure_command(&mut cmd, &namespace);
+    cmd.args([
+        "--auto-approve",
+        "--permissions",
+        "full",
+        "--provider",
+        "openai",
+        "--model",
+        "gpt-5.4-mini",
+        "Read data.txt then replace its entire content with 'new content'",
+    ]);
+    let _output = run_success_output(cmd).await;
+
+    let content =
+        std::fs::read_to_string(context.temp_dir.join("data.txt")).expect("read data.txt");
+    assert_eq!(content, "new content");
 }

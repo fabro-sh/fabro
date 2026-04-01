@@ -1615,6 +1615,8 @@ version = "0.176.2"
 dependencies = [
  "base64",
  "chrono",
+ "fabro-macros",
+ "fabro-test",
  "jsonwebtoken",
  "reqwest",
  "serde",
@@ -1942,8 +1944,10 @@ dependencies = [
  "insta",
  "regex",
  "reqwest",
+ "serde_json",
  "tempfile",
  "tokio",
+ "twin-github",
  "twin-openai",
 ]
 
@@ -6493,6 +6497,24 @@ dependencies = [
  "sha1",
  "thiserror 2.0.18",
  "utf-8",
+]
+
+[[package]]
+name = "twin-github"
+version = "0.176.2"
+dependencies = [
+ "axum",
+ "base64",
+ "chrono",
+ "jsonwebtoken",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]

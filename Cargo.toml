@@ -1,5 +1,5 @@
 [workspace]
-members = ["lib/crates/*", "test/twin/openai"]
+members = ["lib/crates/*", "test/twin/openai", "test/twin/github"]
 default-members = ["lib/crates/fabro-cli"]
 resolver = "2"
 
@@ -59,6 +59,7 @@ hex = "0.4"
 insta = "1"
 fabro-test = { path = "lib/crates/fabro-test" }
 twin-openai = { path = "test/twin/openai" }
+twin-github = { path = "test/twin/github" }
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
 daytona-sdk = { git = "https://github.com/brynary/daytona-sdk-rust", rev = "06033ca", package = "daytona-sdk" }

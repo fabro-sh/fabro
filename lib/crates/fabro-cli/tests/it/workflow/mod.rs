@@ -4,6 +4,7 @@ mod command_pipeline;
 mod conditional_branching;
 mod dry_run_examples;
 mod full_stack;
+mod hooks;
 mod human_gate;
 mod real_cli;
 

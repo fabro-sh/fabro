@@ -3,6 +3,7 @@ use std::process::Output;
 
 use assert_cmd::Command;
 use regex::Regex;
+use serde_json::{Map, Value, json};
 
 /// Walk up from `start` to find the repo-level `test/` fixtures directory.
 pub fn find_test_fixtures_dir(start: &Path) -> Option<PathBuf> {
@@ -489,12 +490,277 @@ impl TestContext {
 use tokio::net::TcpListener as TokioTcpListener;
 use tokio::sync::OnceCell;
 use tokio::time;
+pub use twin_github::AppState as GitHubAppState;
+pub use twin_github::state::AppConfig as GitHubAppConfig;
 use twin_openai::config::Config as TwinConfig;
 
 /// A shared twin-openai server instance.
 pub struct TwinOpenAi {
     /// Base URL including `/v1`, e.g. `http://127.0.0.1:PORT/v1`.
     pub base_url: String,
+}
+
+pub struct TwinGitHub {
+    pub base_url: String,
+    server: twin_github::TestServer,
+}
+
+impl TwinGitHub {
+    pub async fn start(state: twin_github::AppState) -> Self {
+        let server = twin_github::TestServer::start(state).await;
+        let base_url = server.url().to_string();
+        Self { base_url, server }
+    }
+
+    pub async fn shutdown(self) {
+        self.server.shutdown().await;
+    }
+}
+
+impl TwinOpenAi {
+    pub fn configure_command(&self, cmd: &mut Command, namespace: &str) {
+        cmd.env("OPENAI_BASE_URL", &self.base_url);
+        cmd.env("OPENAI_API_KEY", namespace);
+    }
+
+    #[must_use]
+    pub fn admin_url(&self) -> String {
+        self.base_url.trim_end_matches("/v1").to_string()
+    }
+
+    pub async fn reset_namespace(&self, namespace: &str) {
+        let response = reqwest::Client::new()
+            .post(format!("{}/__admin/reset", self.admin_url()))
+            .bearer_auth(namespace)
+            .send()
+            .await
+            .expect("reset twin-openai namespace");
+        assert!(
+            response.status().is_success(),
+            "reset twin-openai namespace failed: {}",
+            response.status()
+        );
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct TwinScenarios {
+    namespace: String,
+    scenarios: Vec<TwinScenario>,
+}
+
+impl TwinScenarios {
+    #[must_use]
+    pub fn new(namespace: impl Into<String>) -> Self {
+        Self {
+            namespace: namespace.into(),
+            scenarios: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn scenario(mut self, scenario: TwinScenario) -> Self {
+        self.scenarios.push(scenario);
+        self
+    }
+
+    pub async fn load(self, twin: &TwinOpenAi) {
+        twin.reset_namespace(&self.namespace).await;
+
+        let response = reqwest::Client::new()
+            .post(format!("{}/__admin/scenarios", twin.admin_url()))
+            .bearer_auth(&self.namespace)
+            .json(&json!({
+                "scenarios": self.scenarios.into_iter().map(TwinScenario::into_json).collect::<Vec<_>>(),
+            }))
+            .send()
+            .await
+            .expect("load twin-openai scenarios");
+        assert!(
+            response.status().is_success(),
+            "load twin-openai scenarios failed: {}",
+            response.status()
+        );
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TwinScenario {
+    matcher: Map<String, Value>,
+    script: Value,
+}
+
+impl TwinScenario {
+    #[must_use]
+    pub fn responses(model: impl Into<String>) -> Self {
+        Self {
+            matcher: Map::from_iter([
+                (
+                    "endpoint".to_string(),
+                    Value::String("responses".to_string()),
+                ),
+                ("model".to_string(), Value::String(model.into())),
+            ]),
+            script: json!({ "kind": "success" }),
+        }
+    }
+
+    #[must_use]
+    pub fn text(mut self, text: impl Into<String>) -> Self {
+        self.assert_script_kind("success", "text");
+        self.script["response_text"] = Value::String(text.into());
+        self
+    }
+
+    #[must_use]
+    pub fn tool_call(self, tool_call: TwinToolCall) -> Self {
+        self.tool_calls(vec![tool_call])
+    }
+
+    #[must_use]
+    pub fn tool_calls(mut self, tool_calls: Vec<TwinToolCall>) -> Self {
+        self.assert_script_kind("success", "tool_calls");
+        self.script["tool_calls"] = Value::Array(
+            tool_calls
+                .into_iter()
+                .map(TwinToolCall::into_json)
+                .collect::<Vec<_>>(),
+        );
+        self
+    }
+
+    #[must_use]
+    pub fn error(mut self, status: u16, message: impl Into<String>) -> Self {
+        self.script = json!({
+            "kind": "error",
+            "status": status,
+            "message": message.into(),
+            "error_type": "invalid_request_error",
+            "code": "twin_error",
+        });
+        self
+    }
+
+    #[must_use]
+    pub fn retry_after(mut self, retry_after: impl Into<String>) -> Self {
+        self.assert_script_kind("error", "retry_after");
+        self.script["retry_after"] = Value::String(retry_after.into());
+        self
+    }
+
+    #[must_use]
+    pub fn stream(mut self, stream: bool) -> Self {
+        self.matcher
+            .insert("stream".to_string(), Value::Bool(stream));
+        self
+    }
+
+    #[must_use]
+    pub fn input_contains(mut self, needle: impl Into<String>) -> Self {
+        self.matcher
+            .insert("input_contains".to_string(), Value::String(needle.into()));
+        self
+    }
+
+    #[must_use]
+    pub fn metadata(mut self, key: impl Into<String>, value: Value) -> Self {
+        let metadata = self
+            .matcher
+            .entry("metadata".to_string())
+            .or_insert_with(|| Value::Object(Map::new()));
+        metadata
+            .as_object_mut()
+            .expect("metadata should be an object")
+            .insert(key.into(), value);
+        self
+    }
+
+    fn into_json(self) -> Value {
+        json!({
+            "matcher": self.matcher,
+            "script": self.script,
+        })
+    }
+
+    fn assert_script_kind(&self, expected: &str, method: &str) {
+        let actual = self.script["kind"]
+            .as_str()
+            .expect("twin scenario script must have a kind");
+        assert_eq!(
+            actual, expected,
+            "TwinScenario::{method} requires a {expected} script, got {actual}"
+        );
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TwinToolCall {
+    name: String,
+    arguments: Value,
+}
+
+impl TwinToolCall {
+    #[must_use]
+    pub fn new(name: impl Into<String>, arguments: Value) -> Self {
+        Self {
+            name: name.into(),
+            arguments,
+        }
+    }
+
+    #[must_use]
+    pub fn write_file(path: impl Into<String>, content: impl Into<String>) -> Self {
+        Self::new(
+            "write_file",
+            json!({ "file_path": path.into(), "content": content.into() }),
+        )
+    }
+
+    #[must_use]
+    pub fn read_file(path: impl Into<String>) -> Self {
+        Self::new("read_file", json!({ "file_path": path.into() }))
+    }
+
+    #[must_use]
+    pub fn shell(command: impl Into<String>) -> Self {
+        Self::new("shell", json!({ "command": command.into() }))
+    }
+
+    #[must_use]
+    pub fn shell_with_timeout(command: impl Into<String>, timeout_ms: u64) -> Self {
+        Self::new(
+            "shell",
+            json!({ "command": command.into(), "timeout_ms": timeout_ms }),
+        )
+    }
+
+    #[must_use]
+    pub fn grep_pattern(pattern: impl Into<String>, path: impl Into<String>) -> Self {
+        Self::new(
+            "grep",
+            json!({ "pattern": pattern.into(), "path": path.into() }),
+        )
+    }
+
+    #[must_use]
+    pub fn glob_pattern(pattern: impl Into<String>, path: impl Into<String>) -> Self {
+        Self::new(
+            "glob",
+            json!({ "pattern": pattern.into(), "path": path.into() }),
+        )
+    }
+
+    #[must_use]
+    pub fn apply_patch(patch: impl Into<String>) -> Self {
+        Self::new("apply_patch", json!({ "patch": patch.into() }))
+    }
+
+    fn into_json(self) -> Value {
+        json!({
+            "name": self.name,
+            "arguments": self.arguments,
+        })
+    }
 }
 
 static TWIN_OPENAI: OnceCell<TwinOpenAi> = OnceCell::const_new();
@@ -558,4 +824,67 @@ macro_rules! e2e_openai {
             (base_url, api_key)
         }
     }};
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn twin_admin_url_removes_v1_suffix() {
+        let twin = TwinOpenAi {
+            base_url: "http://127.0.0.1:3000/v1".to_string(),
+        };
+        assert_eq!(twin.admin_url(), "http://127.0.0.1:3000");
+    }
+
+    #[test]
+    fn twin_configure_command_sets_openai_env() {
+        let twin = TwinOpenAi {
+            base_url: "http://127.0.0.1:3000/v1".to_string(),
+        };
+        let mut cmd = Command::new("env");
+        twin.configure_command(&mut cmd, "test-namespace");
+
+        let envs = cmd.get_envs().collect::<Vec<_>>();
+        assert!(envs.iter().any(|(key, value)| {
+            *key == std::ffi::OsStr::new("OPENAI_BASE_URL")
+                && *value == Some(std::ffi::OsStr::new("http://127.0.0.1:3000/v1"))
+        }),);
+        assert!(envs.iter().any(|(key, value)| {
+            *key == std::ffi::OsStr::new("OPENAI_API_KEY")
+                && *value == Some(std::ffi::OsStr::new("test-namespace"))
+        }),);
+    }
+
+    #[test]
+    fn twin_scenario_builder_matches_admin_contract() {
+        let scenario = TwinScenario::responses("gpt-5.4-mini")
+            .stream(false)
+            .input_contains("Return JSON")
+            .tool_call(TwinToolCall::write_file("hello.txt", "Hello"))
+            .text(r#"{"greeting":"hello"}"#)
+            .into_json();
+
+        assert_eq!(scenario["matcher"]["endpoint"], "responses");
+        assert_eq!(scenario["matcher"]["model"], "gpt-5.4-mini");
+        assert_eq!(scenario["matcher"]["stream"], false);
+        assert_eq!(scenario["matcher"]["input_contains"], "Return JSON");
+        assert_eq!(scenario["script"]["kind"], "success");
+        assert_eq!(
+            scenario["script"]["response_text"],
+            r#"{"greeting":"hello"}"#
+        );
+        assert_eq!(scenario["script"]["tool_calls"][0]["name"], "write_file");
+        assert_eq!(
+            scenario["script"]["tool_calls"][0]["arguments"]["file_path"],
+            "hello.txt"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "TwinScenario::retry_after requires a error script")]
+    fn twin_scenario_rejects_retry_after_on_success() {
+        let _ = TwinScenario::responses("gpt-5.4-mini").retry_after("30");
+    }
 }
