@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+#![allow(dead_code, unreachable_pub)]
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
