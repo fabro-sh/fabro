@@ -98,9 +98,7 @@ fn spawn_event_forwarder(
             // Forward non-streaming agent events to pipeline
             if !matches!(
                 &event.event,
-                AgentEvent::SessionStarted
-                    | AgentEvent::SessionEnded
-                    | AgentEvent::ProcessingEnd
+                AgentEvent::ProcessingEnd
                     | AgentEvent::AssistantTextStart
                     | AgentEvent::AssistantOutputReplace { .. }
                     | AgentEvent::TextDelta { .. }
@@ -496,6 +494,9 @@ impl CodergenBackend for AgentApiBackend {
         emitter.emit(&WorkflowRunEvent::Prompt {
             stage: node.id.clone(),
             text: prompt.to_string(),
+            mode: Some("agent".to_string()),
+            provider: Some(actual_provider.as_str().to_string()),
+            model: Some(actual_model.clone()),
         });
 
         // Record turn count before processing so we only aggregate new usage.

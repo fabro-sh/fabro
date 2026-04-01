@@ -52,10 +52,22 @@ mod tests {
         let emitter = EventEmitter::new();
         let mut receiver = emitter.subscribe();
 
-        emitter.emit("sess-1".into(), AgentEvent::SessionStarted);
+        emitter.emit(
+            "sess-1".into(),
+            AgentEvent::SessionStarted {
+                provider: Some("anthropic".into()),
+                model: Some("claude-opus".into()),
+            },
+        );
 
         let event = receiver.recv().await.unwrap();
-        assert!(matches!(event.event, AgentEvent::SessionStarted));
+        assert!(matches!(
+            event.event,
+            AgentEvent::SessionStarted {
+                provider: Some(_),
+                model: Some(_)
+            }
+        ));
         assert_eq!(event.session_id, "sess-1");
         assert_eq!(event.parent_session_id, None);
     }
@@ -120,7 +132,10 @@ mod tests {
         let mut receiver = emitter.subscribe();
 
         emitter.forward(SessionEvent {
-            event: AgentEvent::SessionStarted,
+            event: AgentEvent::SessionStarted {
+                provider: Some("anthropic".into()),
+                model: Some("claude-opus".into()),
+            },
             timestamp: SystemTime::now(),
             session_id: "child".into(),
             parent_session_id: Some("parent".into()),
@@ -129,6 +144,12 @@ mod tests {
         let event = receiver.recv().await.unwrap();
         assert_eq!(event.session_id, "child");
         assert_eq!(event.parent_session_id.as_deref(), Some("parent"));
-        assert!(matches!(event.event, AgentEvent::SessionStarted));
+        assert!(matches!(
+            event.event,
+            AgentEvent::SessionStarted {
+                provider: Some(_),
+                model: Some(_)
+            }
+        ));
     }
 }

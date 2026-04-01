@@ -1001,6 +1001,7 @@ mod tests {
                         node_id: "start".to_string(),
                         status: "success".to_string(),
                         git_commit_sha: Some("sha-test".to_string()),
+                        diff: None,
                     });
                 }
             });

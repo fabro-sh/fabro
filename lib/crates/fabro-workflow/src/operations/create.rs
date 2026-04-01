@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use chrono::{Local, Utc};
@@ -17,6 +18,7 @@ use crate::run_status::{RunStatus, write_run_status};
 use crate::transforms::{Transform, expand_vars};
 use fabro_sandbox::daytona::detect_repo_info;
 
+use crate::event::{WorkflowRunEvent, append_progress_event, canonicalize_event_at};
 use super::source::{ResolveWorkflowInput, WorkflowInput, resolve_workflow};
 
 const RUN_CONFIG_FILE: &str = "workflow.toml";
@@ -116,6 +118,11 @@ pub fn create(request: CreateRunInput) -> Result<CreatedRun, FabroError> {
 
     write_run_config_snapshot(&run_dir, resolved.workflow_toml_path.as_deref())?;
     write_run_status(&run_dir, RunStatus::Submitted, None);
+    emit_run_created_event(
+        &persisted,
+        &resolved.raw_source,
+        resolved.workflow_toml_path.as_deref(),
+    )?;
 
     Ok(CreatedRun {
         persisted,
@@ -123,6 +130,52 @@ pub fn create(request: CreateRunInput) -> Result<CreatedRun, FabroError> {
         run_dir,
         dot_path: resolved.dot_path,
     })
+}
+
+fn emit_run_created_event(
+    persisted: &Persisted,
+    workflow_source: &str,
+    workflow_toml_path: Option<&Path>,
+) -> Result<(), FabroError> {
+    let record = persisted.run_record();
+    let workflow_config = workflow_toml_path.and_then(|path| std::fs::read_to_string(path).ok());
+    let settings = sort_json_value(
+        serde_json::to_value(&record.settings).map_err(|err| FabroError::engine(err.to_string()))?,
+    );
+    let graph = sort_json_value(
+        serde_json::to_value(&record.graph).map_err(|err| FabroError::engine(err.to_string()))?,
+    );
+    let event = WorkflowRunEvent::RunCreated {
+        run_id: record.run_id,
+        settings,
+        graph,
+        workflow_source: (!workflow_source.is_empty()).then(|| workflow_source.to_string()),
+        workflow_config,
+        labels: record.labels.clone().into_iter().collect::<BTreeMap<_, _>>(),
+        run_dir: persisted.run_dir().display().to_string(),
+        working_directory: record.working_directory.display().to_string(),
+        host_repo_path: record.host_repo_path.clone(),
+        base_branch: record.base_branch.clone(),
+        workflow_slug: record.workflow_slug.clone(),
+        db_prefix: None,
+    };
+    let envelope = canonicalize_event_at(&record.run_id, &event, record.created_at);
+    append_progress_event(persisted.run_dir(), &envelope)
+        .map_err(|err| FabroError::engine(err.to_string()))
+}
+
+fn sort_json_value(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => serde_json::Value::Object(
+            map.into_iter()
+                .map(|(key, value)| (key, sort_json_value(value)))
+                .collect(),
+        ),
+        serde_json::Value::Array(values) => {
+            serde_json::Value::Array(values.into_iter().map(sort_json_value).collect())
+        }
+        other => other,
+    }
 }
 
 fn validate_sandbox_provider(settings: &FabroSettings) -> Result<(), FabroError> {

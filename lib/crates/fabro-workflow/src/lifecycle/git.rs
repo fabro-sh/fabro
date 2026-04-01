@@ -30,6 +30,7 @@ type WfNodeResult = NodeResult<Option<StageUsage>>;
 pub(crate) struct GitCheckpointResult {
     pub commit_sha: Option<String>,
     pub push_results: Vec<(String, bool)>,
+    pub diff: Option<String>,
 }
 
 /// Sub-lifecycle responsible for git operations (checkpoint commits, pushes, diffs).
@@ -199,6 +200,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                 let mut git_result = GitCheckpointResult {
                     commit_sha: Some(sha.clone()),
                     push_results: Vec::new(),
+                    diff: None,
                 };
 
                 match self.run_store.get_checkpoint().await {
@@ -290,7 +292,8 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
 
                 match git_diff(&*self.sandbox, &prev).await {
                     Ok(patch) if !patch.is_empty() => {
-                        let _ = std::fs::write(&diff_dest, patch);
+                        let _ = std::fs::write(&diff_dest, &patch);
+                        git_result.diff = Some(patch);
                     }
                     Ok(_) => {}
                     Err(err) => {

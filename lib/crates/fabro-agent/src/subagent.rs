@@ -99,7 +99,7 @@ impl SubAgentManager {
                             | AgentEvent::ReasoningDelta { .. }
                             | AgentEvent::ToolCallOutputDelta { .. }
                             | AgentEvent::AssistantTextStart
-                            | AgentEvent::SessionStarted
+                            | AgentEvent::SessionStarted { .. }
                             | AgentEvent::SessionEnded
                             | AgentEvent::ProcessingEnd
                             | AgentEvent::SkillExpanded { .. }
@@ -722,13 +722,19 @@ mod tests {
         let mut rx = parent.subscribe();
 
         callback(SubAgentCallbackEvent::Forwarded(SessionEvent {
-            event: AgentEvent::SessionStarted,
+            event: AgentEvent::SessionStarted {
+                provider: Some("anthropic".into()),
+                model: Some("claude-opus".into()),
+            },
             timestamp: std::time::SystemTime::now(),
             session_id: "child".into(),
             parent_session_id: None,
         }));
         callback(SubAgentCallbackEvent::Forwarded(SessionEvent {
-            event: AgentEvent::SessionStarted,
+            event: AgentEvent::SessionStarted {
+                provider: Some("anthropic".into()),
+                model: Some("claude-opus".into()),
+            },
             timestamp: std::time::SystemTime::now(),
             session_id: "grandchild".into(),
             parent_session_id: Some("child".into()),

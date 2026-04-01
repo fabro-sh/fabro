@@ -106,290 +106,505 @@ fn dry_run_writes_jsonl_and_live_json() {
     fabro_json_snapshot!(context, &progress, @r#"
     [
       {
+        "event": "run.created",
         "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
+        "properties": {
+          "graph": {
+            "attrs": {
+              "goal": {
+                "String": "Run tests and report results"
+              },
+              "rankdir": {
+                "String": "LR"
+              }
+            },
+            "edges": [
+              {
+                "attrs": {},
+                "from": "start",
+                "to": "run_tests"
+              },
+              {
+                "attrs": {},
+                "from": "run_tests",
+                "to": "report"
+              },
+              {
+                "attrs": {},
+                "from": "report",
+                "to": "exit"
+              }
+            ],
+            "name": "Simple",
+            "nodes": {
+              "exit": {
+                "attrs": {
+                  "label": {
+                    "String": "Exit"
+                  },
+                  "shape": {
+                    "String": "Msquare"
+                  }
+                },
+                "id": "exit"
+              },
+              "report": {
+                "attrs": {
+                  "label": {
+                    "String": "Report"
+                  },
+                  "prompt": {
+                    "String": "Summarize the test results"
+                  }
+                },
+                "id": "report"
+              },
+              "run_tests": {
+                "attrs": {
+                  "label": {
+                    "String": "Run Tests"
+                  },
+                  "prompt": {
+                    "String": "Run the test suite and report results"
+                  }
+                },
+                "id": "run_tests"
+              },
+              "start": {
+                "attrs": {
+                  "label": {
+                    "String": "Start"
+                  },
+                  "shape": {
+                    "String": "Mdiamond"
+                  }
+                },
+                "id": "start"
+              }
+            }
+          },
+          "host_repo_path": "[TEMP_DIR]",
+          "labels": {},
+          "run_dir": "[STORAGE_DIR]/runs/REDACTED",
+          "settings": {
+            "auto_approve": true,
+            "dry_run": true,
+            "fabro": {
+              "root": "fabro/"
+            },
+            "features": {
+              "retros": false,
+              "session_sandboxes": false
+            },
+            "goal": "Run tests and report results",
+            "hooks": [
+              {
+                "blocking": true,
+                "command": "cargo fmt",
+                "event": "post_tool_use",
+                "matcher": "write_file|edit_file|apply_patch",
+                "name": "cargo-fmt",
+                "sandbox": null,
+                "timeout_ms": null
+              }
+            ],
+            "llm": {
+              "fallbacks": null,
+              "model": "claude-sonnet-4-6",
+              "provider": "anthropic"
+            },
+            "mode": "standalone",
+            "pull_request": {
+              "auto_merge": false,
+              "draft": false,
+              "enabled": true,
+              "merge_strategy": "squash"
+            },
+            "sandbox": {
+              "daytona": {
+                "auto_stop_interval": 30,
+                "labels": {
+                  "repo": "fabro-sh/fabro"
+                },
+                "network": null,
+                "skip_clone": false,
+                "snapshot": {
+                  "cpu": 4,
+                  "disk": 20,
+                  "dockerfile": "FROM ubuntu:24.04/n/nRUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates build-essential pkg-config libssl-dev unzip python3 && rm -rf /var/lib/apt/lists/*/n/n# GitHub CLI/nRUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && apt-get update && apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*/n/n# Rust/nRUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y/nENV PATH=\"/root/.cargo/bin:${PATH}\"/nRUN cargo install cargo-nextest --locked/nENV CARGO_INCREMENTAL=0/n/n# Bun/nRUN curl -fsSL https://bun.sh/install | bash/nENV PATH=\"/root/.bun/bin:${PATH}\"/n/nWORKDIR /root/n",
+                  "memory": 8,
+                  "name": "fabro-v6"
+                }
+              },
+              "devcontainer": null,
+              "env": null,
+              "local": null,
+              "preserve": null,
+              "provider": "local"
+            },
+            "storage_dir": "[STORAGE_DIR]",
+            "version": 1
+          },
+          "workflow_slug": "simple",
+          "workflow_source": "digraph Simple {/n    graph [goal=\"Run tests and report results\"]/n    rankdir=LR/n/n    start [shape=Mdiamond, label=\"Start\"]/n    exit  [shape=Msquare, label=\"Exit\"]/n/n    run_tests [label=\"Run Tests\", prompt=\"Run the test suite and report results\"]/n    report    [label=\"Report\", prompt=\"Summarize the test results\"]/n/n    start -> run_tests -> report -> exit/n}/n",
+          "working_directory": "[TEMP_DIR]"
+        },
         "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
+      },
+      {
         "event": "sandbox.initializing",
+        "id": "[EVENT_ID]",
         "properties": {
           "provider": "local"
-        }
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "sandbox.ready",
+        "id": "[EVENT_ID]",
+        "properties": {
+          "cpu": null,
+          "duration_ms": "[DURATION_MS]",
+          "memory": null,
+          "name": null,
+          "provider": "local",
+          "url": null
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
+      },
+      {
+        "event": "sandbox.initialized",
+        "id": "[EVENT_ID]",
         "properties": {
           "provider": "local",
-          "duration_ms": "[DURATION_MS]",
-          "name": null,
-          "cpu": null,
-          "memory": null,
-          "url": null
-        }
-      },
-      {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
-        "event": "sandbox.initialized",
-        "properties": {
           "working_directory": "[TEMP_DIR]"
-        }
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "run.started",
+        "id": "[EVENT_ID]",
         "properties": {
-          "name": "Simple",
-          "goal": "Run tests and report results"
-        }
+          "goal": "Run tests and report results",
+          "name": "Simple"
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "stage.started",
+        "id": "[EVENT_ID]",
         "node_id": "start",
         "node_label": "Start",
         "properties": {
-          "max_attempts": 1,
           "attempt": 1,
+          "handler_type": "start",
           "index": 0,
-          "handler_type": "start"
-        }
+          "max_attempts": 1
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "stage.completed",
+        "id": "[EVENT_ID]",
         "node_id": "start",
         "node_label": "Start",
         "properties": {
-          "max_attempts": 1,
           "attempt": 1,
-          "index": 0,
+          "context_values": {
+            "current.preamble": "Goal: Run tests and report results/n",
+            "current_node": "start",
+            "graph.goal": "Run tests and report results",
+            "graph.rankdir": "LR",
+            "internal.fidelity": "compact",
+            "internal.node_visit_count": 1,
+            "internal.run_id": "[ULID]",
+            "internal.thread_id": null
+          },
           "duration_ms": "[DURATION_MS]",
-          "status": "success",
-          "preferred_label": null,
-          "suggested_next_ids": [],
-          "usage": null,
+          "files_touched": [],
+          "index": 0,
+          "max_attempts": 1,
+          "node_visits": {
+            "start": 1
+          },
           "notes": "[Simulated] start",
-          "files_touched": []
-        }
+          "preferred_label": null,
+          "status": "success",
+          "suggested_next_ids": [],
+          "usage": null
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "edge.selected",
+        "id": "[EVENT_ID]",
         "properties": {
-          "from_node": "start",
-          "to_node": "run_tests",
-          "label": null,
           "condition": null,
+          "from_node": "start",
+          "is_jump": false,
+          "label": null,
           "reason": "unconditional",
           "stage_status": "success",
-          "is_jump": false
-        }
+          "to_node": "run_tests"
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "checkpoint.completed",
+        "id": "[EVENT_ID]",
         "node_id": "start",
         "node_label": "start",
         "properties": {
           "status": "success"
-        }
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "stage.started",
+        "id": "[EVENT_ID]",
         "node_id": "run_tests",
         "node_label": "Run Tests",
         "properties": {
-          "max_attempts": 1,
           "attempt": 1,
+          "handler_type": "agent",
           "index": 1,
-          "handler_type": "agent"
-        }
+          "max_attempts": 1
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "stage.completed",
+        "id": "[EVENT_ID]",
         "node_id": "run_tests",
         "node_label": "Run Tests",
         "properties": {
-          "max_attempts": 1,
           "attempt": 1,
-          "index": 1,
+          "context_updates": {
+            "last_response": "[Simulated] Response for stage: run_tests",
+            "last_stage": "run_tests",
+            "response.run_tests": "[Simulated] Response for stage: run_tests"
+          },
+          "context_values": {
+            "current.preamble": "Goal: Run tests and report results/n",
+            "current_node": "run_tests",
+            "failure_class": "",
+            "failure_signature": "",
+            "graph.goal": "Run tests and report results",
+            "graph.rankdir": "LR",
+            "internal.fidelity": "compact",
+            "internal.node_visit_count": 1,
+            "internal.retry_count.start": 0,
+            "internal.run_id": "[ULID]",
+            "internal.thread_id": "start",
+            "outcome": "success",
+            "thread.start.current_node": "run_tests"
+          },
           "duration_ms": "[DURATION_MS]",
-          "status": "success",
-          "preferred_label": null,
-          "suggested_next_ids": [],
-          "usage": null,
+          "files_touched": [],
+          "index": 1,
+          "max_attempts": 1,
+          "node_visits": {
+            "run_tests": 1,
+            "start": 1
+          },
           "notes": "[Simulated] run_tests",
-          "files_touched": []
-        }
+          "preferred_label": null,
+          "status": "success",
+          "suggested_next_ids": [],
+          "usage": null
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "edge.selected",
+        "id": "[EVENT_ID]",
         "properties": {
-          "from_node": "run_tests",
-          "to_node": "report",
-          "label": null,
           "condition": null,
+          "from_node": "run_tests",
+          "is_jump": false,
+          "label": null,
           "reason": "unconditional",
           "stage_status": "success",
-          "is_jump": false
-        }
+          "to_node": "report"
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "checkpoint.completed",
+        "id": "[EVENT_ID]",
         "node_id": "run_tests",
         "node_label": "run_tests",
         "properties": {
           "status": "success"
-        }
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "stage.started",
+        "id": "[EVENT_ID]",
         "node_id": "report",
         "node_label": "Report",
         "properties": {
-          "max_attempts": 1,
           "attempt": 1,
+          "handler_type": "agent",
           "index": 2,
-          "handler_type": "agent"
-        }
+          "max_attempts": 1
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "stage.completed",
+        "id": "[EVENT_ID]",
         "node_id": "report",
         "node_label": "Report",
         "properties": {
-          "max_attempts": 1,
           "attempt": 1,
-          "index": 2,
+          "context_updates": {
+            "last_response": "[Simulated] Response for stage: report",
+            "last_stage": "report",
+            "response.report": "[Simulated] Response for stage: report"
+          },
+          "context_values": {
+            "current.preamble": "Goal: Run tests and report results/n/n## Completed stages/n- **run_tests**: success/n",
+            "current_node": "report",
+            "failure_class": "",
+            "failure_signature": "",
+            "graph.goal": "Run tests and report results",
+            "graph.rankdir": "LR",
+            "internal.fidelity": "compact",
+            "internal.node_visit_count": 1,
+            "internal.retry_count.run_tests": 0,
+            "internal.retry_count.start": 0,
+            "internal.run_id": "[ULID]",
+            "internal.thread_id": "run_tests",
+            "last_response": "[Simulated] Response for stage: run_tests",
+            "last_stage": "run_tests",
+            "outcome": "success",
+            "response.run_tests": "[Simulated] Response for stage: run_tests",
+            "thread.run_tests.current_node": "report",
+            "thread.start.current_node": "run_tests"
+          },
           "duration_ms": "[DURATION_MS]",
-          "status": "success",
-          "preferred_label": null,
-          "suggested_next_ids": [],
-          "usage": null,
+          "files_touched": [],
+          "index": 2,
+          "max_attempts": 1,
+          "node_visits": {
+            "report": 1,
+            "run_tests": 1,
+            "start": 1
+          },
           "notes": "[Simulated] report",
-          "files_touched": []
-        }
+          "preferred_label": null,
+          "status": "success",
+          "suggested_next_ids": [],
+          "usage": null
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "edge.selected",
+        "id": "[EVENT_ID]",
         "properties": {
-          "from_node": "report",
-          "to_node": "exit",
-          "label": null,
           "condition": null,
+          "from_node": "report",
+          "is_jump": false,
+          "label": null,
           "reason": "unconditional",
           "stage_status": "success",
-          "is_jump": false
-        }
+          "to_node": "exit"
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "checkpoint.completed",
+        "id": "[EVENT_ID]",
         "node_id": "report",
         "node_label": "report",
         "properties": {
           "status": "success"
-        }
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "stage.started",
+        "id": "[EVENT_ID]",
         "node_id": "exit",
         "node_label": "Exit",
         "properties": {
-          "max_attempts": 1,
           "attempt": 1,
+          "handler_type": "exit",
           "index": 3,
-          "handler_type": "exit"
-        }
+          "max_attempts": 1
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "stage.completed",
+        "id": "[EVENT_ID]",
         "node_id": "exit",
         "node_label": "Exit",
         "properties": {
-          "max_attempts": 1,
           "attempt": 1,
+          "duration_ms": "[DURATION_MS]",
+          "files_touched": [],
           "index": 3,
-          "duration_ms": "[DURATION_MS]",
-          "status": "success",
-          "preferred_label": null,
-          "suggested_next_ids": [],
-          "usage": null,
+          "max_attempts": 1,
           "notes": null,
-          "files_touched": []
-        }
+          "preferred_label": null,
+          "status": "success",
+          "suggested_next_ids": [],
+          "usage": null
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "run.completed",
+        "id": "[EVENT_ID]",
         "properties": {
-          "duration_ms": "[DURATION_MS]",
           "artifact_count": 0,
+          "duration_ms": "[DURATION_MS]",
           "status": "success"
-        }
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "sandbox.cleanup.started",
+        "id": "[EVENT_ID]",
         "properties": {
           "provider": "local"
-        }
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "sandbox.cleanup.completed",
+        "id": "[EVENT_ID]",
         "properties": {
-          "provider": "local",
-          "duration_ms": "[DURATION_MS]"
-        }
+          "duration_ms": "[DURATION_MS]",
+          "provider": "local"
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       }
     ]
     "#);
@@ -398,14 +613,14 @@ fn dry_run_writes_jsonl_and_live_json() {
     let live_content = read_json(&live_path);
     fabro_json_snapshot!(context, &live_content, @r#"
     {
-      "id": "[EVENT_ID]",
-      "ts": "[TIMESTAMP]",
-      "run_id": "[ULID]",
       "event": "sandbox.cleanup.completed",
+      "id": "[EVENT_ID]",
       "properties": {
-        "provider": "local",
-        "duration_ms": "[DURATION_MS]"
-      }
+        "duration_ms": "[DURATION_MS]",
+        "provider": "local"
+      },
+      "run_id": "[ULID]",
+      "ts": "[TIMESTAMP]"
     }
     "#);
 
@@ -486,297 +701,520 @@ fn json_run_implies_auto_approve_for_human_gates() {
     fabro_json_snapshot!(context, &progress, @r#"
     [
       {
+        "event": "run.created",
         "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
+        "properties": {
+          "graph": {
+            "attrs": {
+              "goal": {
+                "String": "Route through the default approval path"
+              }
+            },
+            "edges": [
+              {
+                "attrs": {},
+                "from": "start",
+                "to": "approve"
+              },
+              {
+                "attrs": {
+                  "label": {
+                    "String": "[A] Approve"
+                  }
+                },
+                "from": "approve",
+                "to": "ship"
+              },
+              {
+                "attrs": {
+                  "label": {
+                    "String": "[R] Revise"
+                  }
+                },
+                "from": "approve",
+                "to": "revise"
+              },
+              {
+                "attrs": {},
+                "from": "ship",
+                "to": "exit"
+              },
+              {
+                "attrs": {},
+                "from": "revise",
+                "to": "exit"
+              }
+            ],
+            "name": "HumanGate",
+            "nodes": {
+              "approve": {
+                "attrs": {
+                  "label": {
+                    "String": "Approve?"
+                  },
+                  "shape": {
+                    "String": "hexagon"
+                  }
+                },
+                "id": "approve"
+              },
+              "exit": {
+                "attrs": {
+                  "label": {
+                    "String": "Exit"
+                  },
+                  "shape": {
+                    "String": "Msquare"
+                  }
+                },
+                "id": "exit"
+              },
+              "revise": {
+                "attrs": {
+                  "script": {
+                    "String": "echo revised"
+                  },
+                  "shape": {
+                    "String": "parallelogram"
+                  }
+                },
+                "id": "revise"
+              },
+              "ship": {
+                "attrs": {
+                  "script": {
+                    "String": "echo shipped"
+                  },
+                  "shape": {
+                    "String": "parallelogram"
+                  }
+                },
+                "id": "ship"
+              },
+              "start": {
+                "attrs": {
+                  "label": {
+                    "String": "Start"
+                  },
+                  "shape": {
+                    "String": "Mdiamond"
+                  }
+                },
+                "id": "start"
+              }
+            }
+          },
+          "host_repo_path": "[TEMP_DIR]",
+          "labels": {},
+          "run_dir": "[STORAGE_DIR]/runs/20260401-[ULID]",
+          "settings": {
+            "auto_approve": true,
+            "goal": "Route through the default approval path",
+            "llm": {
+              "fallbacks": null,
+              "model": "claude-sonnet-4-6",
+              "provider": "anthropic"
+            },
+            "mode": "standalone",
+            "no_retro": true,
+            "sandbox": {
+              "daytona": null,
+              "devcontainer": null,
+              "env": null,
+              "local": null,
+              "preserve": null,
+              "provider": "local"
+            },
+            "storage_dir": "[STORAGE_DIR]"
+          },
+          "workflow_slug": "human-gate",
+          "workflow_source": "digraph HumanGate {/n  graph [goal=\"Route through the default approval path\"]/n  start [shape=Mdiamond, label=\"Start\"]/n  exit  [shape=Msquare, label=\"Exit\"]/n  approve [shape=hexagon, label=\"Approve?\"]/n  ship   [shape=parallelogram, script=\"echo shipped\"]/n  revise [shape=parallelogram, script=\"echo revised\"]/n  start -> approve/n  approve -> ship   [label=\"[A] Approve\"]/n  approve -> revise [label=\"[R] Revise\"]/n  ship -> exit/n  revise -> exit/n}/n",
+          "working_directory": "[TEMP_DIR]"
+        },
         "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
+      },
+      {
         "event": "sandbox.initializing",
+        "id": "[EVENT_ID]",
         "properties": {
           "provider": "local"
-        }
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "sandbox.ready",
+        "id": "[EVENT_ID]",
+        "properties": {
+          "cpu": null,
+          "duration_ms": "[DURATION_MS]",
+          "memory": null,
+          "name": null,
+          "provider": "local",
+          "url": null
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
+      },
+      {
+        "event": "sandbox.initialized",
+        "id": "[EVENT_ID]",
         "properties": {
           "provider": "local",
-          "duration_ms": "[DURATION_MS]",
-          "name": null,
-          "cpu": null,
-          "memory": null,
-          "url": null
-        }
-      },
-      {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
-        "event": "sandbox.initialized",
-        "properties": {
           "working_directory": "[TEMP_DIR]"
-        }
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "run.started",
+        "id": "[EVENT_ID]",
         "properties": {
-          "name": "HumanGate",
-          "goal": "Route through the default approval path"
-        }
+          "goal": "Route through the default approval path",
+          "name": "HumanGate"
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "stage.started",
+        "id": "[EVENT_ID]",
         "node_id": "start",
         "node_label": "Start",
         "properties": {
-          "max_attempts": 1,
           "attempt": 1,
+          "handler_type": "start",
           "index": 0,
-          "handler_type": "start"
-        }
+          "max_attempts": 1
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "stage.completed",
+        "id": "[EVENT_ID]",
         "node_id": "start",
         "node_label": "Start",
         "properties": {
-          "max_attempts": 1,
           "attempt": 1,
-          "index": 0,
+          "context_values": {
+            "current.preamble": "Goal: Route through the default approval path/n",
+            "current_node": "start",
+            "graph.goal": "Route through the default approval path",
+            "internal.fidelity": "compact",
+            "internal.node_visit_count": 1,
+            "internal.run_id": "[ULID]",
+            "internal.thread_id": null
+          },
           "duration_ms": "[DURATION_MS]",
-          "status": "success",
-          "preferred_label": null,
-          "suggested_next_ids": [],
-          "usage": null,
+          "files_touched": [],
+          "index": 0,
+          "max_attempts": 1,
+          "node_visits": {
+            "start": 1
+          },
           "notes": null,
-          "files_touched": []
-        }
+          "preferred_label": null,
+          "status": "success",
+          "suggested_next_ids": [],
+          "usage": null
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "edge.selected",
+        "id": "[EVENT_ID]",
         "properties": {
-          "from_node": "start",
-          "to_node": "approve",
-          "label": null,
           "condition": null,
+          "from_node": "start",
+          "is_jump": false,
+          "label": null,
           "reason": "unconditional",
           "stage_status": "success",
-          "is_jump": false
-        }
+          "to_node": "approve"
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "checkpoint.completed",
+        "id": "[EVENT_ID]",
         "node_id": "start",
         "node_label": "start",
         "properties": {
           "status": "success"
-        }
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "stage.started",
+        "id": "[EVENT_ID]",
         "node_id": "approve",
         "node_label": "Approve?",
         "properties": {
-          "max_attempts": 1,
           "attempt": 1,
+          "handler_type": "human",
           "index": 1,
-          "handler_type": "human"
-        }
+          "max_attempts": 1
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "stage.completed",
+        "id": "[EVENT_ID]",
         "node_id": "approve",
         "node_label": "Approve?",
         "properties": {
-          "max_attempts": 1,
           "attempt": 1,
-          "index": 1,
+          "context_updates": {
+            "human.gate.label": "[A] Approve",
+            "human.gate.selected": "A"
+          },
+          "context_values": {
+            "current.preamble": "Goal: Route through the default approval path/n",
+            "current_node": "approve",
+            "failure_class": "",
+            "failure_signature": "",
+            "graph.goal": "Route through the default approval path",
+            "internal.fidelity": "compact",
+            "internal.node_visit_count": 1,
+            "internal.retry_count.start": 0,
+            "internal.run_id": "[ULID]",
+            "internal.thread_id": "start",
+            "outcome": "success",
+            "thread.start.current_node": "approve"
+          },
           "duration_ms": "[DURATION_MS]",
-          "status": "success",
-          "preferred_label": "[A] Approve",
-          "suggested_next_ids": [
-            "ship"
-          ],
-          "usage": null,
+          "files_touched": [],
+          "index": 1,
+          "max_attempts": 1,
+          "node_visits": {
+            "approve": 1,
+            "start": 1
+          },
           "notes": null,
-          "files_touched": []
-        }
-      },
-      {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
-        "event": "edge.selected",
-        "properties": {
-          "from_node": "approve",
-          "to_node": "ship",
-          "label": "[A] Approve",
-          "condition": null,
-          "reason": "preferred_label",
           "preferred_label": "[A] Approve",
+          "status": "success",
           "suggested_next_ids": [
             "ship"
           ],
-          "stage_status": "success",
-          "is_jump": false
-        }
+          "usage": null
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
+        "event": "edge.selected",
         "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
+        "properties": {
+          "condition": null,
+          "from_node": "approve",
+          "is_jump": false,
+          "label": "[A] Approve",
+          "preferred_label": "[A] Approve",
+          "reason": "preferred_label",
+          "stage_status": "success",
+          "suggested_next_ids": [
+            "ship"
+          ],
+          "to_node": "ship"
+        },
         "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
+      },
+      {
         "event": "checkpoint.completed",
+        "id": "[EVENT_ID]",
         "node_id": "approve",
         "node_label": "approve",
         "properties": {
           "status": "success"
-        }
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "stage.started",
+        "id": "[EVENT_ID]",
         "node_id": "ship",
         "node_label": "ship",
         "properties": {
-          "max_attempts": 1,
           "attempt": 1,
-          "index": 2,
           "handler_type": "command",
-          "script": "echo shipped"
-        }
+          "index": 2,
+          "max_attempts": 1
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
+        "event": "command.started",
         "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
-        "event": "stage.completed",
         "node_id": "ship",
         "node_label": "ship",
         "properties": {
-          "max_attempts": 1,
-          "attempt": 1,
-          "index": 2,
-          "duration_ms": "[DURATION_MS]",
-          "status": "success",
-          "preferred_label": null,
-          "suggested_next_ids": [],
-          "usage": null,
-          "notes": "Script completed: echo shipped",
-          "files_touched": []
-        }
+          "language": "shell",
+          "script": "echo shipped"
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
+        "event": "command.completed",
         "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
-        "event": "edge.selected",
+        "node_id": "ship",
+        "node_label": "ship",
         "properties": {
-          "from_node": "ship",
-          "to_node": "exit",
-          "label": null,
+          "duration_ms": "[DURATION_MS]",
+          "exit_code": 0,
+          "stderr": "",
+          "stdout": "shipped/n",
+          "timed_out": false
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
+      },
+      {
+        "event": "stage.completed",
+        "id": "[EVENT_ID]",
+        "node_id": "ship",
+        "node_label": "ship",
+        "properties": {
+          "attempt": 1,
+          "context_updates": {
+            "command.output": "shipped/n",
+            "command.stderr": ""
+          },
+          "context_values": {
+            "current.preamble": "Goal: Route through the default approval path/n/n## Completed stages/n- **approve**: success/n/n## Context/n- human.gate.label: [A] Approve/n- human.gate.selected: A/n",
+            "current_node": "ship",
+            "failure_class": "",
+            "failure_signature": "",
+            "graph.goal": "Route through the default approval path",
+            "human.gate.label": "[A] Approve",
+            "human.gate.selected": "A",
+            "internal.fidelity": "compact",
+            "internal.node_visit_count": 1,
+            "internal.retry_count.approve": 0,
+            "internal.retry_count.start": 0,
+            "internal.run_id": "[ULID]",
+            "internal.thread_id": "approve",
+            "outcome": "success",
+            "preferred_label": "[A] Approve",
+            "thread.approve.current_node": "ship",
+            "thread.start.current_node": "approve"
+          },
+          "duration_ms": "[DURATION_MS]",
+          "files_touched": [],
+          "index": 2,
+          "max_attempts": 1,
+          "node_visits": {
+            "approve": 1,
+            "ship": 1,
+            "start": 1
+          },
+          "notes": "Script completed: echo shipped",
+          "preferred_label": null,
+          "status": "success",
+          "suggested_next_ids": [],
+          "usage": null
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
+      },
+      {
+        "event": "edge.selected",
+        "id": "[EVENT_ID]",
+        "properties": {
           "condition": null,
+          "from_node": "ship",
+          "is_jump": false,
+          "label": null,
           "reason": "unconditional",
           "stage_status": "success",
-          "is_jump": false
-        }
+          "to_node": "exit"
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "checkpoint.completed",
+        "id": "[EVENT_ID]",
         "node_id": "ship",
         "node_label": "ship",
         "properties": {
           "status": "success"
-        }
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "stage.started",
+        "id": "[EVENT_ID]",
         "node_id": "exit",
         "node_label": "Exit",
         "properties": {
-          "max_attempts": 1,
           "attempt": 1,
+          "handler_type": "exit",
           "index": 3,
-          "handler_type": "exit"
-        }
+          "max_attempts": 1
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "stage.completed",
+        "id": "[EVENT_ID]",
         "node_id": "exit",
         "node_label": "Exit",
         "properties": {
-          "max_attempts": 1,
           "attempt": 1,
+          "duration_ms": "[DURATION_MS]",
+          "files_touched": [],
           "index": 3,
-          "duration_ms": "[DURATION_MS]",
-          "status": "success",
-          "preferred_label": null,
-          "suggested_next_ids": [],
-          "usage": null,
+          "max_attempts": 1,
           "notes": null,
-          "files_touched": []
-        }
+          "preferred_label": null,
+          "status": "success",
+          "suggested_next_ids": [],
+          "usage": null
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "run.completed",
+        "id": "[EVENT_ID]",
         "properties": {
-          "duration_ms": "[DURATION_MS]",
           "artifact_count": 0,
+          "duration_ms": "[DURATION_MS]",
           "status": "success"
-        }
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "sandbox.cleanup.started",
+        "id": "[EVENT_ID]",
         "properties": {
           "provider": "local"
-        }
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "sandbox.cleanup.completed",
+        "id": "[EVENT_ID]",
         "properties": {
-          "provider": "local",
-          "duration_ms": "[DURATION_MS]"
-        }
+          "duration_ms": "[DURATION_MS]",
+          "provider": "local"
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       }
     ]
     "#);

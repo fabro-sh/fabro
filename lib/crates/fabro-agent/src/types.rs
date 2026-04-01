@@ -91,7 +91,12 @@ pub enum SessionState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentEvent {
-    SessionStarted,
+    SessionStarted {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+    },
     SessionEnded,
     ProcessingEnd,
     UserInput {
@@ -199,8 +204,13 @@ impl AgentEvent {
     pub fn trace(&self, session_id: &str) {
         use tracing::{debug, error, info, warn};
         match self {
-            Self::SessionStarted => {
-                info!(session_id, "Agent session started");
+            Self::SessionStarted { provider, model } => {
+                info!(
+                    session_id,
+                    provider = provider.as_deref().unwrap_or(""),
+                    model = model.as_deref().unwrap_or(""),
+                    "Agent session started"
+                );
             }
             Self::SessionEnded => {
                 info!(session_id, "Agent session ended");
@@ -397,12 +407,21 @@ mod tests {
     #[test]
     fn session_event_construction() {
         let event = SessionEvent {
-            event: AgentEvent::SessionStarted,
+            event: AgentEvent::SessionStarted {
+                provider: Some("anthropic".into()),
+                model: Some("claude-opus".into()),
+            },
             timestamp: SystemTime::now(),
             session_id: "sess_1".into(),
             parent_session_id: None,
         };
-        assert!(matches!(event.event, AgentEvent::SessionStarted));
+        assert!(matches!(
+            event.event,
+            AgentEvent::SessionStarted {
+                provider: Some(_),
+                model: Some(_)
+            }
+        ));
         assert_eq!(event.session_id, "sess_1");
         assert_eq!(event.parent_session_id, None);
     }
@@ -528,7 +547,10 @@ mod tests {
     #[test]
     fn session_event_serde_round_trip_without_parent_session_id() {
         let event = SessionEvent {
-            event: AgentEvent::SessionStarted,
+            event: AgentEvent::SessionStarted {
+                provider: Some("anthropic".into()),
+                model: Some("claude-opus".into()),
+            },
             timestamp: SystemTime::now(),
             session_id: "sess_42".into(),
             parent_session_id: None,
@@ -543,13 +565,22 @@ mod tests {
         let deserialized: SessionEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.session_id, "sess_42");
         assert_eq!(deserialized.parent_session_id, None);
-        assert!(matches!(deserialized.event, AgentEvent::SessionStarted));
+        assert!(matches!(
+            deserialized.event,
+            AgentEvent::SessionStarted {
+                provider: Some(_),
+                model: Some(_)
+            }
+        ));
     }
 
     #[test]
     fn session_event_serde_round_trip_with_parent_session_id() {
         let event = SessionEvent {
-            event: AgentEvent::SessionStarted,
+            event: AgentEvent::SessionStarted {
+                provider: Some("openai".into()),
+                model: Some("gpt-5.4".into()),
+            },
             timestamp: SystemTime::now(),
             session_id: "sess_child".into(),
             parent_session_id: Some("sess_parent".into()),

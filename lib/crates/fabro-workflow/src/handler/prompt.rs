@@ -8,6 +8,7 @@ use fabro_store::NodeVisitRef;
 use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
+use crate::event::WorkflowRunEvent;
 use crate::outcome::Outcome;
 use crate::run_dir::{node_dir, visit_from_context};
 use fabro_graphviz::graph::{Graph, Node};
@@ -138,6 +139,25 @@ impl Handler for PromptHandler {
                     Vec::new(),
                 )
             };
+
+        let response_model = stage_usage
+            .as_ref()
+            .map(|usage| usage.model.clone())
+            .or_else(|| node.model().map(String::from))
+            .unwrap_or_default();
+        let response_provider = node
+            .provider()
+            .map(String::from)
+            .or_else(|| Some(Provider::default_from_env().as_str().to_string()))
+            .unwrap_or_default();
+
+        services.emitter.emit(&WorkflowRunEvent::PromptCompleted {
+            node_id: node.id.clone(),
+            response: response_text.clone(),
+            model: response_model,
+            provider: response_provider,
+            usage: stage_usage.clone(),
+        });
 
         // 4. Write response to logs
         if let Some(ref store) = services.run_store {

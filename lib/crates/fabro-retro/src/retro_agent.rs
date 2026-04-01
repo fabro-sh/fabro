@@ -646,7 +646,10 @@ mod tests {
         let handle = spawn_retro_event_writer(rx, jsonl_path.clone());
 
         tx.send(SessionEvent {
-            event: AgentEvent::SessionStarted,
+            event: AgentEvent::SessionStarted {
+                provider: Some("anthropic".into()),
+                model: Some("claude-opus".into()),
+            },
             timestamp: SystemTime::now(),
             session_id: "retro-test".into(),
             parent_session_id: None,

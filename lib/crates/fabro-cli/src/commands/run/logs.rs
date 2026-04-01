@@ -7,6 +7,7 @@ use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use fabro_config::FabroSettingsExt;
 use fabro_store::RunStore;
+use fabro_util::redact::redact_jsonl_line;
 use fabro_util::terminal::Styles;
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use futures::StreamExt;
@@ -32,7 +33,9 @@ pub(crate) async fn run(args: &LogsArgs, styles: &Styles, globals: &GlobalArgs) 
 
     let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await?;
     let progress_path = run.path.join("progress.jsonl");
-    let (all_lines, last_seq, use_store_follow) = if let Some(run_store) = run_store.as_ref() {
+    let (all_lines, last_seq, use_store_follow) = if progress_path.exists() {
+        (read_lines(&progress_path)?, 0, false)
+    } else if let Some(run_store) = run_store.as_ref() {
         match run_store.list_events().await {
             Ok(events) => {
                 let last_seq = events.last().map_or(0, |event| event.seq);
@@ -43,22 +46,11 @@ pub(crate) async fn run(args: &LogsArgs, styles: &Styles, globals: &GlobalArgs) 
                 (lines, last_seq, true)
             }
             Err(err) => {
-                if !progress_path.exists() {
-                    return Err(err).context("Failed to list store-backed run events");
-                }
-                warn!(
-                    run_id = %run.run_id,
-                    error = %err,
-                    "Failed to read events from store; falling back to progress.jsonl"
-                );
-                (read_lines(&progress_path)?, 0, false)
+                return Err(err).context("Failed to list store-backed run events");
             }
         }
     } else {
-        if !progress_path.exists() {
-            bail!("No progress.jsonl found for run '{}'", run.run_id);
-        }
-        (read_lines(&progress_path)?, 0, false)
+        bail!("No progress.jsonl found for run '{}'", run.run_id);
     };
     let filtered = apply_filters(&all_lines, since_cutoff.as_ref(), args.tail);
 
@@ -323,7 +315,8 @@ async fn flush_remaining_store_events(
 }
 
 fn event_payload_line(event: &fabro_store::EventEnvelope) -> Result<String> {
-    serde_json::to_string(event.payload.as_value()).map_err(Into::into)
+    let line = serde_json::to_string(event.payload.as_value())?;
+    Ok(redact_jsonl_line(&line))
 }
 
 fn render_indented_markdown(styles: &Styles, text: &str, indent: &str) -> String {

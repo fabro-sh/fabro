@@ -603,6 +603,12 @@ mod tests {
             failure: None,
             notes: None,
             files_touched: Vec::new(),
+            context_updates: None,
+            jump_to_node: None,
+            context_values: None,
+            node_visits: None,
+            loop_failure_signatures: None,
+            restart_failure_signatures: None,
             attempt: 1,
             max_attempts: 1,
         };

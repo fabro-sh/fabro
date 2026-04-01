@@ -512,10 +512,14 @@ pub async fn initialize(
         return Err(FabroError::engine(msg));
     }
 
-    options.emitter.emit(&WorkflowRunEvent::SandboxInitialized {
-        working_directory: sandbox.working_directory().to_string(),
-    });
     let sandbox_record = options.sandbox.to_sandbox_record(&*sandbox);
+    options.emitter.emit(&WorkflowRunEvent::SandboxInitialized {
+        working_directory: sandbox_record.working_directory.clone(),
+        provider: sandbox_record.provider.clone(),
+        identifier: sandbox_record.identifier.clone(),
+        host_working_directory: sandbox_record.host_working_directory.clone(),
+        container_mount_point: sandbox_record.container_mount_point.clone(),
+    });
     if let Err(err) = options.run_store.put_sandbox(&sandbox_record).await {
         tracing::warn!(error = %err, "Failed to save sandbox record to store");
     }

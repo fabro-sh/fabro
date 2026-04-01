@@ -14,6 +14,11 @@ use crate::shared::format_duration_ms;
 use crate::store;
 use crate::user_config::load_user_settings_with_globals;
 
+#[cfg(test)]
+const WAIT_STARTUP_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
+#[cfg(not(test))]
+const WAIT_STARTUP_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
+
 pub(crate) async fn run(args: &WaitArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
     let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
@@ -28,22 +33,24 @@ pub(crate) async fn run(args: &WaitArgs, styles: &Styles, globals: &GlobalArgs) 
         .timeout
         .map(|secs| std::time::Instant::now() + std::time::Duration::from_secs(secs));
     let interval = std::time::Duration::from_millis(args.interval);
+    let started_waiting_at = std::time::Instant::now();
 
     let final_status = loop {
         let status = match run_store.as_ref() {
             Some(run_store) => match run_store.get_status().await {
-                Ok(Some(record)) => record.status,
-                Ok(None) => RunStatus::Dead,
-                Err(_) => match RunStatusRecord::load(&status_path) {
-                    Ok(record) => record.status,
-                    Err(_) => RunStatus::Dead,
-                },
+                Ok(Some(record)) => Some(record.status),
+                Ok(None) => RunStatusRecord::load(&status_path).ok().map(|record| record.status),
+                Err(_) => RunStatusRecord::load(&status_path).ok().map(|record| record.status),
             },
-            None => match RunStatusRecord::load(&status_path) {
-                Ok(record) => record.status,
-                Err(_) => RunStatus::Dead,
-            },
+            None => RunStatusRecord::load(&status_path).ok().map(|record| record.status),
         };
+        let status = status.unwrap_or_else(|| {
+            if started_waiting_at.elapsed() < WAIT_STARTUP_GRACE {
+                RunStatus::Submitted
+            } else {
+                RunStatus::Dead
+            }
+        });
 
         if status.is_terminal() {
             break status;

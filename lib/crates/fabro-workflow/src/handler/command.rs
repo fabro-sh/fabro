@@ -6,6 +6,7 @@ use fabro_store::NodeVisitRef;
 use crate::context::Context;
 use crate::context::keys;
 use crate::error::FabroError;
+use crate::event::WorkflowRunEvent;
 use crate::outcome::{Outcome, OutcomeExt};
 use crate::run_dir::{node_dir, visit_from_context};
 use fabro_graphviz::graph::{Graph, Node};
@@ -107,6 +108,13 @@ impl Handler for CommandHandler {
         )
         .await?;
 
+        services.emitter.emit(&WorkflowRunEvent::CommandStarted {
+            node_id: node.id.clone(),
+            script: script.to_string(),
+            language: language.to_string(),
+            timeout_ms: timeout_ms(node),
+        });
+
         let command = if language == "python" {
             format!("python3 -c {}", shell_quote(script))
         } else {
@@ -152,6 +160,15 @@ impl Handler for CommandHandler {
             serde_json::to_string_pretty(&timing).unwrap(),
         )
         .await?;
+
+        services.emitter.emit(&WorkflowRunEvent::CommandCompleted {
+            node_id: node.id.clone(),
+            stdout: result.stdout.clone(),
+            stderr: result.stderr.clone(),
+            exit_code: (!result.timed_out).then_some(result.exit_code),
+            duration_ms: result.duration_ms,
+            timed_out: result.timed_out,
+        });
 
         if result.timed_out {
             return Err(FabroError::handler(format!(

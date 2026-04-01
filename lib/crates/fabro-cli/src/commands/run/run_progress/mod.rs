@@ -493,7 +493,7 @@ mod tests {
             node_id: node_id.into(),
             name: name.into(),
             index: 0,
-            handler_type: None,
+            handler_type: String::new(),
             script: None,
             attempt: 1,
             max_attempts: 1,
@@ -534,6 +534,12 @@ mod tests {
             failure: None,
             notes: None,
             files_touched: Vec::new(),
+            context_updates: None,
+            jump_to_node: None,
+            context_values: None,
+            node_visits: None,
+            loop_failure_signatures: None,
+            restart_failure_signatures: None,
             attempt: 1,
             max_attempts: 1,
         }
@@ -578,6 +584,7 @@ mod tests {
                 index: 0,
                 duration_ms: 2000,
                 status: "success".into(),
+                head_sha: None,
             },
         );
         let stage = &ui.stage.active_stages["fork1"];
@@ -664,6 +671,10 @@ mod tests {
             stage_started("code", "Code"),
             WorkflowRunEvent::SandboxInitialized {
                 working_directory: "/home/daytona/workspace".into(),
+                provider: "daytona".into(),
+                identifier: None,
+                host_working_directory: None,
+                container_mount_point: None,
             },
             agent_event(
                 "code",
@@ -900,6 +911,10 @@ mod tests {
             &mut ui,
             WorkflowRunEvent::SandboxInitialized {
                 working_directory: "/home/daytona/workspace".into(),
+                provider: "daytona".into(),
+                identifier: None,
+                host_working_directory: None,
+                container_mount_point: None,
             },
         );
         emit(
@@ -1107,6 +1122,7 @@ mod tests {
                 index: 0,
                 duration_ms: 500,
                 status: "success".into(),
+                head_sha: None,
             },
         );
 

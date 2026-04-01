@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 
@@ -20,19 +21,10 @@ use crate::graph::WorkflowNode;
 use crate::outcome::{
     FailureCategory, FailureDetail, Outcome, StageStatus, StageUsage, stage_usage_to_llm,
 };
-use fabro_graphviz::graph::types::Node as GvNode;
 use fabro_types::RunId;
 
 type WfRunState = RunState<Option<StageUsage>>;
 type WfNodeResult = NodeResult<Option<StageUsage>>;
-
-fn node_script(node: &GvNode) -> Option<String> {
-    node.attrs
-        .get("script")
-        .or_else(|| node.attrs.get("tool_command"))
-        .and_then(|v| v.as_str())
-        .map(String::from)
-}
 
 /// Sub-lifecycle responsible for emitting workflow run events.
 pub(crate) struct EventLifecycle {
@@ -99,8 +91,8 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             node_id: gv.id.clone(),
             name: gv.label().to_string(),
             index: stage_index,
-            handler_type: gv.handler_type().map(String::from),
-            script: node_script(gv),
+            handler_type: gv.handler_type().unwrap_or_default().to_string(),
+            script: None,
             attempt: 1,
             max_attempts: 1,
         });
@@ -116,6 +108,12 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             failure: None,
             notes: None,
             files_touched: Vec::new(),
+            context_updates: None,
+            jump_to_node: None,
+            context_values: None,
+            node_visits: None,
+            loop_failure_signatures: None,
+            restart_failure_signatures: None,
             attempt: 1,
             max_attempts: 1,
         });
@@ -131,8 +129,8 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             node_id: gv.id.clone(),
             name: gv.label().to_string(),
             index: state.stage_index,
-            handler_type: gv.handler_type().map(String::from),
-            script: node_script(gv),
+            handler_type: gv.handler_type().unwrap_or_default().to_string(),
+            script: None,
             attempt: ctx.attempt as usize,
             max_attempts: ctx.max_attempts as usize,
         });
@@ -211,6 +209,18 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                 failure: outcome.failure.clone(),
                 notes: outcome.notes.clone(),
                 files_touched: outcome.files_touched.clone(),
+                context_updates: (!outcome.context_updates.is_empty())
+                    .then(|| outcome.context_updates.clone().into_iter().collect::<BTreeMap<_, _>>()),
+                jump_to_node: outcome.jump_to_node.clone(),
+                context_values: {
+                    let snapshot = state.context.snapshot();
+                    (!snapshot.is_empty())
+                        .then(|| snapshot.into_iter().collect::<BTreeMap<_, _>>())
+                },
+                node_visits: (!state.node_visits.is_empty())
+                    .then(|| state.node_visits.clone().into_iter().collect::<BTreeMap<_, _>>()),
+                loop_failure_signatures: None,
+                restart_failure_signatures: None,
                 attempt: result.attempts as usize,
                 max_attempts: result.max_attempts as usize,
             });
@@ -259,11 +269,13 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         let git_result = self.checkpoint_git_result.lock().unwrap().clone();
 
         let git_sha = git_result.as_ref().and_then(|r| r.commit_sha.clone());
+        let diff = git_result.as_ref().and_then(|r| r.diff.clone());
 
         self.emitter.emit(&WorkflowRunEvent::CheckpointCompleted {
             node_id: node.id().to_string(),
             status,
             git_commit_sha: git_sha.clone(),
+            diff,
         });
 
         // Emit GitCommit + GitPush events if git produced results

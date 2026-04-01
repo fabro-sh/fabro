@@ -302,6 +302,7 @@ impl Handler for ParallelHandler {
                         index: setup.branch_index,
                         duration_ms: millis_u64(branch_start.elapsed()),
                         status: "fail".to_string(),
+                        head_sha: None,
                     });
                     return Ok(BranchResult {
                         id: setup.target_id.clone(),
@@ -382,6 +383,7 @@ impl Handler for ParallelHandler {
                     index: setup.branch_index,
                     duration_ms: millis_u64(branch_start.elapsed()),
                     status: outcome.status.to_string(),
+                    head_sha: head_sha.clone(),
                 });
 
                 Ok::<BranchResult, FabroError>(BranchResult {

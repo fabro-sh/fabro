@@ -101,8 +101,13 @@ impl Session {
     /// Initialize session by discovering project docs and capturing environment context.
     /// Call before `process_input`.
     pub async fn initialize(&mut self) {
-        self.event_emitter
-            .emit(self.id.clone(), AgentEvent::SessionStarted);
+        self.event_emitter.emit(
+            self.id.clone(),
+            AgentEvent::SessionStarted {
+                provider: Some(self.provider_profile.provider().to_string()),
+                model: Some(self.provider_profile.model().to_string()),
+            },
+        );
 
         let doc_root = self
             .config
@@ -1280,7 +1285,7 @@ mod tests {
         assert!(
             events
                 .iter()
-                .any(|e| matches!(e.event, AgentEvent::SessionStarted))
+                .any(|e| matches!(e.event, AgentEvent::SessionStarted { .. }))
         );
         assert!(
             events
@@ -1574,7 +1579,7 @@ mod tests {
         assert!(
             !events
                 .iter()
-                .any(|e| matches!(e.event, AgentEvent::SessionStarted)),
+                .any(|e| matches!(e.event, AgentEvent::SessionStarted { .. })),
             "SessionStarted should not be emitted for a closed session"
         );
     }
@@ -1803,7 +1808,7 @@ mod tests {
         let mut session_start_count = 0;
         let mut session_end_count = 0;
         while let Ok(event) = rx.try_recv() {
-            if matches!(event.event, AgentEvent::SessionStarted) {
+            if matches!(event.event, AgentEvent::SessionStarted { .. }) {
                 session_start_count += 1;
             }
             if matches!(event.event, AgentEvent::SessionEnded) {

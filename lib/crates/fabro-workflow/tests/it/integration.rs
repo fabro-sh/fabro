@@ -12081,6 +12081,9 @@ impl Handler for KeepaliveHandler {
             services.emitter.emit(&WorkflowRunEvent::Prompt {
                 stage: node.id.clone(),
                 text: "keepalive".to_string(),
+                mode: None,
+                provider: None,
+                model: None,
             });
         }
         Ok(Outcome::success())

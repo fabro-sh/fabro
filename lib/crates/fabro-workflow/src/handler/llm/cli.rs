@@ -494,6 +494,13 @@ impl CodergenBackend for AgentCliBackend {
         ensure_cli(cli, provider, sandbox, emitter).await?;
 
         let command = cli_command_for_provider(provider, model, &prompt_path);
+        emitter.emit(&WorkflowRunEvent::AgentCliStarted {
+            node_id: node.id.clone(),
+            mode: "cli".to_string(),
+            provider: provider.as_str().to_string(),
+            model: model.to_string(),
+            command: command.clone(),
+        });
 
         let _ = fs::create_dir_all(stage_dir).await;
         let provider_used = serde_json::json!({
@@ -636,6 +643,13 @@ impl CodergenBackend for AgentCliBackend {
             timed_out: false,
             duration_ms,
         };
+        emitter.emit(&WorkflowRunEvent::AgentCliCompleted {
+            node_id: node.id.clone(),
+            stdout: result.stdout.clone(),
+            stderr: result.stderr.clone(),
+            exit_code: result.exit_code,
+            duration_ms: result.duration_ms,
+        });
 
         // 3e. Cleanup temp files
         let _ = sandbox

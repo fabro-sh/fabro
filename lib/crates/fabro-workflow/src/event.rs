@@ -9,6 +9,7 @@ use fabro_store::{EventPayload, RunStore};
 use fabro_types::RunId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::collections::BTreeMap;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
@@ -46,6 +47,26 @@ pub struct RunEventEnvelope {
 /// Events emitted during workflow run execution for observability.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WorkflowRunEvent {
+    RunCreated {
+        run_id: RunId,
+        settings: serde_json::Value,
+        graph: serde_json::Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workflow_source: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workflow_config: Option<String>,
+        labels: BTreeMap<String, String>,
+        run_dir: String,
+        working_directory: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        host_repo_path: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base_branch: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workflow_slug: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        db_prefix: Option<String>,
+    },
     WorkflowRunStarted {
         name: String,
         run_id: RunId,
@@ -87,7 +108,7 @@ pub enum WorkflowRunEvent {
         node_id: String,
         name: String,
         index: usize,
-        handler_type: Option<String>,
+        handler_type: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         script: Option<String>,
         attempt: usize,
@@ -106,6 +127,18 @@ pub enum WorkflowRunEvent {
         failure: Option<FailureDetail>,
         notes: Option<String>,
         files_touched: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context_updates: Option<BTreeMap<String, serde_json::Value>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        jump_to_node: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context_values: Option<BTreeMap<String, serde_json::Value>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        node_visits: Option<BTreeMap<String, usize>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        loop_failure_signatures: Option<BTreeMap<String, usize>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        restart_failure_signatures: Option<BTreeMap<String, usize>>,
         attempt: usize,
         max_attempts: usize,
     },
@@ -137,6 +170,8 @@ pub enum WorkflowRunEvent {
         index: usize,
         duration_ms: u64,
         status: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        head_sha: Option<String>,
     },
     ParallelCompleted {
         duration_ms: u64,
@@ -163,6 +198,8 @@ pub enum WorkflowRunEvent {
         status: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         git_commit_sha: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        diff: Option<String>,
     },
     CheckpointFailed {
         node_id: String,
@@ -220,6 +257,20 @@ pub enum WorkflowRunEvent {
     Prompt {
         stage: String,
         text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mode: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+    },
+    PromptCompleted {
+        node_id: String,
+        response: String,
+        model: String,
+        provider: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        usage: Option<StageUsage>,
     },
     /// Forwarded from an agent session, tagged with the workflow stage.
     Agent {
@@ -247,6 +298,13 @@ pub enum WorkflowRunEvent {
     /// Emitted after the sandbox has been initialized (by engine lifecycle).
     SandboxInitialized {
         working_directory: String,
+        provider: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        identifier: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        host_working_directory: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        container_mount_point: Option<String>,
     },
     SetupStarted {
         command_count: usize,
@@ -312,6 +370,36 @@ pub enum WorkflowRunEvent {
         error: String,
         duration_ms: u64,
     },
+    CommandStarted {
+        node_id: String,
+        script: String,
+        language: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout_ms: Option<u64>,
+    },
+    CommandCompleted {
+        node_id: String,
+        stdout: String,
+        stderr: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        exit_code: Option<i32>,
+        duration_ms: u64,
+        timed_out: bool,
+    },
+    AgentCliStarted {
+        node_id: String,
+        mode: String,
+        provider: String,
+        model: String,
+        command: String,
+    },
+    AgentCliCompleted {
+        node_id: String,
+        stdout: String,
+        stderr: String,
+        exit_code: i32,
+        duration_ms: u64,
+    },
     PullRequestCreated {
         pr_url: String,
         pr_number: u64,
@@ -353,9 +441,16 @@ pub enum WorkflowRunEvent {
         exit_code: i32,
         stderr: String,
     },
-    RetroStarted,
+    RetroStarted {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provider: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+    },
     RetroCompleted {
         duration_ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        retro: Option<serde_json::Value>,
     },
     RetroFailed {
         error: String,
@@ -367,6 +462,9 @@ impl WorkflowRunEvent {
     pub fn trace(&self) {
         use tracing::{debug, error, info, warn};
         match self {
+            Self::RunCreated { run_id, run_dir, .. } => {
+                info!(run_id = %run_id, run_dir, "Run created");
+            }
             Self::WorkflowRunStarted { name, run_id, .. } => {
                 info!(workflow = name.as_str(), run_id = %run_id, "Workflow run started");
             }
@@ -414,7 +512,7 @@ impl WorkflowRunEvent {
                     node_id,
                     stage = name.as_str(),
                     index,
-                    handler_type = handler_type.as_deref().unwrap_or(""),
+                    handler_type,
                     attempt,
                     max_attempts,
                     "Stage started"
@@ -501,6 +599,7 @@ impl WorkflowRunEvent {
                 index,
                 duration_ms,
                 status,
+                ..
             } => {
                 debug!(
                     branch,
@@ -566,7 +665,7 @@ impl WorkflowRunEvent {
                 if *success {
                     debug!(branch, "Git fetch succeeded");
                 } else {
-                    warn!(branch, "Git fetch failed");
+                warn!(branch, "Git fetch failed");
                 }
             }
             Self::GitReset { sha } => {
@@ -590,14 +689,43 @@ impl WorkflowRunEvent {
             Self::LoopRestart { from_node, to_node } => {
                 debug!(from_node, to_node, "Loop restart");
             }
-            Self::Prompt { stage, text } => {
-                debug!(stage, text_len = text.len(), "Prompt sent");
+            Self::Prompt {
+                stage,
+                text,
+                mode,
+                provider,
+                model,
+            } => {
+                debug!(
+                    stage,
+                    text_len = text.len(),
+                    mode = mode.as_deref().unwrap_or(""),
+                    provider = provider.as_deref().unwrap_or(""),
+                    model = model.as_deref().unwrap_or(""),
+                    "Prompt sent"
+                );
+            }
+            Self::PromptCompleted {
+                node_id,
+                model,
+                provider,
+                ..
+            } => {
+                debug!(node_id, model, provider, "Prompt completed");
             }
             Self::Agent { .. } | Self::Sandbox { .. } => {}
             Self::SandboxInitialized {
-                working_directory, ..
+                working_directory,
+                provider,
+                identifier,
+                ..
             } => {
-                info!(working_directory, "Sandbox initialized");
+                info!(
+                    working_directory,
+                    provider,
+                    identifier = identifier.as_deref().unwrap_or(""),
+                    "Sandbox initialized"
+                );
             }
             Self::SubgraphStarted {
                 node_id,
@@ -707,6 +835,45 @@ impl WorkflowRunEvent {
             } => {
                 error!(cli_name, provider, error, duration_ms, "CLI ensure failed");
             }
+            Self::CommandStarted {
+                node_id,
+                language,
+                timeout_ms,
+                ..
+            } => {
+                debug!(node_id, language, timeout_ms, "Command started");
+            }
+            Self::CommandCompleted {
+                node_id,
+                exit_code,
+                duration_ms,
+                timed_out,
+                ..
+            } => {
+                debug!(
+                    node_id,
+                    exit_code,
+                    duration_ms,
+                    timed_out,
+                    "Command completed"
+                );
+            }
+            Self::AgentCliStarted {
+                node_id,
+                provider,
+                model,
+                ..
+            } => {
+                debug!(node_id, provider, model, "Agent CLI started");
+            }
+            Self::AgentCliCompleted {
+                node_id,
+                exit_code,
+                duration_ms,
+                ..
+            } => {
+                debug!(node_id, exit_code, duration_ms, "Agent CLI completed");
+            }
             Self::PullRequestCreated {
                 pr_url,
                 pr_number,
@@ -779,10 +946,14 @@ impl WorkflowRunEvent {
                     command, index, exit_code, "Devcontainer lifecycle command failed"
                 );
             }
-            Self::RetroStarted => {
-                info!("Retro started");
+            Self::RetroStarted { provider, model } => {
+                info!(
+                    provider = provider.as_deref().unwrap_or(""),
+                    model = model.as_deref().unwrap_or(""),
+                    "Retro started"
+                );
             }
-            Self::RetroCompleted { duration_ms } => {
+            Self::RetroCompleted { duration_ms, .. } => {
                 info!(duration_ms, "Retro completed");
             }
             Self::RetroFailed { error, duration_ms } => {
@@ -794,6 +965,7 @@ impl WorkflowRunEvent {
 
 pub fn event_name(event: &WorkflowRunEvent) -> &'static str {
     match event {
+        WorkflowRunEvent::RunCreated { .. } => "run.created",
         WorkflowRunEvent::WorkflowRunStarted { .. } => "run.started",
         WorkflowRunEvent::WorkflowRunCompleted { .. } => "run.completed",
         WorkflowRunEvent::WorkflowRunFailed { .. } => "run.failed",
@@ -821,8 +993,9 @@ pub fn event_name(event: &WorkflowRunEvent) -> &'static str {
         WorkflowRunEvent::EdgeSelected { .. } => "edge.selected",
         WorkflowRunEvent::LoopRestart { .. } => "loop.restart",
         WorkflowRunEvent::Prompt { .. } => "stage.prompt",
+        WorkflowRunEvent::PromptCompleted { .. } => "prompt.completed",
         WorkflowRunEvent::Agent { event, .. } => match event {
-            AgentEvent::SessionStarted => "agent.session.started",
+            AgentEvent::SessionStarted { .. } => "agent.session.started",
             AgentEvent::SessionEnded => "agent.session.ended",
             AgentEvent::ProcessingEnd => "agent.processing.end",
             AgentEvent::UserInput { .. } => "agent.input",
@@ -882,6 +1055,10 @@ pub fn event_name(event: &WorkflowRunEvent) -> &'static str {
         WorkflowRunEvent::CliEnsureStarted { .. } => "cli.ensure.started",
         WorkflowRunEvent::CliEnsureCompleted { .. } => "cli.ensure.completed",
         WorkflowRunEvent::CliEnsureFailed { .. } => "cli.ensure.failed",
+        WorkflowRunEvent::CommandStarted { .. } => "command.started",
+        WorkflowRunEvent::CommandCompleted { .. } => "command.completed",
+        WorkflowRunEvent::AgentCliStarted { .. } => "agent.cli.started",
+        WorkflowRunEvent::AgentCliCompleted { .. } => "agent.cli.completed",
         WorkflowRunEvent::PullRequestCreated { .. } => "pull_request.created",
         WorkflowRunEvent::PullRequestFailed { .. } => "pull_request.failed",
         WorkflowRunEvent::DevcontainerResolved { .. } => "devcontainer.resolved",
@@ -896,7 +1073,7 @@ pub fn event_name(event: &WorkflowRunEvent) -> &'static str {
             "devcontainer.lifecycle.completed"
         }
         WorkflowRunEvent::DevcontainerLifecycleFailed { .. } => "devcontainer.lifecycle.failed",
-        WorkflowRunEvent::RetroStarted => "retro.started",
+        WorkflowRunEvent::RetroStarted { .. } => "retro.started",
         WorkflowRunEvent::RetroCompleted { .. } => "retro.completed",
         WorkflowRunEvent::RetroFailed { .. } => "retro.failed",
     }
@@ -968,7 +1145,7 @@ fn default_node_label(node_id: Option<&String>, node_label: Option<String>) -> O
 
 fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
     match event {
-        WorkflowRunEvent::WorkflowRunStarted { .. } => {
+        WorkflowRunEvent::RunCreated { .. } | WorkflowRunEvent::WorkflowRunStarted { .. } => {
             let mut fields = tagged_variant_fields(event);
             fields.remove("run_id");
             EnvelopeFields {
@@ -1010,7 +1187,12 @@ fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
         | WorkflowRunEvent::CheckpointFailed { .. }
         | WorkflowRunEvent::SubgraphStarted { .. }
         | WorkflowRunEvent::SubgraphCompleted { .. }
-        | WorkflowRunEvent::AssetCaptured { .. } => {
+        | WorkflowRunEvent::AssetCaptured { .. }
+        | WorkflowRunEvent::PromptCompleted { .. }
+        | WorkflowRunEvent::CommandStarted { .. }
+        | WorkflowRunEvent::CommandCompleted { .. }
+        | WorkflowRunEvent::AgentCliStarted { .. }
+        | WorkflowRunEvent::AgentCliCompleted { .. } => {
             let mut fields = tagged_variant_fields(event);
             let node_id = remove_string(&mut fields, "node_id");
             let node_label =
@@ -1122,10 +1304,18 @@ fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
 }
 
 pub fn canonicalize_event(run_id: &RunId, event: &WorkflowRunEvent) -> RunEventEnvelope {
+    canonicalize_event_at(run_id, event, Utc::now())
+}
+
+pub fn canonicalize_event_at(
+    run_id: &RunId,
+    event: &WorkflowRunEvent,
+    ts: chrono::DateTime<Utc>,
+) -> RunEventEnvelope {
     let fields = extract_envelope_fields(event);
     RunEventEnvelope {
         id: Uuid::now_v7().to_string(),
-        ts: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+        ts: ts.to_rfc3339_opts(SecondsFormat::Millis, true),
         run_id: run_id.to_string(),
         event: event_name(event).to_string(),
         session_id: fields.session_id,
@@ -1166,7 +1356,7 @@ pub fn append_progress_event_with_line(
         })?;
     writeln!(file, "{line}")?;
 
-    let pretty = serde_json::to_string_pretty(envelope)?;
+    let pretty = serde_json::to_string_pretty(&normalized_envelope_value(envelope)?)?;
     let pretty = redact_jsonl_line(&pretty);
     std::fs::write(run_dir.join("live.json"), pretty)
         .with_context(|| format!("Failed to write {}", run_dir.join("live.json").display()))?;
@@ -1175,8 +1365,29 @@ pub fn append_progress_event_with_line(
 }
 
 pub fn redacted_event_json(envelope: &RunEventEnvelope) -> Result<String> {
-    let line = serde_json::to_string(envelope)?;
+    let line = serde_json::to_string(&normalized_envelope_value(envelope)?)?;
     Ok(redact_jsonl_line(&line))
+}
+
+fn normalized_envelope_value(envelope: &RunEventEnvelope) -> Result<Value> {
+    let value = serde_json::to_value(envelope)?;
+    Ok(normalize_json_value(value))
+}
+
+fn normalize_json_value(value: Value) -> Value {
+    match value {
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(key, value)| (key, normalize_json_value(value)))
+                .collect::<BTreeMap<_, _>>()
+                .into_iter()
+                .collect::<Map<_, _>>(),
+        ),
+        Value::Array(values) => {
+            Value::Array(values.into_iter().map(normalize_json_value).collect())
+        }
+        other => other,
+    }
 }
 
 pub fn event_payload_from_redacted_json(line: &str, run_id: &RunId) -> Result<EventPayload> {
@@ -1444,6 +1655,12 @@ mod tests {
                 failure: None,
                 notes: None,
                 files_touched: Vec::new(),
+                context_updates: None,
+                jump_to_node: None,
+                context_values: None,
+                node_visits: None,
+                loop_failure_signatures: None,
+                restart_failure_signatures: None,
                 attempt: 1,
                 max_attempts: 1,
             },
@@ -1567,7 +1784,13 @@ mod tests {
 
     #[test]
     fn build_redacted_event_payload_requires_id() {
-        let envelope = canonicalize_event(&fixtures::RUN_8, &WorkflowRunEvent::RetroStarted);
+        let envelope = canonicalize_event(
+            &fixtures::RUN_8,
+            &WorkflowRunEvent::RetroStarted {
+                provider: None,
+                model: None,
+            },
+        );
 
         let payload = build_redacted_event_payload(&envelope, &fixtures::RUN_8).unwrap();
         assert_eq!(payload.as_value()["id"], envelope.id);
@@ -1576,7 +1799,13 @@ mod tests {
 
     #[test]
     fn event_name_matches_new_dot_notation() {
-        assert_eq!(event_name(&WorkflowRunEvent::RetroStarted), "retro.started");
+        assert_eq!(
+            event_name(&WorkflowRunEvent::RetroStarted {
+                provider: None,
+                model: None,
+            }),
+            "retro.started"
+        );
         assert_eq!(
             event_name(&WorkflowRunEvent::ParallelBranchStarted {
                 branch: "fork".to_string(),

@@ -55,7 +55,10 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
 
     let retro_start = std::time::Instant::now();
     if let Some(ref emitter) = options.emitter {
-        emitter.emit(&WorkflowRunEvent::RetroStarted);
+        emitter.emit(&WorkflowRunEvent::RetroStarted {
+            provider: Some(options.provider.as_str().to_string()),
+            model: Some(options.model.clone()),
+        });
     }
 
     let narrative_result = if dry_run {
@@ -68,9 +71,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
                     emitter.touch();
                     if !matches!(
                         &event.event,
-                        fabro_agent::AgentEvent::SessionStarted
-                            | fabro_agent::AgentEvent::SessionEnded
-                            | fabro_agent::AgentEvent::AssistantTextStart
+                        fabro_agent::AgentEvent::AssistantTextStart
                             | fabro_agent::AgentEvent::AssistantOutputReplace { .. }
                             | fabro_agent::AgentEvent::TextDelta { .. }
                             | fabro_agent::AgentEvent::ReasoningDelta { .. }
@@ -103,7 +104,10 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
     let duration_ms = u64::try_from(retro_start.elapsed().as_millis()).unwrap();
     if let Some(ref emitter) = options.emitter {
         match &narrative_result {
-            Ok(_) => emitter.emit(&WorkflowRunEvent::RetroCompleted { duration_ms }),
+            Ok(_) => emitter.emit(&WorkflowRunEvent::RetroCompleted {
+                duration_ms,
+                retro: serde_json::to_value(&retro).ok(),
+            }),
             Err(e) => emitter.emit(&WorkflowRunEvent::RetroFailed {
                 error: e.to_string(),
                 duration_ms,

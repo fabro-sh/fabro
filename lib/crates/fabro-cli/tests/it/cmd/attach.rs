@@ -242,120 +242,266 @@ fn attach_json_errors_without_prompting_for_human_input() {
     fabro_json_snapshot!(context, &progress, @r#"
     [
       {
+        "event": "run.created",
         "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
+        "properties": {
+          "graph": {
+            "attrs": {
+              "goal": {
+                "String": "Wait for approval"
+              }
+            },
+            "edges": [
+              {
+                "attrs": {},
+                "from": "start",
+                "to": "approve"
+              },
+              {
+                "attrs": {
+                  "label": {
+                    "String": "[A] Approve"
+                  }
+                },
+                "from": "approve",
+                "to": "ship"
+              },
+              {
+                "attrs": {
+                  "label": {
+                    "String": "[R] Revise"
+                  }
+                },
+                "from": "approve",
+                "to": "revise"
+              },
+              {
+                "attrs": {},
+                "from": "ship",
+                "to": "exit"
+              },
+              {
+                "attrs": {},
+                "from": "revise",
+                "to": "exit"
+              }
+            ],
+            "name": "HumanGate",
+            "nodes": {
+              "approve": {
+                "attrs": {
+                  "label": {
+                    "String": "Approve?"
+                  },
+                  "shape": {
+                    "String": "hexagon"
+                  }
+                },
+                "id": "approve"
+              },
+              "exit": {
+                "attrs": {
+                  "label": {
+                    "String": "Exit"
+                  },
+                  "shape": {
+                    "String": "Msquare"
+                  }
+                },
+                "id": "exit"
+              },
+              "revise": {
+                "attrs": {
+                  "script": {
+                    "String": "echo revised"
+                  },
+                  "shape": {
+                    "String": "parallelogram"
+                  }
+                },
+                "id": "revise"
+              },
+              "ship": {
+                "attrs": {
+                  "script": {
+                    "String": "echo shipped"
+                  },
+                  "shape": {
+                    "String": "parallelogram"
+                  }
+                },
+                "id": "ship"
+              },
+              "start": {
+                "attrs": {
+                  "label": {
+                    "String": "Start"
+                  },
+                  "shape": {
+                    "String": "Mdiamond"
+                  }
+                },
+                "id": "start"
+              }
+            }
+          },
+          "host_repo_path": "[TEMP_DIR]",
+          "labels": {},
+          "run_dir": "[STORAGE_DIR]/runs/20260401-[ULID]",
+          "settings": {
+            "goal": "Wait for approval",
+            "llm": {
+              "fallbacks": null,
+              "model": "gpt-5.4",
+              "provider": "openai"
+            },
+            "mode": "standalone",
+            "no_retro": true,
+            "sandbox": {
+              "daytona": null,
+              "devcontainer": null,
+              "env": null,
+              "local": null,
+              "preserve": null,
+              "provider": "local"
+            },
+            "storage_dir": "[STORAGE_DIR]"
+          },
+          "workflow_slug": "human-gate",
+          "workflow_source": "digraph HumanGate {/n  graph [goal=\"Wait for approval\"]/n  start [shape=Mdiamond, label=\"Start\"]/n  exit  [shape=Msquare, label=\"Exit\"]/n  approve [shape=hexagon, label=\"Approve?\"]/n  ship   [shape=parallelogram, script=\"echo shipped\"]/n  revise [shape=parallelogram, script=\"echo revised\"]/n  start -> approve/n  approve -> ship   [label=\"[A] Approve\"]/n  approve -> revise [label=\"[R] Revise\"]/n  ship -> exit/n  revise -> exit/n}/n",
+          "working_directory": "[TEMP_DIR]"
+        },
         "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
+      },
+      {
         "event": "sandbox.initializing",
+        "id": "[EVENT_ID]",
         "properties": {
           "provider": "local"
-        }
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "sandbox.ready",
+        "id": "[EVENT_ID]",
+        "properties": {
+          "cpu": null,
+          "duration_ms": "[DURATION_MS]",
+          "memory": null,
+          "name": null,
+          "provider": "local",
+          "url": null
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
+      },
+      {
+        "event": "sandbox.initialized",
+        "id": "[EVENT_ID]",
         "properties": {
           "provider": "local",
-          "duration_ms": "[DURATION_MS]",
-          "name": null,
-          "cpu": null,
-          "memory": null,
-          "url": null
-        }
-      },
-      {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
-        "event": "sandbox.initialized",
-        "properties": {
           "working_directory": "[TEMP_DIR]"
-        }
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "run.started",
+        "id": "[EVENT_ID]",
         "properties": {
-          "name": "HumanGate",
-          "goal": "Wait for approval"
-        }
+          "goal": "Wait for approval",
+          "name": "HumanGate"
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "stage.started",
+        "id": "[EVENT_ID]",
         "node_id": "start",
         "node_label": "Start",
         "properties": {
-          "max_attempts": 1,
           "attempt": 1,
+          "handler_type": "start",
           "index": 0,
-          "handler_type": "start"
-        }
+          "max_attempts": 1
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "stage.completed",
+        "id": "[EVENT_ID]",
         "node_id": "start",
         "node_label": "Start",
         "properties": {
-          "max_attempts": 1,
           "attempt": 1,
-          "index": 0,
+          "context_values": {
+            "current.preamble": "Goal: Wait for approval/n",
+            "current_node": "start",
+            "graph.goal": "Wait for approval",
+            "internal.fidelity": "compact",
+            "internal.node_visit_count": 1,
+            "internal.run_id": "[ULID]",
+            "internal.thread_id": null
+          },
           "duration_ms": "[DURATION_MS]",
-          "status": "success",
-          "preferred_label": null,
-          "suggested_next_ids": [],
-          "usage": null,
+          "files_touched": [],
+          "index": 0,
+          "max_attempts": 1,
+          "node_visits": {
+            "start": 1
+          },
           "notes": null,
-          "files_touched": []
-        }
+          "preferred_label": null,
+          "status": "success",
+          "suggested_next_ids": [],
+          "usage": null
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "edge.selected",
+        "id": "[EVENT_ID]",
         "properties": {
-          "from_node": "start",
-          "to_node": "approve",
-          "label": null,
           "condition": null,
+          "from_node": "start",
+          "is_jump": false,
+          "label": null,
           "reason": "unconditional",
           "stage_status": "success",
-          "is_jump": false
-        }
+          "to_node": "approve"
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "checkpoint.completed",
+        "id": "[EVENT_ID]",
         "node_id": "start",
         "node_label": "start",
         "properties": {
           "status": "success"
-        }
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       },
       {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
         "event": "stage.started",
+        "id": "[EVENT_ID]",
         "node_id": "approve",
         "node_label": "Approve?",
         "properties": {
-          "max_attempts": 1,
           "attempt": 1,
+          "handler_type": "human",
           "index": 1,
-          "handler_type": "human"
-        }
+          "max_attempts": 1
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       }
     ]
     "#);
