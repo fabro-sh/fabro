@@ -1,0 +1,6 @@
+{
+  "status": "fail",
+  "notes": null,
+  "failure_reason": "Script failed with exit code: 101\n\n## stdout\nerror[E0433]: failed to resolve: use of undeclared type `Arc`\n   --> lib/crates/fabro-server/tests/it/api.rs:389:22\n    |\n389 |                 key: Arc::new(decoding_key),\n    |                      ^^^ use of undeclared type `Arc`\n    |\nhelp: consider importing this struct\n    |\n 14 +     use std::sync::Arc;\n    |\n\nerror[E0433]: failed to resolve: use of undeclared type `Arc`\n   --> lib/crates/fabro-server/tests/it/api.rs:390:29\n    |\n390 |                 validation: Arc::new(fabro_server::jwt_auth::jwt_validation()),\n    |                             ^^^ use of undeclared type `Arc`\n    |\nhelp: consider importing this struct\n    |\n 14 +     use std::sync::Arc;\n    |\n\nFor more information about this error, try `rustc --explain E0433`.\nerror: could not compile `fabro-server` (test \"it\") due to 2 previous errors\nerror: command `/root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo test --no-run --message-format json-render-diagnostics --workspace --quiet` exited with code 101\n",
+  "timestamp": "2026-04-01T13:38:59.780123Z"
+}
