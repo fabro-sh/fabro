@@ -36,13 +36,13 @@ pub(crate) async fn run(args: &WaitArgs, styles: &Styles, globals: &GlobalArgs) 
     let started_waiting_at = std::time::Instant::now();
 
     let final_status = loop {
+        let load_file_status = || RunStatusRecord::load(&status_path).ok().map(|r| r.status);
         let status = match run_store.as_ref() {
             Some(run_store) => match run_store.get_status().await {
                 Ok(Some(record)) => Some(record.status),
-                Ok(None) => RunStatusRecord::load(&status_path).ok().map(|record| record.status),
-                Err(_) => RunStatusRecord::load(&status_path).ok().map(|record| record.status),
+                Ok(None) | Err(_) => load_file_status(),
             },
-            None => RunStatusRecord::load(&status_path).ok().map(|record| record.status),
+            None => load_file_status(),
         };
         let status = status.unwrap_or_else(|| {
             if started_waiting_at.elapsed() < WAIT_STARTUP_GRACE {

@@ -69,15 +69,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
             emitter_clone.map(|emitter| -> Arc<dyn Fn(SessionEvent) + Send + Sync> {
                 Arc::new(move |event: SessionEvent| {
                     emitter.touch();
-                    if !matches!(
-                        &event.event,
-                        fabro_agent::AgentEvent::AssistantTextStart
-                            | fabro_agent::AgentEvent::AssistantOutputReplace { .. }
-                            | fabro_agent::AgentEvent::TextDelta { .. }
-                            | fabro_agent::AgentEvent::ReasoningDelta { .. }
-                            | fabro_agent::AgentEvent::ToolCallOutputDelta { .. }
-                            | fabro_agent::AgentEvent::SkillExpanded { .. }
-                    ) {
+                    if !event.event.is_streaming_noise() {
                         emitter.emit(&WorkflowRunEvent::Agent {
                             stage: "retro".to_string(),
                             event: event.event.clone(),

@@ -1,6 +1,6 @@
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 
@@ -209,16 +209,25 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                 failure: outcome.failure.clone(),
                 notes: outcome.notes.clone(),
                 files_touched: outcome.files_touched.clone(),
-                context_updates: (!outcome.context_updates.is_empty())
-                    .then(|| outcome.context_updates.clone().into_iter().collect::<BTreeMap<_, _>>()),
+                context_updates: (!outcome.context_updates.is_empty()).then(|| {
+                    outcome
+                        .context_updates
+                        .clone()
+                        .into_iter()
+                        .collect::<BTreeMap<_, _>>()
+                }),
                 jump_to_node: outcome.jump_to_node.clone(),
                 context_values: {
                     let snapshot = state.context.snapshot();
-                    (!snapshot.is_empty())
-                        .then(|| snapshot.into_iter().collect::<BTreeMap<_, _>>())
+                    (!snapshot.is_empty()).then(|| snapshot.into_iter().collect::<BTreeMap<_, _>>())
                 },
-                node_visits: (!state.node_visits.is_empty())
-                    .then(|| state.node_visits.clone().into_iter().collect::<BTreeMap<_, _>>()),
+                node_visits: (!state.node_visits.is_empty()).then(|| {
+                    state
+                        .node_visits
+                        .clone()
+                        .into_iter()
+                        .collect::<BTreeMap<_, _>>()
+                }),
                 loop_failure_signatures: None,
                 restart_failure_signatures: None,
                 attempt: result.attempts as usize,

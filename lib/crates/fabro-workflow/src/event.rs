@@ -462,7 +462,9 @@ impl WorkflowRunEvent {
     pub fn trace(&self) {
         use tracing::{debug, error, info, warn};
         match self {
-            Self::RunCreated { run_id, run_dir, .. } => {
+            Self::RunCreated {
+                run_id, run_dir, ..
+            } => {
                 info!(run_id = %run_id, run_dir, "Run created");
             }
             Self::WorkflowRunStarted { name, run_id, .. } => {
@@ -665,7 +667,7 @@ impl WorkflowRunEvent {
                 if *success {
                     debug!(branch, "Git fetch succeeded");
                 } else {
-                warn!(branch, "Git fetch failed");
+                    warn!(branch, "Git fetch failed");
                 }
             }
             Self::GitReset { sha } => {
@@ -852,10 +854,7 @@ impl WorkflowRunEvent {
             } => {
                 debug!(
                     node_id,
-                    exit_code,
-                    duration_ms,
-                    timed_out,
-                    "Command completed"
+                    exit_code, duration_ms, timed_out, "Command completed"
                 );
             }
             Self::AgentCliStarted {
@@ -1374,7 +1373,7 @@ fn normalized_envelope_value(envelope: &RunEventEnvelope) -> Result<Value> {
     Ok(normalize_json_value(value))
 }
 
-fn normalize_json_value(value: Value) -> Value {
+pub(crate) fn normalize_json_value(value: Value) -> Value {
     match value {
         Value::Object(map) => Value::Object(
             map.into_iter()

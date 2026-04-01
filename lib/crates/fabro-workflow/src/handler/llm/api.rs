@@ -96,16 +96,9 @@ fn spawn_event_forwarder(
             track_file_event(&event.event, &mut file_tracking.lock().unwrap());
 
             // Forward non-streaming agent events to pipeline
-            if !matches!(
-                &event.event,
-                AgentEvent::ProcessingEnd
-                    | AgentEvent::AssistantTextStart
-                    | AgentEvent::AssistantOutputReplace { .. }
-                    | AgentEvent::TextDelta { .. }
-                    | AgentEvent::ReasoningDelta { .. }
-                    | AgentEvent::ToolCallOutputDelta { .. }
-                    | AgentEvent::SkillExpanded { .. }
-            ) {
+            if !event.event.is_streaming_noise()
+                && !matches!(&event.event, AgentEvent::ProcessingEnd)
+            {
                 emitter.emit(&WorkflowRunEvent::Agent {
                     stage: node_id.clone(),
                     event: event.event.clone(),

@@ -92,18 +92,14 @@ impl SubAgentManager {
             tokio::spawn(async move {
                 while let Ok(event) = rx.recv().await {
                     // Skip streaming / noise events
-                    if matches!(
-                        &event.event,
-                        AgentEvent::TextDelta { .. }
-                            | AgentEvent::AssistantOutputReplace { .. }
-                            | AgentEvent::ReasoningDelta { .. }
-                            | AgentEvent::ToolCallOutputDelta { .. }
-                            | AgentEvent::AssistantTextStart
-                            | AgentEvent::SessionStarted { .. }
-                            | AgentEvent::SessionEnded
-                            | AgentEvent::ProcessingEnd
-                            | AgentEvent::SkillExpanded { .. }
-                    ) {
+                    if event.event.is_streaming_noise()
+                        || matches!(
+                            &event.event,
+                            AgentEvent::SessionStarted { .. }
+                                | AgentEvent::SessionEnded
+                                | AgentEvent::ProcessingEnd
+                        )
+                    {
                         continue;
                     }
                     cb(SubAgentCallbackEvent::Forwarded(event));

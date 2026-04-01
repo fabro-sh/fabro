@@ -201,6 +201,20 @@ pub enum AgentEvent {
 }
 
 impl AgentEvent {
+    /// Returns `true` for streaming-delta and UI-noise variants that are
+    /// typically filtered out before forwarding to the workflow event stream.
+    pub fn is_streaming_noise(&self) -> bool {
+        matches!(
+            self,
+            Self::AssistantTextStart
+                | Self::AssistantOutputReplace { .. }
+                | Self::TextDelta { .. }
+                | Self::ReasoningDelta { .. }
+                | Self::ToolCallOutputDelta { .. }
+                | Self::SkillExpanded { .. }
+        )
+    }
+
     pub fn trace(&self, session_id: &str) {
         use tracing::{debug, error, info, warn};
         match self {
