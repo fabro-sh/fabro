@@ -1,5 +1,5 @@
 digraph Smoke {
-    graph [goal="Verify the sandbox can lint and test the project"]
+    graph [goal="Verify the sandbox can lint and test the project", retry_target=exit]
     rankdir=LR
 
     start [shape=Mdiamond, label="Start"]
