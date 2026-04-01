@@ -45,6 +45,7 @@ fn dry_run_flag() {
 
       Required
       [!] Configuration (no user config file found)
+      [✓] Storage directory ([STORAGE_DIR])
       [✓] LLM providers (1 configured)
       [!] GitHub App (not configured)
 
@@ -53,6 +54,84 @@ fn dry_run_flag() {
       [!] Brave Search (not configured)
 
     Found issues in 4 categories.
+
+    Warnings:
+      • Configuration — Create ~/.fabro/user.toml
+      • GitHub App — Configure GitHub App in server.toml and set env vars to enable GitHub integration
+      • Cloud sandbox — Set DAYTONA_API_KEY to enable cloud sandbox execution
+      • Brave Search — Set BRAVE_SEARCH_API_KEY to enable web search
+    ----- stderr -----
+    ");
+}
+
+#[test]
+fn storage_dir_shown_in_output() {
+    let context = test_context!();
+    let mut cmd = context.doctor();
+    cmd.arg("--dry-run");
+    cmd.env("ANTHROPIC_API_KEY", "sk-test-dummy");
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    Fabro Doctor
+
+      Required
+      [!] Configuration (no user config file found)
+      [✓] Storage directory ([STORAGE_DIR])
+      [✓] LLM providers (1 configured)
+      [!] GitHub App (not configured)
+
+      Optional
+      [!] Cloud sandbox (no sandbox configured)
+      [!] Brave Search (not configured)
+
+    Found issues in 4 categories.
+
+    Warnings:
+      • Configuration — Create ~/.fabro/user.toml
+      • GitHub App — Configure GitHub App in server.toml and set env vars to enable GitHub integration
+      • Cloud sandbox — Set DAYTONA_API_KEY to enable cloud sandbox execution
+      • Brave Search — Set BRAVE_SEARCH_API_KEY to enable web search
+    ----- stderr -----
+    ");
+}
+
+#[test]
+fn storage_dir_missing_shows_error() {
+    let context = test_context!();
+    let mut cmd = context.doctor();
+    cmd.arg("--dry-run");
+    cmd.env("FABRO_STORAGE_DIR", "/tmp/nonexistent-fabro-doctor-xyz");
+    cmd.env("ANTHROPIC_API_KEY", "sk-test-dummy");
+    let filters = {
+        let mut f = context.filters();
+        f.push((
+            regex::escape("/tmp/nonexistent-fabro-doctor-xyz"),
+            "[MISSING_DIR]".to_string(),
+        ));
+        f
+    };
+    fabro_snapshot!(filters, cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    Fabro Doctor
+
+      Required
+      [!] Configuration (no user config file found)
+      [✗] Storage directory ([MISSING_DIR])
+      [✓] LLM providers (1 configured)
+      [!] GitHub App (not configured)
+
+      Optional
+      [!] Cloud sandbox (no sandbox configured)
+      [!] Brave Search (not configured)
+
+    Found issues in 5 categories.
+
+    Errors:
+      • Storage directory — Create the directory: mkdir -p [MISSING_DIR]
 
     Warnings:
       • Configuration — Create ~/.fabro/user.toml

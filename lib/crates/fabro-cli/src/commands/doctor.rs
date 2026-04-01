@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 #[cfg(feature = "server")]
 use std::process::Command;
 #[cfg(feature = "server")]
@@ -6,6 +6,7 @@ use std::sync::LazyLock;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use fabro_config::FabroSettingsExt;
 #[cfg(feature = "server")]
 use fabro_config::server::{ApiAuthStrategy, AuthProvider};
 use fabro_config::user::{default_user_config_path, legacy_user_config_path};
@@ -238,6 +239,53 @@ pub(crate) fn check_config(
             )],
             remediation: Some("Create ~/.fabro/user.toml".to_string()),
         },
+    }
+}
+
+pub(crate) fn check_storage_dir(path: &Path, readable: bool, writable: bool) -> CheckResult {
+    let summary = path.display().to_string();
+    let exists = path.is_dir();
+
+    let mut details = vec![
+        CheckDetail::new(format!("Exists: {}", if exists { "yes" } else { "no" })),
+        CheckDetail::new(format!("Readable: {}", if readable { "yes" } else { "no" })),
+        CheckDetail::new(format!("Writable: {}", if writable { "yes" } else { "no" })),
+    ];
+
+    if !exists {
+        return CheckResult {
+            name: "Storage directory".to_string(),
+            status: CheckStatus::Error,
+            summary,
+            details,
+            remediation: Some(format!("Create the directory: mkdir -p {}", path.display())),
+        };
+    }
+
+    if !readable || !writable {
+        let mut issues = Vec::new();
+        if !readable {
+            issues.push("not readable");
+        }
+        if !writable {
+            issues.push("not writable");
+        }
+        details.push(CheckDetail::new(format!("Issues: {}", issues.join(", "))));
+        return CheckResult {
+            name: "Storage directory".to_string(),
+            status: CheckStatus::Error,
+            summary,
+            details,
+            remediation: Some(format!("Fix permissions on {}", path.display())),
+        };
+    }
+
+    CheckResult {
+        name: "Storage directory".to_string(),
+        status: CheckStatus::Pass,
+        summary,
+        details,
+        remediation: None,
     }
 }
 
@@ -979,6 +1027,13 @@ pub(crate) async fn run_doctor(
     let legacy_config_path = legacy_user_config_path();
     let legacy_config_exists = legacy_config_path.as_ref().is_some_and(|p| p.exists());
 
+    let storage_dir = globals
+        .storage_dir
+        .clone()
+        .unwrap_or_else(|| cli_settings.storage_dir());
+    let storage_readable = std::fs::read_dir(&storage_dir).is_ok();
+    let storage_writable = tempfile::tempfile_in(&storage_dir).is_ok();
+
     let llm_statuses: Vec<(Provider, bool)> = Provider::ALL
         .iter()
         .map(|p| (*p, p.has_api_key()))
@@ -1190,6 +1245,7 @@ pub(crate) async fn run_doctor(
                         None
                     },
                 ),
+                check_storage_dir(&storage_dir, storage_readable, storage_writable),
                 check_llm_providers(&llm_statuses, llm_live_results.as_deref()),
                 check_github_app(&github_status),
             ],
@@ -1270,6 +1326,40 @@ mod tests {
                 .remediation
                 .as_deref()
                 .is_some_and(|remediation| remediation.contains(".fabro/user.toml"))
+        );
+    }
+
+    // -- check_storage_dir --
+
+    #[test]
+    fn check_storage_dir_pass() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = check_storage_dir(dir.path(), true, true);
+        assert_eq!(result.status, CheckStatus::Pass);
+        assert!(result.summary.contains(dir.path().to_str().unwrap()));
+        assert!(result.remediation.is_none());
+    }
+
+    #[test]
+    fn check_storage_dir_not_exists() {
+        let path = PathBuf::from("/tmp/nonexistent-fabro-doctor-test-xyz");
+        let result = check_storage_dir(&path, false, false);
+        assert_eq!(result.status, CheckStatus::Error);
+        assert!(result.summary.contains("nonexistent-fabro-doctor-test-xyz"));
+        assert!(result.remediation.as_deref().unwrap().contains("mkdir -p"));
+    }
+
+    #[test]
+    fn check_storage_dir_not_writable() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = check_storage_dir(dir.path(), true, false);
+        assert_eq!(result.status, CheckStatus::Error);
+        assert!(
+            result
+                .remediation
+                .as_deref()
+                .unwrap()
+                .contains("Fix permissions")
         );
     }
 
