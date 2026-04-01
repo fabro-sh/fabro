@@ -1,0 +1,51 @@
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/support.rs b/lib/crates/fabro-cli/tests/it/cmd/support.rs
+index e36b74d6..4deffb71 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/support.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/support.rs
+@@ -318,23 +318,9 @@ worktree_mode = "never"
+ "#,
+     );
+ 
+-    let mut cmd = context.command();
+-    cmd.current_dir(&workspace_dir);
+-    cmd.timeout(COMMAND_TIMEOUT);
+-    cmd.env("OPENAI_API_KEY", "test");
+-    cmd.args([
+-        "run",
+-        "--auto-approve",
+-        "--no-retro",
+-        "--sandbox",
+-        "local",
+-        "--provider",
+-        "openai",
+-        "run.toml",
+-    ]);
+     // The workflow is expected to fail (script exits 1), but the CLI may still
+     // exit 0.  We only care that conclusion.json records a non-success status.
+-    let _output = cmd.output().expect("command should execute");
++    let _output = exec_local_workflow(context, &workspace_dir, "run.toml");
+ 
+     let run = only_run(context);
+     let conclusion = read_json(&run.run_dir.join("conclusion.json"));
+@@ -348,7 +334,7 @@ worktree_mode = "never"
+     run
+ }
+ 
+-fn run_local_workflow(context: &TestContext, workspace_dir: &Path, workflow: &str) -> RunSetup {
++fn exec_local_workflow(context: &TestContext, workspace_dir: &Path, workflow: &str) -> Output {
+     let mut cmd = context.command();
+     cmd.current_dir(workspace_dir);
+     cmd.timeout(COMMAND_TIMEOUT);
+@@ -363,7 +349,11 @@ fn run_local_workflow(context: &TestContext, workspace_dir: &Path, workflow: &st
+         "openai",
+         workflow,
+     ]);
+-    let output = cmd.output().expect("command should execute");
++    cmd.output().expect("command should execute")
++}
++
++fn run_local_workflow(context: &TestContext, workspace_dir: &Path, workflow: &str) -> RunSetup {
++    let output = exec_local_workflow(context, workspace_dir, workflow);
+     if !output.status.success() {
+         panic!(
+             "command failed: fabro run --auto-approve --no-retro --sandbox local --provider openai {workflow}\nstdout:\n{}\nstderr:\n{}",
