@@ -1,0 +1,155 @@
+diff --git a/lib/crates/fabro-cli/src/args.rs b/lib/crates/fabro-cli/src/args.rs
+index 82ba57d9..0cf3ca9f 100644
+--- a/lib/crates/fabro-cli/src/args.rs
++++ b/lib/crates/fabro-cli/src/args.rs
+@@ -585,6 +585,9 @@ pub(crate) struct PrCreateArgs {
+     /// LLM model for generating PR description
+     #[arg(long)]
+     pub(crate) model: Option<String>,
++    /// Create PR even if the run status is not success/partial_success
++    #[arg(short, long)]
++    pub(crate) force: bool,
+ }
+ 
+ #[derive(Args)]
+diff --git a/lib/crates/fabro-cli/src/commands/pr/create.rs b/lib/crates/fabro-cli/src/commands/pr/create.rs
+index 873630cb..7a1fa16e 100644
+--- a/lib/crates/fabro-cli/src/commands/pr/create.rs
++++ b/lib/crates/fabro-cli/src/commands/pr/create.rs
+@@ -75,6 +75,9 @@ async fn create_from(
+ 
+     match conclusion.status {
+         StageStatus::Success | StageStatus::PartialSuccess => {}
++        status if args.force => {
++            tracing::warn!("Run status is '{status}', proceeding because --force was specified");
++        }
+         status => bail!("Run status is '{status}', expected success or partial_success"),
+     }
+ 
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/pr_create.rs b/lib/crates/fabro-cli/tests/it/cmd/pr_create.rs
+index 99a468c1..e414f19b 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/pr_create.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/pr_create.rs
+@@ -1,6 +1,6 @@
+ use fabro_test::{fabro_snapshot, test_context};
+ 
+-use super::support::{setup_completed_dry_run, setup_created_dry_run};
++use super::support::{setup_completed_dry_run, setup_created_dry_run, setup_failed_run};
+ 
+ #[test]
+ fn help() {
+@@ -22,6 +22,7 @@ fn help() {
+           --json                       Output as JSON [env: FABRO_JSON=]
+           --model <MODEL>              LLM model for generating PR description
+           --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
++      -f, --force                      Create PR even if the run status is not success/partial_success
+           --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
+           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
+@@ -63,3 +64,35 @@ fn pr_create_completed_dry_run_without_run_branch_errors() {
+     error: Run has no run_branch — was it run with git push enabled?
+     ");
+ }
++
++#[test]
++fn pr_create_failed_run_rejects_without_force() {
++    let context = test_context!();
++    let run = setup_failed_run(&context);
++    let mut cmd = context.command();
++    cmd.args(["pr", "create", &run.run_id]);
++
++    fabro_snapshot!(context.filters(), cmd, @"
++    success: false
++    exit_code: 1
++    ----- stdout -----
++    ----- stderr -----
++    error: Run status is 'fail', expected success or partial_success
++    ");
++}
++
++#[test]
++fn pr_create_failed_run_proceeds_with_force() {
++    let context = test_context!();
++    let run = setup_failed_run(&context);
++    let mut cmd = context.command();
++    cmd.args(["pr", "create", "--force", &run.run_id]);
++
++    fabro_snapshot!(context.filters(), cmd, @"
++    success: false
++    exit_code: 1
++    ----- stdout -----
++    ----- stderr -----
++    error: Run has no run_branch — was it run with git push enabled?
++    ");
++}
+diff --git a/lib/crates/fabro-cli/tests/it/cmd/support.rs b/lib/crates/fabro-cli/tests/it/cmd/support.rs
+index 0a6d5ab3..e36b74d6 100644
+--- a/lib/crates/fabro-cli/tests/it/cmd/support.rs
++++ b/lib/crates/fabro-cli/tests/it/cmd/support.rs
+@@ -288,6 +288,66 @@ worktree_mode = "never"
+     WorkspaceRunSetup { run, workspace_dir }
+ }
+ 
++pub(crate) fn setup_failed_run(context: &TestContext) -> RunSetup {
++    let workspace_dir = context.temp_dir.join("failed-run");
++    std::fs::create_dir_all(&workspace_dir)
++        .unwrap_or_else(|err| panic!("failed to create {}: {err}", workspace_dir.display()));
++
++    write_text_file(
++        &workspace_dir.join("fail.fabro"),
++        r#"digraph Fail {
++  graph [goal="Always fail", default_max_retries=0]
++  start [shape=Mdiamond]
++  exit [shape=Msquare]
++  boom [shape=parallelogram, script="exit 1", goal_gate=true]
++  start -> boom -> exit
++}
++"#,
++    );
++    write_text_file(
++        &workspace_dir.join("run.toml"),
++        r#"version = 1
++graph = "fail.fabro"
++goal = "Always fail"
++
++[sandbox]
++provider = "local"
++
++[sandbox.local]
++worktree_mode = "never"
++"#,
++    );
++
++    let mut cmd = context.command();
++    cmd.current_dir(&workspace_dir);
++    cmd.timeout(COMMAND_TIMEOUT);
++    cmd.env("OPENAI_API_KEY", "test");
++    cmd.args([
++        "run",
++        "--auto-approve",
++        "--no-retro",
++        "--sandbox",
++        "local",
++        "--provider",
++        "openai",
++        "run.toml",
++    ]);
++    // The workflow is expected to fail (script exits 1), but the CLI may still
++    // exit 0.  We only care that conclusion.json records a non-success status.
++    let _output = cmd.output().expect("command should execute");
++
++    let run = only_run(context);
++    let conclusion = read_json(&run.run_dir.join("conclusion.json"));
++    let status = conclusion["status"]
++        .as_str()
++        .expect("conclusion.json should have a status field");
++    assert_eq!(
++        status, "fail",
++        "setup_failed_run should produce a failed conclusion"
++    );
++    run
++}
++
+ fn run_local_workflow(context: &TestContext, workspace_dir: &Path, workflow: &str) -> RunSetup {
+     let mut cmd = context.command();
+     cmd.current_dir(workspace_dir);
