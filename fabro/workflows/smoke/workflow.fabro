@@ -5,12 +5,12 @@ digraph Smoke {
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare, label="Exit"]
 
-    toolchain          [label="Toolchain", shape=parallelogram, script="rustc --version && cargo --version && bun --version 2>&1", max_retries=0]
-    compile_rust       [label="Compile Rust", shape=parallelogram, script="cargo check -q --workspace 2>&1", max_retries=0]
-    compile_typescript [label="Compile TypeScript", shape=parallelogram, script="cd apps/fabro-web && bun install && bun run typecheck 2>&1", max_retries=0]
-    lint_rust          [label="Lint Rust", shape=parallelogram, script="cargo fmt --check --all 2>&1 && cargo clippy -q --workspace -- -D warnings 2>&1", max_retries=0]
-    test_rust          [label="Test Rust", shape=parallelogram, script="cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1", max_retries=0]
-    test_typescript    [label="Test TypeScript", shape=parallelogram, script="cd apps/fabro-web && bun test 2>&1", max_retries=0]
+    toolchain          [label="Toolchain", shape=parallelogram, script="rustc --version && cargo --version && bun --version 2>&1", goal_gate=true]
+    compile_rust       [label="Compile Rust", shape=parallelogram, script="cargo check -q --workspace 2>&1", goal_gate=true]
+    compile_typescript [label="Compile TypeScript", shape=parallelogram, script="cd apps/fabro-web && bun install && bun run typecheck 2>&1", goal_gate=true]
+    lint_rust          [label="Lint Rust", shape=parallelogram, script="cargo fmt --check --all 2>&1 && cargo clippy -q --workspace -- -D warnings 2>&1", goal_gate=true]
+    test_rust          [label="Test Rust", shape=parallelogram, script="cargo nextest run --cargo-quiet --workspace --status-level fail 2>&1", goal_gate=true]
+    test_typescript    [label="Test TypeScript", shape=parallelogram, script="cd apps/fabro-web && bun test 2>&1", goal_gate=true]
 
     start -> toolchain
     toolchain -> compile_rust
