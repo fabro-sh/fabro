@@ -1,0 +1,30 @@
+diff --git a/lib/crates/fabro-cli/src/commands/doctor.rs b/lib/crates/fabro-cli/src/commands/doctor.rs
+index a627bb94..e1f9c321 100644
+--- a/lib/crates/fabro-cli/src/commands/doctor.rs
++++ b/lib/crates/fabro-cli/src/commands/doctor.rs
+@@ -1414,7 +1414,12 @@ mod tests {
+             result.remediation.as_deref(),
+             Some("Fix permissions on /home/user/.fabro")
+         );
+-        assert!(result.details.iter().any(|detail| detail.text == "Writable: no"));
++        assert!(
++            result
++                .details
++                .iter()
++                .any(|detail| detail.text == "Writable: no")
++        );
+     }
+ 
+     // -- check_llm_providers --
+diff --git a/lib/crates/fabro-server/tests/it/api.rs b/lib/crates/fabro-server/tests/it/api.rs
+index c05cd5a6..d6dedfcd 100644
+--- a/lib/crates/fabro-server/tests/it/api.rs
++++ b/lib/crates/fabro-server/tests/it/api.rs
+@@ -14,6 +14,7 @@ mod mtls_e2e {
+     use super::api;
+     use std::path::Path;
+     use std::process::{Command, Stdio};
++    use std::sync::Arc;
+ 
+     use fabro_server::jwt_auth::{AuthMode, AuthStrategy};
+     use fabro_server::server::{build_router, create_app_state};
