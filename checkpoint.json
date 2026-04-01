@@ -1,0 +1,47 @@
+{
+  "timestamp": "2026-04-01T14:36:11.055608Z",
+  "current_node": "toolchain",
+  "completed_nodes": [
+    "start",
+    "toolchain"
+  ],
+  "node_retries": {},
+  "context_values": {
+    "failure_class": "",
+    "internal.fidelity": "compact",
+    "internal.node_visit_count": 1,
+    "failure_signature": "",
+    "internal.retry_count.toolchain": 0,
+    "current.preamble": "Goal: Verify the sandbox can lint and test the project\n",
+    "current_node": "toolchain",
+    "graph.goal": "Verify the sandbox can lint and test the project",
+    "command.stderr": "",
+    "graph.rankdir": "LR",
+    "outcome": "success",
+    "thread.start.current_node": "toolchain",
+    "internal.thread_id": "start",
+    "command.output": "rustc 1.94.0 (4a4ef493e 2026-03-02)\ncargo 1.94.0 (85eff7c80 2026-01-15)\n1.3.10\n",
+    "internal.retry_count.start": 0,
+    "internal.run_id": "01KN4QJ0KGMVZ8EGKTZN8E7C07"
+  },
+  "node_outcomes": {
+    "toolchain": {
+      "status": "success",
+      "context_updates": {
+        "command.output": "rustc 1.94.0 (4a4ef493e 2026-03-02)\ncargo 1.94.0 (85eff7c80 2026-01-15)\n1.3.10\n",
+        "command.stderr": ""
+      },
+      "notes": "Script completed: rustc --version && cargo --version && bun --version 2>&1",
+      "usage": null
+    },
+    "start": {
+      "status": "success",
+      "usage": null
+    }
+  },
+  "next_node_id": "compile_rust",
+  "node_visits": {
+    "start": 1,
+    "toolchain": 1
+  }
+}
