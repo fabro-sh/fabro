@@ -20,11 +20,10 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { ciConfig, statusColors, deriveCiStatus, mapRunListItem } from "../data/runs";
 import type { CiStatus, CheckRun, CheckStatus, RunItem, RunWithStatus, ColumnStatus } from "../data/runs";
-import { apiJson } from "../api-client";
+import { apiJson } from "../api";
 import type { PaginatedRunList } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/runs";
 
-export function meta({}: Route.MetaArgs) {
+export function meta({}: any) {
   return [{ title: "Runs — Fabro" }];
 }
 
@@ -42,7 +41,7 @@ const columnConfig: {
   { id: "merge", name: "Merge", accent: "bg-teal-300", iconColor: "text-teal-300", iconType: "pr", actions: ["Merge"] },
 ];
 
-export async function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request }: any) {
   const response = await apiJson<PaginatedRunList>("/runs", { request });
   const apiRuns = response.data;
 
@@ -497,9 +496,13 @@ function SortableRunRow({ run }: { run: RunWithStatus }) {
   );
 }
 
-export default function Runs({ loaderData }: Route.ComponentProps) {
+export default function Runs({ loaderData }: any) {
   const initialColumns = loaderData.columns;
-  const allRepos = [...new Set(initialColumns.flatMap((col: Column) => col.items.map((item: RunItem) => item.repo)))].sort();
+  const allRepos = [
+    ...new Set(
+      initialColumns.flatMap((col: Column) => col.items.map((item: RunItem) => String(item.repo))),
+    ),
+  ].sort();
   const [query, setQuery] = useState("");
   const [repoFilter, setRepoFilter] = useState("all");
   const [view, setView] = useState<ViewMode>("columns");
@@ -559,7 +562,7 @@ export default function Runs({ loaderData }: Route.ComponentProps) {
               className="appearance-none rounded-md border border-line bg-panel/80 py-2 pl-3 pr-8 text-sm text-fg-2 outline-none transition-colors focus:border-focus focus:ring-0"
             >
               <option value="all">All repos</option>
-              {allRepos.map((repo) => (
+              {allRepos.map((repo: string) => (
                 <option key={repo} value={repo}>{repo}</option>
               ))}
             </select>

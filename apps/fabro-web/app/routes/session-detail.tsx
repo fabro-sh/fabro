@@ -10,17 +10,16 @@ import {
 import { ToolRow, ToolBlock } from "../components/tool-use";
 import type { ToolUse } from "../components/tool-use";
 import { timeAgo, groupSessionsByDate } from "../lib/time";
-import { apiJson } from "../api-client";
+import { apiJson } from "../api";
 import type { SessionDetail as ApiSessionDetail, PaginatedSessionList } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/session-detail";
 
 export const handle = { hideHeader: true, wide: true };
 
-export function meta({}: Route.MetaArgs) {
+export function meta({}: any) {
   return [{ title: "Session — Fabro" }];
 }
 
-export async function loader({ request, params }: Route.LoaderArgs) {
+export async function loader({ request, params }: any) {
   const [apiSession, { data: apiSessions }] = await Promise.all([
     apiJson<ApiSessionDetail>(`/sessions/${params.sessionId}`, { request }),
     apiJson<PaginatedSessionList>("/sessions", { request }),
@@ -234,7 +233,7 @@ const sessions: Record<string, Session> = {
           { id: "toolu_s3_02", toolName: "read_file", input: `{ "path": "package.json" }`, result: `"react-router-dom": "^6.22.0"`, isError: false, durationMs: 35 },
         ],
       },
-      { kind: "assistant", content: "You're on React Router 6.22. The migration to v7 involves:\n\n1. Replace `react-router-dom` with `react-router` (single package)\n2. Update `createBrowserRouter` import path\n3. Migrate data loaders to the new `Route.LoaderArgs` type\n4. Update any `useLoaderData` calls to be type-safe\n\nLet me make these changes." },
+      { kind: "assistant", content: "You're on React Router 6.22. The migration to v7 involves:\n\n1. Replace `react-router-dom` with `react-router` (single package)\n2. Update `createBrowserRouter` import path\n3. Migrate data loaders to the new `any` type\n4. Update any `useLoaderData` calls to be type-safe\n\nLet me make these changes." },
     ],
   },
 };
@@ -392,7 +391,7 @@ function SessionSidebar({ activeId, groups }: { activeId: string; groups: Sessio
   );
 }
 
-export default function SessionDetail({ loaderData }: Route.ComponentProps) {
+export default function SessionDetail({ loaderData }: any) {
   const { session, sessionGroups: loaderGroups } = loaderData;
 
   return (

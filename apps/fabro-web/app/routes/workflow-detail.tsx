@@ -1,8 +1,7 @@
 import { ChevronRightIcon } from "@heroicons/react/20/solid";
 import { Link, Outlet, useLocation, useParams } from "react-router";
-import { apiJson } from "../api-client";
+import { apiJson } from "../api";
 import type { WorkflowDetail as ApiWorkflowDetail, RunSettings } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/workflow-detail";
 
 export interface WorkflowEntry {
   name: string;
@@ -209,7 +208,7 @@ const tabs = [
 
 export const handle = { hideHeader: true };
 
-export async function loader({ request, params }: Route.LoaderArgs) {
+export async function loader({ request, params }: any) {
   const apiWorkflow = await apiJson<ApiWorkflowDetail>(`/workflows/${params.name}`, { request });
   const workflow: WorkflowEntry = {
     name: apiWorkflow.name,
@@ -222,12 +221,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   return { workflow };
 }
 
-export function meta({ data }: Route.MetaArgs) {
+export function meta({ data }: any) {
   const title = data?.workflow?.name ?? "Workflow";
   return [{ title: `${title} — Fabro` }];
 }
 
-export default function WorkflowDetail({ loaderData }: Route.ComponentProps) {
+export default function WorkflowDetail({ loaderData }: any) {
   const { name } = useParams();
   const { pathname } = useLocation();
   const workflow = loaderData.workflow;

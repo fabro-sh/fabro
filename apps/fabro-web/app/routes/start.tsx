@@ -20,20 +20,18 @@ import {
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import { Link } from "react-router";
+import { apiJson, getAuthMe } from "../api";
 import { timeAgo, groupSessionsByDate } from "../lib/time";
-import { apiJson } from "../api-client";
-import { getAppConfig } from "../lib/config.server";
 import type { PaginatedSessionList } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/start";
 
 export const handle = { hideHeader: true, wide: true };
 
-export function meta({}: Route.MetaArgs) {
+export function meta({}: any) {
   return [{ title: "Start — Fabro" }];
 }
 
-export async function loader({ request }: Route.LoaderArgs) {
-  const { features } = getAppConfig();
+export async function loader({ request }: any) {
+  const { features } = await getAuthMe();
   const { data: apiSessions } = await apiJson<PaginatedSessionList>("/sessions", { request });
   const sessionGroups = groupSessionsByDate(
     apiSessions.map((s) => ({ id: s.id, title: s.title, created_at: s.created_at }))
@@ -98,7 +96,7 @@ function SessionSidebar({ groups }: { groups: { label: string; sessions: { id: s
   );
 }
 
-export default function Start({ loaderData }: Route.ComponentProps) {
+export default function Start({ loaderData }: any) {
   const { sessionGroups, features } = loaderData;
   const [prompt, setPrompt] = useState("");
   const [project, setProject] = useState(projects[0]);

@@ -5,10 +5,9 @@ import { CheckCircleIcon, ArrowPathIcon, PauseCircleIcon, XCircleIcon } from "@h
 import { DocumentTextIcon, MapIcon } from "@heroicons/react/24/outline";
 import { useTheme } from "../lib/theme";
 import { getGraphTheme } from "../lib/graph-theme";
-import { apiJson } from "../api-client";
+import { apiJson } from "../api";
 import { formatDurationSecs } from "../lib/format";
 import type { PaginatedRunStageList, PaginatedRunList, WorkflowDetail } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/run-overview";
 
 export const handle = { wide: true };
 
@@ -21,7 +20,7 @@ interface Stage {
   duration: string;
 }
 
-export async function loader({ request, params }: Route.LoaderArgs) {
+export async function loader({ request, params }: any) {
   const [{ data: apiStages }, response] = await Promise.all([
     apiJson<PaginatedRunStageList>(`/runs/${params.id}/stages`, { request }),
     apiJson<PaginatedRunList>("/runs", { request }),
@@ -286,7 +285,7 @@ function DotDiagram({ dot }: { dot: string }) {
   );
 }
 
-export default function RunOverview({ loaderData }: Route.ComponentProps) {
+export default function RunOverview({ loaderData }: any) {
   const { id } = useParams();
   const { stages, graphDot } = loaderData;
 

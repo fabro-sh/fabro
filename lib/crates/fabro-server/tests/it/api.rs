@@ -976,8 +976,6 @@ mod serve_dry_run {
 
 mod route_prefixes {
     use super::super::helpers::test_db;
-    use super::api;
-
     use axum::body::Body;
     use axum::http::{Method, Request, StatusCode};
     use fabro_server::server::{build_router, create_app_state};
@@ -996,14 +994,6 @@ mod route_prefixes {
         );
 
         let cases = [
-            (Method::GET, "/runs"),
-            (Method::GET, "/workflows"),
-            (Method::GET, "/models"),
-            (Method::GET, "/sessions"),
-            (Method::GET, "/usage"),
-            (Method::GET, "/settings"),
-            (Method::GET, "/openapi.json"),
-            (Method::GET, "/user"),
             (Method::POST, "/completions"),
         ];
 
@@ -1032,10 +1022,11 @@ mod route_prefixes {
             .unwrap();
         let root_response = app.clone().oneshot(root_req).await.unwrap();
         assert_eq!(root_response.status(), StatusCode::OK);
-        let root_body = body_json(root_response.into_body()).await;
-        assert_eq!(root_body["urls"]["openapi_url"], api("/openapi.json"));
-        assert_eq!(root_body["urls"]["current_user_url"], api("/user"));
-        assert_eq!(root_body["urls"]["health_url"], "/health");
+        let root_body = axum::body::to_bytes(root_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let root_html = String::from_utf8(root_body.to_vec()).unwrap();
+        assert!(root_html.contains("<div id=\"root\"></div>"));
 
         let health_req = Request::builder()
             .method("GET")

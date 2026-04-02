@@ -9,6 +9,7 @@ use serde::Deserialize;
 use tracing::warn;
 
 use crate::error::ApiError;
+use crate::web_auth::SessionCookie;
 use fabro_config::server::ApiSettings;
 
 /// JWT claims for service-to-service authentication.
@@ -31,6 +32,7 @@ pub enum AuthStrategy {
         validation: Arc<Validation>,
         allowed_usernames: Vec<String>,
     },
+    Cookie,
     Mtls,
 }
 
@@ -76,7 +78,12 @@ pub fn resolve_auth_mode(api_settings: &ApiSettings, allowed_usernames: &[String
         warn!("No authentication strategies configured; all requests will be rejected");
     }
 
-    let strategies = api_settings
+    let mut strategies = Vec::new();
+    if std::env::var("SESSION_SECRET").is_ok() {
+        strategies.push(AuthStrategy::Cookie);
+    }
+
+    strategies.extend(api_settings
         .authentication_strategies
         .iter()
         .map(|s| match s {
@@ -103,8 +110,7 @@ pub fn resolve_auth_mode(api_settings: &ApiSettings, allowed_usernames: &[String
                 );
                 AuthStrategy::Mtls
             }
-        })
-        .collect();
+        }));
 
     AuthMode::Strategies(strategies)
 }
@@ -209,6 +215,14 @@ fn try_mtls(parts: &Parts) -> Result<(), ApiError> {
     Ok(())
 }
 
+fn try_cookie(parts: &Parts) -> Result<(), ApiError> {
+    parts
+        .extensions
+        .get::<SessionCookie>()
+        .map(|_| ())
+        .ok_or_else(ApiError::unauthorized)
+}
+
 /// Axum extractor that enforces authentication on a route.
 ///
 /// Tries each configured strategy in order. The first successful match wins.
@@ -239,6 +253,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedService {
         for strategy in strategies {
             let result = match strategy {
                 AuthStrategy::Mtls => try_mtls(parts),
+                AuthStrategy::Cookie => try_cookie(parts),
                 AuthStrategy::Jwt {
                     key,
                     validation,
@@ -290,6 +305,14 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedUser {
 
         for strategy in strategies {
             match strategy {
+                AuthStrategy::Cookie => {
+                    if let Some(session) = parts.extensions.get::<SessionCookie>() {
+                        return Ok(Self {
+                            login: session.login.clone(),
+                        });
+                    }
+                    last_err = ApiError::unauthorized();
+                }
                 AuthStrategy::Jwt {
                     key,
                     validation,

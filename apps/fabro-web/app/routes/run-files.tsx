@@ -5,13 +5,12 @@ import {
   type DiffLineAnnotation,
 } from "@pierre/diffs/react";
 import { useTheme } from "../lib/theme";
-import { apiJson } from "../api-client";
+import { apiJson } from "../api";
 import type { PaginatedRunFileList } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/run-files";
 
 export const handle = { wide: true };
 
-export async function loader({ request, params }: Route.LoaderArgs) {
+export async function loader({ request, params }: any) {
   const data = await apiJson<PaginatedRunFileList>(`/runs/${params.id}/files`, { request });
   return data;
 }
@@ -483,7 +482,7 @@ function buildAnnotationsForFile(
   return annotations;
 }
 
-export default function RunFiles({ loaderData }: Route.ComponentProps) {
+export default function RunFiles({ loaderData }: any) {
   const runFiles = loaderData;
   const files = runFiles.data.length > 0
     ? runFiles.data.map((f) => ({

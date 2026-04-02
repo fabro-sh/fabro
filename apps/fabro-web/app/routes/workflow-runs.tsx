@@ -3,11 +3,10 @@ import { ChevronDownIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outlin
 import { Link, useParams } from "react-router";
 import { ciConfig, columnNames, deriveCiStatus, mapRunListItem, statusColors } from "../data/runs";
 import type { ColumnStatus, RunWithStatus } from "../data/runs";
-import { apiJson } from "../api-client";
+import { apiJson } from "../api";
 import type { PaginatedRunList } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/workflow-runs";
 
-export async function loader({ request, params }: Route.LoaderArgs) {
+export async function loader({ request, params }: any) {
   const { data: apiRuns } = await apiJson<PaginatedRunList>(`/workflows/${params.name}/runs`, { request });
   const runs: RunWithStatus[] = apiRuns.map((r) => ({
     ...mapRunListItem(r),
@@ -68,7 +67,7 @@ function RunRow({ run }: { run: RunWithStatus }) {
   );
 }
 
-export default function WorkflowRuns({ loaderData }: Route.ComponentProps) {
+export default function WorkflowRuns({ loaderData }: any) {
   const { runs } = loaderData;
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<ColumnStatus | "all">("all");

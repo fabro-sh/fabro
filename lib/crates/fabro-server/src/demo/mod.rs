@@ -3461,7 +3461,7 @@ mod settings {
             storage_dir: Some("/home/fabro/.fabro".into()),
             max_concurrent_runs: Some(10),
             web: Some(WebSettings {
-                url: "https://arc.example.com".into(),
+                url: "https://fabro.example.com".into(),
                 auth: AuthSettings {
                     provider: AuthProvider::Github,
                     allowed_usernames: vec!["brynary".into(), "alice".into()],

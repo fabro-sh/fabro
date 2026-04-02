@@ -192,7 +192,7 @@ fn generate_mtls_certs(dir: &Path) -> Result<()> {
 fn format_config_toml(username: &str) -> String {
     format!(
         r#"[web]
-url = "http://localhost:5173"
+url = "http://localhost:3000"
 
 [web.auth]
 provider = "github"
@@ -748,7 +748,6 @@ pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<(
         eprintln!("  To start Arc, run these commands:");
         eprintln!();
         eprintln!("    fabro server start");
-        eprintln!("    cd apps/fabro-web && npx react-router dev");
         eprintln!();
     }
 

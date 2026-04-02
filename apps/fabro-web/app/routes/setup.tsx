@@ -1,40 +1,27 @@
-import { redirect } from "react-router";
+import { useMemo } from "react";
 import { AuthLayout } from "../components/auth-layout";
-import { isGitHubAppConfigured } from "../lib/github.server";
-import type { Route } from "./+types/setup";
-
-export function loader({ request }: Route.LoaderArgs) {
-  if (isGitHubAppConfigured()) {
-    return redirect("/");
-  }
-
-  const url = new URL(request.url);
-  const baseUrl = `${url.protocol}//${url.host}`;
-  const suffix = Math.random().toString(16).slice(2, 8);
-
-  const manifest = {
-    name: `Fabro-${suffix}`,
-    url: baseUrl,
-    redirect_url: `${baseUrl}/setup/callback`,
-    callback_urls: [`${baseUrl}/auth/callback`],
-    setup_url: `${baseUrl}/setup/callback`,
-    public: false,
-    default_permissions: {
-      contents: "write",
-      metadata: "read",
-      pull_requests: "write",
-      checks: "write",
-      issues: "write",
-      emails: "read",
-    },
-    default_events: [] as string[],
-  };
-
-  return { manifest: JSON.stringify(manifest), baseUrl };
-}
-
-export default function Setup({ loaderData }: Route.ComponentProps) {
-  const { manifest } = loaderData;
+export default function Setup() {
+  const manifest = useMemo(() => {
+    const baseUrl = window.location.origin;
+    const suffix = Math.random().toString(16).slice(2, 8);
+    return JSON.stringify({
+      name: `Fabro-${suffix}`,
+      url: baseUrl,
+      redirect_url: `${baseUrl}/setup/complete`,
+      callback_urls: [`${baseUrl}/auth/callback/github`],
+      setup_url: `${baseUrl}/setup/complete`,
+      public: false,
+      default_permissions: {
+        contents: "write",
+        metadata: "read",
+        pull_requests: "write",
+        checks: "write",
+        issues: "write",
+        emails: "read",
+      },
+      default_events: [],
+    });
+  }, []);
 
   return (
     <AuthLayout>

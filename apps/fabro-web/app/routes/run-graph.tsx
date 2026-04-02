@@ -5,10 +5,9 @@ import { CheckCircleIcon, ArrowPathIcon, PauseCircleIcon, XCircleIcon } from "@h
 import { DocumentTextIcon, MapIcon } from "@heroicons/react/24/outline";
 import { useTheme } from "../lib/theme";
 import { getGraphTheme } from "../lib/graph-theme";
-import { apiFetch, apiJson } from "../api-client";
+import { apiFetch, apiJson } from "../api";
 import { formatDurationSecs } from "../lib/format";
 import type { PaginatedRunStageList } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/run-graph";
 
 export const handle = { wide: true };
 
@@ -22,7 +21,7 @@ interface Stage {
   duration: string;
 }
 
-export async function loader({ request, params }: Route.LoaderArgs) {
+export async function loader({ request, params }: any) {
   const [{ data: apiStages }, graphRes] = await Promise.all([
     apiJson<PaginatedRunStageList>(`/runs/${params.id}/stages`, { request }),
     apiFetch(`/runs/${params.id}/graph`, { request }),
@@ -190,7 +189,7 @@ function annotateRunningNodes(svg: SVGSVGElement, gt: ReturnType<typeof getGraph
 const ZOOM_STEPS = [25, 50, 75, 100, 150, 200];
 const DEFAULT_ZOOM_INDEX = 2;
 
-export default function RunGraph({ loaderData }: Route.ComponentProps) {
+export default function RunGraph({ loaderData }: any) {
   const { id } = useParams();
   const { stages, graphSvg } = loaderData;
   const containerRef = useRef<HTMLDivElement>(null);

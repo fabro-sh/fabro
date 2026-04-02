@@ -6,11 +6,13 @@ use std::time::Duration;
 #[cfg(test)]
 use axum::body::to_bytes;
 use axum::extract::{self as axum_extract, Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode};
+use axum::middleware::{self, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use axum_extra::extract::cookie::Key;
 use fabro_config::FabroSettings;
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate, generate_object};
@@ -39,9 +41,11 @@ use tracing::{error, info};
 
 use crate::demo;
 use crate::error::ApiError;
-use crate::jwt_auth::{AuthMode, AuthenticatedService, AuthenticatedUser};
+use crate::jwt_auth::{AuthMode, AuthenticatedService};
+use crate::static_files;
 use crate::sessions as sessions_mod;
 use crate::sessions::{SessionStore, new_session_store};
+use crate::web_auth;
 use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
 use fabro_retro::RetroExt;
 use fabro_workflow::context::Context;
@@ -129,7 +133,8 @@ pub struct AppState {
     scheduler_notify: Notify,
     pub sessions: SessionStore,
     llm_client: OnceCell<LlmClient>,
-    settings: Arc<RwLock<FabroSettings>>,
+    pub(crate) settings: Arc<RwLock<FabroSettings>>,
+    pub(crate) session_key: Option<Key>,
     registry_factory_override: Option<Box<RegistryFactoryOverride>>,
 }
 
@@ -139,29 +144,21 @@ impl AppState {
     }
 }
 
-/// Build the axum Router with all run endpoints.
-///
-/// Both a demo router and a real router are constructed. Incoming requests
-/// with the `X-Fabro-Demo: 1` header are dispatched to the demo router;
-/// all other requests go to the real router.
+/// Build the axum Router with all run endpoints and embedded static assets.
 pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
-    let root_routes = Router::new()
-        .route("/", get(root))
-        .route("/health", get(health));
-
+    let middleware_state = Arc::clone(&state);
     let api_common = Router::new()
         .route("/openapi.json", get(openapi_spec))
-        .route("/user", get(get_user));
+        .merge(web_auth::api_routes());
 
     let demo_router = Router::new()
-        .merge(root_routes.clone())
         .nest("/api/v1", api_common.clone().merge(demo_routes()))
         .layer(axum::Extension(AuthMode::Disabled))
         .with_state(state.clone());
 
     let real_router = Router::new()
-        .merge(root_routes)
         .nest("/api/v1", api_common.merge(real_routes()))
+        .nest("/auth", web_auth::routes())
         .layer(axum::Extension(auth_mode))
         .with_state(state);
 
@@ -177,7 +174,25 @@ pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
         }
     });
 
-    Router::new().fallback_service(dispatch)
+    Router::new()
+        .route("/health", get(health))
+        .layer(middleware::from_fn_with_state(middleware_state, cookie_and_demo_middleware))
+        .fallback_service(service_fn(move |req: axum_extract::Request| {
+            let dispatch = dispatch.clone();
+            async move {
+                let path = req.uri().path().to_string();
+                if path.starts_with("/api/v1/") || path.starts_with("/auth/") || path == "/health" {
+                    dispatch.oneshot(req).await
+                } else if matches!(req.method(), &axum::http::Method::GET | &axum::http::Method::HEAD)
+                {
+                    Ok::<_, std::convert::Infallible>(static_files::serve(&path).await)
+                } else {
+                    Ok::<_, std::convert::Infallible>(
+                        StatusCode::NOT_FOUND.into_response(),
+                    )
+                }
+            }
+        }))
 }
 
 fn demo_routes() -> Router<Arc<AppState>> {
@@ -324,17 +339,6 @@ async fn not_implemented() -> Response {
     ApiError::new(StatusCode::NOT_IMPLEMENTED, "Not implemented.").into_response()
 }
 
-async fn root() -> Response {
-    Json(serde_json::json!({
-        "urls": {
-            "openapi_url": "/api/v1/openapi.json",
-            "current_user_url": "/api/v1/user",
-            "health_url": "/health"
-        }
-    }))
-    .into_response()
-}
-
 async fn health() -> Response {
     Json(serde_json::json!({"status": "ok"})).into_response()
 }
@@ -346,8 +350,25 @@ async fn openapi_spec() -> Response {
     Json(value).into_response()
 }
 
-async fn get_user(user: AuthenticatedUser) -> Response {
-    Json(serde_json::json!({"login": user.login})).into_response()
+async fn cookie_and_demo_middleware(
+    State(state): State<Arc<AppState>>,
+    mut req: axum_extract::Request,
+    next: Next,
+) -> Response {
+    let cookies = web_auth::parse_cookie_header(req.headers());
+    if cookies
+        .get("fabro-demo")
+        .is_some_and(|cookie| cookie.value() == "1")
+    {
+        req.headers_mut()
+            .insert("x-fabro-demo", HeaderValue::from_static("1"));
+    }
+    if let Some(key) = &state.session_key {
+        if let Some(session) = web_auth::read_private_session(req.headers(), key) {
+            req.extensions_mut().insert(session);
+        }
+    }
+    next.run(req).await
 }
 
 async fn get_aggregate_usage(
@@ -442,6 +463,7 @@ fn build_app_state(
         scheduler_notify: Notify::new(),
         sessions: new_session_store(),
         llm_client: OnceCell::new(),
+        session_key: web_auth::session_key_from_env(),
         settings,
         registry_factory_override,
     })
@@ -1602,6 +1624,9 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::Request;
+    use fabro_config::server::{
+        AuthProvider, AuthSettings, GitAuthorSettings, GitProvider, GitSettings, WebSettings,
+    };
     use fabro_types::fixtures;
     use fabro_workflow::records::{RunRecord, RunRecordExt};
     use tower::ServiceExt;
@@ -1689,6 +1714,72 @@ mod tests {
         let body = body_json(response.into_body()).await;
         assert_eq!(body["model_id"], "claude-opus-4-6");
         assert!(body["status"] == "ok" || body["status"] == "error");
+    }
+
+    #[tokio::test]
+    async fn auth_login_github_redirects_to_github() {
+        let mut settings = FabroSettings::default();
+        settings.web = Some(WebSettings {
+            url: "http://localhost:3000".to_string(),
+            auth: AuthSettings {
+                provider: AuthProvider::Github,
+                allowed_usernames: vec!["brynary".to_string()],
+            },
+        });
+        settings.git = Some(GitSettings {
+            provider: GitProvider::Github,
+            app_id: Some("123".to_string()),
+            client_id: Some("Iv1.testclient".to_string()),
+            slug: Some("fabro".to_string()),
+            author: GitAuthorSettings::default(),
+            webhooks: None,
+        });
+        let app = build_router(
+            create_app_state_with_options(test_db().await, settings, 5),
+            AuthMode::Disabled,
+        );
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/auth/login/github")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        let location = response
+            .headers()
+            .get(axum::http::header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .unwrap();
+        assert!(location.starts_with("https://github.com/login/oauth/authorize?"));
+    }
+
+    #[tokio::test]
+    async fn static_favicon_is_served() {
+        let app = test_app_with(test_db().await);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/favicon.svg")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(axum::http::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some("image/svg+xml")
+        );
     }
 
     #[tokio::test]

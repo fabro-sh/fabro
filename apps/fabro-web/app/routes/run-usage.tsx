@@ -1,9 +1,8 @@
-import { apiJson } from "../api-client";
+import { apiJson } from "../api";
 import { formatDurationSecs } from "../lib/format";
 import type { RunUsage } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/run-usage";
 
-export async function loader({ request, params }: Route.LoaderArgs) {
+export async function loader({ request, params }: any) {
   const usage = await apiJson<RunUsage>(`/runs/${params.id}/usage`, { request });
   const stages = usage.stages.map((s) => ({
     stage: s.stage.name,
@@ -33,7 +32,7 @@ function formatTokens(n: number) {
   return `${(n / 1000).toFixed(1)}k`;
 }
 
-export default function RunUsage({ loaderData }: Route.ComponentProps) {
+export default function RunUsage({ loaderData }: any) {
   const { stages, totalRuntime, totalCost, totalInput, totalOutput, modelBreakdown } = loaderData;
   return (
     <div className="space-y-6">

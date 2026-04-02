@@ -1,11 +1,10 @@
 import { Link, Outlet, useNavigate } from "react-router";
 import { PlusIcon } from "@heroicons/react/24/outline";
-import { apiJson } from "../api-client";
+import { apiJson } from "../api";
 import { timeAgo } from "../lib/time";
 import type { PaginatedSavedQueryList, PaginatedHistoryEntryList } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/insights";
 
-export function meta({}: Route.MetaArgs) {
+export function meta({}: any) {
   return [{ title: "Insights — Fabro" }];
 }
 
@@ -29,7 +28,7 @@ export interface HistoryEntry {
   rowsReturned: number;
 }
 
-export async function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request }: any) {
   const [{ data: apiQueries }, { data: apiHistory }] = await Promise.all([
     apiJson<PaginatedSavedQueryList>("/insights/queries", { request }),
     apiJson<PaginatedHistoryEntryList>("/insights/history", { request }),
@@ -49,7 +48,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   return { savedQueries, historyEntries };
 }
 
-export default function InsightsLayout({ loaderData }: Route.ComponentProps) {
+export default function InsightsLayout({ loaderData }: any) {
   const { savedQueries, historyEntries } = loaderData;
   const navigate = useNavigate();
 

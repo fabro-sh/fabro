@@ -13,12 +13,11 @@ import {
   WrenchIcon,
 } from "@heroicons/react/24/outline";
 import { Link } from "react-router";
-import { apiJson } from "../api-client";
+import { apiJson } from "../api";
 import { timeAgo, timeUntil } from "../lib/time";
 import type { PaginatedWorkflowList } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/workflows";
 
-export function meta({}: Route.MetaArgs) {
+export function meta({}: any) {
   return [{ title: "Workflows — Fabro" }];
 }
 
@@ -105,7 +104,7 @@ interface WorkflowData {
   nextRun?: string;
 }
 
-export async function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request }: any) {
   const { data: apiWorkflows } = await apiJson<PaginatedWorkflowList>("/workflows", { request });
   const workflows: WorkflowData[] = apiWorkflows.map((w) => ({
     name: w.name,
@@ -202,7 +201,7 @@ function WorkflowCard({ workflow }: { workflow: Workflow }) {
 
 type TriggerFilter = "all" | "scheduled" | "manual";
 
-export default function Workflows({ loaderData }: Route.ComponentProps) {
+export default function Workflows({ loaderData }: any) {
   const workflows = enrichWorkflows(loaderData.workflows);
   const [query, setQuery] = useState("");
   const [triggerFilter, setTriggerFilter] = useState<TriggerFilter>("all");
