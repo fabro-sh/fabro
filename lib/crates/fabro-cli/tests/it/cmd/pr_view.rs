@@ -1,6 +1,27 @@
+use std::sync::Arc;
+
+use fabro_store::Store;
 use fabro_test::{fabro_snapshot, test_context};
+use fabro_types::{PullRequestRecord, RunId};
+use object_store::local::LocalFileSystem;
 
 use super::support::setup_completed_dry_run;
+
+fn with_runtime<T>(f: impl FnOnce(&tokio::runtime::Runtime) -> T) -> T {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    f(&runtime)
+}
+
+fn build_store(storage_dir: &std::path::Path) -> Arc<fabro_store::SlateStore> {
+    let store_path = storage_dir.join("store");
+    std::fs::create_dir_all(&store_path).unwrap();
+    let object_store = Arc::new(LocalFileSystem::new_with_prefix(&store_path).unwrap());
+    Arc::new(fabro_store::SlateStore::new(
+        object_store,
+        "",
+        std::time::Duration::from_millis(5),
+    ))
+}
 
 #[test]
 fn help() {
@@ -44,5 +65,47 @@ fn pr_view_missing_pull_request_json_errors() {
     ----- stderr -----
     error: No pull_request.json found in run directory. Create one first with: fabro pr create [ULID]
       > No such file or directory (os error 2)
+    ");
+}
+
+#[test]
+fn pr_view_reads_pull_request_from_store_without_pull_request_json() {
+    let context = test_context!();
+    let run = setup_completed_dry_run(&context);
+    let run_id: RunId = run.run_id.parse().unwrap();
+
+    with_runtime(|runtime| {
+        runtime.block_on(async {
+            let store = build_store(&context.storage_dir);
+            let run_store = store.open_run(&run_id).await.unwrap().unwrap();
+            run_store
+                .put_pull_request(&PullRequestRecord {
+                    html_url: "https://github.com/fabro-sh/fabro/pull/123".to_string(),
+                    number: 123,
+                    owner: "fabro-sh".to_string(),
+                    repo: "fabro".to_string(),
+                    base_branch: "main".to_string(),
+                    head_branch: "fabro/run/demo".to_string(),
+                    title: "Map the constellations".to_string(),
+                })
+                .await
+                .unwrap();
+        });
+    });
+
+    let pr_path = run.run_dir.join("pull_request.json");
+    if pr_path.exists() {
+        std::fs::remove_file(pr_path).unwrap();
+    }
+
+    let mut cmd = context.command();
+    cmd.args(["pr", "view", &run.run_id]);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: GitHub App credentials required — set GITHUB_APP_PRIVATE_KEY and configure app_id
     ");
 }

@@ -3,12 +3,12 @@ use std::time::Duration;
 
 use fabro_graphviz::graph::Graph;
 use fabro_store::RuntimeState;
+use fabro_types::PullRequestRecord;
 use fabro_util::terminal::Styles;
 use fabro_util::text::strip_goal_decoration;
 use fabro_workflow::asset_snapshot::collect_asset_paths;
 use fabro_workflow::outcome::{StageStatus, format_cost};
 use fabro_workflow::pipeline::{Persisted, Validated};
-use fabro_workflow::pull_request::PullRequestRecord;
 use fabro_workflow::records::{Checkpoint, CheckpointExt, Conclusion, ConclusionExt};
 use indicatif::HumanDuration;
 

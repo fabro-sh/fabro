@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use fabro_workflow::pull_request::PullRequestRecord;
+use fabro_types::PullRequestRecord;
 use fabro_workflow::run_lookup::resolve_run_combined;
 
 use crate::args::{GlobalArgs, PrCommand, PrNamespace};
@@ -35,9 +35,14 @@ pub(crate) async fn load_pr_record(
 ) -> Result<(PullRequestRecord, PathBuf)> {
     let storage_dir = base.parent().unwrap_or(base);
     let store = store::build_store(storage_dir)?;
-    let run_dir = resolve_run_combined(store.as_ref(), base, run_id)
-        .await?
-        .path;
+    let run = resolve_run_combined(store.as_ref(), base, run_id).await?;
+    let run_dir = run.path;
+    let run_store = store::open_run_reader(storage_dir, &run.run_id).await?;
+    if let Some(run_store) = run_store {
+        if let Some(record) = run_store.get_pull_request().await.ok().flatten() {
+            return Ok((record, run_dir));
+        }
+    }
     let pr_path = run_dir.join("pull_request.json");
     let content = std::fs::read_to_string(&pr_path).with_context(|| {
         format!(

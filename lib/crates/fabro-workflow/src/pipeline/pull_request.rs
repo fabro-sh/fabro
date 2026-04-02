@@ -2,7 +2,7 @@ use std::path::Path;
 
 use fabro_config::run::MergeStrategy;
 use fabro_store::RunStore;
-use serde::{Deserialize, Serialize};
+use fabro_types::PullRequestRecord;
 use tracing::{debug, info};
 
 use fabro_github::{self as github_app, GitHubAppCredentials, ssh_url_to_https};
@@ -18,26 +18,6 @@ use fabro_retro::retro::Retro;
 use tokio::fs::read_to_string;
 
 use super::types::{Concluded, Finalized, PullRequestOptions};
-
-/// Record of a pull request created for a workflow run.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PullRequestRecord {
-    pub html_url: String,
-    pub number: u64,
-    pub owner: String,
-    pub repo: String,
-    pub base_branch: String,
-    pub head_branch: String,
-    pub title: String,
-}
-
-impl PullRequestRecord {
-    pub fn save(&self, path: &Path) -> Result<(), String> {
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| format!("Failed to serialize pull_request.json: {e}"))?;
-        std::fs::write(path, json).map_err(|e| format!("Failed to write pull_request.json: {e}"))
-    }
-}
 
 /// Derive a PR title from the workflow goal.
 ///

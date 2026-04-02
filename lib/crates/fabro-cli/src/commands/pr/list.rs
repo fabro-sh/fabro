@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use fabro_config::FabroSettingsExt;
-use fabro_workflow::pull_request::PullRequestRecord;
+use fabro_types::PullRequestRecord;
 use fabro_workflow::run_lookup::{runs_base, scan_runs_combined};
 use futures::future::join_all;
 use serde::Serialize;
@@ -50,6 +50,12 @@ async fn list_from(
 
     let mut entries: Vec<(String, PullRequestRecord)> = Vec::new();
     for run in &runs {
+        if let Ok(Some(run_store)) = store.open_run_reader(&run.run_id).await {
+            if let Ok(Some(record)) = run_store.get_pull_request().await {
+                entries.push((run.run_id.to_string(), record));
+                continue;
+            }
+        }
         let pr_path = run.path.join("pull_request.json");
         if let Ok(content) = std::fs::read_to_string(&pr_path) {
             if let Ok(record) = serde_json::from_str::<PullRequestRecord>(&content) {
