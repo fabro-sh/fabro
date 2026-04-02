@@ -46,6 +46,7 @@ pub(crate) async fn resume_command(
     } else {
         let exit_code = super::attach::attach_run(
             &run_dir,
+            Some(cli_settings.storage_dir().as_path()),
             Some(&run_id),
             true,
             styles,

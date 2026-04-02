@@ -89,6 +89,43 @@ fn logs_completed_run_outputs_raw_ndjson() {
 }
 
 #[test]
+fn logs_completed_run_reads_store_without_progress_jsonl() {
+    let context = test_context!();
+    let run = setup_completed_dry_run(&context);
+    std::fs::remove_file(run.run_dir.join("progress.jsonl")).unwrap();
+
+    let mut filters = context.filters();
+    filters.push((
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z".to_string(),
+        "[TIMESTAMP]".to_string(),
+    ));
+    filters.push((
+        r#""duration_ms":\s*\d+"#.to_string(),
+        r#""duration_ms": [DURATION_MS]"#.to_string(),
+    ));
+    filters.push((
+        r#""id":"[0-9a-f-]+""#.to_string(),
+        r#""id":"[EVENT_ID]""#.to_string(),
+    ));
+    filters.push((
+        r#""run_dir":"(?:\[DRY_RUN_DIR\]|\[STORAGE_DIR\]/runs/REDACTED)""#.to_string(),
+        r#""run_dir":"[RUN_DIR]""#.to_string(),
+    ));
+
+    let mut cmd = context.command();
+    cmd.args(["logs", "--tail", "2", &run.run_id]);
+
+    fabro_snapshot!(filters, cmd, @r#"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    {"event":"sandbox.cleanup.started","id":"[EVENT_ID]","properties":{"provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
+    {"event":"sandbox.cleanup.completed","id":"[EVENT_ID]","properties":{"duration_ms": [DURATION_MS],"provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
+    ----- stderr -----
+    "#);
+}
+
+#[test]
 fn logs_tail_limits_output() {
     let context = test_context!();
     let run = setup_completed_dry_run(&context);

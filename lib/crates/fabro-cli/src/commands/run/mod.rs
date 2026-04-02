@@ -82,6 +82,7 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             let run_info = resolve_run_combined(store.as_ref(), &base, &run).await?;
             let exit_code = attach::attach_run(
                 &run_info.path,
+                Some(cli_settings.storage_dir().as_path()),
                 Some(&run_info.run_id),
                 false,
                 styles,

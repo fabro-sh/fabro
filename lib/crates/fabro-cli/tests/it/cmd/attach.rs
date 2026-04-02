@@ -98,6 +98,53 @@ fn attach_replays_completed_detached_run() {
 }
 
 #[test]
+fn attach_replays_from_store_without_run_json_or_progress_jsonl() {
+    let context = test_context!();
+    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAQ";
+
+    context
+        .command()
+        .args([
+            "run",
+            "--dry-run",
+            "--auto-approve",
+            "--no-retro",
+            "--detach",
+            "--run-id",
+            run_id,
+            example_fixture("simple.fabro").to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    context
+        .command()
+        .args(["wait", run_id])
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success();
+
+    let run = resolve_run(&context, run_id);
+    std::fs::remove_file(run.run_dir.join("run.json")).unwrap();
+    std::fs::remove_file(run.run_dir.join("progress.jsonl")).unwrap();
+
+    let mut cmd = context.command();
+    cmd.args(["attach", run_id]);
+    cmd.timeout(std::time::Duration::from_secs(10));
+    fabro_snapshot!(run_output_filters(&context), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+        Sandbox: local (ready in [TIME])
+        ✓ Start  [TIME]
+        ✓ Run Tests  [TIME]
+        ✓ Report  [TIME]
+        ✓ Exit  [TIME]
+    ");
+}
+
+#[test]
 fn attach_before_completion_streams_to_finished_state() {
     let context = test_context!();
     let gate = write_gated_workflow(&context.temp_dir.join("slow.fabro"), "slow", "Run slowly");

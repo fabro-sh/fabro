@@ -1,5 +1,5 @@
 use std::fmt::Write as _;
-use std::io::{self, BufRead, IsTerminal, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 use std::time::Duration;
 
@@ -12,7 +12,7 @@ use fabro_util::terminal::Styles;
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use futures::StreamExt;
 use tokio::time;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use crate::args::{GlobalArgs, LogsArgs};
 use crate::store;
@@ -31,26 +31,21 @@ pub(crate) async fn run(args: &LogsArgs, styles: &Styles, globals: &GlobalArgs) 
         None => None,
     };
 
-    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await?;
-    let progress_path = run.path.join("progress.jsonl");
-    let (all_lines, last_seq, use_store_follow) = if progress_path.exists() {
-        (read_lines(&progress_path)?, 0, false)
-    } else if let Some(run_store) = run_store.as_ref() {
-        match run_store.list_events().await {
-            Ok(events) => {
-                let last_seq = events.last().map_or(0, |event| event.seq);
-                let lines = events
-                    .iter()
-                    .map(event_payload_line)
-                    .collect::<Result<Vec<_>>>()?;
-                (lines, last_seq, true)
-            }
-            Err(err) => {
-                return Err(err).context("Failed to list store-backed run events");
-            }
+    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id)
+        .await?
+        .with_context(|| format!("Run '{}' not found in store", run.run_id))?;
+    let (all_lines, last_seq) = match run_store.list_events().await {
+        Ok(events) => {
+            let last_seq = events.last().map_or(0, |event| event.seq);
+            let lines = events
+                .iter()
+                .map(event_payload_line)
+                .collect::<Result<Vec<_>>>()?;
+            (lines, last_seq)
         }
-    } else {
-        bail!("No progress.jsonl found for run '{}'", run.run_id);
+        Err(err) => {
+            return Err(err).context("Failed to list store-backed run events");
+        }
     };
     let filtered = apply_filters(&all_lines, since_cutoff.as_ref(), args.tail);
 
@@ -70,67 +65,18 @@ pub(crate) async fn run(args: &LogsArgs, styles: &Styles, globals: &GlobalArgs) 
     }
 
     if args.follow {
-        if use_store_follow {
-            if let Some(run_store) = run_store.as_ref() {
-                match follow_store_logs(
-                    run_store.as_ref(),
-                    if last_seq == 0 { 1 } else { last_seq + 1 },
-                    pretty,
-                    styles,
-                    is_tty,
-                )
-                .await
-                {
-                    Ok(()) => {}
-                    Err(err) => {
-                        if !progress_path.exists() {
-                            return Err(err);
-                        }
-                        warn!(
-                            run_id = %run.run_id,
-                            error = %err,
-                            "Failed to follow store events; falling back to progress.jsonl"
-                        );
-                        let lines_seen = read_lines(&progress_path)?.len();
-                        follow_logs(
-                            &progress_path,
-                            &run.path,
-                            lines_seen,
-                            pretty,
-                            styles,
-                            is_tty,
-                        )?;
-                    }
-                }
-            } else {
-                unreachable!("store follow requested without a run store");
-            }
-        } else {
-            follow_logs(
-                &progress_path,
-                &run.path,
-                all_lines.len(),
-                pretty,
-                styles,
-                is_tty,
-            )?;
-        }
+        follow_store_logs(
+            run_store.as_ref(),
+            &run.path,
+            if last_seq == 0 { 1 } else { last_seq + 1 },
+            pretty,
+            styles,
+            is_tty,
+        )
+        .await?;
     }
 
     Ok(())
-}
-
-fn read_lines(path: &Path) -> Result<Vec<String>> {
-    let file = std::fs::File::open(path).context("Failed to open progress.jsonl")?;
-    let reader = io::BufReader::new(file);
-    let mut lines = Vec::new();
-    for line in reader.lines() {
-        let line = line?;
-        if !line.trim().is_empty() {
-            lines.push(line);
-        }
-    }
-    Ok(lines)
 }
 
 fn apply_filters(
@@ -193,47 +139,9 @@ fn try_parse_relative_duration(s: &str) -> Option<chrono::Duration> {
     }
 }
 
-fn follow_logs(
-    progress_path: &Path,
-    run_dir: &Path,
-    mut lines_seen: usize,
-    pretty: bool,
-    styles: &Styles,
-    _is_tty: bool,
-) -> Result<()> {
-    let conclusion_path = run_dir.join("conclusion.json");
-    let stdout = io::stdout();
-    let mut out = stdout.lock();
-
-    loop {
-        std::thread::sleep(std::time::Duration::from_millis(200));
-
-        let all_lines = read_lines(progress_path)?;
-        if all_lines.len() > lines_seen {
-            for line in &all_lines[lines_seen..] {
-                if pretty {
-                    if let Some(formatted) = format_event_pretty(line, styles) {
-                        writeln!(out, "{formatted}")?;
-                    }
-                } else {
-                    writeln!(out, "{line}")?;
-                }
-            }
-            out.flush()?;
-            lines_seen = all_lines.len();
-        }
-
-        if conclusion_path.exists() && all_lines.len() <= lines_seen {
-            debug!("Run concluded, stopping follow");
-            break;
-        }
-    }
-
-    Ok(())
-}
-
 async fn follow_store_logs(
     run_store: &dyn RunStore,
+    run_dir: &Path,
     seq: u32,
     pretty: bool,
     styles: &Styles,
@@ -262,20 +170,13 @@ async fn follow_store_logs(
                 next_seq = event.seq.saturating_add(1);
             }
             Ok(Some(Err(err))) => return Err(err.into()),
-            Ok(None) => break,
+            Ok(None) => {
+                if run_concluded(run_store, run_dir).await? {
+                    break;
+                }
+            }
             Err(_) => {
-                let concluded = run_store
-                    .get_conclusion()
-                    .await
-                    .context("Failed to read conclusion from store while following logs")?
-                    .is_some()
-                    || run_store
-                        .get_status()
-                        .await
-                        .context("Failed to read status from store while following logs")?
-                        .is_some_and(|record| record.status.is_terminal());
-
-                if concluded {
+                if run_concluded(run_store, run_dir).await? {
                     flush_remaining_store_events(run_store, next_seq, pretty, styles, &mut out)
                         .await?;
                     debug!("Run reached terminal status, stopping follow");
@@ -286,6 +187,24 @@ async fn follow_store_logs(
     }
 
     Ok(())
+}
+
+async fn run_concluded(run_store: &dyn RunStore, run_dir: &Path) -> Result<bool> {
+    if run_store
+        .get_conclusion()
+        .await
+        .context("Failed to read conclusion from store while following logs")?
+        .is_some()
+    {
+        return Ok(true);
+    }
+
+    Ok(run_store
+        .get_status()
+        .await
+        .context("Failed to read status from store while following logs")?
+        .is_some_and(|record| record.status.is_terminal())
+        || run_dir.join("conclusion.json").exists())
 }
 
 async fn flush_remaining_store_events(

@@ -35,6 +35,7 @@ const JSON_INTERVIEW_MESSAGE: &str = "This run is waiting for human input, but -
 /// Returns exit code 0 for success/partial_success, 1 otherwise.
 pub(crate) async fn attach_run(
     run_dir: &Path,
+    storage_dir: Option<&Path>,
     run_id: Option<&RunId>,
     kill_on_detach: bool,
     styles: &'static Styles,
@@ -42,15 +43,23 @@ pub(crate) async fn attach_run(
     json_output: bool,
 ) -> Result<ExitCode> {
     let run_record = RunRecord::load(run_dir).ok();
-    if let (Some(storage_dir), Some(run_id)) = (
-        run_record
-            .as_ref()
-            .map(|record| record.settings.storage_dir()),
-        run_id.or_else(|| run_record.as_ref().map(|record| &record.run_id)),
-    ) {
+    let fallback_storage_dir = run_record
+        .as_ref()
+        .map(|record| record.settings.storage_dir());
+    let storage_dir = storage_dir.or(fallback_storage_dir.as_deref());
+    let run_id = run_id.or_else(|| run_record.as_ref().map(|record| &record.run_id));
+
+    if let (Some(storage_dir), Some(run_id)) = (storage_dir, run_id) {
         match store::open_run_reader(&storage_dir, run_id).await {
             Ok(Some(run_store)) => match run_store.list_events().await {
                 Ok(events) => {
+                    let verbose = run_store
+                        .get_run()
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(|record| record.settings.verbose_enabled())
+                        .unwrap_or(false);
                     let event_lines = events
                         .iter()
                         .map(event_payload_line)
@@ -58,6 +67,7 @@ pub(crate) async fn attach_run(
                     return attach_run_store(
                         run_dir,
                         run_store.as_ref(),
+                        verbose,
                         event_lines,
                         events.last().map_or(0, |event| event.seq),
                         kill_on_detach,
@@ -86,12 +96,25 @@ pub(crate) async fn attach_run(
         }
     }
 
-    attach_run_files(run_dir, kill_on_detach, styles, engine_child, json_output).await
+    let verbose = run_record
+        .as_ref()
+        .map(|record| record.settings.verbose_enabled())
+        .unwrap_or(false);
+    attach_run_files(
+        run_dir,
+        verbose,
+        kill_on_detach,
+        styles,
+        engine_child,
+        json_output,
+    )
+    .await
 }
 
 async fn attach_run_store(
     run_dir: &Path,
     run_store: &dyn RunStore,
+    verbose: bool,
     existing_events: Vec<String>,
     last_seq: u32,
     kill_on_detach: bool,
@@ -105,9 +128,6 @@ async fn attach_run_store(
     let mut engine_guard = engine_child.map(EngineChildGuard::new);
 
     let is_tty = std::io::stderr().is_terminal();
-    let verbose = RunRecord::load(run_dir)
-        .map(|record| record.settings.verbose_enabled())
-        .unwrap_or(false);
     let mut progress_ui = run_progress::ProgressUI::new(is_tty, verbose);
 
     // Install Ctrl+C handler
@@ -269,6 +289,7 @@ async fn attach_run_store(
 
 async fn attach_run_files(
     run_dir: &Path,
+    verbose: bool,
     kill_on_detach: bool,
     styles: &'static Styles,
     engine_child: Option<std::process::Child>,
@@ -283,9 +304,6 @@ async fn attach_run_files(
     let mut engine_guard = engine_child.map(EngineChildGuard::new);
 
     let is_tty = std::io::stderr().is_terminal();
-    let verbose = RunRecord::load(run_dir)
-        .map(|record| record.settings.verbose_enabled())
-        .unwrap_or(false);
     let mut progress_ui = run_progress::ProgressUI::new(is_tty, verbose);
 
     let cancelled = Arc::new(AtomicBool::new(false));
@@ -775,6 +793,7 @@ mod tests {
         let exit = attach_run(
             dir.path(),
             None,
+            None,
             false,
             no_color_styles(),
             Some(child),
@@ -800,9 +819,17 @@ mod tests {
             Some(StatusReason::LaunchFailed),
         );
 
-        let exit = attach_run(dir.path(), None, false, no_color_styles(), None, false)
-            .await
-            .unwrap();
+        let exit = attach_run(
+            dir.path(),
+            None,
+            None,
+            false,
+            no_color_styles(),
+            None,
+            false,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(exit, ExitCode::from(1));
     }
