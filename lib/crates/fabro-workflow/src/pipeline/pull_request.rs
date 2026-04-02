@@ -333,8 +333,7 @@ pub async fn build_pr_body(
                 tracing::warn!(error = %err, "Failed to load retro from store for PR body");
             })
             .ok()
-            .flatten()
-            .or_else(|| Retro::load(run_dir).ok()),
+            .flatten(),
         None => Retro::load(run_dir).ok(),
     };
     let run_record = match run_store {
@@ -345,8 +344,7 @@ pub async fn build_pr_body(
                 tracing::warn!(error = %err, "Failed to load run record from store for PR body");
             })
             .ok()
-            .flatten()
-            .or_else(|| RunRecord::load(run_dir).ok()),
+            .flatten(),
         None => RunRecord::load(run_dir).ok(),
     };
     let dot_source = match run_store {
@@ -357,8 +355,7 @@ pub async fn build_pr_body(
                 tracing::warn!(error = %err, "Failed to load graph from store for PR body");
             })
             .ok()
-            .flatten()
-            .or_else(|| read_dot_source(run_dir)),
+            .flatten(),
         None => read_dot_source(run_dir),
     };
 
@@ -613,11 +610,14 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::path::PathBuf;
     use std::sync::{Arc, Once};
 
     use super::*;
     use crate::records::StageSummary;
     use chrono::Utc;
+    use fabro_config::FabroSettings;
+    use fabro_graphviz::graph::Graph;
     use fabro_llm::client::Client;
     use fabro_llm::error::SdkError;
     use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
@@ -626,6 +626,8 @@ mod tests {
     use fabro_retro::retro::{
         AggregateStats, FrictionKind, FrictionPoint, OpenItem, OpenItemKind, StageRetro,
     };
+    use fabro_store::{InMemoryStore, Store};
+    use fabro_types::RunRecord;
     use fabro_types::fixtures;
     use futures::stream;
 
@@ -1066,6 +1068,60 @@ mod tests {
         assert!(body.contains("### Fabro Details"));
         assert!(body.contains("Ran 3 stages in 2m 30s for $0.42"));
         assert!(body.contains("| **Total** | **2m 30s** | **$0.42** | **0** |"));
+    }
+
+    #[tokio::test]
+    async fn build_pr_body_uses_store_records_without_legacy_files() {
+        install_mock_llm();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let store = InMemoryStore::default();
+        let created_at = Utc::now();
+        let run_store = store
+            .create_run(
+                &fixtures::RUN_1,
+                created_at,
+                Some(&tmp.path().display().to_string()),
+            )
+            .await
+            .unwrap();
+
+        run_store
+            .put_run(&RunRecord {
+                run_id: fixtures::RUN_1,
+                created_at,
+                settings: FabroSettings::default(),
+                graph: Graph::new("test"),
+                workflow_slug: Some("test".to_string()),
+                working_directory: PathBuf::from("/tmp/project"),
+                host_repo_path: Some("/tmp/project".to_string()),
+                base_branch: Some("main".to_string()),
+                labels: HashMap::new(),
+            })
+            .await
+            .unwrap();
+        run_store
+            .put_graph("digraph test { plan -> code }")
+            .await
+            .unwrap();
+        run_store.put_retro(&make_test_retro()).await.unwrap();
+
+        let conclusion = make_test_conclusion();
+        let body = build_pr_body(
+            "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
+            "Implement feature",
+            "mock-model",
+            Some(run_store.as_ref()),
+            tmp.path(),
+            Some(&conclusion),
+        )
+        .await
+        .unwrap();
+
+        assert!(body.contains("Narrative from mock."));
+        assert!(body.contains("### Retro"));
+        assert!(body.contains("### Fabro Details"));
+        assert!(body.contains("test.fabro"));
     }
 
     // ── parse_dot_summary tests ─────────────────────────────────────────
