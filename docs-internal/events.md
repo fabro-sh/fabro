@@ -169,7 +169,6 @@ Emitted when a workflow node begins execution.
   "properties": {
     "index": 1,
     "handler_type": "agent",
-    "script": null,
     "attempt": 1,
     "max_attempts": 3
   }
@@ -179,8 +178,7 @@ Emitted when a workflow node begins execution.
 | Property | Type | Description |
 |----------|------|-------------|
 | `index` | number | Stage execution order index |
-| `handler_type` | string? | Handler type (`"agent"`, `"prompt"`, `"command"`, `"conditional"`, `"human"`, `"parallel"`, etc.) |
-| `script` | string? | Script body (command nodes only) |
+| `handler_type` | string | Handler type (`"agent"`, `"prompt"`, `"command"`, `"conditional"`, `"human"`, `"parallel"`, etc.) |
 | `attempt` | number | Current attempt number (1-based) |
 | `max_attempts` | number | Maximum attempts allowed |
 
@@ -213,6 +211,13 @@ Emitted when a workflow node finishes execution.
     "error": "lint failed",
     "failure_class": "deterministic",
     "failure_signature": "clippy::unused_import",
+    "context_updates": {"response.code": "done"},
+    "jump_to_node": "review",
+    "context_values": {"response.code": "done"},
+    "node_visits": {"code": 1},
+    "loop_failure_signatures": {"code|deterministic|clippy::unused_import": 2},
+    "restart_failure_signatures": {"code|transient_infra|timeout": 1},
+    "response": "done",
     "notes": "All tests passing",
     "files_touched": ["src/main.rs", "src/lib.rs"],
     "attempt": 1,
@@ -240,6 +245,13 @@ Emitted when a workflow node finishes execution.
 | `error` | string? | Error message (flattened from failure detail) |
 | `failure_class` | string? | `"transient_infra"`, `"deterministic"`, `"budget_exhausted"`, `"compilation_loop"`, `"canceled"`, `"structural"` |
 | `failure_signature` | string? | Dedup key for repeated failures |
+| `context_updates` | object? | Context delta written by this stage |
+| `jump_to_node` | string? | Non-edge jump target |
+| `context_values` | object? | Full context snapshot after the stage |
+| `node_visits` | object? | Node visit counts after the stage |
+| `loop_failure_signatures` | object? | Loop failure signature counts |
+| `restart_failure_signatures` | object? | Restart failure signature counts |
+| `response` | string? | Full LLM or agent response text when produced by the stage |
 | `notes` | string? | Free-text notes |
 | `files_touched` | string[] | File paths modified |
 | `attempt` | number | Attempt number (1-based) |
@@ -497,7 +509,8 @@ Emitted after a checkpoint is saved.
   "node_label": "code",
   "properties": {
     "status": "success",
-    "git_commit_sha": "abc123..."
+    "git_commit_sha": "abc123...",
+    "diff": "diff --git a/src/lib.rs b/src/lib.rs\n..."
   }
 }
 ```
@@ -506,6 +519,7 @@ Emitted after a checkpoint is saved.
 |----------|------|-------------|
 | `status` | string | Checkpoint status |
 | `git_commit_sha` | string? | Commit SHA at checkpoint time |
+| `diff` | string? | Git diff captured for the checkpointed node |
 
 ### `checkpoint.failed`
 
@@ -1433,7 +1447,11 @@ Emitted after the engine completes sandbox initialization (distinct from `sandbo
   "id": "...", "ts": "...", "run_id": "...",
   "event": "sandbox.initialized",
   "properties": {
-    "working_directory": "/workspace/my-project"
+    "working_directory": "/workspace/my-project",
+    "provider": "daytona",
+    "identifier": "sandbox-123",
+    "host_working_directory": "/tmp/fabro-run/worktree",
+    "container_mount_point": "/workspace"
   }
 }
 ```
@@ -1441,6 +1459,10 @@ Emitted after the engine completes sandbox initialization (distinct from `sandbo
 | Property | Type | Description |
 |----------|------|-------------|
 | `working_directory` | string | Working directory inside sandbox |
+| `provider` | string | Sandbox provider |
+| `identifier` | string? | Provider-specific sandbox identifier |
+| `host_working_directory` | string? | Host-side working directory |
+| `container_mount_point` | string? | Container mount point inside the sandbox |
 
 ### `sandbox.cleanup.started`
 
@@ -2074,11 +2096,19 @@ Emitted when the stall watchdog detects no progress.
 {
   "id": "...", "ts": "...", "run_id": "...",
   "event": "retro.started",
-  "properties": {}
+  "properties": {
+    "prompt": "Analyze the workflow run data at `/tmp/retro_data/` ...",
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-20250514"
+  }
 }
 ```
 
-No properties.
+| Property | Type | Description |
+|----------|------|-------------|
+| `prompt` | string? | Prompt sent to the retro agent |
+| `provider` | string? | LLM provider for the retro agent |
+| `model` | string? | Model used for the retro agent |
 
 ### `retro.completed`
 
@@ -2087,7 +2117,9 @@ No properties.
   "id": "...", "ts": "...", "run_id": "...",
   "event": "retro.completed",
   "properties": {
-    "duration_ms": 5000
+    "duration_ms": 5000,
+    "response": "The run was mostly smooth...",
+    "retro": {"smoothness": "smooth"}
   }
 }
 ```
@@ -2095,6 +2127,8 @@ No properties.
 | Property | Type | Description |
 |----------|------|-------------|
 | `duration_ms` | number | Retro duration |
+| `response` | string? | Raw assistant response from the retro agent |
+| `retro` | object? | Parsed `Retro` payload |
 
 ### `retro.failed`
 

@@ -114,6 +114,24 @@ const SUBMIT_RETRO_SCHEMA: &str = r#"{
   "required": ["smoothness", "intent", "outcome"]
 }"#;
 
+pub const RETRO_DATA_DIR: &str = "/tmp/retro_data";
+
+pub struct RetroAgentResult {
+    pub narrative: RetroNarrative,
+    pub response: String,
+}
+
+#[must_use]
+pub fn build_retro_prompt(retro_data_dir: &str) -> String {
+    format!(
+        "Analyze the workflow run data at `{retro_data_dir}/` and generate a retrospective. \
+         The key file is `{retro_data_dir}/progress.jsonl` which contains the full event stream. \
+         Also check `{retro_data_dir}/checkpoint.json` for stage outcomes. \
+         Use grep to search for interesting signals (failures, retries, errors, approach changes) \
+         rather than reading the entire file. When done, call the `submit_retro` tool with your analysis."
+    )
+}
+
 /// Run a retro agent session that analyzes workflow run data and produces
 /// a structured narrative. The agent explores `progress.jsonl` and other
 /// files via tool access, then calls `submit_retro` with its analysis.
@@ -125,11 +143,10 @@ pub async fn run_retro_agent(
     provider: Provider,
     model: &str,
     event_callback: Option<Arc<dyn Fn(SessionEvent) + Send + Sync>>,
-) -> anyhow::Result<RetroNarrative> {
+) -> anyhow::Result<RetroAgentResult> {
     // Upload data files into sandbox (needed for Daytona; no-op effect for local
     // since the agent can also read from the original paths via tools).
-    let retro_data_dir = "/tmp/retro_data";
-    upload_data_files(sandbox, run_store, run_dir, retro_data_dir).await?;
+    upload_data_files(sandbox, run_store, run_dir, RETRO_DATA_DIR).await?;
 
     // Build provider profile with the submit_retro tool
     let captured: Arc<Mutex<Option<RetroNarrative>>> = Arc::new(Mutex::new(None));
@@ -188,13 +205,7 @@ pub async fn run_retro_agent(
 
     session.initialize().await;
 
-    let prompt = format!(
-        "Analyze the workflow run data at `{retro_data_dir}/` and generate a retrospective. \
-         The key file is `{retro_data_dir}/progress.jsonl` which contains the full event stream. \
-         Also check `{retro_data_dir}/checkpoint.json` for stage outcomes. \
-         Use grep to search for interesting signals (failures, retries, errors, approach changes) \
-         rather than reading the entire file. When done, call the `submit_retro` tool with your analysis."
-    );
+    let prompt = build_retro_prompt(RETRO_DATA_DIR);
 
     write_retro_prompt(run_store, &retro_dir, &prompt).await?;
 
@@ -213,7 +224,8 @@ pub async fn run_retro_agent(
             Turn::Assistant { content, .. } => Some(content.as_str()),
             _ => None,
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .to_string();
 
     // Extract result / determine outcome
     let (outcome, failure_reason, narrative_result) = match process_result {
@@ -238,7 +250,7 @@ pub async fn run_retro_agent(
     };
 
     // Write artifacts (on both success and failure)
-    write_retro_response(run_store, &retro_dir, response_text).await?;
+    write_retro_response(run_store, &retro_dir, &response_text).await?;
     write_retro_artifacts(
         &retro_dir,
         provider.as_str(),
@@ -254,7 +266,10 @@ pub async fn run_retro_agent(
         let _ = handle.await;
     }
 
-    narrative_result
+    narrative_result.map(|narrative| RetroAgentResult {
+        narrative,
+        response: response_text,
+    })
 }
 
 /// Return a placeholder narrative for dry-run mode. Exercises the full
