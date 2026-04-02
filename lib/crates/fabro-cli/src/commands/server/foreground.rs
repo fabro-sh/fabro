@@ -18,14 +18,12 @@ pub(crate) async fn execute(
     let _ = fabro_proc::title_init();
     fabro_proc::title_set(&format!("fabro: server {bind}"));
 
-    // Ensure serve_args carries the resolved bind so the server binds correctly.
     serve_args.bind = Some(bind.to_string());
 
     let _record_guard = scopeguard::guard(record_path, |path| {
         record::remove_server_record(&path);
     });
 
-    // If Unix socket, clean up socket file on exit
     let _socket_guard = if let Bind::Unix(ref path) = bind {
         let path = path.clone();
         Some(scopeguard::guard(path, |p| {

@@ -18,8 +18,6 @@ pub(crate) async fn execute(
     storage_dir: PathBuf,
     styles: &'static Styles,
 ) -> Result<()> {
-    // Ensure serve_args carries the resolved bind address so the server knows
-    // what to listen on.
     serve_args.bind = Some(bind.to_string());
 
     if foreground {
@@ -65,7 +63,6 @@ async fn execute_foreground(
         record::remove_server_record(&path);
     });
 
-    // Clean up Unix socket on exit
     let _socket_guard = if let Bind::Unix(ref path) = bind {
         let path = path.clone();
         Some(scopeguard::guard(path, |p| {
@@ -87,11 +84,11 @@ fn execute_daemon(bind: &Bind, serve_args: &ServeArgs, storage_dir: &Path) -> Re
     let _lock_file = lock_file; // keep alive until function returns
 
     if let Some(existing) = record::active_server_record(storage_dir) {
-        eprintln!(
+        bail!(
             "Server already running (pid {}) on {}",
-            existing.pid, existing.bind
+            existing.pid,
+            existing.bind
         );
-        std::process::exit(1);
     }
 
     // Rotate logs
@@ -99,7 +96,6 @@ fn execute_daemon(bind: &Bind, serve_args: &ServeArgs, storage_dir: &Path) -> Re
     let prev_path = log_path.with_extension("log.prev");
     let _ = std::fs::rename(&log_path, &prev_path);
 
-    // Spawn child: `fabro server __serve --record-path <path> --bind <addr> ...`
     let record_path = record::server_record_path(storage_dir);
     let log_file = std::fs::File::create(&log_path)?;
     let stdout_log = log_file.try_clone()?;
@@ -112,7 +108,6 @@ fn execute_daemon(bind: &Bind, serve_args: &ServeArgs, storage_dir: &Path) -> Re
         .arg("--bind")
         .arg(bind.to_string());
 
-    // Forward optional serve args
     if let Some(ref model) = serve_args.model {
         cmd.args(["--model", model]);
     }
@@ -132,7 +127,6 @@ fn execute_daemon(bind: &Bind, serve_args: &ServeArgs, storage_dir: &Path) -> Re
         cmd.arg("--config").arg(config);
     }
 
-    // Forward global --storage-dir
     cmd.arg("--storage-dir").arg(storage_dir);
 
     cmd.env_remove("FABRO_JSON");
@@ -145,7 +139,6 @@ fn execute_daemon(bind: &Bind, serve_args: &ServeArgs, storage_dir: &Path) -> Re
 
     let mut child = cmd.spawn()?;
 
-    // Write server record with child PID
     record::write_server_record(
         &record_path,
         &record::ServerRecord {
@@ -156,7 +149,6 @@ fn execute_daemon(bind: &Bind, serve_args: &ServeArgs, storage_dir: &Path) -> Re
         },
     )?;
 
-    // Check if the child already exited
     if let Ok(Some(status)) = child.try_wait() {
         record::remove_server_record(&record_path);
         let tail = read_log_tail(&log_path, 20);
@@ -166,7 +158,6 @@ fn execute_daemon(bind: &Bind, serve_args: &ServeArgs, storage_dir: &Path) -> Re
         bail!("Server exited immediately with status {status}");
     }
 
-    // Poll-connect until the server is ready
     let poll_interval = Duration::from_millis(50);
     let timeout = Duration::from_secs(5);
     let mut elapsed = Duration::ZERO;
@@ -177,7 +168,6 @@ fn execute_daemon(bind: &Bind, serve_args: &ServeArgs, storage_dir: &Path) -> Re
             return Ok(());
         }
 
-        // Check that the child hasn't died while we poll
         if let Ok(Some(status)) = child.try_wait() {
             record::remove_server_record(&record_path);
             if let Bind::Unix(ref path) = *bind {
@@ -194,7 +184,6 @@ fn execute_daemon(bind: &Bind, serve_args: &ServeArgs, storage_dir: &Path) -> Re
         elapsed += poll_interval;
     }
 
-    // Timed out waiting for connection
     record::remove_server_record(&record_path);
     if let Bind::Unix(ref path) = *bind {
         let _ = std::fs::remove_file(path);
