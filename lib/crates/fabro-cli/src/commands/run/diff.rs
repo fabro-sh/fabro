@@ -82,6 +82,13 @@ async fn resolve_diff(
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("This run was not git-checkpointed; no diff available"))?;
 
+    if let Some(run_store) = run_store {
+        if let Ok(Some(patch)) = run_store.get_final_patch().await {
+            debug!("Reading final.patch from store");
+            return Ok(patch);
+        }
+    }
+
     let final_patch_path = run_dir.join("final.patch");
     if final_patch_path.exists() {
         debug!("Reading final.patch");

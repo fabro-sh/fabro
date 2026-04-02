@@ -44,7 +44,6 @@ fn pr_create_unfinished_run_errors_before_network() {
     ----- stdout -----
     ----- stderr -----
     error: Failed to load start.json
-      > I/O error: No such file or directory (os error 2)
     ");
 }
 
@@ -52,6 +51,24 @@ fn pr_create_unfinished_run_errors_before_network() {
 fn pr_create_completed_dry_run_without_run_branch_errors() {
     let context = test_context!();
     let run = setup_completed_dry_run(&context);
+    let mut cmd = context.command();
+    cmd.args(["pr", "create", &run.run_id]);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: Run has no run_branch — was it run with git push enabled?
+    ");
+}
+
+#[test]
+fn pr_create_uses_store_run_record_without_run_json() {
+    let context = test_context!();
+    let run = setup_completed_dry_run(&context);
+    std::fs::remove_file(run.run_dir.join("run.json")).unwrap();
+
     let mut cmd = context.command();
     cmd.args(["pr", "create", &run.run_id]);
 

@@ -1,6 +1,27 @@
+use std::sync::Arc;
+
+use fabro_store::Store;
 use fabro_test::{fabro_snapshot, test_context};
+use fabro_types::RunId;
+use object_store::local::LocalFileSystem;
 
 use super::support::{git_filters, setup_git_backed_changed_run, setup_git_backed_noop_run};
+
+fn with_runtime<T>(f: impl FnOnce(&tokio::runtime::Runtime) -> T) -> T {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    f(&runtime)
+}
+
+fn build_store(storage_dir: &std::path::Path) -> Arc<fabro_store::SlateStore> {
+    let store_path = storage_dir.join("store");
+    std::fs::create_dir_all(&store_path).unwrap();
+    let object_store = Arc::new(LocalFileSystem::new_with_prefix(&store_path).unwrap());
+    Arc::new(fabro_store::SlateStore::new(
+        object_store,
+        "",
+        std::time::Duration::from_millis(5),
+    ))
+}
 
 #[test]
 fn help() {
@@ -70,6 +91,41 @@ fn diff_missing_node_diff_reports_helpful_error() {
 fn diff_completed_run_with_changes_prints_patch() {
     let context = test_context!();
     let setup = setup_git_backed_changed_run(&context);
+    let mut cmd = context.command();
+    cmd.args(["diff", &setup.run.run_id]);
+
+    fabro_snapshot!(git_filters(&context), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    diff --git a/story.txt b/story.txt
+    index [SHA]..[SHA] 100644
+    --- a/story.txt
+    +++ b/story.txt
+    @@ -1 +1,3 @@
+     line 1
+    +line 2
+    +line 3
+    ----- stderr -----
+    ");
+}
+
+#[test]
+fn diff_completed_run_reads_store_final_patch_without_disk_file() {
+    let context = test_context!();
+    let setup = setup_git_backed_changed_run(&context);
+    let run_id: RunId = setup.run.run_id.parse().unwrap();
+    let patch = std::fs::read_to_string(setup.run.run_dir.join("final.patch")).unwrap();
+    std::fs::remove_file(setup.run.run_dir.join("final.patch")).unwrap();
+
+    with_runtime(|runtime| {
+        runtime.block_on(async {
+            let store = build_store(&context.storage_dir);
+            let run_store = store.open_run(&run_id).await.unwrap().unwrap();
+            run_store.put_final_patch(&patch).await.unwrap();
+        });
+    });
+
     let mut cmd = context.command();
     cmd.args(["diff", &setup.run.run_id]);
 
