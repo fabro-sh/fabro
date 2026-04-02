@@ -15,7 +15,8 @@ use fabro_graphviz::graph::{Graph, Node};
 use tokio::fs;
 
 use super::agent::{
-    CodergenBackend, CodergenResult, expand_variables, extract_status_fields, truncate,
+    CodergenBackend, CodergenResult, expand_variables, extract_status_fields,
+    sync_provider_used_to_store, truncate,
 };
 use super::{EngineServices, Handler};
 
@@ -114,6 +115,7 @@ impl Handler for PromptHandler {
                     .await;
                 match result {
                     Ok(CodergenResult::Full(outcome)) => {
+                        sync_provider_used_to_store(&stage_dir, &node_ref, services).await?;
                         let status_json = serde_json::to_string_pretty(&outcome)
                             .unwrap_or_else(|_| "{}".to_string());
                         fs::write(stage_dir.join("status.json"), &status_json).await?;
@@ -168,6 +170,7 @@ impl Handler for PromptHandler {
         } else {
             fs::write(stage_dir.join("response.md"), &response_text).await?;
         }
+        sync_provider_used_to_store(&stage_dir, &node_ref, services).await?;
 
         // 5. Build and write status
         let mut outcome = Outcome::success();
@@ -200,11 +203,26 @@ impl Handler for PromptHandler {
 mod tests {
     use super::*;
     use fabro_graphviz::graph::AttrValue;
+    use fabro_store::{InMemoryStore, NodeVisitRef, RunStore, Store};
+    use fabro_types::fixtures;
     use std::sync::Arc;
     use tempfile::TempDir;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
+    }
+
+    async fn make_services_with_run_store() -> (EngineServices, Arc<dyn RunStore>) {
+        let store = InMemoryStore::default();
+        let run_store = store
+            .create_run(&fixtures::RUN_1, chrono::Utc::now(), None)
+            .await
+            .unwrap();
+        let services = EngineServices {
+            run_store: Some(Arc::clone(&run_store)),
+            ..EngineServices::test_default()
+        };
+        (services, run_store)
     }
 
     #[tokio::test]
@@ -304,6 +322,75 @@ mod tests {
         )
         .unwrap();
         assert_eq!(response_content, "one-shot response");
+    }
+
+    #[tokio::test]
+    async fn prompt_handler_persists_provider_used_in_run_store() {
+        use fabro_agent::Sandbox;
+
+        struct ProviderOneShotBackend;
+
+        #[async_trait]
+        impl CodergenBackend for ProviderOneShotBackend {
+            async fn run(
+                &self,
+                _node: &Node,
+                _prompt: &str,
+                _context: &Context,
+                _thread_id: Option<&str>,
+                _emitter: &Arc<crate::event::EventEmitter>,
+                _stage_dir: &Path,
+                _sandbox: &Arc<dyn Sandbox>,
+                _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+            ) -> Result<CodergenResult, FabroError> {
+                panic!("run() should not be called for prompt handler");
+            }
+
+            async fn one_shot(
+                &self,
+                _node: &Node,
+                _prompt: &str,
+                _system_prompt: Option<&str>,
+                stage_dir: &Path,
+            ) -> Result<CodergenResult, FabroError> {
+                std::fs::write(
+                    stage_dir.join("provider_used.json"),
+                    r#"{"mode":"prompt","provider":"openai","model":"gpt-5.4"}"#,
+                )
+                .unwrap();
+                Ok(CodergenResult::Text {
+                    text: "one-shot response".to_string(),
+                    usage: None,
+                    files_touched: Vec::new(),
+                    last_file_touched: None,
+                })
+            }
+        }
+
+        let handler = PromptHandler::new(Some(Box::new(ProviderOneShotBackend)));
+        let mut node = Node::new("classify");
+        node.attrs.insert(
+            "prompt".to_string(),
+            AttrValue::String("Classify this".to_string()),
+        );
+        let context = Context::new();
+        let graph = Graph::new("test");
+        let tmp = TempDir::new().unwrap();
+        let (services, run_store) = make_services_with_run_store().await;
+
+        handler
+            .execute(&node, &context, &graph, tmp.path(), &services)
+            .await
+            .unwrap();
+
+        let snapshot = run_store
+            .get_node(&NodeVisitRef {
+                node_id: "classify",
+                visit: 1,
+            })
+            .await
+            .unwrap();
+        assert_eq!(snapshot.provider_used.unwrap()["mode"], "prompt");
     }
 
     struct OneShotCapturingBackend {

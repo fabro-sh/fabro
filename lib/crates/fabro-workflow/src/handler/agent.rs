@@ -200,6 +200,33 @@ pub(crate) fn truncate(s: &str, max_chars: usize) -> &str {
     }
 }
 
+pub(crate) async fn sync_provider_used_to_store(
+    stage_dir: &Path,
+    node_ref: &NodeVisitRef<'_>,
+    services: &EngineServices,
+) -> Result<(), FabroError> {
+    let Some(ref store) = services.run_store else {
+        return Ok(());
+    };
+
+    let path = stage_dir.join("provider_used.json");
+    let json = match fs::read_to_string(&path).await {
+        Ok(json) => json,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => {
+            return Err(FabroError::handler(format!(
+                "Failed to read provider_used.json: {err}"
+            )));
+        }
+    };
+    let value: serde_json::Value = serde_json::from_str(&json)
+        .map_err(|err| FabroError::handler(format!("Failed to parse provider_used.json: {err}")))?;
+    store
+        .put_node_provider_used(node_ref, &value)
+        .await
+        .map_err(|err| FabroError::handler(err.to_string()))
+}
+
 /// Shared simulate implementation for LLM-backed handlers (agent & prompt).
 /// Produces a simulated outcome with standard context updates.
 pub(crate) fn simulate_llm_handler(node: &Node) -> Outcome {
@@ -303,6 +330,7 @@ impl Handler for AgentHandler {
                     .await;
                 match result {
                     Ok(CodergenResult::Full(outcome)) => {
+                        sync_provider_used_to_store(&stage_dir, &node_ref, services).await?;
                         let status_json = serde_json::to_string_pretty(&outcome)
                             .unwrap_or_else(|_| "{}".to_string());
                         fs::write(stage_dir.join("status.json"), &status_json).await?;
@@ -339,6 +367,7 @@ impl Handler for AgentHandler {
         } else {
             fs::write(stage_dir.join("response.md"), &response_text).await?;
         }
+        sync_provider_used_to_store(&stage_dir, &node_ref, services).await?;
 
         // 7. Build and write status
         let mut outcome = Outcome::success();
@@ -402,11 +431,26 @@ mod tests {
     use super::*;
     use crate::event::EventEmitter;
     use fabro_graphviz::graph::AttrValue;
+    use fabro_store::{InMemoryStore, RunStore, Store};
     use fabro_types::fixtures;
+    use std::sync::Arc;
     use tempfile::TempDir;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
+    }
+
+    async fn make_services_with_run_store() -> (EngineServices, Arc<dyn RunStore>) {
+        let store = InMemoryStore::default();
+        let run_store = store
+            .create_run(&fixtures::RUN_1, chrono::Utc::now(), None)
+            .await
+            .unwrap();
+        let services = EngineServices {
+            run_store: Some(Arc::clone(&run_store)),
+            ..EngineServices::test_default()
+        };
+        (services, run_store)
     }
 
     fn test_context() -> Context {
@@ -666,6 +710,59 @@ mod tests {
             outcome.context_updates.get("verified"),
             Some(&serde_json::json!("true")),
         );
+    }
+
+    #[tokio::test]
+    async fn codergen_handler_persists_provider_used_in_run_store() {
+        struct ProviderUsedBackend;
+
+        #[async_trait]
+        impl CodergenBackend for ProviderUsedBackend {
+            async fn run(
+                &self,
+                _node: &Node,
+                _prompt: &str,
+                _context: &Context,
+                _thread_id: Option<&str>,
+                _emitter: &Arc<EventEmitter>,
+                stage_dir: &Path,
+                _sandbox: &Arc<dyn fabro_agent::Sandbox>,
+                _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
+            ) -> Result<CodergenResult, FabroError> {
+                std::fs::write(
+                    stage_dir.join("provider_used.json"),
+                    r#"{"mode":"agent","provider":"openai","model":"gpt-5.4"}"#,
+                )
+                .unwrap();
+                Ok(CodergenResult::Text {
+                    text: "done".to_string(),
+                    usage: None,
+                    files_touched: Vec::new(),
+                    last_file_touched: None,
+                })
+            }
+        }
+
+        let handler = AgentHandler::new(Some(Box::new(ProviderUsedBackend)));
+        let node = Node::new("step");
+        let context = test_context();
+        let graph = Graph::new("test");
+        let tmp = TempDir::new().unwrap();
+        let (services, run_store) = make_services_with_run_store().await;
+
+        handler
+            .execute(&node, &context, &graph, tmp.path(), &services)
+            .await
+            .unwrap();
+
+        let snapshot = run_store
+            .get_node(&NodeVisitRef {
+                node_id: "step",
+                visit: 1,
+            })
+            .await
+            .unwrap();
+        assert_eq!(snapshot.provider_used.unwrap()["provider"], "openai");
     }
 
     #[test]
