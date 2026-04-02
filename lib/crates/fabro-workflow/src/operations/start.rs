@@ -158,6 +158,7 @@ pub(super) async fn execute_persisted_run(
     {
         let error = FabroError::engine(err.to_string());
         let _ = persist_detached_failure(
+            run_id,
             run_store.as_ref(),
             run_dir,
             "bootstrap",
@@ -175,6 +176,7 @@ pub(super) async fn execute_persisted_run(
         Ok(persisted) => persisted,
         Err(err) => {
             let _ = persist_detached_failure(
+                run_id,
                 run_store.as_ref(),
                 run_dir,
                 "bootstrap",
@@ -191,6 +193,7 @@ pub(super) async fn execute_persisted_run(
         Ok(session) => session,
         Err(err) => {
             let _ = persist_detached_failure(
+                run_id,
                 run_store.as_ref(),
                 run_dir,
                 "bootstrap",
@@ -790,6 +793,7 @@ fn load_run_id(run_dir: &Path) -> Option<RunId> {
 }
 
 async fn persist_detached_failure(
+    run_id: RunId,
     run_store: &dyn RunStore,
     run_dir: &Path,
     phase: &'static str,
@@ -832,25 +836,23 @@ async fn persist_detached_failure(
         tracing::warn!(error = %err, "Failed to save detached failure status to store");
     }
 
-    if let Some(run_id) = load_run_id(run_dir) {
-        let event = WorkflowRunEvent::RunNotice {
-            level: RunNoticeLevel::Error,
-            code: format!("{phase}_failed"),
-            message: message.clone(),
-        };
-        let envelope = canonicalize_event(&run_id, &event);
-        let line = redacted_event_json(&envelope).map_err(|err| FabroError::Io(err.to_string()))?;
-        append_progress_event_with_line(run_dir, &envelope, &line)
-            .map_err(|err| FabroError::Io(err.to_string()))?;
-        match event_payload_from_redacted_json(&line, &run_id) {
-            Ok(payload) => {
-                if let Err(err) = run_store.append_event(&payload).await {
-                    tracing::warn!(error = %err, "Failed to append detached failure event to store");
-                }
+    let event = WorkflowRunEvent::RunNotice {
+        level: RunNoticeLevel::Error,
+        code: format!("{phase}_failed"),
+        message: message.clone(),
+    };
+    let envelope = canonicalize_event(&run_id, &event);
+    let line = redacted_event_json(&envelope).map_err(|err| FabroError::Io(err.to_string()))?;
+    append_progress_event_with_line(run_dir, &envelope, &line)
+        .map_err(|err| FabroError::Io(err.to_string()))?;
+    match event_payload_from_redacted_json(&line, &run_id) {
+        Ok(payload) => {
+            if let Err(err) = run_store.append_event(&payload).await {
+                tracing::warn!(error = %err, "Failed to append detached failure event to store");
             }
-            Err(err) => {
-                tracing::warn!(error = %err, "Failed to build detached failure event payload");
-            }
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, "Failed to build detached failure event payload");
         }
     }
 
