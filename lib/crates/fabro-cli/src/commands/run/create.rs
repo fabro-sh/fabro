@@ -1,18 +1,19 @@
 use std::path::PathBuf;
 
 use crate::args::RunArgs;
-use fabro_config::{ConfigLayer, FabroSettings};
+use fabro_config::{ConfigLayer, FabroSettings, FabroSettingsExt};
 use fabro_types::RunId;
 use fabro_util::terminal::Styles;
 use fabro_workflow::error::FabroError;
 use fabro_workflow::operations::{CreateRunInput, WorkflowInput, create};
 
 use super::output::{print_diagnostics_from_error, print_workflow_report_from_persisted};
+use crate::store;
 
 /// Create a workflow run: allocate run directory, persist RunRecord, return (run_id, run_dir).
 ///
 /// This does NOT execute the workflow — it only prepares the run directory.
-pub(crate) fn create_run(
+pub(crate) async fn create_run(
     args: &RunArgs,
     cli_defaults: ConfigLayer,
     styles: &Styles,
@@ -36,16 +37,23 @@ pub(crate) fn create_run(
         .transpose()
         .map_err(|err| anyhow::anyhow!("invalid run ID: {err}"))?;
 
-    let created = match create(CreateRunInput {
-        workflow: WorkflowInput::Path(workflow_path.clone()),
-        settings,
-        cwd,
-        workflow_slug: None,
-        run_dir: None,
-        run_id,
-        base_branch: None,
-        host_repo_path: None,
-    }) {
+    let store = store::build_store(settings.storage_dir().as_path())?;
+
+    let created = match create(
+        store.as_ref(),
+        CreateRunInput {
+            workflow: WorkflowInput::Path(workflow_path.clone()),
+            settings,
+            cwd,
+            workflow_slug: None,
+            run_dir: None,
+            run_id,
+            base_branch: None,
+            host_repo_path: None,
+        },
+    )
+    .await
+    {
         Ok(created) => created,
         Err(FabroError::ValidationFailed { diagnostics }) => {
             if !quiet {

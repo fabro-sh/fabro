@@ -1,29 +1,24 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::Duration;
 
 use chrono::{Local, Utc};
 use fabro_config::{FabroSettings, FabroSettingsExt};
 use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, Provider};
 use fabro_sandbox::SandboxProvider;
-use fabro_store::SlateStore;
+use fabro_store::Store;
 use fabro_types::RunId;
-use object_store::local::LocalFileSystem;
 
 use crate::error::FabroError;
 use crate::pipeline::types::PersistOptions;
 use crate::pipeline::{self, Persisted, TransformOptions, Validated};
 use crate::records::RunRecord;
 use crate::run_lookup::default_runs_base;
-use crate::run_status::{RunStatus, write_run_status};
+use crate::run_status::{RunStatus, RunStatusRecord, write_run_status};
 use crate::transforms::{Transform, expand_vars};
 use fabro_sandbox::daytona::detect_repo_info;
-use tokio::runtime::Builder;
 
-use super::hydrate::open_or_hydrate_run;
 use super::source::{ResolveWorkflowInput, WorkflowInput, resolve_workflow};
 use crate::event::{
     WorkflowRunEvent, append_progress_event, canonicalize_event_at, normalize_json_value,
@@ -63,7 +58,7 @@ struct PersistCreateOptions {
 }
 
 /// Resolve workflow inputs, normalize settings, and persist a run directory.
-pub fn create(request: CreateRunInput) -> Result<CreatedRun, FabroError> {
+pub async fn create(store: &dyn Store, request: CreateRunInput) -> Result<CreatedRun, FabroError> {
     let resolved = resolve_workflow(ResolveWorkflowInput {
         workflow: request.workflow,
         settings: request.settings,
@@ -131,7 +126,7 @@ pub fn create(request: CreateRunInput) -> Result<CreatedRun, FabroError> {
         &resolved.raw_source,
         resolved.workflow_toml_path.as_deref(),
     )?;
-    hydrate_created_run(&persisted)?;
+    persist_created_run(store, &persisted, &resolved.raw_source).await?;
 
     Ok(CreatedRun {
         persisted,
@@ -178,42 +173,79 @@ fn emit_run_created_event(
         .map_err(|err| FabroError::engine(err.to_string()))
 }
 
-fn hydrate_created_run(persisted: &Persisted) -> Result<(), FabroError> {
-    let storage_dir = persisted.run_record().settings.storage_dir();
-    let run_dir = persisted.run_dir().to_path_buf();
-    let join = std::thread::spawn(move || -> Result<(), FabroError> {
-        let runtime = Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|err| FabroError::engine(err.to_string()))?;
-        runtime.block_on(async move {
-            let store = build_durable_store(&storage_dir)?;
-            open_or_hydrate_run(store.as_ref(), &run_dir)
-                .await
-                .map(|_| ())
-        })
-    });
+async fn persist_created_run(
+    store: &dyn Store,
+    persisted: &Persisted,
+    workflow_source: &str,
+) -> Result<(), FabroError> {
+    let record = persisted.run_record();
+    let run_dir_string = persisted.run_dir().to_string_lossy().to_string();
+    let run_store = match store
+        .create_run(&record.run_id, record.created_at, Some(&run_dir_string))
+        .await
+    {
+        Ok(run_store) => run_store,
+        Err(err) => store
+            .open_run(&record.run_id)
+            .await
+            .map_err(|open_err| FabroError::engine(open_err.to_string()))?
+            .ok_or_else(|| FabroError::engine(err.to_string()))?,
+    };
 
-    match join.join() {
-        Ok(result) => result,
-        Err(_) => Err(FabroError::engine(
-            "store hydration thread panicked".to_string(),
-        )),
+    run_store.put_run(record).await.map_err(store_error)?;
+    if !workflow_source.is_empty() {
+        run_store
+            .put_graph(workflow_source)
+            .await
+            .map_err(store_error)?;
     }
+    run_store
+        .put_status(&RunStatusRecord::new(RunStatus::Submitted, None))
+        .await
+        .map_err(store_error)?;
+
+    let envelope = canonicalize_event_at(
+        &record.run_id,
+        &WorkflowRunEvent::RunCreated {
+            run_id: record.run_id,
+            settings: normalize_json_value(
+                serde_json::to_value(&record.settings)
+                    .map_err(|err| FabroError::engine(err.to_string()))?,
+            ),
+            graph: normalize_json_value(
+                serde_json::to_value(&record.graph)
+                    .map_err(|err| FabroError::engine(err.to_string()))?,
+            ),
+            workflow_source: (!workflow_source.is_empty()).then(|| workflow_source.to_string()),
+            workflow_config: None,
+            labels: record
+                .labels
+                .clone()
+                .into_iter()
+                .collect::<BTreeMap<_, _>>(),
+            run_dir: persisted.run_dir().display().to_string(),
+            working_directory: record.working_directory.display().to_string(),
+            host_repo_path: record.host_repo_path.clone(),
+            base_branch: record.base_branch.clone(),
+            workflow_slug: record.workflow_slug.clone(),
+            db_prefix: None,
+        },
+        record.created_at,
+    );
+    let payload = fabro_store::EventPayload::new(
+        serde_json::to_value(&envelope).map_err(|err| FabroError::engine(err.to_string()))?,
+        &record.run_id,
+    )
+    .map_err(store_error)?;
+    run_store
+        .append_event(&payload)
+        .await
+        .map(|_| ())
+        .map_err(store_error)
 }
 
-fn build_durable_store(storage_dir: &Path) -> Result<Arc<SlateStore>, FabroError> {
-    let store_path = storage_dir.join("store");
-    std::fs::create_dir_all(&store_path)?;
-    let object_store = Arc::new(
-        LocalFileSystem::new_with_prefix(&store_path)
-            .map_err(|err| FabroError::engine(err.to_string()))?,
-    );
-    Ok(Arc::new(SlateStore::new(
-        object_store,
-        "",
-        Duration::from_millis(5),
-    )))
+fn store_error(err: impl std::fmt::Display) -> FabroError {
+    FabroError::engine(err.to_string())
 }
 
 fn validate_sandbox_provider(settings: &FabroSettings) -> Result<(), FabroError> {
@@ -412,7 +444,7 @@ pub(crate) fn make_run_dir(runs_base: &Path, run_id: &str, dry_run: bool) -> Pat
 mod tests {
     use super::*;
     use fabro_graphviz::graph::AttrValue;
-    use fabro_store::{SlateStore, Store};
+    use fabro_store::{InMemoryStore, SlateStore, Store};
     use fabro_types::fixtures;
     use object_store::local::LocalFileSystem;
     use std::sync::Arc;
@@ -420,6 +452,10 @@ mod tests {
 
     use crate::operations::{ValidateInput, validate};
     use crate::run_status::RunStatusRecordExt;
+
+    fn memory_store() -> InMemoryStore {
+        InMemoryStore::default()
+    }
 
     fn validate_dot(dot_source: &str, settings: FabroSettings) -> Validated {
         validate(ValidateInput {
@@ -606,26 +642,31 @@ mod tests {
         assert_eq!(validated.graph().goal(), "ship it");
     }
 
-    #[test]
-    fn create_returns_validation_failed_with_diagnostics() {
+    #[tokio::test]
+    async fn create_returns_validation_failed_with_diagnostics() {
         let dot = r#"digraph Test {
             graph [goal="Test"]
             work [label="Work"]
         }"#;
         let dir = tempfile::tempdir().unwrap();
-        let err = create(CreateRunInput {
-            workflow: WorkflowInput::DotSource {
-                source: dot.to_string(),
-                base_dir: None,
+        let store = memory_store();
+        let err = create(
+            &store,
+            CreateRunInput {
+                workflow: WorkflowInput::DotSource {
+                    source: dot.to_string(),
+                    base_dir: None,
+                },
+                settings: FabroSettings::default(),
+                cwd: dir.path().to_path_buf(),
+                workflow_slug: None,
+                run_dir: Some(dir.path().join("run")),
+                run_id: None,
+                host_repo_path: None,
+                base_branch: None,
             },
-            settings: FabroSettings::default(),
-            cwd: dir.path().to_path_buf(),
-            workflow_slug: None,
-            run_dir: Some(dir.path().join("run")),
-            run_id: None,
-            host_repo_path: None,
-            base_branch: None,
-        })
+        )
+        .await
         .unwrap_err();
 
         match err {
@@ -636,36 +677,41 @@ mod tests {
         }
     }
 
-    #[test]
-    fn create_persists_normalized_config_and_initial_state() {
+    #[tokio::test]
+    async fn create_persists_normalized_config_and_initial_state() {
         let dir = tempfile::tempdir().unwrap();
-        let created = create(CreateRunInput {
-            workflow: WorkflowInput::DotSource {
-                source: MINIMAL_DOT.to_string(),
-                base_dir: None,
-            },
-            settings: FabroSettings {
-                llm: Some(fabro_config::run::LlmSettings {
-                    model: Some("sonnet".to_string()),
-                    provider: None,
-                    fallbacks: None,
-                }),
-                pull_request: Some(fabro_config::run::PullRequestSettings {
-                    enabled: false,
+        let store = memory_store();
+        let created = create(
+            &store,
+            CreateRunInput {
+                workflow: WorkflowInput::DotSource {
+                    source: MINIMAL_DOT.to_string(),
+                    base_dir: None,
+                },
+                settings: FabroSettings {
+                    llm: Some(fabro_config::run::LlmSettings {
+                        model: Some("sonnet".to_string()),
+                        provider: None,
+                        fallbacks: None,
+                    }),
+                    pull_request: Some(fabro_config::run::PullRequestSettings {
+                        enabled: false,
+                        ..Default::default()
+                    }),
+                    goal: Some("override goal".to_string()),
+                    dry_run: Some(true),
+                    labels: HashMap::from([("env".to_string(), "test".to_string())]),
                     ..Default::default()
-                }),
-                goal: Some("override goal".to_string()),
-                dry_run: Some(true),
-                labels: HashMap::from([("env".to_string(), "test".to_string())]),
-                ..Default::default()
+                },
+                cwd: dir.path().to_path_buf(),
+                workflow_slug: Some("slug".to_string()),
+                run_dir: Some(dir.path().join("run")),
+                run_id: Some(fixtures::RUN_1),
+                host_repo_path: Some(dir.path().display().to_string()),
+                base_branch: Some("main".to_string()),
             },
-            cwd: dir.path().to_path_buf(),
-            workflow_slug: Some("slug".to_string()),
-            run_dir: Some(dir.path().join("run")),
-            run_id: Some(fixtures::RUN_1),
-            host_repo_path: Some(dir.path().display().to_string()),
-            base_branch: Some("main".to_string()),
-        })
+        )
+        .await
         .unwrap();
 
         assert_eq!(created.run_id, fixtures::RUN_1);
@@ -715,8 +761,8 @@ mod tests {
         assert!(!created.run_dir.join("id.txt").exists());
     }
 
-    #[test]
-    fn create_copies_workflow_toml_snapshot() {
+    #[tokio::test]
+    async fn create_copies_workflow_toml_snapshot() {
         let dir = tempfile::tempdir().unwrap();
         let workflow_dir = dir.path().join("workflow");
         std::fs::create_dir_all(&workflow_dir).unwrap();
@@ -727,20 +773,25 @@ mod tests {
         )
         .unwrap();
 
-        let created = create(CreateRunInput {
-            workflow: WorkflowInput::Path(workflow_dir.join("workflow.toml")),
-            settings: FabroSettings {
-                storage_dir: Some(dir.path().join("storage")),
-                dry_run: Some(true),
-                ..Default::default()
+        let store = memory_store();
+        let created = create(
+            &store,
+            CreateRunInput {
+                workflow: WorkflowInput::Path(workflow_dir.join("workflow.toml")),
+                settings: FabroSettings {
+                    storage_dir: Some(dir.path().join("storage")),
+                    dry_run: Some(true),
+                    ..Default::default()
+                },
+                cwd: dir.path().to_path_buf(),
+                workflow_slug: None,
+                run_dir: None,
+                run_id: None,
+                host_repo_path: None,
+                base_branch: None,
             },
-            cwd: dir.path().to_path_buf(),
-            workflow_slug: None,
-            run_dir: None,
-            run_id: None,
-            host_repo_path: None,
-            base_branch: None,
-        })
+        )
+        .await
         .unwrap();
 
         assert_eq!(
@@ -749,29 +800,34 @@ mod tests {
         );
     }
 
-    #[test]
-    fn create_resolves_working_directory_and_repo_path_from_request_cwd() {
+    #[tokio::test]
+    async fn create_resolves_working_directory_and_repo_path_from_request_cwd() {
         let dir = tempfile::tempdir().unwrap();
         let workspace = dir.path().join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
 
-        let created = create(CreateRunInput {
-            workflow: WorkflowInput::DotSource {
-                source: MINIMAL_DOT.to_string(),
-                base_dir: None,
+        let store = memory_store();
+        let created = create(
+            &store,
+            CreateRunInput {
+                workflow: WorkflowInput::DotSource {
+                    source: MINIMAL_DOT.to_string(),
+                    base_dir: None,
+                },
+                settings: FabroSettings {
+                    work_dir: Some("workspace".to_string()),
+                    dry_run: Some(true),
+                    ..Default::default()
+                },
+                cwd: dir.path().to_path_buf(),
+                workflow_slug: None,
+                run_dir: Some(dir.path().join("run")),
+                run_id: Some(fixtures::RUN_2),
+                host_repo_path: None,
+                base_branch: None,
             },
-            settings: FabroSettings {
-                work_dir: Some("workspace".to_string()),
-                dry_run: Some(true),
-                ..Default::default()
-            },
-            cwd: dir.path().to_path_buf(),
-            workflow_slug: None,
-            run_dir: Some(dir.path().join("run")),
-            run_id: Some(fixtures::RUN_2),
-            host_repo_path: None,
-            base_branch: None,
-        })
+        )
+        .await
         .unwrap();
 
         assert_eq!(created.persisted.run_record().working_directory, workspace);
@@ -793,29 +849,32 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let storage_dir = dir.path().join("storage");
         let run_dir = dir.path().join("run");
-        let created = create(CreateRunInput {
-            workflow: WorkflowInput::DotSource {
-                source: MINIMAL_DOT.to_string(),
-                base_dir: None,
-            },
-            settings: FabroSettings {
-                storage_dir: Some(storage_dir.clone()),
-                dry_run: Some(true),
-                ..Default::default()
-            },
-            cwd: dir.path().to_path_buf(),
-            workflow_slug: Some("slug".to_string()),
-            run_dir: Some(run_dir.clone()),
-            run_id: Some(fixtures::RUN_3),
-            host_repo_path: None,
-            base_branch: None,
-        })
-        .unwrap();
-
         std::fs::create_dir_all(storage_dir.join("store")).unwrap();
         let object_store =
             Arc::new(LocalFileSystem::new_with_prefix(storage_dir.join("store")).unwrap());
         let store = Arc::new(SlateStore::new(object_store, "", Duration::from_millis(5)));
+        let created = create(
+            store.as_ref(),
+            CreateRunInput {
+                workflow: WorkflowInput::DotSource {
+                    source: MINIMAL_DOT.to_string(),
+                    base_dir: None,
+                },
+                settings: FabroSettings {
+                    storage_dir: Some(storage_dir.clone()),
+                    dry_run: Some(true),
+                    ..Default::default()
+                },
+                cwd: dir.path().to_path_buf(),
+                workflow_slug: Some("slug".to_string()),
+                run_dir: Some(run_dir.clone()),
+                run_id: Some(fixtures::RUN_3),
+                host_repo_path: None,
+                base_branch: None,
+            },
+        )
+        .await
+        .unwrap();
         let run_store = store
             .open_run_reader(&created.run_id)
             .await

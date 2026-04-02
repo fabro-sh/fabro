@@ -541,19 +541,24 @@ async fn start_run(
     info!(run_id = %run_id, "Run queued");
     let run_dir = std::env::temp_dir().join(format!("fabro-{}", uuid::Uuid::new_v4()));
     let settings = state.settings.read().unwrap().clone();
-    let created = match operations::create(CreateRunInput {
-        workflow: WorkflowInput::DotSource {
-            source: req.dot_source.clone(),
-            base_dir: None,
+    let created = match operations::create(
+        state.store.as_ref(),
+        CreateRunInput {
+            workflow: WorkflowInput::DotSource {
+                source: req.dot_source.clone(),
+                base_dir: None,
+            },
+            settings,
+            cwd: std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir()),
+            workflow_slug: None,
+            run_dir: Some(run_dir.clone()),
+            run_id: Some(run_id),
+            host_repo_path: None,
+            base_branch: None,
         },
-        settings,
-        cwd: std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir()),
-        workflow_slug: None,
-        run_dir: Some(run_dir.clone()),
-        run_id: Some(run_id),
-        host_repo_path: None,
-        base_branch: None,
-    }) {
+    )
+    .await
+    {
         Ok(created) => created,
         Err(ref err @ FabroError::ValidationFailed { ref diagnostics }) => {
             let message = if diagnostics.is_empty() {
