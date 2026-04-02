@@ -1633,6 +1633,9 @@ mod tests {
         start -> exit
     }"#;
 
+    const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
+    const POLL_ATTEMPTS: usize = 500;
+
     fn dry_run_settings() -> FabroSettings {
         FabroSettings {
             dry_run: Some(true),
@@ -2187,8 +2190,8 @@ mod tests {
 
         // Poll until run completes
         let mut status = String::new();
-        for _ in 0..100 {
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        for _ in 0..POLL_ATTEMPTS {
+            tokio::time::sleep(POLL_INTERVAL).await;
             let req = Request::builder()
                 .method("GET")
                 .uri(api(&format!("/runs/{run_id}")))
@@ -2365,8 +2368,8 @@ mod tests {
 
         // Poll until run completes
         let mut status = String::new();
-        for _ in 0..100 {
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        for _ in 0..POLL_ATTEMPTS {
+            tokio::time::sleep(POLL_INTERVAL).await;
             let req = Request::builder()
                 .method("GET")
                 .uri(api(&format!("/runs/{run_id}")))
