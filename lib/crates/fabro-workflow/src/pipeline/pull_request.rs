@@ -296,6 +296,23 @@ fn emit_run_notice(
     });
 }
 
+async fn load_pull_request_diff(run_store: Option<&dyn RunStore>, run_dir: &Path) -> String {
+    match run_store {
+        Some(run_store) => run_store
+            .get_final_patch()
+            .await
+            .inspect_err(|err| {
+                tracing::warn!(error = %err, "Failed to load final patch from store for PR");
+            })
+            .ok()
+            .flatten()
+            .unwrap_or_default(),
+        None => read_to_string(run_dir.join("final.patch"))
+            .await
+            .unwrap_or_default(),
+    }
+}
+
 /// Build a complete PR body by combining LLM-generated narrative with
 /// programmatic sections (plan, retro, fabro details).
 pub async fn build_pr_body(
@@ -541,9 +558,8 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                 result.status,
                 StageStatus::Success | StageStatus::PartialSuccess
             ) {
-                let diff = read_to_string(options.run_dir.join("final.patch"))
-                    .await
-                    .unwrap_or_default();
+                let diff =
+                    load_pull_request_diff(options.run_store.as_deref(), &options.run_dir).await;
                 if let (Some(base_branch), Some(run_branch), Some(creds), Some(origin)) = (
                     &run_options.base_branch,
                     pushed_branch.as_deref(),
@@ -1322,5 +1338,27 @@ mod tests {
         .await;
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn load_pull_request_diff_uses_store_without_disk_patch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = InMemoryStore::default();
+        let run_store = store
+            .create_run(
+                &fixtures::RUN_1,
+                Utc::now(),
+                Some(&tmp.path().display().to_string()),
+            )
+            .await
+            .unwrap();
+        run_store
+            .put_final_patch("diff --git a/src/lib.rs b/src/lib.rs\n+fn from_store() {}\n")
+            .await
+            .unwrap();
+
+        let diff = load_pull_request_diff(Some(run_store.as_ref()), tmp.path()).await;
+
+        assert!(diff.contains("from_store"));
     }
 }
