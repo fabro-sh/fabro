@@ -51,6 +51,7 @@ pub(crate) async fn execute(
     let runtime_state = RuntimeState::new(&run_dir);
 
     let services = StartServices {
+        run_id: run_record.run_id,
         cancel_token: None,
         emitter: Arc::new(EventEmitter::new(run_record.run_id)),
         interviewer: Arc::new(FileInterviewer::new(

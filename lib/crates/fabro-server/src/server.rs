@@ -738,6 +738,7 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
         }
     };
     let services = operations::StartServices {
+        run_id,
         cancel_token: Some(Arc::clone(&cancel_token)),
         emitter: Arc::clone(&emitter),
         interviewer: Arc::clone(&interviewer) as Arc<dyn Interviewer>,

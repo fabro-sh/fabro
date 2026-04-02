@@ -65,6 +65,7 @@ struct RunSession {
 }
 
 pub struct StartServices {
+    pub run_id: RunId,
     pub cancel_token: Option<Arc<AtomicBool>>,
     pub emitter: Arc<EventEmitter>,
     pub interviewer: Arc<dyn Interviewer>,
@@ -118,15 +119,12 @@ pub(super) async fn execute_persisted_run(
     mut services: StartServices,
 ) -> Result<Started, FabroError> {
     let cancel_token = services.cancel_token.clone();
+    let run_id = services.run_id;
     let inner_store = Arc::clone(&services.run_store);
     let projection_run_dir = run_dir.to_path_buf();
     services.run_store = Arc::new(
         DiskProjectingRunStore::new(inner_store, run_dir.to_path_buf()).on_projection_error(
             Arc::new(move |projection_error: ProjectionError| {
-                let Some(run_id) = load_run_id(&projection_run_dir) else {
-                    return;
-                };
-
                 // Write directly to progress.jsonl/live.json so projection failures do not
                 // recurse back through the decorated store.append_event() path.
                 let envelope = canonicalize_event(
@@ -947,6 +945,7 @@ mod tests {
         registry: Arc<HandlerRegistry>,
     ) -> StartServices {
         StartServices {
+            run_id: fixtures::RUN_1,
             cancel_token: None,
             emitter,
             interviewer: Arc::new(fabro_interview::AutoApproveInterviewer),
