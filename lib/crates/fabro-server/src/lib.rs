@@ -10,9 +10,11 @@ pub mod github_webhooks;
 pub mod jwt_auth;
 pub mod serve;
 pub mod server;
+pub mod static_files;
 pub mod server_config {
     pub use fabro_config::FabroSettings;
     pub use fabro_config::server::*;
 }
 pub mod sessions;
 pub mod tls;
+pub mod web_auth;

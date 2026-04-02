@@ -4,9 +4,8 @@ import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import { Link, Outlet, useFetcher, useLocation } from "react-router";
 import { columnNames, mapRunListItem, statusColors } from "../data/runs";
 import type { ColumnStatus } from "../data/runs";
-import { apiJson } from "../api-client";
+import { apiJson } from "../api";
 import type { PaginatedRunList, PreviewUrlResponse } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/run-detail";
 
 const tabs = [
   { name: "Overview", path: "", count: null },
@@ -19,7 +18,7 @@ const tabs = [
 
 export const handle = { hideHeader: true };
 
-export async function loader({ request, params }: Route.LoaderArgs) {
+export async function loader({ request, params }: any) {
   const response = await apiJson<PaginatedRunList>("/runs", { request });
   const apiRun = response.data.find((r) => r.id === params.id);
   if (!apiRun) return { run: null };
@@ -32,7 +31,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   };
 }
 
-export async function action({ params, request }: Route.ActionArgs) {
+export async function action({ params, request }: any) {
   const formData = await request.formData();
   const port = formData.get("port");
   const expiresInSecs = formData.get("expires_in_secs");
@@ -47,12 +46,12 @@ export async function action({ params, request }: Route.ActionArgs) {
   return result;
 }
 
-export function meta({ data }: Route.MetaArgs) {
+export function meta({ data }: any) {
   const run = data?.run;
   return [{ title: run ? `${run.title} — Fabro` : "Run — Fabro" }];
 }
 
-export default function RunDetail({ loaderData, params }: Route.ComponentProps) {
+export default function RunDetail({ loaderData, params }: any) {
   const { run } = loaderData;
   const { pathname } = useLocation();
   const basePath = `/runs/${params.id}`;

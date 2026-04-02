@@ -1580,19 +1580,19 @@ mod tests {
         #[test]
         fn check_web_shows_url() {
             let status = WebStatus {
-                url: "http://localhost:5173".to_string(),
+                url: "http://localhost:3000".to_string(),
                 auth_provider: AuthProvider::Github,
                 allowed_usernames_count: 0,
             };
             let result = check_web(&status, None);
             assert_eq!(result.status, CheckStatus::Pass);
-            assert_eq!(result.summary, "http://localhost:5173");
+            assert_eq!(result.summary, "http://localhost:3000");
         }
 
         #[test]
         fn check_web_details_show_auth() {
             let status = WebStatus {
-                url: "https://arc.example.com".to_string(),
+                url: "https://fabro.example.com".to_string(),
                 auth_provider: AuthProvider::Github,
                 allowed_usernames_count: 3,
             };
@@ -1602,7 +1602,7 @@ mod tests {
                 result
                     .details
                     .iter()
-                    .any(|d| d.text.contains("https://arc.example.com"))
+                    .any(|d| d.text.contains("https://fabro.example.com"))
             );
             assert!(
                 result
@@ -1615,7 +1615,7 @@ mod tests {
         #[test]
         fn check_web_live_ok() {
             let status = WebStatus {
-                url: "http://localhost:5173".to_string(),
+                url: "http://localhost:3000".to_string(),
                 auth_provider: AuthProvider::Github,
                 allowed_usernames_count: 0,
             };
@@ -1633,7 +1633,7 @@ mod tests {
         #[test]
         fn check_web_live_error() {
             let status = WebStatus {
-                url: "http://localhost:5173".to_string(),
+                url: "http://localhost:3000".to_string(),
                 auth_provider: AuthProvider::Github,
                 allowed_usernames_count: 0,
             };

@@ -1,20 +1,19 @@
-import { apiJson } from "../api-client";
+import { apiJson } from "../api";
 import { CollapsibleFile } from "../components/collapsible-file";
 import type { ServerSettings } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/settings";
 
-export function meta({}: Route.MetaArgs) {
+export function meta({}: any) {
   return [{ title: "Settings — Fabro" }];
 }
 
 export const handle = { hideHeader: true };
 
-export async function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request }: any) {
   const settings = await apiJson<ServerSettings>("/settings", { request });
   return { settings };
 }
 
-export default function Settings({ loaderData }: Route.ComponentProps) {
+export default function Settings({ loaderData }: any) {
   const { settings } = loaderData;
 
   return (

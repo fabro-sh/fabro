@@ -50,18 +50,17 @@ import type {
   VerificationMode,
   VerificationResult,
 } from "../data/verifications";
-import { apiJson } from "../api-client";
+import { apiJson } from "../api";
 import type { VerificationCriterionDetail } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/verification-criterion";
 
 export const handle = { hideHeader: true };
 
-export async function loader({ request, params }: Route.LoaderArgs) {
+export async function loader({ request, params }: any) {
   const data = await apiJson<VerificationCriterionDetail>(`/verification/criteria/${params.id}`, { request });
   return { data };
 }
 
-export function meta({ data }: Route.MetaArgs) {
+export function meta({ data }: any) {
   const name = data?.data?.name ?? "Criterion";
   return [{ title: `${name} — Verification — Fabro` }];
 }
@@ -170,7 +169,7 @@ function EvaluationDots({ evaluations }: { evaluations: readonly VerificationRes
   );
 }
 
-export default function VerificationCriterion({ loaderData }: Route.ComponentProps) {
+export default function VerificationCriterion({ loaderData }: any) {
   const { data } = loaderData;
   const navigate = useNavigate();
 

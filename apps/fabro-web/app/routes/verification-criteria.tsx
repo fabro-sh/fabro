@@ -62,11 +62,10 @@ import type {
   VerificationCategory,
   CriterionPerformance,
 } from "../data/verifications";
-import { apiJson } from "../api-client";
+import { apiJson } from "../api";
 import type { VerificationCriterion as ApiVerificationCriterion } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/verification-criteria";
 
-export async function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request }: any) {
   const { data: apiCategories } = await apiJson<{ data: ApiVerificationCriterion[] }>("/verification/criteria", { request });
   const categories: VerificationCategory[] = apiCategories.map((cat) => ({
     name: cat.name,
@@ -96,7 +95,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 export const handle = { wide: true };
 
-export function meta({}: Route.MetaArgs) {
+export function meta({}: any) {
   return [{ title: "Verifications — Fabro" }];
 }
 
@@ -385,7 +384,7 @@ function filterCategories(
     .filter((category) => category.criteria.length > 0);
 }
 
-export default function Verifications({ loaderData }: Route.ComponentProps) {
+export default function Verifications({ loaderData }: any) {
   const { categories: verificationCategories, criterionPerformance } = loaderData;
   const [view, setView] = useState<ViewMode>("grouped");
   const [query, setQuery] = useState("");

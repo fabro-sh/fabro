@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract full digraph DOT examples from Arc documentation files."""
+"""Extract full digraph DOT examples from Fabro documentation files."""
 
 import os
 import re

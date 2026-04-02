@@ -100,7 +100,7 @@ pub struct WebSettings {
 }
 
 fn default_web_url() -> String {
-    "http://localhost:5173".to_string()
+    "http://localhost:3000".to_string()
 }
 
 impl Default for WebSettings {

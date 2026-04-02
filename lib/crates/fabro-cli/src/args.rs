@@ -779,7 +779,7 @@ pub(crate) enum Commands {
     /// Set up the Fabro environment (LLMs, certs, GitHub)
     Install {
         /// Base URL for the web UI (used for OAuth callback URLs)
-        #[arg(long, default_value = "http://localhost:5173")]
+        #[arg(long, default_value = "http://localhost:3000")]
         web_url: String,
     },
     /// Pull request operations

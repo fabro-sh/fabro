@@ -17,7 +17,7 @@ docker compose -f docker/docker-compose.yaml up api web -d
 Wait ~10 seconds for both services to be ready, then verify:
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}" http://localhost:5173/runs
+curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/runs
 # Should return 200
 ```
 

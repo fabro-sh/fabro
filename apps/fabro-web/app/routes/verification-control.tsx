@@ -54,19 +54,18 @@ import type {
   VerificationMode,
   VerificationResult,
 } from "../data/verifications";
-import { apiJson } from "../api-client";
+import { apiJson } from "../api";
 import { timeAgo } from "../lib/time";
 import type { VerificationDetailResponse } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/verification-control";
 
 export const handle = { hideHeader: true };
 
-export async function loader({ request, params }: Route.LoaderArgs) {
+export async function loader({ request, params }: any) {
   const data = await apiJson<VerificationDetailResponse>(`/verification/controls/${params.id}`, { request });
   return { data };
 }
 
-export function meta({ data }: Route.MetaArgs) {
+export function meta({ data }: any) {
   const name = data?.data?.control?.name ?? "Verification";
   return [{ title: `${name} — Verification — Fabro` }];
 }
@@ -204,7 +203,7 @@ function ResultIcon({ result }: { result: VerificationResult }) {
   return <MinusCircleIcon className={`size-4 ${config.color}`} />;
 }
 
-export default function VerificationDetail({ loaderData }: Route.ComponentProps) {
+export default function VerificationDetail({ loaderData }: any) {
   const { data } = loaderData;
   const { control: controlInfo, performance: apiPerf, control_detail: apiDetail, recent_results: apiRecentResults, siblings: apiSiblings } = data;
 

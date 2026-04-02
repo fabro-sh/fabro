@@ -5,10 +5,9 @@ import { CheckCircleIcon, ArrowPathIcon, PauseCircleIcon, XCircleIcon } from "@h
 import { DocumentTextIcon, MapIcon, CommandLineIcon, ChatBubbleLeftIcon } from "@heroicons/react/24/outline";
 import { ToolRow, ToolBlock } from "../components/tool-use";
 import type { ToolUse } from "../components/tool-use";
-import { apiJson } from "../api-client";
+import { apiJson } from "../api";
 import { formatDurationSecs } from "../lib/format";
 import type { PaginatedRunStageList, StageTurn as ApiStageTurn, PaginatedStageTurnList } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/run-stages";
 
 export const handle = { wide: true };
 
@@ -21,7 +20,7 @@ interface Stage {
   duration: string;
 }
 
-export async function loader({ request, params }: Route.LoaderArgs) {
+export async function loader({ request, params }: any) {
   const { data: apiStages } = await apiJson<PaginatedRunStageList>(`/runs/${params.id}/stages`, { request });
   const stages: Stage[] = apiStages.map((s) => ({
     id: s.id,
@@ -84,7 +83,7 @@ function AssistantBlock({ content }: { content: string }) {
   );
 }
 
-export default function RunStages({ loaderData }: Route.ComponentProps) {
+export default function RunStages({ loaderData }: any) {
   const { id, stageId } = useParams();
   const { stages, turns: apiTurns } = loaderData;
 

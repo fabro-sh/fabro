@@ -3,9 +3,8 @@ import { useNavigate } from "react-router";
 import { MagnifyingGlassIcon, ChevronDownIcon } from "@heroicons/react/24/outline";
 import { smoothnessConfig, formatDurationMs } from "../data/retros";
 import type { SmoothnessRating } from "../data/retros";
-import { apiJson } from "../api-client";
+import { apiJson } from "../api";
 import type { PaginatedRetroList } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/retros";
 
 interface RetroRow {
   run_id: string;
@@ -17,7 +16,7 @@ interface RetroRow {
   friction_point_count: number;
 }
 
-export async function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request }: any) {
   const { data: apiRetros } = await apiJson<PaginatedRetroList>("/retros", { request });
   const retros: RetroRow[] = apiRetros.map((r) => ({
     run_id: r.run.id,
@@ -31,7 +30,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   return { retros };
 }
 
-export function meta({}: Route.MetaArgs) {
+export function meta({}: any) {
   return [{ title: "Retros \u2014 Fabro" }];
 }
 
@@ -71,7 +70,7 @@ function truncate(text: string, maxLength: number): string {
   return text.slice(0, maxLength) + "\u2026";
 }
 
-export default function Retros({ loaderData }: Route.ComponentProps) {
+export default function Retros({ loaderData }: any) {
   const { retros } = loaderData;
   const navigate = useNavigate();
   const [query, setQuery] = useState("");

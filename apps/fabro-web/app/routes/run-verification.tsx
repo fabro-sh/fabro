@@ -19,11 +19,10 @@ import type {
   VerificationType,
   VerificationCategory,
 } from "../data/verifications";
-import { apiJson } from "../api-client";
+import { apiJson } from "../api";
 import type { PaginatedRunVerificationList } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/run-verification";
 
-export async function loader({ request, params }: Route.LoaderArgs) {
+export async function loader({ request, params }: any) {
   const { data: apiCategories } = await apiJson<PaginatedRunVerificationList>(`/runs/${params.id}/verification`, { request });
   const categories: VerificationCategory[] = apiCategories.map((cat) => ({
     name: cat.name,
@@ -135,7 +134,7 @@ function CategoryCard({ category }: { category: VerificationCategory }) {
   );
 }
 
-export default function RunVerifications({ loaderData }: Route.ComponentProps) {
+export default function RunVerifications({ loaderData }: any) {
   const { categories } = loaderData;
   return (
     <div className="space-y-3">

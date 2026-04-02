@@ -32,6 +32,8 @@ fabro-store = { path = "../fabro-store" }
 chrono.workspace = true
 futures-util.workspace = true
 axum.workspace = true
+axum-extra.workspace = true
+cookie.workspace = true
 dirs.workspace = true
 sqlx.workspace = true
 tower = "0.5"
@@ -60,8 +62,11 @@ hmac.workspace = true
 sha2.workspace = true
 hex.workspace = true
 reqwest.workspace = true
+rand.workspace = true
 bytes = "1"
 object_store.workspace = true
+mime_guess.workspace = true
+rust-embed.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }

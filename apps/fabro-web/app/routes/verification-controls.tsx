@@ -40,18 +40,17 @@ import type {
   VerificationType,
   VerificationMode,
 } from "../data/verifications";
-import { apiJson } from "../api-client";
+import { apiJson } from "../api";
 import type { VerificationControlListItem } from "@qltysh/fabro-api-client";
-import type { Route } from "./+types/verification-controls";
 
-export async function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request }: any) {
   const { data: controls } = await apiJson<{ data: VerificationControlListItem[] }>("/verification/controls", { request });
   return { controls };
 }
 
 export const handle = { wide: true };
 
-export function meta({}: Route.MetaArgs) {
+export function meta({}: any) {
   return [{ title: "Controls — Verification — Fabro" }];
 }
 
@@ -114,7 +113,7 @@ function ModeBadge({ mode }: { mode: VerificationMode }) {
   );
 }
 
-export default function VerificationControls({ loaderData }: Route.ComponentProps) {
+export default function VerificationControls({ loaderData }: any) {
   const { controls } = loaderData;
   const navigate = useNavigate();
 

@@ -7,15 +7,14 @@ import {
   formatDurationMs,
 } from "../data/retros";
 import type { Retro } from "../data/retros";
-import { apiJson } from "../api-client";
-import type { Route } from "./+types/run-retro";
+import { apiJson } from "../api";
 
-export async function loader({ request, params }: Route.LoaderArgs) {
+export async function loader({ request, params }: any) {
   const retro = await apiJson<Retro>(`/runs/${params.id}/retro`, { request });
   return { retro };
 }
 
-export function meta({ data }: Route.MetaArgs) {
+export function meta({ data }: any) {
   const retro = data?.retro;
   return [{ title: retro ? `Retro: ${retro.goal} \u2014 Fabro` : "Retro \u2014 Fabro" }];
 }
@@ -25,7 +24,7 @@ function formatCost(cost: number | undefined): string {
   return `$${cost.toFixed(2)}`;
 }
 
-export default function RunRetro({ loaderData }: Route.ComponentProps) {
+export default function RunRetro({ loaderData }: any) {
   const { retro } = loaderData;
 
   if (!retro) {
