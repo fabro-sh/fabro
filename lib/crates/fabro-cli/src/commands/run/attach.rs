@@ -29,6 +29,7 @@ const ATTACH_STARTUP_GRACE: Duration = Duration::from_secs(3);
 const INTERVIEW_UNANSWERED_MESSAGE: &str =
     "Interview ended without an answer. The run is still waiting for input; reattach to answer it.";
 const JSON_INTERVIEW_MESSAGE: &str = "This run is waiting for human input, but --json is non-interactive. Reattach without --json to answer it.";
+const ATTACH_FINAL_STATUS_GRACE: Duration = Duration::from_secs(2);
 
 /// Attach to a running (or finished) workflow run, rendering progress live.
 ///
@@ -245,7 +246,6 @@ async fn attach_run_store(
             .await
             .ok()
             .flatten()
-            .or_else(|| read_status_record(&run_dir.join("status.json")))
             .map(|record| record.status)
             .filter(|status| status.is_terminal());
 
@@ -284,7 +284,7 @@ async fn attach_run_store(
 
     finish_progress(&mut progress_ui, json_output);
 
-    Ok(determine_exit_code_with_store(run_store, run_dir).await)
+    Ok(determine_exit_code_with_store(run_store).await)
 }
 
 async fn attach_run_files(
@@ -711,25 +711,33 @@ fn determine_exit_code(conclusion_path: &Path, status_record: Option<RunStatusRe
     }
 }
 
-async fn determine_exit_code_with_store(run_store: &dyn RunStore, run_dir: &Path) -> ExitCode {
-    if let Ok(Some(conclusion)) = run_store.get_conclusion().await {
-        let success = matches!(
-            conclusion.status,
-            StageStatus::Success | StageStatus::PartialSuccess
-        );
-        if success {
-            ExitCode::from(0)
-        } else {
-            ExitCode::from(1)
+async fn determine_exit_code_with_store(run_store: &dyn RunStore) -> ExitCode {
+    let deadline = Instant::now() + ATTACH_FINAL_STATUS_GRACE;
+    loop {
+        if let Ok(Some(conclusion)) = run_store.get_conclusion().await {
+            let success = matches!(
+                conclusion.status,
+                StageStatus::Success | StageStatus::PartialSuccess
+            );
+            return if success {
+                ExitCode::from(0)
+            } else {
+                ExitCode::from(1)
+            };
         }
-    } else {
-        let status_path = run_dir.join("status.json");
-        let conclusion_path = run_dir.join("conclusion.json");
-        let status_record = match run_store.get_status().await {
-            Ok(record) => record.or_else(|| read_status_record(&status_path)),
-            Err(_) => read_status_record(&status_path),
-        };
-        determine_exit_code(&conclusion_path, status_record)
+
+        match run_store.get_status().await {
+            Ok(Some(record)) if matches!(record.status, RunStatus::Succeeded) => {
+                return ExitCode::from(0);
+            }
+            Ok(Some(record)) if record.status.is_terminal() => return ExitCode::from(1),
+            Ok(Some(_)) | Ok(None) | Err(_) => {}
+        }
+
+        if Instant::now() >= deadline {
+            return ExitCode::from(1);
+        }
+        sleep(Duration::from_millis(100)).await;
     }
 }
 

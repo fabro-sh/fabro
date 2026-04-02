@@ -64,6 +64,14 @@ pub fn default_runs_base() -> PathBuf {
 }
 
 pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
+    scan_runs_inner(base, true)
+}
+
+fn scan_runs_without_status(base: &Path) -> Result<Vec<RunInfo>> {
+    scan_runs_inner(base, false)
+}
+
+fn scan_runs_inner(base: &Path, include_status: bool) -> Result<Vec<RunInfo>> {
     let entries = match std::fs::read_dir(base) {
         Ok(entries) => entries,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -88,7 +96,11 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
             let start_time = start_time_dt.to_rfc3339();
             let workflow_name = record.workflow_name().to_string();
             let goal = record.goal().to_string();
-            let status_info = read_status(&path);
+            let status_info = if include_status {
+                read_status(&path)
+            } else {
+                StatusInfo::simple(RunStatus::Dead)
+            };
 
             runs.push(RunInfo {
                 run_id: record.run_id,
@@ -124,8 +136,12 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
                 continue;
             };
 
-            let status_info = read_status(&path);
-            let is_orphan = matches!(status_info.status, RunStatus::Dead);
+            let status_info = if include_status {
+                read_status(&path)
+            } else {
+                StatusInfo::simple(RunStatus::Dead)
+            };
+            let is_orphan = !include_status || matches!(status_info.status, RunStatus::Dead);
             runs.push(RunInfo {
                 run_id,
                 dir_name,
@@ -157,7 +173,7 @@ pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
 }
 
 pub async fn scan_runs_combined(store: &dyn Store, base: &Path) -> Result<Vec<RunInfo>> {
-    let mut runs_by_id: HashMap<RunId, RunInfo> = scan_runs(base)?
+    let mut runs_by_id: HashMap<RunId, RunInfo> = scan_runs_without_status(base)?
         .into_iter()
         .map(|run| (run.run_id, run))
         .collect();
@@ -432,4 +448,69 @@ fn parse_run_id(value: &str) -> Option<RunId> {
 
 fn run_id_matches(run_id: RunId, prefix: &str) -> bool {
     run_id.to_string().starts_with(prefix)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    use chrono::Utc;
+    use fabro_config::FabroSettings;
+    use fabro_graphviz::graph::Graph;
+    use fabro_store::{InMemoryStore, Store};
+    use fabro_types::{RunStatus, RunStatusRecord, fixtures};
+
+    use super::scan_runs_combined;
+    use crate::records::{RunRecord, RunRecordExt};
+
+    fn sample_run_record() -> RunRecord {
+        RunRecord {
+            run_id: fixtures::RUN_1,
+            created_at: Utc::now(),
+            settings: FabroSettings::default(),
+            graph: Graph::new("test"),
+            workflow_slug: Some("test".to_string()),
+            working_directory: PathBuf::from("/tmp/project"),
+            host_repo_path: Some("/tmp/project".to_string()),
+            base_branch: Some("main".to_string()),
+            labels: HashMap::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn scan_runs_combined_uses_store_status_without_status_json() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join(fixtures::RUN_1.to_string());
+        std::fs::create_dir_all(&run_dir).unwrap();
+
+        let run_record = sample_run_record();
+        run_record.save(&run_dir).unwrap();
+        std::fs::write(run_dir.join("id.txt"), format!("{}\n", fixtures::RUN_1)).unwrap();
+
+        let store = InMemoryStore::default();
+        let run_dir_string = run_dir.to_string_lossy().to_string();
+        let run_store = store
+            .create_run(
+                &fixtures::RUN_1,
+                run_record.created_at,
+                Some(&run_dir_string),
+            )
+            .await
+            .unwrap();
+        run_store.put_run(&run_record).await.unwrap();
+        run_store
+            .put_status(&RunStatusRecord::new(RunStatus::Submitted, None))
+            .await
+            .unwrap();
+
+        let runs = scan_runs_combined(&store, temp.path()).await.unwrap();
+        let run = runs
+            .iter()
+            .find(|run| run.run_id == fixtures::RUN_1)
+            .expect("run should be listed");
+
+        assert_eq!(run.status, RunStatus::Submitted);
+        assert!(!run.is_orphan);
+    }
 }
