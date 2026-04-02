@@ -10,7 +10,7 @@ use fabro_util::text::strip_goal_decoration;
 use fabro_workflow::asset_snapshot::collect_asset_paths;
 use fabro_workflow::outcome::{StageStatus, format_cost};
 use fabro_workflow::pipeline::{Persisted, Validated};
-use fabro_workflow::records::{Checkpoint, CheckpointExt, Conclusion, ConclusionExt};
+use fabro_workflow::records::{Checkpoint, CheckpointExt, Conclusion};
 use indicatif::HumanDuration;
 
 use crate::shared::{format_tokens_human, print_diagnostics, relative_path, tilde_path};
@@ -78,23 +78,26 @@ pub(crate) async fn print_run_summary(
     styles: &Styles,
 ) -> Result<()> {
     let run_id = run_id.to_string();
-    let conclusion_path = run_dir.join("conclusion.json");
-    let Ok(conclusion) = Conclusion::load(&conclusion_path) else {
-        return Ok(());
-    };
-
-    let pr_url = match run_id.parse() {
+    let (run_store, conclusion, pr_url) = match run_id.parse() {
         Ok(parsed_run_id) => {
-            if let Some(run_store) = store::open_run_reader(storage_dir, &parsed_run_id).await? {
-                run_store
+            let run_store = store::open_run_reader(storage_dir, &parsed_run_id).await?;
+            let conclusion = match run_store.as_deref() {
+                Some(run_store) => run_store.get_conclusion().await?,
+                None => None,
+            };
+            let pr_url = match run_store.as_deref() {
+                Some(run_store) => run_store
                     .get_pull_request()
                     .await?
-                    .map(|record: PullRequestRecord| record.html_url)
-            } else {
-                None
-            }
+                    .map(|record: PullRequestRecord| record.html_url),
+                None => None,
+            };
+            (run_store, conclusion, pr_url)
         }
-        Err(_) => None,
+        Err(_) => (None, None, None),
+    };
+    let Some(conclusion) = conclusion else {
+        return Ok(());
     };
 
     print_run_conclusion(
@@ -105,7 +108,7 @@ pub(crate) async fn print_run_summary(
         pr_url.as_deref(),
         styles,
     );
-    print_final_output(run_dir, styles);
+    print_final_output(run_store.as_deref(), run_dir, styles).await;
     print_assets(run_dir, styles);
     Ok(())
 }
@@ -199,8 +202,17 @@ pub(crate) fn print_run_conclusion(
     }
 }
 
-pub(crate) fn print_final_output(run_dir: &Path, styles: &Styles) {
-    let Ok(checkpoint) = Checkpoint::load(&run_dir.join("checkpoint.json")) else {
+pub(crate) async fn print_final_output(
+    run_store: Option<&dyn fabro_store::RunStore>,
+    run_dir: &Path,
+    styles: &Styles,
+) {
+    let checkpoint = match run_store {
+        Some(run_store) => run_store.get_checkpoint().await.ok().flatten(),
+        None => None,
+    }
+    .or_else(|| Checkpoint::load(&run_dir.join("checkpoint.json")).ok());
+    let Some(checkpoint) = checkpoint else {
         return;
     };
 
