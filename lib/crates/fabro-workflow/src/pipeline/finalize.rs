@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::error::FabroError;
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
-use crate::git::{MetadataStore, scan_node_files};
+use crate::git::{MetadataStore, scan_node_files_from_store};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::records::{Checkpoint, CheckpointExt, Conclusion, ConclusionExt, StageSummary};
 use crate::run_options::RunOptions;
@@ -264,7 +264,7 @@ pub fn persist_terminal_outcome(
 /// Best-effort: errors are logged as warnings.
 pub async fn write_finalize_commit(
     run_options: &RunOptions,
-    run_dir: &Path,
+    _run_dir: &Path,
     run_store: &dyn RunStore,
 ) {
     let (Some(meta_branch), Some(repo_path)) = (
@@ -279,10 +279,10 @@ pub async fn write_finalize_commit(
 
     let git_author = run_options.git_author();
     let store = MetadataStore::new(repo_path, &git_author);
-    let mut entries = scan_node_files(run_dir);
+    let mut entries = scan_node_files_from_store(run_store).await;
     let retro_bytes = match run_store.get_retro().await {
         Ok(Some(retro)) => serde_json::to_vec_pretty(&retro).ok(),
-        _ => std::fs::read(run_dir.join("retro.json")).ok(),
+        _ => None,
     };
     if let Some(bytes) = retro_bytes {
         entries.push(("retro.json".to_string(), bytes));

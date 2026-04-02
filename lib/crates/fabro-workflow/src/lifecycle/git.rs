@@ -14,7 +14,7 @@ use fabro_core::state::RunState;
 use crate::artifact::ArtifactStore;
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::git::MetadataStore;
-use crate::git::scan_node_files;
+use crate::git::scan_node_files_from_store;
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::{Outcome, StageStatus, StageUsage};
@@ -137,16 +137,17 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
             let git_author = self.run_options.git_author();
             let store = MetadataStore::new(repo_path, &git_author);
             // Build checkpoint JSON for shadow branch
-            self.run_store
+            if let Some(cp_json) = self
+                .run_store
                 .get_checkpoint()
                 .await
                 .ok()
                 .flatten()
                 .and_then(|checkpoint| serde_json::to_vec_pretty(&checkpoint).ok())
-                .or_else(|| std::fs::read(self.run_dir.join("checkpoint.json")).ok())
-                .and_then(|cp_json| {
+            {
+                let mut extra_entries: Vec<(String, Vec<u8>)> = {
                     let artifact_store = self.artifact_store.lock().unwrap();
-                    let mut extra_entries: Vec<(String, Vec<u8>)> = artifact_store
+                    artifact_store
                         .list()
                         .iter()
                         .filter_map(|info| {
@@ -156,26 +157,29 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                                     .map(|data| (format!("artifacts/{}.json", info.id), data))
                             })
                         })
-                        .collect();
-                    extra_entries.extend(scan_node_files(&self.run_dir));
-                    let extra_refs: Vec<(&str, &[u8])> = extra_entries
-                        .iter()
-                        .map(|(k, v)| (k.as_str(), v.as_slice()))
-                        .collect();
-                    match store.write_checkpoint(&self.run_id.to_string(), &cp_json, &extra_refs) {
-                        Ok(sha) => Some(sha),
-                        Err(e) => {
-                            self.emitter.emit(&WorkflowRunEvent::RunNotice {
-                                level: RunNoticeLevel::Warn,
-                                code: "checkpoint_metadata_write_failed".to_string(),
-                                message: format!(
-                                    "[node: {node_id}] metadata checkpoint write failed: {e}"
-                                ),
-                            });
-                            None
-                        }
+                        .collect()
+                };
+                extra_entries.extend(scan_node_files_from_store(self.run_store.as_ref()).await);
+                let extra_refs: Vec<(&str, &[u8])> = extra_entries
+                    .iter()
+                    .map(|(k, v)| (k.as_str(), v.as_slice()))
+                    .collect();
+                match store.write_checkpoint(&self.run_id.to_string(), &cp_json, &extra_refs) {
+                    Ok(sha) => Some(sha),
+                    Err(e) => {
+                        self.emitter.emit(&WorkflowRunEvent::RunNotice {
+                            level: RunNoticeLevel::Warn,
+                            code: "checkpoint_metadata_write_failed".to_string(),
+                            message: format!(
+                                "[node: {node_id}] metadata checkpoint write failed: {e}"
+                            ),
+                        });
+                        None
                     }
-                })
+                }
+            } else {
+                None
+            }
         } else {
             None
         };

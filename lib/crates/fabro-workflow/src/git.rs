@@ -3,6 +3,7 @@ use std::process::Command;
 
 use fabro_checkpoint::git::Store;
 use fabro_config::FabroSettings;
+use fabro_store::{NodeVisitRef, RunStore};
 
 use crate::error::{FabroError, Result};
 use tokio::task::{JoinError, spawn_blocking};
@@ -352,9 +353,97 @@ pub fn scan_node_files(run_dir: &Path) -> Vec<(String, Vec<u8>)> {
     result
 }
 
+pub async fn scan_node_files_from_store(run_store: &dyn RunStore) -> Vec<(String, Vec<u8>)> {
+    let mut result = Vec::new();
+    let Ok(node_ids) = run_store.list_node_ids().await else {
+        return result;
+    };
+
+    for node_id in node_ids {
+        let Ok(visits) = run_store.list_node_visits(&node_id).await else {
+            continue;
+        };
+        for visit in visits {
+            let Ok(node) = run_store
+                .get_node(&NodeVisitRef {
+                    node_id: &node_id,
+                    visit,
+                })
+                .await
+            else {
+                continue;
+            };
+
+            if let Some(prompt) = node.prompt {
+                result.push((
+                    node_file_path(&node_id, visit, "prompt.md"),
+                    prompt.into_bytes(),
+                ));
+            }
+            if let Some(response) = node.response {
+                result.push((
+                    node_file_path(&node_id, visit, "response.md"),
+                    response.into_bytes(),
+                ));
+            }
+            if let Some(status) = node.status {
+                if let Ok(bytes) = serde_json::to_vec_pretty(&status) {
+                    result.push((node_file_path(&node_id, visit, "status.json"), bytes));
+                }
+            }
+            if let Some(provider_used) = node.provider_used {
+                if let Ok(bytes) = serde_json::to_vec_pretty(&provider_used) {
+                    result.push((node_file_path(&node_id, visit, "provider_used.json"), bytes));
+                }
+            }
+            if let Some(diff) = node.diff {
+                result.push((
+                    node_file_path(&node_id, visit, "diff.patch"),
+                    diff.into_bytes(),
+                ));
+            }
+            if let Some(script_invocation) = node.script_invocation {
+                if let Ok(bytes) = serde_json::to_vec_pretty(&script_invocation) {
+                    result.push((
+                        node_file_path(&node_id, visit, "script_invocation.json"),
+                        bytes,
+                    ));
+                }
+            }
+            if let Some(script_timing) = node.script_timing {
+                if let Ok(bytes) = serde_json::to_vec_pretty(&script_timing) {
+                    result.push((node_file_path(&node_id, visit, "script_timing.json"), bytes));
+                }
+            }
+            if let Some(parallel_results) = node.parallel_results {
+                if let Ok(bytes) = serde_json::to_vec_pretty(&parallel_results) {
+                    result.push((
+                        node_file_path(&node_id, visit, "parallel_results.json"),
+                        bytes,
+                    ));
+                }
+            }
+        }
+    }
+
+    result
+}
+
+fn node_file_path(node_id: &str, visit: u32, filename: &str) -> String {
+    if visit <= 1 {
+        format!("nodes/{node_id}/{filename}")
+    } else {
+        format!("nodes/{node_id}-visit_{visit}/{filename}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Utc;
+    use fabro_graphviz::graph::Graph;
+    use fabro_store::{InMemoryStore, Store};
+    use fabro_types::{NodeStatusRecord, RunRecord, StageStatus, fixtures};
     use std::fs;
 
     /// Create a temporary git repo with an initial commit.
@@ -490,6 +579,72 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let files = scan_node_files(dir.path());
         assert!(files.is_empty());
+    }
+
+    #[tokio::test]
+    async fn scan_node_files_from_store_reconstructs_allowlisted_entries() {
+        let store = InMemoryStore::default();
+        let created_at = Utc::now();
+        let run = store
+            .create_run(&fixtures::RUN_1, created_at, None)
+            .await
+            .unwrap();
+        run.put_run(&RunRecord {
+            run_id: fixtures::RUN_1,
+            created_at,
+            settings: fabro_config::FabroSettings::default(),
+            graph: Graph::new("test"),
+            workflow_slug: None,
+            working_directory: std::path::PathBuf::from("."),
+            host_repo_path: None,
+            base_branch: None,
+            labels: std::collections::HashMap::new(),
+        })
+        .await
+        .unwrap();
+        let node = NodeVisitRef {
+            node_id: "work",
+            visit: 2,
+        };
+        run.put_node_prompt(&node, "hello").await.unwrap();
+        run.put_node_response(&node, "world").await.unwrap();
+        run.put_node_status(
+            &node,
+            &NodeStatusRecord {
+                status: StageStatus::Success,
+                notes: None,
+                failure_reason: None,
+                timestamp: Utc::now(),
+            },
+        )
+        .await
+        .unwrap();
+        run.put_node_provider_used(&node, &serde_json::json!({"provider":"openai"}))
+            .await
+            .unwrap();
+        run.put_node_diff(&node, "diff --git a/story.txt b/story.txt")
+            .await
+            .unwrap();
+        run.put_node_script_invocation(&node, &serde_json::json!({"command":"echo hi"}))
+            .await
+            .unwrap();
+        run.put_node_script_timing(&node, &serde_json::json!({"exit_code":0}))
+            .await
+            .unwrap();
+        run.put_node_parallel_results(&node, &serde_json::json!([{"id":"a"}]))
+            .await
+            .unwrap();
+
+        let files = scan_node_files_from_store(run.as_ref()).await;
+        let paths: Vec<&str> = files.iter().map(|(path, _)| path.as_str()).collect();
+        assert!(paths.contains(&"nodes/work-visit_2/prompt.md"));
+        assert!(paths.contains(&"nodes/work-visit_2/response.md"));
+        assert!(paths.contains(&"nodes/work-visit_2/status.json"));
+        assert!(paths.contains(&"nodes/work-visit_2/provider_used.json"));
+        assert!(paths.contains(&"nodes/work-visit_2/diff.patch"));
+        assert!(paths.contains(&"nodes/work-visit_2/script_invocation.json"));
+        assert!(paths.contains(&"nodes/work-visit_2/script_timing.json"));
+        assert!(paths.contains(&"nodes/work-visit_2/parallel_results.json"));
     }
 
     #[test]
