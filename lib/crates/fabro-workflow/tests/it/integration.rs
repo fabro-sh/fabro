@@ -10229,19 +10229,6 @@ async fn git_checkpoint_host_writes_shadow_branch() {
     let run_dir = tempfile::tempdir().unwrap();
     // Write graph.fabro so init_run can read it
     std::fs::write(run_dir.path().join("graph.fabro"), "digraph {}").unwrap();
-    // Write run.json so init_run stores it on the metadata branch
-    let run_record_json = serde_json::json!({
-        "run_id": run_id,
-        "created_at": "2025-01-01T00:00:00Z",
-        "settings": {},
-        "graph": { "name": "ShadowBranchTest", "nodes": {}, "edges": [], "attrs": {} },
-        "working_directory": worktree_path.to_str().unwrap(),
-    });
-    std::fs::write(
-        run_dir.path().join("run.json"),
-        serde_json::to_string(&run_record_json).unwrap(),
-    )
-    .unwrap();
     let emitter = EventEmitter::default();
 
     let env: Arc<dyn fabro_agent::Sandbox> =
