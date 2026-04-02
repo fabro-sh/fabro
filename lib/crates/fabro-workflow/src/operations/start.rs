@@ -912,7 +912,7 @@ mod tests {
 
     use chrono::Utc;
     use fabro_config::FabroSettings;
-    use fabro_store::InMemoryStore;
+    use fabro_store::{InMemoryStore, Store};
     use fabro_types::fixtures;
 
     use super::*;
@@ -931,9 +931,9 @@ mod tests {
         start -> exit
     }"#;
 
-    async fn persisted_workflow(dot: &str, run_dir: &Path) -> Persisted {
+    async fn persisted_workflow(dot: &str, run_dir: &Path) -> (Persisted, InMemoryStore) {
         let store = InMemoryStore::default();
-        crate::operations::create(
+        let created = crate::operations::create(
             &store,
             crate::operations::CreateRunInput {
                 workflow: crate::operations::WorkflowInput::DotSource {
@@ -956,8 +956,8 @@ mod tests {
             },
         )
         .await
-        .unwrap()
-        .persisted
+        .unwrap();
+        (created.persisted, store)
     }
 
     fn test_registry() -> HandlerRegistry {
@@ -968,7 +968,8 @@ mod tests {
     }
 
     async fn test_start_services(
-        run_dir: &Path,
+        store: &InMemoryStore,
+        _run_dir: &Path,
         emitter: Arc<EventEmitter>,
         registry: Arc<HandlerRegistry>,
     ) -> StartServices {
@@ -976,9 +977,7 @@ mod tests {
             cancel_token: None,
             emitter,
             interviewer: Arc::new(fabro_interview::AutoApproveInterviewer),
-            run_store: crate::operations::open_or_hydrate_run(&InMemoryStore::default(), run_dir)
-                .await
-                .unwrap(),
+            run_store: store.open_run(&fixtures::RUN_1).await.unwrap().unwrap(),
             github_app: None,
             on_node: None,
             registry_override: Some(registry),
@@ -1012,10 +1011,10 @@ mod tests {
             });
         }
 
-        persisted_workflow(MINIMAL_DOT, &run_dir).await;
+        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &run_dir).await;
         let started = start(
             &run_dir,
-            test_start_services(&run_dir, emitter, registry).await,
+            test_start_services(&store, &run_dir, emitter, registry).await,
         )
         .await
         .unwrap();
@@ -1035,11 +1034,11 @@ mod tests {
         let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
-        persisted_workflow(MINIMAL_DOT, &run_dir).await;
+        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &run_dir).await;
 
         let started = start(
             &run_dir,
-            test_start_services(&run_dir, emitter, registry).await,
+            test_start_services(&store, &run_dir, emitter, registry).await,
         )
         .await
         .unwrap();
@@ -1056,7 +1055,7 @@ mod tests {
         let registry = Arc::new(test_registry());
         let visited = Arc::new(Mutex::new(Vec::new()));
 
-        persisted_workflow(MINIMAL_DOT, &run_dir).await;
+        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &run_dir).await;
 
         let started = start(
             &run_dir,
@@ -1067,7 +1066,7 @@ mod tests {
                         visited.lock().unwrap().push(node_id.to_string());
                     }
                 })),
-                ..test_start_services(&run_dir, emitter, registry).await
+                ..test_start_services(&store, &run_dir, emitter, registry).await
             },
         )
         .await
@@ -1084,8 +1083,8 @@ mod tests {
         let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
-        persisted_workflow(MINIMAL_DOT, &run_dir).await;
-        let services = test_start_services(&run_dir, emitter, registry).await;
+        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &run_dir).await;
+        let services = test_start_services(&store, &run_dir, emitter, registry).await;
 
         // Write a checkpoint to the store (not disk) so start() sees it
         let checkpoint = Checkpoint::from_context(
@@ -1121,11 +1120,11 @@ mod tests {
         let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
-        persisted_workflow(MINIMAL_DOT, &run_dir).await;
+        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &run_dir).await;
 
         let result = resume(
             &run_dir,
-            test_start_services(&run_dir, emitter, registry).await,
+            test_start_services(&store, &run_dir, emitter, registry).await,
         )
         .await;
 
@@ -1143,7 +1142,7 @@ mod tests {
         let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
-        persisted_workflow(MINIMAL_DOT, &run_dir).await;
+        let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &run_dir).await;
 
         let checkpoint = Checkpoint::from_context(
             &Context::new(),
@@ -1179,7 +1178,7 @@ mod tests {
 
         let result = resume(
             &run_dir,
-            test_start_services(&run_dir, emitter, registry).await,
+            test_start_services(&store, &run_dir, emitter, registry).await,
         )
         .await;
 

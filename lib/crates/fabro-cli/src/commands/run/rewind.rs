@@ -8,9 +8,10 @@ use fabro_util::terminal::Styles;
 use fabro_workflow::git::MetadataStore;
 use fabro_workflow::operations::{
     RewindInput, RewindTarget, RunTimeline, build_timeline_or_rebuild,
-    find_run_id_by_prefix_or_store, open_or_hydrate_run, rewind,
+    find_run_id_by_prefix_or_store, rewind,
 };
 use fabro_workflow::records::CheckpointExt;
+use fabro_workflow::records::{RunRecord, RunRecordExt};
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use fabro_workflow::run_status::{self, RunStatus};
 use git2::Repository;
@@ -106,6 +107,7 @@ async fn reset_rewound_run_state(
     run_id: &fabro_types::RunId,
     run_dir: &std::path::Path,
 ) -> Result<()> {
+    let run_record = RunRecord::load(run_dir)?;
     let checkpoint = MetadataStore::read_checkpoint(git_store.repo_dir(), &run_id.to_string())?
         .context("rewound metadata branch is missing checkpoint.json")?;
     checkpoint.save(&run_dir.join("checkpoint.json"))?;
@@ -126,11 +128,32 @@ async fn reset_rewound_run_state(
         .delete_run(run_id)
         .await
         .map_err(|err| anyhow::anyhow!("failed to reset durable store run: {err}"))?;
-    open_or_hydrate_run(durable_store, run_dir)
+    let run_dir_string = run_dir.to_string_lossy().to_string();
+    let run_store = durable_store
+        .create_run(run_id, run_record.created_at, Some(&run_dir_string))
         .await
-        .map_err(|err| {
-            anyhow::anyhow!("failed to restore durable store run after rewind: {err}")
-        })?;
+        .map_err(|err| anyhow::anyhow!("failed to recreate durable store run: {err}"))?;
+    run_store
+        .put_run(&run_record)
+        .await
+        .map_err(|err| anyhow::anyhow!("failed to restore run record after rewind: {err}"))?;
+    if let Ok(dot_source) = std::fs::read_to_string(run_dir.join("workflow.fabro")) {
+        run_store
+            .put_graph(&dot_source)
+            .await
+            .map_err(|err| anyhow::anyhow!("failed to restore graph after rewind: {err}"))?;
+    }
+    run_store
+        .put_status(&fabro_types::RunStatusRecord::new(
+            RunStatus::Submitted,
+            None,
+        ))
+        .await
+        .map_err(|err| anyhow::anyhow!("failed to restore run status after rewind: {err}"))?;
+    run_store
+        .put_checkpoint(&checkpoint)
+        .await
+        .map_err(|err| anyhow::anyhow!("failed to restore checkpoint after rewind: {err}"))?;
     Ok(())
 }
 
