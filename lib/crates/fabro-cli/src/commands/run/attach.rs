@@ -16,6 +16,7 @@ use fabro_util::terminal::Styles;
 use fabro_workflow::outcome::StageStatus;
 use fabro_workflow::records::{Conclusion, ConclusionExt, RunRecord, RunRecordExt};
 use fabro_workflow::run_status::{RunStatus, RunStatusRecord, RunStatusRecordExt};
+use serde_json::{Map, Value};
 use tokio::signal::ctrl_c;
 use tokio::time::{self, sleep};
 
@@ -148,6 +149,7 @@ async fn attach_run_store(
     let mut stream = run_store
         .watch_events_from(if last_seq == 0 { 1 } else { last_seq + 1 })
         .await?;
+    let mut next_seq = if last_seq == 0 { 1 } else { last_seq + 1 };
     let mut cached_pid: Option<u32> = None;
     let attach_started = Instant::now();
 
@@ -189,6 +191,7 @@ async fn attach_run_store(
             Ok(Some(Ok(event))) => {
                 let line = event_payload_line(&event)?;
                 emit_progress_line(&mut progress_ui, &line, json_output)?;
+                next_seq = event.seq.saturating_add(1);
                 saw_event = true;
             }
             Ok(Some(Err(err))) => return Err(err.into()),
@@ -258,10 +261,14 @@ async fn attach_run_store(
 
         if let Some(child_alive) = child_alive_via_handle {
             if !child_alive && !saw_event {
+                flush_remaining_store_events(run_store, next_seq, &mut progress_ui, json_output)
+                    .await?;
                 break;
             }
         } else {
             if terminal_status.is_some() && !saw_event {
+                flush_remaining_store_events(run_store, next_seq, &mut progress_ui, json_output)
+                    .await?;
                 break;
             }
 
@@ -277,6 +284,8 @@ async fn attach_run_store(
                 }
             };
             if !engine_alive {
+                flush_remaining_store_events(run_store, next_seq, &mut progress_ui, json_output)
+                    .await?;
                 break;
             }
         }
@@ -285,6 +294,38 @@ async fn attach_run_store(
     finish_progress(&mut progress_ui, json_output);
 
     Ok(determine_exit_code_with_store(run_store).await)
+}
+
+async fn flush_remaining_store_events(
+    run_store: &dyn RunStore,
+    mut next_seq: u32,
+    progress_ui: &mut run_progress::ProgressUI,
+    json_output: bool,
+) -> Result<()> {
+    let deadline = Instant::now() + ATTACH_FINAL_STATUS_GRACE;
+    loop {
+        let mut saw_new_event = false;
+        let events = run_store
+            .list_events()
+            .await?
+            .into_iter()
+            .filter(|e| e.seq >= next_seq)
+            .collect::<Vec<_>>();
+        for event in events {
+            let line = event_payload_line(&event)?;
+            emit_progress_line(progress_ui, &line, json_output)?;
+            next_seq = event.seq.saturating_add(1);
+            saw_new_event = true;
+        }
+
+        if !saw_new_event || Instant::now() >= deadline {
+            break;
+        }
+
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    Ok(())
 }
 
 async fn attach_run_files(
@@ -559,7 +600,24 @@ fn show_progress(progress_ui: &mut run_progress::ProgressUI, json_output: bool) 
 }
 
 fn event_payload_line(event: &EventEnvelope) -> Result<String> {
-    serde_json::to_string(event.payload.as_value()).map_err(Into::into)
+    serde_json::to_string(&normalize_json_value(event.payload.as_value().clone()))
+        .map_err(Into::into)
+}
+
+fn normalize_json_value(value: Value) -> Value {
+    match value {
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(key, value)| (key, normalize_json_value(value)))
+                .collect::<std::collections::BTreeMap<_, _>>()
+                .into_iter()
+                .collect::<Map<_, _>>(),
+        ),
+        Value::Array(values) => {
+            Value::Array(values.into_iter().map(normalize_json_value).collect())
+        }
+        other => other,
+    }
 }
 
 fn read_status_record(path: &Path) -> Option<RunStatusRecord> {
