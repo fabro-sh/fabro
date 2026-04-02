@@ -857,7 +857,10 @@ impl Commands {
             },
             #[cfg(feature = "server")]
             Self::Server(ns) => match &ns.command {
-                ServerCommand::Start(_) => "server start",
+                ServerCommand::Start { .. } => "server start",
+                ServerCommand::Stop { .. } => "server stop",
+                ServerCommand::Status { .. } => "server status",
+                ServerCommand::Serve { .. } => "server __serve",
             },
             Self::Doctor { .. } => "doctor",
             Self::Repo(ns) => match &ns.command {
@@ -977,10 +980,42 @@ pub(crate) struct ServerNamespace {
 }
 
 #[cfg(feature = "server")]
+use fabro_server::serve::ServeArgs;
+
+#[cfg(feature = "server")]
 #[derive(Subcommand)]
 pub(crate) enum ServerCommand {
     /// Start the HTTP API server
-    Start(fabro_server::serve::ServeArgs),
+    Start {
+        /// Run in the foreground instead of daemonizing
+        #[arg(long)]
+        foreground: bool,
+
+        #[command(flatten)]
+        serve_args: ServeArgs,
+    },
+    /// Stop the HTTP API server
+    Stop {
+        /// Seconds to wait for graceful shutdown before SIGKILL
+        #[arg(long, default_value = "10")]
+        timeout: u64,
+    },
+    /// Show server status
+    Status {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Internal: run the server process (spawned by `start`)
+    #[command(name = "__serve", hide = true)]
+    Serve {
+        /// Path to the server record file
+        #[arg(long)]
+        record_path: PathBuf,
+
+        #[command(flatten)]
+        serve_args: ServeArgs,
+    },
 }
 
 #[derive(Args)]

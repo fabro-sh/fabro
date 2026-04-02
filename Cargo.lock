@@ -1858,6 +1858,7 @@ version = "0.176.2"
 dependencies = [
  "cc",
  "libc",
+ "tempfile",
 ]
 
 [[package]]

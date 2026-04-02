@@ -109,7 +109,13 @@ async fn main_inner() -> (String, Result<()>) {
         #[cfg(feature = "server")]
         {
             if let Commands::Server(ServerNamespace {
-                command: ServerCommand::Start(args),
+                command:
+                    ServerCommand::Start {
+                        serve_args: args, ..
+                    }
+                    | ServerCommand::Serve {
+                        serve_args: args, ..
+                    },
             }) = command.as_ref()
             {
                 match fabro_config::server::load_server_settings(args.config.as_deref()) {
@@ -141,7 +147,7 @@ async fn main_inner() -> (String, Result<()>) {
         }
     };
 
-    let log_prefix = if command_name == "server start" {
+    let log_prefix = if command_name == "server start" || command_name == "server __serve" {
         "server"
     } else {
         "cli"
@@ -188,10 +194,7 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::Model { command } => commands::model::execute(command, &globals).await?,
             #[cfg(feature = "server")]
             Commands::Server(ns) => {
-                let ServerCommand::Start(args) = ns.command;
-                let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-                fabro_server::serve::serve_command(args, styles, globals.storage_dir.clone())
-                    .await?;
+                commands::server::dispatch(ns.command, &globals).await?;
             }
             Commands::Doctor { verbose, dry_run } => {
                 let cli_settings = user_config::load_user_settings()?;
