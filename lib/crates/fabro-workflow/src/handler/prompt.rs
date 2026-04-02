@@ -15,8 +15,7 @@ use fabro_graphviz::graph::{Graph, Node};
 use tokio::fs;
 
 use super::agent::{
-    CodergenBackend, CodergenResult, expand_variables, extract_status_fields,
-    sync_provider_used_to_store, truncate,
+    CodergenBackend, CodergenResult, expand_variables, extract_status_fields, truncate,
 };
 use super::{EngineServices, Handler};
 
@@ -107,6 +106,20 @@ impl Handler for PromptHandler {
             fs::write(stage_dir.join("prompt.md"), &prompt).await?;
         }
 
+        let prompt_provider = node
+            .provider()
+            .map(String::from)
+            .or_else(|| Some(Provider::default_from_env().as_str().to_string()));
+        let prompt_model = node.model().map(String::from);
+        services.emitter.emit(&WorkflowRunEvent::Prompt {
+            stage: node.id.clone(),
+            visit: u32::try_from(visit).unwrap_or(u32::MAX),
+            text: prompt.clone(),
+            mode: Some("prompt".to_string()),
+            provider: prompt_provider.clone(),
+            model: prompt_model.clone(),
+        });
+
         // 3. Call LLM backend (one_shot)
         let (response_text, stage_usage, backend_files_touched) =
             if let Some(backend) = &self.backend {
@@ -114,10 +127,7 @@ impl Handler for PromptHandler {
                     .one_shot(node, &prompt, system_prompt.as_deref(), &stage_dir)
                     .await;
                 match result {
-                    Ok(CodergenResult::Full(outcome)) => {
-                        sync_provider_used_to_store(&stage_dir, &node_ref, services).await?;
-                        return Ok(outcome);
-                    }
+                    Ok(CodergenResult::Full(outcome)) => return Ok(outcome),
                     Ok(CodergenResult::Text {
                         text,
                         usage,
@@ -167,7 +177,6 @@ impl Handler for PromptHandler {
         } else {
             fs::write(stage_dir.join("response.md"), &response_text).await?;
         }
-        sync_provider_used_to_store(&stage_dir, &node_ref, services).await?;
 
         // 5. Build and write status
         let mut outcome = Outcome::success();
@@ -205,7 +214,11 @@ mod tests {
         EngineServices::test_default()
     }
 
-    async fn make_services_with_run_store() -> (EngineServices, Arc<dyn RunStore>) {
+    async fn make_services_with_run_store() -> (
+        EngineServices,
+        Arc<dyn RunStore>,
+        crate::event::StoreProgressLogger,
+    ) {
         let store = InMemoryStore::default();
         let run_store = store
             .create_run(&fixtures::RUN_1, chrono::Utc::now(), None)
@@ -215,7 +228,9 @@ mod tests {
             run_store: Some(Arc::clone(&run_store)),
             ..EngineServices::test_default()
         };
-        (services, run_store)
+        let logger = crate::event::StoreProgressLogger::new(Arc::clone(&run_store));
+        logger.register(services.emitter.as_ref());
+        (services, run_store, logger)
     }
 
     #[tokio::test]
@@ -318,7 +333,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prompt_handler_persists_provider_used_in_run_store() {
+    async fn prompt_handler_projects_provider_used_from_prompt_events() {
         use fabro_agent::Sandbox;
 
         struct ProviderOneShotBackend;
@@ -344,13 +359,8 @@ mod tests {
                 _node: &Node,
                 _prompt: &str,
                 _system_prompt: Option<&str>,
-                stage_dir: &Path,
+                _stage_dir: &Path,
             ) -> Result<CodergenResult, FabroError> {
-                std::fs::write(
-                    stage_dir.join("provider_used.json"),
-                    r#"{"mode":"prompt","provider":"openai","model":"gpt-5.4"}"#,
-                )
-                .unwrap();
                 Ok(CodergenResult::Text {
                     text: "one-shot response".to_string(),
                     usage: None,
@@ -369,12 +379,13 @@ mod tests {
         let context = Context::new();
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
-        let (services, run_store) = make_services_with_run_store().await;
+        let (services, run_store, logger) = make_services_with_run_store().await;
 
         handler
             .execute(&node, &context, &graph, tmp.path(), &services)
             .await
             .unwrap();
+        logger.flush().await;
 
         let snapshot = run_store
             .get_node(&NodeVisitRef {

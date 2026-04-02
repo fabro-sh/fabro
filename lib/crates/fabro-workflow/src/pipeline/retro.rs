@@ -76,6 +76,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
                     if !event.event.is_streaming_noise() {
                         emitter.emit(&WorkflowRunEvent::Agent {
                             stage: "retro".to_string(),
+                            visit: 1,
                             event: event.event.clone(),
                             session_id: Some(event.session_id.clone()),
                             parent_session_id: event.parent_session_id.clone(),

@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use anyhow::{Context, Result};
 use chrono::{SecondsFormat, Utc};
-use fabro_store::{EventPayload, RunStore};
+use fabro_store::{EventPayload, NodeVisitRef, RunStore};
 use fabro_types::RunId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -95,17 +95,18 @@ pub enum WorkflowRunEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<StatusReason>,
     },
-    RunPaused {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        reason: Option<StatusReason>,
-    },
     RunRemoving {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<StatusReason>,
     },
-    RunDead {
+    RunRewound {
+        target_checkpoint_ordinal: usize,
+        target_node_id: String,
+        target_visit: usize,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        reason: Option<StatusReason>,
+        previous_status: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        run_commit_sha: Option<String>,
     },
     WorkflowRunCompleted {
         duration_ms: u64,
@@ -307,6 +308,7 @@ pub enum WorkflowRunEvent {
     },
     Prompt {
         stage: String,
+        visit: u32,
         text: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mode: Option<String>,
@@ -326,6 +328,7 @@ pub enum WorkflowRunEvent {
     /// Forwarded from an agent session, tagged with the workflow stage.
     Agent {
         stage: String,
+        visit: u32,
         event: AgentEvent,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session_id: Option<String>,
@@ -439,6 +442,7 @@ pub enum WorkflowRunEvent {
     },
     AgentCliStarted {
         node_id: String,
+        visit: u32,
         mode: String,
         provider: String,
         model: String,
@@ -539,14 +543,24 @@ impl WorkflowRunEvent {
             Self::RunRunning { reason } => {
                 info!(?reason, "Run running");
             }
-            Self::RunPaused { reason } => {
-                info!(?reason, "Run paused");
-            }
             Self::RunRemoving { reason } => {
                 info!(?reason, "Run removing");
             }
-            Self::RunDead { reason } => {
-                warn!(?reason, "Run dead");
+            Self::RunRewound {
+                target_checkpoint_ordinal,
+                target_node_id,
+                target_visit,
+                previous_status,
+                run_commit_sha,
+            } => {
+                info!(
+                    target_checkpoint_ordinal,
+                    target_node_id,
+                    target_visit,
+                    previous_status = previous_status.as_deref().unwrap_or(""),
+                    run_commit_sha = run_commit_sha.as_deref().unwrap_or(""),
+                    "Run rewound"
+                );
             }
             Self::WorkflowRunCompleted {
                 duration_ms,
@@ -787,6 +801,7 @@ impl WorkflowRunEvent {
                 mode,
                 provider,
                 model,
+                ..
             } => {
                 debug!(
                     stage,
@@ -1065,9 +1080,8 @@ pub fn event_name(event: &WorkflowRunEvent) -> &'static str {
         WorkflowRunEvent::RunSubmitted { .. } => "run.submitted",
         WorkflowRunEvent::RunStarting { .. } => "run.starting",
         WorkflowRunEvent::RunRunning { .. } => "run.running",
-        WorkflowRunEvent::RunPaused { .. } => "run.paused",
         WorkflowRunEvent::RunRemoving { .. } => "run.removing",
-        WorkflowRunEvent::RunDead { .. } => "run.dead",
+        WorkflowRunEvent::RunRewound { .. } => "run.rewound",
         WorkflowRunEvent::WorkflowRunCompleted { .. } => "run.completed",
         WorkflowRunEvent::WorkflowRunFailed { .. } => "run.failed",
         WorkflowRunEvent::RunNotice { .. } => "run.notice",
@@ -1314,12 +1328,16 @@ fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
             let mut fields = tagged_variant_fields(event);
             let node_id = remove_string(&mut fields, "stage");
             let node_label = default_node_label(node_id.as_ref(), None);
+            let visit = fields.remove("visit");
             fields.remove("session_id");
             fields.remove("parent_session_id");
-            let properties = fields.remove("event").map_or_else(
+            let mut properties = fields.remove("event").map_or_else(
                 || Value::Object(Map::new()),
                 |value| Value::Object(tagged_variant_fields_from_value(value)),
             );
+            if let (Some(visit), Value::Object(map)) = (visit, &mut properties) {
+                map.insert("visit".to_string(), visit);
+            }
             EnvelopeFields {
                 session_id: session_id.clone(),
                 parent_session_id: parent_session_id.clone(),
@@ -1552,6 +1570,15 @@ impl StoreProgressLogger {
                         if let Err(err) = run_store.append_event(&payload).await {
                             tracing::warn!(error = %err, "Failed to append event to run store");
                         }
+                        if let Err(err) =
+                            project_provider_used_from_event_payload(run_store.as_ref(), &payload)
+                                .await
+                        {
+                            tracing::warn!(
+                                error = %err,
+                                "Failed to project provider metadata from event"
+                            );
+                        }
                     }
                     StoreProgressCommand::Flush(tx) => {
                         let _ = tx.send(());
@@ -1595,6 +1622,80 @@ impl StoreProgressLogger {
             tracing::warn!("Store progress logger flush dropped before completion");
         }
     }
+}
+
+async fn project_provider_used_from_event_payload(
+    run_store: &dyn RunStore,
+    payload: &EventPayload,
+) -> Result<()> {
+    let value = payload.as_value();
+    let Some(event_name) = value.get("event").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    let Some(node_id) = value.get("node_id").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    let Some(properties) = value.get("properties").and_then(Value::as_object) else {
+        return Ok(());
+    };
+    let Some(visit) = properties
+        .get("visit")
+        .and_then(Value::as_u64)
+        .and_then(|visit| u32::try_from(visit).ok())
+    else {
+        return Ok(());
+    };
+
+    let provider_used = match event_name {
+        "stage.prompt" => {
+            let mut provider_used = Map::new();
+            if let Some(mode) = properties.get("mode").and_then(Value::as_str) {
+                provider_used.insert("mode".to_string(), Value::String(mode.to_string()));
+            }
+            if let Some(provider) = properties.get("provider").and_then(Value::as_str) {
+                provider_used.insert("provider".to_string(), Value::String(provider.to_string()));
+            }
+            if let Some(model) = properties.get("model").and_then(Value::as_str) {
+                provider_used.insert("model".to_string(), Value::String(model.to_string()));
+            }
+            (!provider_used.is_empty()).then_some(Value::Object(provider_used))
+        }
+        "agent.session.started" => {
+            let mut provider_used = Map::new();
+            provider_used.insert("mode".to_string(), Value::String("agent".to_string()));
+            if let Some(provider) = properties.get("provider").and_then(Value::as_str) {
+                provider_used.insert("provider".to_string(), Value::String(provider.to_string()));
+            }
+            if let Some(model) = properties.get("model").and_then(Value::as_str) {
+                provider_used.insert("model".to_string(), Value::String(model.to_string()));
+            }
+            Some(Value::Object(provider_used))
+        }
+        "agent.cli.started" => {
+            let mut provider_used = Map::new();
+            provider_used.insert("mode".to_string(), Value::String("cli".to_string()));
+            if let Some(provider) = properties.get("provider").and_then(Value::as_str) {
+                provider_used.insert("provider".to_string(), Value::String(provider.to_string()));
+            }
+            if let Some(model) = properties.get("model").and_then(Value::as_str) {
+                provider_used.insert("model".to_string(), Value::String(model.to_string()));
+            }
+            if let Some(command) = properties.get("command").and_then(Value::as_str) {
+                provider_used.insert("command".to_string(), Value::String(command.to_string()));
+            }
+            Some(Value::Object(provider_used))
+        }
+        _ => None,
+    };
+
+    let Some(provider_used) = provider_used else {
+        return Ok(());
+    };
+
+    run_store
+        .put_node_provider_used(&NodeVisitRef { node_id, visit }, &provider_used)
+        .await
+        .map_err(anyhow::Error::from)
 }
 
 /// Current time as epoch milliseconds.
@@ -1856,6 +1957,7 @@ mod tests {
             &fixtures::RUN_4,
             &WorkflowRunEvent::Agent {
                 stage: "code".to_string(),
+                visit: 2,
                 event: AgentEvent::ToolCallStarted {
                     tool_name: "read_file".to_string(),
                     tool_call_id: "call_1".to_string(),
@@ -1873,6 +1975,7 @@ mod tests {
         assert_eq!(envelope.parent_session_id.as_deref(), Some("ses_parent"));
         assert_eq!(envelope.properties["tool_name"], "read_file");
         assert_eq!(envelope.properties["tool_call_id"], "call_1");
+        assert_eq!(envelope.properties["visit"], 2);
     }
 
     #[test]
@@ -1975,6 +2078,7 @@ mod tests {
         assert_eq!(
             event_name(&WorkflowRunEvent::Agent {
                 stage: "code".to_string(),
+                visit: 1,
                 event: AgentEvent::SubAgentSpawned {
                     agent_id: "a1".to_string(),
                     depth: 1,

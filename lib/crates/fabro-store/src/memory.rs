@@ -535,6 +535,18 @@ impl RunStore for InMemoryRunStore {
         self.get_json(keys::pull_request()).await
     }
 
+    async fn reset_for_rewind(&self) -> Result<()> {
+        let mut data = self.data.lock().await;
+        data.retain(|key, _| {
+            key == keys::init()
+                || key == keys::run()
+                || key == keys::start()
+                || key == keys::graph()
+                || key.starts_with(keys::EVENTS_PREFIX)
+        });
+        Ok(())
+    }
+
     async fn append_event(&self, payload: &EventPayload) -> Result<u32> {
         payload.validate(&self.run_id)?;
 

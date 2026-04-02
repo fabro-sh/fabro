@@ -468,6 +468,32 @@ impl RunStore for SlateRunStore {
         self.inner.db.get_json(keys::pull_request()).await
     }
 
+    async fn reset_for_rewind(&self) -> Result<()> {
+        let db = self.inner.db.writer()?;
+        for key in [
+            keys::status(),
+            keys::checkpoint(),
+            keys::conclusion(),
+            keys::retro(),
+            keys::sandbox(),
+            keys::final_patch(),
+            keys::pull_request(),
+            keys::retro_prompt(),
+            keys::retro_response(),
+        ] {
+            db.delete(key).await?;
+        }
+        for prefix in [
+            b"nodes/".as_slice(),
+            keys::CHECKPOINTS_PREFIX.as_bytes(),
+            keys::ARTIFACT_VALUES_PREFIX.as_bytes(),
+            keys::ARTIFACT_NODES_PREFIX.as_bytes(),
+        ] {
+            delete_prefix(db, prefix).await?;
+        }
+        Ok(())
+    }
+
     async fn append_event(&self, payload: &EventPayload) -> Result<u32> {
         payload.validate(&self.inner.run_id)?;
         let seq = self.inner.event_seq.fetch_add(1, Ordering::SeqCst);
@@ -759,6 +785,18 @@ where
 
 async fn put_bytes(db: &slatedb::Db, key: &str, value: &[u8]) -> Result<()> {
     db.put(key, value).await?;
+    Ok(())
+}
+
+async fn delete_prefix(db: &slatedb::Db, prefix: &[u8]) -> Result<()> {
+    let mut iter = db.scan_prefix(prefix).await?;
+    let mut keys = Vec::new();
+    while let Some(entry) = iter.next().await? {
+        keys.push(key_to_string(&entry.key)?);
+    }
+    for key in keys {
+        db.delete(key).await?;
+    }
     Ok(())
 }
 

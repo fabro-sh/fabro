@@ -4,7 +4,7 @@ use fabro_test::{fabro_snapshot, run_and_format, test_context};
 
 use super::support::{
     git_filters, git_stdout, output_stderr as support_stderr, run_branch_commits_since_base,
-    setup_git_backed_changed_run,
+    run_events, run_snapshot, setup_git_backed_changed_run,
 };
 
 #[test]
@@ -120,5 +120,70 @@ fn rewind_target_updates_metadata_and_resume_hint() {
     assert!(
         !list.contains("@2"),
         "rewound timeline should drop @2: {list}"
+    );
+}
+
+#[test]
+fn rewind_preserves_event_history_and_clears_terminal_snapshot_state() {
+    let context = test_context!();
+    let setup = setup_git_backed_changed_run(&context);
+    let before_events = run_events(&setup.run.run_dir);
+    assert!(
+        before_events.iter().any(|event| event.payload.as_value()["event"] == "run.completed"),
+        "setup run should be completed before rewind"
+    );
+
+    let mut cmd = context.command();
+    cmd.current_dir(&setup.repo_dir);
+    cmd.args(["rewind", &setup.run.run_id, "@1", "--no-push"]);
+    let output = cmd.output().expect("rewind should execute");
+    assert!(
+        output.status.success(),
+        "rewind should succeed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        support_stderr(&output),
+    );
+
+    let after_events = run_events(&setup.run.run_dir);
+    assert_eq!(
+        after_events.len(),
+        before_events.len() + 3,
+        "rewind should append run.rewound, checkpoint.completed, and run.submitted"
+    );
+    assert_eq!(
+        after_events[..before_events.len()]
+            .iter()
+            .map(|event| event.payload.as_value()["event"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        before_events
+            .iter()
+            .map(|event| event.payload.as_value()["event"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        "rewind should preserve the prior event prefix"
+    );
+    assert_eq!(
+        after_events[before_events.len()].payload.as_value()["event"],
+        "run.rewound"
+    );
+    assert_eq!(
+        after_events[before_events.len() + 1].payload.as_value()["event"],
+        "checkpoint.completed"
+    );
+    assert_eq!(
+        after_events[before_events.len() + 2].payload.as_value()["event"],
+        "run.submitted"
+    );
+
+    let snapshot = run_snapshot(&setup.run.run_dir);
+    assert_eq!(
+        snapshot.status.as_ref().map(|status| &status.status),
+        Some(&fabro_types::RunStatus::Submitted)
+    );
+    assert!(snapshot.conclusion.is_none(), "rewind should clear conclusion");
+    assert!(snapshot.final_patch.is_none(), "rewind should clear final patch");
+    assert!(snapshot.pull_request.is_none(), "rewind should clear pull request");
+    assert!(
+        snapshot.nodes.is_empty(),
+        "rewind should clear node snapshots that belonged to the prior execution"
     );
 }

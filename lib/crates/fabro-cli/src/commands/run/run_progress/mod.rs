@@ -482,6 +482,7 @@ mod tests {
     fn agent_event(stage: &str, event: AgentEvent) -> WorkflowRunEvent {
         WorkflowRunEvent::Agent {
             stage: stage.into(),
+            visit: 1,
             event,
             session_id: None,
             parent_session_id: None,

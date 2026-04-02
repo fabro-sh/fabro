@@ -15,6 +15,7 @@ use crate::error::FabroError;
 use crate::event::{EventEmitter, WorkflowRunEvent};
 use crate::outcome::StageUsage;
 use crate::outcome::compute_stage_cost;
+use crate::run_dir::visit_from_context;
 use fabro_graphviz::graph::Node;
 
 /// Maps a provider to its corresponding CLI tool metadata.
@@ -54,6 +55,10 @@ impl AgentCli {
             Self::Gemini => "@anthropic-ai/gemini-cli",
         }
     }
+}
+
+fn current_visit(context: &Context) -> u32 {
+    u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX)
 }
 
 /// Ensure the CLI tool for the given provider is installed in the sandbox.
@@ -496,6 +501,7 @@ impl CodergenBackend for AgentCliBackend {
         let command = cli_command_for_provider(provider, model, &prompt_path);
         emitter.emit(&WorkflowRunEvent::AgentCliStarted {
             node_id: node.id.clone(),
+            visit: current_visit(_context),
             mode: "cli".to_string(),
             provider: provider.as_str().to_string(),
             model: model.to_string(),

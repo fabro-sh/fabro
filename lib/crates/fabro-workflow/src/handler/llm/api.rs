@@ -23,6 +23,7 @@ use crate::error::FabroError;
 use crate::event::{EventEmitter, WorkflowRunEvent};
 use crate::outcome::StageUsage;
 use crate::outcome::compute_stage_cost;
+use crate::run_dir::visit_from_context;
 use fabro_graphviz::graph::Node;
 
 fn build_profile(model: &str, provider: Provider) -> Box<dyn AgentProfile> {
@@ -36,6 +37,10 @@ fn build_profile(model: &str, provider: Provider) -> Box<dyn AgentProfile> {
         Provider::Gemini => Box::new(GeminiProfile::new(model)),
         Provider::Anthropic => Box::new(AnthropicProfile::new(model)),
     }
+}
+
+fn current_visit(context: &Context) -> u32 {
+    u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX)
 }
 
 /// Shared state for tracking file modifications from agent tool calls.
@@ -83,6 +88,7 @@ fn track_file_event(event: &AgentEvent, state: &mut FileTracking) {
 fn spawn_event_forwarder(
     session: &Session,
     node_id: String,
+    visit: u32,
     emitter: Arc<EventEmitter>,
     file_tracking: Arc<Mutex<FileTracking>>,
 ) {
@@ -101,6 +107,7 @@ fn spawn_event_forwarder(
             {
                 emitter.emit(&WorkflowRunEvent::Agent {
                     stage: node_id.clone(),
+                    visit,
                     event: event.event.clone(),
                     session_id: Some(event.session_id.clone()),
                     parent_session_id: event.parent_session_id.clone(),
@@ -424,7 +431,7 @@ impl CodergenBackend for AgentApiBackend {
         context: &Context,
         thread_id: Option<&str>,
         emitter: &Arc<EventEmitter>,
-        stage_dir: &std::path::Path,
+        _stage_dir: &std::path::Path,
         sandbox: &Arc<dyn Sandbox>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
     ) -> Result<CodergenResult, FabroError> {
@@ -479,6 +486,7 @@ impl CodergenBackend for AgentApiBackend {
         spawn_event_forwarder(
             &session,
             node.id.clone(),
+            current_visit(context),
             Arc::clone(emitter),
             Arc::clone(&file_tracking),
         );
@@ -486,6 +494,7 @@ impl CodergenBackend for AgentApiBackend {
         // Emit Prompt event before processing
         emitter.emit(&WorkflowRunEvent::Prompt {
             stage: node.id.clone(),
+            visit: current_visit(context),
             text: prompt.to_string(),
             mode: Some("agent".to_string()),
             provider: Some(actual_provider.as_str().to_string()),
@@ -552,6 +561,7 @@ impl CodergenBackend for AgentApiBackend {
                     spawn_event_forwarder(
                         &session,
                         node.id.clone(),
+                        current_visit(context),
                         Arc::clone(emitter),
                         Arc::clone(&file_tracking),
                     );
@@ -632,15 +642,6 @@ impl CodergenBackend for AgentApiBackend {
             v.sort();
             (v, s.last.clone())
         };
-
-        let provider_used = serde_json::json!({
-            "mode": "agent",
-            "provider": actual_provider.as_str(),
-            "model": &actual_model,
-        });
-        if let Ok(json) = serde_json::to_string_pretty(&provider_used) {
-            let _ = std::fs::write(stage_dir.join("provider_used.json"), json);
-        }
 
         // Cache session back for reuse on success.
         if let Some(key) = reuse_key {
