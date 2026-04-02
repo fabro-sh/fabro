@@ -682,14 +682,25 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
         }
     }
 
-    let run_store = match operations::open_or_hydrate_run(state.store.as_ref(), &run_dir).await {
-        Ok(run_store) => run_store,
-        Err(e) => {
-            tracing::error!(run_id = %run_id, error = %e, "Failed to open or hydrate run store");
+    let run_store = match state.store.open_run(&run_id).await {
+        Ok(Some(run_store)) => run_store,
+        Ok(None) => {
+            tracing::error!(run_id = %run_id, "Run store missing");
             let mut runs = state.runs.lock().expect("runs lock poisoned");
             if let Some(managed_run) = runs.get_mut(&run_id) {
                 managed_run.status = RunStatus::Failed;
-                managed_run.error = Some(format!("Failed to open or hydrate run store: {e}"));
+                managed_run.error = Some("Run store missing".to_string());
+                clear_live_run_state(managed_run);
+            }
+            state.scheduler_notify.notify_one();
+            return;
+        }
+        Err(e) => {
+            tracing::error!(run_id = %run_id, error = %e, "Failed to open run store");
+            let mut runs = state.runs.lock().expect("runs lock poisoned");
+            if let Some(managed_run) = runs.get_mut(&run_id) {
+                managed_run.status = RunStatus::Failed;
+                managed_run.error = Some(format!("Failed to open run store: {e}"));
                 clear_live_run_state(managed_run);
             }
             state.scheduler_notify.notify_one();
