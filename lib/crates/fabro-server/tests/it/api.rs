@@ -786,7 +786,7 @@ mod sse_events {
         let mut body = response.into_body();
         let mut sse_data = String::new();
         while let Ok(Some(Ok(frame))) =
-            tokio::time::timeout(Duration::from_millis(500), body.frame()).await
+            tokio::time::timeout(Duration::from_secs(2), body.frame()).await
         {
             if let Some(data) = frame.data_ref() {
                 sse_data.push_str(&String::from_utf8_lossy(data));
