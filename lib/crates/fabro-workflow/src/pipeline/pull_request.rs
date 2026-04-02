@@ -500,7 +500,7 @@ pub async fn maybe_open_pull_request(
         }
     }
 
-    Ok(Some(PullRequestRecord {
+    let record = PullRequestRecord {
         html_url: created.html_url,
         number: created.number,
         owner,
@@ -508,7 +508,16 @@ pub async fn maybe_open_pull_request(
         base_branch: base_branch.to_string(),
         head_branch: head_branch.to_string(),
         title,
-    }))
+    };
+
+    if let Some(run_store) = run_store {
+        run_store
+            .put_pull_request(&record)
+            .await
+            .map_err(|err| format!("failed to persist pull request in run store: {err}"))?;
+    }
+
+    Ok(Some(record))
 }
 
 /// PULL_REQUEST phase: optionally create a pull request after finalize.
