@@ -8,7 +8,7 @@ use fabro_util::terminal::Styles;
 use fabro_workflow::git::MetadataStore;
 use fabro_workflow::operations::{
     RewindInput, RewindTarget, RunTimeline, build_timeline_or_rebuild,
-    find_run_id_by_prefix_or_store, rewind,
+    find_run_id_by_prefix_or_store, open_or_hydrate_run, rewind,
 };
 use fabro_workflow::records::CheckpointExt;
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
@@ -126,6 +126,11 @@ async fn reset_rewound_run_state(
         .delete_run(run_id)
         .await
         .map_err(|err| anyhow::anyhow!("failed to reset durable store run: {err}"))?;
+    open_or_hydrate_run(durable_store, run_dir)
+        .await
+        .map_err(|err| {
+            anyhow::anyhow!("failed to restore durable store run after rewind: {err}")
+        })?;
     Ok(())
 }
 
