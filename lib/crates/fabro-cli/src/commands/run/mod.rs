@@ -60,7 +60,13 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             let base = runs_base(&cli_settings.storage_dir());
             let store = store::build_store(&cli_settings.storage_dir())?;
             let run_info = resolve_run_combined(store.as_ref(), &base, &run).await?;
-            let child = start::start_run(&run_info.path, false)?;
+            let child = start::start_run(
+                &run_info.path,
+                &run_info.run_id,
+                &cli_settings.storage_dir(),
+                false,
+            )
+            .await?;
             if globals.json {
                 print_json_pretty(&serde_json::json!({ "run_id": run_info.run_id }))?;
             } else {
@@ -89,10 +95,20 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             Ok(())
         }
         RunCommands::Detached {
+            run_id,
             run_dir,
             launcher_path,
             resume,
-        } => detached::execute(run_dir, launcher_path, resume).await,
+        } => {
+            detached::execute(
+                run_id,
+                run_dir,
+                globals.storage_dir.clone(),
+                launcher_path,
+                resume,
+            )
+            .await
+        }
         RunCommands::Diff(args) => diff::run(args, globals).await,
         RunCommands::Logs(args) => {
             let styles = Styles::detect_stdout();

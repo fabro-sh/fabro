@@ -1,4 +1,5 @@
 use anyhow::Result;
+use fabro_config::FabroSettingsExt;
 use fabro_util::terminal::Styles;
 
 use crate::args::{GlobalArgs, RunArgs};
@@ -21,7 +22,8 @@ pub(crate) async fn execute(mut args: RunArgs, globals: &GlobalArgs) -> Result<(
     #[cfg(not(feature = "sleep_inhibitor"))]
     let _ = prevent_idle_sleep;
 
-    let child = super::start::start_run(&run_dir, false)?;
+    let child =
+        super::start::start_run(&run_dir, &run_id, &cli_settings.storage_dir(), false).await?;
 
     if args.detach {
         if globals.json {

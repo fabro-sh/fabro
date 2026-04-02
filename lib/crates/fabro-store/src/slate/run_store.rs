@@ -16,12 +16,12 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::keys;
 use crate::{
-    CatalogRecord, EventEnvelope, EventPayload, NodeSnapshot, NodeVisitRef, Result, RunSnapshot,
-    RunStore, RunSummary, StoreError,
+    CatalogRecord, EventEnvelope, EventPayload, NodeOutcomeRecord, NodeSnapshot, NodeVisitRef,
+    Result, RunSnapshot, RunStore, RunSummary, StoreError,
 };
 use fabro_types::{
-    Checkpoint, Conclusion, NodeStatusRecord, Retro, RunId, RunRecord, RunStatusRecord,
-    SandboxRecord, StartRecord,
+    Checkpoint, Conclusion, NodeStatusRecord, PullRequestRecord, Retro, RunId, RunRecord,
+    RunStatusRecord, SandboxRecord, StartRecord,
 };
 
 #[derive(Clone)]
@@ -204,6 +204,28 @@ impl SlateRunStore {
             prompt: self.inner.db.get_text(&keys::node_prompt(node)).await?,
             response: self.inner.db.get_text(&keys::node_response(node)).await?,
             status: self.inner.db.get_json(&keys::node_status(node)).await?,
+            outcome: self.inner.db.get_json(&keys::node_outcome(node)).await?,
+            provider_used: self
+                .inner
+                .db
+                .get_json(&keys::node_provider_used(node))
+                .await?,
+            diff: self.inner.db.get_text(&keys::node_diff(node)).await?,
+            script_invocation: self
+                .inner
+                .db
+                .get_json(&keys::node_script_invocation(node))
+                .await?,
+            script_timing: self
+                .inner
+                .db
+                .get_json(&keys::node_script_timing(node))
+                .await?,
+            parallel_results: self
+                .inner
+                .db
+                .get_json(&keys::node_parallel_results(node))
+                .await?,
             stdout: self.inner.db.get_text(&keys::node_stdout(node)).await?,
             stderr: self.inner.db.get_text(&keys::node_stderr(node)).await?,
         })
@@ -319,6 +341,65 @@ impl RunStore for SlateRunStore {
             .await
     }
 
+    async fn put_node_outcome(
+        &self,
+        node: &NodeVisitRef<'_>,
+        outcome: &NodeOutcomeRecord,
+    ) -> Result<()> {
+        self.inner
+            .db
+            .put_json(&keys::node_outcome(node), outcome)
+            .await
+    }
+
+    async fn put_node_provider_used(
+        &self,
+        node: &NodeVisitRef<'_>,
+        provider_used: &serde_json::Value,
+    ) -> Result<()> {
+        self.inner
+            .db
+            .put_json(&keys::node_provider_used(node), provider_used)
+            .await
+    }
+
+    async fn put_node_diff(&self, node: &NodeVisitRef<'_>, diff: &str) -> Result<()> {
+        self.inner.db.put_text(&keys::node_diff(node), diff).await
+    }
+
+    async fn put_node_script_invocation(
+        &self,
+        node: &NodeVisitRef<'_>,
+        invocation: &serde_json::Value,
+    ) -> Result<()> {
+        self.inner
+            .db
+            .put_json(&keys::node_script_invocation(node), invocation)
+            .await
+    }
+
+    async fn put_node_script_timing(
+        &self,
+        node: &NodeVisitRef<'_>,
+        timing: &serde_json::Value,
+    ) -> Result<()> {
+        self.inner
+            .db
+            .put_json(&keys::node_script_timing(node), timing)
+            .await
+    }
+
+    async fn put_node_parallel_results(
+        &self,
+        node: &NodeVisitRef<'_>,
+        results: &serde_json::Value,
+    ) -> Result<()> {
+        self.inner
+            .db
+            .put_json(&keys::node_parallel_results(node), results)
+            .await
+    }
+
     async fn put_node_stdout(&self, node: &NodeVisitRef<'_>, log: &str) -> Result<()> {
         self.inner.db.put_text(&keys::node_stdout(node), log).await
     }
@@ -344,6 +425,47 @@ impl RunStore for SlateRunStore {
             }
         }
         Ok(visits.into_iter().collect())
+    }
+
+    async fn list_node_ids(&self) -> Result<Vec<String>> {
+        let mut iter = self.inner.db.scan_prefix(b"nodes/").await?;
+        let mut node_ids = BTreeSet::new();
+        while let Some(entry) = iter.next().await? {
+            let key = key_to_string(&entry.key)?;
+            if let Some((node_id, _, _)) = keys::parse_node_key(&key) {
+                node_ids.insert(node_id);
+            }
+        }
+
+        let mut asset_iter = self
+            .inner
+            .db
+            .scan_prefix(keys::ARTIFACT_NODES_PREFIX.as_bytes())
+            .await?;
+        while let Some(entry) = asset_iter.next().await? {
+            let key = key_to_string(&entry.key)?;
+            if let Some((node_id, _, _)) = keys::parse_node_asset_key(&key) {
+                node_ids.insert(node_id);
+            }
+        }
+
+        Ok(node_ids.into_iter().collect())
+    }
+
+    async fn put_final_patch(&self, patch: &str) -> Result<()> {
+        self.inner.db.put_text(keys::final_patch(), patch).await
+    }
+
+    async fn get_final_patch(&self) -> Result<Option<String>> {
+        self.inner.db.get_text(keys::final_patch()).await
+    }
+
+    async fn put_pull_request(&self, record: &PullRequestRecord) -> Result<()> {
+        self.inner.db.put_json(keys::pull_request(), record).await
+    }
+
+    async fn get_pull_request(&self) -> Result<Option<PullRequestRecord>> {
+        self.inner.db.get_json(keys::pull_request()).await
     }
 
     async fn append_event(&self, payload: &EventPayload) -> Result<u32> {
@@ -503,6 +625,8 @@ impl RunStore for SlateRunStore {
             retro: self.get_retro().await?,
             graph: self.get_graph().await?,
             sandbox: self.get_sandbox().await?,
+            final_patch: self.get_final_patch().await?,
+            pull_request: self.get_pull_request().await?,
             nodes,
         }))
     }

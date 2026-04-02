@@ -2,30 +2,29 @@ use std::path::Path;
 
 use anyhow::{Result, anyhow, bail};
 use chrono::Utc;
-use fabro_config::FabroSettingsExt;
-use fabro_workflow::records::{RunRecord, RunRecordExt};
-use fabro_workflow::run_status::{RunStatus, RunStatusRecord, RunStatusRecordExt};
+use fabro_types::RunId;
+use fabro_workflow::run_status::RunStatus;
 
 use super::launcher::{
-    LauncherRecord, active_launcher_record_for_run, launcher_log_path, launcher_record_path,
+    LauncherRecord, active_launcher_record, launcher_log_path, launcher_record_path,
     remove_launcher_record, write_launcher_record,
 };
+use crate::store;
 
-/// Spawn a detached engine process for the given run directory.
+/// Spawn a detached engine process for the given run.
 ///
-/// The engine process reads `run.json` from the run directory and executes the
-/// workflow. Returns the child process handle (use `.id()` for the PID).
-pub(crate) fn start_run(run_dir: &Path, resume: bool) -> Result<std::process::Child> {
+/// Returns the child process handle (use `.id()` for the PID).
+pub(crate) async fn start_run(
+    run_dir: &Path,
+    run_id: &RunId,
+    storage_dir: &Path,
+    resume: bool,
+) -> Result<std::process::Child> {
     if !resume {
-        ensure_startable_run(run_dir)?;
+        ensure_startable_run(storage_dir, run_id).await?;
     }
-
-    let record = RunRecord::load(run_dir)
-        .map_err(|e| anyhow!("Cannot start run: failed to load run.json: {e}"))?;
-
-    let storage_dir = record.settings.storage_dir();
-    let launcher_path = launcher_record_path(&storage_dir, &record.run_id);
-    let log_path = launcher_log_path(&storage_dir, &record.run_id);
+    let launcher_path = launcher_record_path(storage_dir, run_id);
+    let log_path = launcher_log_path(storage_dir, run_id);
 
     if let Some(parent) = log_path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -36,8 +35,12 @@ pub(crate) fn start_run(run_dir: &Path, resume: bool) -> Result<std::process::Ch
     let exe = std::env::current_exe()?;
 
     let mut cmd = std::process::Command::new(&exe);
-    cmd.args(["__detached", "--run-dir"])
+    cmd.args(["__detached", "--run-id"])
+        .arg(run_id.to_string())
+        .args(["--run-dir"])
         .arg(run_dir)
+        .args(["--storage-dir"])
+        .arg(storage_dir)
         .args(["--launcher-path"])
         .arg(&launcher_path);
     if resume {
@@ -56,7 +59,7 @@ pub(crate) fn start_run(run_dir: &Path, resume: bool) -> Result<std::process::Ch
     if let Err(err) = write_launcher_record(
         &launcher_path,
         &LauncherRecord {
-            run_id: record.run_id,
+            run_id: *run_id,
             run_dir: run_dir.to_path_buf(),
             pid: child.id(),
             resume,
@@ -75,13 +78,15 @@ pub(crate) fn start_run(run_dir: &Path, resume: bool) -> Result<std::process::Ch
     Ok(child)
 }
 
-fn ensure_startable_run(run_dir: &Path) -> Result<()> {
-    if active_launcher_record_for_run(run_dir).is_some() {
+async fn ensure_startable_run(storage_dir: &Path, run_id: &RunId) -> Result<()> {
+    if active_launcher_record(storage_dir, run_id).is_some() {
         bail!("an engine process is still running for this run — cannot start");
     }
 
-    let status_path = run_dir.join("status.json");
-    if let Ok(record) = RunStatusRecord::load(&status_path) {
+    let run_store = store::open_run_reader(storage_dir, run_id)
+        .await?
+        .ok_or_else(|| anyhow!("Cannot start run: run {run_id} not found in store"))?;
+    if let Some(record) = run_store.get_status().await? {
         if !matches!(record.status, RunStatus::Submitted | RunStatus::Starting) {
             bail!(
                 "cannot start run: status is {:?}, expected submitted",

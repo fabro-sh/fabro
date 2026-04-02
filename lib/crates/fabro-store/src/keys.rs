@@ -9,6 +9,8 @@ pub(crate) const CONCLUSION_KEY: &str = "conclusion.json";
 pub(crate) const RETRO_KEY: &str = "retro.json";
 pub(crate) const GRAPH_KEY: &str = "graph.fabro";
 pub(crate) const SANDBOX_KEY: &str = "sandbox.json";
+pub(crate) const FINAL_PATCH_KEY: &str = "final.patch";
+pub(crate) const PULL_REQUEST_KEY: &str = "pull_request.json";
 pub(crate) const RETRO_PROMPT_KEY: &str = "retro/prompt.md";
 pub(crate) const RETRO_RESPONSE_KEY: &str = "retro/response.md";
 pub(crate) const EVENTS_PREFIX: &str = "events/";
@@ -52,6 +54,14 @@ pub(crate) fn sandbox() -> &'static str {
     SANDBOX_KEY
 }
 
+pub(crate) fn final_patch() -> &'static str {
+    FINAL_PATCH_KEY
+}
+
+pub(crate) fn pull_request() -> &'static str {
+    PULL_REQUEST_KEY
+}
+
 pub(crate) fn node_visit_prefix(node: &NodeVisitRef<'_>) -> String {
     format!("nodes/{}/visit-{}", node.node_id, node.visit)
 }
@@ -66,6 +76,30 @@ pub(crate) fn node_response(node: &NodeVisitRef<'_>) -> String {
 
 pub(crate) fn node_status(node: &NodeVisitRef<'_>) -> String {
     format!("{}/status.json", node_visit_prefix(node))
+}
+
+pub(crate) fn node_outcome(node: &NodeVisitRef<'_>) -> String {
+    format!("{}/outcome.json", node_visit_prefix(node))
+}
+
+pub(crate) fn node_provider_used(node: &NodeVisitRef<'_>) -> String {
+    format!("{}/provider_used.json", node_visit_prefix(node))
+}
+
+pub(crate) fn node_diff(node: &NodeVisitRef<'_>) -> String {
+    format!("{}/diff.patch", node_visit_prefix(node))
+}
+
+pub(crate) fn node_script_invocation(node: &NodeVisitRef<'_>) -> String {
+    format!("{}/script_invocation.json", node_visit_prefix(node))
+}
+
+pub(crate) fn node_script_timing(node: &NodeVisitRef<'_>) -> String {
+    format!("{}/script_timing.json", node_visit_prefix(node))
+}
+
+pub(crate) fn node_parallel_results(node: &NodeVisitRef<'_>) -> String {
+    format!("{}/parallel_results.json", node_visit_prefix(node))
 }
 
 pub(crate) fn node_stdout(node: &NodeVisitRef<'_>) -> String {
@@ -149,6 +183,8 @@ mod tests {
         assert_eq!(init(), "_init.json");
         assert_eq!(run(), "run.json");
         assert_eq!(graph(), "graph.fabro");
+        assert_eq!(final_patch(), "final.patch");
+        assert_eq!(pull_request(), "pull_request.json");
         assert_eq!(retro_prompt(), "retro/prompt.md");
         assert_eq!(retro_response(), "retro/response.md");
     }
@@ -163,6 +199,24 @@ mod tests {
         assert_eq!(node_prompt(&node), "nodes/plan/visit-3/prompt.md");
         assert_eq!(node_response(&node), "nodes/plan/visit-3/response.md");
         assert_eq!(node_status(&node), "nodes/plan/visit-3/status.json");
+        assert_eq!(node_outcome(&node), "nodes/plan/visit-3/outcome.json");
+        assert_eq!(
+            node_provider_used(&node),
+            "nodes/plan/visit-3/provider_used.json"
+        );
+        assert_eq!(node_diff(&node), "nodes/plan/visit-3/diff.patch");
+        assert_eq!(
+            node_script_invocation(&node),
+            "nodes/plan/visit-3/script_invocation.json"
+        );
+        assert_eq!(
+            node_script_timing(&node),
+            "nodes/plan/visit-3/script_timing.json"
+        );
+        assert_eq!(
+            node_parallel_results(&node),
+            "nodes/plan/visit-3/parallel_results.json"
+        );
         assert_eq!(node_stdout(&node), "nodes/plan/visit-3/stdout.log");
         assert_eq!(node_stderr(&node), "nodes/plan/visit-3/stderr.log");
     }

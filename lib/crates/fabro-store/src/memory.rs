@@ -14,12 +14,12 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::keys;
 use crate::{
-    CatalogRecord, EventEnvelope, EventPayload, ListRunsQuery, NodeSnapshot, NodeVisitRef, Result,
-    RunSnapshot, RunStore, RunSummary, Store, StoreError,
+    CatalogRecord, EventEnvelope, EventPayload, ListRunsQuery, NodeOutcomeRecord, NodeSnapshot,
+    NodeVisitRef, Result, RunSnapshot, RunStore, RunSummary, Store, StoreError,
 };
 use fabro_types::{
-    Checkpoint, Conclusion, NodeStatusRecord, Retro, RunId, RunRecord, RunStatusRecord,
-    SandboxRecord, StartRecord,
+    Checkpoint, Conclusion, NodeStatusRecord, PullRequestRecord, Retro, RunId, RunRecord,
+    RunStatusRecord, SandboxRecord, StartRecord,
 };
 
 #[derive(Debug, Default)]
@@ -126,9 +126,30 @@ impl InMemoryRunStore {
             prompt: read_text(data, &keys::node_prompt(node))?,
             response: read_text(data, &keys::node_response(node))?,
             status: read_json(data, &keys::node_status(node))?,
+            outcome: read_json(data, &keys::node_outcome(node))?,
+            provider_used: read_json(data, &keys::node_provider_used(node))?,
+            diff: read_text(data, &keys::node_diff(node))?,
+            script_invocation: read_json(data, &keys::node_script_invocation(node))?,
+            script_timing: read_json(data, &keys::node_script_timing(node))?,
+            parallel_results: read_json(data, &keys::node_parallel_results(node))?,
             stdout: read_text(data, &keys::node_stdout(node))?,
             stderr: read_text(data, &keys::node_stderr(node))?,
         })
+    }
+
+    async fn list_node_ids_inner(&self) -> Vec<String> {
+        let data = self.snapshot_data().await;
+        let mut node_ids = BTreeSet::new();
+        for key in data.keys() {
+            if let Some((node_id, _, _)) = keys::parse_node_key(key) {
+                node_ids.insert(node_id);
+                continue;
+            }
+            if let Some((node_id, _, _)) = keys::parse_node_asset_key(key) {
+                node_ids.insert(node_id);
+            }
+        }
+        node_ids.into_iter().collect()
     }
 
     async fn list_events_from_inner(&self, seq: u32) -> Result<Vec<EventEnvelope>> {
@@ -222,6 +243,8 @@ impl InMemoryRunStore {
             retro: read_json(data, keys::retro())?,
             graph: read_text(data, keys::graph())?,
             sandbox: read_json(data, keys::sandbox())?,
+            final_patch: read_text(data, keys::final_patch())?,
+            pull_request: read_json(data, keys::pull_request())?,
             nodes,
         }))
     }
@@ -413,6 +436,54 @@ impl RunStore for InMemoryRunStore {
         self.put_json(keys::node_status(node), status).await
     }
 
+    async fn put_node_outcome(
+        &self,
+        node: &NodeVisitRef<'_>,
+        outcome: &NodeOutcomeRecord,
+    ) -> Result<()> {
+        self.put_json(keys::node_outcome(node), outcome).await
+    }
+
+    async fn put_node_provider_used(
+        &self,
+        node: &NodeVisitRef<'_>,
+        provider_used: &serde_json::Value,
+    ) -> Result<()> {
+        self.put_json(keys::node_provider_used(node), provider_used)
+            .await
+    }
+
+    async fn put_node_diff(&self, node: &NodeVisitRef<'_>, diff: &str) -> Result<()> {
+        self.put_text(keys::node_diff(node), diff).await;
+        Ok(())
+    }
+
+    async fn put_node_script_invocation(
+        &self,
+        node: &NodeVisitRef<'_>,
+        invocation: &serde_json::Value,
+    ) -> Result<()> {
+        self.put_json(keys::node_script_invocation(node), invocation)
+            .await
+    }
+
+    async fn put_node_script_timing(
+        &self,
+        node: &NodeVisitRef<'_>,
+        timing: &serde_json::Value,
+    ) -> Result<()> {
+        self.put_json(keys::node_script_timing(node), timing).await
+    }
+
+    async fn put_node_parallel_results(
+        &self,
+        node: &NodeVisitRef<'_>,
+        results: &serde_json::Value,
+    ) -> Result<()> {
+        self.put_json(keys::node_parallel_results(node), results)
+            .await
+    }
+
     async fn put_node_stdout(&self, node: &NodeVisitRef<'_>, log: &str) -> Result<()> {
         self.put_text(keys::node_stdout(node), log).await;
         Ok(())
@@ -440,6 +511,28 @@ impl RunStore for InMemoryRunStore {
             }
         }
         Ok(visits.into_iter().collect())
+    }
+
+    async fn list_node_ids(&self) -> Result<Vec<String>> {
+        Ok(self.list_node_ids_inner().await)
+    }
+
+    async fn put_final_patch(&self, patch: &str) -> Result<()> {
+        self.put_text(keys::final_patch().to_string(), patch).await;
+        Ok(())
+    }
+
+    async fn get_final_patch(&self) -> Result<Option<String>> {
+        self.get_text(keys::final_patch()).await
+    }
+
+    async fn put_pull_request(&self, record: &PullRequestRecord) -> Result<()> {
+        self.put_json(keys::pull_request().to_string(), record)
+            .await
+    }
+
+    async fn get_pull_request(&self) -> Result<Option<PullRequestRecord>> {
+        self.get_json(keys::pull_request()).await
     }
 
     async fn append_event(&self, payload: &EventPayload) -> Result<u32> {
@@ -650,7 +743,8 @@ mod tests {
 
     use chrono::Duration as ChronoDuration;
     use fabro_types::{
-        AttrValue, FabroSettings, Graph, RunId, RunStatus, StageStatus, StatusReason, fixtures,
+        AttrValue, FabroSettings, Graph, PullRequestRecord, RunId, RunStatus, StageStatus,
+        StatusReason, fixtures,
     };
     use tokio::time::timeout;
 
@@ -787,6 +881,27 @@ mod tests {
         }
     }
 
+    fn sample_node_outcome() -> NodeOutcomeRecord {
+        fabro_types::Outcome {
+            status: StageStatus::Success,
+            notes: Some("all good".to_string()),
+            files_touched: vec!["src/lib.rs".to_string()],
+            ..Default::default()
+        }
+    }
+
+    fn sample_pull_request() -> PullRequestRecord {
+        PullRequestRecord {
+            html_url: "https://github.com/fabro-sh/fabro/pull/123".to_string(),
+            number: 123,
+            owner: "fabro-sh".to_string(),
+            repo: "fabro".to_string(),
+            base_branch: "main".to_string(),
+            head_branch: "fabro/run/demo".to_string(),
+            title: "Map the constellations".to_string(),
+        }
+    }
+
     #[tokio::test]
     async fn create_run_put_get_and_snapshot_round_trip() {
         let store = InMemoryStore::default();
@@ -809,6 +924,12 @@ mod tests {
             visit: 2,
         };
         let node_status = sample_node_status();
+        let node_outcome = sample_node_outcome();
+        let provider_used = serde_json::json!({"provider": "openai", "model": "gpt-5.4"});
+        let script_invocation = serde_json::json!({"command": "cargo test"});
+        let script_timing = serde_json::json!({"duration_ms": 3210});
+        let parallel_results = serde_json::json!([{"node_id": "lint", "status": "success"}]);
+        let pull_request = sample_pull_request();
 
         run.put_run(&run_record).await.unwrap();
         run.put_start(&start_record).await.unwrap();
@@ -821,8 +942,28 @@ mod tests {
         run.put_node_prompt(&node, "Plan the fix").await.unwrap();
         run.put_node_response(&node, "Implemented").await.unwrap();
         run.put_node_status(&node, &node_status).await.unwrap();
+        run.put_node_outcome(&node, &node_outcome).await.unwrap();
+        run.put_node_provider_used(&node, &provider_used)
+            .await
+            .unwrap();
+        run.put_node_diff(&node, "diff --git a/src/lib.rs b/src/lib.rs")
+            .await
+            .unwrap();
+        run.put_node_script_invocation(&node, &script_invocation)
+            .await
+            .unwrap();
+        run.put_node_script_timing(&node, &script_timing)
+            .await
+            .unwrap();
+        run.put_node_parallel_results(&node, &parallel_results)
+            .await
+            .unwrap();
         run.put_node_stdout(&node, "ok").await.unwrap();
         run.put_node_stderr(&node, "").await.unwrap();
+        run.put_final_patch("diff --git a/src/lib.rs b/src/lib.rs\n")
+            .await
+            .unwrap();
+        run.put_pull_request(&pull_request).await.unwrap();
         run.put_retro_prompt("How did it go?").await.unwrap();
         run.put_retro_response("Smooth enough").await.unwrap();
         run.put_artifact_value("summary", &serde_json::json!({"done": true}))
@@ -882,6 +1023,15 @@ mod tests {
             Some(Bytes::from_static(b"fn main() {}"))
         );
         assert_eq!(
+            run.get_final_patch().await.unwrap().as_deref(),
+            Some("diff --git a/src/lib.rs b/src/lib.rs\n")
+        );
+        assert_eq!(
+            run.get_pull_request().await.unwrap(),
+            Some(pull_request.clone())
+        );
+        assert_eq!(run.list_node_ids().await.unwrap(), vec!["code".to_string()]);
+        assert_eq!(
             run.list_assets(&node).await.unwrap(),
             vec!["src/lib.rs".to_string()]
         );
@@ -909,6 +1059,35 @@ mod tests {
         let snapshot_status = snapshot.nodes[0].status.as_ref().unwrap();
         assert_eq!(snapshot_status.status, node_status.status);
         assert_eq!(snapshot_status.failure_reason, node_status.failure_reason);
+        assert_eq!(
+            snapshot.nodes[0].outcome.as_ref().unwrap().status,
+            StageStatus::Success
+        );
+        assert_eq!(
+            snapshot.nodes[0].provider_used.as_ref(),
+            Some(&provider_used)
+        );
+        assert_eq!(
+            snapshot.nodes[0].diff.as_deref(),
+            Some("diff --git a/src/lib.rs b/src/lib.rs")
+        );
+        assert_eq!(
+            snapshot.nodes[0].script_invocation.as_ref(),
+            Some(&script_invocation)
+        );
+        assert_eq!(
+            snapshot.nodes[0].script_timing.as_ref(),
+            Some(&script_timing)
+        );
+        assert_eq!(
+            snapshot.nodes[0].parallel_results.as_ref(),
+            Some(&parallel_results)
+        );
+        assert_eq!(
+            snapshot.final_patch.as_deref(),
+            Some("diff --git a/src/lib.rs b/src/lib.rs\n")
+        );
+        assert_eq!(snapshot.pull_request, Some(pull_request));
     }
 
     #[tokio::test]
@@ -963,6 +1142,10 @@ mod tests {
                 ),
                 ("code".to_string(), 2, "src/lib.rs".to_string())
             ]
+        );
+        assert_eq!(
+            run.list_node_ids().await.unwrap(),
+            vec!["artifact-only".to_string(), "code".to_string()]
         );
 
         let snapshot = run.get_snapshot().await.unwrap().unwrap();

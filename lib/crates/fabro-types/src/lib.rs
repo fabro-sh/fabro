@@ -7,6 +7,7 @@ pub mod failure_signature;
 pub mod graph;
 pub mod node_status;
 pub mod outcome;
+pub mod pull_request;
 pub mod retro;
 pub mod run;
 pub mod run_id;
@@ -22,6 +23,7 @@ pub use failure_signature::FailureSignature;
 pub use graph::{AttrValue, Edge, Graph, Node, is_llm_handler_type, shape_to_handler_type};
 pub use node_status::NodeStatusRecord;
 pub use outcome::{FailureCategory, FailureDetail, NodeResult, Outcome, OutcomeMeta, StageStatus};
+pub use pull_request::PullRequestRecord;
 pub use retro::{
     AggregateStats, FrictionKind, FrictionPoint, Learning, LearningCategory, OpenItem,
     OpenItemKind, Retro, RetroNarrative, SmoothnessRating, StageRetro,
