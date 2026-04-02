@@ -10,12 +10,12 @@ pub const LINEAR_API_ENDPOINT: &str = "https://api.linear.app/graphql";
 const BLOCKS_RELATION_TYPE: &str = "blocks";
 
 #[derive(Clone, Debug)]
-pub struct LinearConfig {
+pub struct LinearOptions {
     pub api_key: String,
     pub endpoint: String,
 }
 
-impl LinearConfig {
+impl LinearOptions {
     pub fn new(api_key: String) -> Self {
         Self {
             api_key,
@@ -129,7 +129,7 @@ fn normalize_issue(node: &Value) -> Result<Issue, String> {
 
 async fn execute_graphql(
     client: &reqwest::Client,
-    config: &LinearConfig,
+    config: &LinearOptions,
     query: &str,
     variables: Value,
 ) -> Result<Value, String> {
@@ -154,13 +154,13 @@ fn extract_issues(response: &Value) -> Result<Vec<Issue>, String> {
 
 /// A `Tracker` implementation backed by Linear.
 pub struct LinearTracker {
-    config: LinearConfig,
+    config: LinearOptions,
     client: reqwest::Client,
     project_slug: String,
 }
 
 impl LinearTracker {
-    pub fn new(config: LinearConfig, client: reqwest::Client, project_slug: String) -> Self {
+    pub fn new(config: LinearOptions, client: reqwest::Client, project_slug: String) -> Self {
         Self {
             config,
             client,
@@ -356,8 +356,8 @@ impl Tracker for LinearTracker {
 mod tests {
     use super::*;
 
-    fn mock_config(server_url: &str) -> LinearConfig {
-        LinearConfig {
+    fn mock_config(server_url: &str) -> LinearOptions {
+        LinearOptions {
             api_key: "lin_api_test123".to_string(),
             endpoint: format!("{server_url}/graphql"),
         }
@@ -1070,7 +1070,7 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_issues_by_ids_empty() {
-        let config = LinearConfig::new("unused".to_string());
+        let config = LinearOptions::new("unused".to_string());
         let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
         let issues = tracker.fetch_issues_by_ids(&[]).await.unwrap();
         assert!(issues.is_empty());

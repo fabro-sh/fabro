@@ -92,7 +92,7 @@ pub async fn get_branch(
 #[cfg(test)]
 mod tests {
     use crate::server::TestServer;
-    use crate::state::{AppConfig, AppState};
+    use crate::state::{AppOptions, AppState};
 
     fn test_rsa_key() -> String {
         use std::process::Command;
@@ -169,7 +169,7 @@ mod tests {
     async fn branch_exists_returns_200() {
         let pem = test_rsa_key();
         let mut state = AppState::new();
-        state.register_app(AppConfig {
+        state.register_app(AppOptions {
             app_id: "100".to_string(),
             slug: "test-app".to_string(),
             owner_login: "owner".to_string(),
@@ -212,7 +212,7 @@ mod tests {
     async fn branch_not_found_returns_404() {
         let pem = test_rsa_key();
         let mut state = AppState::new();
-        state.register_app(AppConfig {
+        state.register_app(AppOptions {
             app_id: "100".to_string(),
             slug: "test-app".to_string(),
             owner_login: "owner".to_string(),

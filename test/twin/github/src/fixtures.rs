@@ -6,8 +6,9 @@ use std::path::Path;
 use serde::Deserialize;
 
 use crate::state::{
-    AppConfig, AppState, Comment, Installation, IssueContent, ManifestConversion, OwnerType,
-    Project, ProjectItem, PullRequest, Release, Repository, StatusOption, TokenInfo, WebhookConfig,
+    AppOptions, AppState, Comment, Installation, IssueContent, ManifestConversion, OwnerType,
+    Project, ProjectItem, PullRequest, Release, Repository, StatusOption, TokenInfo,
+    WebhookOptions,
 };
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -31,7 +32,7 @@ pub struct FixtureState {
     #[serde(default)]
     pub comments: Vec<FixtureComment>,
     #[serde(default)]
-    pub webhook_config: FixtureWebhookConfig,
+    pub webhook_config: FixtureWebhookOptions,
     pub next_installation_id: Option<u64>,
     pub next_pr_number: Option<u64>,
     pub viewer_id: Option<String>,
@@ -161,7 +162,7 @@ pub struct FixtureComment {
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
-pub struct FixtureWebhookConfig {
+pub struct FixtureWebhookOptions {
     pub url: Option<String>,
     pub content_type: Option<String>,
 }
@@ -180,7 +181,7 @@ impl FixtureState {
 
         for app in self.apps {
             let app_id = app.app_id.clone();
-            let config = AppConfig {
+            let config = AppOptions {
                 app_id: app.app_id,
                 slug: app.slug,
                 owner_login: app.owner_login,
@@ -328,7 +329,7 @@ impl FixtureState {
             })
             .collect();
 
-        state.webhook_config = WebhookConfig {
+        state.webhook_config = WebhookOptions {
             url: self.webhook_config.url,
             content_type: self.webhook_config.content_type,
         };

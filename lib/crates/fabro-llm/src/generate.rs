@@ -5,7 +5,7 @@ use crate::retry::retry;
 use crate::tools::{RepairToolCallFn, Tool, execute_all_tools_with_repair};
 use crate::types::{
     FinishReason, GenerateResult, Message, ObjectStreamEvent, ReasoningEffort, Request, Response,
-    ResponseFormat, ResponseFormatType, RetryPolicy, StepResult, StreamEvent, TimeoutConfig,
+    ResponseFormat, ResponseFormatType, RetryPolicy, StepResult, StreamEvent, TimeoutOptions,
     ToolCall, ToolChoice, ToolDefinition, Usage,
 };
 use fabro_util::backoff::BackoffPolicy;
@@ -303,7 +303,7 @@ pub struct GenerateParams {
     pub provider_options: Option<serde_json::Value>,
     pub metadata: Option<std::collections::HashMap<String, String>>,
     pub max_retries: u32,
-    pub timeout: Option<TimeoutConfig>,
+    pub timeout: Option<TimeoutOptions>,
     pub client: Option<Arc<Client>>,
     /// Cancellation token to abort generation (Section 4.8).
     pub abort_signal: Option<CancellationToken>,
@@ -445,7 +445,7 @@ impl GenerateParams {
     }
 
     #[must_use]
-    pub const fn timeout(mut self, timeout: TimeoutConfig) -> Self {
+    pub const fn timeout(mut self, timeout: TimeoutOptions) -> Self {
         self.timeout = Some(timeout);
         self
     }
@@ -1558,7 +1558,7 @@ mod tests {
 
     #[test]
     fn generate_params_timeout_builder() {
-        let params = GenerateParams::new("test-model").timeout(TimeoutConfig {
+        let params = GenerateParams::new("test-model").timeout(TimeoutOptions {
             total: Some(30.0),
             per_step: Some(10.0),
         });
@@ -2504,7 +2504,7 @@ mod tests {
                     |_args, _ctx| async { Ok(serde_json::json!("72F")) },
                 )])
                 .max_tool_rounds(1)
-                .timeout(TimeoutConfig {
+                .timeout(TimeoutOptions {
                     total: None,
                     per_step: Some(0.01), // 10ms timeout, provider takes 5s
                 })
@@ -2635,7 +2635,7 @@ mod tests {
                     |_args, _ctx| async { Ok(serde_json::json!("72F")) },
                 )])
                 .max_tool_rounds(5)
-                .timeout(TimeoutConfig {
+                .timeout(TimeoutOptions {
                     total: Some(0.05), // 50ms total timeout
                     per_step: None,
                 })

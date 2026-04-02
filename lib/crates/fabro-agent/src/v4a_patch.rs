@@ -1401,7 +1401,7 @@ def gamma():
 
     #[tokio::test]
     async fn e2e_through_tool_executor() {
-        use crate::config::SessionConfig;
+        use crate::config::SessionOptions;
         use crate::session::Session;
         use crate::test_support::{
             MockLlmProvider, TestProfile, make_client, text_response, tool_call_response,
@@ -1451,8 +1451,13 @@ def farewell(name):
         let provider = Arc::new(MockLlmProvider::new(responses));
         let client = make_client(provider).await;
         let profile = Arc::new(TestProfile::with_tools(registry));
-        let mut session =
-            Session::new(client, profile, env.clone(), SessionConfig::default(), None);
+        let mut session = Session::new(
+            client,
+            profile,
+            env.clone(),
+            SessionOptions::default(),
+            None,
+        );
         session.initialize().await;
         session
             .process_input("Update the greeting functions")

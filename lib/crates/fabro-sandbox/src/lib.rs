@@ -32,12 +32,12 @@ pub use read_guard::ReadBeforeWriteSandbox;
 
 pub use sandbox_provider::SandboxProvider;
 
-pub use worktree::{WorktreeConfig, WorktreeEvent, WorktreeEventCallback, WorktreeSandbox};
+pub use worktree::{WorktreeEvent, WorktreeEventCallback, WorktreeOptions, WorktreeSandbox};
 
 pub use local::LocalSandbox;
 
 #[cfg(feature = "docker")]
-pub use docker::{DockerSandbox, DockerSandboxConfig};
+pub use docker::{DockerSandbox, DockerSandboxOptions};
 
 pub use sandbox_record::{SandboxRecord, SandboxRecordExt};
 

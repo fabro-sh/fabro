@@ -1,1 +1,1 @@
-pub use fabro_config::hook::{HookConfig, HookDefinition, HookEvent, HookType, TlsMode};
+pub use fabro_config::hook::{HookDefinition, HookEvent, HookSettings, HookType, TlsMode};

@@ -1,4 +1,4 @@
-use crate::config::SessionConfig;
+use crate::config::SessionOptions;
 
 /// Round a byte index down to the nearest UTF-8 char boundary.
 /// Stable equivalent of `str::floor_char_boundary` (nightly-only).
@@ -99,7 +99,7 @@ pub fn truncate_lines(output: &str, max_lines: usize) -> String {
 }
 
 #[must_use]
-pub fn truncate_tool_output(output: &str, tool_name: &str, config: &SessionConfig) -> String {
+pub fn truncate_tool_output(output: &str, tool_name: &str, config: &SessionOptions) -> String {
     let mode = default_truncation_mode(tool_name);
 
     // Char truncation first
@@ -180,7 +180,7 @@ mod tests {
         // Create an output that is large in chars and many lines
         let long_line = "x".repeat(50_000);
         let output = format!("{long_line}\n{long_line}");
-        let config = SessionConfig::default();
+        let config = SessionOptions::default();
         let result = truncate_tool_output(&output, "shell", &config);
         // Should have been char-truncated first (30k limit for shell)
         assert!(result.len() < output.len());
@@ -189,7 +189,7 @@ mod tests {
     #[test]
     fn config_override_char_limit() {
         let output = "x".repeat(5000);
-        let mut config = SessionConfig::default();
+        let mut config = SessionOptions::default();
         config.tool_output_limits.insert("my_tool".into(), 100);
         let result = truncate_tool_output(&output, "my_tool", &config);
         assert!(result.len() < output.len());
@@ -200,7 +200,7 @@ mod tests {
     fn config_override_line_limit() {
         let lines: Vec<String> = (1..=100).map(|i| format!("line {i}")).collect();
         let output = lines.join("\n");
-        let mut config = SessionConfig::default();
+        let mut config = SessionOptions::default();
         config.tool_line_limits.insert("my_tool".into(), 10);
         let result = truncate_tool_output(&output, "my_tool", &config);
         assert!(result.contains("lines omitted"));
@@ -209,7 +209,7 @@ mod tests {
     #[test]
     fn unknown_tool_no_truncation() {
         let output = "x".repeat(200);
-        let config = SessionConfig::default();
+        let config = SessionOptions::default();
         let result = truncate_tool_output(&output, "unknown_tool", &config);
         assert_eq!(result, output);
     }

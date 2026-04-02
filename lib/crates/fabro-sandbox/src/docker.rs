@@ -21,7 +21,7 @@ use tokio::time;
 use tokio_util::sync::CancellationToken;
 
 /// Configuration for a Docker-based sandbox.
-pub struct DockerSandboxConfig {
+pub struct DockerSandboxOptions {
     /// Docker image to use. Default: `"fabro-agent:latest"`.
     pub image: String,
     /// Host directory to bind-mount into the container.
@@ -42,7 +42,7 @@ pub struct DockerSandboxConfig {
     pub env_vars: Vec<String>,
 }
 
-impl Default for DockerSandboxConfig {
+impl Default for DockerSandboxOptions {
     fn default() -> Self {
         Self {
             image: "fabro-agent:latest".to_string(),
@@ -64,7 +64,7 @@ impl Default for DockerSandboxConfig {
 /// operations, commands, grep, and glob execute inside the container via `docker exec`.
 pub struct DockerSandbox {
     docker: Docker,
-    config: DockerSandboxConfig,
+    config: DockerSandboxOptions,
     container_id: OnceCell<String>,
     cached_platform: std::sync::OnceLock<String>,
     cached_os_version: std::sync::OnceLock<String>,
@@ -77,7 +77,7 @@ impl DockerSandbox {
     ///
     /// Validates Docker daemon connectivity but does NOT create a container.
     /// Call `initialize()` to create and start the container.
-    pub fn new(config: DockerSandboxConfig) -> Result<Self, String> {
+    pub fn new(config: DockerSandboxOptions) -> Result<Self, String> {
         let docker = Docker::connect_with_local_defaults()
             .map_err(|e| format!("Failed to connect to Docker daemon: {e}"))?;
         Ok(Self {
@@ -791,8 +791,8 @@ mod tests {
         Docker::connect_with_local_defaults().expect("Docker not available — skipping")
     }
 
-    fn test_config(host_dir: &str) -> DockerSandboxConfig {
-        DockerSandboxConfig {
+    fn test_config(host_dir: &str) -> DockerSandboxOptions {
+        DockerSandboxOptions {
             host_working_directory: host_dir.to_string(),
             auto_pull: false,
             ..Default::default()

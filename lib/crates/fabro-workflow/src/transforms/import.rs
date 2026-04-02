@@ -11,7 +11,7 @@ pub struct ImportTransform {
     fallback_dir: Option<PathBuf>,
 }
 
-struct PlaceholderConfig {
+struct PlaceholderOptions {
     default_attrs: HashMap<String, AttrValue>,
     class_names: Vec<String>,
     normalized_class: String,
@@ -194,7 +194,7 @@ impl ImportTransform {
         graph: &mut Graph,
         placeholder_id: &str,
         resolved_path: &Path,
-        placeholder: &PlaceholderConfig,
+        placeholder: &PlaceholderOptions,
         prepared: PreparedImport,
     ) -> Result<(), String> {
         if graph
@@ -341,7 +341,7 @@ impl ImportTransform {
     fn placeholder_config(
         graph: &Graph,
         placeholder_id: &str,
-    ) -> Result<PlaceholderConfig, String> {
+    ) -> Result<PlaceholderOptions, String> {
         let node = graph
             .nodes
             .get(placeholder_id)
@@ -378,7 +378,7 @@ impl ImportTransform {
             ));
         }
 
-        Ok(PlaceholderConfig {
+        Ok(PlaceholderOptions {
             default_attrs,
             class_names,
             normalized_class: Self::normalize_class_name(placeholder_id),

@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use fabro_agent::tool_registry::RegisteredTool;
 use fabro_agent::{
-    AgentProfile, AnthropicProfile, GeminiProfile, OpenAiProfile, Sandbox, Session, SessionConfig,
-    SessionEvent, Turn,
+    AgentProfile, AnthropicProfile, GeminiProfile, OpenAiProfile, Sandbox, Session, SessionEvent,
+    SessionOptions, Turn,
 };
 use fabro_llm::client::Client;
 use fabro_llm::provider::Provider;
@@ -159,14 +159,14 @@ pub async fn run_retro_agent(
 
     let profile: Arc<dyn AgentProfile> = Arc::from(profile);
 
-    let config = SessionConfig {
+    let config = SessionOptions {
         max_tool_rounds_per_input: 20,
         wall_clock_timeout: Some(Duration::from_secs(180)),
         // Disable features not needed for retro analysis
         enable_context_compaction: false,
         skill_dirs: Some(vec![]),
         user_instructions: Some(RETRO_SYSTEM_PROMPT.to_string()),
-        ..SessionConfig::default()
+        ..SessionOptions::default()
     };
 
     let mut session = Session::new(

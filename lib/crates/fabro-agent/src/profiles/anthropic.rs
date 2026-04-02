@@ -1,5 +1,5 @@
 use crate::agent_profile::AgentProfile;
-use crate::config::SessionConfig;
+use crate::config::SessionOptions;
 use crate::profiles::BaseProfile;
 use crate::profiles::assemble_system_prompt;
 use crate::sandbox::Sandbox;
@@ -25,9 +25,9 @@ impl AnthropicProfile {
         model: impl Into<String>,
         summarizer: Option<WebFetchSummarizer>,
     ) -> Self {
-        let config = SessionConfig {
+        let config = SessionOptions {
             default_command_timeout_ms: 120_000,
-            ..SessionConfig::default()
+            ..SessionOptions::default()
         };
         let mut registry = ToolRegistry::new();
 

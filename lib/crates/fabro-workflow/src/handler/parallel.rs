@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use fabro_agent::{Sandbox, WorktreeConfig, WorktreeSandbox};
+use fabro_agent::{Sandbox, WorktreeOptions, WorktreeSandbox};
 use fabro_store::NodeVisitRef;
 use fabro_types::RunId;
 use tokio::sync::Semaphore;
@@ -231,7 +231,7 @@ impl Handler for ParallelHandler {
                 tracing::debug!(branch = %branch_name, path = %wt_path_str, "Creating worktree for parallel branch");
 
                 // Set up worktree via WorktreeSandbox
-                let wt_config = WorktreeConfig {
+                let wt_config = WorktreeOptions {
                     branch_name: branch_name.clone(),
                     base_sha: bsha.clone(),
                     worktree_path: wt_path_str.clone(),

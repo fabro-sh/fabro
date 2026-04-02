@@ -7157,7 +7157,7 @@ fn subgraph_without_label_no_class_derived() {
 // ---------------------------------------------------------------------------
 
 fn hook_runner_from_defs(hooks: Vec<fabro_hooks::HookDefinition>) -> Arc<fabro_hooks::HookRunner> {
-    Arc::new(fabro_hooks::HookRunner::new(fabro_hooks::HookConfig {
+    Arc::new(fabro_hooks::HookRunner::new(fabro_hooks::HookSettings {
         hooks,
     }))
 }
@@ -7798,9 +7798,9 @@ async fn hook_stage_start_exit_2_blocks() {
 
 #[tokio::test]
 async fn hook_config_merge_concatenates() {
-    use fabro_hooks::{HookConfig, HookDefinition, HookEvent};
+    use fabro_hooks::{HookDefinition, HookEvent, HookSettings};
 
-    let server_hooks = HookConfig {
+    let server_hooks = HookSettings {
         hooks: vec![HookDefinition {
             name: Some("server-hook".into()),
             event: HookEvent::RunStart,
@@ -7812,7 +7812,7 @@ async fn hook_config_merge_concatenates() {
             sandbox: Some(false),
         }],
     };
-    let run_hooks = HookConfig {
+    let run_hooks = HookSettings {
         hooks: vec![HookDefinition {
             name: Some("run-hook".into()),
             event: HookEvent::StageComplete,
@@ -7833,9 +7833,9 @@ async fn hook_config_merge_concatenates() {
 
 #[tokio::test]
 async fn hook_config_merge_run_overrides_by_name() {
-    use fabro_hooks::{HookConfig, HookDefinition, HookEvent};
+    use fabro_hooks::{HookDefinition, HookEvent, HookSettings};
 
-    let server_hooks = HookConfig {
+    let server_hooks = HookSettings {
         hooks: vec![HookDefinition {
             name: Some("shared".into()),
             event: HookEvent::RunStart,
@@ -7847,7 +7847,7 @@ async fn hook_config_merge_run_overrides_by_name() {
             sandbox: Some(false),
         }],
     };
-    let run_hooks = HookConfig {
+    let run_hooks = HookSettings {
         hooks: vec![HookDefinition {
             name: Some("shared".into()),
             event: HookEvent::RunStart,
@@ -12574,7 +12574,7 @@ async fn asset_collection_docker_sandbox() {
     let host_dir = tempfile::tempdir().unwrap();
     let run_dir = tempfile::tempdir().unwrap();
 
-    let config = fabro_agent::DockerSandboxConfig {
+    let config = fabro_agent::DockerSandboxOptions {
         host_working_directory: host_dir.path().to_str().unwrap().to_string(),
         auto_pull: false,
         ..Default::default()

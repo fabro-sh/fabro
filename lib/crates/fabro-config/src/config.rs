@@ -4,14 +4,14 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::combine::Combine;
-use crate::hook::{HookConfig, HookDefinition};
+use crate::hook::{HookDefinition, HookSettings};
 use crate::mcp::McpServerEntry;
 use crate::project::{self, ProjectConfig};
 use crate::run::{
     AssetsConfig, CheckpointConfig, GitHubConfig, LlmConfig, PullRequestConfig, SetupConfig,
 };
 use crate::sandbox::SandboxConfig;
-use crate::server::{self, ApiConfig, Features, GitConfig, LogConfig, WebConfig};
+use crate::server::{self, ApiConfig, FeaturesConfig, GitConfig, LogConfig, WebConfig};
 use crate::settings::FabroSettings;
 use crate::user::{self, ExecConfig, ExecutionMode, ServerConfig};
 
@@ -118,7 +118,7 @@ pub struct ConfigLayer {
     pub api: Option<ApiConfig>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub features: Option<Features>,
+    pub features: Option<FeaturesConfig>,
 
     // --- Shared fields ---
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -139,8 +139,8 @@ impl Combine for ConfigLayer {
         } else if other.hooks.is_empty() {
             self.hooks
         } else {
-            HookConfig { hooks: other.hooks }
-                .merge(HookConfig { hooks: self.hooks })
+            HookSettings { hooks: other.hooks }
+                .merge(HookSettings { hooks: self.hooks })
                 .hooks
         };
 

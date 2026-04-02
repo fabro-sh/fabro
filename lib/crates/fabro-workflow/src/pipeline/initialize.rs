@@ -8,7 +8,7 @@ use fabro_graphviz::graph;
 use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
 use fabro_llm::client::Client;
 use fabro_sandbox::{
-    ReadBeforeWriteSandbox, SandboxEventCallback, SandboxSpec, WorkdirStrategy, WorktreeConfig,
+    ReadBeforeWriteSandbox, SandboxEventCallback, SandboxSpec, WorkdirStrategy, WorktreeOptions,
     WorktreeSandbox,
 };
 use shlex::try_quote;
@@ -441,7 +441,7 @@ pub async fn initialize(
             .map_err(|e| FabroError::engine(e.to_string()))?;
         let mut worktree = WorktreeSandbox::new(
             inner,
-            WorktreeConfig {
+            WorktreeOptions {
                 branch_name: plan.branch_name.clone(),
                 base_sha: plan.base_sha.clone(),
                 worktree_path: plan.worktree_path.to_string_lossy().into_owned(),
@@ -792,7 +792,7 @@ mod tests {
                     devcontainer_phases: vec![],
                 },
                 run_options: test_settings(&run_dir),
-                hooks: fabro_hooks::HookConfig { hooks: vec![] },
+                hooks: fabro_hooks::HookSettings { hooks: vec![] },
                 sandbox_env: SandboxEnvSpec {
                     devcontainer_env: HashMap::new(),
                     toml_env: HashMap::from([("TEST_KEY".to_string(), "value".to_string())]),
@@ -867,7 +867,7 @@ mod tests {
                     devcontainer_phases: vec![],
                 },
                 run_options: test_settings(&run_dir),
-                hooks: fabro_hooks::HookConfig { hooks: vec![] },
+                hooks: fabro_hooks::HookSettings { hooks: vec![] },
                 sandbox_env: SandboxEnvSpec {
                     devcontainer_env: HashMap::new(),
                     toml_env: HashMap::new(),

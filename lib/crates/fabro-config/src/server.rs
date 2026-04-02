@@ -153,14 +153,14 @@ impl From<WebConfig> for WebSettings {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
-pub struct Features {
+pub struct FeaturesConfig {
     pub session_sandboxes: Option<bool>,
     /// Experimental: enable automatic retro generation after workflow runs.
     pub retros: Option<bool>,
 }
 
-impl From<Features> for FeaturesSettings {
-    fn from(value: Features) -> Self {
+impl From<FeaturesConfig> for FeaturesSettings {
+    fn from(value: FeaturesConfig) -> Self {
         Self {
             session_sandboxes: value.session_sandboxes.unwrap_or(false),
             retros: value.retros.unwrap_or(false),

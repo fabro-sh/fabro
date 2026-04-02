@@ -1,7 +1,7 @@
 pub use fabro_sandbox::test_support::{MockSandbox, MutableMockSandbox};
 
 use crate::agent_profile::AgentProfile;
-use crate::config::SessionConfig;
+use crate::config::SessionOptions;
 use crate::profiles::EnvContext;
 use crate::sandbox::*;
 use crate::session::Session;
@@ -197,7 +197,7 @@ pub async fn make_session(responses: Vec<Response>) -> Session {
     let client = make_client(provider).await;
     let profile = Arc::new(TestProfile::new());
     let env = Arc::new(MockSandbox::default());
-    Session::new(client, profile, env, SessionConfig::default(), None)
+    Session::new(client, profile, env, SessionOptions::default(), None)
 }
 
 pub async fn make_session_with_tools(responses: Vec<Response>, registry: ToolRegistry) -> Session {
@@ -205,10 +205,10 @@ pub async fn make_session_with_tools(responses: Vec<Response>, registry: ToolReg
     let client = make_client(provider).await;
     let profile = Arc::new(TestProfile::with_tools(registry));
     let env = Arc::new(MockSandbox::default());
-    Session::new(client, profile, env, SessionConfig::default(), None)
+    Session::new(client, profile, env, SessionOptions::default(), None)
 }
 
-pub async fn make_session_with_config(responses: Vec<Response>, config: SessionConfig) -> Session {
+pub async fn make_session_with_config(responses: Vec<Response>, config: SessionOptions) -> Session {
     let provider = Arc::new(MockLlmProvider::new(responses));
     let client = make_client(provider).await;
     let profile = Arc::new(TestProfile::new());
@@ -219,7 +219,7 @@ pub async fn make_session_with_config(responses: Vec<Response>, config: SessionC
 pub async fn make_session_with_tools_and_config(
     responses: Vec<Response>,
     registry: ToolRegistry,
-    config: SessionConfig,
+    config: SessionOptions,
 ) -> Session {
     let provider = Arc::new(MockLlmProvider::new(responses));
     let client = make_client(provider).await;

@@ -191,12 +191,12 @@ impl HookDefinition {
 
 /// Top-level hook configuration: a list of hook definitions.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
-pub struct HookConfig {
+pub struct HookSettings {
     #[serde(default)]
     pub hooks: Vec<HookDefinition>,
 }
 
-impl HookConfig {
+impl HookSettings {
     /// Merge with another config. Concatenates lists; on name collisions, `other` wins.
     #[must_use]
     pub fn merge(self, other: Self) -> Self {

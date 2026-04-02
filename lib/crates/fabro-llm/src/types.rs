@@ -696,12 +696,12 @@ pub use fabro_model::{Model, ModelCosts, ModelFeatures, ModelLimits};
 // --- 4.7 Timeouts ---
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TimeoutConfig {
+pub struct TimeoutOptions {
     pub total: Option<f64>,
     pub per_step: Option<f64>,
 }
 
-impl From<f64> for TimeoutConfig {
+impl From<f64> for TimeoutOptions {
     fn from(total: f64) -> Self {
         Self {
             total: Some(total),

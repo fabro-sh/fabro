@@ -46,7 +46,7 @@ struct RunSession {
     interviewer: Arc<dyn Interviewer>,
     on_node: crate::OnNodeCallback,
     lifecycle: LifecycleOptions,
-    hooks: fabro_hooks::HookConfig,
+    hooks: fabro_hooks::HookSettings,
     sandbox_env: SandboxEnvSpec,
     devcontainer: Option<DevcontainerSpec>,
     seed_context: Option<Context>,
@@ -293,7 +293,7 @@ impl RunSession {
                 working_directory: working_directory.clone(),
             },
             SandboxProvider::Docker => SandboxSpec::Docker {
-                config: fabro_agent::DockerSandboxConfig {
+                config: fabro_agent::DockerSandboxOptions {
                     host_working_directory: working_directory.to_string_lossy().to_string(),
                     ..Default::default()
                 },
@@ -349,7 +349,7 @@ impl RunSession {
                 setup_command_timeout_ms: settings.setup_timeout_ms().unwrap_or(300_000),
                 devcontainer_phases: Vec::new(),
             },
-            hooks: fabro_hooks::HookConfig {
+            hooks: fabro_hooks::HookSettings {
                 hooks: settings.hooks.clone(),
             },
             sandbox_env,

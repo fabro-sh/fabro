@@ -21,7 +21,7 @@ const RESPONSES_STREAM_MILESTONES: &[&str] = &[
 ];
 
 #[derive(Clone)]
-struct LiveConfig {
+struct LiveOptions {
     api: common::ApiClient,
     model: String,
 }
@@ -51,7 +51,7 @@ struct ToolCallObservation {
 #[tokio::test]
 #[ignore = "requires OPENAI_API_KEY and outbound network"]
 async fn live_openai_contract_smoke_suite() {
-    let Some(config) = LiveConfig::from_env().expect("live config should load") else {
+    let Some(config) = LiveOptions::from_env().expect("live config should load") else {
         eprintln!("skipping live OpenAI smoke suite because OPENAI_API_KEY is not set");
         return;
     };
@@ -203,7 +203,7 @@ async fn live_openai_contract_smoke_suite() {
     );
 }
 
-impl LiveConfig {
+impl LiveOptions {
     fn from_env() -> Result<Option<Self>> {
         let Some(api_key) = non_empty_env("OPENAI_API_KEY") else {
             return Ok(None);
@@ -232,7 +232,7 @@ fn collect_failure(failures: &mut Vec<String>, name: &str, result: Result<()>) {
     }
 }
 
-async fn probe_responses_availability(config: &LiveConfig) -> Result<SurfaceAvailability> {
+async fn probe_responses_availability(config: &LiveOptions) -> Result<SurfaceAvailability> {
     probe_surface_availability(
         &config.api,
         "/v1/responses",
@@ -246,7 +246,7 @@ async fn probe_responses_availability(config: &LiveConfig) -> Result<SurfaceAvai
     .await
 }
 
-async fn probe_chat_availability(config: &LiveConfig) -> Result<SurfaceAvailability> {
+async fn probe_chat_availability(config: &LiveOptions) -> Result<SurfaceAvailability> {
     probe_surface_availability(
         &config.api,
         "/v1/chat/completions",
@@ -284,7 +284,7 @@ async fn probe_surface_availability(
     );
 }
 
-async fn compare_responses_non_stream_text(config: &LiveConfig) -> Result<()> {
+async fn compare_responses_non_stream_text(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let request = json!({
         "model": config.model,
@@ -319,7 +319,7 @@ async fn compare_responses_non_stream_text(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_responses_stream_text(config: &LiveConfig) -> Result<()> {
+async fn compare_responses_stream_text(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let request = json!({
         "model": config.model,
@@ -347,7 +347,7 @@ async fn compare_responses_stream_text(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_responses_structured_output(config: &LiveConfig) -> Result<()> {
+async fn compare_responses_structured_output(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let schema = smoke_schema();
     let request = json!({
@@ -386,7 +386,7 @@ async fn compare_responses_structured_output(config: &LiveConfig) -> Result<()> 
     Ok(())
 }
 
-async fn compare_responses_stream_structured_output(config: &LiveConfig) -> Result<()> {
+async fn compare_responses_stream_structured_output(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let schema = smoke_schema();
     let request = json!({
@@ -436,7 +436,7 @@ async fn compare_responses_stream_structured_output(config: &LiveConfig) -> Resu
     Ok(())
 }
 
-async fn compare_responses_tool_call(config: &LiveConfig) -> Result<()> {
+async fn compare_responses_tool_call(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     enqueue_tool_scenario(&server, "responses", &config.model, false).await;
 
@@ -494,7 +494,7 @@ async fn compare_responses_tool_call(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_responses_stream_tool_call(config: &LiveConfig) -> Result<()> {
+async fn compare_responses_stream_tool_call(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     enqueue_tool_scenario(&server, "responses", &config.model, true).await;
 
@@ -553,7 +553,7 @@ async fn compare_responses_stream_tool_call(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_responses_continuation(config: &LiveConfig) -> Result<()> {
+async fn compare_responses_continuation(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     enqueue_responses_continuation_scenarios(&server, &config.model).await;
 
@@ -656,7 +656,7 @@ async fn compare_responses_continuation(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_responses_stream_continuation(config: &LiveConfig) -> Result<()> {
+async fn compare_responses_stream_continuation(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     enqueue_responses_continuation_scenarios(&server, &config.model).await;
 
@@ -746,7 +746,7 @@ async fn compare_responses_stream_continuation(config: &LiveConfig) -> Result<()
     Ok(())
 }
 
-async fn compare_responses_image_input(config: &LiveConfig) -> Result<()> {
+async fn compare_responses_image_input(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let request = json!({
         "model": config.model,
@@ -782,7 +782,7 @@ async fn compare_responses_image_input(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_responses_stream_image_input(config: &LiveConfig) -> Result<()> {
+async fn compare_responses_stream_image_input(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let request = json!({
         "model": config.model,
@@ -821,7 +821,7 @@ async fn compare_responses_stream_image_input(config: &LiveConfig) -> Result<()>
     Ok(())
 }
 
-async fn compare_responses_tool_choice_none(config: &LiveConfig) -> Result<()> {
+async fn compare_responses_tool_choice_none(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let request = json!({
         "model": config.model,
@@ -867,7 +867,7 @@ async fn compare_responses_tool_choice_none(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_chat_non_stream_text(config: &LiveConfig) -> Result<()> {
+async fn compare_chat_non_stream_text(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let request = json!({
         "model": config.model,
@@ -902,7 +902,7 @@ async fn compare_chat_non_stream_text(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_chat_stream_text(config: &LiveConfig) -> Result<()> {
+async fn compare_chat_stream_text(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let request = json!({
         "model": config.model,
@@ -925,7 +925,7 @@ async fn compare_chat_stream_text(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_chat_structured_output(config: &LiveConfig) -> Result<()> {
+async fn compare_chat_structured_output(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let schema = smoke_schema();
     let request = json!({
@@ -964,7 +964,7 @@ async fn compare_chat_structured_output(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_chat_stream_structured_output(config: &LiveConfig) -> Result<()> {
+async fn compare_chat_stream_structured_output(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let schema = smoke_schema();
     let request = json!({
@@ -1009,7 +1009,7 @@ async fn compare_chat_stream_structured_output(config: &LiveConfig) -> Result<()
     Ok(())
 }
 
-async fn compare_chat_tool_call(config: &LiveConfig) -> Result<()> {
+async fn compare_chat_tool_call(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     enqueue_tool_scenario(&server, "chat.completions", &config.model, false).await;
 
@@ -1065,7 +1065,7 @@ async fn compare_chat_tool_call(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_chat_stream_tool_call(config: &LiveConfig) -> Result<()> {
+async fn compare_chat_stream_tool_call(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     enqueue_tool_scenario(&server, "chat.completions", &config.model, true).await;
 
@@ -1109,7 +1109,7 @@ async fn compare_chat_stream_tool_call(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_chat_image_input(config: &LiveConfig) -> Result<()> {
+async fn compare_chat_image_input(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let request = json!({
         "model": config.model,
@@ -1145,7 +1145,7 @@ async fn compare_chat_image_input(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_chat_stream_image_input(config: &LiveConfig) -> Result<()> {
+async fn compare_chat_stream_image_input(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let request = json!({
         "model": config.model,
@@ -1179,7 +1179,7 @@ async fn compare_chat_stream_image_input(config: &LiveConfig) -> Result<()> {
     Ok(())
 }
 
-async fn compare_chat_tool_choice_none(config: &LiveConfig) -> Result<()> {
+async fn compare_chat_tool_choice_none(config: &LiveOptions) -> Result<()> {
     let server = common::spawn_server().await?;
     let request = json!({
         "model": config.model,

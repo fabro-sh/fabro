@@ -14,7 +14,7 @@ pub fn default_tool_timeout_secs() -> u64 {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct McpServerConfig {
+pub struct McpServerSettings {
     pub name: String,
     pub transport: McpTransport,
     #[serde(default = "default_startup_timeout_secs")]
@@ -23,7 +23,7 @@ pub struct McpServerConfig {
     pub tool_timeout_secs: u64,
 }
 
-impl McpServerConfig {
+impl McpServerSettings {
     #[must_use]
     pub fn startup_timeout(&self) -> Duration {
         Duration::from_secs(self.startup_timeout_secs)
@@ -67,7 +67,7 @@ impl Combine for McpTransport {
 
 /// MCP server entry as it appears in TOML config files (without a `name` field).
 ///
-/// Converted to [`McpServerConfig`] via [`McpServerEntry::into_config`].
+/// Converted to [`McpServerSettings`] via [`McpServerEntry::into_config`].
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct McpServerEntry {
     #[serde(flatten)]
@@ -79,8 +79,8 @@ pub struct McpServerEntry {
 }
 
 impl McpServerEntry {
-    pub fn into_config(self, name: String) -> McpServerConfig {
-        McpServerConfig {
+    pub fn into_config(self, name: String) -> McpServerSettings {
+        McpServerSettings {
             name,
             transport: self.transport,
             startup_timeout_secs: self.startup_timeout_secs,
@@ -102,7 +102,7 @@ mod tests {
 
     #[test]
     fn stdio_config_construction() {
-        let config = McpServerConfig {
+        let config = McpServerSettings {
             name: "test-server".into(),
             transport: McpTransport::Stdio {
                 command: vec![
@@ -122,7 +122,7 @@ mod tests {
 
     #[test]
     fn http_config_construction() {
-        let config = McpServerConfig {
+        let config = McpServerSettings {
             name: "remote-server".into(),
             transport: McpTransport::Http {
                 url: "https://example.com/mcp".into(),
@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn serde_round_trip_stdio() {
-        let config = McpServerConfig {
+        let config = McpServerSettings {
             name: "fs".into(),
             transport: McpTransport::Stdio {
                 command: vec!["node".into(), "server.js".into()],
@@ -148,7 +148,7 @@ mod tests {
             tool_timeout_secs: 90,
         };
         let json = serde_json::to_string(&config).unwrap();
-        let deserialized: McpServerConfig = serde_json::from_str(&json).unwrap();
+        let deserialized: McpServerSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.name, "fs");
         assert_eq!(deserialized.startup_timeout_secs, 15);
         assert_eq!(deserialized.tool_timeout_secs, 90);
@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn serde_round_trip_http() {
-        let config = McpServerConfig {
+        let config = McpServerSettings {
             name: "remote".into(),
             transport: McpTransport::Http {
                 url: "https://mcp.example.com".into(),
@@ -169,7 +169,7 @@ mod tests {
             tool_timeout_secs: 60,
         };
         let json = serde_json::to_string(&config).unwrap();
-        let deserialized: McpServerConfig = serde_json::from_str(&json).unwrap();
+        let deserialized: McpServerSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.name, "remote");
         assert!(
             matches!(deserialized.transport, McpTransport::Http { url, .. } if url == "https://mcp.example.com")
@@ -179,7 +179,7 @@ mod tests {
     #[test]
     fn serde_defaults_applied() {
         let json = r#"{"name":"minimal","transport":{"type":"stdio","command":["echo"]}}"#;
-        let config: McpServerConfig = serde_json::from_str(json).unwrap();
+        let config: McpServerSettings = serde_json::from_str(json).unwrap();
         assert_eq!(config.startup_timeout_secs, 10);
         assert_eq!(config.tool_timeout_secs, 60);
     }

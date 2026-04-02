@@ -62,7 +62,7 @@ struct ApiRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     system_instruction: Option<SystemInstruction>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    generation_config: Option<GenerationConfig>,
+    generation_config: Option<GenerationOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<GeminiToolGroup>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -82,7 +82,7 @@ struct SystemInstruction {
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-struct GenerationConfig {
+struct GenerationOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -421,7 +421,7 @@ fn build_api_request(request: &Request) -> serde_json::Value {
         .as_ref()
         .map_or((None, None), translate_response_format);
 
-    let generation_config = GenerationConfig {
+    let generation_config = GenerationOptions {
         temperature: request.temperature,
         max_output_tokens: request.max_tokens,
         top_p: request.top_p,

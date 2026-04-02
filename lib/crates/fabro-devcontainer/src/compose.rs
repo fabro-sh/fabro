@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 /// Extracted configuration from a Docker Compose service.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ComposeServiceConfig {
+pub(crate) struct ComposeServiceSpec {
     pub image: Option<String>,
     pub build: Option<ComposeBuild>,
     pub ports: Vec<u16>,
@@ -22,7 +22,7 @@ pub(crate) struct ComposeBuild {
 pub(crate) fn parse_compose(
     compose_path: &Path,
     service_name: &str,
-) -> Result<ComposeServiceConfig, String> {
+) -> Result<ComposeServiceSpec, String> {
     let contents = std::fs::read_to_string(compose_path)
         .map_err(|e| format!("failed to read compose file: {e}"))?;
 
@@ -48,7 +48,7 @@ pub(crate) fn parse_compose(
         .and_then(|v| v.as_str())
         .map(String::from);
 
-    Ok(ComposeServiceConfig {
+    Ok(ComposeServiceSpec {
         image,
         build,
         ports,
@@ -158,8 +158,8 @@ fn parse_environment(service: &serde_yaml::Value) -> HashMap<String, String> {
 pub(crate) fn parse_compose_multi(
     compose_paths: &[PathBuf],
     service_name: &str,
-) -> Result<ComposeServiceConfig, String> {
-    let mut merged = ComposeServiceConfig::default();
+) -> Result<ComposeServiceSpec, String> {
+    let mut merged = ComposeServiceSpec::default();
     let mut found_service = false;
 
     for path in compose_paths {

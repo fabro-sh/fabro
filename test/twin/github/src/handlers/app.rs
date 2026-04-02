@@ -112,7 +112,7 @@ pub async fn patch_webhook_config(
 #[cfg(test)]
 mod tests {
     use crate::server::TestServer;
-    use crate::state::{AppConfig, AppState};
+    use crate::state::{AppOptions, AppState};
 
     fn test_rsa_key() -> String {
         use std::process::Command;
@@ -155,7 +155,7 @@ mod tests {
     async fn get_app_returns_app_info() {
         let pem = test_rsa_key();
         let mut state = AppState::new();
-        state.register_app(AppConfig {
+        state.register_app(AppOptions {
             app_id: "12345".to_string(),
             slug: "my-app".to_string(),
             owner_login: "my-org".to_string(),
@@ -187,7 +187,7 @@ mod tests {
     async fn get_app_rejects_invalid_jwt() {
         let pem = test_rsa_key();
         let mut state = AppState::new();
-        state.register_app(AppConfig {
+        state.register_app(AppOptions {
             app_id: "12345".to_string(),
             slug: "my-app".to_string(),
             owner_login: "my-org".to_string(),
@@ -213,7 +213,7 @@ mod tests {
     async fn get_apps_slug_public() {
         let pem = test_rsa_key();
         let mut state = AppState::new();
-        state.register_app(AppConfig {
+        state.register_app(AppOptions {
             app_id: "12345".to_string(),
             slug: "my-app".to_string(),
             owner_login: "my-org".to_string(),
@@ -240,7 +240,7 @@ mod tests {
     async fn get_apps_slug_private_returns_404() {
         let pem = test_rsa_key();
         let mut state = AppState::new();
-        state.register_app(AppConfig {
+        state.register_app(AppOptions {
             app_id: "12345".to_string(),
             slug: "private-app".to_string(),
             owner_login: "my-org".to_string(),

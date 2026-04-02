@@ -613,7 +613,7 @@ fn extract_unquoted_value(s: &str, key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use crate::server::TestServer;
-    use crate::state::{AppConfig, AppState, PullRequest};
+    use crate::state::{AppOptions, AppState, PullRequest};
 
     fn test_rsa_key() -> String {
         use std::process::Command;
@@ -697,7 +697,7 @@ mod tests {
         state: &mut AppState,
         pem: &str,
     ) -> (TestServer, reqwest::Client, String) {
-        state.register_app(AppConfig {
+        state.register_app(AppOptions {
             app_id: "100".to_string(),
             slug: "test-app".to_string(),
             owner_login: "owner".to_string(),

@@ -8,7 +8,7 @@ use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_llm::client::Client as LlmClient;
 use fabro_model::{Catalog, Provider};
 use fabro_sandbox::daytona::{DaytonaConfig, detect_repo_info};
-use fabro_sandbox::{DockerSandboxConfig, Sandbox, SandboxProvider, SandboxSpec};
+use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxProvider, SandboxSpec};
 use fabro_util::check_report::CheckReport;
 use fabro_util::terminal::Styles;
 use fabro_workflow::git::{GitSyncStatus, sync_status};
@@ -274,9 +274,9 @@ async fn run_preflight(
         .await
         .map_err(|e| e.to_string()),
         SandboxProvider::Docker => SandboxSpec::Docker {
-            config: DockerSandboxConfig {
+            config: DockerSandboxOptions {
                 host_working_directory: working_directory.to_string_lossy().to_string(),
-                ..DockerSandboxConfig::default()
+                ..DockerSandboxOptions::default()
             },
         }
         .build(None)

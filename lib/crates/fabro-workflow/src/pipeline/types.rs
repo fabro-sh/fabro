@@ -8,7 +8,7 @@ use fabro_graphviz::graph::Graph;
 use fabro_hooks::HookRunner;
 use fabro_interview::Interviewer;
 use fabro_llm::Provider;
-use fabro_mcp::config::McpServerConfig;
+use fabro_mcp::config::McpServerSettings;
 use fabro_model::FallbackTarget;
 use fabro_sandbox::SandboxSpec;
 use fabro_store::RunStore;
@@ -207,7 +207,7 @@ pub struct LlmSpec {
     pub model: String,
     pub provider: Provider,
     pub fallback_chain: Vec<FallbackTarget>,
-    pub mcp_servers: Vec<McpServerConfig>,
+    pub mcp_servers: Vec<McpServerSettings>,
     pub dry_run: bool,
 }
 
@@ -235,7 +235,7 @@ pub struct InitOptions {
     pub interviewer: Arc<dyn Interviewer>,
     pub lifecycle: LifecycleOptions,
     pub run_options: RunOptions,
-    pub hooks: fabro_hooks::HookConfig,
+    pub hooks: fabro_hooks::HookSettings,
     pub sandbox_env: SandboxEnvSpec,
     pub devcontainer: Option<DevcontainerSpec>,
     pub git: Option<GitCheckpointOptions>,

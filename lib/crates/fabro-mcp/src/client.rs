@@ -15,7 +15,7 @@ use tokio::time;
 use tracing::{debug, error, info, warn};
 
 use crate::client_handler::LoggingClientHandler;
-use crate::config::{McpServerConfig, McpTransport};
+use crate::config::{McpServerSettings, McpTransport};
 
 enum ClientState {
     /// Transport created but handshake not yet performed.
@@ -37,7 +37,7 @@ pub struct McpClient {
 
 impl McpClient {
     /// Create a new MCP client from config. Does not connect yet — call `initialize()`.
-    pub fn new(config: &McpServerConfig) -> Result<Self> {
+    pub fn new(config: &McpServerSettings) -> Result<Self> {
         let transport = match &config.transport {
             McpTransport::Stdio { command, env } => {
                 let (program, args) = command.split_first().ok_or_else(|| {

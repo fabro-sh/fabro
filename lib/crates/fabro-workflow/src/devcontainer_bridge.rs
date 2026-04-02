@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use sha2::{Digest, Sha256};
 
-use fabro_devcontainer::DevcontainerConfig;
+use fabro_devcontainer::DevcontainerSpec;
 
 use crate::event::{EventEmitter, WorkflowRunEvent};
 use fabro_agent::sandbox::Sandbox;
@@ -16,8 +16,8 @@ pub fn snapshot_name_for_dockerfile(dockerfile: &str) -> String {
     format!("devcontainer-{}", &hex[..12])
 }
 
-/// Map a `DevcontainerConfig` to a `DaytonaSnapshotConfig`.
-pub fn devcontainer_to_snapshot_config(dc: &DevcontainerConfig) -> DaytonaSnapshotConfig {
+/// Map a `DevcontainerSpec` to a `DaytonaSnapshotConfig`.
+pub fn devcontainer_to_snapshot_config(dc: &DevcontainerSpec) -> DaytonaSnapshotConfig {
     DaytonaSnapshotConfig {
         name: snapshot_name_for_dockerfile(&dc.dockerfile),
         dockerfile: Some(DockerfileSource::Inline(dc.dockerfile.clone())),
@@ -460,8 +460,8 @@ mod tests {
         assert_eq!(captured.len(), 2);
     }
 
-    fn test_devcontainer_config(dockerfile: &str) -> DevcontainerConfig {
-        DevcontainerConfig {
+    fn test_devcontainer_config(dockerfile: &str) -> DevcontainerSpec {
+        DevcontainerSpec {
             dockerfile: dockerfile.to_string(),
             build_context: std::path::PathBuf::from("."),
             build_args: HashMap::new(),

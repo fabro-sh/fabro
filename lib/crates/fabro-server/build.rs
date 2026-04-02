@@ -13,8 +13,8 @@ fn main() {
         return;
     }
 
-    let web_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
-        .join("../../../apps/fabro-web");
+    let web_dir =
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("../../../apps/fabro-web");
 
     let status = Command::new("bun")
         .args(["run", "build"])

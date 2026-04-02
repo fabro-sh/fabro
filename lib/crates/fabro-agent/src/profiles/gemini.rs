@@ -1,5 +1,5 @@
 use crate::agent_profile::AgentProfile;
-use crate::config::SessionConfig;
+use crate::config::SessionOptions;
 use crate::profiles::BaseProfile;
 use crate::profiles::assemble_system_prompt;
 use crate::sandbox::Sandbox;
@@ -28,7 +28,7 @@ impl GeminiProfile {
         model: impl Into<String>,
         summarizer: Option<WebFetchSummarizer>,
     ) -> Self {
-        let config = SessionConfig::default();
+        let config = SessionOptions::default();
         let mut registry = ToolRegistry::new();
 
         register_core_tools(&mut registry, &config, summarizer);

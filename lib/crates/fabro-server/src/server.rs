@@ -41,9 +41,9 @@ use tracing::{error, info};
 use crate::demo;
 use crate::error::ApiError;
 use crate::jwt_auth::{AuthMode, AuthenticatedService};
-use crate::static_files;
 use crate::sessions as sessions_mod;
 use crate::sessions::{SessionStore, new_session_store};
+use crate::static_files;
 use crate::web_auth;
 use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
 use fabro_workflow::context::Context;
@@ -174,20 +174,23 @@ pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
 
     Router::new()
         .route("/health", get(health))
-        .layer(middleware::from_fn_with_state(middleware_state, cookie_and_demo_middleware))
+        .layer(middleware::from_fn_with_state(
+            middleware_state,
+            cookie_and_demo_middleware,
+        ))
         .fallback_service(service_fn(move |req: axum_extract::Request| {
             let dispatch = dispatch.clone();
             async move {
                 let path = req.uri().path().to_string();
                 if path.starts_with("/api/v1/") || path.starts_with("/auth/") || path == "/health" {
                     dispatch.oneshot(req).await
-                } else if matches!(req.method(), &axum::http::Method::GET | &axum::http::Method::HEAD)
-                {
+                } else if matches!(
+                    req.method(),
+                    &axum::http::Method::GET | &axum::http::Method::HEAD
+                ) {
                     Ok::<_, std::convert::Infallible>(static_files::serve(&path).await)
                 } else {
-                    Ok::<_, std::convert::Infallible>(
-                        StatusCode::NOT_FOUND.into_response(),
-                    )
+                    Ok::<_, std::convert::Infallible>(StatusCode::NOT_FOUND.into_response())
                 }
             }
         }))

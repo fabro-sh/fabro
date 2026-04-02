@@ -1,4 +1,4 @@
-use crate::config::SessionConfig;
+use crate::config::SessionOptions;
 use crate::sandbox::GrepOptions;
 use crate::tool_registry::{RegisteredTool, ToolRegistry};
 use fabro_llm::client::Client;
@@ -44,11 +44,11 @@ fn html_to_markdown(text: &str) -> String {
 /// `shell`, `grep`, `glob`, `web_search`, and `web_fetch`.
 ///
 /// The shell tool uses `config` to set its default and max timeouts. Pass a custom
-/// `SessionConfig` (e.g. with a longer `default_command_timeout_ms`) for providers
+/// `SessionOptions` (e.g. with a longer `default_command_timeout_ms`) for providers
 /// that need non-default shell behavior.
 pub fn register_core_tools(
     registry: &mut ToolRegistry,
-    config: &SessionConfig,
+    config: &SessionOptions,
     summarizer: Option<WebFetchSummarizer>,
 ) {
     registry.register(make_read_file_tool());
@@ -190,11 +190,11 @@ pub fn make_edit_file_tool() -> RegisteredTool {
 
 #[must_use]
 pub fn make_shell_tool() -> RegisteredTool {
-    make_shell_tool_with_config(&SessionConfig::default())
+    make_shell_tool_with_config(&SessionOptions::default())
 }
 
 #[must_use]
-pub fn make_shell_tool_with_config(config: &SessionConfig) -> RegisteredTool {
+pub fn make_shell_tool_with_config(config: &SessionOptions) -> RegisteredTool {
     let default_timeout = config.default_command_timeout_ms;
     let max_timeout = config.max_command_timeout_ms;
     RegisteredTool {

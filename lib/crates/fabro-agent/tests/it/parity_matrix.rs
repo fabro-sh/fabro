@@ -6,7 +6,7 @@ use std::sync::Arc;
 use fabro_agent::subagent::SessionFactory;
 use fabro_agent::{
     AgentProfile, AnthropicProfile, GeminiProfile, LocalSandbox, OpenAiProfile, Session,
-    SessionConfig, SubAgentManager, WebFetchSummarizer,
+    SessionOptions, SubAgentManager, WebFetchSummarizer,
 };
 use fabro_llm::client::Client;
 use fabro_llm::provider::{Provider, ProviderAdapter};
@@ -16,7 +16,7 @@ use fabro_test::{TwinScenario, TwinScenarios, TwinToolCall, twin_openai};
 use tokio::sync::Mutex as AsyncMutex;
 
 #[derive(Clone)]
-struct OpenAiTwinConfig {
+struct OpenAiTwinOptions {
     base_url: String,
     api_key: String,
 }
@@ -70,7 +70,7 @@ async fn make_session(
     provider: Provider,
     model: &str,
     cwd: &Path,
-    twin: Option<OpenAiTwinConfig>,
+    twin: Option<OpenAiTwinOptions>,
 ) -> Session {
     let client = make_client(provider, twin.as_ref()).await;
     let mut profile = build_profile(provider, model, &client);
@@ -110,16 +110,16 @@ async fn make_session(
             factory_client.clone(),
             sub_profile,
             sub_env,
-            SessionConfig::default(),
+            SessionOptions::default(),
             None,
         )
     });
     profile.register_subagent_tools(manager, factory, 0);
 
     let profile: Arc<dyn AgentProfile> = Arc::from(profile);
-    let config = SessionConfig {
+    let config = SessionOptions {
         max_turns: 20,
-        ..SessionConfig::default()
+        ..SessionOptions::default()
     };
     Session::new(client, profile, env, config, None)
 }
@@ -128,8 +128,8 @@ async fn make_session_with_config(
     provider: Provider,
     model: &str,
     cwd: &Path,
-    config: SessionConfig,
-    twin: Option<OpenAiTwinConfig>,
+    config: SessionOptions,
+    twin: Option<OpenAiTwinOptions>,
 ) -> Session {
     let client = make_client(provider, twin.as_ref()).await;
     let profile: Arc<dyn AgentProfile> = Arc::from(build_profile(provider, model, &client));
@@ -137,7 +137,7 @@ async fn make_session_with_config(
     Session::new(client, profile, env, config, None)
 }
 
-async fn make_client(provider: Provider, twin: Option<&OpenAiTwinConfig>) -> Client {
+async fn make_client(provider: Provider, twin: Option<&OpenAiTwinOptions>) -> Client {
     if provider == Provider::OpenAi && fabro_test::TestMode::from_env().is_twin() {
         return make_twin_client(twin.expect("openai twin config should be provided")).await;
     }
@@ -145,7 +145,7 @@ async fn make_client(provider: Provider, twin: Option<&OpenAiTwinConfig>) -> Cli
     Client::from_env().await.expect("Client::from_env failed")
 }
 
-async fn make_twin_client(twin: &OpenAiTwinConfig) -> Client {
+async fn make_twin_client(twin: &OpenAiTwinOptions) -> Client {
     let adapter: Arc<dyn ProviderAdapter> =
         Arc::new(OpenAiAdapter::new(twin.api_key.clone()).with_base_url(twin.base_url.clone()));
     let mut providers: HashMap<String, Arc<dyn ProviderAdapter>> = HashMap::new();
@@ -174,7 +174,7 @@ macro_rules! openai_twin_provider_test {
             async fn [<openai_twin_ $scenario>]() {
                 let tmp = tempfile::tempdir().expect("failed to create tempdir");
                 let (base_url, api_key) = fabro_test::e2e_openai!();
-                let twin = OpenAiTwinConfig { base_url, api_key };
+                let twin = OpenAiTwinOptions { base_url, api_key };
                 if fabro_test::TestMode::from_env().is_twin() {
                     load_openai_twin_scenario(stringify!($scenario), &twin.api_key, tmp.path())
                         .await;
@@ -650,10 +650,10 @@ macro_rules! reasoning_effort_tests {
         #[fabro_macros::e2e_test($(live($key)),+)]
         async fn $test_name() {
             let tmp = tempfile::tempdir().expect("failed to create tempdir");
-            let config = SessionConfig {
+            let config = SessionOptions {
                 max_turns: 20,
                 reasoning_effort: Some(fabro_llm::types::ReasoningEffort::Low),
-                ..SessionConfig::default()
+                ..SessionOptions::default()
             };
             let mut session =
                 make_session_with_config($provider, $model, tmp.path(), config, None).await;
@@ -728,10 +728,10 @@ macro_rules! loop_detection_tests {
         #[fabro_macros::e2e_test($(live($key)),+)]
         async fn $test_name() {
             let tmp = tempfile::tempdir().expect("failed to create tempdir");
-            let config = SessionConfig {
+            let config = SessionOptions {
                 max_turns: 20,
                 loop_detection_window: 3,
-                ..SessionConfig::default()
+                ..SessionOptions::default()
             };
             let mut session =
                 make_session_with_config($provider, $model, tmp.path(), config, None).await;

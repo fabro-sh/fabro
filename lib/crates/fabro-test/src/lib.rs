@@ -491,7 +491,7 @@ use tokio::net::TcpListener as TokioTcpListener;
 use tokio::sync::OnceCell;
 use tokio::time;
 pub use twin_github::AppState as GitHubAppState;
-pub use twin_github::state::AppConfig as GitHubAppConfig;
+pub use twin_github::state::AppOptions as GitHubAppOptions;
 use twin_openai::config::Config as TwinConfig;
 
 /// A shared twin-openai server instance.

@@ -302,7 +302,7 @@ fn pr_to_json(pr: &PullRequest) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use crate::server::TestServer;
-    use crate::state::{AppConfig, AppState};
+    use crate::state::{AppOptions, AppState};
 
     fn test_rsa_key() -> String {
         use std::process::Command;
@@ -379,7 +379,7 @@ mod tests {
         state: &mut AppState,
         pem: &str,
     ) -> (TestServer, reqwest::Client, String) {
-        state.register_app(AppConfig {
+        state.register_app(AppOptions {
             app_id: "100".to_string(),
             slug: "test-app".to_string(),
             owner_login: "owner".to_string(),

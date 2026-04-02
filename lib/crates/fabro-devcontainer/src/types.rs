@@ -9,7 +9,7 @@ pub struct DevcontainerJson {
     pub image: Option<String>,
 
     /// Dockerfile build config
-    pub build: Option<BuildConfig>,
+    pub build: Option<BuildSpec>,
 
     /// Docker Compose file path(s) (compose mode)
     pub docker_compose_file: Option<ComposeFileRef>,
@@ -63,7 +63,7 @@ pub struct DevcontainerJson {
 
 /// Build configuration for Dockerfile mode.
 #[derive(Debug, Clone, Deserialize)]
-pub struct BuildConfig {
+pub struct BuildSpec {
     /// Path to Dockerfile (relative to devcontainer.json)
     pub dockerfile: Option<String>,
 

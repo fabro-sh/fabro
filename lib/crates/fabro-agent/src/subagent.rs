@@ -456,7 +456,7 @@ pub fn make_close_agent_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> Regis
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::SessionConfig;
+    use crate::config::SessionOptions;
     use crate::test_support::*;
     use fabro_llm::provider::ProviderAdapter;
     use fabro_llm::types::Role;
@@ -491,7 +491,7 @@ mod tests {
         let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
         let profile = Arc::new(TestProfile::new());
         let env = Arc::new(MockSandbox::default());
-        let session = Session::new(client, profile, env, SessionConfig::default(), None);
+        let session = Session::new(client, profile, env, SessionOptions::default(), None);
 
         let agent_id = manager.spawn(session, "Do something".into(), 0).unwrap();
         let _ = manager.wait(&agent_id).await.unwrap();

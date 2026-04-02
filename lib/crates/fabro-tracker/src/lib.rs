@@ -4,7 +4,7 @@ pub mod github;
 pub mod linear;
 
 pub use github::GitHubTracker;
-pub use linear::{LINEAR_API_ENDPOINT, LinearConfig, LinearTracker};
+pub use linear::{LINEAR_API_ENDPOINT, LinearOptions, LinearTracker};
 
 /// Shared GraphQL execution used by both provider modules.
 ///

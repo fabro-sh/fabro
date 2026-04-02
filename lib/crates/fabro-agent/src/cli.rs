@@ -4,7 +4,7 @@ use crate::tools::WebFetchSummarizer;
 use crate::truncation;
 use crate::{
     AgentEvent, AgentProfile, AnthropicProfile, GeminiProfile, LocalSandbox, OpenAiProfile,
-    Sandbox, Session, SessionConfig, Turn,
+    Sandbox, Session, SessionOptions, Turn,
     subagent::{SessionFactory, SubAgentManager},
 };
 use clap::{Args, Parser};
@@ -13,7 +13,7 @@ use fabro_llm::error::SdkError;
 use fabro_llm::middleware::{Middleware, NextFn, NextStreamFn};
 use fabro_llm::provider::StreamEventStream;
 use fabro_llm::types::{Request, Response};
-use fabro_mcp::config::McpServerConfig;
+use fabro_mcp::config::McpServerSettings;
 use fabro_model::{Catalog, ModelRef, Provider};
 use fabro_util::terminal::Styles;
 use std::io::{IsTerminal, Write};
@@ -355,7 +355,7 @@ impl Middleware for VerboseMiddleware {
 
 pub async fn run_with_args(
     args: AgentArgs,
-    mcp_servers: Vec<McpServerConfig>,
+    mcp_servers: Vec<McpServerSettings>,
 ) -> anyhow::Result<()> {
     run_with_args_and_client(args, None, mcp_servers).await
 }
@@ -364,7 +364,7 @@ pub async fn run_with_args(
 pub async fn run_with_args_and_client(
     args: AgentArgs,
     llm_client: Option<Client>,
-    mcp_servers: Vec<McpServerConfig>,
+    mcp_servers: Vec<McpServerSettings>,
 ) -> anyhow::Result<()> {
     // Resolve color support once, leak to get 'static lifetime for use across threads
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
@@ -420,11 +420,11 @@ pub async fn run_with_args_and_client(
     let tool_approval = build_tool_approval(permissions, is_interactive, styles);
     let tool_hooks: Arc<dyn ToolHookCallback> = Arc::new(ToolApprovalAdapter(tool_approval));
 
-    let config = SessionConfig {
+    let config = SessionOptions {
         tool_hooks: Some(tool_hooks.clone()),
         skill_dirs: args.skills_dir.map(|d| vec![d]),
         mcp_servers,
-        ..SessionConfig::default()
+        ..SessionOptions::default()
     };
 
     // Register subagent tools
@@ -464,9 +464,9 @@ pub async fn run_with_args_and_client(
             factory_client.clone(),
             child_profile,
             Arc::clone(&factory_env),
-            SessionConfig {
+            SessionOptions {
                 tool_hooks: factory_hooks.clone(),
-                ..SessionConfig::default()
+                ..SessionOptions::default()
             },
             None,
         )

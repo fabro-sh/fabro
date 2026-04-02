@@ -16,7 +16,7 @@ pub struct ResponsesRequest {
     pub stop: Option<Value>,
     pub previous_response_id: Option<String>,
     pub reasoning: Option<Value>,
-    pub text: Option<TextConfig>,
+    pub text: Option<TextOptions>,
     pub tools: Option<Vec<Value>>,
     pub tool_choice: Option<Value>,
     /// Catch-all for fields the twin doesn't use (temperature, top_p, etc.)
@@ -319,7 +319,7 @@ fn validate_input_content_part(part: &ContentPart) -> Result<(), OpenAiError> {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct TextConfig {
+pub struct TextOptions {
     pub format: Option<TextFormat>,
 }
 

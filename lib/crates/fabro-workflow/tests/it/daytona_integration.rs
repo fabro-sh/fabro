@@ -2010,7 +2010,7 @@ async fn daytona_playwright_mcp_sandbox_transport() {
 
     // 2. Start the Playwright MCP server via the sandbox transport resolution path
     let mcp_port = 3100u16;
-    let mcp_config = fabro_mcp::config::McpServerConfig {
+    let mcp_config = fabro_mcp::config::McpServerSettings {
         name: "playwright".into(),
         transport: fabro_mcp::config::McpTransport::Sandbox {
             command: vec![
@@ -2077,7 +2077,7 @@ async fn daytona_playwright_mcp_sandbox_transport() {
             };
             eprintln!("Preview URL: {url}");
 
-            fabro_mcp::config::McpServerConfig {
+            fabro_mcp::config::McpServerSettings {
                 name: mcp_config.name.clone(),
                 transport: fabro_mcp::config::McpTransport::Http { url, headers },
                 startup_timeout_secs: mcp_config.startup_timeout_secs,

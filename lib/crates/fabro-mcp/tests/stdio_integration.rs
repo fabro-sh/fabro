@@ -4,12 +4,12 @@ use std::time::Duration;
 use fabro_mcp::connection_manager::McpConnectionManager;
 
 use fabro_mcp::client::McpClient;
-use fabro_mcp::config::{McpServerConfig, McpTransport};
+use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_mcp::connection_manager::call_result_to_string;
 
-fn test_server_config() -> McpServerConfig {
+fn test_server_config() -> McpServerSettings {
     let test_server = format!("{}/tests/test_mcp_server.py", env!("CARGO_MANIFEST_DIR"));
-    McpServerConfig {
+    McpServerSettings {
         name: "test-echo".into(),
         transport: McpTransport::Stdio {
             command: vec!["python3".into(), test_server],

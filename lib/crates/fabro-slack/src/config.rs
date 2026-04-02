@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
-pub struct SlackConfig {
+pub struct SlackOptions {
     pub default_channel: Option<String>,
 }
 
@@ -24,13 +24,13 @@ pub fn resolve_credentials() -> Option<SlackCredentials> {
     })
 }
 
-pub struct SlackRuntimeConfig {
-    pub config: SlackConfig,
+pub struct SlackRuntimeOptions {
+    pub config: SlackOptions,
     pub credentials: SlackCredentials,
 }
 
-impl SlackRuntimeConfig {
-    pub fn new(config: SlackConfig, credentials: SlackCredentials) -> Self {
+impl SlackRuntimeOptions {
+    pub fn new(config: SlackOptions, credentials: SlackCredentials) -> Self {
         Self {
             config,
             credentials,
@@ -44,14 +44,14 @@ mod tests {
 
     #[test]
     fn parse_empty_toml_defaults() {
-        let config: SlackConfig = toml::from_str("").unwrap();
+        let config: SlackOptions = toml::from_str("").unwrap();
         assert_eq!(config.default_channel, None);
     }
 
     #[test]
     fn parse_with_channel() {
         let toml_str = r##"default_channel = "#arc-reviews""##;
-        let config: SlackConfig = toml::from_str(toml_str).unwrap();
+        let config: SlackOptions = toml::from_str(toml_str).unwrap();
         assert_eq!(config.default_channel.as_deref(), Some("#arc-reviews"));
     }
 

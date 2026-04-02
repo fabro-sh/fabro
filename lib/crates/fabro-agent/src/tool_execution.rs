@@ -1,4 +1,4 @@
-use crate::config::{SessionConfig, ToolHookCallback, ToolHookDecision};
+use crate::config::{SessionOptions, ToolHookCallback, ToolHookDecision};
 use crate::event::EventEmitter;
 use crate::sandbox::Sandbox;
 use crate::tool_registry::{RegisteredTool, ToolContext, ToolRegistry};
@@ -20,7 +20,7 @@ pub async fn execute_tool_calls(
     env: Arc<dyn Sandbox>,
     tool_hooks: Option<&Arc<dyn ToolHookCallback>>,
     cancel_token: &CancellationToken,
-    config: &SessionConfig,
+    config: &SessionOptions,
     emitter: &EventEmitter,
     session_id: &str,
     tool_env: Option<&HashMap<String, String>>,
@@ -61,7 +61,7 @@ async fn execute_tool_calls_sequential(
     env: Arc<dyn Sandbox>,
     tool_hooks: Option<&Arc<dyn ToolHookCallback>>,
     cancel_token: &CancellationToken,
-    config: &SessionConfig,
+    config: &SessionOptions,
     emitter: &EventEmitter,
     session_id: &str,
     tool_env: Option<&HashMap<String, String>>,
@@ -97,7 +97,7 @@ async fn execute_tool_calls_parallel(
     env: Arc<dyn Sandbox>,
     tool_hooks: Option<&Arc<dyn ToolHookCallback>>,
     cancel_token: &CancellationToken,
-    config: &SessionConfig,
+    config: &SessionOptions,
     emitter: &EventEmitter,
     session_id: &str,
     tool_env: Option<&HashMap<String, String>>,
@@ -144,7 +144,7 @@ pub async fn execute_and_emit_one_tool(
     env: Arc<dyn Sandbox>,
     tool_hooks: Option<&Arc<dyn ToolHookCallback>>,
     cancel_token: CancellationToken,
-    config: &SessionConfig,
+    config: &SessionOptions,
     emitter: &EventEmitter,
     session_id: &str,
     tool_env: Option<&HashMap<String, String>>,
@@ -171,7 +171,7 @@ async fn execute_and_emit_one_tool_with_lookup(
     env: Arc<dyn Sandbox>,
     tool_hooks: Option<&Arc<dyn ToolHookCallback>>,
     cancel_token: CancellationToken,
-    config: &SessionConfig,
+    config: &SessionOptions,
     emitter: &EventEmitter,
     session_id: &str,
     tool_env: Option<&HashMap<String, String>>,
@@ -294,7 +294,7 @@ async fn execute_one_tool(
 fn truncate_tool_result(
     result: &ToolResult,
     tool_name: &str,
-    config: &SessionConfig,
+    config: &SessionOptions,
 ) -> ToolResult {
     let truncated_content = match &result.content {
         serde_json::Value::String(s) => {
@@ -461,7 +461,7 @@ mod tests {
 
         let tc = make_tool_call("echo", "call_1", serde_json::json!({"text": "hello"}));
         let emitter = EventEmitter::new();
-        let config = SessionConfig::default();
+        let config = SessionOptions::default();
 
         let result = execute_and_emit_one_tool(
             &tc,
@@ -491,7 +491,7 @@ mod tests {
 
         let tc = make_tool_call("echo", "call_1", serde_json::json!({"text": "hello"}));
         let emitter = EventEmitter::new();
-        let config = SessionConfig::default();
+        let config = SessionOptions::default();
 
         let result = execute_and_emit_one_tool(
             &tc,
@@ -521,7 +521,7 @@ mod tests {
 
         let tc = make_tool_call("echo", "call_1", serde_json::json!({"text": "hello"}));
         let emitter = EventEmitter::new();
-        let config = SessionConfig::default();
+        let config = SessionOptions::default();
 
         execute_and_emit_one_tool(
             &tc,
@@ -556,7 +556,7 @@ mod tests {
 
         let tc = make_tool_call("fail_tool", "call_1", serde_json::json!({}));
         let emitter = EventEmitter::new();
-        let config = SessionConfig::default();
+        let config = SessionOptions::default();
 
         execute_and_emit_one_tool(
             &tc,
@@ -588,7 +588,7 @@ mod tests {
 
         let tc = make_tool_call("echo", "call_1", serde_json::json!({"text": "hello"}));
         let emitter = EventEmitter::new();
-        let config = SessionConfig::default();
+        let config = SessionOptions::default();
 
         let result = execute_and_emit_one_tool(
             &tc,
@@ -628,7 +628,7 @@ mod tests {
             serde_json::json!({"file_path": "a.ts", "content": "new"}),
         );
         let emitter = EventEmitter::new();
-        let config = SessionConfig::default();
+        let config = SessionOptions::default();
 
         let result = execute_and_emit_one_tool(
             &tc,
@@ -655,7 +655,7 @@ mod tests {
 
         let sandbox = make_guarded_sandbox(HashMap::from([("a.ts".into(), "content".into())]));
         let emitter = EventEmitter::new();
-        let config = SessionConfig::default();
+        let config = SessionOptions::default();
 
         // First read the file
         let read_tc = make_tool_call(
@@ -707,7 +707,7 @@ mod tests {
 
         let sandbox = make_guarded_sandbox(HashMap::from([("a.ts".into(), "content".into())]));
         let emitter = EventEmitter::new();
-        let config = SessionConfig::default();
+        let config = SessionOptions::default();
 
         // Grep matching a.ts
         let grep_tc = make_tool_call("grep", "call_1", serde_json::json!({"pattern": "content"}));
@@ -759,7 +759,7 @@ mod tests {
             serde_json::json!({"file_path": "a.ts", "old_string": "content", "new_string": "updated"}),
         );
         let emitter = EventEmitter::new();
-        let config = SessionConfig::default();
+        let config = SessionOptions::default();
 
         let result = execute_and_emit_one_tool(
             &tc,
@@ -790,7 +790,7 @@ mod tests {
             serde_json::json!({"file_path": "new.ts", "content": "hello"}),
         );
         let emitter = EventEmitter::new();
-        let config = SessionConfig::default();
+        let config = SessionOptions::default();
 
         let result = execute_and_emit_one_tool(
             &tc,

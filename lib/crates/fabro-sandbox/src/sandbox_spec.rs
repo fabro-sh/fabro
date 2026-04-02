@@ -12,7 +12,7 @@ use crate::{Sandbox, SandboxEventCallback};
 #[cfg(feature = "daytona")]
 use crate::daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
 #[cfg(feature = "docker")]
-use crate::docker::{DockerSandbox, DockerSandboxConfig};
+use crate::docker::{DockerSandbox, DockerSandboxOptions};
 use crate::local::LocalSandbox;
 
 #[cfg(feature = "daytona")]
@@ -25,7 +25,7 @@ pub enum SandboxSpec {
     },
     #[cfg(feature = "docker")]
     Docker {
-        config: DockerSandboxConfig,
+        config: DockerSandboxOptions,
     },
     #[cfg(feature = "daytona")]
     Daytona {
@@ -157,7 +157,7 @@ impl SandboxSpec {
             }
             #[cfg(feature = "docker")]
             Self::Docker { config } => {
-                let mut sandbox = DockerSandbox::new(DockerSandboxConfig {
+                let mut sandbox = DockerSandbox::new(DockerSandboxOptions {
                     image: config.image.clone(),
                     host_working_directory: config.host_working_directory.clone(),
                     container_mount_point: config.container_mount_point.clone(),

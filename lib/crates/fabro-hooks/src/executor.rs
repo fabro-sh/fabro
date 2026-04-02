@@ -313,7 +313,7 @@ impl HookExecutorImpl {
                 }
             };
 
-            let config = fabro_agent::SessionConfig::default();
+            let config = fabro_agent::SessionOptions::default();
             let mut registry = fabro_agent::ToolRegistry::new();
             fabro_agent::register_core_tools(&mut registry, &config, None);
             let tool_defs = registry.definitions();

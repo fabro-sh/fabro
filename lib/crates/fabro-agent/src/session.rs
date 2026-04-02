@@ -1,6 +1,6 @@
 use crate::agent_profile::AgentProfile;
 use crate::compaction::{check_context_usage, compact_context};
-use crate::config::SessionConfig;
+use crate::config::SessionOptions;
 use crate::error::{AbortReason, AgentError};
 use crate::event::EventEmitter;
 use crate::file_tracker::FileTracker;
@@ -24,7 +24,7 @@ use fabro_llm::retry;
 use fabro_llm::types::{
     ContentPart, Message, ReasoningEffort, Request, RetryPolicy, StreamEvent, ToolChoice,
 };
-use fabro_mcp::config::{McpServerConfig, McpTransport};
+use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_mcp::connection_manager::McpConnectionManager;
 use futures::StreamExt;
 use std::collections::{HashMap, VecDeque};
@@ -37,7 +37,7 @@ use tracing::{debug, info, warn};
 
 pub struct Session {
     id: String,
-    config: SessionConfig,
+    config: SessionOptions,
     history: History,
     event_emitter: EventEmitter,
     state: SessionState,
@@ -63,7 +63,7 @@ impl Session {
         llm_client: Client,
         provider_profile: Arc<dyn AgentProfile>,
         sandbox: Arc<dyn Sandbox>,
-        config: SessionConfig,
+        config: SessionOptions,
         subagent_manager: Option<Arc<AsyncMutex<SubAgentManager>>>,
     ) -> Self {
         Self {
@@ -203,7 +203,7 @@ impl Session {
 
     /// Resolve `McpTransport::Sandbox` configs by starting the MCP server inside the
     /// sandbox and rewriting the transport to `Http` with the sandbox's preview URL.
-    async fn resolve_sandbox_mcp_servers(&self) -> Vec<McpServerConfig> {
+    async fn resolve_sandbox_mcp_servers(&self) -> Vec<McpServerSettings> {
         let mut resolved = Vec::with_capacity(self.config.mcp_servers.len());
 
         for config in &self.config.mcp_servers {
@@ -217,7 +217,7 @@ impl Session {
                                 url = %url,
                                 "Sandbox MCP server started, connecting via HTTP"
                             );
-                            resolved.push(McpServerConfig {
+                            resolved.push(McpServerSettings {
                                 name: config.name.clone(),
                                 transport: McpTransport::Http { url, headers },
                                 startup_timeout_secs: config.startup_timeout_secs,
@@ -1118,7 +1118,7 @@ mod tests {
             client,
             profile,
             env,
-            SessionConfig::default(),
+            SessionOptions::default(),
             subagent_manager,
         )
     }
@@ -1185,7 +1185,7 @@ mod tests {
             tool_call_response("echo", "call_3", serde_json::json!({"text": "c"})),
         ];
 
-        let config = SessionConfig {
+        let config = SessionOptions {
             max_tool_rounds_per_input: 2,
             enable_loop_detection: false,
             ..Default::default()
@@ -1208,7 +1208,7 @@ mod tests {
             text_response("should not reach"),
         ];
 
-        let config = SessionConfig {
+        let config = SessionOptions {
             max_turns: 3,
             ..Default::default()
         };
@@ -1398,7 +1398,7 @@ mod tests {
             text_response("Done"),
         ];
 
-        let config = SessionConfig {
+        let config = SessionOptions {
             enable_loop_detection: true,
             loop_detection_window: 3,
             ..Default::default()
@@ -1435,7 +1435,7 @@ mod tests {
             tool_call_response("echo", "call_2", serde_json::json!({"text": "b"})),
         ];
 
-        let config = SessionConfig {
+        let config = SessionOptions {
             enable_loop_detection: false,
             ..Default::default()
         };
@@ -1488,7 +1488,7 @@ mod tests {
         let client = make_client(provider).await;
         let profile = Arc::new(TestProfile::with_tools(registry));
         let env = Arc::new(MockSandbox::default());
-        let config = SessionConfig {
+        let config = SessionOptions {
             enable_loop_detection: false,
             ..Default::default()
         };
@@ -1523,7 +1523,7 @@ mod tests {
         let client = make_client(error_provider).await;
         let profile = Arc::new(TestProfile::new());
         let env = Arc::new(MockSandbox::default());
-        let mut session = Session::new(client, profile, env, SessionConfig::default(), None);
+        let mut session = Session::new(client, profile, env, SessionOptions::default(), None);
 
         let result = session.process_input("Hello").await;
         assert!(result.is_err());
@@ -1602,7 +1602,7 @@ mod tests {
         let client = make_client(provider).await;
         let profile = Arc::new(TestProfile::with_tools(registry));
         let env = Arc::new(MockSandbox::default());
-        let mut session = Session::new(client, profile, env, SessionConfig::default(), None);
+        let mut session = Session::new(client, profile, env, SessionOptions::default(), None);
         let mut rx = session.subscribe();
 
         session.process_input("Use echo three times").await.unwrap();
@@ -1653,7 +1653,7 @@ mod tests {
         let registry = ToolRegistry::new();
         let profile = Arc::new(TestProfile::with_context_window(registry, 100));
         let env = Arc::new(MockSandbox::default());
-        let mut session = Session::new(client, profile, env, SessionConfig::default(), None);
+        let mut session = Session::new(client, profile, env, SessionOptions::default(), None);
         let mut rx = session.subscribe();
 
         session.process_input(&large_input).await.unwrap();
@@ -1675,7 +1675,7 @@ mod tests {
         let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
         let profile = Arc::new(TestProfile::new());
         let env = Arc::new(MockSandbox::default());
-        let mut session = Session::new(client, profile, env, SessionConfig::default(), None);
+        let mut session = Session::new(client, profile, env, SessionOptions::default(), None);
 
         // Default reasoning_effort is None
         session.set_reasoning_effort(Some(ReasoningEffort::High));
@@ -1698,7 +1698,7 @@ mod tests {
         // Large context window so short input stays well under 80%
         let profile = Arc::new(TestProfile::with_context_window(registry, 200_000));
         let env = Arc::new(MockSandbox::default());
-        let mut session = Session::new(client, profile, env, SessionConfig::default(), None);
+        let mut session = Session::new(client, profile, env, SessionOptions::default(), None);
         let mut rx = session.subscribe();
 
         session.process_input("Hi").await.unwrap();
@@ -1827,7 +1827,7 @@ mod tests {
         let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
         let profile = Arc::new(TestProfile::new());
         let env = Arc::new(MockSandbox::default());
-        let config = SessionConfig {
+        let config = SessionOptions {
             user_instructions: Some("Always use TDD".into()),
             ..Default::default()
         };
@@ -1855,7 +1855,7 @@ mod tests {
         let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
         let profile = Arc::new(TestProfile::new());
         let env = Arc::new(MockSandbox::default());
-        let mut session = Session::new(client, profile, env, SessionConfig::default(), None);
+        let mut session = Session::new(client, profile, env, SessionOptions::default(), None);
 
         // Intentionally skip initialize(): system prompt remains empty.
         session.process_input("test").await.unwrap();
@@ -1887,7 +1887,7 @@ mod tests {
             text_response("OK after denial"),
         ];
 
-        let config = SessionConfig {
+        let config = SessionOptions {
             tool_hooks: Some(Arc::new(ToolApprovalAdapter(Arc::new(|_name, _args| {
                 Err("denied by policy".to_string())
             })))),
@@ -1928,7 +1928,7 @@ mod tests {
             text_response("Done"),
         ];
 
-        let config = SessionConfig {
+        let config = SessionOptions {
             tool_hooks: Some(Arc::new(ToolApprovalAdapter(Arc::new(|_name, _args| {
                 Ok(())
             })))),
@@ -1964,7 +1964,7 @@ mod tests {
             text_response("Done"),
         ];
 
-        let config = SessionConfig {
+        let config = SessionOptions {
             tool_hooks: Some(Arc::new(ToolApprovalAdapter(Arc::new(
                 move |name, args| {
                     *captured_clone.lock().unwrap() = Some((name.to_string(), args.clone()));
@@ -1995,7 +1995,7 @@ mod tests {
             text_response("Done"),
         ];
 
-        let config = SessionConfig {
+        let config = SessionOptions {
             tool_hooks: None,
             ..Default::default()
         };
@@ -2026,7 +2026,7 @@ mod tests {
             text_response("Done"),
         ];
 
-        let config = SessionConfig {
+        let config = SessionOptions {
             tool_hooks: Some(Arc::new(ToolApprovalAdapter(Arc::new(|_name, _args| {
                 Err("not allowed".to_string())
             })))),
@@ -2087,7 +2087,7 @@ mod tests {
         let client = make_client(provider as Arc<dyn ProviderAdapter>).await;
         let profile = Arc::new(TestProfile::new());
         let env = Arc::new(MockSandbox::default());
-        let mut session = Session::new(client, profile, env, SessionConfig::default(), None);
+        let mut session = Session::new(client, profile, env, SessionOptions::default(), None);
 
         let result = session.process_input("Hello").await;
         assert!(matches!(
@@ -2260,7 +2260,7 @@ mod tests {
         let registry = ToolRegistry::new();
         let profile = Arc::new(TestProfile::with_context_window(registry, 100));
         let env = Arc::new(MockSandbox::default());
-        let config = SessionConfig {
+        let config = SessionOptions {
             enable_context_compaction: true,
             compaction_preserve_turns: 1,
             ..Default::default()
@@ -2303,7 +2303,7 @@ mod tests {
         let registry = ToolRegistry::new();
         let profile = Arc::new(TestProfile::with_context_window(registry, 100));
         let env = Arc::new(MockSandbox::default());
-        let config = SessionConfig {
+        let config = SessionOptions {
             enable_context_compaction: false,
             ..Default::default()
         };
@@ -2387,7 +2387,7 @@ mod tests {
         let registry = ToolRegistry::new();
         let profile = Arc::new(TestProfile::with_context_window(registry, 100));
         let env = Arc::new(MockSandbox::default());
-        let config = SessionConfig {
+        let config = SessionOptions {
             enable_context_compaction: true,
             compaction_preserve_turns: 1,
             ..Default::default()
@@ -2491,7 +2491,7 @@ mod tests {
         // Tiny context window to force compaction
         let profile = Arc::new(TestProfile::with_context_window(registry, 100));
         let env = Arc::new(MockSandbox::default());
-        let config = SessionConfig {
+        let config = SessionOptions {
             enable_context_compaction: true,
             compaction_preserve_turns: 1,
             ..Default::default()
@@ -2555,15 +2555,15 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_end_to_end_tool_call() {
-        use fabro_mcp::config::{McpServerConfig, McpTransport};
+        use fabro_mcp::config::{McpServerSettings, McpTransport};
         use std::collections::HashMap;
 
         let test_server = format!(
             "{}/../fabro-mcp/tests/test_mcp_server.py",
             env!("CARGO_MANIFEST_DIR")
         );
-        let config = SessionConfig {
-            mcp_servers: vec![McpServerConfig {
+        let config = SessionOptions {
+            mcp_servers: vec![McpServerSettings {
                 name: "test-echo".into(),
                 transport: McpTransport::Stdio {
                     command: vec!["python3".into(), test_server],
@@ -2696,7 +2696,7 @@ mod tests {
             text_response("Should not reach this"),
         ];
 
-        let config = SessionConfig {
+        let config = SessionOptions {
             wall_clock_timeout: Some(std::time::Duration::from_millis(10)),
             enable_loop_detection: false,
             ..Default::default()
@@ -2719,7 +2719,7 @@ mod tests {
     async fn wall_clock_timeout_does_not_fire_when_session_completes_in_time() {
         let responses = vec![text_response("Fast response")];
 
-        let config = SessionConfig {
+        let config = SessionOptions {
             wall_clock_timeout: Some(std::time::Duration::from_secs(10)),
             ..Default::default()
         };

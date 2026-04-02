@@ -73,7 +73,7 @@ impl ToolHookCallback for WorkflowToolHookCallback {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{HookConfig, HookDefinition};
+    use crate::config::{HookDefinition, HookSettings};
     use crate::executor::HookExecutor;
     use crate::types::{HookContext, HookResult};
     use fabro_types::fixtures;
@@ -143,7 +143,7 @@ mod tests {
             captured_contexts: captured.clone(),
             decision: HookDecision::Proceed,
         });
-        let config = HookConfig {
+        let config = HookSettings {
             hooks: vec![make_hook(HookEvent::PreToolUse)],
         };
         let runner = Arc::new(HookRunner::with_executor(config, executor));
@@ -174,7 +174,7 @@ mod tests {
                 reason: Some("forbidden".into()),
             },
         });
-        let config = HookConfig {
+        let config = HookSettings {
             hooks: vec![make_hook(HookEvent::PreToolUse)],
         };
         let runner = Arc::new(HookRunner::with_executor(config, executor));
@@ -196,7 +196,7 @@ mod tests {
             captured_contexts: Arc::new(Mutex::new(Vec::new())),
             decision: HookDecision::Proceed,
         });
-        let config = HookConfig {
+        let config = HookSettings {
             hooks: vec![make_hook(HookEvent::PreToolUse)],
         };
         let runner = Arc::new(HookRunner::with_executor(config, executor));
@@ -214,7 +214,7 @@ mod tests {
             captured_contexts: captured.clone(),
             decision: HookDecision::Proceed,
         });
-        let config = HookConfig {
+        let config = HookSettings {
             hooks: vec![make_hook(HookEvent::PostToolUse)],
         };
         let runner = Arc::new(HookRunner::with_executor(config, executor));
@@ -243,7 +243,7 @@ mod tests {
             captured_contexts: captured.clone(),
             decision: HookDecision::Proceed,
         });
-        let config = HookConfig {
+        let config = HookSettings {
             hooks: vec![make_hook(HookEvent::PostToolUseFailure)],
         };
         let runner = Arc::new(HookRunner::with_executor(config, executor));

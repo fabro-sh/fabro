@@ -23,7 +23,7 @@ pub enum Command {
 
 /// Parsed and resolved devcontainer configuration — everything needed to create a sandbox.
 #[derive(Debug, Clone)]
-pub struct DevcontainerConfig {
+pub struct DevcontainerSpec {
     /// Generated Dockerfile content
     pub dockerfile: String,
     /// Directory for docker build context
@@ -159,7 +159,7 @@ pub struct DevcontainerResolver;
 
 impl DevcontainerResolver {
     /// path: repo root (or explicit .devcontainer/ path)
-    pub async fn resolve(path: &Path) -> Result<DevcontainerConfig> {
+    pub async fn resolve(path: &Path) -> Result<DevcontainerSpec> {
         let (json_path, devcontainer) = Self::find_and_parse(path)?;
         let repo_root = Self::repo_root_from_json_path(&json_path, path);
         let base_dir = json_path.parent().unwrap_or(path);
@@ -246,7 +246,7 @@ impl DevcontainerResolver {
 
             check_no_build_context_copies(&dockerfile)?;
 
-            return Ok(DevcontainerConfig {
+            return Ok(DevcontainerSpec {
                 dockerfile,
                 build_context: compose_base_dir.to_path_buf(),
                 build_args: HashMap::new(),
@@ -384,7 +384,7 @@ impl DevcontainerResolver {
             post_start_commands.push(Self::convert_lifecycle_command(cmd));
         }
 
-        Ok(DevcontainerConfig {
+        Ok(DevcontainerSpec {
             dockerfile: dockerfile_content,
             build_context,
             build_args,

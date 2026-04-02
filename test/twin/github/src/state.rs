@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 /// Configuration for a registered GitHub App (user-facing input).
 #[derive(Debug, Clone)]
-pub struct AppConfig {
+pub struct AppOptions {
     pub app_id: String,
     pub slug: String,
     pub owner_login: String,
@@ -15,7 +15,7 @@ pub struct AppConfig {
 /// Internal enriched app config with derived public key.
 #[derive(Debug, Clone)]
 pub struct RegisteredApp {
-    pub config: AppConfig,
+    pub config: AppOptions,
     /// Derived from `private_key_pem` during `register_app`. Used for JWT verification.
     pub public_key_pem: String,
 }
@@ -140,7 +140,7 @@ pub struct Comment {
 
 /// Stores webhook configuration.
 #[derive(Debug, Clone, Default)]
-pub struct WebhookConfig {
+pub struct WebhookOptions {
     pub url: Option<String>,
     pub content_type: Option<String>,
 }
@@ -234,7 +234,7 @@ pub struct AppState {
     pub releases: HashMap<(String, String), Release>,
     pub manifest_conversions: HashMap<String, ManifestConversion>,
     pub comments: Vec<Comment>,
-    pub webhook_config: WebhookConfig,
+    pub webhook_config: WebhookOptions,
     pub next_installation_id: u64,
     pub next_pr_number: u64,
     pub viewer_id: String,
@@ -279,14 +279,14 @@ impl AppState {
             releases: HashMap::new(),
             manifest_conversions: HashMap::new(),
             comments: Vec::new(),
-            webhook_config: WebhookConfig::default(),
+            webhook_config: WebhookOptions::default(),
             next_installation_id: 1,
             next_pr_number: 1,
             viewer_id: "U_fakeviewer".to_string(),
         }
     }
 
-    pub fn register_app(&mut self, config: AppConfig) {
+    pub fn register_app(&mut self, config: AppOptions) {
         let public_key_pem = derive_public_key_pem(&config.private_key_pem);
         let app_id = config.app_id.clone();
         self.apps.insert(
@@ -477,7 +477,7 @@ mod tests {
     fn can_register_app() {
         let pem = test_rsa_key();
         let mut state = AppState::new();
-        state.register_app(AppConfig {
+        state.register_app(AppOptions {
             app_id: "12345".to_string(),
             slug: "test-app".to_string(),
             owner_login: "test-owner".to_string(),

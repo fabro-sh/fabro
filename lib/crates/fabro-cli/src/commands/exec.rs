@@ -3,7 +3,7 @@ use anyhow::Result;
 use fabro_agent::cli::run_with_args_and_client;
 use fabro_agent::cli::{AgentArgs, OutputFormat, run_with_args};
 use fabro_config::mcp::McpServerEntry;
-use fabro_mcp::config::McpServerConfig;
+use fabro_mcp::config::McpServerSettings;
 
 use crate::args::GlobalArgs;
 use crate::user_config;
@@ -28,7 +28,7 @@ pub(crate) async fn execute(mut args: AgentArgs, globals: &GlobalArgs) -> Result
         globals.server_url.as_deref(),
         &cli_settings,
     );
-    let mcp_servers: Vec<McpServerConfig> = cli_settings
+    let mcp_servers: Vec<McpServerSettings> = cli_settings
         .mcp_servers
         .into_iter()
         .map(|(name, entry): (String, McpServerEntry)| entry.into_config(name))

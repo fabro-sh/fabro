@@ -11,7 +11,7 @@ use chrono::Utc;
 use fabro_agent::Sandbox;
 use fabro_config::FabroSettings;
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
-use fabro_hooks::HookConfig;
+use fabro_hooks::HookSettings;
 use fabro_interview::AutoApproveInterviewer;
 use fabro_sandbox::SandboxSpec;
 use fabro_store::InMemoryStore;
@@ -200,7 +200,7 @@ async fn execute_test_run_with_options(
                 devcontainer_phases: vec![],
             },
             run_options,
-            hooks: HookConfig { hooks: vec![] },
+            hooks: HookSettings { hooks: vec![] },
             sandbox_env: SandboxEnvSpec {
                 devcontainer_env: HashMap::new(),
                 toml_env: HashMap::new(),
@@ -251,7 +251,7 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
                 devcontainer_phases: vec![],
             },
             run_options: test_run_options(&run_dir, "run-test"),
-            hooks: HookConfig { hooks: vec![] },
+            hooks: HookSettings { hooks: vec![] },
             sandbox_env: SandboxEnvSpec {
                 devcontainer_env: HashMap::new(),
                 toml_env: HashMap::new(),
@@ -314,7 +314,7 @@ async fn run_with_lifecycle(
             interviewer: Arc::new(AutoApproveInterviewer),
             lifecycle,
             run_options,
-            hooks: HookConfig { hooks: vec![] },
+            hooks: HookSettings { hooks: vec![] },
             sandbox_env: SandboxEnvSpec {
                 devcontainer_env: HashMap::new(),
                 toml_env: HashMap::new(),

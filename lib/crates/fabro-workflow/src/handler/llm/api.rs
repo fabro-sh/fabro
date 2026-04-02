@@ -5,12 +5,12 @@ use async_trait::async_trait;
 
 use fabro_agent::{
     AgentEvent, AgentProfile, AnthropicProfile, GeminiProfile, OpenAiProfile, Sandbox, Session,
-    SessionConfig, Turn,
+    SessionOptions, Turn,
     subagent::{SessionFactory, SubAgentManager},
 };
 use fabro_llm::client::Client;
 use fabro_llm::types::{Message, Request, Usage};
-use fabro_mcp::config::McpServerConfig;
+use fabro_mcp::config::McpServerSettings;
 use fabro_model::FallbackTarget;
 use fabro_model::Provider;
 use tokio::fs;
@@ -120,7 +120,7 @@ pub struct AgentApiBackend {
     fallback_chain: Vec<FallbackTarget>,
     sessions: Mutex<HashMap<String, Session>>,
     env: HashMap<String, String>,
-    mcp_servers: Vec<McpServerConfig>,
+    mcp_servers: Vec<McpServerSettings>,
 }
 
 impl AgentApiBackend {
@@ -143,7 +143,7 @@ impl AgentApiBackend {
     }
 
     #[must_use]
-    pub fn with_mcp_servers(mut self, servers: Vec<McpServerConfig>) -> Self {
+    pub fn with_mcp_servers(mut self, servers: Vec<McpServerSettings>) -> Self {
         self.mcp_servers = servers;
         self
     }
@@ -178,7 +178,7 @@ impl AgentApiBackend {
         sandbox: &Arc<dyn Sandbox>,
         env: &HashMap<String, String>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-        mcp_servers: Vec<McpServerConfig>,
+        mcp_servers: Vec<McpServerSettings>,
     ) -> Result<Session, FabroError> {
         let client = Client::from_env()
             .await
@@ -186,13 +186,13 @@ impl AgentApiBackend {
 
         let mut profile = build_profile(model, provider);
 
-        let config = SessionConfig {
+        let config = SessionOptions {
             max_tokens: node.max_tokens(),
             reasoning_effort: node.reasoning_effort().parse().ok(),
             speed: node.speed().map(String::from),
             tool_hooks,
             mcp_servers,
-            ..SessionConfig::default()
+            ..SessionOptions::default()
         };
 
         let manager = Arc::new(TokioMutex::new(SubAgentManager::new(
@@ -222,7 +222,7 @@ impl AgentApiBackend {
                 factory_client.clone(),
                 child_profile,
                 Arc::clone(&factory_env),
-                SessionConfig::default(),
+                SessionOptions::default(),
                 None,
             );
             if !factory_tool_env.is_empty() {

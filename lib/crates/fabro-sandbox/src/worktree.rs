@@ -24,7 +24,7 @@ pub enum WorktreeEvent {
 pub type WorktreeEventCallback = Arc<dyn Fn(WorktreeEvent) + Send + Sync>;
 
 /// Configuration for a `WorktreeSandbox`.
-pub struct WorktreeConfig {
+pub struct WorktreeOptions {
     pub branch_name: String,
     pub base_sha: String,
     pub worktree_path: String,
@@ -39,14 +39,14 @@ pub struct WorktreeConfig {
 /// The inner sandbox's lifecycle is managed separately by the caller.
 pub struct WorktreeSandbox {
     inner: Arc<dyn Sandbox>,
-    config: WorktreeConfig,
+    config: WorktreeOptions,
     event_callback: Option<WorktreeEventCallback>,
     initialized: std::sync::atomic::AtomicBool,
 }
 
 impl WorktreeSandbox {
     /// Create a new `WorktreeSandbox` wrapping `inner` with the given configuration.
-    pub fn new(inner: Arc<dyn Sandbox>, config: WorktreeConfig) -> Self {
+    pub fn new(inner: Arc<dyn Sandbox>, config: WorktreeOptions) -> Self {
         Self {
             inner,
             config,
@@ -357,8 +357,8 @@ mod tests {
     use crate::test_support::MockSandbox;
     use std::sync::Mutex;
 
-    fn make_config(wt_path: &str) -> WorktreeConfig {
-        WorktreeConfig {
+    fn make_config(wt_path: &str) -> WorktreeOptions {
+        WorktreeOptions {
             branch_name: "fabro/run/test-branch".to_string(),
             base_sha: "abc123def456".to_string(),
             worktree_path: wt_path.to_string(),
@@ -366,8 +366,8 @@ mod tests {
         }
     }
 
-    fn make_config_skip(wt_path: &str) -> WorktreeConfig {
-        WorktreeConfig {
+    fn make_config_skip(wt_path: &str) -> WorktreeOptions {
+        WorktreeOptions {
             branch_name: "fabro/run/test-branch".to_string(),
             base_sha: "abc123def456".to_string(),
             worktree_path: wt_path.to_string(),
@@ -432,7 +432,7 @@ mod tests {
     #[tokio::test]
     async fn initialize_uses_shell_quoted_values_in_commands() {
         let (inner, mock) = make_mock();
-        let config = WorktreeConfig {
+        let config = WorktreeOptions {
             branch_name: "fabro/run/my-branch".to_string(),
             base_sha: "deadbeef".to_string(),
             worktree_path: "/tmp/my worktree".to_string(), // path with space
@@ -651,7 +651,7 @@ mod tests {
         std::fs::write(worktree.join("marker.txt"), "UNIQUE_WORKTREE_MARKER").unwrap();
 
         let inner: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(original.clone()));
-        let config = WorktreeConfig {
+        let config = WorktreeOptions {
             branch_name: "test-branch".into(),
             base_sha: "abc123".into(),
             worktree_path: worktree.to_string_lossy().to_string(),
@@ -692,7 +692,7 @@ mod tests {
         std::fs::write(worktree.join("worktree_only.txt"), "content").unwrap();
 
         let inner: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(original.clone()));
-        let config = WorktreeConfig {
+        let config = WorktreeOptions {
             branch_name: "test-branch".into(),
             base_sha: "abc123".into(),
             worktree_path: worktree.to_string_lossy().to_string(),
@@ -726,7 +726,7 @@ mod tests {
         std::fs::write(worktree.join("only_in_worktree.txt"), "worktree content").unwrap();
 
         let inner: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(original.clone()));
-        let config = WorktreeConfig {
+        let config = WorktreeOptions {
             branch_name: "test-branch".into(),
             base_sha: "abc123".into(),
             worktree_path: worktree.to_string_lossy().to_string(),
@@ -752,7 +752,7 @@ mod tests {
     #[test]
     fn accessors_return_config_values() {
         let (inner, _mock) = make_mock();
-        let config = WorktreeConfig {
+        let config = WorktreeOptions {
             branch_name: "my-branch".to_string(),
             base_sha: "sha123".to_string(),
             worktree_path: "/path/to/wt".to_string(),

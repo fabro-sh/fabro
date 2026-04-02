@@ -177,7 +177,7 @@ pub async fn create_access_token(
 #[cfg(test)]
 mod tests {
     use crate::server::TestServer;
-    use crate::state::{AppConfig, AppState};
+    use crate::state::{AppOptions, AppState};
 
     fn test_rsa_key() -> String {
         use std::process::Command;
@@ -220,7 +220,7 @@ mod tests {
     async fn get_installation_returns_id() {
         let pem = test_rsa_key();
         let mut state = AppState::new();
-        state.register_app(AppConfig {
+        state.register_app(AppOptions {
             app_id: "100".to_string(),
             slug: "test-app".to_string(),
             owner_login: "owner".to_string(),
@@ -252,7 +252,7 @@ mod tests {
     async fn get_installation_returns_404_when_not_installed() {
         let pem = test_rsa_key();
         let mut state = AppState::new();
-        state.register_app(AppConfig {
+        state.register_app(AppOptions {
             app_id: "100".to_string(),
             slug: "test-app".to_string(),
             owner_login: "owner".to_string(),
@@ -280,7 +280,7 @@ mod tests {
     async fn get_installation_returns_403_when_suspended() {
         let pem = test_rsa_key();
         let mut state = AppState::new();
-        state.register_app(AppConfig {
+        state.register_app(AppOptions {
             app_id: "100".to_string(),
             slug: "test-app".to_string(),
             owner_login: "owner".to_string(),
@@ -308,7 +308,7 @@ mod tests {
     async fn create_access_token_returns_201() {
         let pem = test_rsa_key();
         let mut state = AppState::new();
-        state.register_app(AppConfig {
+        state.register_app(AppOptions {
             app_id: "100".to_string(),
             slug: "test-app".to_string(),
             owner_login: "owner".to_string(),
@@ -346,7 +346,7 @@ mod tests {
     async fn create_access_token_returns_422_for_unauthorized_repo() {
         let pem = test_rsa_key();
         let mut state = AppState::new();
-        state.register_app(AppConfig {
+        state.register_app(AppOptions {
             app_id: "100".to_string(),
             slug: "test-app".to_string(),
             owner_login: "owner".to_string(),

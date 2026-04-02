@@ -46,15 +46,15 @@ mod tests {
     use crate::tool_registry::ToolContext;
     use std::collections::HashMap;
 
-    use fabro_mcp::config::{McpServerConfig, McpTransport};
+    use fabro_mcp::config::{McpServerSettings, McpTransport};
     use tokio_util::sync::CancellationToken;
 
-    fn test_server_config() -> McpServerConfig {
+    fn test_server_config() -> McpServerSettings {
         let test_server = format!(
             "{}/../fabro-mcp/tests/test_mcp_server.py",
             env!("CARGO_MANIFEST_DIR")
         );
-        McpServerConfig {
+        McpServerSettings {
             name: "test-echo".into(),
             transport: McpTransport::Stdio {
                 command: vec!["python3".into(), test_server],

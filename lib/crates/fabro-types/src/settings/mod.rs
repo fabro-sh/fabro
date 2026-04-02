@@ -11,9 +11,9 @@ pub mod sandbox;
 pub mod server;
 pub mod user;
 
-pub use hook::{HookConfig, HookDefinition, HookEvent, HookType, TlsMode};
+pub use hook::{HookDefinition, HookEvent, HookSettings, HookType, TlsMode};
 pub use mcp::{
-    McpServerConfig, McpServerEntry, McpTransport, default_startup_timeout_secs,
+    McpServerEntry, McpServerSettings, McpTransport, default_startup_timeout_secs,
     default_tool_timeout_secs,
 };
 pub use project::ProjectSettings;

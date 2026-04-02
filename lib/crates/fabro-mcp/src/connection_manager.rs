@@ -7,7 +7,7 @@ use rmcp::model::{CallToolResult, RawContent};
 use tracing::{error, info};
 
 use crate::client::McpClient;
-use crate::config::McpServerConfig;
+use crate::config::McpServerSettings;
 
 const MCP_TOOL_NAME_DELIMITER: &str = "__";
 
@@ -102,7 +102,7 @@ impl McpConnectionManager {
     /// Returns a list of `(server_name, result)` for each server.
     pub async fn start_servers(
         &mut self,
-        configs: &[McpServerConfig],
+        configs: &[McpServerSettings],
     ) -> Vec<(String, Result<usize>)> {
         let mut results = Vec::new();
 
@@ -122,7 +122,7 @@ impl McpConnectionManager {
         results
     }
 
-    async fn start_one_server(&mut self, config: &McpServerConfig) -> Result<usize> {
+    async fn start_one_server(&mut self, config: &McpServerSettings) -> Result<usize> {
         let client = McpClient::new(config)?;
         client.initialize(config.startup_timeout()).await?;
         let tools = client.list_tools().await?;
