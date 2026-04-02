@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use fabro_agent::SessionEvent;
 use fabro_retro::retro::{Retro, derive_retro};
-use fabro_retro::retro_agent::{dry_run_narrative, run_retro_agent};
+use fabro_retro::retro_agent::{
+    RETRO_DATA_DIR, build_retro_prompt, dry_run_narrative, run_retro_agent,
+};
 
 use super::types::{Executed, RetroOptions, Retroed};
 use crate::event::WorkflowRunEvent;
@@ -54,15 +56,17 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
     }
 
     let retro_start = std::time::Instant::now();
+    let retro_prompt = build_retro_prompt(RETRO_DATA_DIR);
     if let Some(ref emitter) = options.emitter {
         emitter.emit(&WorkflowRunEvent::RetroStarted {
+            prompt: Some(retro_prompt),
             provider: Some(options.provider.as_str().to_string()),
             model: Some(options.model.clone()),
         });
     }
 
-    let narrative_result = if dry_run {
-        Ok(dry_run_narrative())
+    let retro_result = if dry_run {
+        Ok((dry_run_narrative(), String::new()))
     } else if let Some(client) = options.llm_client.as_ref() {
         let emitter_clone = options.emitter.clone();
         let event_callback: Option<Arc<dyn Fn(SessionEvent) + Send + Sync>> =
@@ -89,32 +93,33 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
             event_callback,
         )
         .await
+        .map(|result| (result.narrative, result.response))
     } else {
         Err(anyhow::anyhow!("No LLM client available"))
     };
 
     let duration_ms = u64::try_from(retro_start.elapsed().as_millis()).unwrap();
-    if let Some(ref emitter) = options.emitter {
-        match &narrative_result {
-            Ok(_) => emitter.emit(&WorkflowRunEvent::RetroCompleted {
-                duration_ms,
-                retro: serde_json::to_value(&retro).ok(),
-            }),
-            Err(e) => emitter.emit(&WorkflowRunEvent::RetroFailed {
-                error: e.to_string(),
-                duration_ms,
-            }),
-        }
-    }
-
-    match narrative_result {
-        Ok(narrative) => {
+    match retro_result {
+        Ok((narrative, response)) => {
             retro.apply_narrative(narrative);
+            if let Some(ref emitter) = options.emitter {
+                emitter.emit(&WorkflowRunEvent::RetroCompleted {
+                    duration_ms,
+                    response: Some(response),
+                    retro: serde_json::to_value(&retro).ok(),
+                });
+            }
             if let Err(err) = options.run_store.put_retro(&retro).await {
                 tracing::warn!(error = %err, "Failed to save retro with narrative to store");
             }
         }
         Err(e) => {
+            if let Some(ref emitter) = options.emitter {
+                emitter.emit(&WorkflowRunEvent::RetroFailed {
+                    error: e.to_string(),
+                    duration_ms,
+                });
+            }
             tracing::debug!(error = %e, "Retro agent skipped");
         }
     }
@@ -298,7 +303,7 @@ mod tests {
         let seen = Arc::new(Mutex::new(Vec::new()));
         emitter.on_event({
             let seen = Arc::clone(&seen);
-            move |event| seen.lock().unwrap().push(event.event.clone())
+            move |event| seen.lock().unwrap().push(event.clone())
         });
 
         let retro = run_retro(
@@ -325,7 +330,24 @@ mod tests {
 
         assert!(retro.is_some());
         let seen = seen.lock().unwrap();
-        assert!(seen.iter().any(|event| event == "retro.started"));
-        assert!(seen.iter().any(|event| event == "retro.completed"));
+        let retro_started = seen
+            .iter()
+            .find(|event| event.event == "retro.started")
+            .unwrap();
+        assert_eq!(retro_started.properties["provider"], "anthropic");
+        assert_eq!(retro_started.properties["model"], "test-model");
+        assert!(
+            retro_started.properties["prompt"]
+                .as_str()
+                .is_some_and(|prompt| prompt.contains("/tmp/retro_data/progress.jsonl"))
+        );
+
+        let retro_completed = seen
+            .iter()
+            .find(|event| event.event == "retro.completed")
+            .unwrap();
+        assert_eq!(retro_completed.properties["response"], "");
+        assert!(retro_completed.properties.get("retro").is_some());
+        assert_eq!(retro_completed.properties["retro"]["smoothness"], "smooth");
     }
 }

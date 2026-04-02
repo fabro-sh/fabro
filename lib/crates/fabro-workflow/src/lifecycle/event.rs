@@ -12,8 +12,10 @@ use fabro_core::lifecycle::{
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::RunState;
 
+use super::circuit_breaker::CircuitBreakerLifecycle;
 use super::git::GitCheckpointResult;
 use crate::artifact::ArtifactStore;
+use crate::context;
 use crate::error::FabroError;
 use crate::event::{EventEmitter, WorkflowRunEvent};
 use crate::graph::WorkflowGraph;
@@ -45,6 +47,36 @@ pub(crate) struct EventLifecycle {
     // Cross-lifecycle data
     pub checkpoint_git_result: Arc<Mutex<Option<GitCheckpointResult>>>,
     pub last_git_sha: Arc<Mutex<Option<String>>>,
+    pub circuit_breaker: Arc<CircuitBreakerLifecycle>,
+}
+
+fn snapshot_failure_signatures(
+    circuit_breaker: &CircuitBreakerLifecycle,
+) -> (
+    Option<BTreeMap<String, usize>>,
+    Option<BTreeMap<String, usize>>,
+) {
+    let (loop_sigs, restart_sigs) = circuit_breaker.snapshot();
+    let loop_sigs = (!loop_sigs.is_empty()).then(|| {
+        loop_sigs
+            .into_iter()
+            .map(|(sig, count)| (sig.to_string(), count))
+            .collect::<BTreeMap<_, _>>()
+    });
+    let restart_sigs = (!restart_sigs.is_empty()).then(|| {
+        restart_sigs
+            .into_iter()
+            .map(|(sig, count)| (sig.to_string(), count))
+            .collect::<BTreeMap<_, _>>()
+    });
+    (loop_sigs, restart_sigs)
+}
+
+fn response_from_outcome(node_id: &str, outcome: &Outcome) -> Option<String> {
+    outcome
+        .context_updates
+        .get(&context::keys::response_key(node_id))
+        .and_then(|value| value.as_str().map(ToOwned::to_owned))
 }
 
 #[async_trait]
@@ -87,12 +119,13 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         }
         let gv = node.inner();
         let stage_index = state.stage_index;
+        let (loop_failure_signatures, restart_failure_signatures) =
+            snapshot_failure_signatures(&self.circuit_breaker);
         self.emitter.emit(&WorkflowRunEvent::StageStarted {
             node_id: gv.id.clone(),
             name: gv.label().to_string(),
             index: stage_index,
             handler_type: gv.handler_type().unwrap_or_default().to_string(),
-            script: None,
             attempt: 1,
             max_attempts: 1,
         });
@@ -112,8 +145,12 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             jump_to_node: None,
             context_values: None,
             node_visits: None,
-            loop_failure_signatures: None,
-            restart_failure_signatures: None,
+            loop_failure_signatures,
+            restart_failure_signatures,
+            response: state
+                .context
+                .get(&context::keys::response_key(&gv.id))
+                .and_then(|value| value.as_str().map(ToOwned::to_owned)),
             attempt: 1,
             max_attempts: 1,
         });
@@ -130,7 +167,6 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             name: gv.label().to_string(),
             index: state.stage_index,
             handler_type: gv.handler_type().unwrap_or_default().to_string(),
-            script: None,
             attempt: ctx.attempt as usize,
             max_attempts: ctx.max_attempts as usize,
         });
@@ -185,6 +221,8 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         let gv = node.inner();
         let stage_index = state.stage_index;
         let duration_ms = u64::try_from(result.duration.as_millis()).unwrap();
+        let (loop_failure_signatures, restart_failure_signatures) =
+            snapshot_failure_signatures(&self.circuit_breaker);
 
         if outcome.status == StageStatus::Fail {
             self.emitter.emit(&WorkflowRunEvent::StageFailed {
@@ -228,8 +266,9 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                         .into_iter()
                         .collect::<BTreeMap<_, _>>()
                 }),
-                loop_failure_signatures: None,
-                restart_failure_signatures: None,
+                loop_failure_signatures,
+                restart_failure_signatures,
+                response: response_from_outcome(&gv.id, outcome),
                 attempt: result.attempts as usize,
                 max_attempts: result.max_attempts as usize,
             });

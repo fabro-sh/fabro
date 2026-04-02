@@ -128,6 +128,7 @@ impl WorkflowLifecycle {
             artifact_store: Arc::clone(&artifact_store),
             last_git_sha: Arc::clone(&last_git_sha),
             checkpoint_git_result: Arc::clone(&checkpoint_git_result),
+            circuit_breaker: Arc::clone(&circuit_breaker),
         };
 
         let hook = HookLifecycle {

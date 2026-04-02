@@ -109,8 +109,6 @@ pub enum WorkflowRunEvent {
         name: String,
         index: usize,
         handler_type: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        script: Option<String>,
         attempt: usize,
         max_attempts: usize,
     },
@@ -139,6 +137,8 @@ pub enum WorkflowRunEvent {
         loop_failure_signatures: Option<BTreeMap<String, usize>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         restart_failure_signatures: Option<BTreeMap<String, usize>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        response: Option<String>,
         attempt: usize,
         max_attempts: usize,
     },
@@ -443,12 +443,16 @@ pub enum WorkflowRunEvent {
     },
     RetroStarted {
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        prompt: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         provider: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         model: Option<String>,
     },
     RetroCompleted {
         duration_ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        response: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         retro: Option<serde_json::Value>,
     },
@@ -945,7 +949,11 @@ impl WorkflowRunEvent {
                     command, index, exit_code, "Devcontainer lifecycle command failed"
                 );
             }
-            Self::RetroStarted { provider, model } => {
+            Self::RetroStarted {
+                prompt: _,
+                provider,
+                model,
+            } => {
                 info!(
                     provider = provider.as_deref().unwrap_or(""),
                     model = model.as_deref().unwrap_or(""),
@@ -1660,6 +1668,7 @@ mod tests {
                 node_visits: None,
                 loop_failure_signatures: None,
                 restart_failure_signatures: None,
+                response: None,
                 attempt: 1,
                 max_attempts: 1,
             },
@@ -1672,6 +1681,42 @@ mod tests {
         assert_eq!(envelope.properties["duration_ms"], 5000);
         assert_eq!(envelope.properties["status"], "success");
         assert!(envelope.session_id.is_none());
+    }
+
+    #[test]
+    fn canonicalize_stage_completed_keeps_response_and_signature_snapshots() {
+        let envelope = canonicalize_event(
+            &fixtures::RUN_2,
+            &WorkflowRunEvent::StageCompleted {
+                node_id: "plan".to_string(),
+                name: "Plan".to_string(),
+                index: 0,
+                duration_ms: 5000,
+                status: "success".to_string(),
+                preferred_label: None,
+                suggested_next_ids: Vec::new(),
+                usage: None,
+                failure: None,
+                notes: None,
+                files_touched: Vec::new(),
+                context_updates: None,
+                jump_to_node: None,
+                context_values: None,
+                node_visits: None,
+                loop_failure_signatures: Some(BTreeMap::from([("sig-a".to_string(), 2usize)])),
+                restart_failure_signatures: Some(BTreeMap::from([("sig-b".to_string(), 1usize)])),
+                response: Some("done".to_string()),
+                attempt: 1,
+                max_attempts: 1,
+            },
+        );
+
+        assert_eq!(envelope.properties["response"], "done");
+        assert_eq!(envelope.properties["loop_failure_signatures"]["sig-a"], 2);
+        assert_eq!(
+            envelope.properties["restart_failure_signatures"]["sig-b"],
+            1
+        );
     }
 
     #[test]
@@ -1786,6 +1831,7 @@ mod tests {
         let envelope = canonicalize_event(
             &fixtures::RUN_8,
             &WorkflowRunEvent::RetroStarted {
+                prompt: Some("Analyze the run".to_string()),
                 provider: None,
                 model: None,
             },
@@ -1794,12 +1840,17 @@ mod tests {
         let payload = build_redacted_event_payload(&envelope, &fixtures::RUN_8).unwrap();
         assert_eq!(payload.as_value()["id"], envelope.id);
         assert_eq!(payload.as_value()["event"], "retro.started");
+        assert_eq!(
+            payload.as_value()["properties"]["prompt"],
+            "Analyze the run"
+        );
     }
 
     #[test]
     fn event_name_matches_new_dot_notation() {
         assert_eq!(
             event_name(&WorkflowRunEvent::RetroStarted {
+                prompt: None,
                 provider: None,
                 model: None,
             }),
