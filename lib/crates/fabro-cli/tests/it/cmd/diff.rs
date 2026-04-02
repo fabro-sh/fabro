@@ -117,7 +117,7 @@ fn diff_completed_run_reads_store_final_patch_without_disk_file() {
     let patch = with_runtime(|runtime| {
         runtime.block_on(async {
             let store = build_store(&context.storage_dir);
-            let run_store = store.open_run(&run_id).await.unwrap().unwrap();
+            let run_store = store.open_run(&run_id).await.unwrap();
             run_store.get_final_patch().await.unwrap().unwrap()
         })
     });
@@ -126,7 +126,7 @@ fn diff_completed_run_reads_store_final_patch_without_disk_file() {
     with_runtime(|runtime| {
         runtime.block_on(async {
             let store = build_store(&context.storage_dir);
-            let run_store = store.open_run(&run_id).await.unwrap().unwrap();
+            let run_store = store.open_run(&run_id).await.unwrap();
             run_store.put_final_patch(&patch).await.unwrap();
         });
     });
@@ -180,7 +180,7 @@ fn diff_node_reads_store_patch_without_disk_file() {
     let patch = with_runtime(|runtime| {
         runtime.block_on(async {
             let store = build_store(&context.storage_dir);
-            let run_store = store.open_run(&run_id).await.unwrap().unwrap();
+            let run_store = store.open_run(&run_id).await.unwrap();
             run_store
                 .get_node(&fabro_store::NodeVisitRef {
                     node_id: "step_one",
@@ -197,7 +197,7 @@ fn diff_node_reads_store_patch_without_disk_file() {
     with_runtime(|runtime| {
         runtime.block_on(async {
             let store = build_store(&context.storage_dir);
-            let run_store = store.open_run(&run_id).await.unwrap().unwrap();
+            let run_store = store.open_run(&run_id).await.unwrap();
             run_store
                 .put_node_diff(
                     &fabro_store::NodeVisitRef {

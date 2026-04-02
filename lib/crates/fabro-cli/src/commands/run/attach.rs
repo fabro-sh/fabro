@@ -50,13 +50,13 @@ pub(crate) async fn attach_run(
 
     if let (Some(storage_dir), Some(run_id)) = (storage_dir.as_deref(), run_id.as_ref()) {
         match store::open_run_reader(storage_dir, run_id).await {
-            Ok(Some(run_store)) => match run_store.list_events().await {
+            Ok(run_store) => match run_store.list_events().await {
                 Ok(events) => {
                     let verbose = run_store
-                        .get_run()
+                        .state()
                         .await
                         .ok()
-                        .flatten()
+                        .and_then(|state| state.run)
                         .is_some_and(|record| record.settings.verbose_enabled());
                     let event_lines = events
                         .iter()
@@ -83,7 +83,6 @@ pub(crate) async fn attach_run(
                     );
                 }
             },
-            Ok(None) => {}
             Err(err) => {
                 tracing::warn!(
                     run_id = %run_id,
@@ -157,13 +156,14 @@ async fn attach_run_store(
                 }
                 // Wait briefly for a terminal status or conclusion
                 for _ in 0..20 {
-                    if run_store.get_conclusion().await.ok().flatten().is_some()
-                        || run_store
-                            .get_status()
-                            .await
-                            .ok()
-                            .flatten()
-                            .is_some_and(|record| record.status.is_terminal())
+                    if run_store
+                        .state()
+                        .await
+                        .ok()
+                        .is_some_and(|state| {
+                            state.conclusion.is_some()
+                                || state.status.is_some_and(|record| record.status.is_terminal())
+                        })
                     {
                         break;
                     }
@@ -237,11 +237,10 @@ async fn attach_run_store(
         }
 
         let terminal_status = run_store
-            .get_status()
+            .state()
             .await
             .ok()
-            .flatten()
-            .map(|record| record.status)
+            .and_then(|state| state.status.map(|record| record.status))
             .filter(|status| status.is_terminal());
 
         let child_alive_via_handle = engine_guard.as_mut().and_then(|guard| {
@@ -749,24 +748,29 @@ fn determine_exit_code(conclusion_path: &Path, status_record: Option<RunStatusRe
 async fn determine_exit_code_with_store(run_store: &dyn RunStore) -> ExitCode {
     let deadline = Instant::now() + ATTACH_FINAL_STATUS_GRACE;
     loop {
-        if let Ok(Some(conclusion)) = run_store.get_conclusion().await {
-            let success = matches!(
-                conclusion.status,
-                StageStatus::Success | StageStatus::PartialSuccess
-            );
-            return if success {
-                ExitCode::from(0)
-            } else {
-                ExitCode::from(1)
-            };
-        }
+        match run_store.state().await {
+            Ok(state) => {
+                if let Some(conclusion) = state.conclusion {
+                    let success = matches!(
+                        conclusion.status,
+                        StageStatus::Success | StageStatus::PartialSuccess
+                    );
+                    return if success {
+                        ExitCode::from(0)
+                    } else {
+                        ExitCode::from(1)
+                    };
+                }
 
-        match run_store.get_status().await {
-            Ok(Some(record)) if matches!(record.status, RunStatus::Succeeded) => {
-                return ExitCode::from(0);
+                match state.status {
+                    Some(record) if matches!(record.status, RunStatus::Succeeded) => {
+                        return ExitCode::from(0);
+                    }
+                    Some(record) if record.status.is_terminal() => return ExitCode::from(1),
+                    Some(_) | None => {}
+                }
             }
-            Ok(Some(record)) if record.status.is_terminal() => return ExitCode::from(1),
-            Ok(Some(_) | None) | Err(_) => {}
+            Err(_) => {}
         }
 
         if Instant::now() >= deadline {

@@ -356,7 +356,7 @@ pub struct FinalizeOptions {
 /// Options for the PULL_REQUEST phase.
 pub struct PullRequestOptions {
     pub run_dir: PathBuf,
-    pub run_store: Option<Arc<dyn RunStore>>,
+    pub run_store: Arc<dyn RunStore>,
     pub pr_config: Option<PullRequestSettings>,
     pub github_app: Option<fabro_github::GitHubAppCredentials>,
     pub origin_url: Option<String>,

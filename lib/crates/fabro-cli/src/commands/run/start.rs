@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, bail};
 use chrono::Utc;
 use fabro_types::RunId;
 use fabro_workflow::run_status::RunStatus;
@@ -83,10 +83,8 @@ async fn ensure_startable_run(storage_dir: &Path, run_id: &RunId) -> Result<()> 
         bail!("an engine process is still running for this run — cannot start");
     }
 
-    let run_store = store::open_run_reader(storage_dir, run_id)
-        .await?
-        .ok_or_else(|| anyhow!("Cannot start run: run {run_id} not found in store"))?;
-    if let Some(record) = run_store.get_status().await? {
+    let run_store = store::open_run_reader(storage_dir, run_id).await?;
+    if let Some(record) = run_store.state().await?.status {
         if !matches!(record.status, RunStatus::Submitted | RunStatus::Starting) {
             bail!(
                 "cannot start run: status is {:?}, expected submitted",

@@ -1,8 +1,6 @@
 use std::path::Path;
 
 use async_trait::async_trait;
-use fabro_store::NodeVisitRef;
-
 use crate::context::Context;
 use crate::context::keys;
 use crate::error::FabroError;
@@ -92,22 +90,11 @@ impl Handler for CommandHandler {
         let visit = visit_from_context(context);
         let stage_dir = node_dir(run_dir, &node.id, visit);
         fs::create_dir_all(&stage_dir).await?;
-        let node_ref = NodeVisitRef {
-            node_id: &node.id,
-            visit: u32::try_from(visit).unwrap_or(u32::MAX),
-        };
-
         let invocation = serde_json::json!({
             "command": script,
             "language": language,
             "timeout_ms": timeout_ms(node),
         });
-        if let Some(ref store) = services.run_store {
-            store
-                .put_node_script_invocation(&node_ref, &invocation)
-                .await
-                .map_err(|err| FabroError::handler(err.to_string()))?;
-        }
         fs::write(
             stage_dir.join("script_invocation.json"),
             serde_json::to_string_pretty(&invocation).unwrap(),
@@ -142,31 +129,14 @@ impl Handler for CommandHandler {
             .await
             .map_err(|e| FabroError::handler(format!("Failed to spawn script: {e}")))?;
 
-        if let Some(ref store) = services.run_store {
-            store
-                .put_node_stdout(&node_ref, &result.stdout)
-                .await
-                .map_err(|err| FabroError::handler(err.to_string()))?;
-            store
-                .put_node_stderr(&node_ref, &result.stderr)
-                .await
-                .map_err(|err| FabroError::handler(err.to_string()))?;
-        } else {
-            fs::write(stage_dir.join("stdout.log"), &result.stdout).await?;
-            fs::write(stage_dir.join("stderr.log"), &result.stderr).await?;
-        }
+        fs::write(stage_dir.join("stdout.log"), &result.stdout).await?;
+        fs::write(stage_dir.join("stderr.log"), &result.stderr).await?;
 
         let timing = serde_json::json!({
             "duration_ms": result.duration_ms,
             "exit_code": if result.timed_out { serde_json::Value::Null } else { serde_json::json!(result.exit_code) },
             "timed_out": result.timed_out,
         });
-        if let Some(ref store) = services.run_store {
-            store
-                .put_node_script_timing(&node_ref, &timing)
-                .await
-                .map_err(|err| FabroError::handler(err.to_string()))?;
-        }
         fs::write(
             stage_dir.join("script_timing.json"),
             serde_json::to_string_pretty(&timing).unwrap(),
@@ -230,11 +200,32 @@ mod tests {
     use crate::outcome::StageStatus;
     use fabro_graphviz::graph::AttrValue;
     use fabro_store::{InMemoryStore, NodeVisitRef, RunStore, Store};
+    use fabro_types::fixtures;
     use std::sync::Arc;
     use std::time::Duration;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
+    }
+
+    async fn make_services_with_run_store() -> (
+        EngineServices,
+        Arc<dyn RunStore>,
+        crate::event::StoreProgressLogger,
+    ) {
+        let store = InMemoryStore::default();
+        let run_store = store
+            .create_run(&fixtures::RUN_1, chrono::Utc::now(), None)
+            .await
+            .unwrap();
+        let services = EngineServices {
+            emitter: Arc::new(crate::event::EventEmitter::new(fixtures::RUN_1)),
+            run_store: Arc::clone(&run_store),
+            ..EngineServices::test_default()
+        };
+        let logger = crate::event::StoreProgressLogger::new(Arc::clone(&run_store));
+        logger.register(services.emitter.as_ref());
+        (services, run_store, logger)
     }
 
     #[tokio::test]
@@ -586,31 +577,28 @@ mod tests {
         let context = Context::new();
         let graph = Graph::new("test");
         let run_dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(InMemoryStore::default());
-        let run_store = store
-            .create_run(&fabro_types::fixtures::RUN_1, chrono::Utc::now(), None)
-            .await
-            .unwrap();
-        let services = EngineServices {
-            run_store: Some(Arc::clone(&run_store) as Arc<dyn RunStore>),
-            ..EngineServices::test_default()
-        };
+        let (services, run_store, logger) = make_services_with_run_store().await;
 
         handler
             .execute(&node, &context, &graph, run_dir.path(), &services)
             .await
             .unwrap();
+        logger.flush().await;
 
         let snapshot = run_store
-            .get_node(&NodeVisitRef {
+            .state()
+            .await
+            .unwrap();
+        let node = snapshot
+            .node(&NodeVisitRef {
                 node_id: "script_node",
                 visit: 1,
             })
-            .await
+            .cloned()
             .unwrap();
 
-        assert_eq!(snapshot.script_invocation.unwrap()["command"], "echo hello");
-        assert_eq!(snapshot.script_timing.unwrap()["exit_code"], 0);
+        assert_eq!(node.script_invocation.unwrap()["script"], "echo hello");
+        assert_eq!(node.script_timing.unwrap()["exit_code"], 0);
     }
 
     #[tokio::test]

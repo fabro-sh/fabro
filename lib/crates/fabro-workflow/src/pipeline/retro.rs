@@ -8,12 +8,14 @@ use fabro_retro::retro_agent::{
 
 use super::types::{Executed, RetroOptions, Retroed};
 use crate::event::WorkflowRunEvent;
+#[cfg(test)]
+use crate::records::RunRecord;
 
 pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
-    let cp = match options.run_store.get_checkpoint().await {
-        Ok(Some(cp)) => cp,
+    let state = match options.run_store.state().await {
+        Ok(state) => state,
         Err(e) => {
-            tracing::warn!(error = %e, "Could not load checkpoint, skipping retro");
+            tracing::warn!(error = %e, "Could not load run state, skipping retro");
             if let Some(ref emitter) = options.emitter {
                 emitter.emit(&WorkflowRunEvent::RetroFailed {
                     error: e.to_string(),
@@ -22,7 +24,10 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
             }
             return None;
         }
-        Ok(None) => {
+    };
+    let cp = match state.checkpoint {
+        Some(cp) => cp,
+        None => {
             tracing::warn!("Could not load checkpoint, skipping retro");
             if let Some(ref emitter) = options.emitter {
                 emitter.emit(&WorkflowRunEvent::RetroFailed {
@@ -86,7 +91,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
             });
         run_retro_agent(
             &options.sandbox,
-            Some(&*options.run_store),
+            options.run_store.as_ref(),
             &options.run_dir,
             client,
             options.provider,
@@ -213,15 +218,30 @@ mod tests {
         run_dir: &std::path::Path,
         checkpoint: &Checkpoint,
     ) -> Arc<dyn fabro_store::RunStore> {
+        let created_at = Utc::now();
         let inner = InMemoryStore::default()
             .create_run(
                 &test_run_id(),
-                Utc::now(),
+                created_at,
                 Some(run_dir.to_string_lossy().as_ref()),
             )
             .await
             .unwrap();
         let run_store: Arc<dyn fabro_store::RunStore> = inner;
+        run_store
+            .put_run(&RunRecord {
+                run_id: test_run_id(),
+                created_at,
+                settings: Settings::default(),
+                graph: Graph::new("test"),
+                workflow_slug: None,
+                working_directory: run_dir.to_path_buf(),
+                host_repo_path: None,
+                base_branch: None,
+                labels: std::collections::HashMap::new(),
+            })
+            .await
+            .unwrap();
         run_store.put_checkpoint(checkpoint).await.unwrap();
         run_store
     }

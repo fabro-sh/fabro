@@ -69,7 +69,11 @@ pub(crate) async fn build_conclusion_from_store(
     run_duration_ms: u64,
     final_git_commit_sha: Option<String>,
 ) -> Conclusion {
-    let checkpoint = run_store.get_checkpoint().await.ok().flatten();
+    let checkpoint = run_store
+        .state()
+        .await
+        .ok()
+        .and_then(|state| state.checkpoint);
     let stage_durations = run_store
         .list_events()
         .await
@@ -192,10 +196,12 @@ pub async fn write_finalize_commit(
     let git_author = run_options.git_author();
     let store = MetadataStore::new(repo_path, &git_author);
     let mut entries = scan_node_files_from_store(run_store).await;
-    let retro_bytes = match run_store.get_retro().await {
-        Ok(Some(retro)) => serde_json::to_vec_pretty(&retro).ok(),
-        _ => None,
-    };
+    let retro_bytes = run_store
+        .state()
+        .await
+        .ok()
+        .and_then(|state| state.retro)
+        .and_then(|retro| serde_json::to_vec_pretty(&retro).ok());
     if let Some(bytes) = retro_bytes {
         entries.push(("retro.json".to_string(), bytes));
     }

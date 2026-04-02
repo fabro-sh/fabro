@@ -3,8 +3,6 @@ use std::path::Path;
 use async_trait::async_trait;
 
 use fabro_model::Provider;
-use fabro_store::NodeVisitRef;
-
 use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
@@ -93,18 +91,7 @@ impl Handler for PromptHandler {
         let visit = visit_from_context(context);
         let stage_dir = node_dir(run_dir, &node.id, visit);
         fs::create_dir_all(&stage_dir).await?;
-        let node_ref = NodeVisitRef {
-            node_id: &node.id,
-            visit: u32::try_from(visit).unwrap_or(u32::MAX),
-        };
-        if let Some(ref store) = services.run_store {
-            store
-                .put_node_prompt(&node_ref, &prompt)
-                .await
-                .map_err(|err| FabroError::handler(err.to_string()))?;
-        } else {
-            fs::write(stage_dir.join("prompt.md"), &prompt).await?;
-        }
+        fs::write(stage_dir.join("prompt.md"), &prompt).await?;
 
         let prompt_provider = node
             .provider()
@@ -169,14 +156,7 @@ impl Handler for PromptHandler {
         });
 
         // 4. Write response to logs
-        if let Some(ref store) = services.run_store {
-            store
-                .put_node_response(&node_ref, &response_text)
-                .await
-                .map_err(|err| FabroError::handler(err.to_string()))?;
-        } else {
-            fs::write(stage_dir.join("response.md"), &response_text).await?;
-        }
+        fs::write(stage_dir.join("response.md"), &response_text).await?;
 
         // 5. Build and write status
         let mut outcome = Outcome::success();
@@ -225,7 +205,7 @@ mod tests {
             .await
             .unwrap();
         let services = EngineServices {
-            run_store: Some(Arc::clone(&run_store)),
+            run_store: Arc::clone(&run_store),
             ..EngineServices::test_default()
         };
         let logger = crate::event::StoreProgressLogger::new(Arc::clone(&run_store));

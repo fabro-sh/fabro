@@ -29,10 +29,7 @@ pub(crate) async fn execute(
         None => load_user_settings()?.storage_dir(),
     };
     let store = store::build_store(&storage_dir)?;
-    let run_store = store
-        .open_run(&run_id)
-        .await?
-        .ok_or_else(|| anyhow!("Run {run_id} not found in store"))?;
+    let run_store = store.open_run(&run_id).await?;
     let run_record = run_store
         .get_run()
         .await?

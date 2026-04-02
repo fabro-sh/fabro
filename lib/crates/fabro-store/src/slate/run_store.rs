@@ -15,9 +15,10 @@ use tokio::time;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::keys;
+use crate::run_state::EventProjectionCache;
 use crate::{
     CatalogRecord, EventEnvelope, EventPayload, NodeOutcomeRecord, NodeSnapshot, NodeVisitRef,
-    Result, RunSnapshot, RunStore, RunSummary, StoreError,
+    Result, RunSnapshot, RunState, RunStore, RunSummary, StoreError,
 };
 use fabro_types::{
     Checkpoint, Conclusion, NodeStatusRecord, PullRequestRecord, Retro, RunId, RunRecord,
@@ -38,6 +39,7 @@ pub(crate) struct SlateRunStoreInner {
     event_seq: AtomicU32,
     checkpoint_seq: AtomicU32,
     close_lock: Mutex<()>,
+    projection_cache: Mutex<EventProjectionCache>,
 }
 
 enum SlateRunDb {
@@ -60,6 +62,7 @@ impl SlateRunStore {
                 event_seq: AtomicU32::new(event_seq),
                 checkpoint_seq: AtomicU32::new(checkpoint_seq),
                 close_lock: Mutex::new(()),
+                projection_cache: Mutex::new(EventProjectionCache::default()),
             }),
         })
     }
@@ -78,6 +81,7 @@ impl SlateRunStore {
                 event_seq: AtomicU32::new(event_seq),
                 checkpoint_seq: AtomicU32::new(checkpoint_seq),
                 close_lock: Mutex::new(()),
+                projection_cache: Mutex::new(EventProjectionCache::default()),
             }),
         })
     }
@@ -143,42 +147,74 @@ impl SlateRunStore {
     where
         R: DbRead + Sync,
     {
-        let run = get_json::<_, RunRecord>(db, keys::run()).await?;
-        let start = get_json::<_, StartRecord>(db, keys::start()).await?;
-        let status = get_json::<_, RunStatusRecord>(db, keys::status()).await?;
-        let conclusion = get_json::<_, Conclusion>(db, keys::conclusion()).await?;
-
-        let workflow_name = run.as_ref().map(|run| {
-            if run.graph.name.is_empty() {
-                "unnamed".to_string()
-            } else {
-                run.graph.name.clone()
+        let events = list_events_from(db, 1).await?;
+        let mut state = RunState::apply_events(&events)?;
+        let mut nodes = BTreeSet::new();
+        let mut iter = db.scan_prefix(b"nodes/").await?;
+        while let Some(entry) = iter.next().await? {
+            let key = key_to_string(&entry.key)?;
+            if let Some((node_id, visit, _)) = keys::parse_node_key(&key) {
+                nodes.insert((node_id, visit));
             }
-        });
-        let goal = run.as_ref().and_then(|run| {
-            let goal = run.graph.goal();
-            (!goal.is_empty()).then(|| goal.to_string())
-        });
-
-        Ok(RunSummary {
-            run_id: catalog.run_id,
-            created_at: catalog.created_at,
-            db_prefix: catalog.db_prefix.clone(),
-            run_dir: catalog.run_dir.clone(),
-            workflow_name,
-            workflow_slug: run.as_ref().and_then(|run| run.workflow_slug.clone()),
-            goal,
-            labels: run
-                .as_ref()
-                .map(|run| run.labels.clone())
-                .unwrap_or_default(),
-            host_repo_path: run.as_ref().and_then(|run| run.host_repo_path.clone()),
-            start_time: start.map(|start| start.start_time),
-            status: status.as_ref().map(|status| status.status),
-            status_reason: status.and_then(|status| status.reason),
-            duration_ms: conclusion.as_ref().map(|conclusion| conclusion.duration_ms),
-            total_cost: conclusion.and_then(|conclusion| conclusion.total_cost),
-        })
+        }
+        let snapshot = if let Some(run) = get_json::<_, RunRecord>(db, keys::run()).await? {
+            let mut snapshot_nodes = Vec::new();
+            for (node_id, visit) in nodes {
+                let node = NodeVisitRef {
+                    node_id: &node_id,
+                    visit,
+                };
+                let prompt_key = keys::node_prompt(&node);
+                let response_key = keys::node_response(&node);
+                let status_key = keys::node_status(&node);
+                let outcome_key = keys::node_outcome(&node);
+                let provider_key = keys::node_provider_used(&node);
+                let diff_key = keys::node_diff(&node);
+                let invocation_key = keys::node_script_invocation(&node);
+                let timing_key = keys::node_script_timing(&node);
+                let results_key = keys::node_parallel_results(&node);
+                let stdout_key = keys::node_stdout(&node);
+                let stderr_key = keys::node_stderr(&node);
+                snapshot_nodes.push(NodeSnapshot {
+                    node_id: node_id.clone(),
+                    visit,
+                    prompt: get_text(db, &prompt_key).await?,
+                    response: get_text(db, &response_key).await?,
+                    status: get_json(db, &status_key).await?,
+                    outcome: get_json(db, &outcome_key).await?,
+                    provider_used: get_json(db, &provider_key).await?,
+                    diff: get_text(db, &diff_key).await?,
+                    script_invocation: get_json(db, &invocation_key).await?,
+                    script_timing: get_json(db, &timing_key).await?,
+                    parallel_results: get_json(db, &results_key).await?,
+                    stdout: get_text(db, &stdout_key).await?,
+                    stderr: get_text(db, &stderr_key).await?,
+                });
+            }
+            Some(RunSnapshot {
+                run,
+                start: get_json::<_, StartRecord>(db, keys::start()).await?,
+                status: get_json::<_, RunStatusRecord>(db, keys::status()).await?,
+                checkpoint: get_json::<_, Checkpoint>(db, keys::checkpoint()).await?,
+                conclusion: get_json::<_, Conclusion>(db, keys::conclusion()).await?,
+                retro: get_json::<_, Retro>(db, keys::retro()).await?,
+                graph: get_text(db, keys::graph()).await?,
+                sandbox: get_json::<_, SandboxRecord>(db, keys::sandbox()).await?,
+                final_patch: get_text(db, keys::final_patch()).await?,
+                pull_request: get_json::<_, PullRequestRecord>(db, keys::pull_request()).await?,
+                nodes: snapshot_nodes,
+            })
+        } else {
+            None
+        };
+        state.merge_legacy(
+            snapshot,
+            get_text(db, keys::graph()).await?,
+            get_text(db, keys::retro_prompt()).await?,
+            get_text(db, keys::retro_response()).await?,
+            list_checkpoints(db).await?,
+        );
+        Ok(state.build_summary(catalog))
     }
 
     fn validate_run_record(&self, record: &RunRecord) -> Result<()> {
@@ -229,6 +265,20 @@ impl SlateRunStore {
             stdout: self.inner.db.get_text(&keys::node_stdout(node)).await?,
             stderr: self.inner.db.get_text(&keys::node_stderr(node)).await?,
         })
+    }
+
+    async fn projected_state(&self) -> Result<RunState> {
+        let next_seq = {
+            let cache = self.inner.projection_cache.lock().await;
+            cache.last_seq.saturating_add(1)
+        };
+        let events = self.inner.db.list_events_from(next_seq).await?;
+        let mut cache = self.inner.projection_cache.lock().await;
+        for event in &events {
+            cache.state.apply_event(event)?;
+            cache.last_seq = event.seq;
+        }
+        Ok(cache.state.clone())
     }
 }
 
@@ -619,7 +669,25 @@ impl RunStore for SlateRunStore {
         self.inner.db.list_all_assets().await
     }
 
+    async fn state(&self) -> Result<RunState> {
+        let mut state = self.projected_state().await?;
+        state.merge_legacy(
+            self.get_snapshot_legacy().await?,
+            self.get_graph().await?,
+            self.get_retro_prompt().await?,
+            self.get_retro_response().await?,
+            self.list_checkpoints().await?,
+        );
+        Ok(state)
+    }
+
     async fn get_snapshot(&self) -> Result<Option<RunSnapshot>> {
+        self.state().await.map(|state| state.to_snapshot())
+    }
+}
+
+impl SlateRunStore {
+    async fn get_snapshot_legacy(&self) -> Result<Option<RunSnapshot>> {
         let Some(run) = self.get_run().await? else {
             return Ok(None);
         };

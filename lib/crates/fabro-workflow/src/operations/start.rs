@@ -82,24 +82,18 @@ pub struct Started {
 
 /// Start a fresh workflow run. Errors if a checkpoint already exists (use `resume()` instead).
 pub async fn start(run_dir: &Path, services: StartServices) -> Result<Started, FabroError> {
-    if services
+    let state = services
         .run_store
-        .get_checkpoint()
+        .state()
         .await
-        .map_err(|err| FabroError::engine(err.to_string()))?
-        .is_some()
-    {
+        .map_err(|err| FabroError::engine(err.to_string()))?;
+    if state.checkpoint.is_some() {
         return Err(FabroError::Precondition(
             "checkpoint.json exists in run directory — did you mean to resume?".to_string(),
         ));
     }
 
-    if let Some(record) = services
-        .run_store
-        .get_status()
-        .await
-        .map_err(|err| FabroError::engine(err.to_string()))?
-    {
+    if let Some(record) = state.status {
         if !matches!(record.status, RunStatus::Submitted | RunStatus::Starting) {
             return Err(FabroError::Precondition(format!(
                 "cannot start run: status is {:?}, expected submitted",
@@ -580,7 +574,7 @@ impl RunSession {
         };
         let pr_opts = PullRequestOptions {
             run_dir: retroed.run_options.run_dir.clone(),
-            run_store: Some(Arc::clone(&retroed.run_store)),
+            run_store: Arc::clone(&retroed.run_store),
             pr_config: self.pr_config,
             github_app: self.pr_github_app,
             origin_url: self.pr_origin_url,
@@ -976,7 +970,7 @@ mod tests {
             cancel_token: None,
             emitter,
             interviewer: Arc::new(fabro_interview::AutoApproveInterviewer),
-            run_store: store.open_run(&fixtures::RUN_1).await.unwrap().unwrap(),
+            run_store: store.open_run(&fixtures::RUN_1).await.unwrap(),
             github_app: None,
             on_node: None,
             registry_override: Some(registry),
@@ -1052,7 +1046,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(started.finalized.conclusion.status, StageStatus::Success);
-        let run_store = store.open_run(&fixtures::RUN_1).await.unwrap().unwrap();
+        let run_store = store.open_run(&fixtures::RUN_1).await.unwrap();
         assert!(run_store.get_conclusion().await.unwrap().is_some());
     }
 

@@ -21,7 +21,7 @@ pub(crate) fn build_store(storage_dir: &Path) -> Result<Arc<SlateStore>> {
 pub(crate) async fn open_run_reader(
     storage_dir: &Path,
     run_id: &RunId,
-) -> Result<Option<Arc<dyn RunStore>>> {
+) -> Result<Arc<dyn RunStore>> {
     build_store(storage_dir)?
         .open_run_reader(run_id)
         .await

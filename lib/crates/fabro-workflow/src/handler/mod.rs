@@ -19,6 +19,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
 use fabro_store::RunStore;
+#[cfg(test)]
+use fabro_store::Store;
 
 use crate::context::Context;
 use crate::error::FabroError;
@@ -34,7 +36,7 @@ pub struct EngineServices {
     pub registry: Arc<HandlerRegistry>,
     pub emitter: Arc<EventEmitter>,
     pub sandbox: Arc<dyn Sandbox>,
-    pub run_store: Option<Arc<dyn RunStore>>,
+    pub run_store: Arc<dyn RunStore>,
     /// Git state for the current run. Set via `set_git_state` at the start of
     /// `run_via_core` and read by parallel/fan-in handlers.
     pub(crate) git_state: std::sync::RwLock<Option<Arc<GitState>>>,
@@ -75,7 +77,12 @@ impl EngineServices {
             sandbox: Arc::new(fabro_agent::LocalSandbox::new(
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             )),
-            run_store: None,
+            run_store: futures::executor::block_on(async {
+                fabro_store::InMemoryStore::default()
+                    .create_run(&fabro_types::RunId::new(), chrono::Utc::now(), None)
+                    .await
+                    .expect("in-memory test run store should initialize")
+            }),
             git_state: std::sync::RwLock::new(None),
             hook_runner: None,
             env: HashMap::new(),

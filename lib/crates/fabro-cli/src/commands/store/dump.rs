@@ -2,7 +2,7 @@ use std::io::{ErrorKind, Write};
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use fabro_store::{NodeVisitRef, RunSnapshot, RunStore};
+use fabro_store::{NodeVisitRef, RunSnapshot, RunState, RunStore};
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use serde::Serialize;
 #[cfg(test)]
@@ -18,14 +18,7 @@ pub(crate) async fn dump_command(args: &StoreDumpArgs, globals: &GlobalArgs) -> 
     let base = runs_base(&cli_settings.storage_dir());
     let store = store::build_store(&cli_settings.storage_dir())?;
     let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
-    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id)
-        .await?
-        .with_context(|| {
-            format!(
-                "run {} is not in the store (it may be a legacy filesystem-only run)",
-                run.run_id
-            )
-        })?;
+    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await?;
 
     let file_count = export_run(run_store.as_ref(), &args.output).await?;
     if globals.json {
@@ -45,9 +38,9 @@ pub(crate) async fn dump_command(args: &StoreDumpArgs, globals: &GlobalArgs) -> 
 }
 
 pub(crate) async fn export_run(run_store: &dyn RunStore, output_dir: &Path) -> Result<usize> {
-    let snapshot = run_store
-        .get_snapshot()
-        .await?
+    let state = run_store.state().await?;
+    let snapshot = state
+        .to_snapshot()
         .context("run has no data in the store")?;
 
     let output_state = inspect_output_dir(output_dir)?;
@@ -66,7 +59,7 @@ pub(crate) async fn export_run(run_store: &dyn RunStore, output_dir: &Path) -> R
         })?;
     let staging_path = staging_dir.path().to_path_buf();
 
-    let file_count = export_run_to_dir(run_store, &snapshot, &staging_path).await?;
+    let file_count = export_run_to_dir(run_store, &state, &snapshot, &staging_path).await?;
 
     if matches!(output_state, OutputDirState::ExistingEmpty) {
         std::fs::remove_dir(output_dir)
@@ -86,6 +79,7 @@ pub(crate) async fn export_run(run_store: &dyn RunStore, output_dir: &Path) -> R
 
 async fn export_run_to_dir(
     run_store: &dyn RunStore,
+    state: &RunState,
     snapshot: &RunSnapshot,
     output_dir: &Path,
 ) -> Result<usize> {
@@ -152,11 +146,11 @@ async fn export_run_to_dir(
 
     file_count += usize::from(write_optional_text_file(
         &output_dir.join("retro").join("prompt.md"),
-        run_store.get_retro_prompt().await?.as_deref(),
+        state.retro_prompt.as_deref(),
     )?);
     file_count += usize::from(write_optional_text_file(
         &output_dir.join("retro").join("response.md"),
-        run_store.get_retro_response().await?.as_deref(),
+        state.retro_response.as_deref(),
     )?);
 
     write_events_jsonl(
@@ -165,12 +159,12 @@ async fn export_run_to_dir(
     )?;
     file_count += 1;
 
-    for (seq, checkpoint) in run_store.list_checkpoints().await? {
+    for (seq, checkpoint) in &state.checkpoints {
         write_json_file(
             &output_dir
                 .join("checkpoints")
                 .join(format!("{seq:04}.json")),
-            &checkpoint,
+            checkpoint,
         )?;
         file_count += 1;
     }

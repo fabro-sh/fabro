@@ -159,10 +159,12 @@ pub(crate) fn setup_detached_dry_run(context: &TestContext) -> RunSetup {
         .to_string();
     let run = resolve_run(context, &run_id);
     let deadline = Instant::now() + COMMAND_TIMEOUT;
-    while run_store(&run.run_dir)
-        .and_then(|store| block_on(store.list_events()).ok())
-        .is_none_or(|events| events.is_empty())
-    {
+    while {
+        let store = run_store(&run.run_dir);
+        block_on(store.list_events())
+            .ok()
+            .is_none_or(|events| events.is_empty())
+    } {
         assert!(
             Instant::now() < deadline,
             "timed out waiting for store events for {run_id}"
@@ -280,9 +282,10 @@ worktree_mode = "never"
     );
 
     let run = run_local_workflow(context, &workspace_dir, "run.toml");
+    let store = run_store(&run.run_dir);
     assert!(
-        run_store(&run.run_dir)
-            .and_then(|store| block_on(store.get_sandbox()).ok())
+        block_on(store.get_sandbox())
+            .ok()
             .flatten()
             .is_some()
     );
@@ -371,8 +374,8 @@ pub(crate) fn write_gated_workflow(path: &Path, name: &str, goal: &str) -> Workf
 pub(crate) fn wait_for_status(run_dir: &Path, expected: &[&str]) -> String {
     let deadline = Instant::now() + COMMAND_TIMEOUT;
     loop {
-        if let Some(status) = run_store(run_dir)
-            .and_then(|store| block_on(store.get_status()).ok())
+        if let Some(status) = block_on(run_store(run_dir).get_status())
+            .ok()
             .flatten()
             .map(|record| record.status.to_string())
         {
@@ -478,25 +481,30 @@ fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
         .block_on(future)
 }
 
-fn run_store(run_dir: &Path) -> Option<Arc<dyn RunStore>> {
-    let runs_dir = run_dir.parent()?;
-    let storage_dir = runs_dir.parent()?;
-    let run_id: RunId = infer_run_id(run_dir).parse().ok()?;
-    let object_store = Arc::new(LocalFileSystem::new_with_prefix(storage_dir.join("store")).ok()?);
+fn run_store(run_dir: &Path) -> Arc<dyn RunStore> {
+    let runs_dir = run_dir.parent().expect("run dir should have parent");
+    let storage_dir = runs_dir.parent().expect("runs dir should have parent");
+    let run_id: RunId = infer_run_id(run_dir).parse().expect("run id should parse");
+    let object_store = Arc::new(
+        LocalFileSystem::new_with_prefix(storage_dir.join("store"))
+            .expect("test store path should be accessible"),
+    );
     let store = Arc::new(SlateStore::new(object_store, "", Duration::from_millis(1)));
-    block_on(store.open_run_reader(&run_id)).ok().flatten()
+    block_on(store.open_run_reader(&run_id)).expect("run store should exist")
 }
 
 pub(crate) fn run_snapshot(run_dir: &Path) -> RunSnapshot {
-    run_store(run_dir)
-        .and_then(|store| block_on(store.get_snapshot()).ok())
+    let store = run_store(run_dir);
+    block_on(store.get_snapshot())
+        .ok()
         .flatten()
         .expect("run store snapshot should exist")
 }
 
 pub(crate) fn run_events(run_dir: &Path) -> Vec<EventEnvelope> {
-    run_store(run_dir)
-        .and_then(|store| block_on(store.list_events()).ok())
+    let store = run_store(run_dir);
+    block_on(store.list_events())
+        .ok()
         .expect("run store events should exist")
 }
 

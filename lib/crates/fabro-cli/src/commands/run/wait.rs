@@ -34,9 +34,8 @@ pub(crate) async fn run(args: &WaitArgs, styles: &Styles, globals: &GlobalArgs) 
 
     let final_status = loop {
         let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run_info.run_id)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Run {} not found in store", run_info.run_id))?;
-        let status = run_store.get_status().await?.map(|record| record.status);
+            .await?;
+        let status = run_store.state().await?.status.map(|record| record.status);
         let status = status.unwrap_or_else(|| {
             if started_waiting_at.elapsed() < WAIT_STARTUP_GRACE {
                 RunStatus::Submitted
@@ -65,9 +64,8 @@ pub(crate) async fn run(args: &WaitArgs, styles: &Styles, globals: &GlobalArgs) 
     };
 
     let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run_info.run_id)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("Run {} not found in store", run_info.run_id))?;
-    let conclusion = run_store.get_conclusion().await?;
+        .await?;
+    let conclusion = run_store.state().await?.conclusion;
 
     if globals.json {
         let json_value = build_json_output(final_status, &run_info.run_id, conclusion.as_ref());

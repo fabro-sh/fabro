@@ -49,9 +49,11 @@ async fn list_from(
 
     let mut entries: Vec<(String, PullRequestRecord)> = Vec::new();
     for run in &runs {
-        if let Ok(Some(run_store)) = store.open_run_reader(&run.run_id).await {
-            if let Ok(Some(record)) = run_store.get_pull_request().await {
-                entries.push((run.run_id.to_string(), record));
+        if let Ok(run_store) = store.open_run_reader(&run.run_id).await {
+            if let Ok(state) = run_store.state().await {
+                if let Some(record) = state.pull_request {
+                    entries.push((run.run_id.to_string(), record));
+                }
             }
         }
     }

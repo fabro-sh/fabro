@@ -137,7 +137,7 @@ pub fn build_retro_prompt(retro_data_dir: &str) -> String {
 /// files via tool access, then calls `submit_retro` with its analysis.
 pub async fn run_retro_agent(
     sandbox: &Arc<dyn Sandbox>,
-    run_store: Option<&dyn RunStore>,
+    run_store: &dyn RunStore,
     run_dir: &Path,
     llm_client: &Client,
     provider: Provider,
@@ -286,32 +286,24 @@ pub fn dry_run_narrative() -> RetroNarrative {
 }
 
 async fn write_retro_prompt(
-    run_store: Option<&dyn RunStore>,
+    run_store: &dyn RunStore,
     retro_dir: &Path,
     prompt: &str,
 ) -> anyhow::Result<()> {
-    if let Some(store) = run_store {
-        if let Err(err) = store.put_retro_prompt(prompt).await {
-            tracing::warn!(error = %err, "Failed to save retro prompt to store");
-            std::fs::write(retro_dir.join("prompt.md"), prompt)?;
-        }
-    } else {
+    if let Err(err) = run_store.put_retro_prompt(prompt).await {
+        tracing::warn!(error = %err, "Failed to save retro prompt to store");
         std::fs::write(retro_dir.join("prompt.md"), prompt)?;
     }
     Ok(())
 }
 
 async fn write_retro_response(
-    run_store: Option<&dyn RunStore>,
+    run_store: &dyn RunStore,
     retro_dir: &Path,
     response: &str,
 ) -> anyhow::Result<()> {
-    if let Some(store) = run_store {
-        if let Err(err) = store.put_retro_response(response).await {
-            tracing::warn!(error = %err, "Failed to save retro response to store");
-            std::fs::write(retro_dir.join("response.md"), response)?;
-        }
-    } else {
+    if let Err(err) = run_store.put_retro_response(response).await {
+        tracing::warn!(error = %err, "Failed to save retro response to store");
         std::fs::write(retro_dir.join("response.md"), response)?;
     }
     Ok(())
@@ -393,7 +385,7 @@ fn build_profile(provider: Provider, model: &str) -> Box<dyn AgentProfile> {
 
 async fn upload_data_files(
     sandbox: &Arc<dyn Sandbox>,
-    run_store: Option<&dyn RunStore>,
+    run_store: &dyn RunStore,
     _run_dir: &Path,
     target_dir: &str,
 ) -> anyhow::Result<()> {
@@ -403,11 +395,7 @@ async fn upload_data_files(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to create retro data dir: {e}"))?;
 
-    let Some(store) = run_store else {
-        anyhow::bail!("retro analysis now requires a run store");
-    };
-
-    let progress_content = match store.list_events().await {
+    let progress_content = match run_store.list_events().await {
         Ok(envelopes) => {
             let lines: Vec<String> = envelopes
                 .into_iter()
@@ -428,7 +416,7 @@ async fn upload_data_files(
             .map_err(|e| anyhow::anyhow!("Failed to upload progress.jsonl: {e}"))?;
     }
 
-    let checkpoint_content = store
+    let checkpoint_content = run_store
         .get_checkpoint()
         .await
         .map_err(|e| anyhow::anyhow!("Failed to load checkpoint from store: {e}"))?
@@ -436,7 +424,7 @@ async fn upload_data_files(
         .transpose()?;
     upload_file(sandbox, target_dir, "checkpoint.json", checkpoint_content).await?;
 
-    let run_content = store
+    let run_content = run_store
         .get_run()
         .await
         .map_err(|e| anyhow::anyhow!("Failed to load run metadata from store: {e}"))?
@@ -444,7 +432,7 @@ async fn upload_data_files(
         .transpose()?;
     upload_file(sandbox, target_dir, "run.json", run_content).await?;
 
-    let start_content = store
+    let start_content = run_store
         .get_start()
         .await
         .map_err(|e| anyhow::anyhow!("Failed to load start metadata from store: {e}"))?

@@ -45,7 +45,7 @@ pub(crate) async fn run(args: &RewindArgs, styles: &Styles, globals: &GlobalArgs
     .await
     .ok();
 
-    let timeline = build_timeline_or_rebuild(&store, run_store.as_deref(), &run_id).await?;
+    let timeline = build_timeline_or_rebuild(&store, Some(run_store.as_ref()), &run_id).await?;
 
     if args.list || args.target.is_none() {
         if globals.json {
@@ -113,45 +113,28 @@ async fn reset_rewound_run_state(
         .open_run_reader(run_id)
         .await
         .map_err(|err| anyhow::anyhow!("failed to open durable store run before rewind: {err}"))?;
-    let store_run_record = if let Some(run_store) = existing_run_store.as_ref() {
-        run_store.get_run().await.ok().flatten()
-    } else {
-        None
-    };
-    let store_start_record = if let Some(run_store) = existing_run_store.as_ref() {
-        run_store.get_start().await.ok().flatten()
-    } else {
-        None
-    };
-    let store_graph = if let Some(run_store) = existing_run_store.as_ref() {
-        run_store.get_graph().await.ok().flatten()
-    } else {
-        None
-    };
+    let store_run_record = existing_run_store.get_run().await.ok().flatten();
+    let store_start_record = existing_run_store.get_start().await.ok().flatten();
+    let store_graph = existing_run_store.get_graph().await.ok().flatten();
 
     let run_record = store_run_record
         .or_else(|| RunRecord::load(run_dir).ok())
         .context("failed to restore run record after rewind: missing run metadata")?;
     let checkpoint = MetadataStore::read_checkpoint(git_store.repo_dir(), &run_id.to_string())?
         .context("rewound metadata branch is missing checkpoint.json")?;
-    let previous_status = if let Some(run_store) = existing_run_store.as_ref() {
-        run_store
-            .get_status()
-            .await
-            .ok()
-            .flatten()
-            .map(|status| status.status.to_string())
-    } else {
-        None
-    };
+    let previous_status = existing_run_store
+        .get_status()
+        .await
+        .ok()
+        .flatten()
+        .map(|status| status.status.to_string());
 
     let _ = std::fs::remove_file(run_dir.join("detached_failure.json"));
 
     let run_store = durable_store
         .open_run(run_id)
         .await
-        .map_err(|err| anyhow::anyhow!("failed to open durable store run for rewind reset: {err}"))?
-        .context("failed to reset durable store run after rewind: missing run store")?;
+        .map_err(|err| anyhow::anyhow!("failed to open durable store run for rewind reset: {err}"))?;
     run_store
         .reset_for_rewind()
         .await

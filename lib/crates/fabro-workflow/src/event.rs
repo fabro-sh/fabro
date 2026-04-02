@@ -1510,7 +1510,9 @@ pub(crate) fn normalize_json_value(value: Value) -> Value {
 }
 
 pub fn event_payload_from_redacted_json(line: &str, run_id: &RunId) -> Result<EventPayload> {
-    let value = serde_json::from_str(line).context("Failed to parse redacted event payload")?;
+    let value = normalize_json_value(
+        serde_json::from_str(line).context("Failed to parse redacted event payload")?,
+    );
     EventPayload::new(value, run_id).map_err(anyhow::Error::from)
 }
 

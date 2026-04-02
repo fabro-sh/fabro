@@ -81,18 +81,13 @@ pub(crate) async fn print_run_summary(
     let (run_store, conclusion, pr_url) = match run_id.parse() {
         Ok(parsed_run_id) => {
             let run_store = store::open_run_reader(storage_dir, &parsed_run_id).await?;
-            let conclusion = match run_store.as_deref() {
-                Some(run_store) => run_store.get_conclusion().await?,
-                None => None,
-            };
-            let pr_url = match run_store.as_deref() {
-                Some(run_store) => run_store
-                    .get_pull_request()
-                    .await?
-                    .map(|record: PullRequestRecord| record.html_url),
-                None => None,
-            };
-            (run_store, conclusion, pr_url)
+            let run_state = run_store.state().await?;
+            let conclusion = run_state.conclusion.clone();
+            let pr_url = run_state
+                .pull_request
+                .as_ref()
+                .map(|record: &PullRequestRecord| record.html_url.clone());
+            (Some(run_store), conclusion, pr_url)
         }
         Err(_) => (None, None, None),
     };
@@ -208,7 +203,7 @@ pub(crate) async fn print_final_output(
     styles: &Styles,
 ) {
     let checkpoint = match run_store {
-        Some(run_store) => run_store.get_checkpoint().await.ok().flatten(),
+        Some(run_store) => run_store.state().await.ok().and_then(|state| state.checkpoint),
         None => None,
     };
     let Some(checkpoint) = checkpoint else {

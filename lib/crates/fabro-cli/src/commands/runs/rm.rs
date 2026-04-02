@@ -116,7 +116,7 @@ pub(crate) async fn remove_run_with_cleanup(store: &dyn Store, run: &RunInfo) ->
 
 async fn remove_run_dir_with_cleanup(store: &dyn Store, run: &RunInfo) -> Result<()> {
     let run_store = match store.open_run_reader(&run.run_id).await {
-        Ok(run_store) => run_store,
+        Ok(run_store) => Some(run_store),
         Err(err) => {
             warn!(
                 run_id = %run.run_id,
@@ -183,9 +183,8 @@ async fn load_sandbox_record(
     run_store: Option<&dyn fabro_store::RunStore>,
 ) -> Option<fabro_sandbox::SandboxRecord> {
     if let Some(run_store) = run_store {
-        match run_store.get_sandbox().await {
-            Ok(Some(record)) => return Some(record),
-            Ok(None) => {}
+        match run_store.state().await {
+            Ok(state) => return state.sandbox,
             Err(err) => {
                 warn!(error = %err, "failed to load sandbox record from store");
             }

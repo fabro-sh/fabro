@@ -34,23 +34,19 @@ async fn create_from(
     let store = store::build_store(storage_dir)?;
     let run = resolve_run_combined(store.as_ref(), base, &args.run_id).await?;
     let run_dir = run.path.clone();
-    let run_store = store::open_run_reader(storage_dir, &run.run_id)
-        .await?
-        .context("Failed to open run store")?;
+    let run_store = store::open_run_reader(storage_dir, &run.run_id).await?;
+    let state = run_store.state().await?;
 
-    let record = run_store
-        .get_run()
-        .await?
+    let record = state
+        .run
         .context("Failed to load run record from store")?;
 
-    let start = run_store
-        .get_start()
-        .await?
+    let start = state
+        .start
         .context("Failed to load start record from store")?;
 
-    let conclusion = run_store
-        .get_conclusion()
-        .await?
+    let conclusion = state
+        .conclusion
         .context("Failed to load conclusion from store — is the run finished?")?;
 
     match conclusion.status {
@@ -63,9 +59,8 @@ async fn create_from(
         .as_deref()
         .context("Run has no run_branch — was it run with git push enabled?")?;
 
-    let diff = run_store
-        .get_final_patch()
-        .await?
+    let diff = state
+        .final_patch
         .context("Failed to load final patch from store — no diff available")?;
     if diff.trim().is_empty() {
         bail!("final.patch is empty — nothing to create a PR for");
@@ -120,7 +115,7 @@ async fn create_from(
         &model,
         true,
         None,
-        Some(run_store.as_ref()),
+        run_store.as_ref(),
         &run_dir,
         None,
     )

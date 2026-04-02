@@ -9,12 +9,14 @@ use futures::Stream;
 mod error;
 mod keys;
 mod memory;
+mod run_state;
 mod runtime;
 mod slate;
 mod types;
 
 pub use error::{Result, StoreError};
 pub use memory::InMemoryStore;
+pub use run_state::{NodeState, RunState};
 pub use runtime::RuntimeState;
 pub use slate::SlateStore;
 pub use types::{
@@ -42,8 +44,8 @@ pub trait Store: Send + Sync {
         created_at: DateTime<Utc>,
         run_dir: Option<&str>,
     ) -> Result<Arc<dyn RunStore>>;
-    async fn open_run(&self, run_id: &RunId) -> Result<Option<Arc<dyn RunStore>>>;
-    async fn open_run_reader(&self, run_id: &RunId) -> Result<Option<Arc<dyn RunStore>>>;
+    async fn open_run(&self, run_id: &RunId) -> Result<Arc<dyn RunStore>>;
+    async fn open_run_reader(&self, run_id: &RunId) -> Result<Arc<dyn RunStore>>;
     async fn list_runs(&self, query: &ListRunsQuery) -> Result<Vec<RunSummary>>;
     async fn delete_run(&self, run_id: &RunId) -> Result<()>;
 }
@@ -146,5 +148,6 @@ pub trait RunStore: Send + Sync {
     async fn list_assets(&self, node: &NodeVisitRef<'_>) -> Result<Vec<String>>;
     async fn list_all_assets(&self) -> Result<Vec<(String, u32, String)>>;
 
+    async fn state(&self) -> Result<RunState>;
     async fn get_snapshot(&self) -> Result<Option<RunSnapshot>>;
 }

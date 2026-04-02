@@ -11,24 +11,20 @@ use super::start::{StartServices, Started, execute_persisted_run};
 
 /// Resume a workflow run from its checkpoint. Errors if no checkpoint is found.
 pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, FabroError> {
-    if let Some(record) = services
+    let state = services
         .run_store
-        .get_status()
+        .state()
         .await
-        .map_err(|err| FabroError::engine(err.to_string()))?
-    {
+        .map_err(|err| FabroError::engine(err.to_string()))?;
+
+    if let Some(record) = state.status {
         if record.status == RunStatus::Succeeded {
             return Err(FabroError::Precondition(
                 "run already finished successfully — nothing to resume".to_string(),
             ));
         }
     }
-    if let Some(conclusion) = services
-        .run_store
-        .get_conclusion()
-        .await
-        .map_err(|err| FabroError::engine(err.to_string()))?
-    {
+    if let Some(conclusion) = state.conclusion {
         if matches!(
             conclusion.status,
             StageStatus::Success | StageStatus::PartialSuccess | StageStatus::Skipped
@@ -39,11 +35,8 @@ pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, 
         }
     }
 
-    let checkpoint = services
-        .run_store
-        .get_checkpoint()
-        .await
-        .map_err(|err| FabroError::engine(err.to_string()))?
+    let checkpoint = state
+        .checkpoint
         .ok_or_else(|| FabroError::Precondition("no checkpoint to resume from".to_string()))?;
 
     cleanup_resume_artifacts(run_dir);

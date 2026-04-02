@@ -680,18 +680,7 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
     }
 
     let run_store = match state.store.open_run(&run_id).await {
-        Ok(Some(run_store)) => run_store,
-        Ok(None) => {
-            tracing::error!(run_id = %run_id, "Run store missing");
-            let mut runs = state.runs.lock().expect("runs lock poisoned");
-            if let Some(managed_run) = runs.get_mut(&run_id) {
-                managed_run.status = RunStatus::Failed;
-                managed_run.error = Some("Run store missing".to_string());
-                clear_live_run_state(managed_run);
-            }
-            state.scheduler_notify.notify_one();
-            return;
-        }
+        Ok(run_store) => run_store,
         Err(e) => {
             tracing::error!(run_id = %run_id, error = %e, "Failed to open run store");
             let mut runs = state.runs.lock().expect("runs lock poisoned");
@@ -754,10 +743,10 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
     };
 
     // Save final checkpoint
-    let checkpoint = match run_store.get_checkpoint().await {
-        Ok(checkpoint) => checkpoint,
+    let checkpoint = match run_store.state().await {
+        Ok(state) => state.checkpoint,
         Err(err) => {
-            tracing::warn!(run_id = %run_id, error = %err, "Failed to load checkpoint from store");
+            tracing::warn!(run_id = %run_id, error = %err, "Failed to load run state from store");
             None
         }
     };
@@ -1069,13 +1058,32 @@ async fn get_checkpoint(
         Ok(id) => id,
         Err(response) => return response,
     };
-    let runs = state.runs.lock().expect("runs lock poisoned");
-    match runs.get(&id) {
-        Some(managed_run) => match &managed_run.checkpoint {
-            Some(cp) => (StatusCode::OK, Json(cp.clone())).into_response(),
-            None => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
+    let live_checkpoint = {
+        let runs = state.runs.lock().expect("runs lock poisoned");
+        match runs.get(&id) {
+            Some(managed_run) => managed_run.checkpoint.clone(),
+            None => return ApiError::not_found("Run not found.").into_response(),
+        }
+    };
+    if let Some(cp) = live_checkpoint {
+        return (StatusCode::OK, Json(cp)).into_response();
+    }
+
+    match state.store.open_run_reader(&id).await {
+        Ok(run_store) => match run_store.state().await {
+            Ok(run_state) => match run_state.checkpoint {
+                Some(cp) => (StatusCode::OK, Json(cp)).into_response(),
+                None => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
+            },
+            Err(err) => {
+                tracing::warn!(run_id = %id, error = %err, "Failed to load checkpoint state from store");
+                (StatusCode::OK, Json(serde_json::json!(null))).into_response()
+            }
         },
-        None => ApiError::not_found("Run not found.").into_response(),
+        Err(err) => {
+            tracing::warn!(run_id = %id, error = %err, "Failed to open run store reader");
+            ApiError::not_found("Run not found.").into_response()
+        }
     }
 }
 
@@ -1564,18 +1572,19 @@ async fn get_retro(
     }
 
     match state.store.open_run_reader(&id).await {
-        Ok(Some(run_store)) => match run_store.get_retro().await {
-            Ok(Some(retro)) => (StatusCode::OK, Json(retro)).into_response(),
-            Ok(None) => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
+        Ok(run_store) => match run_store.state().await {
+            Ok(run_state) => match run_state.retro {
+                Some(retro) => (StatusCode::OK, Json(retro)).into_response(),
+                None => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
+            },
             Err(err) => {
-                tracing::warn!(run_id = %id, error = %err, "Failed to load retro from store");
+                tracing::warn!(run_id = %id, error = %err, "Failed to load retro state from store");
                 (StatusCode::OK, Json(serde_json::json!(null))).into_response()
             }
         },
-        Ok(None) => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
         Err(err) => {
             tracing::warn!(run_id = %id, error = %err, "Failed to open run store reader");
-            (StatusCode::OK, Json(serde_json::json!(null))).into_response()
+            ApiError::not_found("Run not found.").into_response()
         }
     }
 }
@@ -1603,15 +1612,27 @@ async fn get_graph(
         Ok(id) => id,
         Err(response) => return response,
     };
-    let dot_source = {
+    let live_dot_source = {
         let runs = state.runs.lock().expect("runs lock poisoned");
         match runs.get(&id) {
             Some(managed_run) => managed_run.dot_source.clone(),
             None => return ApiError::not_found("Run not found.").into_response(),
         }
     };
+    if !live_dot_source.is_empty() {
+        return render_dot_svg(&live_dot_source).await;
+    }
 
-    render_dot_svg(&dot_source).await
+    match state.store.open_run_reader(&id).await {
+        Ok(run_store) => match run_store.state().await {
+            Ok(run_state) => match run_state.graph_source {
+                Some(dot_source) => render_dot_svg(&dot_source).await,
+                None => ApiError::new(StatusCode::NOT_FOUND, "Graph not found.").into_response(),
+            },
+            Err(err) => ApiError::new(StatusCode::BAD_GATEWAY, err.to_string()).into_response(),
+        },
+        Err(_) => ApiError::new(StatusCode::NOT_FOUND, "Run not found.").into_response(),
+    }
 }
 
 #[cfg(test)]

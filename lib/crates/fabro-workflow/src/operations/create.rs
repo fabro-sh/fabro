@@ -148,8 +148,8 @@ async fn persist_created_run(
         Err(err) => store
             .open_run(&record.run_id)
             .await
-            .map_err(|open_err| FabroError::engine(open_err.to_string()))?
-            .ok_or_else(|| FabroError::engine(err.to_string()))?,
+            .map_err(|open_err| FabroError::engine(open_err.to_string()))
+            .or_else(|_| Err(FabroError::engine(err.to_string())))?,
     };
 
     run_store.put_run(record).await.map_err(store_error)?;
@@ -717,7 +717,7 @@ mod tests {
             created.persisted.run_record().workflow_slug.as_deref(),
             Some("slug")
         );
-        let run_store = store.open_run(&fixtures::RUN_1).await.unwrap().unwrap();
+        let run_store = store.open_run(&fixtures::RUN_1).await.unwrap();
         assert_eq!(
             run_store.get_status().await.unwrap().unwrap().status,
             crate::run_status::RunStatus::Submitted
@@ -839,11 +839,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let run_store = store
-            .open_run_reader(&created.run_id)
-            .await
-            .unwrap()
-            .unwrap();
+        let run_store = store.open_run_reader(&created.run_id).await.unwrap();
         let events = run_store.list_events().await.unwrap();
 
         assert_eq!(

@@ -17,12 +17,11 @@ pub(crate) async fn run(args: SshArgs, globals: &GlobalArgs) -> Result<()> {
     let base = runs_base(&cli_settings.storage_dir());
     let store = store::build_store(&cli_settings.storage_dir())?;
     let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
-    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id)
-        .await?
-        .context("Failed to open run store")?;
+    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await?;
     let record = run_store
-        .get_sandbox()
+        .state()
         .await?
+        .sandbox
         .context("Failed to load sandbox record from store")?;
 
     validate_daytona_provider(&record, "SSH access")?;

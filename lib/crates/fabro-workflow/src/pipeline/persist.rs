@@ -29,17 +29,15 @@ pub(crate) async fn load_from_store(
     run_store: &dyn RunStore,
     run_dir: &Path,
 ) -> Result<Persisted, FabroError> {
-    let run_record = run_store
-        .get_run()
+    let state = run_store
+        .state()
         .await
-        .map_err(|err| FabroError::engine(err.to_string()))?
+        .map_err(|err| FabroError::engine(err.to_string()))?;
+    let run_record = state
+        .run
         .ok_or_else(|| FabroError::Precondition("run record missing from store".to_string()))?;
     let graph = run_record.graph.clone();
-    let source = run_store
-        .get_graph()
-        .await
-        .map_err(|err| FabroError::engine(err.to_string()))?
-        .unwrap_or_default();
+    let source = state.graph_source.unwrap_or_default();
 
     Ok(Persisted::new(
         graph,

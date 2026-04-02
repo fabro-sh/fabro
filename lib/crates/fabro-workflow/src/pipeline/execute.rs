@@ -73,7 +73,7 @@ pub async fn execute(init: Initialized) -> Executed {
         registry,
         emitter: Arc::clone(&emitter),
         sandbox: Arc::clone(&sandbox),
-        run_store: Some(Arc::clone(&run_store)),
+        run_store: Arc::clone(&run_store),
         git_state: std::sync::RwLock::new(git_state),
         hook_runner: hook_runner.clone(),
         env,

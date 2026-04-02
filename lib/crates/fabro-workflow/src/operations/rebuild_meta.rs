@@ -26,9 +26,13 @@ pub async fn rebuild_metadata_branch(
         bail!("metadata branch already exists for run {run_id}");
     }
 
-    let run_record = run_store
-        .get_run()
+    let state = run_store
+        .state()
         .await?
+        ;
+    let run_record = state
+        .run
+        .clone()
         .ok_or_else(|| anyhow::anyhow!("run record not found for {run_id}"))?;
 
     let sig = Signature::now("Fabro", "noreply@fabro.sh")?;
@@ -43,10 +47,10 @@ pub async fn rebuild_metadata_branch(
             "run.json".to_string(),
             serde_json::to_vec_pretty(&run_record)?,
         ));
-        if let Some(start) = run_store.get_start().await? {
+        if let Some(start) = state.start.clone() {
             init_entries.push(("start.json".to_string(), serde_json::to_vec_pretty(&start)?));
         }
-        if let Some(sandbox) = run_store.get_sandbox().await? {
+        if let Some(sandbox) = state.sandbox.clone() {
             init_entries.push((
                 "sandbox.json".to_string(),
                 serde_json::to_vec_pretty(&sandbox)?,
@@ -54,7 +58,7 @@ pub async fn rebuild_metadata_branch(
         }
         write_entries(&bs, &init_entries, "init run")?;
 
-        let mut checkpoints = run_store.list_checkpoints().await?;
+        let mut checkpoints = state.checkpoints.clone();
         backfill_missing_checkpoint_shas(git_store, run_id, &mut checkpoints);
 
         for (_seq, checkpoint) in checkpoints {
@@ -69,7 +73,9 @@ pub async fn rebuild_metadata_branch(
                 for visit in 1..=max_visit {
                     let visit = u32::try_from(visit)
                         .with_context(|| format!("visit {visit} for node {node_id} exceeds u32"))?;
-                    let node = run_store.get_node(&NodeVisitRef { node_id, visit }).await?;
+                    let Some(node) = state.node(&NodeVisitRef { node_id, visit }).cloned() else {
+                        continue;
+                    };
 
                     if let Some(prompt) = node.prompt {
                         entries.push((
@@ -125,7 +131,7 @@ pub async fn rebuild_metadata_branch(
             write_entries(&bs, &entries, "checkpoint")?;
         }
 
-        if let Some(retro) = run_store.get_retro().await? {
+        if let Some(retro) = state.retro.clone() {
             let entries = vec![("retro.json".to_string(), serde_json::to_vec_pretty(&retro)?)];
             write_entries(&bs, &entries, "finalize run")?;
         }

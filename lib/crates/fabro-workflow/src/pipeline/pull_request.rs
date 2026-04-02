@@ -292,21 +292,17 @@ fn emit_run_notice(
     });
 }
 
-async fn load_pull_request_diff(run_store: Option<&dyn RunStore>, run_dir: &Path) -> String {
-    if let Some(run_store) = run_store {
-        run_store
-            .get_final_patch()
-            .await
-            .inspect_err(|err| {
-                tracing::warn!(error = %err, "Failed to load final patch from store for PR");
-            })
-            .ok()
-            .flatten()
-            .unwrap_or_default()
-    } else {
-        let _ = run_dir;
-        String::new()
-    }
+async fn load_pull_request_diff(run_store: &dyn RunStore, run_dir: &Path) -> String {
+    let _ = run_dir;
+    run_store
+        .state()
+        .await
+        .inspect_err(|err| {
+            tracing::warn!(error = %err, "Failed to load final patch from store for PR");
+        })
+        .ok()
+        .and_then(|state| state.final_patch)
+        .unwrap_or_default()
 }
 
 /// Build a complete PR body by combining LLM-generated narrative with
@@ -315,7 +311,7 @@ pub async fn build_pr_body(
     diff: &str,
     goal: &str,
     model: &str,
-    run_store: Option<&dyn RunStore>,
+    run_store: &dyn RunStore,
     run_dir: &Path,
     conclusion: Option<&Conclusion>,
 ) -> Result<String, String> {
@@ -323,54 +319,28 @@ pub async fn build_pr_body(
 
     let plan_text = read_plan_text(run_dir);
     let loaded_conclusion = if conclusion.is_none() {
-        match run_store {
-            Some(run_store) => run_store
-                .get_conclusion()
-                .await
-                .inspect_err(|err| {
-                    tracing::warn!(error = %err, "Failed to load conclusion from store for PR body");
-                })
-                .ok()
-                .flatten(),
-            None => None,
-        }
+        run_store
+            .state()
+            .await
+            .inspect_err(|err| {
+                tracing::warn!(error = %err, "Failed to load conclusion from store for PR body");
+            })
+            .ok()
+            .and_then(|state| state.conclusion)
     } else {
         None
     };
     let conclusion = conclusion.or(loaded_conclusion.as_ref());
-    let retro = match run_store {
-        Some(run_store) => run_store
-            .get_retro()
-            .await
-            .inspect_err(|err| {
-                tracing::warn!(error = %err, "Failed to load retro from store for PR body");
-            })
-            .ok()
-            .flatten(),
-        None => None,
-    };
-    let run_record = match run_store {
-        Some(run_store) => run_store
-            .get_run()
-            .await
-            .inspect_err(|err| {
-                tracing::warn!(error = %err, "Failed to load run record from store for PR body");
-            })
-            .ok()
-            .flatten(),
-        None => None,
-    };
-    let dot_source = match run_store {
-        Some(run_store) => run_store
-            .get_graph()
-            .await
-            .inspect_err(|err| {
-                tracing::warn!(error = %err, "Failed to load graph from store for PR body");
-            })
-            .ok()
-            .flatten(),
-        None => None,
-    };
+    let run_state = run_store
+        .state()
+        .await
+        .inspect_err(|err| {
+            tracing::warn!(error = %err, "Failed to load run state from store for PR body");
+        })
+        .ok();
+    let retro = run_state.as_ref().and_then(|state| state.retro.clone());
+    let run_record = run_state.as_ref().and_then(|state| state.run.clone());
+    let dot_source = run_state.as_ref().and_then(|state| state.graph_source.clone());
 
     // Build LLM prompt
     let system = if plan_text.is_some() {
@@ -448,7 +418,7 @@ pub async fn maybe_open_pull_request(
     model: &str,
     draft: bool,
     auto_merge: Option<AutoMergeOptions>,
-    run_store: Option<&dyn RunStore>,
+    run_store: &dyn RunStore,
     run_dir: &Path,
     conclusion: Option<&Conclusion>,
 ) -> Result<Option<PullRequestRecord>, String> {
@@ -519,12 +489,10 @@ pub async fn maybe_open_pull_request(
         title,
     };
 
-    if let Some(run_store) = run_store {
-        run_store
-            .put_pull_request(&record)
-            .await
-            .map_err(|err| format!("failed to persist pull request in run store: {err}"))?;
-    }
+    run_store
+        .put_pull_request(&record)
+        .await
+        .map_err(|err| format!("failed to persist pull request in run store: {err}"))?;
 
     Ok(Some(record))
 }
@@ -554,8 +522,7 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                 result.status,
                 StageStatus::Success | StageStatus::PartialSuccess
             ) {
-                let diff =
-                    load_pull_request_diff(options.run_store.as_deref(), &options.run_dir).await;
+                let diff = load_pull_request_diff(options.run_store.as_ref(), &options.run_dir).await;
                 if let (Some(base_branch), Some(run_branch), Some(creds), Some(origin)) = (
                     &run_options.base_branch,
                     pushed_branch.as_deref(),
@@ -580,7 +547,7 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                         &options.model,
                         pr_cfg.draft,
                         auto_merge,
-                        options.run_store.as_deref(),
+                        options.run_store.as_ref(),
                         &options.run_dir,
                         Some(&conclusion),
                     )
@@ -1067,12 +1034,21 @@ mod tests {
         install_mock_llm();
 
         let tmp = tempfile::tempdir().unwrap();
+        let store = InMemoryStore::default();
+        let run_store = store
+            .create_run(
+                &fixtures::RUN_1,
+                Utc::now(),
+                Some(&tmp.path().display().to_string()),
+            )
+            .await
+            .unwrap();
         let conclusion = make_test_conclusion();
         let body = build_pr_body(
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
             "Implement feature",
             "mock-model",
-            None,
+            run_store.as_ref(),
             tmp.path(),
             Some(&conclusion),
         )
@@ -1126,7 +1102,7 @@ mod tests {
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
             "Implement feature",
             "mock-model",
-            Some(run_store.as_ref()),
+                        run_store.as_ref(),
             tmp.path(),
             Some(&conclusion),
         )
@@ -1316,6 +1292,15 @@ mod tests {
     #[tokio::test]
     async fn empty_diff_returns_none() {
         let tmp = tempfile::tempdir().unwrap();
+        let store = InMemoryStore::default();
+        let run_store = store
+            .create_run(
+                &fixtures::RUN_1,
+                Utc::now(),
+                Some(&tmp.path().display().to_string()),
+            )
+            .await
+            .unwrap();
         let creds = GitHubAppCredentials {
             app_id: "123".to_string(),
             private_key_pem: "unused".to_string(),
@@ -1330,7 +1315,7 @@ mod tests {
             "claude-sonnet-4-20250514",
             false,
             None,
-            None,
+            run_store.as_ref(),
             tmp.path(),
             None,
         )
@@ -1343,12 +1328,27 @@ mod tests {
     async fn load_pull_request_diff_uses_store_without_disk_patch() {
         let tmp = tempfile::tempdir().unwrap();
         let store = InMemoryStore::default();
+        let created_at = Utc::now();
         let run_store = store
             .create_run(
                 &fixtures::RUN_1,
-                Utc::now(),
+                created_at,
                 Some(&tmp.path().display().to_string()),
             )
+            .await
+            .unwrap();
+        run_store
+            .put_run(&RunRecord {
+                run_id: fixtures::RUN_1,
+                created_at,
+                settings: Settings::default(),
+                graph: Graph::new("test"),
+                workflow_slug: None,
+                working_directory: tmp.path().to_path_buf(),
+                host_repo_path: None,
+                base_branch: None,
+                labels: std::collections::HashMap::new(),
+            })
             .await
             .unwrap();
         run_store
@@ -1356,7 +1356,7 @@ mod tests {
             .await
             .unwrap();
 
-        let diff = load_pull_request_diff(Some(run_store.as_ref()), tmp.path()).await;
+        let diff = load_pull_request_diff(run_store.as_ref(), tmp.path()).await;
 
         assert!(diff.contains("from_store"));
     }

@@ -13,9 +13,10 @@ use tokio_stream::StreamExt as _;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::keys;
+use crate::run_state::EventProjectionCache;
 use crate::{
     CatalogRecord, EventEnvelope, EventPayload, ListRunsQuery, NodeOutcomeRecord, NodeSnapshot,
-    NodeVisitRef, Result, RunSnapshot, RunStore, RunSummary, Store, StoreError,
+    NodeVisitRef, Result, RunSnapshot, RunState, RunStore, RunSummary, Store, StoreError,
 };
 use fabro_types::{
     Checkpoint, Conclusion, NodeStatusRecord, PullRequestRecord, Retro, RunId, RunRecord,
@@ -41,6 +42,7 @@ struct InMemoryRunStore {
     event_seq: AtomicU32,
     checkpoint_seq: AtomicU32,
     watchers: Mutex<Vec<mpsc::UnboundedSender<EventEnvelope>>>,
+    projection_cache: Mutex<EventProjectionCache>,
 }
 
 impl InMemoryRunStore {
@@ -65,6 +67,7 @@ impl InMemoryRunStore {
             event_seq: AtomicU32::new(1),
             checkpoint_seq: AtomicU32::new(1),
             watchers: Mutex::new(Vec::new()),
+            projection_cache: Mutex::new(EventProjectionCache::default()),
         })
     }
 
@@ -264,6 +267,20 @@ impl InMemoryRunStore {
         }
         Ok(())
     }
+
+    async fn projected_state(&self) -> Result<RunState> {
+        let next_seq = {
+            let cache = self.projection_cache.lock().await;
+            cache.last_seq.saturating_add(1)
+        };
+        let events = self.list_events_from_inner(next_seq).await?;
+        let mut cache = self.projection_cache.lock().await;
+        for event in &events {
+            cache.state.apply_event(event)?;
+            cache.last_seq = event.seq;
+        }
+        Ok(cache.state.clone())
+    }
 }
 
 #[async_trait]
@@ -302,14 +319,14 @@ impl Store for InMemoryStore {
         Ok(run_store as Arc<dyn RunStore>)
     }
 
-    async fn open_run(&self, run_id: &RunId) -> Result<Option<Arc<dyn RunStore>>> {
+    async fn open_run(&self, run_id: &RunId) -> Result<Arc<dyn RunStore>> {
         let runs = self.runs.lock().await;
-        Ok(runs
-            .get(run_id)
-            .map(|catalog| Arc::clone(&catalog.run_store) as Arc<dyn RunStore>))
+        runs.get(run_id)
+            .map(|catalog| Arc::clone(&catalog.run_store) as Arc<dyn RunStore>)
+            .ok_or_else(|| StoreError::RunNotFound(run_id.to_string()))
     }
 
-    async fn open_run_reader(&self, run_id: &RunId) -> Result<Option<Arc<dyn RunStore>>> {
+    async fn open_run_reader(&self, run_id: &RunId) -> Result<Arc<dyn RunStore>> {
         self.open_run(run_id).await
     }
 
@@ -324,8 +341,7 @@ impl Store for InMemoryStore {
             if !matches_query(&catalog.record.created_at, query) {
                 continue;
             }
-            let data = catalog.run_store.snapshot_data().await;
-            summaries.push(build_run_summary(&catalog.record, &data)?);
+            summaries.push(catalog.run_store.state().await?.build_summary(&catalog.record));
         }
         summaries.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         Ok(summaries)
@@ -665,9 +681,21 @@ impl RunStore for InMemoryRunStore {
         self.list_all_assets_inner().await
     }
 
-    async fn get_snapshot(&self) -> Result<Option<RunSnapshot>> {
+    async fn state(&self) -> Result<RunState> {
+        let mut state = self.projected_state().await?;
         let data = self.snapshot_data().await;
-        self.build_snapshot_from_data(&data)
+        state.merge_legacy(
+            self.build_snapshot_from_data(&data)?,
+            read_text(&data, keys::graph())?,
+            read_text(&data, keys::retro_prompt())?,
+            read_text(&data, keys::retro_response())?,
+            self.list_checkpoints_inner().await?,
+        );
+        Ok(state)
+    }
+
+    async fn get_snapshot(&self) -> Result<Option<RunSnapshot>> {
+        self.state().await.map(|state| state.to_snapshot())
     }
 }
 
@@ -702,48 +730,6 @@ fn read_text(data: &BTreeMap<String, Vec<u8>>, key: &str) -> Result<Option<Strin
                 .map_err(|err| StoreError::Other(format!("stored text is not valid UTF-8: {err}")))
         })
         .transpose()
-}
-
-fn build_run_summary(
-    record: &CatalogRecord,
-    data: &BTreeMap<String, Vec<u8>>,
-) -> Result<RunSummary> {
-    let run = read_json::<RunRecord>(data, keys::run())?;
-    let start = read_json::<StartRecord>(data, keys::start())?;
-    let status = read_json::<RunStatusRecord>(data, keys::status())?;
-    let conclusion = read_json::<Conclusion>(data, keys::conclusion())?;
-
-    let workflow_name = run.as_ref().map(|run| {
-        if run.graph.name.is_empty() {
-            "unnamed".to_string()
-        } else {
-            run.graph.name.clone()
-        }
-    });
-    let goal = run.as_ref().and_then(|run| {
-        let goal = run.graph.goal();
-        (!goal.is_empty()).then(|| goal.to_string())
-    });
-
-    Ok(RunSummary {
-        run_id: record.run_id,
-        created_at: record.created_at,
-        db_prefix: record.db_prefix.clone(),
-        run_dir: record.run_dir.clone(),
-        workflow_name,
-        workflow_slug: run.as_ref().and_then(|run| run.workflow_slug.clone()),
-        goal,
-        labels: run
-            .as_ref()
-            .map(|run| run.labels.clone())
-            .unwrap_or_default(),
-        host_repo_path: run.as_ref().and_then(|run| run.host_repo_path.clone()),
-        start_time: start.map(|start| start.start_time),
-        status: status.as_ref().map(|status| status.status),
-        status_reason: status.and_then(|status| status.reason),
-        duration_ms: conclusion.as_ref().map(|conclusion| conclusion.duration_ms),
-        total_cost: conclusion.and_then(|conclusion| conclusion.total_cost),
-    })
 }
 
 #[cfg(test)]
@@ -912,6 +898,26 @@ mod tests {
             head_branch: "fabro/run/demo".to_string(),
             title: "Map the constellations".to_string(),
         }
+    }
+
+    fn event_payload(
+        run_id: &str,
+        ts: &str,
+        event: &str,
+        node_id: Option<&str>,
+        properties: serde_json::Value,
+    ) -> EventPayload {
+        let mut value = serde_json::json!({
+            "id": format!("evt-{event}-{ts}"),
+            "ts": ts,
+            "run_id": test_run_id(run_id).to_string(),
+            "event": event,
+            "properties": properties,
+        });
+        if let Some(node_id) = node_id {
+            value["node_id"] = serde_json::Value::String(node_id.to_string());
+        }
+        EventPayload::new(value, &test_run_id(run_id)).unwrap()
     }
 
     #[tokio::test]
@@ -1100,6 +1106,317 @@ mod tests {
             Some("diff --git a/src/lib.rs b/src/lib.rs\n")
         );
         assert_eq!(snapshot.pull_request, Some(pull_request));
+    }
+
+    #[tokio::test]
+    async fn state_projects_event_stream_and_compat_fields() {
+        let store = InMemoryStore::default();
+        let created_at = dt("2026-03-27T12:00:00Z");
+        let run = store
+            .create_run(&test_run_id("run-1"), created_at, None)
+            .await
+            .unwrap();
+        let run_record = sample_run_record("run-1", created_at);
+        let retro = sample_retro("run-1");
+
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:00Z",
+            "run.created",
+            None,
+            serde_json::json!({
+                "settings": run_record.settings,
+                "graph": run_record.graph,
+                "workflow_source": "digraph night_sky {}",
+                "workflow_slug": run_record.workflow_slug,
+                "working_directory": run_record.working_directory,
+                "host_repo_path": run_record.host_repo_path,
+                "base_branch": run_record.base_branch,
+                "labels": run_record.labels,
+            }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:05Z",
+            "run.started",
+            None,
+            serde_json::json!({
+                "run_branch": "fabro/run/demo",
+                "base_sha": "abc123"
+            }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:06Z",
+            "run.running",
+            None,
+            serde_json::json!({}),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:07Z",
+            "stage.prompt",
+            Some("code"),
+            serde_json::json!({
+                "visit": 2,
+                "text": "Plan the fix",
+                "mode": "prompt",
+                "provider": "openai",
+                "model": "gpt-5.4"
+            }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:08Z",
+            "stage.completed",
+            Some("code"),
+            serde_json::json!({
+                "status": "success",
+                "notes": "all good",
+                "response": "Implemented",
+                "files_touched": ["src/lib.rs"],
+                "node_visits": {"code": 2}
+            }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:09Z",
+            "checkpoint.completed",
+            Some("code"),
+            serde_json::json!({
+                "status": "success",
+                "current_node": "code",
+                "completed_nodes": ["plan"],
+                "context_values": {"artifact": {"kind": "summary"}},
+                "next_node_id": "review",
+                "git_commit_sha": "def456",
+                "node_visits": {"code": 2},
+                "diff": "diff --git a/src/lib.rs b/src/lib.rs"
+            }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:10Z",
+            "sandbox.initialized",
+            None,
+            serde_json::json!({
+                "provider": "local",
+                "working_directory": "/tmp/night-sky",
+                "identifier": "sandbox-1",
+                "host_working_directory": "/tmp/night-sky"
+            }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:11Z",
+            "retro.started",
+            None,
+            serde_json::json!({
+                "prompt": "How did it go?"
+            }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:12Z",
+            "retro.completed",
+            None,
+            serde_json::json!({
+                "response": "Smooth enough",
+                "retro": retro
+            }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:13Z",
+            "pull_request.created",
+            None,
+            serde_json::json!({
+                "pr_url": "https://github.com/fabro-sh/fabro/pull/123",
+                "pr_number": 123,
+                "owner": "fabro-sh",
+                "repo": "fabro",
+                "base_branch": "main",
+                "head_branch": "fabro/run/demo",
+                "title": "Map the constellations",
+                "draft": false
+            }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:15Z",
+            "run.completed",
+            None,
+            serde_json::json!({
+                "duration_ms": 3210,
+                "artifact_count": 1,
+                "status": "success",
+                "total_cost": 1.25,
+                "final_git_commit_sha": "feedbeef",
+                "final_patch": "diff --git a/src/lib.rs b/src/lib.rs\n"
+            }),
+        ))
+        .await
+        .unwrap();
+
+        let state = run.state().await.unwrap();
+        assert_eq!(state.run.as_ref().map(|run| run.run_id), Some(test_run_id("run-1")));
+        assert_eq!(state.graph_source.as_deref(), Some("digraph night_sky {}"));
+        assert_eq!(state.start.as_ref().and_then(|start| start.run_branch.as_deref()), Some("fabro/run/demo"));
+        assert_eq!(state.status.as_ref().map(|status| status.status), Some(RunStatus::Succeeded));
+        assert_eq!(state.checkpoint.as_ref().map(|checkpoint| checkpoint.current_node.as_str()), Some("code"));
+        assert_eq!(state.checkpoints.len(), 1);
+        assert_eq!(state.final_patch.as_deref(), Some("diff --git a/src/lib.rs b/src/lib.rs\n"));
+        assert_eq!(state.retro_prompt.as_deref(), Some("How did it go?"));
+        assert_eq!(state.retro_response.as_deref(), Some("Smooth enough"));
+        assert_eq!(state.pull_request.as_ref().map(|pr| pr.number), Some(123));
+        assert_eq!(state.sandbox.as_ref().map(|sandbox| sandbox.provider.as_str()), Some("local"));
+        assert_eq!(state.list_node_visits("code"), vec![2]);
+        let node = state
+            .node(&NodeVisitRef {
+                node_id: "code",
+                visit: 2,
+            })
+            .unwrap();
+        assert_eq!(node.prompt.as_deref(), Some("Plan the fix"));
+        assert_eq!(node.response.as_deref(), Some("Implemented"));
+        assert_eq!(node.diff.as_deref(), Some("diff --git a/src/lib.rs b/src/lib.rs"));
+        assert_eq!(
+            node.provider_used.as_ref().and_then(|value| value.get("provider")).and_then(|value| value.as_str()),
+            Some("openai")
+        );
+    }
+
+    #[tokio::test]
+    async fn state_rewind_keeps_active_projection_only() {
+        let store = InMemoryStore::default();
+        let run = store
+            .create_run(&test_run_id("run-1"), dt("2026-03-27T12:00:00Z"), None)
+            .await
+            .unwrap();
+
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:00Z",
+            "run.created",
+            None,
+            serde_json::json!({
+                "settings": Settings::default(),
+                "graph": Graph::new("night-sky"),
+                "working_directory": "/tmp/night-sky",
+                "labels": {}
+            }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:01Z",
+            "stage.prompt",
+            Some("code"),
+            serde_json::json!({
+                "visit": 1,
+                "text": "before rewind"
+            }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:02Z",
+            "pull_request.created",
+            None,
+            serde_json::json!({
+                "pr_url": "https://github.com/fabro-sh/fabro/pull/123",
+                "pr_number": 123,
+                "owner": "fabro-sh",
+                "repo": "fabro",
+                "base_branch": "main",
+                "head_branch": "fabro/run/demo",
+                "title": "Map the constellations",
+                "draft": false
+            }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:03Z",
+            "run.completed",
+            None,
+            serde_json::json!({
+                "duration_ms": 10,
+                "artifact_count": 0,
+                "status": "success",
+                "final_patch": "old patch"
+            }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:04Z",
+            "run.rewound",
+            None,
+            serde_json::json!({
+                "target_checkpoint_ordinal": 1,
+                "target_node_id": "plan",
+                "target_visit": 1
+            }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:05Z",
+            "checkpoint.completed",
+            Some("plan"),
+            serde_json::json!({
+                "status": "success",
+                "current_node": "plan",
+                "completed_nodes": [],
+                "node_visits": {"plan": 1}
+            }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:06Z",
+            "run.submitted",
+            None,
+            serde_json::json!({}),
+        ))
+        .await
+        .unwrap();
+
+        let state = run.state().await.unwrap();
+        assert_eq!(state.status.as_ref().map(|status| status.status), Some(RunStatus::Submitted));
+        assert!(state.conclusion.is_none());
+        assert!(state.final_patch.is_none());
+        assert!(state.pull_request.is_none());
+        assert_eq!(state.checkpoints.len(), 1);
+        assert_eq!(state.checkpoint.as_ref().map(|checkpoint| checkpoint.current_node.as_str()), Some("plan"));
+        assert!(state.list_node_ids().is_empty());
     }
 
     #[tokio::test]
@@ -1379,11 +1696,10 @@ mod tests {
         store.delete_run(&test_run_id("run-1")).await.unwrap();
         store.delete_run(&test_run_id("run-1")).await.unwrap();
         assert!(
-            store
-                .open_run(&test_run_id("run-1"))
-                .await
-                .unwrap()
-                .is_none()
+            matches!(
+                store.open_run(&test_run_id("run-1")).await,
+                Err(StoreError::RunNotFound(_))
+            )
         );
     }
 

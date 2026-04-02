@@ -236,30 +236,28 @@ impl Store for SlateStore {
         Ok(Arc::new(run_store) as Arc<dyn RunStore>)
     }
 
-    async fn open_run(&self, run_id: &RunId) -> Result<Option<Arc<dyn RunStore>>> {
-        let Some(locator) =
-            catalog::read_locator(self.object_store.clone(), &self.base_prefix, run_id).await?
-        else {
-            return Ok(None);
-        };
+    async fn open_run(&self, run_id: &RunId) -> Result<Arc<dyn RunStore>> {
+        let locator = catalog::read_locator(self.object_store.clone(), &self.base_prefix, run_id)
+            .await?
+            .ok_or_else(|| StoreError::RunNotFound(run_id.to_string()))?;
 
-        let Some(run_store) = self.open_run_store(&locator).await? else {
-            return Ok(None);
-        };
-        Ok(Some(Arc::new(run_store) as Arc<dyn RunStore>))
+        let run_store = self
+            .open_run_store(&locator)
+            .await?
+            .ok_or_else(|| StoreError::RunNotFound(run_id.to_string()))?;
+        Ok(Arc::new(run_store) as Arc<dyn RunStore>)
     }
 
-    async fn open_run_reader(&self, run_id: &RunId) -> Result<Option<Arc<dyn RunStore>>> {
-        let Some(locator) =
-            catalog::read_locator(self.object_store.clone(), &self.base_prefix, run_id).await?
-        else {
-            return Ok(None);
-        };
+    async fn open_run_reader(&self, run_id: &RunId) -> Result<Arc<dyn RunStore>> {
+        let locator = catalog::read_locator(self.object_store.clone(), &self.base_prefix, run_id)
+            .await?
+            .ok_or_else(|| StoreError::RunNotFound(run_id.to_string()))?;
 
-        let Some(run_store) = self.open_run_reader_store(&locator).await? else {
-            return Ok(None);
-        };
-        Ok(Some(Arc::new(run_store) as Arc<dyn RunStore>))
+        let run_store = self
+            .open_run_reader_store(&locator)
+            .await?
+            .ok_or_else(|| StoreError::RunNotFound(run_id.to_string()))?;
+        Ok(Arc::new(run_store) as Arc<dyn RunStore>)
     }
 
     async fn list_runs(&self, query: &ListRunsQuery) -> Result<Vec<RunSummary>> {
@@ -584,7 +582,6 @@ mod tests {
         let reopened = store
             .open_run(&test_run_id("run-1"))
             .await
-            .unwrap()
             .unwrap();
         let stored = reopened.get_run().await.unwrap().unwrap();
         assert_eq!(stored.run_id, test_run_id("run-1"));
@@ -594,8 +591,7 @@ mod tests {
             store
                 .open_run(&test_run_id("run-1"))
                 .await
-                .unwrap()
-                .is_none()
+                .is_err()
         );
         assert!(!object_exists(object_store.clone(), &by_id).await);
         assert!(!object_exists(object_store.clone(), &by_start).await);
@@ -634,8 +630,7 @@ mod tests {
             store
                 .open_run(&test_run_id("run-1"))
                 .await
-                .unwrap()
-                .is_some()
+                .is_ok()
         );
         assert!(
             store
@@ -680,7 +675,6 @@ mod tests {
         let reopened = store
             .open_run(&test_run_id("run-1"))
             .await
-            .unwrap()
             .unwrap();
         let next_event = reopened
             .append_event(&event_payload(
@@ -730,8 +724,7 @@ mod tests {
             store
                 .open_run(&test_run_id("run-1"))
                 .await
-                .unwrap()
-                .is_none()
+                .is_err()
         );
         assert!(
             store
@@ -783,7 +776,6 @@ mod tests {
         let reopened = store
             .open_run(&test_run_id("run-1"))
             .await
-            .unwrap()
             .unwrap();
         let first_event = run
             .append_event(&event_payload("run-1", "2026-03-27T12:00:00Z", "Started"))
@@ -884,8 +876,7 @@ mod tests {
             store
                 .open_run(&test_run_id("run-1"))
                 .await
-                .unwrap()
-                .is_none()
+                .is_err()
         );
         assert!(list_paths(object_store, "runs").await.is_empty());
     }
