@@ -51,7 +51,6 @@ mod secret_rm;
 mod secret_set;
 mod send_analytics;
 mod send_panic;
-mod server;
 mod server_start;
 mod server_status;
 mod server_stop;

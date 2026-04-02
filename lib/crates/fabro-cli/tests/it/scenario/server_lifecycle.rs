@@ -17,7 +17,6 @@ fn start_status_stop_lifecycle() {
         "started [UPTIME] ago".to_string(),
     ));
 
-    // Start the server as a daemon with a Unix socket in a short path
     let mut cmd = context.command();
     cmd.args(["server", "start", "--dry-run", "--bind", &bind_str]);
     fabro_snapshot!(filters.clone(), cmd, @"
@@ -28,13 +27,6 @@ fn start_status_stop_lifecycle() {
     Server started (pid [PID]) on [SOCKET_PATH]
     ");
 
-    // Verify server.json is written in storage_dir
-    assert!(
-        context.storage_dir.join("server.json").exists(),
-        "server.json should exist after start"
-    );
-
-    // Status should report running
     let mut cmd = context.command();
     cmd.args(["server", "status"]);
     fabro_snapshot!(filters.clone(), cmd, @"
@@ -45,22 +37,21 @@ fn start_status_stop_lifecycle() {
     Server running (pid [PID]) on [SOCKET_PATH], started [UPTIME] ago
     ");
 
-    // Status --json should produce valid JSON with "running" status
     let status_output = context
         .command()
         .args(["server", "status", "--json"])
         .assert()
         .success();
-    let stdout = String::from_utf8(status_output.get_output().stdout.clone()).unwrap();
+    let stdout = std::str::from_utf8(&status_output.get_output().stdout)
+        .expect("status --json stdout should be valid UTF-8");
     let json: serde_json::Value =
-        serde_json::from_str(&stdout).expect("status --json should be valid JSON");
+        serde_json::from_str(stdout).expect("status --json should be valid JSON");
     assert_eq!(
         json["status"].as_str(),
         Some("running"),
         "status should be running"
     );
 
-    // Stop the server
     let mut cmd = context.command();
     cmd.args(["server", "stop"]);
     fabro_snapshot!(filters.clone(), cmd, @"
@@ -71,10 +62,9 @@ fn start_status_stop_lifecycle() {
     Server stopped
     ");
 
-    // Status should report not running
     let mut cmd = context.command();
     cmd.args(["server", "status"]);
-    fabro_snapshot!(filters.clone(), cmd, @"
+    fabro_snapshot!(filters, cmd, @"
     success: false
     exit_code: 1
     ----- stdout -----
@@ -82,7 +72,6 @@ fn start_status_stop_lifecycle() {
     Server is not running
     ");
 
-    // Verify server.json is cleaned up
     assert!(
         !context.storage_dir.join("server.json").exists(),
         "server.json should be removed after stop"

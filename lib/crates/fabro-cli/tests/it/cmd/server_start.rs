@@ -60,14 +60,12 @@ fn start_already_running_exits_with_error() {
     let bind_addr = sock_dir.path().join("test.sock");
     let bind_str = bind_addr.to_string_lossy().to_string();
 
-    // Start the daemon
     context
         .command()
         .args(["server", "start", "--dry-run", "--bind", &bind_str])
         .assert()
         .success();
 
-    // Try to start again -- should fail with "already running"
     let mut filters = context.filters();
     filters.push((r"pid \d+".to_string(), "pid [PID]".to_string()));
     filters.push((regex::escape(&bind_str), "[SOCKET_PATH]".to_string()));
@@ -81,7 +79,6 @@ fn start_already_running_exits_with_error() {
     error: Server already running (pid [PID]) on [SOCKET_PATH]
     ");
 
-    // Clean up: stop the server
     context
         .command()
         .args(["server", "stop"])
