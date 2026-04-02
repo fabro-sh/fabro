@@ -27,6 +27,10 @@ use fabro_types::RunId;
 
 type WfRunState = RunState<Option<StageUsage>>;
 type WfNodeResult = NodeResult<Option<StageUsage>>;
+type FailureSignatureSnapshot = (
+    Option<BTreeMap<String, usize>>,
+    Option<BTreeMap<String, usize>>,
+);
 
 /// Sub-lifecycle responsible for emitting workflow run events.
 pub(crate) struct EventLifecycle {
@@ -52,10 +56,7 @@ pub(crate) struct EventLifecycle {
 
 fn snapshot_failure_signatures(
     circuit_breaker: &CircuitBreakerLifecycle,
-) -> (
-    Option<BTreeMap<String, usize>>,
-    Option<BTreeMap<String, usize>>,
-) {
+) -> FailureSignatureSnapshot {
     let (loop_sigs, restart_sigs) = circuit_breaker.snapshot();
     let loop_sigs = (!loop_sigs.is_empty()).then(|| {
         loop_sigs

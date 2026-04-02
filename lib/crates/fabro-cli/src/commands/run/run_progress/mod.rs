@@ -494,7 +494,6 @@ mod tests {
             name: name.into(),
             index: 0,
             handler_type: String::new(),
-            script: None,
             attempt: 1,
             max_attempts: 1,
         }
@@ -540,6 +539,7 @@ mod tests {
             node_visits: None,
             loop_failure_signatures: None,
             restart_failure_signatures: None,
+            response: None,
             attempt: 1,
             max_attempts: 1,
         }

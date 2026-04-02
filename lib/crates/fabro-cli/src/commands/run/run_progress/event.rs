@@ -609,6 +609,7 @@ mod tests {
             node_visits: None,
             loop_failure_signatures: None,
             restart_failure_signatures: None,
+            response: None,
             attempt: 1,
             max_attempts: 1,
         };

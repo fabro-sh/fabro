@@ -46,6 +46,7 @@ pub struct RunEventEnvelope {
 
 /// Events emitted during workflow run execution for observability.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum WorkflowRunEvent {
     RunCreated {
         run_id: RunId,
