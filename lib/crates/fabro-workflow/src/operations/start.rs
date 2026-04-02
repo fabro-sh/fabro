@@ -30,7 +30,7 @@ use crate::pipeline::{
     PullRequestOptions, RetroOptions, SandboxEnvSpec, build_conclusion_from_store,
     classify_engine_result,
 };
-use crate::records::{Checkpoint, Conclusion, RunRecord, RunRecordExt};
+use crate::records::{Checkpoint, Conclusion, RunRecordExt};
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::run_status::{self, RunStatus, StatusReason};
 use fabro_config::run::PullRequestSettings;
@@ -208,7 +208,7 @@ pub(super) async fn execute_persisted_run(
 
     bootstrap_guard.defuse();
     let mut completion_guard =
-        DetachedRunCompletionGuard::arm(run_dir, Arc::clone(&run_store), cancel_token);
+        DetachedRunCompletionGuard::arm(run_dir, run_id, Arc::clone(&run_store), cancel_token);
     let run_start = Instant::now();
     let started = Box::pin(session.run(persisted, checkpoint)).await;
 
@@ -657,7 +657,7 @@ const POSTRUN_CANCELLED_MESSAGE: &str = "Run cancelled before post-run finalizat
 struct DetachedRunCompletionGuard {
     run_dir: PathBuf,
     run_store: Arc<dyn RunStore>,
-    run_id: Option<RunId>,
+    run_id: RunId,
     cancel_token: Option<Arc<AtomicBool>>,
     active: bool,
 }
@@ -665,13 +665,14 @@ struct DetachedRunCompletionGuard {
 impl DetachedRunCompletionGuard {
     fn arm(
         run_dir: &Path,
+        run_id: RunId,
         run_store: Arc<dyn RunStore>,
         cancel_token: Option<Arc<AtomicBool>>,
     ) -> Self {
         Self {
             run_dir: run_dir.to_path_buf(),
             run_store,
-            run_id: load_run_id(run_dir),
+            run_id,
             cancel_token,
             active: true,
         }
@@ -708,9 +709,9 @@ impl Drop for DetachedRunCompletionGuard {
             "postrun_aborted"
         };
 
-        let serialized_notice = load_run_id(&self.run_dir).and_then(|run_id| {
+        let serialized_notice = {
             let envelope = canonicalize_event(
-                &run_id,
+                &self.run_id,
                 &WorkflowRunEvent::RunNotice {
                     level: RunNoticeLevel::Error,
                     code: code.to_string(),
@@ -721,15 +722,20 @@ impl Drop for DetachedRunCompletionGuard {
                 Ok(line) => line,
                 Err(err) => {
                     tracing::warn!(error = %err, "Failed to serialize post-run abort event");
-                    return None;
+                    String::new()
                 }
             };
-            if let Err(err) = append_progress_event_with_line(&self.run_dir, &envelope, &line) {
+            if line.is_empty() {
+                None
+            } else if let Err(err) =
+                append_progress_event_with_line(&self.run_dir, &envelope, &line)
+            {
                 tracing::warn!(error = %err, "Failed to append post-run abort event");
-                return None;
+                None
+            } else {
+                Some((self.run_id, line))
             }
-            Some((run_id, line))
-        });
+        };
         let run_store = Arc::clone(&self.run_store);
         let run_id = self.run_id;
         if let Ok(handle) = Handle::try_current() {
@@ -749,7 +755,7 @@ impl Drop for DetachedRunCompletionGuard {
                         "Failed to save post-run abort conclusion to store"
                     );
                 }
-                if let Some((run_id, line)) = serialized_notice.or(run_id.and_then(|run_id| {
+                if let Some((run_id, line)) = serialized_notice.or_else(|| {
                     let envelope = canonicalize_event(
                         &run_id,
                         &WorkflowRunEvent::RunNotice {
@@ -761,7 +767,7 @@ impl Drop for DetachedRunCompletionGuard {
                     redacted_event_json(&envelope)
                         .ok()
                         .map(|line| (run_id, line))
-                })) {
+                }) {
                     match event_payload_from_redacted_json(&line, &run_id) {
                         Ok(payload) => {
                             let _ = run_store.append_event(&payload).await;
@@ -777,19 +783,6 @@ impl Drop for DetachedRunCompletionGuard {
             });
         }
     }
-}
-
-fn load_run_id(run_dir: &Path) -> Option<RunId> {
-    RunRecord::load(run_dir)
-        .ok()
-        .map(|record| record.run_id)
-        .or_else(|| {
-            std::fs::read_to_string(run_dir.join("id.txt"))
-                .ok()
-                .map(|run_id| run_id.trim().to_string())
-                .filter(|run_id| !run_id.is_empty())
-                .and_then(|run_id| run_id.parse().ok())
-        })
 }
 
 async fn persist_detached_failure(
