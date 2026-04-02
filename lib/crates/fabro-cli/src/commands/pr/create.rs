@@ -131,9 +131,6 @@ async fn create_from(
     match record {
         Some(record) => {
             info!(pr_url = %record.html_url, "Pull request created");
-            if let Err(err) = run_store.put_pull_request(&record).await {
-                tracing::warn!(error = %err, "Failed to persist pull request in run store");
-            }
             if let Err(err) = record.save(&run_dir.join("pull_request.json")) {
                 tracing::warn!(error = %err, "Failed to save pull_request.json");
             }
