@@ -90,7 +90,7 @@ export const routes: RouteObject[] = [
       indexRoute(RedirectHome),
       route("setup", Setup),
       route("setup/complete", SetupComplete),
-      route("auth/login", AuthLogin),
+      route("login", AuthLogin),
       {
         loader: appShellLoader,
         Component: withRouteModule({

@@ -12,7 +12,7 @@ export async function apiFetch(path: string, options?: ApiOptions): Promise<Resp
   });
 
   if (response.status === 401) {
-    window.location.href = "/auth/login";
+    window.location.href = "/login";
     throw new Error("Unauthorized");
   }
 

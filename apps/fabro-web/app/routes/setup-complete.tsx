@@ -107,7 +107,7 @@ export default function SetupComplete() {
             Authentication is ready.
           </p>
           <a
-            href="/auth/login"
+            href="/login"
             className="mt-6 flex w-full items-center justify-center rounded-lg bg-teal-500 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-teal-300"
           >
             Continue to sign in

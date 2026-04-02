@@ -1759,6 +1759,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn logout_redirects_to_login_page() {
+        let app = test_app_with(test_db().await);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/auth/logout")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            response
+                .headers()
+                .get(axum::http::header::LOCATION)
+                .and_then(|value| value.to_str().ok()),
+            Some("/login")
+        );
+    }
+
+    #[tokio::test]
     async fn static_favicon_is_served() {
         let app = test_app_with(test_db().await);
 

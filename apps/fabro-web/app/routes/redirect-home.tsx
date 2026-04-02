@@ -11,7 +11,7 @@ export async function loader() {
     await getAuthMe();
   } catch (error) {
     if (error instanceof Response && error.status === 401) {
-      return redirect("/auth/login");
+      return redirect("/login");
     }
     throw error;
   }

@@ -211,7 +211,7 @@ async fn callback_github(
     let cookie_jar = parse_cookie_header(&headers);
     let stored_state = cookie_jar.get(OAUTH_STATE_COOKIE_NAME).map(|cookie| cookie.value());
     if stored_state != Some(params.state.as_str()) {
-        return Redirect::to("/auth/login").into_response();
+        return Redirect::to("/login").into_response();
     }
 
     let Some(client_id) = settings.client_id().map(str::to_string) else {
@@ -322,7 +322,7 @@ async fn callback_github(
         .map(|web| web.auth.allowed_usernames.clone())
         .unwrap_or_default();
     if !allowed_usernames.is_empty() && !allowed_usernames.iter().any(|user| user == &profile.login) {
-        return Redirect::to("/auth/login?error=unauthorized").into_response();
+        return Redirect::to("/login?error=unauthorized").into_response();
     }
 
     let primary_email = emails
@@ -374,7 +374,7 @@ async fn logout(State(state): State<Arc<AppState>>) -> Response {
                 .build(),
         );
     }
-    let mut response = Redirect::to("/auth/login").into_response();
+    let mut response = Redirect::to("/login").into_response();
     append_jar_delta(response.headers_mut(), &jar);
     response
 }

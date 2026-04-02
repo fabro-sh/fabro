@@ -3,7 +3,7 @@
     "app/**/*",
     "scripts/**/*"
   ],
-  "exclude": ["**/*.test.ts"],
+  "exclude": ["**/*.test.ts", "**/*.test.tsx"],
   "compilerOptions": {
     "lib": ["DOM", "DOM.Iterable", "ES2022"],
     "types": ["node"],
