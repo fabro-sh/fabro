@@ -9,19 +9,10 @@ use std::time::Duration;
 use fabro_store::{RunSnapshot, RunStore, SlateStore, Store};
 use fabro_types::RunId;
 use object_store::local::LocalFileSystem;
-use serde_json::Value;
-
 pub(super) fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/it/workflow/fixtures")
         .join(name)
-}
-
-pub(super) fn read_json(path: &Path) -> Value {
-    let content = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
-    serde_json::from_str(&content)
-        .unwrap_or_else(|e| panic!("failed to parse {}: {e}", path.display()))
 }
 
 fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
@@ -47,7 +38,7 @@ fn run_store(run_dir: &Path) -> Option<Arc<dyn RunStore>> {
         .parse()
         .ok()?;
     let object_store = Arc::new(LocalFileSystem::new_with_prefix(storage_dir.join("store")).ok()?);
-    let store = Arc::new(SlateStore::new(object_store, "", Duration::from_millis(5)));
+    let store = Arc::new(SlateStore::new(object_store, "", Duration::from_millis(1)));
     block_on(store.open_run_reader(&run_id)).ok().flatten()
 }
 

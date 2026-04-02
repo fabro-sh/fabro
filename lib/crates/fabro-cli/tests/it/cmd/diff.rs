@@ -19,7 +19,7 @@ fn build_store(storage_dir: &std::path::Path) -> Arc<fabro_store::SlateStore> {
     Arc::new(fabro_store::SlateStore::new(
         object_store,
         "",
-        std::time::Duration::from_millis(5),
+        std::time::Duration::from_millis(1),
     ))
 }
 

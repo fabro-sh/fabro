@@ -396,7 +396,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
           },
           "host_repo_path": "[TEMP_DIR]",
           "labels": {},
-          "run_dir": "[STORAGE_DIR]/runs/20260401-[ULID]",
+          "run_dir": "[RUN_DIR]",
           "settings": {
             "goal": "Wait for approval",
             "llm": {

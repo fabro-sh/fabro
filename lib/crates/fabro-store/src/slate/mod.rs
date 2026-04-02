@@ -72,7 +72,7 @@ impl SlateStore {
             self.object_store.clone(),
             None,
             DbReaderOptions {
-                manifest_poll_interval: Duration::from_millis(100),
+                manifest_poll_interval: Duration::from_millis(5),
                 ..DbReaderOptions::default()
             },
         )
@@ -404,7 +404,7 @@ mod tests {
 
     fn make_store() -> (Arc<dyn ObjectStore>, SlateStore) {
         let object_store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
-        let store = SlateStore::new(object_store.clone(), "runs/", Duration::from_millis(5));
+        let store = SlateStore::new(object_store.clone(), "runs/", Duration::from_millis(1));
         (object_store, store)
     }
 
@@ -531,7 +531,7 @@ mod tests {
     ) -> slatedb::Db {
         let db = slatedb::Db::builder(record.db_prefix.clone(), object_store)
             .with_settings(Settings {
-                flush_interval: Some(Duration::from_millis(5)),
+                flush_interval: Some(Duration::from_millis(1)),
                 ..Settings::default()
             })
             .build()
@@ -960,7 +960,7 @@ mod tests {
         let db_prefix = catalog::db_prefix("runs/", created_at, &test_run_id("run-1"));
         let db = slatedb::Db::builder(db_prefix.clone(), object_store)
             .with_settings(Settings {
-                flush_interval: Some(Duration::from_millis(5)),
+                flush_interval: Some(Duration::from_millis(1)),
                 ..Settings::default()
             })
             .build()
