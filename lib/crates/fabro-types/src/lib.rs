@@ -32,7 +32,7 @@ pub use run::RunRecord;
 pub use run_id::RunId;
 pub use run_id::fixtures;
 pub use sandbox_record::SandboxRecord;
-pub use settings::FabroSettings;
+pub use settings::Settings;
 pub use start::StartRecord;
 pub use status::{
     InvalidTransition, ParseRunStatusError, RunStatus, RunStatusRecord, StatusReason,

@@ -3,7 +3,6 @@ use anyhow::Result;
 use cli_table::format::{Border, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_checkpoint::git::Store;
-use fabro_config::FabroSettingsExt;
 use fabro_util::terminal::Styles;
 use fabro_workflow::git::MetadataStore;
 use fabro_workflow::operations::{

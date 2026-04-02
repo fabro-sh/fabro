@@ -2,7 +2,6 @@ use std::io::{self, IsTerminal, Write};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use fabro_config::FabroSettingsExt;
 use fabro_sandbox::reconnect::reconnect;
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use fabro_workflow::sandbox_git::GIT_REMOTE;

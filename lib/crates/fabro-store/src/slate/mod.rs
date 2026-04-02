@@ -386,11 +386,11 @@ mod tests {
 
     use bytes::Bytes;
     use fabro_types::{
-        AttrValue, Checkpoint, Conclusion, FabroSettings, Graph, NodeStatusRecord, RunId,
-        RunRecord, RunStatus, RunStatusRecord, StageStatus, StartRecord, StatusReason, fixtures,
+        AttrValue, Checkpoint, Conclusion, Graph, NodeStatusRecord, RunId, RunRecord, RunStatus,
+        RunStatusRecord, Settings, StageStatus, StartRecord, StatusReason, fixtures,
     };
     use object_store::memory::InMemory;
-    use slatedb::config::Settings;
+    use slatedb::config::Settings as SlateSettings;
     use slatedb::{CloseReason, ErrorKind};
     use tokio::time::timeout;
 
@@ -425,7 +425,7 @@ mod tests {
         RunRecord {
             run_id: test_run_id(run_id),
             created_at,
-            settings: FabroSettings::default(),
+            settings: Settings::default(),
             graph,
             workflow_slug: Some("night-sky".to_string()),
             working_directory: PathBuf::from("/tmp/night-sky"),
@@ -530,9 +530,9 @@ mod tests {
         include_init: bool,
     ) -> slatedb::Db {
         let db = slatedb::Db::builder(record.db_prefix.clone(), object_store)
-            .with_settings(Settings {
+            .with_settings(SlateSettings {
                 flush_interval: Some(Duration::from_millis(1)),
-                ..Settings::default()
+                ..SlateSettings::default()
             })
             .build()
             .await
@@ -959,9 +959,9 @@ mod tests {
         let created_at = dt("2026-03-27T12:00:00Z");
         let db_prefix = catalog::db_prefix("runs/", created_at, &test_run_id("run-1"));
         let db = slatedb::Db::builder(db_prefix.clone(), object_store)
-            .with_settings(Settings {
+            .with_settings(SlateSettings {
                 flush_interval: Some(Duration::from_millis(1)),
-                ..Settings::default()
+                ..SlateSettings::default()
             })
             .build()
             .await

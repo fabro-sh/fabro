@@ -2070,6 +2070,7 @@ version = "0.176.2"
 dependencies = [
  "chrono",
  "clap",
+ "dirs",
  "fabro-macros",
  "serde",
  "serde_json",

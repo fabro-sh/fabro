@@ -12,8 +12,8 @@ use crate::run::{
 };
 use crate::sandbox::SandboxConfig;
 use crate::server::{self, ApiConfig, FeaturesConfig, GitConfig, LogConfig, WebConfig};
-use crate::settings::FabroSettings;
 use crate::user::{self, ExecConfig, ExecutionMode, ServerConfig};
+use fabro_types::Settings;
 
 fn is_default_checkpoint(c: &CheckpointConfig) -> bool {
     c.exclude_globs.is_empty()
@@ -233,7 +233,7 @@ impl ConfigLayer {
     }
 
     /// Convert this combined config layer into final resolved settings.
-    pub fn resolve(self) -> anyhow::Result<FabroSettings> {
+    pub fn resolve(self) -> anyhow::Result<Settings> {
         self.try_into()
     }
 }

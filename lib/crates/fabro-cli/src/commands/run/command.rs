@@ -1,5 +1,4 @@
 use anyhow::Result;
-use fabro_config::FabroSettingsExt;
 use fabro_util::terminal::Styles;
 
 use crate::args::{GlobalArgs, RunArgs};

@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use fabro_agent::sandbox::Sandbox;
-use fabro_config::FabroSettingsExt;
 use fabro_sandbox::reconnect::reconnect;
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use tokio::fs;

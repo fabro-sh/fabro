@@ -349,10 +349,9 @@ mod tests {
     use std::sync::Arc;
 
     use chrono::Utc;
-    use fabro_config::FabroSettings;
     use fabro_graphviz::graph::Graph;
     use fabro_store::{InMemoryStore, Store};
-    use fabro_types::{RunId, fixtures};
+    use fabro_types::{RunId, Settings, fixtures};
 
     use super::*;
     use crate::pipeline::types::Retroed;
@@ -364,7 +363,7 @@ mod tests {
 
     fn test_run_options(run_dir: &std::path::Path) -> RunOptions {
         RunOptions {
-            settings: FabroSettings::default(),
+            settings: Settings::default(),
             run_dir: run_dir.to_path_buf(),
             cancel_token: None,
             run_id: test_run_id(),

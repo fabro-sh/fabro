@@ -4,9 +4,10 @@ use std::path::Path;
 use crate::args::{GlobalArgs, SettingsArgs};
 use crate::shared::print_json_pretty;
 use crate::user_config;
-use fabro_config::{ConfigLayer, FabroSettings};
+use fabro_config::ConfigLayer;
+use fabro_types::Settings;
 
-fn merged_config(workflow: Option<&Path>, globals: &GlobalArgs) -> anyhow::Result<FabroSettings> {
+fn merged_config(workflow: Option<&Path>, globals: &GlobalArgs) -> anyhow::Result<Settings> {
     let cwd = std::env::current_dir()?;
     let base = match workflow {
         Some(path) => ConfigLayer::for_workflow(path, &cwd)?,

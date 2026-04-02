@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::FabroSettings;
 use crate::config::ConfigLayer;
 use crate::run;
+use fabro_types::Settings;
 pub use fabro_types::settings::project::ProjectSettings;
 
 const CONFIG_FILENAME: &str = "fabro.toml";
@@ -171,7 +171,7 @@ pub fn resolve_workflow_path(
     }
 }
 
-pub fn resolve_working_directory(settings: &FabroSettings, caller_cwd: &Path) -> PathBuf {
+pub fn resolve_working_directory(settings: &Settings, caller_cwd: &Path) -> PathBuf {
     let Some(work_dir) = settings.work_dir.as_deref() else {
         return caller_cwd.to_path_buf();
     };

@@ -1,10 +1,9 @@
 use chrono::{Local, Utc};
-use fabro_config::{FabroSettings, FabroSettingsExt};
 use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, Provider};
 use fabro_sandbox::SandboxProvider;
 use fabro_store::Store;
-use fabro_types::RunId;
+use fabro_types::{RunId, Settings};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -26,7 +25,7 @@ const RUN_CONFIG_FILE: &str = "workflow.toml";
 #[derive(Clone, Debug)]
 pub struct CreateRunInput {
     pub workflow: WorkflowInput,
-    pub settings: FabroSettings,
+    pub settings: Settings,
     pub cwd: PathBuf,
     pub workflow_slug: Option<String>,
     pub run_dir: Option<PathBuf>,
@@ -44,7 +43,7 @@ pub struct CreatedRun {
 }
 
 struct PersistCreateOptions {
-    settings: FabroSettings,
+    settings: Settings,
     run_dir: Option<PathBuf>,
     run_id: Option<RunId>,
     workflow_slug: Option<String>,
@@ -207,7 +206,7 @@ fn store_error(err: impl std::fmt::Display) -> FabroError {
     FabroError::engine(err.to_string())
 }
 
-fn validate_sandbox_provider(settings: &FabroSettings) -> Result<(), FabroError> {
+fn validate_sandbox_provider(settings: &Settings) -> Result<(), FabroError> {
     if let Some(provider) = settings
         .sandbox_settings()
         .and_then(|sandbox| sandbox.provider.as_deref())
@@ -261,7 +260,7 @@ pub(super) fn preprocess_and_validate(
     dot_source: &str,
     base_dir: Option<PathBuf>,
     custom_transforms: Vec<Box<dyn Transform>>,
-    settings: Option<&FabroSettings>,
+    settings: Option<&Settings>,
     goal_override: Option<&str>,
 ) -> Result<Validated, FabroError> {
     let source = match settings.and_then(|resolved| resolved.vars.as_ref()) {
@@ -338,7 +337,7 @@ fn persist_validated(
     )
 }
 
-pub(crate) fn resolve_run_settings(mut settings: FabroSettings, graph: &Graph) -> FabroSettings {
+pub(crate) fn resolve_run_settings(mut settings: Settings, graph: &Graph) -> Settings {
     let llm_settings = settings.llm.as_ref();
     let configured_model = llm_settings.and_then(|l| l.model.as_deref());
     let configured_provider = llm_settings.and_then(|l| l.provider.as_deref());
@@ -414,7 +413,7 @@ mod tests {
         InMemoryStore::default()
     }
 
-    fn validate_dot(dot_source: &str, settings: FabroSettings) -> Validated {
+    fn validate_dot(dot_source: &str, settings: Settings) -> Validated {
         validate(ValidateInput {
             workflow: WorkflowInput::DotSource {
                 source: dot_source.to_string(),
@@ -436,7 +435,7 @@ mod tests {
 
     #[test]
     fn validate_minimal() {
-        let validated = validate_dot(MINIMAL_DOT, FabroSettings::default());
+        let validated = validate_dot(MINIMAL_DOT, Settings::default());
         validated.raise_on_errors().unwrap();
 
         assert_eq!(validated.graph().name, "Test");
@@ -453,7 +452,7 @@ mod tests {
             exit  [shape=Msquare]
             start -> work -> exit
         }"#;
-        let validated = validate_dot(dot, FabroSettings::default());
+        let validated = validate_dot(dot, Settings::default());
         validated.raise_on_errors().unwrap();
 
         let prompt = validated.graph().nodes["work"]
@@ -473,7 +472,7 @@ mod tests {
             exit  [shape=Msquare]
             start -> work -> exit
         }"#;
-        let validated = validate_dot(dot, FabroSettings::default());
+        let validated = validate_dot(dot, Settings::default());
         validated.raise_on_errors().unwrap();
 
         assert_eq!(
@@ -493,7 +492,7 @@ mod tests {
         }"#;
         let validated = validate_dot(
             dot,
-            FabroSettings {
+            Settings {
                 vars: Some(HashMap::from([("who".to_string(), "agent".to_string())])),
                 goal: Some("override".to_string()),
                 ..Default::default()
@@ -517,7 +516,7 @@ mod tests {
                 source: "not a graph".to_string(),
                 base_dir: None,
             },
-            settings: FabroSettings::default(),
+            settings: Settings::default(),
             cwd: PathBuf::from("."),
             custom_transforms: Vec::new(),
         });
@@ -530,7 +529,7 @@ mod tests {
             graph [goal="Test"]
             work [label="Work"]
         }"#;
-        let validated = validate_dot(dot, FabroSettings::default());
+        let validated = validate_dot(dot, Settings::default());
 
         assert!(validated.has_errors());
         assert!(validated.raise_on_errors().is_err());
@@ -557,7 +556,7 @@ mod tests {
                 source: MINIMAL_DOT.to_string(),
                 base_dir: None,
             },
-            settings: FabroSettings::default(),
+            settings: Settings::default(),
             cwd: PathBuf::from("."),
             custom_transforms: vec![Box::new(TagTransform)],
         })
@@ -590,7 +589,7 @@ mod tests {
 
         let validated = validate(ValidateInput {
             workflow: WorkflowInput::Path(dot_path),
-            settings: FabroSettings::default(),
+            settings: Settings::default(),
             cwd: dir.path().to_path_buf(),
             custom_transforms: Vec::new(),
         })
@@ -614,7 +613,7 @@ mod tests {
                     source: dot.to_string(),
                     base_dir: None,
                 },
-                settings: FabroSettings::default(),
+                settings: Settings::default(),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: None,
                 run_dir: Some(dir.path().join("run")),
@@ -645,7 +644,7 @@ mod tests {
                     source: MINIMAL_DOT.to_string(),
                     base_dir: None,
                 },
-                settings: FabroSettings {
+                settings: Settings {
                     llm: Some(fabro_config::run::LlmSettings {
                         model: Some("sonnet".to_string()),
                         provider: None,
@@ -734,7 +733,7 @@ mod tests {
             &store,
             CreateRunInput {
                 workflow: WorkflowInput::Path(workflow_dir.join("workflow.toml")),
-                settings: FabroSettings {
+                settings: Settings {
                     storage_dir: Some(dir.path().join("storage")),
                     dry_run: Some(true),
                     ..Default::default()
@@ -770,7 +769,7 @@ mod tests {
                     source: MINIMAL_DOT.to_string(),
                     base_dir: None,
                 },
-                settings: FabroSettings {
+                settings: Settings {
                     work_dir: Some("workspace".to_string()),
                     dry_run: Some(true),
                     ..Default::default()
@@ -816,7 +815,7 @@ mod tests {
                     source: MINIMAL_DOT.to_string(),
                     base_dir: None,
                 },
-                settings: FabroSettings {
+                settings: Settings {
                     storage_dir: Some(storage_dir.clone()),
                     dry_run: Some(true),
                     ..Default::default()

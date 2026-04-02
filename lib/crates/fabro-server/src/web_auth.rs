@@ -9,7 +9,7 @@ use axum::{Json, Router, routing::get, routing::post};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use cookie::{Cookie, CookieJar, Expiration, Key, SameSite, time::Duration};
-use fabro_config::FabroSettings;
+use fabro_types::Settings;
 use fabro_types::settings::{ApiAuthStrategy, GitProvider, GitSettings};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -155,7 +155,7 @@ fn json_response(status: StatusCode, body: serde_json::Value) -> Response {
     (status, Json(body)).into_response()
 }
 
-fn features_json(settings: &FabroSettings) -> serde_json::Value {
+fn features_json(settings: &Settings) -> serde_json::Value {
     let features = settings.features.clone().unwrap_or_default();
     json!({
         "session_sandboxes": features.session_sandboxes,
@@ -560,7 +560,7 @@ async fn setup_register(
     Json(json!({"ok": true, "restart_required": true})).into_response()
 }
 
-fn build_server_toml(settings: &FabroSettings, git: &GitSettings) -> String {
+fn build_server_toml(settings: &Settings, git: &GitSettings) -> String {
     let web_url = settings.web.as_ref().map_or_else(
         || "http://localhost:3000".to_string(),
         |web| web.url.clone(),

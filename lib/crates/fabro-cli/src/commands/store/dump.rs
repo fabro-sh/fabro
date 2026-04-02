@@ -2,7 +2,6 @@ use std::io::{ErrorKind, Write};
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use fabro_config::FabroSettingsExt;
 use fabro_store::{NodeVisitRef, RunSnapshot, RunStore};
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use serde::Serialize;
@@ -360,9 +359,9 @@ mod tests {
     use chrono::{DateTime, Utc};
     use fabro_store::{EventEnvelope, EventPayload, InMemoryStore, Store as _};
     use fabro_types::{
-        AggregateStats, AttrValue, Checkpoint, Conclusion, FabroSettings, Graph, NodeStatusRecord,
-        Retro, RunId, RunRecord, RunStatus, RunStatusRecord, SandboxRecord, StageStatus,
-        StartRecord, StatusReason, fixtures,
+        AggregateStats, AttrValue, Checkpoint, Conclusion, Graph, NodeStatusRecord, Retro, RunId,
+        RunRecord, RunStatus, RunStatusRecord, SandboxRecord, Settings, StageStatus, StartRecord,
+        StatusReason, fixtures,
     };
 
     fn dt(rfc3339: &str) -> DateTime<Utc> {
@@ -384,7 +383,7 @@ mod tests {
         RunRecord {
             run_id,
             created_at,
-            settings: FabroSettings::default(),
+            settings: Settings::default(),
             graph,
             workflow_slug: Some("night-sky".to_string()),
             working_directory: PathBuf::from("/tmp/night-sky"),

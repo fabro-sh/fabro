@@ -1,7 +1,6 @@
 use anyhow::Context;
 use anyhow::Result;
 use fabro_checkpoint::git::Store;
-use fabro_config::FabroSettingsExt;
 use fabro_util::terminal::Styles;
 use fabro_workflow::operations::{
     ForkRunInput, RewindTarget, build_timeline_or_rebuild, find_run_id_by_prefix_or_store, fork,

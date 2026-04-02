@@ -226,10 +226,10 @@ fn compare_schema(
     }
 }
 
-/// Build a FabroSettings with every Option set to Some so all keys appear
+/// Build a Settings with every Option set to Some so all keys appear
 /// in the serialized JSON.
-fn fully_populated_server_config() -> FabroSettings {
-    FabroSettings {
+fn fully_populated_server_config() -> Settings {
+    Settings {
         storage_dir: Some("/data".into()),
         max_concurrent_runs: Some(10),
         web: Some(WebSettings {

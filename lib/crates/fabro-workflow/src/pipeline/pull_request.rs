@@ -628,7 +628,6 @@ mod tests {
     use super::*;
     use crate::records::StageSummary;
     use chrono::Utc;
-    use fabro_config::FabroSettings;
     use fabro_graphviz::graph::Graph;
     use fabro_llm::client::Client;
     use fabro_llm::error::SdkError;
@@ -639,8 +638,7 @@ mod tests {
         AggregateStats, FrictionKind, FrictionPoint, OpenItem, OpenItemKind, StageRetro,
     };
     use fabro_store::{InMemoryStore, Store};
-    use fabro_types::RunRecord;
-    use fabro_types::fixtures;
+    use fabro_types::{RunRecord, Settings, fixtures};
     use futures::stream;
 
     struct MockProvider {
@@ -1102,7 +1100,7 @@ mod tests {
             .put_run(&RunRecord {
                 run_id: fixtures::RUN_1,
                 created_at,
-                settings: FabroSettings::default(),
+                settings: Settings::default(),
                 graph: Graph::new("test"),
                 workflow_slug: Some("test".to_string()),
                 working_directory: PathBuf::from("/tmp/project"),

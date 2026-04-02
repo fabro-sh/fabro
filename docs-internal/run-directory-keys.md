@@ -25,7 +25,7 @@ No single event carries this data. The `run.started` event has a subset (`name`,
 |-------|-------------|--------------|
 | `run_id` | ULID string | `run.started` → `envelope.run_id` |
 | `created_at` | RFC 3339 timestamp | — |
-| `settings` | full FabroSettings object | — |
+| `settings` | full Settings object | — |
 | `graph` | parsed workflow graph | — |
 | `workflow_slug` | workflow slug (optional) | — |
 | `working_directory` | path string | — |

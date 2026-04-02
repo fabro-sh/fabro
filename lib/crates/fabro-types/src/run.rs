@@ -6,13 +6,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::graph::Graph;
 use crate::run_id::RunId;
-use crate::settings::FabroSettings;
+use crate::settings::Settings;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunRecord {
     pub run_id: RunId,
     pub created_at: DateTime<Utc>,
-    pub settings: FabroSettings,
+    pub settings: Settings,
     pub graph: Graph,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow_slug: Option<String>,

@@ -9,13 +9,12 @@ use std::time::Duration;
 use async_trait::async_trait;
 use chrono::Utc;
 use fabro_agent::Sandbox;
-use fabro_config::FabroSettings;
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_hooks::HookSettings;
 use fabro_interview::AutoApproveInterviewer;
 use fabro_sandbox::SandboxSpec;
 use fabro_store::InMemoryStore;
-use fabro_types::{RunId, fixtures};
+use fabro_types::{RunId, Settings, fixtures};
 
 use super::*;
 use crate::context::{self, Context};
@@ -90,7 +89,7 @@ fn test_run_options(run_dir: &Path, run_id: &str) -> RunOptions {
         run_dir: run_dir.to_path_buf(),
         cancel_token: None,
         run_id: test_run_id(run_id),
-        settings: FabroSettings::default(),
+        settings: Settings::default(),
         git: None,
         host_repo_path: None,
         labels: HashMap::new(),
@@ -133,7 +132,7 @@ fn persisted_workflow(graph: Graph, source: String, run_dir: &Path, run_id: RunI
         RunRecord {
             run_id,
             created_at: Utc::now(),
-            settings: FabroSettings::default(),
+            settings: Settings::default(),
             graph,
             workflow_slug: Some("test".to_string()),
             working_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),

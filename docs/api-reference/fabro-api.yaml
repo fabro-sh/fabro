@@ -3984,7 +3984,7 @@ components:
     # ── Settings Schemas ─────────────────────────────────────────────────
 
     RunSettings:
-      description: Structured run settings mirroring FabroSettings.
+      description: Structured run settings mirroring fabro_types::Settings.
       type: object
       required:
         - version
@@ -4227,7 +4227,7 @@ components:
           description: Whether hook runs in sandbox.
 
     ServerSettings:
-      description: Structured server settings mirroring FabroSettings.
+      description: Structured server settings mirroring fabro_types::Settings.
       type: object
       properties:
         storage_dir:

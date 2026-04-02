@@ -4,7 +4,7 @@ use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
 use crate::config::ConfigLayer;
-use crate::settings::{FabroSettings, FabroSettingsExt};
+use fabro_types::Settings;
 pub use fabro_types::settings::server::{
     ApiAuthStrategy, ApiSettings, AuthProvider, AuthSettings, FeaturesSettings, GitAuthorSettings,
     GitProvider, GitSettings, LogSettings, TlsSettings, WebSettings, WebhookSettings,
@@ -185,11 +185,11 @@ pub fn load_server_config(path: Option<&Path>) -> anyhow::Result<ConfigLayer> {
     crate::load_config_file(path, "server.toml")
 }
 
-pub fn load_server_settings(path: Option<&Path>) -> anyhow::Result<FabroSettings> {
+pub fn load_server_settings(path: Option<&Path>) -> anyhow::Result<Settings> {
     load_server_config(path)?.try_into()
 }
 
 /// Resolve the storage directory: config value > default `~/.fabro`.
-pub fn resolve_storage_dir(settings: &FabroSettings) -> PathBuf {
+pub fn resolve_storage_dir(settings: &Settings) -> PathBuf {
     settings.storage_dir()
 }

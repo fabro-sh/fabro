@@ -2,13 +2,14 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::bail;
+use fabro_config::ConfigLayer;
 use fabro_config::project::{resolve_workflow_path, resolve_working_directory};
-use fabro_config::{ConfigLayer, FabroSettings};
 use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_llm::client::Client as LlmClient;
 use fabro_model::{Catalog, Provider};
 use fabro_sandbox::daytona::{DaytonaConfig, detect_repo_info};
 use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxProvider, SandboxSpec};
+use fabro_types::Settings;
 use fabro_util::check_report::CheckReport;
 use fabro_util::terminal::Styles;
 use fabro_workflow::git::{GitSyncStatus, sync_status};
@@ -22,7 +23,7 @@ use crate::user_config::{load_user_settings_with_globals, user_layer_with_global
 pub(crate) async fn execute(mut args: PreflightArgs, globals: &GlobalArgs) -> anyhow::Result<()> {
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
     let cli = user_layer_with_globals(globals)?;
-    let cli_settings: FabroSettings = load_user_settings_with_globals(globals)?;
+    let cli_settings: Settings = load_user_settings_with_globals(globals)?;
     args.verbose = args.verbose || cli_settings.verbose_enabled();
 
     let github_app = build_github_app_credentials(cli_settings.app_id())?;
@@ -105,7 +106,7 @@ pub(crate) async fn execute(mut args: PreflightArgs, globals: &GlobalArgs) -> an
 fn resolve_model_provider(
     cli_model: Option<&str>,
     cli_provider: Option<&str>,
-    settings: &FabroSettings,
+    settings: &Settings,
     graph: &Graph,
 ) -> (String, Option<String>) {
     let configured_model = settings.llm.as_ref().and_then(|llm| llm.model.as_deref());
@@ -144,7 +145,7 @@ fn resolve_model_provider(
     }
 }
 
-fn parse_sandbox_provider(settings: &FabroSettings) -> anyhow::Result<Option<SandboxProvider>> {
+fn parse_sandbox_provider(settings: &Settings) -> anyhow::Result<Option<SandboxProvider>> {
     settings
         .sandbox_settings()
         .and_then(|s| s.provider.as_deref())
@@ -155,14 +156,14 @@ fn parse_sandbox_provider(settings: &FabroSettings) -> anyhow::Result<Option<San
 
 fn resolve_sandbox_provider(
     cli: Option<SandboxProvider>,
-    settings: &FabroSettings,
+    settings: &Settings,
 ) -> anyhow::Result<SandboxProvider> {
     Ok(cli
         .or(parse_sandbox_provider(settings)?)
         .unwrap_or_default())
 }
 
-fn resolve_daytona_config(settings: &FabroSettings) -> Option<DaytonaConfig> {
+fn resolve_daytona_config(settings: &Settings) -> Option<DaytonaConfig> {
     settings
         .sandbox_settings()
         .and_then(|sandbox| sandbox.daytona.clone())
@@ -196,7 +197,7 @@ async fn mint_github_token(
 #[allow(clippy::too_many_arguments)]
 async fn run_preflight(
     graph: &Graph,
-    settings: &FabroSettings,
+    settings: &Settings,
     cli_model: Option<&str>,
     cli_provider: Option<&str>,
     git_status: GitSyncStatus,

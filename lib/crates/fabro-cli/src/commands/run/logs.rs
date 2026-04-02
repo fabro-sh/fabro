@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
-use fabro_config::FabroSettingsExt;
 use fabro_store::RunStore;
 use fabro_util::redact::redact_jsonl_line;
 use fabro_util::terminal::Styles;

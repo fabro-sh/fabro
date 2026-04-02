@@ -39,7 +39,7 @@ fn is_default_checkpoint(c: &CheckpointSettings) -> bool {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-pub struct FabroSettings {
+pub struct Settings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -108,7 +108,7 @@ pub struct FabroSettings {
     pub fabro: Option<ProjectSettings>,
 }
 
-impl FabroSettings {
+impl Settings {
     pub fn app_id(&self) -> Option<&str> {
         self.git.as_ref().and_then(|g| g.app_id.as_deref())
     }
@@ -182,5 +182,13 @@ impl FabroSettings {
 
     pub fn no_retro_enabled(&self) -> bool {
         self.no_retro.unwrap_or(false)
+    }
+
+    pub fn storage_dir(&self) -> PathBuf {
+        self.storage_dir.clone().unwrap_or_else(|| {
+            dirs::home_dir()
+                .expect("could not determine home directory")
+                .join(".fabro")
+        })
     }
 }

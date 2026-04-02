@@ -743,8 +743,8 @@ mod tests {
 
     use chrono::Duration as ChronoDuration;
     use fabro_types::{
-        AttrValue, FabroSettings, Graph, PullRequestRecord, RunId, RunStatus, StageStatus,
-        StatusReason, fixtures,
+        AttrValue, Graph, PullRequestRecord, RunId, RunStatus, Settings, StageStatus, StatusReason,
+        fixtures,
     };
     use tokio::time::timeout;
 
@@ -773,7 +773,7 @@ mod tests {
         RunRecord {
             run_id: test_run_id(run_id),
             created_at,
-            settings: FabroSettings::default(),
+            settings: Settings::default(),
             graph,
             workflow_slug: Some("night-sky".to_string()),
             working_directory: PathBuf::from("/tmp/night-sky"),

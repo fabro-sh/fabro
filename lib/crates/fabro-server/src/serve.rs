@@ -11,7 +11,7 @@ use tracing::{error, info, warn};
 
 use clap::Args;
 
-use fabro_config::FabroSettings;
+use fabro_types::Settings;
 
 use crate::github_webhooks::WebhookManager;
 use crate::jwt_auth::{AuthMode, AuthStrategy, resolve_auth_mode};
@@ -55,11 +55,7 @@ pub struct ServeArgs {
     pub config: Option<PathBuf>,
 }
 
-fn apply_serve_overrides(
-    base: &FabroSettings,
-    args: &ServeArgs,
-    dry_run_mode: bool,
-) -> FabroSettings {
+fn apply_serve_overrides(base: &Settings, args: &ServeArgs, dry_run_mode: bool) -> Settings {
     let mut settings = base.clone();
     if dry_run_mode {
         settings.dry_run = Some(true);

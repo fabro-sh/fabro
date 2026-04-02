@@ -1,7 +1,6 @@
 use std::io::Write;
 
 use anyhow::{Result, bail};
-use fabro_config::FabroSettingsExt;
 use fabro_types::RunId;
 use fabro_util::terminal::Styles;
 use fabro_workflow::records::Conclusion;

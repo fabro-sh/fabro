@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
-use fabro_config::FabroSettingsExt;
 use fabro_types::RunId;
 use serde::Serialize;
 

@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
-use fabro_config::{FabroSettings, project as project_config};
+use fabro_config::project as project_config;
+use fabro_types::Settings;
 use fabro_util::path::expand_tilde;
 
 #[derive(Clone, Debug)]
@@ -16,14 +17,14 @@ pub enum WorkflowInput {
 #[derive(Clone, Debug)]
 pub(crate) struct ResolveWorkflowInput {
     pub workflow: WorkflowInput,
-    pub settings: FabroSettings,
+    pub settings: Settings,
     pub cwd: PathBuf,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct ResolvedWorkflow {
     pub raw_source: String,
-    pub settings: FabroSettings,
+    pub settings: Settings,
     pub workflow_slug: Option<String>,
     pub workflow_toml_path: Option<PathBuf>,
     pub dot_path: Option<PathBuf>,
@@ -125,7 +126,7 @@ mod tests {
 
         let resolved = resolve_workflow(ResolveWorkflowInput {
             workflow: WorkflowInput::Path(run_dir.join("workflow.toml")),
-            settings: FabroSettings::default(),
+            settings: Settings::default(),
             cwd: dir.path().to_path_buf(),
         })
         .unwrap();
@@ -146,7 +147,7 @@ mod tests {
                 source: "digraph Test { start -> exit }".to_string(),
                 base_dir: None,
             },
-            settings: FabroSettings {
+            settings: Settings {
                 work_dir: Some("workspace".to_string()),
                 ..Default::default()
             },

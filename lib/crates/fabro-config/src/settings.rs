@@ -1,24 +1,8 @@
-use std::path::PathBuf;
-
-pub use fabro_types::settings::FabroSettings;
+use fabro_types::Settings;
 
 use crate::config::ConfigLayer;
 
-pub trait FabroSettingsExt {
-    fn storage_dir(&self) -> PathBuf;
-}
-
-impl FabroSettingsExt for FabroSettings {
-    fn storage_dir(&self) -> PathBuf {
-        self.storage_dir.clone().unwrap_or_else(|| {
-            dirs::home_dir()
-                .expect("could not determine home directory")
-                .join(".fabro")
-        })
-    }
-}
-
-impl TryFrom<ConfigLayer> for FabroSettings {
+impl TryFrom<ConfigLayer> for Settings {
     type Error = anyhow::Error;
 
     fn try_from(value: ConfigLayer) -> Result<Self, Self::Error> {
@@ -60,7 +44,7 @@ impl TryFrom<ConfigLayer> for FabroSettings {
     }
 }
 
-impl TryFrom<&ConfigLayer> for FabroSettings {
+impl TryFrom<&ConfigLayer> for Settings {
     type Error = anyhow::Error;
 
     fn try_from(value: &ConfigLayer) -> Result<Self, Self::Error> {

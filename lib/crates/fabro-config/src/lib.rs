@@ -15,7 +15,6 @@ pub mod user;
 pub use config::ConfigLayer;
 pub use fabro_types::Combine;
 pub use fabro_util::path::expand_tilde;
-pub use settings::{FabroSettings, FabroSettingsExt};
 
 use std::path::Path;
 

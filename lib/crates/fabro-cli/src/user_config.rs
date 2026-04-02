@@ -5,14 +5,14 @@ use std::path::Path;
 pub(crate) use fabro_config::user::*;
 
 use fabro_config::ConfigLayer;
-use fabro_config::FabroSettings;
+use fabro_types::Settings;
 
 use crate::args::GlobalArgs;
 
 #[cfg(feature = "server")]
 use tracing::debug;
 
-pub(crate) fn load_user_settings() -> anyhow::Result<FabroSettings> {
+pub(crate) fn load_user_settings() -> anyhow::Result<Settings> {
     ConfigLayer::user()?.resolve()
 }
 
@@ -21,9 +21,7 @@ pub(crate) fn user_layer_with_globals(globals: &GlobalArgs) -> anyhow::Result<Co
     Ok(apply_global_overrides(layer, globals))
 }
 
-pub(crate) fn load_user_settings_with_globals(
-    globals: &GlobalArgs,
-) -> anyhow::Result<FabroSettings> {
+pub(crate) fn load_user_settings_with_globals(globals: &GlobalArgs) -> anyhow::Result<Settings> {
     user_layer_with_globals(globals)?.resolve()
 }
 
@@ -57,7 +55,7 @@ const DEFAULT_SERVER_URL: &str = "http://localhost:3000/api/v1";
 pub(crate) fn resolve_mode(
     cli_storage_dir: Option<&Path>,
     cli_server_url: Option<&str>,
-    settings: &FabroSettings,
+    settings: &Settings,
 ) -> ResolvedMode {
     let mode = if cli_server_url.is_some() {
         ExecutionMode::Server
@@ -127,7 +125,7 @@ mod tests {
 
     #[test]
     fn resolve_mode_defaults_to_standalone() {
-        let settings = FabroSettings::default();
+        let settings = Settings::default();
         let resolved = resolve_mode(None, None, &settings);
         assert_eq!(resolved.mode, ExecutionMode::Standalone);
         assert_eq!(resolved.server_base_url, DEFAULT_SERVER_URL);
@@ -136,9 +134,9 @@ mod tests {
 
     #[test]
     fn resolve_mode_storage_dir_forces_standalone() {
-        let settings = FabroSettings {
+        let settings = Settings {
             mode: Some(ExecutionMode::Server),
-            ..FabroSettings::default()
+            ..Settings::default()
         };
         let resolved = resolve_mode(Some(Path::new("/tmp/fabro")), None, &settings);
         assert_eq!(resolved.mode, ExecutionMode::Standalone);
@@ -146,13 +144,13 @@ mod tests {
 
     #[test]
     fn resolve_mode_server_url_forces_server() {
-        let settings = FabroSettings {
+        let settings = Settings {
             mode: Some(ExecutionMode::Standalone),
             server: Some(ServerSettings {
                 base_url: Some("https://config.example.com".to_string()),
                 tls: None,
             }),
-            ..FabroSettings::default()
+            ..Settings::default()
         };
         let resolved = resolve_mode(None, Some("https://cli.example.com"), &settings);
         assert_eq!(resolved.mode, ExecutionMode::Server);
@@ -161,13 +159,13 @@ mod tests {
 
     #[test]
     fn resolve_mode_config_overrides_default() {
-        let settings = FabroSettings {
+        let settings = Settings {
             mode: Some(ExecutionMode::Server),
             server: Some(ServerSettings {
                 base_url: Some("https://config.example.com".to_string()),
                 tls: None,
             }),
-            ..FabroSettings::default()
+            ..Settings::default()
         };
         let resolved = resolve_mode(None, None, &settings);
         assert_eq!(resolved.mode, ExecutionMode::Server);
@@ -176,12 +174,12 @@ mod tests {
 
     #[test]
     fn resolve_mode_cli_url_overrides_config_url() {
-        let settings = FabroSettings {
+        let settings = Settings {
             server: Some(ServerSettings {
                 base_url: Some("https://config.example.com".to_string()),
                 tls: None,
             }),
-            ..FabroSettings::default()
+            ..Settings::default()
         };
         let resolved = resolve_mode(None, Some("https://cli.example.com"), &settings);
         assert_eq!(resolved.server_base_url, "https://cli.example.com");
@@ -194,12 +192,12 @@ mod tests {
             key: PathBuf::from("key.pem"),
             ca: PathBuf::from("ca.pem"),
         };
-        let settings = FabroSettings {
+        let settings = Settings {
             server: Some(ServerSettings {
                 base_url: None,
                 tls: Some(tls.clone()),
             }),
-            ..FabroSettings::default()
+            ..Settings::default()
         };
         let resolved = resolve_mode(None, None, &settings);
         assert_eq!(resolved.tls, Some(tls));

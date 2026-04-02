@@ -2,7 +2,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
-use fabro_config::FabroSettingsExt;
 use fabro_interview::FileInterviewer;
 use fabro_store::{RuntimeState, Store};
 use fabro_types::RunId;

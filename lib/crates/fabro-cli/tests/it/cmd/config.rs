@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 
-use fabro_config::FabroSettings;
 use fabro_config::mcp::McpTransport;
 #[cfg(feature = "server")]
 use fabro_config::user::ExecutionMode;
 use fabro_test::{fabro_snapshot, test_context};
+use fabro_types::Settings;
 use predicates::prelude::*;
 
 use super::support::run_snapshot;
@@ -59,8 +59,8 @@ fn old_config_show_command_is_rejected() {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn parse_settings(stdout: &[u8]) -> FabroSettings {
-    serde_yaml::from_slice(stdout).expect("stdout should be valid YAML FabroSettings")
+fn parse_settings(stdout: &[u8]) -> Settings {
+    serde_yaml::from_slice(stdout).expect("stdout should be valid YAML Settings")
 }
 
 /// Set up home config and project config for settings command tests.

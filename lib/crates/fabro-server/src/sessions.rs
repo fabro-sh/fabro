@@ -444,7 +444,7 @@ mod tests {
         let db = test_db().await;
         let state = create_app_state_with_options(
             db,
-            fabro_config::FabroSettings {
+            fabro_types::Settings {
                 dry_run: Some(true),
                 ..Default::default()
             },

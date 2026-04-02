@@ -440,10 +440,9 @@ mod tests {
     use std::path::PathBuf;
 
     use chrono::Utc;
-    use fabro_config::FabroSettings;
     use fabro_graphviz::graph::Graph;
     use fabro_store::{InMemoryStore, Store};
-    use fabro_types::{RunStatus, RunStatusRecord, fixtures};
+    use fabro_types::{RunStatus, RunStatusRecord, Settings, fixtures};
 
     use super::scan_runs_combined;
     use crate::records::{RunRecord, RunRecordExt};
@@ -452,7 +451,7 @@ mod tests {
         RunRecord {
             run_id: fixtures::RUN_1,
             created_at: Utc::now(),
-            settings: FabroSettings::default(),
+            settings: Settings::default(),
             graph: Graph::new("test"),
             workflow_slug: Some("test".to_string()),
             working_directory: PathBuf::from("/tmp/project"),

@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use fabro_config::FabroSettingsExt;
 use fabro_store::RuntimeState;
 use fabro_workflow::assets::{AssetEntry, scan_assets};
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};

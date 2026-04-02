@@ -662,7 +662,7 @@ mod sse_events {
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use fabro_server::server::{build_router, create_app_state_with_options};
-    use fabro_types::settings::FabroSettings;
+    use fabro_types::Settings;
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
@@ -677,8 +677,8 @@ mod sse_events {
     const POLL_INTERVAL: Duration = Duration::from_millis(10);
     const POLL_ATTEMPTS: usize = 500;
 
-    fn dry_run_settings() -> FabroSettings {
-        FabroSettings {
+    fn dry_run_settings() -> Settings {
+        Settings {
             dry_run: Some(true),
             ..Default::default()
         }
@@ -858,7 +858,7 @@ mod serve_dry_run {
     async fn dry_run_app() -> axum::Router {
         let state = create_app_state_with_options(
             test_db().await,
-            fabro_config::FabroSettings {
+            fabro_types::Settings {
                 dry_run: Some(true),
                 ..Default::default()
             },

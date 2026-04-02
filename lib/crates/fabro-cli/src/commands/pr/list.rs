@@ -1,7 +1,6 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use fabro_config::FabroSettingsExt;
 use fabro_types::PullRequestRecord;
 use fabro_workflow::run_lookup::{runs_base, scan_runs_combined};
 use futures::future::join_all;

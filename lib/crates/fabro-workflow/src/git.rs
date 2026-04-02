@@ -2,8 +2,8 @@ use std::path::Path;
 use std::process::Command;
 
 use fabro_checkpoint::git::Store;
-use fabro_config::FabroSettings;
 use fabro_store::{NodeVisitRef, RunStore};
+use fabro_types::Settings;
 
 use crate::error::{FabroError, Result};
 use tokio::task::{JoinError, spawn_blocking};
@@ -16,7 +16,7 @@ pub use fabro_checkpoint::metadata::MetadataStore;
 /// Branch prefix for workflow run branches (e.g. `fabro/run/{run_id}`).
 pub const RUN_BRANCH_PREFIX: &str = "fabro/run/";
 
-pub fn git_author_from_settings(settings: &FabroSettings) -> GitAuthor {
+pub fn git_author_from_settings(settings: &Settings) -> GitAuthor {
     settings
         .git_author()
         .map(GitAuthor::from)
@@ -592,7 +592,7 @@ mod tests {
         run.put_run(&RunRecord {
             run_id: fixtures::RUN_1,
             created_at,
-            settings: fabro_config::FabroSettings::default(),
+            settings: Settings::default(),
             graph: Graph::new("test"),
             workflow_slug: None,
             working_directory: std::path::PathBuf::from("."),

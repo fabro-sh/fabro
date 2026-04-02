@@ -1,7 +1,6 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use fabro_config::FabroSettingsExt;
 use fabro_store::Store;
 use tracing::warn;
 

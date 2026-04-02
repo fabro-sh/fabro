@@ -333,11 +333,11 @@ mod tests {
     use std::sync::Arc;
 
     use chrono::{TimeZone, Utc};
-    use fabro_config::FabroSettings;
     use fabro_graphviz::graph::Graph;
     use fabro_store::{InMemoryStore, NodeVisitRef, Store as _};
     use fabro_types::{
-        NodeStatusRecord, RunId, RunRecord, SandboxRecord, StageStatus, StartRecord, fixtures,
+        NodeStatusRecord, RunId, RunRecord, SandboxRecord, Settings, StageStatus, StartRecord,
+        fixtures,
     };
 
     use super::*;
@@ -360,7 +360,7 @@ mod tests {
         RunRecord {
             run_id,
             created_at: created_at(),
-            settings: FabroSettings::default(),
+            settings: Settings::default(),
             graph: Graph::new("test"),
             workflow_slug: None,
             working_directory: PathBuf::from("/tmp/project"),

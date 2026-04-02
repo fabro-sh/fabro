@@ -2,7 +2,6 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
-use fabro_config::FabroSettingsExt;
 use fabro_store::Store;
 use serde::Serialize;
 use tracing::{debug, info};

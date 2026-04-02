@@ -4,7 +4,6 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Style, Table};
-use fabro_config::FabroSettingsExt;
 use serde::Serialize;
 
 use fabro_workflow::run_lookup::{logs_base, runs_base, scan_runs_combined};

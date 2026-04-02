@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use fabro_config::FabroSettingsExt;
 use fabro_types::RunId;
 use fabro_workflow::records::{RunRecord, RunRecordExt};
 use serde::{Deserialize, Serialize};
@@ -132,9 +131,8 @@ fn launcher_process_matches(_record: &LauncherRecord) -> bool {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use fabro_config::FabroSettings;
     use fabro_graphviz::graph::Graph;
-    use fabro_types::fixtures;
+    use fabro_types::{Settings, fixtures};
     use fabro_workflow::records::RunRecord;
 
     #[test]
@@ -147,7 +145,7 @@ mod tests {
         RunRecord {
             run_id: fixtures::RUN_1,
             created_at: Utc::now(),
-            settings: FabroSettings {
+            settings: Settings {
                 storage_dir: Some(storage_dir.clone()),
                 ..Default::default()
             },

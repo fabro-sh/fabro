@@ -1,14 +1,14 @@
 use anyhow::Result;
-use fabro_config::FabroSettings;
 use fabro_llm::cli::{ChatArgs, run_chat};
 #[cfg(feature = "server")]
 use fabro_llm::cli::{ServerConnection, run_chat_via_server};
+use fabro_types::Settings;
 
 use crate::args::GlobalArgs;
 
 pub(super) async fn execute(
     mut args: ChatArgs,
-    cli_settings: &FabroSettings,
+    cli_settings: &Settings,
     globals: &GlobalArgs,
 ) -> Result<()> {
     globals.require_no_json()?;

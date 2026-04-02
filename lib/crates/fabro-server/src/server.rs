@@ -13,7 +13,6 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_extra::extract::cookie::Key;
-use fabro_config::FabroSettings;
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate, generate_object};
 use fabro_llm::types::{
@@ -21,7 +20,7 @@ use fabro_llm::types::{
     Response as LlmResponse, Role, StreamEvent, ToolChoice, ToolDefinition, Usage,
 };
 use fabro_store::{InMemoryStore, Store};
-use fabro_types::RunId;
+use fabro_types::{RunId, Settings};
 use fabro_util::redact::redact_jsonl_line;
 use fabro_workflow::error::FabroError;
 use fabro_workflow::handler::HandlerRegistry;
@@ -131,7 +130,7 @@ pub struct AppState {
     scheduler_notify: Notify,
     pub sessions: SessionStore,
     llm_client: OnceCell<LlmClient>,
-    pub(crate) settings: Arc<RwLock<FabroSettings>>,
+    pub(crate) settings: Arc<RwLock<Settings>>,
     pub(crate) session_key: Option<Key>,
     registry_factory_override: Option<Box<RegistryFactoryOverride>>,
 }
@@ -405,7 +404,7 @@ async fn get_aggregate_usage(
 
 /// Create an `AppState` with the given LLM spec factory and database pool.
 pub fn create_app_state(db: sqlx::SqlitePool) -> Arc<AppState> {
-    create_app_state_with_options(db, FabroSettings::default(), 5)
+    create_app_state_with_options(db, Settings::default(), 5)
 }
 
 #[doc(hidden)]
@@ -415,7 +414,7 @@ pub fn create_app_state_with_registry_factory(
 ) -> Arc<AppState> {
     build_app_state(
         db,
-        Arc::new(RwLock::new(FabroSettings::default())),
+        Arc::new(RwLock::new(Settings::default())),
         Some(Box::new(registry_factory_override)),
         5,
         Arc::new(InMemoryStore::default()),
@@ -425,7 +424,7 @@ pub fn create_app_state_with_registry_factory(
 /// Create an `AppState` with the given database pool, settings, and concurrency limit.
 pub fn create_app_state_with_options(
     db: sqlx::SqlitePool,
-    settings: FabroSettings,
+    settings: Settings,
     max_concurrent_runs: usize,
 ) -> Arc<AppState> {
     create_app_state_with_store(
@@ -438,7 +437,7 @@ pub fn create_app_state_with_options(
 
 pub fn create_app_state_with_store(
     db: sqlx::SqlitePool,
-    settings: Arc<RwLock<FabroSettings>>,
+    settings: Arc<RwLock<Settings>>,
     max_concurrent_runs: usize,
     store: Arc<dyn Store>,
 ) -> Arc<AppState> {
@@ -447,7 +446,7 @@ pub fn create_app_state_with_store(
 
 fn build_app_state(
     db: sqlx::SqlitePool,
-    settings: Arc<RwLock<FabroSettings>>,
+    settings: Arc<RwLock<Settings>>,
     registry_factory_override: Option<Box<RegistryFactoryOverride>>,
     max_concurrent_runs: usize,
     store: Arc<dyn Store>,
@@ -1636,8 +1635,8 @@ mod tests {
     const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
     const POLL_ATTEMPTS: usize = 500;
 
-    fn dry_run_settings() -> FabroSettings {
-        FabroSettings {
+    fn dry_run_settings() -> Settings {
+        Settings {
             dry_run: Some(true),
             ..Default::default()
         }
@@ -1716,7 +1715,7 @@ mod tests {
 
     #[tokio::test]
     async fn auth_login_github_redirects_to_github() {
-        let mut settings = FabroSettings::default();
+        let mut settings = Settings::default();
         settings.web = Some(WebSettings {
             url: "http://localhost:3000".to_string(),
             auth: AuthSettings {
@@ -2431,7 +2430,7 @@ mod tests {
 
     #[tokio::test]
     async fn start_run_persists_full_settings_snapshot() {
-        let settings = FabroSettings {
+        let settings = Settings {
             dry_run: Some(true),
             llm: Some(fabro_config::run::LlmSettings {
                 model: Some("claude-sonnet-4-5".to_string()),
@@ -2534,7 +2533,7 @@ mod tests {
         let body = body_json(response.into_body()).await;
         let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
 
-        *state.settings.write().unwrap() = FabroSettings::default();
+        *state.settings.write().unwrap() = Settings::default();
 
         execute_run(Arc::clone(&state), run_id).await;
 
@@ -2592,7 +2591,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cancel_during_startup_persists_cancelled_reason() {
-        let settings = FabroSettings {
+        let settings = Settings {
             setup: Some(fabro_config::run::SetupSettings {
                 commands: vec!["sleep 5".to_string()],
                 timeout_ms: Some(30_000),
@@ -2754,7 +2753,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrency_limit_respected() {
-        let state = create_app_state_with_options(test_db().await, FabroSettings::default(), 1);
+        let state = create_app_state_with_options(test_db().await, Settings::default(), 1);
         let app = test_app_with_scheduler(state);
 
         // Submit two runs with max_concurrent_runs=1

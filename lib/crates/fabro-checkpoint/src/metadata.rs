@@ -178,7 +178,7 @@ mod tests {
 
     use super::*;
     use chrono::{TimeZone, Utc};
-    use fabro_types::{FabroSettings, Graph, fixtures};
+    use fabro_types::{Graph, Settings, fixtures};
 
     /// Create a temporary git repo with an initial commit.
     fn init_repo(dir: &Path) {
@@ -207,7 +207,7 @@ mod tests {
         RunRecord {
             run_id,
             created_at: Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).single().unwrap(),
-            settings: FabroSettings::default(),
+            settings: Settings::default(),
             graph: Graph::new("test"),
             workflow_slug: None,
             working_directory: PathBuf::from("/tmp"),

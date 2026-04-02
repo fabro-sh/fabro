@@ -5,14 +5,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
-use fabro_config::FabroSettings;
 use fabro_config::sandbox::WorktreeMode;
 use fabro_config::{project as project_config, run as run_config, sandbox as sandbox_config};
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_model::{Catalog, FallbackTarget, Provider};
 use fabro_sandbox::{SandboxProvider, SandboxSpec};
 use fabro_store::RunStore;
-use fabro_types::RunId;
+use fabro_types::{RunId, Settings};
 use serde::Serialize;
 
 use crate::context::Context;
@@ -370,7 +369,7 @@ impl RunSession {
     }
 }
 
-fn resolve_sandbox_provider(settings: &FabroSettings) -> Result<SandboxProvider, FabroError> {
+fn resolve_sandbox_provider(settings: &Settings) -> Result<SandboxProvider, FabroError> {
     settings
         .sandbox_settings()
         .and_then(|sandbox| sandbox.provider.as_deref())
@@ -380,11 +379,11 @@ fn resolve_sandbox_provider(settings: &FabroSettings) -> Result<SandboxProvider,
         .map_or_else(|| Ok(SandboxProvider::default()), Ok)
 }
 
-fn resolve_preserve_sandbox(settings: &FabroSettings) -> bool {
+fn resolve_preserve_sandbox(settings: &Settings) -> bool {
     settings.preserve_sandbox_enabled()
 }
 
-fn resolve_worktree_mode(settings: &FabroSettings) -> sandbox_config::WorktreeMode {
+fn resolve_worktree_mode(settings: &Settings) -> sandbox_config::WorktreeMode {
     settings
         .sandbox_settings()
         .and_then(|sandbox| sandbox.local.as_ref())
@@ -392,7 +391,7 @@ fn resolve_worktree_mode(settings: &FabroSettings) -> sandbox_config::WorktreeMo
         .unwrap_or_default()
 }
 
-fn resolve_daytona_config(settings: &FabroSettings) -> Option<DaytonaConfig> {
+fn resolve_daytona_config(settings: &Settings) -> Option<DaytonaConfig> {
     settings
         .sandbox_settings()
         .and_then(|sandbox| sandbox.daytona.clone())
@@ -401,7 +400,7 @@ fn resolve_daytona_config(settings: &FabroSettings) -> Option<DaytonaConfig> {
 fn resolve_fallback_chain(
     provider: Provider,
     model: &str,
-    settings: &FabroSettings,
+    settings: &Settings,
 ) -> Vec<FallbackTarget> {
     let fallbacks = settings.llm.as_ref().and_then(|llm| llm.fallbacks.as_ref());
 
@@ -837,9 +836,8 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use chrono::Utc;
-    use fabro_config::FabroSettings;
     use fabro_store::{InMemoryStore, Store};
-    use fabro_types::fixtures;
+    use fabro_types::{Settings, fixtures};
 
     use super::*;
     use crate::context::Context;
@@ -866,7 +864,7 @@ mod tests {
                     source: dot.to_string(),
                     base_dir: None,
                 },
-                settings: FabroSettings {
+                settings: Settings {
                     dry_run: Some(true),
                     ..Default::default()
                 },
