@@ -50,8 +50,28 @@ pub(crate) fn remove_launcher_record(path: &Path) {
 }
 
 pub(crate) fn active_launcher_record_for_run(run_dir: &Path) -> Option<LauncherRecord> {
-    let run_record = RunRecord::load(run_dir).ok()?;
-    active_launcher_record(&run_record.settings.storage_dir(), &run_record.run_id)
+    if let Ok(run_record) = RunRecord::load(run_dir) {
+        return active_launcher_record(&run_record.settings.storage_dir(), &run_record.run_id);
+    }
+
+    let storage_dir = run_dir.parent()?.parent()?;
+    let launchers_dir = launcher_dir(storage_dir);
+    let entries = std::fs::read_dir(&launchers_dir).ok()?;
+    for entry in entries.filter_map(std::result::Result::ok) {
+        let path = entry.path();
+        let Some(launcher) = read_launcher_record(&path) else {
+            continue;
+        };
+        if launcher.run_dir == run_dir {
+            if launcher_record_is_running(&launcher) {
+                return Some(launcher);
+            }
+            remove_launcher_record(&path);
+            return None;
+        }
+    }
+
+    None
 }
 
 pub(crate) fn active_launcher_record(storage_dir: &Path, run_id: &RunId) -> Option<LauncherRecord> {
@@ -146,6 +166,31 @@ mod tests {
 
         assert!(active_launcher_record_for_run(&run_dir).is_none());
         assert!(active_launcher_record(&storage_dir, &fixtures::RUN_1).is_none());
+        assert!(!launcher_path.exists());
+    }
+
+    #[test]
+    fn active_launcher_record_for_run_falls_back_without_run_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage_dir = dir.path().join("storage");
+        let run_dir = storage_dir.join("runs").join("20260401-test");
+        std::fs::create_dir_all(&run_dir).unwrap();
+
+        let launcher_path = launcher_record_path(&storage_dir, &fixtures::RUN_1);
+        write_launcher_record(
+            &launcher_path,
+            &LauncherRecord {
+                run_id: fixtures::RUN_1,
+                run_dir: run_dir.clone(),
+                pid: u32::MAX,
+                resume: false,
+                log_path: dir.path().join("launcher.log"),
+                started_at: Utc::now(),
+            },
+        )
+        .unwrap();
+
+        assert!(active_launcher_record_for_run(&run_dir).is_none());
         assert!(!launcher_path.exists());
     }
 

@@ -30,7 +30,7 @@ use crate::pipeline::{
     PullRequestOptions, RetroOptions, SandboxEnvSpec, build_conclusion_from_store,
     classify_engine_result,
 };
-use crate::records::{Checkpoint, Conclusion, RunRecordExt};
+use crate::records::{Checkpoint, Conclusion};
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::run_status::{self, RunStatus, StatusReason};
 use fabro_config::run::PullRequestSettings;
