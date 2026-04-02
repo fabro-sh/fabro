@@ -11,7 +11,7 @@ use fabro_workflow::operations::{
     find_run_id_by_prefix_or_store, rewind,
 };
 use fabro_workflow::records::CheckpointExt;
-use fabro_workflow::records::{RunRecord, RunRecordExt};
+use fabro_workflow::records::{RunRecord, RunRecordExt, StartRecord, StartRecordExt};
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use fabro_workflow::run_status::{self, RunStatus};
 use git2::Repository;
@@ -137,6 +137,12 @@ async fn reset_rewound_run_state(
         .put_run(&run_record)
         .await
         .map_err(|err| anyhow::anyhow!("failed to restore run record after rewind: {err}"))?;
+    if let Ok(start_record) = StartRecord::load(run_dir) {
+        run_store
+            .put_start(&start_record)
+            .await
+            .map_err(|err| anyhow::anyhow!("failed to restore start record after rewind: {err}"))?;
+    }
     if let Ok(dot_source) = std::fs::read_to_string(run_dir.join("workflow.fabro")) {
         run_store
             .put_graph(&dot_source)
