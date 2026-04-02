@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use fabro_config::FabroSettingsExt;
 use fabro_types::RunId;
 use futures::StreamExt;
@@ -356,59 +356,7 @@ async fn attach_run_files(
         });
     }
 
-    let mut wait_count = 0;
-    while !progress_path.exists() {
-        sleep(std::time::Duration::from_millis(100)).await;
-        wait_count += 1;
-
-        if let Some(record) = read_status_record(&status_path) {
-            if record.status.is_terminal() {
-                finish_progress(&mut progress_ui, json_output);
-                return Ok(determine_exit_code(&conclusion_path, Some(record)));
-            }
-        }
-
-        if let Some(guard) = engine_guard.as_mut() {
-            if let Some(child) = guard.inner() {
-                if matches!(child.try_wait(), Ok(Some(_))) {
-                    finish_progress(&mut progress_ui, json_output);
-                    return Ok(determine_exit_code(
-                        &conclusion_path,
-                        read_status_record(&status_path),
-                    ));
-                }
-            }
-        }
-
-        if let Some(pid) = read_launcher_pid(run_dir) {
-            if !process_alive(pid) && wait_count > 5 {
-                finish_progress(&mut progress_ui, json_output);
-                return Ok(determine_exit_code(
-                    &conclusion_path,
-                    read_status_record(&status_path),
-                ));
-            }
-        }
-
-        if wait_count > 100 {
-            drop(engine_guard.take());
-            bail!(
-                "Timed out waiting for progress.jsonl to appear in {}",
-                run_dir.display()
-            );
-        }
-        if cancelled.load(Ordering::Relaxed) {
-            if !kill_on_detach {
-                if let Some(guard) = engine_guard.as_mut() {
-                    guard.defuse();
-                }
-            }
-            return Ok(ExitCode::from(1));
-        }
-    }
-
-    let file = std::fs::File::open(&progress_path)?;
-    let mut reader = BufReader::new(file);
+    let mut reader = open_progress_reader(&progress_path)?;
     let mut line = String::new();
     let mut cached_pid: Option<u32> = None;
     let attach_started = Instant::now();
@@ -441,15 +389,21 @@ async fn attach_run_files(
             break;
         }
 
-        loop {
-            line.clear();
-            let bytes_read = reader.read_line(&mut line)?;
-            if bytes_read == 0 {
-                break;
-            }
-            let trimmed = line.trim();
-            if !trimmed.is_empty() {
-                emit_progress_line(&mut progress_ui, trimmed, json_output)?;
+        if reader.is_none() {
+            reader = open_progress_reader(&progress_path)?;
+        }
+
+        if let Some(reader) = reader.as_mut() {
+            loop {
+                line.clear();
+                let bytes_read = reader.read_line(&mut line)?;
+                if bytes_read == 0 {
+                    break;
+                }
+                let trimmed = line.trim();
+                if !trimmed.is_empty() {
+                    emit_progress_line(&mut progress_ui, trimmed, json_output)?;
+                }
             }
         }
 
@@ -508,12 +462,12 @@ async fn attach_run_files(
 
         if let Some(child_alive) = child_alive_via_handle {
             if !child_alive {
-                drain_remaining(&mut reader, &mut line, &mut progress_ui, json_output)?;
+                drain_remaining(reader.as_mut(), &mut line, &mut progress_ui, json_output)?;
                 break;
             }
         } else {
             if terminal_status.is_some() {
-                drain_remaining(&mut reader, &mut line, &mut progress_ui, json_output)?;
+                drain_remaining(reader.as_mut(), &mut line, &mut progress_ui, json_output)?;
                 break;
             }
 
@@ -529,7 +483,7 @@ async fn attach_run_files(
                 }
             };
             if !engine_alive {
-                drain_remaining(&mut reader, &mut line, &mut progress_ui, json_output)?;
+                drain_remaining(reader.as_mut(), &mut line, &mut progress_ui, json_output)?;
                 break;
             }
         }
@@ -545,12 +499,23 @@ async fn attach_run_files(
     ))
 }
 
+fn open_progress_reader(progress_path: &Path) -> Result<Option<BufReader<std::fs::File>>> {
+    if !progress_path.exists() {
+        return Ok(None);
+    }
+
+    Ok(Some(BufReader::new(std::fs::File::open(progress_path)?)))
+}
+
 fn drain_remaining(
-    reader: &mut BufReader<std::fs::File>,
+    reader: Option<&mut BufReader<std::fs::File>>,
     line: &mut String,
     progress_ui: &mut run_progress::ProgressUI,
     json_output: bool,
 ) -> Result<()> {
+    let Some(reader) = reader else {
+        return Ok(());
+    };
     loop {
         line.clear();
         match reader.read_line(line) {
@@ -845,7 +810,6 @@ mod tests {
     #[tokio::test]
     async fn attach_does_not_return_when_only_conclusion_exists() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("progress.jsonl"), "").unwrap();
         sample_conclusion(StageStatus::Success)
             .save(&dir.path().join("conclusion.json"))
             .unwrap();
@@ -878,7 +842,6 @@ mod tests {
     #[tokio::test]
     async fn attach_missing_pid_and_failed_status_is_not_alive() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("progress.jsonl"), "").unwrap();
         write_run_status(
             dir.path(),
             RunStatus::Failed,
