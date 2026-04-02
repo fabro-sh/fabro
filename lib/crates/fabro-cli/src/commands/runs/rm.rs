@@ -5,6 +5,7 @@ use fabro_store::Store;
 use tracing::warn;
 
 use fabro_sandbox::reconnect::reconnect as reconnect_sandbox;
+use fabro_workflow::event::{WorkflowRunEvent, append_workflow_event};
 use fabro_workflow::run_lookup::RunInfo;
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use fabro_workflow::run_status::{RunStatus, RunStatusRecord};
@@ -134,6 +135,19 @@ async fn remove_run_dir_with_cleanup(store: &dyn Store, run: &RunInfo) -> Result
                 run_id = %run.run_id,
                 error = %err,
                 "failed to save removing status to store"
+            );
+        }
+        if let Err(err) = append_workflow_event(
+            run_store.as_ref(),
+            &run.run_id,
+            &WorkflowRunEvent::RunRemoving { reason: None },
+        )
+        .await
+        {
+            warn!(
+                run_id = %run.run_id,
+                error = %err,
+                "failed to append removing status event"
             );
         }
     }

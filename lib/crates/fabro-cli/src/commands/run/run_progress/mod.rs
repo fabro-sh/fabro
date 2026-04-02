@@ -1079,6 +1079,11 @@ mod tests {
             WorkflowRunEvent::PullRequestCreated {
                 pr_url: "https://github.com/fabro-sh/fabro/pull/42".into(),
                 pr_number: 42,
+                owner: "fabro-sh".into(),
+                repo: "fabro".into(),
+                base_branch: "main".into(),
+                head_branch: "fabro/run/42".into(),
+                title: "Ship the change".into(),
                 draft: true,
             },
         );

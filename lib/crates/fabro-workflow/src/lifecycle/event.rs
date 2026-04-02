@@ -23,7 +23,7 @@ use crate::graph::WorkflowNode;
 use crate::outcome::{
     FailureCategory, FailureDetail, Outcome, StageStatus, StageUsage, stage_usage_to_llm,
 };
-use fabro_types::RunId;
+use fabro_types::{RunId, StatusReason};
 
 type WfRunState = RunState<Option<StageUsage>>;
 type WfNodeResult = NodeResult<Option<StageUsage>>;
@@ -51,6 +51,7 @@ pub(crate) struct EventLifecycle {
     // Cross-lifecycle data
     pub checkpoint_git_result: Arc<Mutex<Option<GitCheckpointResult>>>,
     pub last_git_sha: Arc<Mutex<Option<String>>>,
+    pub final_patch: Arc<Mutex<Option<String>>>,
     pub circuit_breaker: Arc<CircuitBreakerLifecycle>,
 }
 
@@ -309,8 +310,8 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         &self,
         node: &WorkflowNode,
         result: &WfNodeResult,
-        _next_node_id: Option<&str>,
-        _state: &WfRunState,
+        next_node_id: Option<&str>,
+        state: &WfRunState,
     ) -> CoreResult<()> {
         let status = result.outcome.status.to_string();
 
@@ -319,11 +320,42 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
 
         let git_sha = git_result.as_ref().and_then(|r| r.commit_sha.clone());
         let diff = git_result.as_ref().and_then(|r| r.diff.clone());
+        let (loop_failure_signatures, restart_failure_signatures) =
+            snapshot_failure_signatures(&self.circuit_breaker);
 
         self.emitter.emit(&WorkflowRunEvent::CheckpointCompleted {
             node_id: node.id().to_string(),
             status,
+            current_node: node.id().to_string(),
+            completed_nodes: state.completed_nodes.clone(),
+            node_retries: state
+                .node_retries
+                .clone()
+                .into_iter()
+                .collect::<BTreeMap<_, _>>(),
+            context_values: state
+                .context
+                .snapshot()
+                .into_iter()
+                .collect::<BTreeMap<_, _>>(),
+            node_outcomes: state
+                .node_outcomes
+                .clone()
+                .into_iter()
+                .chain(std::iter::once((
+                    node.id().to_string(),
+                    result.outcome.clone(),
+                )))
+                .collect::<BTreeMap<_, _>>(),
+            next_node_id: next_node_id.map(ToOwned::to_owned),
             git_commit_sha: git_sha.clone(),
+            loop_failure_signatures: loop_failure_signatures.unwrap_or_default(),
+            restart_failure_signatures: restart_failure_signatures.unwrap_or_default(),
+            node_visits: state
+                .node_visits
+                .clone()
+                .into_iter()
+                .collect::<BTreeMap<_, _>>(),
             diff,
         });
 
@@ -354,6 +386,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             u64::try_from(self.run_start.lock().unwrap().elapsed().as_millis()).unwrap();
         let artifact_count = self.artifact_store.lock().unwrap().list().len();
         let last_sha = self.last_git_sha.lock().unwrap().clone();
+        let final_patch = self.final_patch.lock().unwrap().clone();
         let total_cost = {
             let sum: f64 = state
                 .node_outcomes
@@ -373,8 +406,13 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                 duration_ms,
                 artifact_count,
                 status: outcome.status.to_string(),
+                reason: Some(match outcome.status {
+                    StageStatus::PartialSuccess => StatusReason::PartialSuccess,
+                    _ => StatusReason::Completed,
+                }),
                 total_cost,
                 final_git_commit_sha: last_sha,
+                final_patch,
                 usage: run_usage,
             });
         } else {
@@ -385,6 +423,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             self.emitter.emit(&WorkflowRunEvent::WorkflowRunFailed {
                 error: FabroError::engine(error_msg),
                 duration_ms,
+                reason: Some(StatusReason::WorkflowError),
                 git_commit_sha: last_sha,
             });
         }

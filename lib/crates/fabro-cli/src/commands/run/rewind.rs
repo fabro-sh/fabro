@@ -4,6 +4,7 @@ use cli_table::format::{Border, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_checkpoint::git::Store;
 use fabro_util::terminal::Styles;
+use fabro_workflow::event::{WorkflowRunEvent, append_workflow_event};
 use fabro_workflow::git::MetadataStore;
 use fabro_workflow::operations::{
     RewindInput, RewindTarget, RunTimeline, build_timeline_or_rebuild,
@@ -165,6 +166,13 @@ async fn reset_rewound_run_state(
         ))
         .await
         .map_err(|err| anyhow::anyhow!("failed to restore run status after rewind: {err}"))?;
+    append_workflow_event(
+        run_store.as_ref(),
+        run_id,
+        &WorkflowRunEvent::RunSubmitted { reason: None },
+    )
+    .await
+    .map_err(|err| anyhow::anyhow!("failed to append restored run status event: {err}"))?;
     run_store
         .put_checkpoint(&checkpoint)
         .await

@@ -45,6 +45,7 @@ pub(crate) struct GitLifecycle {
     // Cross-lifecycle data (shared with EventLifecycle)
     pub checkpoint_git_result: Arc<Mutex<Option<GitCheckpointResult>>>,
     pub last_git_sha: Arc<Mutex<Option<String>>>,
+    pub final_patch: Arc<Mutex<Option<String>>>,
 }
 
 #[async_trait]
@@ -53,6 +54,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
         // Reset last_git_sha (diff base parity)
         *self.last_git_sha.lock().unwrap() = None;
         *self.checkpoint_git_result.lock().unwrap() = None;
+        *self.final_patch.lock().unwrap() = None;
 
         // Init metadata branch (best-effort)
         if let (Some(_), Some(repo_path)) = (
@@ -350,6 +352,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
             {
                 match git_diff(&*self.sandbox, &base_sha).await {
                     Ok(patch) if !patch.is_empty() => {
+                        *self.final_patch.lock().unwrap() = Some(patch.clone());
                         if let Err(err) = self.run_store.put_final_patch(&patch).await {
                             self.emitter.emit(&WorkflowRunEvent::RunNotice {
                                 level: RunNoticeLevel::Warn,
@@ -358,11 +361,13 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                                     "failed to persist final diff in run store: {err}"
                                 ),
                             });
-                            return;
                         }
                     }
-                    Ok(_) => {}
+                    Ok(_) => {
+                        *self.final_patch.lock().unwrap() = None;
+                    }
                     Err(err) => {
+                        *self.final_patch.lock().unwrap() = None;
                         self.emitter.emit(&WorkflowRunEvent::RunNotice {
                             level: RunNoticeLevel::Warn,
                             code: "git_diff_failed".to_string(),

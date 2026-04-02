@@ -14,9 +14,10 @@ use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
 use crate::error::FabroError;
-use crate::outcome::{FailureDetail, StageUsage};
+use crate::outcome::{FailureDetail, Outcome, StageUsage};
 use fabro_agent::{AgentEvent, SandboxEvent, WorktreeEvent, WorktreeEventCallback};
 use fabro_llm::types::Usage as LlmUsage;
+use fabro_types::StatusReason;
 use fabro_util::redact::redact_jsonl_line;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -82,21 +83,51 @@ pub enum WorkflowRunEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         goal: Option<String>,
     },
+    RunSubmitted {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<StatusReason>,
+    },
+    RunStarting {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<StatusReason>,
+    },
+    RunRunning {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<StatusReason>,
+    },
+    RunPaused {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<StatusReason>,
+    },
+    RunRemoving {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<StatusReason>,
+    },
+    RunDead {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<StatusReason>,
+    },
     WorkflowRunCompleted {
         duration_ms: u64,
         artifact_count: usize,
         #[serde(default)]
         status: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<StatusReason>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         total_cost: Option<f64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         final_git_commit_sha: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        final_patch: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         usage: Option<LlmUsage>,
     },
     WorkflowRunFailed {
         error: FabroError,
         duration_ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<StatusReason>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         git_commit_sha: Option<String>,
     },
@@ -178,6 +209,8 @@ pub enum WorkflowRunEvent {
         duration_ms: u64,
         success_count: usize,
         failure_count: usize,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        results: Vec<serde_json::Value>,
     },
     InterviewStarted {
         question: String,
@@ -197,8 +230,25 @@ pub enum WorkflowRunEvent {
     CheckpointCompleted {
         node_id: String,
         status: String,
+        current_node: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        completed_nodes: Vec<String>,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        node_retries: BTreeMap<String, u32>,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        context_values: BTreeMap<String, serde_json::Value>,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        node_outcomes: BTreeMap<String, Outcome>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        next_node_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         git_commit_sha: Option<String>,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        loop_failure_signatures: BTreeMap<String, usize>,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        restart_failure_signatures: BTreeMap<String, usize>,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        node_visits: BTreeMap<String, usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         diff: Option<String>,
     },
@@ -404,6 +454,11 @@ pub enum WorkflowRunEvent {
     PullRequestCreated {
         pr_url: String,
         pr_number: u64,
+        owner: String,
+        repo: String,
+        base_branch: String,
+        head_branch: String,
+        title: String,
         draft: bool,
     },
     PullRequestFailed {
@@ -474,6 +529,24 @@ impl WorkflowRunEvent {
             }
             Self::WorkflowRunStarted { name, run_id, .. } => {
                 info!(workflow = name.as_str(), run_id = %run_id, "Workflow run started");
+            }
+            Self::RunSubmitted { reason } => {
+                info!(?reason, "Run submitted");
+            }
+            Self::RunStarting { reason } => {
+                info!(?reason, "Run starting");
+            }
+            Self::RunRunning { reason } => {
+                info!(?reason, "Run running");
+            }
+            Self::RunPaused { reason } => {
+                info!(?reason, "Run paused");
+            }
+            Self::RunRemoving { reason } => {
+                info!(?reason, "Run removing");
+            }
+            Self::RunDead { reason } => {
+                warn!(?reason, "Run dead");
             }
             Self::WorkflowRunCompleted {
                 duration_ms,
@@ -617,10 +690,14 @@ impl WorkflowRunEvent {
                 duration_ms,
                 success_count,
                 failure_count,
+                results,
             } => {
                 debug!(
                     duration_ms,
-                    success_count, failure_count, "Parallel execution completed"
+                    success_count,
+                    failure_count,
+                    result_count = results.len(),
+                    "Parallel execution completed"
                 );
             }
             Self::InterviewStarted {
@@ -639,9 +716,17 @@ impl WorkflowRunEvent {
                 warn!(stage, duration_ms, "Interview timeout");
             }
             Self::CheckpointCompleted {
-                node_id, status, ..
+                node_id,
+                status,
+                completed_nodes,
+                ..
             } => {
-                debug!(node_id, status, "Checkpoint completed");
+                debug!(
+                    node_id,
+                    status,
+                    completed_count = completed_nodes.len(),
+                    "Checkpoint completed"
+                );
             }
             Self::CheckpointFailed { node_id, error } => {
                 error!(node_id, error, "Checkpoint failed");
@@ -882,9 +967,11 @@ impl WorkflowRunEvent {
                 pr_url,
                 pr_number,
                 draft,
+                owner,
+                repo,
                 ..
             } => {
-                info!(pr_url = %pr_url, pr_number, draft, "Pull request created");
+                info!(pr_url = %pr_url, pr_number, draft, owner, repo, "Pull request created");
             }
             Self::PullRequestFailed { error, .. } => {
                 error!(error = %error, "Pull request creation failed");
@@ -975,6 +1062,12 @@ pub fn event_name(event: &WorkflowRunEvent) -> &'static str {
     match event {
         WorkflowRunEvent::RunCreated { .. } => "run.created",
         WorkflowRunEvent::WorkflowRunStarted { .. } => "run.started",
+        WorkflowRunEvent::RunSubmitted { .. } => "run.submitted",
+        WorkflowRunEvent::RunStarting { .. } => "run.starting",
+        WorkflowRunEvent::RunRunning { .. } => "run.running",
+        WorkflowRunEvent::RunPaused { .. } => "run.paused",
+        WorkflowRunEvent::RunRemoving { .. } => "run.removing",
+        WorkflowRunEvent::RunDead { .. } => "run.dead",
         WorkflowRunEvent::WorkflowRunCompleted { .. } => "run.completed",
         WorkflowRunEvent::WorkflowRunFailed { .. } => "run.failed",
         WorkflowRunEvent::RunNotice { .. } => "run.notice",
@@ -1403,6 +1496,20 @@ pub fn event_payload_from_redacted_json(line: &str, run_id: &RunId) -> Result<Ev
     EventPayload::new(value, run_id).map_err(anyhow::Error::from)
 }
 
+pub async fn append_workflow_event(
+    run_store: &dyn RunStore,
+    run_id: &RunId,
+    event: &WorkflowRunEvent,
+) -> Result<()> {
+    let envelope = canonicalize_event(run_id, event);
+    let payload = build_redacted_event_payload(&envelope, run_id)?;
+    run_store
+        .append_event(&payload)
+        .await
+        .map(|_| ())
+        .map_err(anyhow::Error::from)
+}
+
 pub struct ProgressLogger {
     run_dir: PathBuf,
 }
@@ -1797,6 +1904,7 @@ mod tests {
             &WorkflowRunEvent::WorkflowRunFailed {
                 error: FabroError::handler("boom"),
                 duration_ms: 900,
+                reason: Some(StatusReason::WorkflowError),
                 git_commit_sha: Some("abc123".to_string()),
             },
         );

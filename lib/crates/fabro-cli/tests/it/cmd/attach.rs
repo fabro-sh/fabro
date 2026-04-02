@@ -424,6 +424,22 @@ fn attach_json_errors_without_prompting_for_human_input() {
         "ts": "[TIMESTAMP]"
       },
       {
+        "event": "run.submitted",
+        "id": "[EVENT_ID]",
+        "properties": {},
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
+      },
+      {
+        "event": "run.starting",
+        "id": "[EVENT_ID]",
+        "properties": {
+          "reason": "sandbox_initializing"
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
+      },
+      {
         "event": "sandbox.initializing",
         "id": "[EVENT_ID]",
         "properties": {
@@ -463,6 +479,13 @@ fn attach_json_errors_without_prompting_for_human_input() {
           "goal": "Wait for approval",
           "name": "HumanGate"
         },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
+      },
+      {
+        "event": "run.running",
+        "id": "[EVENT_ID]",
+        "properties": {},
         "run_id": "[ULID]",
         "ts": "[TIMESTAMP]"
       },
@@ -533,6 +556,33 @@ fn attach_json_errors_without_prompting_for_human_input() {
         "node_id": "start",
         "node_label": "start",
         "properties": {
+          "completed_nodes": [
+            "start"
+          ],
+          "context_values": {
+            "current.preamble": "Goal: Wait for approval/n",
+            "current_node": "start",
+            "failure_class": "",
+            "failure_signature": "",
+            "graph.goal": "Wait for approval",
+            "internal.fidelity": "compact",
+            "internal.node_visit_count": 1,
+            "internal.retry_count.start": 0,
+            "internal.run_id": "[ULID]",
+            "internal.thread_id": null,
+            "outcome": "success"
+          },
+          "current_node": "start",
+          "next_node_id": "approve",
+          "node_outcomes": {
+            "start": {
+              "status": "success",
+              "usage": null
+            }
+          },
+          "node_visits": {
+            "start": 1
+          },
           "status": "success"
         },
         "run_id": "[ULID]",

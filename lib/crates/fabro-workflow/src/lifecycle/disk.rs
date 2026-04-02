@@ -12,7 +12,7 @@ use fabro_core::outcome::NodeResult;
 use fabro_core::state::RunState;
 
 use super::circuit_breaker::CircuitBreakerLifecycle;
-use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
+use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent, append_workflow_event};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::{OutcomeExt, StageUsage};
@@ -62,6 +62,19 @@ impl RunLifecycle<WorkflowGraph> for DiskLifecycle {
                 level: RunNoticeLevel::Warn,
                 code: "status_store_save_failed".to_string(),
                 message: format!("failed to save running status to store: {err}"),
+            });
+        }
+        if let Err(err) = append_workflow_event(
+            self.run_store.as_ref(),
+            &self.run_id,
+            &WorkflowRunEvent::RunRunning { reason: None },
+        )
+        .await
+        {
+            self.emitter.emit(&WorkflowRunEvent::RunNotice {
+                level: RunNoticeLevel::Warn,
+                code: "status_event_append_failed".to_string(),
+                message: format!("failed to append running status event: {err}"),
             });
         }
         Ok(())

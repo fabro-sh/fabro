@@ -371,6 +371,22 @@ fn json_run_implies_auto_approve_for_human_gates() {
         "ts": "[TIMESTAMP]"
       },
       {
+        "event": "run.submitted",
+        "id": "[EVENT_ID]",
+        "properties": {},
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
+      },
+      {
+        "event": "run.starting",
+        "id": "[EVENT_ID]",
+        "properties": {
+          "reason": "sandbox_initializing"
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
+      },
+      {
         "event": "sandbox.initializing",
         "id": "[EVENT_ID]",
         "properties": {
@@ -410,6 +426,13 @@ fn json_run_implies_auto_approve_for_human_gates() {
           "goal": "Route through the default approval path",
           "name": "HumanGate"
         },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
+      },
+      {
+        "event": "run.running",
+        "id": "[EVENT_ID]",
+        "properties": {},
         "run_id": "[ULID]",
         "ts": "[TIMESTAMP]"
       },
@@ -480,6 +503,33 @@ fn json_run_implies_auto_approve_for_human_gates() {
         "node_id": "start",
         "node_label": "start",
         "properties": {
+          "completed_nodes": [
+            "start"
+          ],
+          "context_values": {
+            "current.preamble": "Goal: Route through the default approval path/n",
+            "current_node": "start",
+            "failure_class": "",
+            "failure_signature": "",
+            "graph.goal": "Route through the default approval path",
+            "internal.fidelity": "compact",
+            "internal.node_visit_count": 1,
+            "internal.retry_count.start": 0,
+            "internal.run_id": "[ULID]",
+            "internal.thread_id": null,
+            "outcome": "success"
+          },
+          "current_node": "start",
+          "next_node_id": "approve",
+          "node_outcomes": {
+            "start": {
+              "status": "success",
+              "usage": null
+            }
+          },
+          "node_visits": {
+            "start": 1
+          },
           "status": "success"
         },
         "run_id": "[ULID]",
@@ -568,6 +618,52 @@ fn json_run_implies_auto_approve_for_human_gates() {
         "node_id": "approve",
         "node_label": "approve",
         "properties": {
+          "completed_nodes": [
+            "start",
+            "approve"
+          ],
+          "context_values": {
+            "current.preamble": "Goal: Route through the default approval path/n",
+            "current_node": "approve",
+            "failure_class": "",
+            "failure_signature": "",
+            "graph.goal": "Route through the default approval path",
+            "human.gate.label": "[A] Approve",
+            "human.gate.selected": "A",
+            "internal.fidelity": "compact",
+            "internal.node_visit_count": 1,
+            "internal.retry_count.approve": 0,
+            "internal.retry_count.start": 0,
+            "internal.run_id": "[ULID]",
+            "internal.thread_id": "start",
+            "outcome": "success",
+            "preferred_label": "[A] Approve",
+            "thread.start.current_node": "approve"
+          },
+          "current_node": "approve",
+          "next_node_id": "ship",
+          "node_outcomes": {
+            "approve": {
+              "context_updates": {
+                "human.gate.label": "[A] Approve",
+                "human.gate.selected": "A"
+              },
+              "preferred_label": "[A] Approve",
+              "status": "success",
+              "suggested_next_ids": [
+                "ship"
+              ],
+              "usage": null
+            },
+            "start": {
+              "status": "success",
+              "usage": null
+            }
+          },
+          "node_visits": {
+            "approve": 1,
+            "start": 1
+          },
           "status": "success"
         },
         "run_id": "[ULID]",
@@ -683,6 +779,67 @@ fn json_run_implies_auto_approve_for_human_gates() {
         "node_id": "ship",
         "node_label": "ship",
         "properties": {
+          "completed_nodes": [
+            "start",
+            "approve",
+            "ship"
+          ],
+          "context_values": {
+            "command.output": "shipped/n",
+            "command.stderr": "",
+            "current.preamble": "Goal: Route through the default approval path/n/n## Completed stages/n- **approve**: success/n/n## Context/n- human.gate.label: [A] Approve/n- human.gate.selected: A/n",
+            "current_node": "ship",
+            "failure_class": "",
+            "failure_signature": "",
+            "graph.goal": "Route through the default approval path",
+            "human.gate.label": "[A] Approve",
+            "human.gate.selected": "A",
+            "internal.fidelity": "compact",
+            "internal.node_visit_count": 1,
+            "internal.retry_count.approve": 0,
+            "internal.retry_count.ship": 0,
+            "internal.retry_count.start": 0,
+            "internal.run_id": "[ULID]",
+            "internal.thread_id": "approve",
+            "outcome": "success",
+            "preferred_label": "[A] Approve",
+            "thread.approve.current_node": "ship",
+            "thread.start.current_node": "approve"
+          },
+          "current_node": "ship",
+          "next_node_id": "exit",
+          "node_outcomes": {
+            "approve": {
+              "context_updates": {
+                "human.gate.label": "[A] Approve",
+                "human.gate.selected": "A"
+              },
+              "preferred_label": "[A] Approve",
+              "status": "success",
+              "suggested_next_ids": [
+                "ship"
+              ],
+              "usage": null
+            },
+            "ship": {
+              "context_updates": {
+                "command.output": "shipped/n",
+                "command.stderr": ""
+              },
+              "notes": "Script completed: echo shipped",
+              "status": "success",
+              "usage": null
+            },
+            "start": {
+              "status": "success",
+              "usage": null
+            }
+          },
+          "node_visits": {
+            "approve": 1,
+            "ship": 1,
+            "start": 1
+          },
           "status": "success"
         },
         "run_id": "[ULID]",
@@ -728,6 +885,7 @@ fn json_run_implies_auto_approve_for_human_gates() {
         "properties": {
           "artifact_count": 0,
           "duration_ms": "[DURATION_MS]",
+          "reason": "completed",
           "status": "success"
         },
         "run_id": "[ULID]",

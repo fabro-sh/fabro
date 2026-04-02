@@ -499,6 +499,7 @@ impl Handler for ParallelHandler {
             duration_ms: millis_u64(parallel_start.elapsed()),
             success_count,
             failure_count: fail_count,
+            results: results_json.clone(),
         });
         {
             let run_id = context
