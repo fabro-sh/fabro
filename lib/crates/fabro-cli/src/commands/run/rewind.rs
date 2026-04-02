@@ -107,7 +107,29 @@ async fn reset_rewound_run_state(
     run_id: &fabro_types::RunId,
     run_dir: &std::path::Path,
 ) -> Result<()> {
-    let run_record = RunRecord::load(run_dir)?;
+    let existing_run_store = durable_store
+        .open_run_reader(run_id)
+        .await
+        .map_err(|err| anyhow::anyhow!("failed to open durable store run before rewind: {err}"))?;
+    let store_run_record = if let Some(run_store) = existing_run_store.as_ref() {
+        run_store.get_run().await.ok().flatten()
+    } else {
+        None
+    };
+    let store_start_record = if let Some(run_store) = existing_run_store.as_ref() {
+        run_store.get_start().await.ok().flatten()
+    } else {
+        None
+    };
+    let store_graph = if let Some(run_store) = existing_run_store.as_ref() {
+        run_store.get_graph().await.ok().flatten()
+    } else {
+        None
+    };
+
+    let run_record = store_run_record
+        .or_else(|| RunRecord::load(run_dir).ok())
+        .context("failed to restore run record after rewind: missing run metadata")?;
     let checkpoint = MetadataStore::read_checkpoint(git_store.repo_dir(), &run_id.to_string())?
         .context("rewound metadata branch is missing checkpoint.json")?;
     checkpoint.save(&run_dir.join("checkpoint.json"))?;
@@ -136,13 +158,15 @@ async fn reset_rewound_run_state(
         .put_run(&run_record)
         .await
         .map_err(|err| anyhow::anyhow!("failed to restore run record after rewind: {err}"))?;
-    if let Ok(start_record) = StartRecord::load(run_dir) {
+    if let Some(start_record) = store_start_record.or_else(|| StartRecord::load(run_dir).ok()) {
         run_store
             .put_start(&start_record)
             .await
             .map_err(|err| anyhow::anyhow!("failed to restore start record after rewind: {err}"))?;
     }
-    if let Ok(dot_source) = std::fs::read_to_string(run_dir.join("workflow.fabro")) {
+    if let Some(dot_source) =
+        store_graph.or_else(|| std::fs::read_to_string(run_dir.join("workflow.fabro")).ok())
+    {
         run_store
             .put_graph(&dot_source)
             .await
