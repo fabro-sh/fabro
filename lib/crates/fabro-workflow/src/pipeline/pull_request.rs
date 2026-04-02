@@ -585,10 +585,6 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                                 draft: pr_cfg.draft,
                             });
                             pr_url = Some(record.html_url.clone());
-                            if let Err(e) = record.save(&options.run_dir.join("pull_request.json"))
-                            {
-                                tracing::warn!(error = %e, "Failed to save pull_request.json");
-                            }
                         }
                         Ok(None) => {}
                         Err(e) => {

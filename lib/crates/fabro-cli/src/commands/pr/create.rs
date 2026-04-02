@@ -131,9 +131,6 @@ async fn create_from(
     match record {
         Some(record) => {
             info!(pr_url = %record.html_url, "Pull request created");
-            if let Err(err) = record.save(&run_dir.join("pull_request.json")) {
-                tracing::warn!(error = %err, "Failed to save pull_request.json");
-            }
             if globals.json {
                 print_json_pretty(&record)?;
             } else {
