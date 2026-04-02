@@ -79,6 +79,50 @@ fn start_by_run_id_starts_created_run() {
 }
 
 #[test]
+fn start_by_run_id_starts_created_run_without_run_json_or_status_json() {
+    let context = test_context!();
+    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAH";
+
+    context
+        .command()
+        .args([
+            "create",
+            "--dry-run",
+            "--auto-approve",
+            "--run-id",
+            run_id,
+            example_fixture("simple.fabro").to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let run_dir = context.find_run_dir(run_id);
+    std::fs::remove_file(run_dir.join("run.json")).unwrap();
+    std::fs::remove_file(run_dir.join("status.json")).unwrap();
+
+    context.command().args(["start", run_id]).assert().success();
+    context
+        .command()
+        .args(["wait", run_id])
+        .timeout(std::time::Duration::from_secs(10))
+        .assert()
+        .success();
+
+    let conclusion = read_json(run_dir.join("conclusion.json"));
+    fabro_json_snapshot!(
+        context,
+        serde_json::json!({
+            "conclusion_status": conclusion["status"],
+        }),
+        @r#"
+        {
+          "conclusion_status": "success"
+        }
+        "#
+    );
+}
+
+#[test]
 fn start_by_workflow_name_prefers_newly_created_submitted_run() {
     let context = test_context!();
     let workflow_path = context.temp_dir.join("smoke/workflow.fabro");

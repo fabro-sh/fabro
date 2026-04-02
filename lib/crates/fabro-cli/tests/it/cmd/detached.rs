@@ -11,18 +11,19 @@ fn help() {
     success: true
     exit_code: 0
     ----- stdout -----
-    Internal: run the engine process (reads run.json from run dir)
+    Internal: run the engine process
 
-    Usage: fabro __detached [OPTIONS] --run-dir <RUN_DIR> --launcher-path <LAUNCHER_PATH>
+    Usage: fabro __detached [OPTIONS] --run-id <RUN_ID> --run-dir <RUN_DIR> --launcher-path <LAUNCHER_PATH>
 
     Options:
           --json                           Output as JSON [env: FABRO_JSON=]
-          --run-dir <RUN_DIR>              Run directory
+          --run-id <RUN_ID>                Run ID
           --debug                          Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --run-dir <RUN_DIR>              Run directory
           --launcher-path <LAUNCHER_PATH>  Launcher metadata path
           --no-upgrade-check               Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --resume                         Resume from checkpoint instead of fresh start
           --quiet                          Suppress non-essential output [env: FABRO_QUIET=]
+          --resume                         Resume from checkpoint instead of fresh start
           --verbose                        Enable verbose output [env: FABRO_VERBOSE=]
           --storage-dir <STORAGE_DIR>      Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
       -h, --help                           Print help
@@ -74,6 +75,8 @@ digraph CachedGraph {
         .command()
         .args([
             "__detached",
+            "--run-id",
+            run_id,
             "--run-dir",
             run_dir.to_str().unwrap(),
             "--launcher-path",
@@ -156,6 +159,8 @@ digraph GitHubApp {
     cmd.env("GITHUB_APP_PRIVATE_KEY", "%%%not-base64%%%");
     cmd.args([
         "__detached",
+        "--run-id",
+        run_id,
         "--run-dir",
         run_dir.to_str().unwrap(),
         "--launcher-path",
@@ -169,6 +174,68 @@ digraph GitHubApp {
     ----- stderr -----
     error: GITHUB_APP_PRIVATE_KEY is not valid PEM or base64: Invalid symbol 37, offset 0.
     ");
+}
+
+#[test]
+fn detached_runs_without_run_json_when_run_id_is_explicit() {
+    let context = test_context!();
+    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAJ";
+    let workflow_path = context.temp_dir.join("workflow.fabro");
+
+    context.write_temp(
+        "workflow.fabro",
+        "\
+digraph DetachedStoreOnly {
+  start [shape=Mdiamond, label=\"Start\"]
+  exit  [shape=Msquare, label=\"Exit\"]
+  start -> exit
+}
+",
+    );
+
+    context
+        .command()
+        .args([
+            "create",
+            "--dry-run",
+            "--auto-approve",
+            "--run-id",
+            run_id,
+            workflow_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let run_dir = context.find_run_dir(run_id);
+    std::fs::remove_file(run_dir.join("run.json")).unwrap();
+
+    context
+        .command()
+        .args([
+            "__detached",
+            "--run-id",
+            run_id,
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            "--launcher-path",
+            launcher_path(&context, run_id).to_str().unwrap(),
+        ])
+        .timeout(std::time::Duration::from_secs(15))
+        .assert()
+        .success();
+
+    let conclusion = read_json(run_dir.join("conclusion.json"));
+    fabro_json_snapshot!(
+        context,
+        serde_json::json!({
+            "status": conclusion["status"],
+        }),
+        @r#"
+        {
+          "status": "success"
+        }
+        "#
+    );
 }
 
 #[test]
@@ -235,6 +302,8 @@ digraph Test {
     let mut cmd = context.command();
     cmd.args([
         "__detached",
+        "--run-id",
+        &run_id,
         "--run-dir",
         &run_dir,
         "--launcher-path",

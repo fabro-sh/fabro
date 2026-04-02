@@ -51,7 +51,11 @@ pub(crate) fn remove_launcher_record(path: &Path) {
 
 pub(crate) fn active_launcher_record_for_run(run_dir: &Path) -> Option<LauncherRecord> {
     let run_record = RunRecord::load(run_dir).ok()?;
-    let path = launcher_record_path(&run_record.settings.storage_dir(), &run_record.run_id);
+    active_launcher_record(&run_record.settings.storage_dir(), &run_record.run_id)
+}
+
+pub(crate) fn active_launcher_record(storage_dir: &Path, run_id: &RunId) -> Option<LauncherRecord> {
+    let path = launcher_record_path(storage_dir, run_id);
     let launcher = read_launcher_record(&path)?;
     if launcher_record_is_running(&launcher) {
         Some(launcher)
@@ -141,6 +145,7 @@ mod tests {
         .unwrap();
 
         assert!(active_launcher_record_for_run(&run_dir).is_none());
+        assert!(active_launcher_record(&storage_dir, &fixtures::RUN_1).is_none());
         assert!(!launcher_path.exists());
     }
 

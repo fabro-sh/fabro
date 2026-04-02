@@ -24,9 +24,11 @@ pub use types::{
 };
 
 use fabro_types::{
-    Checkpoint, Conclusion, NodeStatusRecord, Retro, RunId, RunRecord, RunStatusRecord,
-    SandboxRecord, StartRecord,
+    Checkpoint, Conclusion, NodeStatusRecord, Outcome, PullRequestRecord, Retro, RunId, RunRecord,
+    RunStatusRecord, SandboxRecord, StageUsage, StartRecord,
 };
+
+pub type NodeOutcomeRecord = Outcome<Option<StageUsage>>;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ListRunsQuery {
@@ -83,11 +85,44 @@ pub trait RunStore: Send + Sync {
         node: &NodeVisitRef<'_>,
         status: &NodeStatusRecord,
     ) -> Result<()>;
+    async fn put_node_outcome(
+        &self,
+        node: &NodeVisitRef<'_>,
+        outcome: &NodeOutcomeRecord,
+    ) -> Result<()>;
+    async fn put_node_provider_used(
+        &self,
+        node: &NodeVisitRef<'_>,
+        provider_used: &serde_json::Value,
+    ) -> Result<()>;
+    async fn put_node_diff(&self, node: &NodeVisitRef<'_>, diff: &str) -> Result<()>;
+    async fn put_node_script_invocation(
+        &self,
+        node: &NodeVisitRef<'_>,
+        invocation: &serde_json::Value,
+    ) -> Result<()>;
+    async fn put_node_script_timing(
+        &self,
+        node: &NodeVisitRef<'_>,
+        timing: &serde_json::Value,
+    ) -> Result<()>;
+    async fn put_node_parallel_results(
+        &self,
+        node: &NodeVisitRef<'_>,
+        results: &serde_json::Value,
+    ) -> Result<()>;
     async fn put_node_stdout(&self, node: &NodeVisitRef<'_>, log: &str) -> Result<()>;
     async fn put_node_stderr(&self, node: &NodeVisitRef<'_>, log: &str) -> Result<()>;
 
     async fn get_node(&self, node: &NodeVisitRef<'_>) -> Result<NodeSnapshot>;
     async fn list_node_visits(&self, node_id: &str) -> Result<Vec<u32>>;
+    async fn list_node_ids(&self) -> Result<Vec<String>>;
+
+    async fn put_final_patch(&self, patch: &str) -> Result<()>;
+    async fn get_final_patch(&self) -> Result<Option<String>>;
+
+    async fn put_pull_request(&self, record: &PullRequestRecord) -> Result<()>;
+    async fn get_pull_request(&self) -> Result<Option<PullRequestRecord>>;
 
     async fn append_event(&self, payload: &EventPayload) -> Result<u32>;
     async fn list_events(&self) -> Result<Vec<EventEnvelope>>;

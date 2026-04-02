@@ -646,9 +646,12 @@ pub(crate) enum RunCommands {
         /// Run ID prefix or workflow name
         run: String,
     },
-    /// Internal: run the engine process (reads run.json from run dir)
+    /// Internal: run the engine process
     #[command(name = "__detached", hide = true)]
     Detached {
+        /// Run ID
+        #[arg(long)]
+        run_id: fabro_types::RunId,
         /// Run directory
         #[arg(long)]
         run_dir: PathBuf,

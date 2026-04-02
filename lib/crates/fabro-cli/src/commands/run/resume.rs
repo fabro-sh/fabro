@@ -1,7 +1,6 @@
 use anyhow::bail;
 use fabro_config::FabroSettingsExt;
 use fabro_util::terminal::Styles;
-use fabro_workflow::records::{RunRecord, RunRecordExt};
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 
 use crate::args::{GlobalArgs, ResumeArgs};
@@ -29,13 +28,14 @@ pub(crate) async fn resume_command(
     if !run_dir.join("run.json").exists() {
         bail!("run directory exists but has no run.json — cannot resume");
     }
-    let run_id = RunRecord::load(&run_dir)?.run_id;
+    let run_id = run.run_id;
 
     if launcher_pid_alive(&run_dir) {
         bail!("an engine process is still running for this run — cannot resume");
     }
 
-    let child = super::start::start_run(&run_dir, true)?;
+    let child =
+        super::start::start_run(&run_dir, &run_id, &cli_settings.storage_dir(), true).await?;
 
     if args.detach {
         if globals.json {

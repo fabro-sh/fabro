@@ -10,11 +10,12 @@ use futures::Stream;
 use tracing::warn;
 
 use crate::{
-    EventEnvelope, EventPayload, NodeSnapshot, NodeVisitRef, Result, RunSnapshot, RunStore,
+    EventEnvelope, EventPayload, NodeOutcomeRecord, NodeSnapshot, NodeVisitRef, Result,
+    RunSnapshot, RunStore,
 };
 use fabro_types::{
-    Checkpoint, Conclusion, NodeStatusRecord, Retro, RunRecord, RunStatusRecord, SandboxRecord,
-    StartRecord,
+    Checkpoint, Conclusion, NodeStatusRecord, PullRequestRecord, Retro, RunRecord, RunStatusRecord,
+    SandboxRecord, StartRecord,
 };
 
 #[derive(Debug, Clone)]
@@ -265,6 +266,84 @@ impl RunStore for DiskProjectingRunStore {
         Ok(())
     }
 
+    async fn put_node_outcome(
+        &self,
+        node: &NodeVisitRef<'_>,
+        outcome: &NodeOutcomeRecord,
+    ) -> Result<()> {
+        self.inner.put_node_outcome(node, outcome).await?;
+        self.write_json_best_effort(
+            &disk_node_dir(&self.run_dir, node.node_id, node.visit).join("outcome.json"),
+            outcome,
+        );
+        Ok(())
+    }
+
+    async fn put_node_provider_used(
+        &self,
+        node: &NodeVisitRef<'_>,
+        provider_used: &serde_json::Value,
+    ) -> Result<()> {
+        self.inner
+            .put_node_provider_used(node, provider_used)
+            .await?;
+        self.write_json_best_effort(
+            &disk_node_dir(&self.run_dir, node.node_id, node.visit).join("provider_used.json"),
+            provider_used,
+        );
+        Ok(())
+    }
+
+    async fn put_node_diff(&self, node: &NodeVisitRef<'_>, diff: &str) -> Result<()> {
+        self.inner.put_node_diff(node, diff).await?;
+        self.write_text_best_effort(
+            &disk_node_dir(&self.run_dir, node.node_id, node.visit).join("diff.patch"),
+            diff,
+        );
+        Ok(())
+    }
+
+    async fn put_node_script_invocation(
+        &self,
+        node: &NodeVisitRef<'_>,
+        invocation: &serde_json::Value,
+    ) -> Result<()> {
+        self.inner
+            .put_node_script_invocation(node, invocation)
+            .await?;
+        self.write_json_best_effort(
+            &disk_node_dir(&self.run_dir, node.node_id, node.visit).join("script_invocation.json"),
+            invocation,
+        );
+        Ok(())
+    }
+
+    async fn put_node_script_timing(
+        &self,
+        node: &NodeVisitRef<'_>,
+        timing: &serde_json::Value,
+    ) -> Result<()> {
+        self.inner.put_node_script_timing(node, timing).await?;
+        self.write_json_best_effort(
+            &disk_node_dir(&self.run_dir, node.node_id, node.visit).join("script_timing.json"),
+            timing,
+        );
+        Ok(())
+    }
+
+    async fn put_node_parallel_results(
+        &self,
+        node: &NodeVisitRef<'_>,
+        results: &serde_json::Value,
+    ) -> Result<()> {
+        self.inner.put_node_parallel_results(node, results).await?;
+        self.write_json_best_effort(
+            &disk_node_dir(&self.run_dir, node.node_id, node.visit).join("parallel_results.json"),
+            results,
+        );
+        Ok(())
+    }
+
     async fn put_node_stdout(&self, node: &NodeVisitRef<'_>, log: &str) -> Result<()> {
         self.inner.put_node_stdout(node, log).await?;
         self.write_text_best_effort(
@@ -289,6 +368,30 @@ impl RunStore for DiskProjectingRunStore {
 
     async fn list_node_visits(&self, node_id: &str) -> Result<Vec<u32>> {
         self.inner.list_node_visits(node_id).await
+    }
+
+    async fn list_node_ids(&self) -> Result<Vec<String>> {
+        self.inner.list_node_ids().await
+    }
+
+    async fn put_final_patch(&self, patch: &str) -> Result<()> {
+        self.inner.put_final_patch(patch).await?;
+        self.write_text_best_effort(&self.run_dir.join("final.patch"), patch);
+        Ok(())
+    }
+
+    async fn get_final_patch(&self) -> Result<Option<String>> {
+        self.inner.get_final_patch().await
+    }
+
+    async fn put_pull_request(&self, record: &PullRequestRecord) -> Result<()> {
+        self.inner.put_pull_request(record).await?;
+        self.write_json_best_effort(&self.run_dir.join("pull_request.json"), record);
+        Ok(())
+    }
+
+    async fn get_pull_request(&self) -> Result<Option<PullRequestRecord>> {
+        self.inner.get_pull_request().await
     }
 
     async fn append_event(&self, payload: &EventPayload) -> Result<u32> {

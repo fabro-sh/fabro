@@ -3,10 +3,10 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{Result, StoreError};
+use crate::{NodeOutcomeRecord, Result, StoreError};
 use fabro_types::{
-    Checkpoint, Conclusion, NodeStatusRecord, Retro, RunId, RunRecord, RunStatus, RunStatusRecord,
-    SandboxRecord, StartRecord, StatusReason,
+    Checkpoint, Conclusion, NodeStatusRecord, PullRequestRecord, Retro, RunId, RunRecord,
+    RunStatus, RunStatusRecord, SandboxRecord, StartRecord, StatusReason,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +51,8 @@ pub struct RunSnapshot {
     pub retro: Option<Retro>,
     pub graph: Option<String>,
     pub sandbox: Option<SandboxRecord>,
+    pub final_patch: Option<String>,
+    pub pull_request: Option<PullRequestRecord>,
     pub nodes: Vec<NodeSnapshot>,
 }
 
@@ -61,6 +63,12 @@ pub struct NodeSnapshot {
     pub prompt: Option<String>,
     pub response: Option<String>,
     pub status: Option<NodeStatusRecord>,
+    pub outcome: Option<NodeOutcomeRecord>,
+    pub provider_used: Option<serde_json::Value>,
+    pub diff: Option<String>,
+    pub script_invocation: Option<serde_json::Value>,
+    pub script_timing: Option<serde_json::Value>,
+    pub parallel_results: Option<serde_json::Value>,
     pub stdout: Option<String>,
     pub stderr: Option<String>,
 }

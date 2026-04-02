@@ -27,7 +27,6 @@ pub(crate) async fn run(args: &WaitArgs, styles: &Styles, globals: &GlobalArgs) 
 
     info!(run_id = %run_info.run_id, "Waiting for run to complete");
 
-    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run_info.run_id).await?;
     let status_path = run_info.path.join("status.json");
     let deadline = args
         .timeout
@@ -37,6 +36,8 @@ pub(crate) async fn run(args: &WaitArgs, styles: &Styles, globals: &GlobalArgs) 
 
     let final_status = loop {
         let load_file_status = || RunStatusRecord::load(&status_path).ok().map(|r| r.status);
+        let run_store =
+            store::open_run_reader(&cli_settings.storage_dir(), &run_info.run_id).await?;
         let status = match run_store.as_ref() {
             Some(run_store) => match run_store.get_status().await {
                 Ok(Some(record)) => Some(record.status),
@@ -72,6 +73,7 @@ pub(crate) async fn run(args: &WaitArgs, styles: &Styles, globals: &GlobalArgs) 
     };
 
     let conclusion_path = run_info.path.join("conclusion.json");
+    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run_info.run_id).await?;
     let conclusion = match run_store.as_ref() {
         Some(run_store) => run_store
             .get_conclusion()
