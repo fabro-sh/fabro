@@ -1,13 +1,14 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use chrono::{Local, Utc};
 use fabro_config::{FabroSettings, FabroSettingsExt};
 use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, Provider};
 use fabro_sandbox::SandboxProvider;
-use fabro_store::Store;
+use fabro_store::{DiskProjectingRunStore, RunStore, Store};
 use fabro_types::RunId;
 
 use crate::error::FabroError;
@@ -20,9 +21,7 @@ use crate::transforms::{Transform, expand_vars};
 use fabro_sandbox::daytona::detect_repo_info;
 
 use super::source::{ResolveWorkflowInput, WorkflowInput, resolve_workflow};
-use crate::event::{
-    WorkflowRunEvent, append_progress_event, canonicalize_event_at, normalize_json_value,
-};
+use crate::event::{WorkflowRunEvent, canonicalize_event_at, normalize_json_value};
 
 const RUN_CONFIG_FILE: &str = "workflow.toml";
 
@@ -120,12 +119,11 @@ pub async fn create(store: &dyn Store, request: CreateRunInput) -> Result<Create
     )?;
 
     write_run_config_snapshot(&run_dir, resolved.workflow_toml_path.as_deref())?;
-    emit_run_created_event(
-        &persisted,
-        &resolved.raw_source,
-        resolved.workflow_toml_path.as_deref(),
-    )?;
-    persist_created_run(store, &persisted, &resolved.raw_source).await?;
+    let workflow_config = resolved
+        .workflow_toml_path
+        .as_deref()
+        .and_then(|path| std::fs::read_to_string(path).ok());
+    persist_created_run(store, &persisted, &resolved.raw_source, workflow_config).await?;
 
     Ok(CreatedRun {
         persisted,
@@ -135,51 +133,15 @@ pub async fn create(store: &dyn Store, request: CreateRunInput) -> Result<Create
     })
 }
 
-fn emit_run_created_event(
-    persisted: &Persisted,
-    workflow_source: &str,
-    workflow_toml_path: Option<&Path>,
-) -> Result<(), FabroError> {
-    let record = persisted.run_record();
-    let workflow_config = workflow_toml_path.and_then(|path| std::fs::read_to_string(path).ok());
-    let settings = normalize_json_value(
-        serde_json::to_value(&record.settings)
-            .map_err(|err| FabroError::engine(err.to_string()))?,
-    );
-    let graph = normalize_json_value(
-        serde_json::to_value(&record.graph).map_err(|err| FabroError::engine(err.to_string()))?,
-    );
-    let event = WorkflowRunEvent::RunCreated {
-        run_id: record.run_id,
-        settings,
-        graph,
-        workflow_source: (!workflow_source.is_empty()).then(|| workflow_source.to_string()),
-        workflow_config,
-        labels: record
-            .labels
-            .clone()
-            .into_iter()
-            .collect::<BTreeMap<_, _>>(),
-        run_dir: persisted.run_dir().display().to_string(),
-        working_directory: record.working_directory.display().to_string(),
-        host_repo_path: record.host_repo_path.clone(),
-        base_branch: record.base_branch.clone(),
-        workflow_slug: record.workflow_slug.clone(),
-        db_prefix: None,
-    };
-    let envelope = canonicalize_event_at(&record.run_id, &event, record.created_at);
-    append_progress_event(persisted.run_dir(), &envelope)
-        .map_err(|err| FabroError::engine(err.to_string()))
-}
-
 async fn persist_created_run(
     store: &dyn Store,
     persisted: &Persisted,
     workflow_source: &str,
+    workflow_config: Option<String>,
 ) -> Result<(), FabroError> {
     let record = persisted.run_record();
     let run_dir_string = persisted.run_dir().to_string_lossy().to_string();
-    let run_store = match store
+    let inner_run_store = match store
         .create_run(&record.run_id, record.created_at, Some(&run_dir_string))
         .await
     {
@@ -190,6 +152,10 @@ async fn persist_created_run(
             .map_err(|open_err| FabroError::engine(open_err.to_string()))?
             .ok_or_else(|| FabroError::engine(err.to_string()))?,
     };
+    let run_store: Arc<dyn RunStore> = Arc::new(DiskProjectingRunStore::new(
+        inner_run_store,
+        persisted.run_dir().to_path_buf(),
+    ));
 
     run_store.put_run(record).await.map_err(store_error)?;
     if !workflow_source.is_empty() {
@@ -216,7 +182,7 @@ async fn persist_created_run(
                     .map_err(|err| FabroError::engine(err.to_string()))?,
             ),
             workflow_source: (!workflow_source.is_empty()).then(|| workflow_source.to_string()),
-            workflow_config: None,
+            workflow_config,
             labels: record
                 .labels
                 .clone()

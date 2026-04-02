@@ -106,9 +106,71 @@ fn dry_run_writes_jsonl_and_live_json() {
     fabro_json_snapshot!(context, &progress, @r#"
     [
       {
-        "event": "run.created",
         "id": "[EVENT_ID]",
+        "ts": "[TIMESTAMP]",
+        "run_id": "[ULID]",
+        "event": "run.created",
         "properties": {
+          "workflow_slug": "simple",
+          "settings": {
+            "auto_approve": true,
+            "dry_run": true,
+            "fabro": {
+              "root": "fabro/"
+            },
+            "features": {
+              "retros": false,
+              "session_sandboxes": false
+            },
+            "goal": "Run tests and report results",
+            "hooks": [
+              {
+                "blocking": true,
+                "command": "cargo fmt",
+                "event": "post_tool_use",
+                "matcher": "write_file|edit_file|apply_patch",
+                "name": "cargo-fmt",
+                "sandbox": null,
+                "timeout_ms": null
+              }
+            ],
+            "llm": {
+              "fallbacks": null,
+              "model": "claude-sonnet-4-6",
+              "provider": "anthropic"
+            },
+            "mode": "standalone",
+            "pull_request": {
+              "auto_merge": false,
+              "draft": false,
+              "enabled": true,
+              "merge_strategy": "squash"
+            },
+            "sandbox": {
+              "daytona": {
+                "auto_stop_interval": 30,
+                "labels": {
+                  "repo": "fabro-sh/fabro"
+                },
+                "network": null,
+                "skip_clone": false,
+                "snapshot": {
+                  "cpu": 4,
+                  "disk": 20,
+                  "dockerfile": "FROM ubuntu:24.04/n/nRUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates build-essential pkg-config libssl-dev unzip python3 && rm -rf /var/lib/apt/lists/*/n/n# GitHub CLI/nRUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && apt-get update && apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*/n/n# Rust/nRUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y/nENV PATH=\"/root/.cargo/bin:${PATH}\"/nRUN cargo install cargo-nextest --locked/nENV CARGO_INCREMENTAL=0/n/n# Bun/nRUN curl -fsSL https://bun.sh/install | bash/nENV PATH=\"/root/.bun/bin:${PATH}\"/n/nWORKDIR /root/n",
+                  "memory": 8,
+                  "name": "fabro-v6"
+                }
+              },
+              "devcontainer": null,
+              "env": null,
+              "local": null,
+              "preserve": null,
+              "provider": "local"
+            },
+            "storage_dir": "[STORAGE_DIR]",
+            "version": 1
+          },
           "graph": {
             "attrs": {
               "goal": {
@@ -183,74 +245,12 @@ fn dry_run_writes_jsonl_and_live_json() {
               }
             }
           },
-          "host_repo_path": "[TEMP_DIR]",
-          "labels": {},
-          "run_dir": "[STORAGE_DIR]/runs/REDACTED",
-          "settings": {
-            "auto_approve": true,
-            "dry_run": true,
-            "fabro": {
-              "root": "fabro/"
-            },
-            "features": {
-              "retros": false,
-              "session_sandboxes": false
-            },
-            "goal": "Run tests and report results",
-            "hooks": [
-              {
-                "blocking": true,
-                "command": "cargo fmt",
-                "event": "post_tool_use",
-                "matcher": "write_file|edit_file|apply_patch",
-                "name": "cargo-fmt",
-                "sandbox": null,
-                "timeout_ms": null
-              }
-            ],
-            "llm": {
-              "fallbacks": null,
-              "model": "claude-sonnet-4-6",
-              "provider": "anthropic"
-            },
-            "mode": "standalone",
-            "pull_request": {
-              "auto_merge": false,
-              "draft": false,
-              "enabled": true,
-              "merge_strategy": "squash"
-            },
-            "sandbox": {
-              "daytona": {
-                "auto_stop_interval": 30,
-                "labels": {
-                  "repo": "fabro-sh/fabro"
-                },
-                "network": null,
-                "skip_clone": false,
-                "snapshot": {
-                  "cpu": 4,
-                  "disk": 20,
-                  "dockerfile": "FROM ubuntu:24.04/n/nRUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates build-essential pkg-config libssl-dev unzip python3 && rm -rf /var/lib/apt/lists/*/n/n# GitHub CLI/nRUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && apt-get update && apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*/n/n# Rust/nRUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y/nENV PATH=\"/root/.cargo/bin:${PATH}\"/nRUN cargo install cargo-nextest --locked/nENV CARGO_INCREMENTAL=0/n/n# Bun/nRUN curl -fsSL https://bun.sh/install | bash/nENV PATH=\"/root/.bun/bin:${PATH}\"/n/nWORKDIR /root/n",
-                  "memory": 8,
-                  "name": "fabro-v6"
-                }
-              },
-              "devcontainer": null,
-              "env": null,
-              "local": null,
-              "preserve": null,
-              "provider": "local"
-            },
-            "storage_dir": "[STORAGE_DIR]",
-            "version": 1
-          },
-          "workflow_slug": "simple",
           "workflow_source": "digraph Simple {/n    graph [goal=\"Run tests and report results\"]/n    rankdir=LR/n/n    start [shape=Mdiamond, label=\"Start\"]/n    exit  [shape=Msquare, label=\"Exit\"]/n/n    run_tests [label=\"Run Tests\", prompt=\"Run the test suite and report results\"]/n    report    [label=\"Report\", prompt=\"Summarize the test results\"]/n/n    start -> run_tests -> report -> exit/n}/n",
-          "working_directory": "[TEMP_DIR]"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
+          "labels": {},
+          "run_dir": "[DRY_RUN_DIR]",
+          "working_directory": "[TEMP_DIR]",
+          "host_repo_path": "[TEMP_DIR]"
+        }
       },
       {
         "event": "sandbox.initializing",
