@@ -89,6 +89,36 @@ pub async fn rebuild_metadata_branch(
                             serde_json::to_vec_pretty(&status)?,
                         ));
                     }
+                    if let Some(provider_used) = node.provider_used {
+                        entries.push((
+                            node_file_path(node_id, visit, "provider_used.json"),
+                            serde_json::to_vec_pretty(&provider_used)?,
+                        ));
+                    }
+                    if let Some(diff) = node.diff {
+                        entries.push((
+                            node_file_path(node_id, visit, "diff.patch"),
+                            diff.into_bytes(),
+                        ));
+                    }
+                    if let Some(script_invocation) = node.script_invocation {
+                        entries.push((
+                            node_file_path(node_id, visit, "script_invocation.json"),
+                            serde_json::to_vec_pretty(&script_invocation)?,
+                        ));
+                    }
+                    if let Some(script_timing) = node.script_timing {
+                        entries.push((
+                            node_file_path(node_id, visit, "script_timing.json"),
+                            serde_json::to_vec_pretty(&script_timing)?,
+                        ));
+                    }
+                    if let Some(parallel_results) = node.parallel_results {
+                        entries.push((
+                            node_file_path(node_id, visit, "parallel_results.json"),
+                            serde_json::to_vec_pretty(&parallel_results)?,
+                        ));
+                    }
                 }
             }
 
@@ -305,7 +335,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use fabro_config::FabroSettings;
     use fabro_graphviz::graph::Graph;
-    use fabro_store::{InMemoryStore, Store as _};
+    use fabro_store::{InMemoryStore, NodeVisitRef, Store as _};
     use fabro_types::{
         NodeStatusRecord, RunId, RunRecord, SandboxRecord, StageStatus, StartRecord, fixtures,
     };
