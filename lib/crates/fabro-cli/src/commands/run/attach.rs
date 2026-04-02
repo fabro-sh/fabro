@@ -45,14 +45,20 @@ pub(crate) async fn attach_run(
     json_output: bool,
 ) -> Result<ExitCode> {
     let run_record = RunRecord::load(run_dir).ok();
+    let inferred_storage_dir = infer_storage_dir(run_dir);
     let fallback_storage_dir = run_record
         .as_ref()
-        .map(|record| record.settings.storage_dir());
-    let storage_dir = storage_dir.or(fallback_storage_dir.as_deref());
-    let run_id = run_id.or_else(|| run_record.as_ref().map(|record| &record.run_id));
+        .map(|record| record.settings.storage_dir())
+        .or(inferred_storage_dir);
+    let inferred_run_id = infer_run_id(run_dir);
+    let storage_dir = storage_dir.map(Path::to_path_buf).or(fallback_storage_dir);
+    let run_id = run_id
+        .copied()
+        .or_else(|| run_record.as_ref().map(|record| record.run_id))
+        .or(inferred_run_id);
 
-    if let (Some(storage_dir), Some(run_id)) = (storage_dir, run_id) {
-        match store::open_run_reader(&storage_dir, run_id).await {
+    if let (Some(storage_dir), Some(run_id)) = (storage_dir.as_deref(), run_id.as_ref()) {
+        match store::open_run_reader(storage_dir, run_id).await {
             Ok(Some(run_store)) => match run_store.list_events().await {
                 Ok(events) => {
                     let verbose = run_store
@@ -593,6 +599,24 @@ fn read_launcher_pid(run_dir: &Path) -> Option<u32> {
     super::launcher::active_launcher_record_for_run(run_dir).map(|record| record.pid)
 }
 
+fn infer_storage_dir(run_dir: &Path) -> Option<PathBuf> {
+    let runs_dir = run_dir.parent()?;
+    let storage_dir = runs_dir.parent()?;
+    (runs_dir.file_name()? == "runs").then(|| storage_dir.to_path_buf())
+}
+
+fn infer_run_id(run_dir: &Path) -> Option<RunId> {
+    super::launcher::active_launcher_record_for_run(run_dir)
+        .map(|record| record.run_id)
+        .or_else(|| {
+            std::fs::read_to_string(run_dir.join("id.txt"))
+                .ok()
+                .map(|run_id| run_id.trim().to_string())
+                .filter(|run_id| !run_id.is_empty())
+                .and_then(|run_id| run_id.parse().ok())
+        })
+}
+
 #[allow(clippy::struct_field_names)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct InterviewPaths {
@@ -861,6 +885,45 @@ mod tests {
         .unwrap();
 
         assert_eq!(exit, ExitCode::from(1));
+    }
+
+    #[test]
+    fn infer_storage_dir_detects_standard_run_layout() {
+        let dir = tempfile::tempdir().unwrap();
+        let run_dir = dir
+            .path()
+            .join("storage")
+            .join("runs")
+            .join("20260401-test");
+        std::fs::create_dir_all(&run_dir).unwrap();
+
+        assert_eq!(
+            infer_storage_dir(&run_dir),
+            Some(dir.path().join("storage"))
+        );
+    }
+
+    #[test]
+    fn infer_run_id_uses_launcher_record_without_run_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage_dir = dir.path().join("storage");
+        let run_dir = storage_dir.join("runs").join("20260401-test");
+        std::fs::create_dir_all(&run_dir).unwrap();
+
+        super::launcher::write_launcher_record(
+            &super::launcher::launcher_record_path(&storage_dir, &fabro_types::fixtures::RUN_1),
+            &super::launcher::LauncherRecord {
+                run_id: fabro_types::fixtures::RUN_1,
+                run_dir: run_dir.clone(),
+                pid: u32::MAX,
+                resume: false,
+                log_path: dir.path().join("launcher.log"),
+                started_at: Utc::now(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(infer_run_id(&run_dir), Some(fabro_types::fixtures::RUN_1));
     }
 
     #[test]
