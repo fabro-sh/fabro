@@ -3,9 +3,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use fabro_config::FabroSettingsExt;
-use fabro_sandbox::SandboxRecordExt;
 use fabro_sandbox::reconnect::reconnect;
-use fabro_workflow::records::{StartRecord, StartRecordExt};
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use fabro_workflow::sandbox_git::GIT_REMOTE;
 use tracing::{debug, info};
@@ -21,9 +19,11 @@ pub(crate) async fn run(args: DiffArgs, globals: &GlobalArgs) -> Result<()> {
     let base = runs_base(&cli_settings.storage_dir());
     let store = store::build_store(&cli_settings.storage_dir())?;
     let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
-    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await?;
+    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id)
+        .await?
+        .context("Failed to open run store")?;
 
-    let patch = resolve_diff(&run.path, run_store.as_deref(), &args).await?;
+    let patch = resolve_diff(&run.path, run_store.as_ref(), &args).await?;
 
     if globals.json {
         let mut value = serde_json::json!({
@@ -55,21 +55,19 @@ pub(crate) async fn run(args: DiffArgs, globals: &GlobalArgs) -> Result<()> {
 
 async fn resolve_diff(
     run_dir: &Path,
-    run_store: Option<&dyn fabro_store::RunStore>,
+    run_store: &dyn fabro_store::RunStore,
     args: &DiffArgs,
 ) -> Result<String> {
     if let Some(ref node_id) = args.node {
-        if let Some(run_store) = run_store {
-            if let Ok(visits) = run_store.list_node_visits(node_id).await {
-                if let Some(visit) = visits.into_iter().max() {
-                    if let Ok(node) = run_store
-                        .get_node(&fabro_store::NodeVisitRef { node_id, visit })
-                        .await
-                    {
-                        if let Some(patch) = node.diff {
-                            debug!(node_id, visit, "Reading per-node diff from store");
-                            return Ok(patch);
-                        }
+        if let Ok(visits) = run_store.list_node_visits(node_id).await {
+            if let Some(visit) = visits.into_iter().max() {
+                if let Ok(node) = run_store
+                    .get_node(&fabro_store::NodeVisitRef { node_id, visit })
+                    .await
+                {
+                    if let Some(patch) = node.diff {
+                        debug!(node_id, visit, "Reading per-node diff from store");
+                        return Ok(patch);
                     }
                 }
             }
@@ -82,30 +80,22 @@ async fn resolve_diff(
         });
     }
 
-    let start = match run_store {
-        Some(run_store) => run_store
-            .get_start()
-            .await?
-            .context("Failed to load start.json")?,
-        None => StartRecord::load(run_dir).context("Failed to load start.json")?,
-    };
+    let start = run_store
+        .get_start()
+        .await?
+        .context("Failed to load start record from store")?;
 
     let base_sha = start
         .base_sha
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("This run was not git-checkpointed; no diff available"))?;
 
-    if let Some(run_store) = run_store {
-        if let Ok(Some(patch)) = run_store.get_final_patch().await {
-            debug!("Reading final.patch from store");
-            return Ok(patch);
-        }
+    if let Ok(Some(patch)) = run_store.get_final_patch().await {
+        debug!("Reading final.patch from store");
+        return Ok(patch);
     }
 
-    let run_concluded = match run_store {
-        Some(run_store) => run_store.get_conclusion().await?.is_some(),
-        None => run_dir.join("conclusion.json").exists(),
-    };
+    let run_concluded = run_store.get_conclusion().await?.is_some();
     if run_concluded {
         bail!(
             "Run completed but no final.patch exists — the run may not have produced any changes"
@@ -113,15 +103,10 @@ async fn resolve_diff(
     }
 
     debug!("No final.patch found; attempting live diff from sandbox");
-    let record = match run_store {
-        Some(run_store) => run_store
-            .get_sandbox()
-            .await?
-            .context("Failed to load sandbox record from store")?,
-        None => fabro_sandbox::SandboxRecord::load(&run_dir.join("sandbox.json")).context(
-            "Failed to load sandbox.json — was this run started with a recent version of arc?",
-        )?,
-    };
+    let record = run_store
+        .get_sandbox()
+        .await?
+        .context("Failed to load sandbox record from store")?;
 
     info!(provider = %record.provider, "Reconnecting to sandbox for live diff");
     let sandbox = reconnect(&record).await?;
