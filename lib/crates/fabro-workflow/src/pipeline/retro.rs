@@ -37,7 +37,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
         Ok(events) => crate::extract_stage_durations_from_events(&events),
         Err(err) => {
             tracing::warn!(error = %err, "Could not load events from store, skipping stage durations");
-            Default::default()
+            std::collections::HashMap::default()
         }
     };
     let mut retro = derive_retro(

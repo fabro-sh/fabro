@@ -68,7 +68,5 @@ fn cleanup_resume_artifacts(run_dir: &Path) {
         let _ = std::fs::remove_file(path);
     }
 
-    for name in ["detached_failure.json"] {
-        let _ = std::fs::remove_file(run_dir.join(name));
-    }
+    let _ = std::fs::remove_file(run_dir.join("detached_failure.json"));
 }

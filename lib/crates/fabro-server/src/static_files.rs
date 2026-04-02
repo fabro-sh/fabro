@@ -13,14 +13,14 @@ struct DistAssets;
 #[folder = "../../../apps/fabro-web/public/"]
 struct PublicAssets;
 
-pub async fn serve(path: &str) -> Response {
+pub fn serve(path: &str) -> Response {
     let normalized = normalize(path);
 
-    if let Some(asset) = load_asset(&normalized).await {
+    if let Some(asset) = load_asset(&normalized) {
         return asset_response(&normalized, asset);
     }
 
-    if let Some(index) = load_asset("index.html").await {
+    if let Some(index) = load_asset("index.html") {
         return asset_response("index.html", index);
     }
 
@@ -36,7 +36,7 @@ fn normalize(path: &str) -> String {
     }
 }
 
-async fn load_asset(path: &str) -> Option<Vec<u8>> {
+fn load_asset(path: &str) -> Option<Vec<u8>> {
     if cfg!(debug_assertions) {
         if let Some(bytes) = read_disk_asset(path) {
             return Some(bytes);
@@ -73,7 +73,8 @@ fn asset_response(path: &str, bytes: Vec<u8>) -> Response {
     *response.status_mut() = StatusCode::OK;
     response.headers_mut().insert(
         header::CONTENT_TYPE,
-        HeaderValue::from_str(mime.as_ref()).unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream")),
+        HeaderValue::from_str(mime.as_ref())
+            .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream")),
     );
     response.headers_mut().insert(
         header::CACHE_CONTROL,
@@ -83,7 +84,7 @@ fn asset_response(path: &str, bytes: Vec<u8>) -> Response {
 }
 
 fn cache_control(path: &str) -> &'static str {
-    if path.contains("/assets/") || path.contains("-") && has_hashed_extension(path) {
+    if path.contains("/assets/") || path.contains('-') && has_hashed_extension(path) {
         "public, max-age=31536000, immutable"
     } else {
         "no-cache"
@@ -94,12 +95,11 @@ fn has_hashed_extension(path: &str) -> bool {
     Path::new(path)
         .file_name()
         .and_then(|name| name.to_str())
-        .map(|name| {
+        .is_some_and(|name| {
             let mut parts = name.split('.');
             let Some(stem) = parts.next() else {
                 return false;
             };
             stem.split('-').count() > 1
         })
-        .unwrap_or(false)
 }

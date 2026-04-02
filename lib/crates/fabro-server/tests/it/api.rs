@@ -993,9 +993,7 @@ mod route_prefixes {
             fabro_server::jwt_auth::AuthMode::Disabled,
         );
 
-        let cases = [
-            (Method::POST, "/completions"),
-        ];
+        let cases = [(Method::POST, "/completions")];
 
         for (method, path) in cases {
             let req = Request::builder()

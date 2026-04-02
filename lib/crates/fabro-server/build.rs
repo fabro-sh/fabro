@@ -13,8 +13,8 @@ fn main() {
         return;
     }
 
-    let web_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
-        .join("../../../apps/fabro-web");
+    let web_dir =
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("../../../apps/fabro-web");
 
     let status = Command::new("bun")
         .args(["run", "build"])
@@ -22,7 +22,8 @@ fn main() {
         .status()
         .expect("failed to run `bun run build` for embedded web assets");
 
-    if !status.success() {
-        panic!("`bun run build` failed for embedded web assets");
-    }
+    assert!(
+        status.success(),
+        "`bun run build` failed for embedded web assets"
+    );
 }

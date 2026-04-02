@@ -178,7 +178,7 @@ fn attach_before_completion_streams_to_finished_state() {
         "[DURATION]".to_string(),
     ));
     let release_gate = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(300));
+        std::thread::sleep(Duration::from_secs(1));
         gate.release();
     });
     let mut attach_cmd = context.command();
@@ -194,6 +194,8 @@ fn attach_before_completion_streams_to_finished_state() {
     ----- stderr -----
         Sandbox: local (ready in [TIME])
         ✓ start  [DURATION]
+        ✓ wait  [DURATION]
+        ✓ exit  [DURATION]
     ");
 }
 

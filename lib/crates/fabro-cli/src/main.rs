@@ -38,7 +38,7 @@ async fn main() {
     let start = std::time::Instant::now();
     let raw_args: Vec<String> = std::env::args().collect();
 
-    let (command_name, result) = main_inner().await;
+    let (command_name, result) = Box::pin(main_inner()).await;
     let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap();
 
     let is_error = result.is_err();
@@ -438,6 +438,8 @@ mod tests {
         let cli = Cli::try_parse_from([
             "fabro",
             "__detached",
+            "--run-id",
+            "01ARZ3NDEKTSV4RRFFQ69G5FAV",
             "--run-dir",
             "/tmp/fabro/runs/01ABC",
             "--launcher-path",
@@ -446,10 +448,12 @@ mod tests {
         .expect("should parse");
         match *cli.command {
             Commands::RunCmd(RunCommands::Detached {
+                run_id,
                 run_dir,
                 launcher_path,
                 resume,
             }) => {
+                assert_eq!(run_id, "01ARZ3NDEKTSV4RRFFQ69G5FAV".parse().unwrap());
                 assert_eq!(run_dir, std::path::PathBuf::from("/tmp/fabro/runs/01ABC"));
                 assert_eq!(
                     launcher_path,
@@ -466,6 +470,8 @@ mod tests {
         let cli = Cli::try_parse_from([
             "fabro",
             "__detached",
+            "--run-id",
+            "01ARZ3NDEKTSV4RRFFQ69G5FAV",
             "--run-dir",
             "/tmp/fabro/runs/01ABC",
             "--launcher-path",
@@ -475,10 +481,12 @@ mod tests {
         .expect("should parse");
         match *cli.command {
             Commands::RunCmd(RunCommands::Detached {
+                run_id,
                 run_dir,
                 launcher_path,
                 resume,
             }) => {
+                assert_eq!(run_id, "01ARZ3NDEKTSV4RRFFQ69G5FAV".parse().unwrap());
                 assert_eq!(run_dir, std::path::PathBuf::from("/tmp/fabro/runs/01ABC"));
                 assert_eq!(
                     launcher_path,

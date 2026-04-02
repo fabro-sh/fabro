@@ -293,8 +293,8 @@ fn emit_run_notice(
 }
 
 async fn load_pull_request_diff(run_store: Option<&dyn RunStore>, run_dir: &Path) -> String {
-    match run_store {
-        Some(run_store) => run_store
+    if let Some(run_store) = run_store {
+        run_store
             .get_final_patch()
             .await
             .inspect_err(|err| {
@@ -302,11 +302,10 @@ async fn load_pull_request_diff(run_store: Option<&dyn RunStore>, run_dir: &Path
             })
             .ok()
             .flatten()
-            .unwrap_or_default(),
-        None => {
-            let _ = run_dir;
-            String::new()
-        }
+            .unwrap_or_default()
+    } else {
+        let _ = run_dir;
+        String::new()
     }
 }
 

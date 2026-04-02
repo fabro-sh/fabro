@@ -5,16 +5,17 @@ use std::sync::Arc;
 use chrono::Utc;
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::Graph as GvGraph;
-use fabro_store::{InMemoryStore, Store};
+use fabro_store::{InMemoryStore, RunStore, Store};
 use fabro_types::run::RunRecord;
 
 use crate::error::Result;
 use crate::event::EventEmitter;
+use crate::git::scan_node_files_from_store;
 use crate::handler::HandlerRegistry;
 use crate::outcome::Outcome;
 use crate::pipeline;
 use crate::pipeline::types::Initialized;
-use crate::records::Checkpoint;
+use crate::records::{Checkpoint, CheckpointExt};
 use crate::run_options::RunOptions;
 
 struct InitializedOptions {
@@ -108,6 +109,7 @@ pub async fn run_graph(
     )
     .await;
     let executed = pipeline::execute(initialized).await;
+    persist_run_artifacts_for_tests(executed.run_store.as_ref(), &run_options.run_dir).await;
     executed.outcome
 }
 
@@ -134,6 +136,7 @@ pub async fn run_graph_with_hooks(
     )
     .await;
     let executed = pipeline::execute(initialized).await;
+    persist_run_artifacts_for_tests(executed.run_store.as_ref(), &run_options.run_dir).await;
     executed.outcome
 }
 
@@ -159,7 +162,26 @@ pub async fn run_graph_from_checkpoint(
     )
     .await;
     let executed = pipeline::execute(initialized).await;
+    persist_run_artifacts_for_tests(executed.run_store.as_ref(), &run_options.run_dir).await;
     executed.outcome
+}
+
+async fn persist_run_artifacts_for_tests(run_store: &dyn RunStore, run_dir: &std::path::Path) {
+    if let Ok(Some(checkpoint)) = run_store.get_checkpoint().await {
+        let _ = checkpoint.save(&run_dir.join("checkpoint.json"));
+    }
+
+    if let Ok(Some(final_patch)) = run_store.get_final_patch().await {
+        let _ = std::fs::write(run_dir.join("final.patch"), final_patch);
+    }
+
+    for (relative_path, contents) in scan_node_files_from_store(run_store).await {
+        let path = run_dir.join(relative_path);
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(path, contents);
+    }
 }
 
 pub struct WorkflowRunner {

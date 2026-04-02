@@ -6,6 +6,8 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::{Json, Router, routing::get, routing::post};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use cookie::{Cookie, CookieJar, Expiration, Key, SameSite, time::Duration};
 use fabro_config::FabroSettings;
 use fabro_types::settings::{ApiAuthStrategy, GitProvider, GitSettings};
@@ -116,7 +118,10 @@ pub fn api_routes() -> Router<Arc<AppState>> {
 
 pub fn parse_cookie_header(headers: &HeaderMap) -> CookieJar {
     let mut jar = CookieJar::new();
-    if let Some(raw) = headers.get(header::COOKIE).and_then(|value| value.to_str().ok()) {
+    if let Some(raw) = headers
+        .get(header::COOKIE)
+        .and_then(|value| value.to_str().ok())
+    {
         for part in raw.split(';') {
             if let Ok(cookie) = Cookie::parse(part.trim().to_string()) {
                 jar.add_original(cookie.into_owned());
@@ -159,7 +164,11 @@ fn features_json(settings: &FabroSettings) -> serde_json::Value {
 }
 
 async fn login_github(State(state): State<Arc<AppState>>) -> Response {
-    let settings = state.settings.read().expect("settings lock poisoned").clone();
+    let settings = state
+        .settings
+        .read()
+        .expect("settings lock poisoned")
+        .clone();
     let Some(client_id) = settings.client_id().map(str::to_string) else {
         return json_response(
             StatusCode::CONFLICT,
@@ -167,7 +176,10 @@ async fn login_github(State(state): State<Arc<AppState>>) -> Response {
         );
     };
     let Some(web_url) = settings.web.as_ref().map(|web| web.url.clone()) else {
-        return json_response(StatusCode::CONFLICT, json!({"error": "web.url is not configured"}));
+        return json_response(
+            StatusCode::CONFLICT,
+            json!({"error": "web.url is not configured"}),
+        );
     };
 
     let state_token = format!("fabro-{}", ulid::Ulid::new());
@@ -207,9 +219,13 @@ async fn callback_github(
             json!({"error": "SESSION_SECRET is not configured"}),
         );
     };
-    let settings = state.settings.read().expect("settings lock poisoned").clone();
+    let settings = state
+        .settings
+        .read()
+        .expect("settings lock poisoned")
+        .clone();
     let cookie_jar = parse_cookie_header(&headers);
-    let stored_state = cookie_jar.get(OAUTH_STATE_COOKIE_NAME).map(|cookie| cookie.value());
+    let stored_state = cookie_jar.get(OAUTH_STATE_COOKIE_NAME).map(Cookie::value);
     if stored_state != Some(params.state.as_str()) {
         return Redirect::to("/login").into_response();
     }
@@ -226,11 +242,10 @@ async fn callback_github(
             json!({"error": "GITHUB_APP_CLIENT_SECRET is not configured"}),
         );
     };
-    let web_url = settings
-        .web
-        .as_ref()
-        .map(|web| web.url.clone())
-        .unwrap_or_else(|| "http://localhost:3000".to_string());
+    let web_url = settings.web.as_ref().map_or_else(
+        || "http://localhost:3000".to_string(),
+        |web| web.url.clone(),
+    );
 
     let http = reqwest::Client::new();
     let token = match http
@@ -240,7 +255,10 @@ async fn callback_github(
             ("client_id", client_id.as_str()),
             ("client_secret", client_secret.as_str()),
             ("code", params.code.as_str()),
-            ("redirect_uri", format!("{web_url}/auth/callback/github").as_str()),
+            (
+                "redirect_uri",
+                format!("{web_url}/auth/callback/github").as_str(),
+            ),
             ("state", params.state.as_str()),
         ])
         .send()
@@ -279,7 +297,8 @@ async fn callback_github(
         .send()
         .await
     {
-        Ok(response) if response.status().is_success() => match response.json::<GitHubUser>().await {
+        Ok(response) if response.status().is_success() => match response.json::<GitHubUser>().await
+        {
             Ok(profile) => profile,
             Err(_) => {
                 return json_response(
@@ -321,7 +340,8 @@ async fn callback_github(
         .as_ref()
         .map(|web| web.auth.allowed_usernames.clone())
         .unwrap_or_default();
-    if !allowed_usernames.is_empty() && !allowed_usernames.iter().any(|user| user == &profile.login) {
+    if !allowed_usernames.is_empty() && !allowed_usernames.iter().any(|user| user == &profile.login)
+    {
         return Redirect::to("/login?error=unauthorized").into_response();
     }
 
@@ -343,13 +363,16 @@ async fn callback_github(
 
     let mut jar = CookieJar::new();
     jar.private_mut(&session_key).add(
-        Cookie::build((SESSION_COOKIE_NAME, serde_json::to_string(&session).unwrap_or_default()))
-            .path("/")
-            .http_only(true)
-            .same_site(SameSite::Lax)
-            .secure(false)
-            .max_age(Duration::days(30))
-            .build(),
+        Cookie::build((
+            SESSION_COOKIE_NAME,
+            serde_json::to_string(&session).unwrap_or_default(),
+        ))
+        .path("/")
+        .http_only(true)
+        .same_site(SameSite::Lax)
+        .secure(false)
+        .max_age(Duration::days(30))
+        .build(),
     );
     jar.add(
         Cookie::build((OAUTH_STATE_COOKIE_NAME, ""))
@@ -387,11 +410,14 @@ async fn auth_me(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Resp
         return json_response(StatusCode::UNAUTHORIZED, json!({"error": "Unauthorized"}));
     };
 
-    let settings = state.settings.read().expect("settings lock poisoned").clone();
+    let settings = state
+        .settings
+        .read()
+        .expect("settings lock poisoned")
+        .clone();
     let demo_mode = parse_cookie_header(&headers)
         .get("fabro-demo")
-        .map(|cookie| cookie.value() == "1")
-        .unwrap_or(false);
+        .is_some_and(|cookie| cookie.value() == "1");
     Json(AuthMeResponse {
         user: SessionUser {
             login: session.login,
@@ -408,7 +434,11 @@ async fn auth_me(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Resp
 }
 
 async fn setup_status(State(state): State<Arc<AppState>>) -> Response {
-    let settings = state.settings.read().expect("settings lock poisoned").clone();
+    let settings = state
+        .settings
+        .read()
+        .expect("settings lock poisoned")
+        .clone();
     let configured = settings
         .git
         .as_ref()
@@ -476,7 +506,11 @@ async fn setup_register(
         .unwrap_or_else(|_| PathBuf::from("."))
         .join(".env");
 
-    let mut settings = state.settings.read().expect("settings lock poisoned").clone();
+    let mut settings = state
+        .settings
+        .read()
+        .expect("settings lock poisoned")
+        .clone();
     let mut git = settings.git.clone().unwrap_or_default();
     git.provider = GitProvider::Github;
     git.app_id = Some(data.id.to_string());
@@ -508,7 +542,7 @@ async fn setup_register(
         ),
         (
             "GITHUB_APP_PRIVATE_KEY".to_string(),
-            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, data.pem),
+            STANDARD.encode(data.pem),
         ),
     ]);
     if let Err(error) = write_env_file(&env_path, &env_updates) {
@@ -527,11 +561,10 @@ async fn setup_register(
 }
 
 fn build_server_toml(settings: &FabroSettings, git: &GitSettings) -> String {
-    let web_url = settings
-        .web
-        .as_ref()
-        .map(|web| web.url.clone())
-        .unwrap_or_else(|| "http://localhost:3000".to_string());
+    let web_url = settings.web.as_ref().map_or_else(
+        || "http://localhost:3000".to_string(),
+        |web| web.url.clone(),
+    );
     let allowed = settings
         .web
         .as_ref()
@@ -549,12 +582,13 @@ fn build_server_toml(settings: &FabroSettings, git: &GitSettings) -> String {
                 "auth".to_string(),
                 toml::Value::Table({
                     let mut auth = toml::Table::new();
-                    auth.insert("provider".to_string(), toml::Value::String("github".to_string()));
+                    auth.insert(
+                        "provider".to_string(),
+                        toml::Value::String("github".to_string()),
+                    );
                     auth.insert(
                         "allowed_usernames".to_string(),
-                        toml::Value::Array(
-                            allowed.into_iter().map(toml::Value::String).collect(),
-                        ),
+                        toml::Value::Array(allowed.into_iter().map(toml::Value::String).collect()),
                     );
                     auth
                 }),
@@ -587,7 +621,10 @@ fn build_server_toml(settings: &FabroSettings, git: &GitSettings) -> String {
         "git".to_string(),
         toml::Value::Table({
             let mut git_table = toml::Table::new();
-            git_table.insert("provider".to_string(), toml::Value::String("github".to_string()));
+            git_table.insert(
+                "provider".to_string(),
+                toml::Value::String("github".to_string()),
+            );
             git_table.insert(
                 "app_id".to_string(),
                 toml::Value::String(git.app_id.clone().unwrap_or_default()),
@@ -614,7 +651,11 @@ fn write_env_file(path: &PathBuf, updates: &BTreeMap<String, String>) -> std::io
             merged.insert(key.trim().to_string(), value.to_string());
         }
     }
-    merged.extend(updates.iter().map(|(key, value)| (key.clone(), value.clone())));
+    merged.extend(
+        updates
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone())),
+    );
     let body = merged
         .into_iter()
         .map(|(key, value)| format!("{key}={value}"))
