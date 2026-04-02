@@ -85,10 +85,7 @@ async fn resolve_diff(
     let start = match run_store {
         Some(run_store) => run_store
             .get_start()
-            .await
-            .ok()
-            .flatten()
-            .or_else(|| StartRecord::load(run_dir).ok())
+            .await?
             .context("Failed to load start.json")?,
         None => StartRecord::load(run_dir).context("Failed to load start.json")?,
     };
@@ -105,17 +102,8 @@ async fn resolve_diff(
         }
     }
 
-    let final_patch_path = run_dir.join("final.patch");
-    if final_patch_path.exists() {
-        debug!("Reading final.patch");
-        return std::fs::read_to_string(&final_patch_path).context("Failed to read final.patch");
-    }
-
     let run_concluded = match run_store {
-        Some(run_store) => {
-            run_store.get_conclusion().await.ok().flatten().is_some()
-                || run_dir.join("conclusion.json").exists()
-        }
+        Some(run_store) => run_store.get_conclusion().await?.is_some(),
         None => run_dir.join("conclusion.json").exists(),
     };
     if run_concluded {
@@ -125,18 +113,12 @@ async fn resolve_diff(
     }
 
     debug!("No final.patch found; attempting live diff from sandbox");
-    let sandbox_json = run_dir.join("sandbox.json");
     let record = match run_store {
         Some(run_store) => run_store
             .get_sandbox()
-            .await
-            .ok()
-            .flatten()
-            .or_else(|| fabro_sandbox::SandboxRecord::load(&sandbox_json).ok())
-            .context(
-                "Failed to load sandbox.json — was this run started with a recent version of arc?",
-            )?,
-        None => fabro_sandbox::SandboxRecord::load(&sandbox_json).context(
+            .await?
+            .context("Failed to load sandbox record from store")?,
+        None => fabro_sandbox::SandboxRecord::load(&run_dir.join("sandbox.json")).context(
             "Failed to load sandbox.json — was this run started with a recent version of arc?",
         )?,
     };

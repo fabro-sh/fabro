@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use fabro_config::FabroSettingsExt;
-use fabro_sandbox::SandboxRecordExt;
 use fabro_sandbox::daytona::DaytonaSandbox;
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use tracing::info;
@@ -15,21 +14,13 @@ pub(crate) async fn run(args: PreviewArgs, globals: &GlobalArgs) -> Result<()> {
     let base = runs_base(&cli_settings.storage_dir());
     let store = store::build_store(&cli_settings.storage_dir())?;
     let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
-    let sandbox_json = run.path.join("sandbox.json");
-    let record = match store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await? {
-        Some(run_store) => run_store
-            .get_sandbox()
-            .await
-            .ok()
-            .flatten()
-            .or_else(|| fabro_sandbox::SandboxRecord::load(&sandbox_json).ok())
-            .context(
-                "Failed to load sandbox.json — was this run started with a recent version of arc?",
-            )?,
-        None => fabro_sandbox::SandboxRecord::load(&sandbox_json).context(
-            "Failed to load sandbox.json — was this run started with a recent version of arc?",
-        )?,
-    };
+    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id)
+        .await?
+        .context("Failed to open run store")?;
+    let record = run_store
+        .get_sandbox()
+        .await?
+        .context("Failed to load sandbox record from store")?;
 
     validate_daytona_provider(&record, "Preview URLs")?;
 

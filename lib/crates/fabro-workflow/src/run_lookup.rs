@@ -173,67 +173,73 @@ fn scan_runs_inner(base: &Path, include_status: bool) -> Result<Vec<RunInfo>> {
 }
 
 pub async fn scan_runs_combined(store: &dyn Store, base: &Path) -> Result<Vec<RunInfo>> {
-    let mut runs_by_id: HashMap<RunId, RunInfo> = scan_runs_without_status(base)?
-        .into_iter()
-        .map(|run| (run.run_id, run))
-        .collect();
+    let mut runs_by_id: HashMap<RunId, RunInfo> = HashMap::new();
 
     if let Ok(store_runs) = store.list_runs(&ListRunsQuery::default()).await {
         for summary in store_runs {
-            let Some(run_dir) = summary.run_dir.as_deref() else {
+            let Some(run_info) = run_info_from_summary(&summary) else {
                 continue;
             };
-            let path = PathBuf::from(run_dir);
-            if !path.exists() {
-                continue;
-            }
-            let Some(dir_name) = path
-                .file_name()
-                .map(|name| name.to_string_lossy().to_string())
-            else {
-                continue;
-            };
-            let start_time_dt = summary.created_at;
-            let start_time = summary.start_time.unwrap_or(start_time_dt);
-            let end_time = if summary.status.is_some_and(RunStatus::is_terminal) {
-                summary.duration_ms.and_then(|duration_ms| {
-                    Some(
-                        start_time_dt
-                            + chrono::Duration::milliseconds(i64::try_from(duration_ms).ok()?),
-                    )
-                })
-            } else {
-                None
-            };
-            runs_by_id.insert(
-                summary.run_id,
-                RunInfo {
-                    run_id: summary.run_id,
-                    dir_name,
-                    workflow_name: summary
-                        .workflow_name
-                        .unwrap_or_else(|| "[starting]".to_string()),
-                    workflow_slug: summary.workflow_slug,
-                    status: summary.status.unwrap_or(RunStatus::Dead),
-                    status_reason: summary.status_reason,
-                    start_time: start_time.to_rfc3339(),
-                    labels: summary.labels,
-                    duration_ms: summary.duration_ms,
-                    total_cost: summary.total_cost,
-                    host_repo_path: summary.host_repo_path,
-                    goal: summary.goal.unwrap_or_default(),
-                    start_time_dt: Some(start_time_dt),
-                    end_time,
-                    path,
-                    is_orphan: false,
-                },
-            );
+            runs_by_id.insert(summary.run_id, run_info);
         }
+    }
+
+    let store_run_ids = runs_by_id
+        .keys()
+        .copied()
+        .collect::<std::collections::HashSet<_>>();
+    for run in scan_runs_without_status(base)?
+        .into_iter()
+        .filter(|run| run.is_orphan && !store_run_ids.contains(&run.run_id))
+    {
+        runs_by_id.insert(run.run_id, run);
     }
 
     let mut runs: Vec<_> = runs_by_id.into_values().collect();
     runs.sort_by(|a, b| b.start_time_dt.cmp(&a.start_time_dt));
     Ok(runs)
+}
+
+fn run_info_from_summary(summary: &fabro_store::RunSummary) -> Option<RunInfo> {
+    let run_dir = summary.run_dir.as_deref()?;
+    let path = PathBuf::from(run_dir);
+    if !path.exists() {
+        return None;
+    }
+    let dir_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())?;
+    let start_time_dt = summary.created_at;
+    let start_time = summary.start_time.unwrap_or(start_time_dt);
+    let end_time = if summary.status.is_some_and(RunStatus::is_terminal) {
+        summary.duration_ms.and_then(|duration_ms| {
+            Some(start_time_dt + chrono::Duration::milliseconds(i64::try_from(duration_ms).ok()?))
+        })
+    } else {
+        None
+    };
+
+    Some(RunInfo {
+        run_id: summary.run_id,
+        dir_name,
+        workflow_name: summary
+            .workflow_name
+            .clone()
+            .unwrap_or_else(|| "[starting]".to_string()),
+        workflow_slug: summary.workflow_slug.clone(),
+        status: summary.status.unwrap_or(RunStatus::Dead),
+        status_reason: summary.status_reason,
+        start_time: start_time.to_rfc3339(),
+        labels: summary.labels.clone(),
+        duration_ms: summary.duration_ms,
+        total_cost: summary.total_cost,
+        host_repo_path: summary.host_repo_path.clone(),
+        goal: summary.goal.clone().unwrap_or_default(),
+        start_time_dt: Some(start_time_dt),
+        end_time,
+        path,
+        is_orphan: false,
+    })
 }
 
 struct StatusInfo {

@@ -52,7 +52,7 @@ use fabro_workflow::context::Context;
 use fabro_workflow::event::{EventEmitter, RunEventEnvelope};
 use fabro_workflow::operations::{self, CreateRunInput, WorkflowInput};
 use fabro_workflow::pipeline::Persisted;
-use fabro_workflow::records::{Checkpoint, CheckpointExt};
+use fabro_workflow::records::Checkpoint;
 
 pub use fabro_api_types::{
     ApiQuestion, ApiQuestionOption, PaginatedRunList, PaginationMeta,
@@ -757,12 +757,10 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
 
     // Save final checkpoint
     let checkpoint = match run_store.get_checkpoint().await {
-        Ok(checkpoint) => {
-            checkpoint.or_else(|| Checkpoint::load(&run_dir.join("checkpoint.json")).ok())
-        }
+        Ok(checkpoint) => checkpoint,
         Err(err) => {
             tracing::warn!(run_id = %run_id, error = %err, "Failed to load checkpoint from store");
-            Checkpoint::load(&run_dir.join("checkpoint.json")).ok()
+            None
         }
     };
 

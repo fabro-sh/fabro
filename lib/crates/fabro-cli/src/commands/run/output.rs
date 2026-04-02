@@ -209,9 +209,8 @@ pub(crate) async fn print_final_output(
 ) {
     let checkpoint = match run_store {
         Some(run_store) => run_store.get_checkpoint().await.ok().flatten(),
-        None => None,
-    }
-    .or_else(|| Checkpoint::load(&run_dir.join("checkpoint.json")).ok());
+        None => Checkpoint::load(&run_dir.join("checkpoint.json")).ok(),
+    };
     let Some(checkpoint) = checkpoint else {
         return;
     };

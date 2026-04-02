@@ -11,6 +11,7 @@ use fabro_util::redact::redact_jsonl_line;
 use fabro_util::terminal::Styles;
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use futures::StreamExt;
+use serde_json::{Map, Value};
 use tokio::time;
 use tracing::{debug, info};
 
@@ -189,7 +190,7 @@ async fn follow_store_logs(
     Ok(())
 }
 
-async fn run_concluded(run_store: &dyn RunStore, run_dir: &Path) -> Result<bool> {
+async fn run_concluded(run_store: &dyn RunStore, _run_dir: &Path) -> Result<bool> {
     if run_store
         .get_conclusion()
         .await
@@ -203,8 +204,7 @@ async fn run_concluded(run_store: &dyn RunStore, run_dir: &Path) -> Result<bool>
         .get_status()
         .await
         .context("Failed to read status from store while following logs")?
-        .is_some_and(|record| record.status.is_terminal())
-        || run_dir.join("conclusion.json").exists())
+        .is_some_and(|record| record.status.is_terminal()))
 }
 
 async fn flush_remaining_store_events(
@@ -234,8 +234,24 @@ async fn flush_remaining_store_events(
 }
 
 fn event_payload_line(event: &fabro_store::EventEnvelope) -> Result<String> {
-    let line = serde_json::to_string(event.payload.as_value())?;
+    let line = serde_json::to_string(&normalize_json_value(event.payload.as_value().clone()))?;
     Ok(redact_jsonl_line(&line))
+}
+
+fn normalize_json_value(value: Value) -> Value {
+    match value {
+        Value::Object(map) => Value::Object(
+            map.into_iter()
+                .map(|(key, value)| (key, normalize_json_value(value)))
+                .collect::<std::collections::BTreeMap<_, _>>()
+                .into_iter()
+                .collect::<Map<_, _>>(),
+        ),
+        Value::Array(values) => {
+            Value::Array(values.into_iter().map(normalize_json_value).collect())
+        }
+        other => other,
+    }
 }
 
 fn render_indented_markdown(styles: &Styles, text: &str, indent: &str) -> String {
