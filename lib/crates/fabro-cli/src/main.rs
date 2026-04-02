@@ -182,7 +182,7 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::Parse(args) => {
                 commands::parse::run(&args, &globals)?;
             }
-            Commands::Asset(ns) => commands::asset::dispatch(ns, &globals)?,
+            Commands::Asset(ns) => commands::asset::dispatch(ns, &globals).await?,
             Commands::Store(ns) => commands::store::dispatch(ns, &globals).await?,
             Commands::RunsCmd(cmd) => commands::runs::dispatch(cmd, &globals).await?,
             Commands::Model { command } => commands::model::execute(command, &globals).await?,

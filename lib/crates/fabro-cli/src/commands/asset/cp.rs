@@ -4,17 +4,19 @@ use anyhow::{Context, Result, bail};
 use fabro_config::FabroSettingsExt;
 use fabro_store::RuntimeState;
 use fabro_workflow::assets::{AssetEntry, scan_assets};
-use fabro_workflow::run_lookup::{resolve_run, runs_base};
+use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 
 use crate::args::{AssetCpArgs, GlobalArgs};
 use crate::shared::{print_json_pretty, split_run_path};
+use crate::store;
 use crate::user_config::load_user_settings_with_globals;
 
-pub(super) fn cp_command(args: &AssetCpArgs, globals: &GlobalArgs) -> Result<()> {
+pub(super) async fn cp_command(args: &AssetCpArgs, globals: &GlobalArgs) -> Result<()> {
     let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
+    let store = store::build_store(&cli_settings.storage_dir())?;
     let (run_id, asset_path) = parse_source(&args.source);
-    let run = resolve_run(&base, run_id)?;
+    let run = resolve_run_combined(store.as_ref(), &base, run_id).await?;
     let runtime_state = RuntimeState::new(&run.path);
     let entries = scan_assets(
         &runtime_state.assets_dir(),
