@@ -96,6 +96,7 @@ impl WorkflowLifecycle {
         let checkpoint_git_result: Arc<Mutex<Option<GitCheckpointResult>>> =
             Arc::new(Mutex::new(None));
         let last_git_sha: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let final_patch: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
         let artifact_store = Arc::new(Mutex::new(ArtifactStore::new(Some(
             runtime_state.artifact_values_dir(),
         ))));
@@ -127,6 +128,7 @@ impl WorkflowLifecycle {
             goal: (!graph.goal().is_empty()).then(|| graph.goal().to_string()),
             artifact_store: Arc::clone(&artifact_store),
             last_git_sha: Arc::clone(&last_git_sha),
+            final_patch: Arc::clone(&final_patch),
             checkpoint_git_result: Arc::clone(&checkpoint_git_result),
             circuit_breaker: Arc::clone(&circuit_breaker),
         };
@@ -165,6 +167,7 @@ impl WorkflowLifecycle {
             start_node_id,
             checkpoint_git_result: Arc::clone(&checkpoint_git_result),
             last_git_sha: Arc::clone(&last_git_sha),
+            final_patch,
         };
 
         let artifact = ArtifactLifecycle::new(
@@ -425,8 +428,8 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
         if state.cancelled {
             return;
         }
+        self.git.on_run_end(outcome, state).await;
         self.event.on_run_end(outcome, state).await;
         self.hook.on_run_end(outcome, state).await;
-        self.git.on_run_end(outcome, state).await;
     }
 }

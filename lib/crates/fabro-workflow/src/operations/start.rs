@@ -17,8 +17,8 @@ use serde::Serialize;
 use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::{
-    EventEmitter, RunNoticeLevel, StoreProgressLogger, WorkflowRunEvent, canonicalize_event,
-    event_payload_from_redacted_json, redacted_event_json,
+    EventEmitter, RunNoticeLevel, StoreProgressLogger, WorkflowRunEvent, append_workflow_event,
+    canonicalize_event, event_payload_from_redacted_json, redacted_event_json,
 };
 use crate::git::MetadataStore;
 use crate::handler::HandlerRegistry;
@@ -138,9 +138,22 @@ pub(super) async fn execute_persisted_run(
         .await;
         return Err(error);
     }
+    append_workflow_event(
+        run_store.as_ref(),
+        &run_id,
+        &WorkflowRunEvent::RunStarting {
+            reason: Some(StatusReason::SandboxInitializing),
+        },
+    )
+    .await
+    .map_err(|err| FabroError::engine(err.to_string()))?;
 
-    let mut bootstrap_guard =
-        DetachedRunBootstrapGuard::arm(run_dir, Arc::clone(&run_store), cancel_token.clone());
+    let mut bootstrap_guard = DetachedRunBootstrapGuard::arm(
+        run_id,
+        run_dir,
+        Arc::clone(&run_store),
+        cancel_token.clone(),
+    );
 
     let persisted = match Persisted::load_from_store(services.run_store.as_ref(), run_dir).await {
         Ok(persisted) => persisted,
@@ -188,8 +201,14 @@ pub(super) async fn execute_persisted_run(
             Ok(started)
         }
         Err(err) => {
-            persist_terminal_engine_failure(run_store.as_ref(), run_dir, &err, run_start.elapsed())
-                .await;
+            persist_terminal_engine_failure(
+                run_id,
+                run_store.as_ref(),
+                run_dir,
+                &err,
+                run_start.elapsed(),
+            )
+            .await;
             completion_guard.defuse();
             Err(err)
         }
@@ -197,6 +216,7 @@ pub(super) async fn execute_persisted_run(
 }
 
 async fn persist_terminal_engine_failure(
+    run_id: RunId,
     run_store: &dyn RunStore,
     _run_dir: &Path,
     error: &FabroError,
@@ -221,6 +241,20 @@ async fn persist_terminal_engine_failure(
         .await
     {
         tracing::warn!(error = %err, "Failed to save terminal engine failure status to store");
+    }
+    if let Err(err) = append_workflow_event(
+        run_store,
+        &run_id,
+        &WorkflowRunEvent::WorkflowRunFailed {
+            error: error.clone(),
+            duration_ms: u64::try_from(duration.as_millis()).unwrap(),
+            reason: status_reason,
+            git_commit_sha: None,
+        },
+    )
+    .await
+    {
+        tracing::warn!(error = %err, "Failed to append terminal engine failure event");
     }
 }
 
@@ -570,6 +604,7 @@ impl RunSession {
 }
 
 struct DetachedRunBootstrapGuard {
+    run_id: RunId,
     run_store: Arc<dyn RunStore>,
     cancel_token: Option<Arc<AtomicBool>>,
     active: bool,
@@ -577,11 +612,13 @@ struct DetachedRunBootstrapGuard {
 
 impl DetachedRunBootstrapGuard {
     fn arm(
+        run_id: RunId,
         _run_dir: &Path,
         run_store: Arc<dyn RunStore>,
         cancel_token: Option<Arc<AtomicBool>>,
     ) -> Self {
         Self {
+            run_id,
             run_store,
             cancel_token,
             active: true,
@@ -605,6 +642,7 @@ impl Drop for DetachedRunBootstrapGuard {
             } else {
                 StatusReason::SandboxInitFailed
             };
+            let run_id = self.run_id;
             let run_store = Arc::clone(&self.run_store);
             if let Ok(handle) = Handle::try_current() {
                 handle.spawn(async move {
@@ -614,6 +652,17 @@ impl Drop for DetachedRunBootstrapGuard {
                             Some(reason),
                         ))
                         .await;
+                    let _ = append_workflow_event(
+                        run_store.as_ref(),
+                        &run_id,
+                        &WorkflowRunEvent::WorkflowRunFailed {
+                            error: FabroError::engine(format!("{reason:?}")),
+                            duration_ms: 0,
+                            reason: Some(reason),
+                            git_commit_sha: None,
+                        },
+                    )
+                    .await;
                 });
             }
         }
@@ -707,6 +756,17 @@ impl Drop for DetachedRunCompletionGuard {
                         Some(reason),
                     ))
                     .await;
+                let _ = append_workflow_event(
+                    run_store.as_ref(),
+                    &run_id,
+                    &WorkflowRunEvent::WorkflowRunFailed {
+                        error: FabroError::engine(message.to_string()),
+                        duration_ms: 0,
+                        reason: Some(reason),
+                        git_commit_sha: None,
+                    },
+                )
+                .await;
                 if let Err(err) = run_store
                     .put_conclusion(&build_failure_conclusion(message))
                     .await
@@ -788,6 +848,20 @@ async fn persist_detached_failure(
         .await
     {
         tracing::warn!(error = %err, "Failed to save detached failure status to store");
+    }
+    if let Err(err) = append_workflow_event(
+        run_store,
+        &run_id,
+        &WorkflowRunEvent::WorkflowRunFailed {
+            error: error.clone(),
+            duration_ms: 0,
+            reason: Some(reason),
+            git_commit_sha: None,
+        },
+    )
+    .await
+    {
+        tracing::warn!(error = %err, "Failed to append detached failure event");
     }
 
     let event = WorkflowRunEvent::RunNotice {
@@ -929,7 +1003,16 @@ mod tests {
                     emitter_for_injection.emit(&WorkflowRunEvent::CheckpointCompleted {
                         node_id: "start".to_string(),
                         status: "success".to_string(),
+                        current_node: "start".to_string(),
+                        completed_nodes: Vec::new(),
+                        node_retries: HashMap::new().into_iter().collect(),
+                        context_values: HashMap::new().into_iter().collect(),
+                        node_outcomes: HashMap::new().into_iter().collect(),
+                        next_node_id: None,
                         git_commit_sha: Some("sha-test".to_string()),
+                        loop_failure_signatures: HashMap::new().into_iter().collect(),
+                        restart_failure_signatures: HashMap::new().into_iter().collect(),
+                        node_visits: HashMap::new().into_iter().collect(),
                         diff: None,
                     });
                 }

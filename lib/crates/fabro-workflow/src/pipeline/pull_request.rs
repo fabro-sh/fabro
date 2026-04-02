@@ -590,6 +590,11 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                             emitter.emit(&WorkflowRunEvent::PullRequestCreated {
                                 pr_url: record.html_url.clone(),
                                 pr_number: record.number,
+                                owner: record.owner.clone(),
+                                repo: record.repo.clone(),
+                                base_branch: record.base_branch.clone(),
+                                head_branch: record.head_branch.clone(),
+                                title: record.title.clone(),
                                 draft: pr_cfg.draft,
                             });
                             pr_url = Some(record.html_url.clone());

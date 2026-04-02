@@ -200,33 +200,6 @@ pub(crate) fn truncate(s: &str, max_chars: usize) -> &str {
     }
 }
 
-pub(crate) async fn sync_provider_used_to_store(
-    stage_dir: &Path,
-    node_ref: &NodeVisitRef<'_>,
-    services: &EngineServices,
-) -> Result<(), FabroError> {
-    let Some(ref store) = services.run_store else {
-        return Ok(());
-    };
-
-    let path = stage_dir.join("provider_used.json");
-    let json = match fs::read_to_string(&path).await {
-        Ok(json) => json,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(err) => {
-            return Err(FabroError::handler(format!(
-                "Failed to read provider_used.json: {err}"
-            )));
-        }
-    };
-    let value: serde_json::Value = serde_json::from_str(&json)
-        .map_err(|err| FabroError::handler(format!("Failed to parse provider_used.json: {err}")))?;
-    store
-        .put_node_provider_used(node_ref, &value)
-        .await
-        .map_err(|err| FabroError::handler(err.to_string()))
-}
-
 /// Shared simulate implementation for LLM-backed handlers (agent & prompt).
 /// Produces a simulated outcome with standard context updates.
 pub(crate) fn simulate_llm_handler(node: &Node) -> Outcome {
@@ -329,10 +302,7 @@ impl Handler for AgentHandler {
                     )
                     .await;
                 match result {
-                    Ok(CodergenResult::Full(outcome)) => {
-                        sync_provider_used_to_store(&stage_dir, &node_ref, services).await?;
-                        return Ok(outcome);
-                    }
+                    Ok(CodergenResult::Full(outcome)) => return Ok(outcome),
                     Ok(CodergenResult::Text {
                         text,
                         usage,
@@ -364,8 +334,6 @@ impl Handler for AgentHandler {
         } else {
             fs::write(stage_dir.join("response.md"), &response_text).await?;
         }
-        sync_provider_used_to_store(&stage_dir, &node_ref, services).await?;
-
         // 7. Build and write status
         let mut outcome = Outcome::success();
         outcome.notes = Some(format!("Stage completed: {}", node.id));
@@ -433,7 +401,11 @@ mod tests {
         EngineServices::test_default()
     }
 
-    async fn make_services_with_run_store() -> (EngineServices, Arc<dyn RunStore>) {
+    async fn make_services_with_run_store() -> (
+        EngineServices,
+        Arc<dyn RunStore>,
+        crate::event::StoreProgressLogger,
+    ) {
         let store = InMemoryStore::default();
         let run_store = store
             .create_run(&fixtures::RUN_1, chrono::Utc::now(), None)
@@ -443,7 +415,9 @@ mod tests {
             run_store: Some(Arc::clone(&run_store)),
             ..EngineServices::test_default()
         };
-        (services, run_store)
+        let logger = crate::event::StoreProgressLogger::new(Arc::clone(&run_store));
+        logger.register(services.emitter.as_ref());
+        (services, run_store, logger)
     }
 
     fn test_context() -> Context {
@@ -706,27 +680,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn codergen_handler_persists_provider_used_in_run_store() {
-        struct ProviderUsedBackend;
+    async fn codergen_handler_projects_provider_used_from_agent_session_events() {
+        struct ProviderEventBackend;
 
         #[async_trait]
-        impl CodergenBackend for ProviderUsedBackend {
+        impl CodergenBackend for ProviderEventBackend {
             async fn run(
                 &self,
-                _node: &Node,
+                node: &Node,
                 _prompt: &str,
-                _context: &Context,
+                context: &Context,
                 _thread_id: Option<&str>,
-                _emitter: &Arc<EventEmitter>,
-                stage_dir: &Path,
+                emitter: &Arc<EventEmitter>,
+                _stage_dir: &Path,
                 _sandbox: &Arc<dyn fabro_agent::Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
-                std::fs::write(
-                    stage_dir.join("provider_used.json"),
-                    r#"{"mode":"agent","provider":"openai","model":"gpt-5.4"}"#,
-                )
-                .unwrap();
+                emitter.emit(&crate::event::WorkflowRunEvent::Agent {
+                    stage: node.id.clone(),
+                    visit: crate::run_dir::visit_from_context(context) as u32,
+                    event: fabro_agent::AgentEvent::SessionStarted {
+                        provider: Some("openai".to_string()),
+                        model: Some("gpt-5.4".to_string()),
+                    },
+                    session_id: Some("session_123".to_string()),
+                    parent_session_id: None,
+                });
                 Ok(CodergenResult::Text {
                     text: "done".to_string(),
                     usage: None,
@@ -736,17 +715,18 @@ mod tests {
             }
         }
 
-        let handler = AgentHandler::new(Some(Box::new(ProviderUsedBackend)));
+        let handler = AgentHandler::new(Some(Box::new(ProviderEventBackend)));
         let node = Node::new("step");
         let context = test_context();
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
-        let (services, run_store) = make_services_with_run_store().await;
+        let (services, run_store, logger) = make_services_with_run_store().await;
 
         handler
             .execute(&node, &context, &graph, tmp.path(), &services)
             .await
             .unwrap();
+        logger.flush().await;
 
         let snapshot = run_store
             .get_node(&NodeVisitRef {

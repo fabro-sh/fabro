@@ -631,6 +631,7 @@ mod tests {
     fn round_trip_agent_tool_call() {
         let event = WorkflowRunEvent::Agent {
             stage: "code".into(),
+            visit: 1,
             event: AgentEvent::ToolCallStarted {
                 tool_name: "read_file".into(),
                 tool_call_id: "tc1".into(),

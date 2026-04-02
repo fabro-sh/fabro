@@ -122,6 +122,8 @@ pub trait RunStore: Send + Sync {
     async fn put_pull_request(&self, record: &PullRequestRecord) -> Result<()>;
     async fn get_pull_request(&self) -> Result<Option<PullRequestRecord>>;
 
+    async fn reset_for_rewind(&self) -> Result<()>;
+
     async fn append_event(&self, payload: &EventPayload) -> Result<u32>;
     async fn list_events(&self) -> Result<Vec<EventEnvelope>>;
     async fn list_events_from(&self, seq: u32) -> Result<Vec<EventEnvelope>>;

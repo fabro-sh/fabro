@@ -482,6 +482,7 @@ mod tests {
     fn agent_event(stage: &str, event: AgentEvent) -> WorkflowRunEvent {
         WorkflowRunEvent::Agent {
             stage: stage.into(),
+            visit: 1,
             event,
             session_id: None,
             parent_session_id: None,
@@ -1079,6 +1080,11 @@ mod tests {
             WorkflowRunEvent::PullRequestCreated {
                 pr_url: "https://github.com/fabro-sh/fabro/pull/42".into(),
                 pr_number: 42,
+                owner: "fabro-sh".into(),
+                repo: "fabro".into(),
+                base_branch: "main".into(),
+                head_branch: "fabro/run/42".into(),
+                title: "Ship the change".into(),
                 draft: true,
             },
         );

@@ -4,9 +4,10 @@ use cli_table::format::{Border, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_checkpoint::git::Store;
 use fabro_util::terminal::Styles;
+use fabro_workflow::event::{WorkflowRunEvent, append_workflow_event};
 use fabro_workflow::git::MetadataStore;
 use fabro_workflow::operations::{
-    RewindInput, RewindTarget, RunTimeline, build_timeline_or_rebuild,
+    RewindInput, RewindTarget, RunTimeline, TimelineEntry, build_timeline_or_rebuild,
     find_run_id_by_prefix_or_store, rewind,
 };
 use fabro_workflow::records::{RunRecord, RunRecordExt, StartRecord, StartRecordExt};
@@ -61,12 +62,14 @@ pub(crate) async fn run(args: &RewindArgs, styles: &Styles, globals: &GlobalArgs
         &store,
         &RewindInput {
             run_id,
-            target,
+            target: target.clone(),
             push: !args.no_push,
         },
     )?;
     if let Some(run_info) = run_info.as_ref() {
-        reset_rewound_run_state(&store, durable_store.as_ref(), &run_id, &run_info.path).await?;
+        let entry = timeline.resolve(&target)?;
+        reset_rewound_run_state(&store, durable_store.as_ref(), &run_id, &run_info.path, entry)
+            .await?;
     }
 
     let run_id_string = run_id.to_string();
@@ -104,6 +107,7 @@ async fn reset_rewound_run_state(
     durable_store: &dyn fabro_store::Store,
     run_id: &fabro_types::RunId,
     run_dir: &std::path::Path,
+    entry: &TimelineEntry,
 ) -> Result<()> {
     let existing_run_store = durable_store
         .open_run_reader(run_id)
@@ -130,18 +134,28 @@ async fn reset_rewound_run_state(
         .context("failed to restore run record after rewind: missing run metadata")?;
     let checkpoint = MetadataStore::read_checkpoint(git_store.repo_dir(), &run_id.to_string())?
         .context("rewound metadata branch is missing checkpoint.json")?;
+    let previous_status = if let Some(run_store) = existing_run_store.as_ref() {
+        run_store
+            .get_status()
+            .await
+            .ok()
+            .flatten()
+            .map(|status| status.status.to_string())
+    } else {
+        None
+    };
 
     let _ = std::fs::remove_file(run_dir.join("detached_failure.json"));
 
-    durable_store
-        .delete_run(run_id)
-        .await
-        .map_err(|err| anyhow::anyhow!("failed to reset durable store run: {err}"))?;
-    let run_dir_string = run_dir.to_string_lossy().to_string();
     let run_store = durable_store
-        .create_run(run_id, run_record.created_at, Some(&run_dir_string))
+        .open_run(run_id)
         .await
-        .map_err(|err| anyhow::anyhow!("failed to recreate durable store run: {err}"))?;
+        .map_err(|err| anyhow::anyhow!("failed to open durable store run for rewind reset: {err}"))?
+        .context("failed to reset durable store run after rewind: missing run store")?;
+    run_store
+        .reset_for_rewind()
+        .await
+        .map_err(|err| anyhow::anyhow!("failed to clear rewound run state: {err}"))?;
     run_store
         .put_run(&run_record)
         .await
@@ -158,6 +172,26 @@ async fn reset_rewound_run_state(
             .await
             .map_err(|err| anyhow::anyhow!("failed to restore graph after rewind: {err}"))?;
     }
+    append_workflow_event(
+        run_store.as_ref(),
+        run_id,
+        &WorkflowRunEvent::RunRewound {
+            target_checkpoint_ordinal: entry.ordinal,
+            target_node_id: entry.node_name.clone(),
+            target_visit: entry.visit,
+            previous_status,
+            run_commit_sha: entry.run_commit_sha.clone(),
+        },
+    )
+    .await
+    .map_err(|err| anyhow::anyhow!("failed to append run rewound event: {err}"))?;
+    append_workflow_event(
+        run_store.as_ref(),
+        run_id,
+        &restored_checkpoint_event(&checkpoint),
+    )
+    .await
+    .map_err(|err| anyhow::anyhow!("failed to append restored checkpoint event: {err}"))?;
     run_store
         .put_status(&fabro_types::RunStatusRecord::new(
             RunStatus::Submitted,
@@ -165,11 +199,48 @@ async fn reset_rewound_run_state(
         ))
         .await
         .map_err(|err| anyhow::anyhow!("failed to restore run status after rewind: {err}"))?;
+    append_workflow_event(
+        run_store.as_ref(),
+        run_id,
+        &WorkflowRunEvent::RunSubmitted { reason: None },
+    )
+    .await
+    .map_err(|err| anyhow::anyhow!("failed to append restored run status event: {err}"))?;
     run_store
         .put_checkpoint(&checkpoint)
         .await
         .map_err(|err| anyhow::anyhow!("failed to restore checkpoint after rewind: {err}"))?;
     Ok(())
+}
+
+fn restored_checkpoint_event(checkpoint: &fabro_types::Checkpoint) -> WorkflowRunEvent {
+    let current_status = checkpoint
+        .node_outcomes
+        .get(&checkpoint.current_node)
+        .map_or_else(|| "success".to_string(), |outcome| outcome.status.to_string());
+    WorkflowRunEvent::CheckpointCompleted {
+        node_id: checkpoint.current_node.clone(),
+        status: current_status,
+        current_node: checkpoint.current_node.clone(),
+        completed_nodes: checkpoint.completed_nodes.clone(),
+        node_retries: checkpoint.node_retries.clone().into_iter().collect(),
+        context_values: checkpoint.context_values.clone().into_iter().collect(),
+        node_outcomes: checkpoint.node_outcomes.clone().into_iter().collect(),
+        next_node_id: checkpoint.next_node_id.clone(),
+        git_commit_sha: checkpoint.git_commit_sha.clone(),
+        loop_failure_signatures: checkpoint
+            .loop_failure_signatures
+            .iter()
+            .map(|(sig, count)| (sig.to_string(), *count))
+            .collect(),
+        restart_failure_signatures: checkpoint
+            .restart_failure_signatures
+            .iter()
+            .map(|(sig, count)| (sig.to_string(), *count))
+            .collect(),
+        node_visits: checkpoint.node_visits.clone().into_iter().collect(),
+        diff: None,
+    }
 }
 
 pub(crate) fn print_timeline(timeline: &RunTimeline, styles: &Styles) {

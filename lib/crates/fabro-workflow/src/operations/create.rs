@@ -18,7 +18,9 @@ use crate::transforms::{Transform, expand_vars};
 use fabro_sandbox::daytona::detect_repo_info;
 
 use super::source::{ResolveWorkflowInput, WorkflowInput, resolve_workflow};
-use crate::event::{WorkflowRunEvent, canonicalize_event_at, normalize_json_value};
+use crate::event::{
+    WorkflowRunEvent, append_workflow_event, canonicalize_event_at, normalize_json_value,
+};
 
 const RUN_CONFIG_FILE: &str = "workflow.toml";
 
@@ -199,7 +201,14 @@ async fn persist_created_run(
         .append_event(&payload)
         .await
         .map(|_| ())
-        .map_err(store_error)
+        .map_err(store_error)?;
+    append_workflow_event(
+        run_store.as_ref(),
+        &record.run_id,
+        &WorkflowRunEvent::RunSubmitted { reason: None },
+    )
+    .await
+    .map_err(store_error)
 }
 
 fn store_error(err: impl std::fmt::Display) -> FabroError {

@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use anyhow::{Context, Result};
 use chrono::{SecondsFormat, Utc};
-use fabro_store::{EventPayload, RunStore};
+use fabro_store::{EventPayload, NodeVisitRef, RunStore};
 use fabro_types::RunId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -14,9 +14,10 @@ use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
 use crate::error::FabroError;
-use crate::outcome::{FailureDetail, StageUsage};
+use crate::outcome::{FailureDetail, Outcome, StageUsage};
 use fabro_agent::{AgentEvent, SandboxEvent, WorktreeEvent, WorktreeEventCallback};
 use fabro_llm::types::Usage as LlmUsage;
+use fabro_types::StatusReason;
 use fabro_util::redact::redact_jsonl_line;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -82,21 +83,52 @@ pub enum WorkflowRunEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         goal: Option<String>,
     },
+    RunSubmitted {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<StatusReason>,
+    },
+    RunStarting {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<StatusReason>,
+    },
+    RunRunning {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<StatusReason>,
+    },
+    RunRemoving {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<StatusReason>,
+    },
+    RunRewound {
+        target_checkpoint_ordinal: usize,
+        target_node_id: String,
+        target_visit: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        previous_status: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        run_commit_sha: Option<String>,
+    },
     WorkflowRunCompleted {
         duration_ms: u64,
         artifact_count: usize,
         #[serde(default)]
         status: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<StatusReason>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         total_cost: Option<f64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         final_git_commit_sha: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        final_patch: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         usage: Option<LlmUsage>,
     },
     WorkflowRunFailed {
         error: FabroError,
         duration_ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<StatusReason>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         git_commit_sha: Option<String>,
     },
@@ -178,6 +210,8 @@ pub enum WorkflowRunEvent {
         duration_ms: u64,
         success_count: usize,
         failure_count: usize,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        results: Vec<serde_json::Value>,
     },
     InterviewStarted {
         question: String,
@@ -197,8 +231,25 @@ pub enum WorkflowRunEvent {
     CheckpointCompleted {
         node_id: String,
         status: String,
+        current_node: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        completed_nodes: Vec<String>,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        node_retries: BTreeMap<String, u32>,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        context_values: BTreeMap<String, serde_json::Value>,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        node_outcomes: BTreeMap<String, Outcome>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        next_node_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         git_commit_sha: Option<String>,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        loop_failure_signatures: BTreeMap<String, usize>,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        restart_failure_signatures: BTreeMap<String, usize>,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        node_visits: BTreeMap<String, usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         diff: Option<String>,
     },
@@ -257,6 +308,7 @@ pub enum WorkflowRunEvent {
     },
     Prompt {
         stage: String,
+        visit: u32,
         text: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mode: Option<String>,
@@ -276,6 +328,7 @@ pub enum WorkflowRunEvent {
     /// Forwarded from an agent session, tagged with the workflow stage.
     Agent {
         stage: String,
+        visit: u32,
         event: AgentEvent,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         session_id: Option<String>,
@@ -389,6 +442,7 @@ pub enum WorkflowRunEvent {
     },
     AgentCliStarted {
         node_id: String,
+        visit: u32,
         mode: String,
         provider: String,
         model: String,
@@ -404,6 +458,11 @@ pub enum WorkflowRunEvent {
     PullRequestCreated {
         pr_url: String,
         pr_number: u64,
+        owner: String,
+        repo: String,
+        base_branch: String,
+        head_branch: String,
+        title: String,
         draft: bool,
     },
     PullRequestFailed {
@@ -474,6 +533,34 @@ impl WorkflowRunEvent {
             }
             Self::WorkflowRunStarted { name, run_id, .. } => {
                 info!(workflow = name.as_str(), run_id = %run_id, "Workflow run started");
+            }
+            Self::RunSubmitted { reason } => {
+                info!(?reason, "Run submitted");
+            }
+            Self::RunStarting { reason } => {
+                info!(?reason, "Run starting");
+            }
+            Self::RunRunning { reason } => {
+                info!(?reason, "Run running");
+            }
+            Self::RunRemoving { reason } => {
+                info!(?reason, "Run removing");
+            }
+            Self::RunRewound {
+                target_checkpoint_ordinal,
+                target_node_id,
+                target_visit,
+                previous_status,
+                run_commit_sha,
+            } => {
+                info!(
+                    target_checkpoint_ordinal,
+                    target_node_id,
+                    target_visit,
+                    previous_status = previous_status.as_deref().unwrap_or(""),
+                    run_commit_sha = run_commit_sha.as_deref().unwrap_or(""),
+                    "Run rewound"
+                );
             }
             Self::WorkflowRunCompleted {
                 duration_ms,
@@ -617,10 +704,14 @@ impl WorkflowRunEvent {
                 duration_ms,
                 success_count,
                 failure_count,
+                results,
             } => {
                 debug!(
                     duration_ms,
-                    success_count, failure_count, "Parallel execution completed"
+                    success_count,
+                    failure_count,
+                    result_count = results.len(),
+                    "Parallel execution completed"
                 );
             }
             Self::InterviewStarted {
@@ -639,9 +730,17 @@ impl WorkflowRunEvent {
                 warn!(stage, duration_ms, "Interview timeout");
             }
             Self::CheckpointCompleted {
-                node_id, status, ..
+                node_id,
+                status,
+                completed_nodes,
+                ..
             } => {
-                debug!(node_id, status, "Checkpoint completed");
+                debug!(
+                    node_id,
+                    status,
+                    completed_count = completed_nodes.len(),
+                    "Checkpoint completed"
+                );
             }
             Self::CheckpointFailed { node_id, error } => {
                 error!(node_id, error, "Checkpoint failed");
@@ -702,6 +801,7 @@ impl WorkflowRunEvent {
                 mode,
                 provider,
                 model,
+                ..
             } => {
                 debug!(
                     stage,
@@ -882,9 +982,11 @@ impl WorkflowRunEvent {
                 pr_url,
                 pr_number,
                 draft,
+                owner,
+                repo,
                 ..
             } => {
-                info!(pr_url = %pr_url, pr_number, draft, "Pull request created");
+                info!(pr_url = %pr_url, pr_number, draft, owner, repo, "Pull request created");
             }
             Self::PullRequestFailed { error, .. } => {
                 error!(error = %error, "Pull request creation failed");
@@ -975,6 +1077,11 @@ pub fn event_name(event: &WorkflowRunEvent) -> &'static str {
     match event {
         WorkflowRunEvent::RunCreated { .. } => "run.created",
         WorkflowRunEvent::WorkflowRunStarted { .. } => "run.started",
+        WorkflowRunEvent::RunSubmitted { .. } => "run.submitted",
+        WorkflowRunEvent::RunStarting { .. } => "run.starting",
+        WorkflowRunEvent::RunRunning { .. } => "run.running",
+        WorkflowRunEvent::RunRemoving { .. } => "run.removing",
+        WorkflowRunEvent::RunRewound { .. } => "run.rewound",
         WorkflowRunEvent::WorkflowRunCompleted { .. } => "run.completed",
         WorkflowRunEvent::WorkflowRunFailed { .. } => "run.failed",
         WorkflowRunEvent::RunNotice { .. } => "run.notice",
@@ -1221,12 +1328,16 @@ fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
             let mut fields = tagged_variant_fields(event);
             let node_id = remove_string(&mut fields, "stage");
             let node_label = default_node_label(node_id.as_ref(), None);
+            let visit = fields.remove("visit");
             fields.remove("session_id");
             fields.remove("parent_session_id");
-            let properties = fields.remove("event").map_or_else(
+            let mut properties = fields.remove("event").map_or_else(
                 || Value::Object(Map::new()),
                 |value| Value::Object(tagged_variant_fields_from_value(value)),
             );
+            if let (Some(visit), Value::Object(map)) = (visit, &mut properties) {
+                map.insert("visit".to_string(), visit);
+            }
             EnvelopeFields {
                 session_id: session_id.clone(),
                 parent_session_id: parent_session_id.clone(),
@@ -1403,6 +1514,20 @@ pub fn event_payload_from_redacted_json(line: &str, run_id: &RunId) -> Result<Ev
     EventPayload::new(value, run_id).map_err(anyhow::Error::from)
 }
 
+pub async fn append_workflow_event(
+    run_store: &dyn RunStore,
+    run_id: &RunId,
+    event: &WorkflowRunEvent,
+) -> Result<()> {
+    let envelope = canonicalize_event(run_id, event);
+    let payload = build_redacted_event_payload(&envelope, run_id)?;
+    run_store
+        .append_event(&payload)
+        .await
+        .map(|_| ())
+        .map_err(anyhow::Error::from)
+}
+
 pub struct ProgressLogger {
     run_dir: PathBuf,
 }
@@ -1444,6 +1569,15 @@ impl StoreProgressLogger {
                     StoreProgressCommand::Event(payload) => {
                         if let Err(err) = run_store.append_event(&payload).await {
                             tracing::warn!(error = %err, "Failed to append event to run store");
+                        }
+                        if let Err(err) =
+                            project_provider_used_from_event_payload(run_store.as_ref(), &payload)
+                                .await
+                        {
+                            tracing::warn!(
+                                error = %err,
+                                "Failed to project provider metadata from event"
+                            );
                         }
                     }
                     StoreProgressCommand::Flush(tx) => {
@@ -1488,6 +1622,80 @@ impl StoreProgressLogger {
             tracing::warn!("Store progress logger flush dropped before completion");
         }
     }
+}
+
+async fn project_provider_used_from_event_payload(
+    run_store: &dyn RunStore,
+    payload: &EventPayload,
+) -> Result<()> {
+    let value = payload.as_value();
+    let Some(event_name) = value.get("event").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    let Some(node_id) = value.get("node_id").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    let Some(properties) = value.get("properties").and_then(Value::as_object) else {
+        return Ok(());
+    };
+    let Some(visit) = properties
+        .get("visit")
+        .and_then(Value::as_u64)
+        .and_then(|visit| u32::try_from(visit).ok())
+    else {
+        return Ok(());
+    };
+
+    let provider_used = match event_name {
+        "stage.prompt" => {
+            let mut provider_used = Map::new();
+            if let Some(mode) = properties.get("mode").and_then(Value::as_str) {
+                provider_used.insert("mode".to_string(), Value::String(mode.to_string()));
+            }
+            if let Some(provider) = properties.get("provider").and_then(Value::as_str) {
+                provider_used.insert("provider".to_string(), Value::String(provider.to_string()));
+            }
+            if let Some(model) = properties.get("model").and_then(Value::as_str) {
+                provider_used.insert("model".to_string(), Value::String(model.to_string()));
+            }
+            (!provider_used.is_empty()).then_some(Value::Object(provider_used))
+        }
+        "agent.session.started" => {
+            let mut provider_used = Map::new();
+            provider_used.insert("mode".to_string(), Value::String("agent".to_string()));
+            if let Some(provider) = properties.get("provider").and_then(Value::as_str) {
+                provider_used.insert("provider".to_string(), Value::String(provider.to_string()));
+            }
+            if let Some(model) = properties.get("model").and_then(Value::as_str) {
+                provider_used.insert("model".to_string(), Value::String(model.to_string()));
+            }
+            Some(Value::Object(provider_used))
+        }
+        "agent.cli.started" => {
+            let mut provider_used = Map::new();
+            provider_used.insert("mode".to_string(), Value::String("cli".to_string()));
+            if let Some(provider) = properties.get("provider").and_then(Value::as_str) {
+                provider_used.insert("provider".to_string(), Value::String(provider.to_string()));
+            }
+            if let Some(model) = properties.get("model").and_then(Value::as_str) {
+                provider_used.insert("model".to_string(), Value::String(model.to_string()));
+            }
+            if let Some(command) = properties.get("command").and_then(Value::as_str) {
+                provider_used.insert("command".to_string(), Value::String(command.to_string()));
+            }
+            Some(Value::Object(provider_used))
+        }
+        _ => None,
+    };
+
+    let Some(provider_used) = provider_used else {
+        return Ok(());
+    };
+
+    run_store
+        .put_node_provider_used(&NodeVisitRef { node_id, visit }, &provider_used)
+        .await
+        .map_err(anyhow::Error::from)
 }
 
 /// Current time as epoch milliseconds.
@@ -1749,6 +1957,7 @@ mod tests {
             &fixtures::RUN_4,
             &WorkflowRunEvent::Agent {
                 stage: "code".to_string(),
+                visit: 2,
                 event: AgentEvent::ToolCallStarted {
                     tool_name: "read_file".to_string(),
                     tool_call_id: "call_1".to_string(),
@@ -1766,6 +1975,7 @@ mod tests {
         assert_eq!(envelope.parent_session_id.as_deref(), Some("ses_parent"));
         assert_eq!(envelope.properties["tool_name"], "read_file");
         assert_eq!(envelope.properties["tool_call_id"], "call_1");
+        assert_eq!(envelope.properties["visit"], 2);
     }
 
     #[test]
@@ -1797,6 +2007,7 @@ mod tests {
             &WorkflowRunEvent::WorkflowRunFailed {
                 error: FabroError::handler("boom"),
                 duration_ms: 900,
+                reason: Some(StatusReason::WorkflowError),
                 git_commit_sha: Some("abc123".to_string()),
             },
         );
@@ -1867,6 +2078,7 @@ mod tests {
         assert_eq!(
             event_name(&WorkflowRunEvent::Agent {
                 stage: "code".to_string(),
+                visit: 1,
                 event: AgentEvent::SubAgentSpawned {
                     agent_id: "a1".to_string(),
                     depth: 1,

@@ -12063,6 +12063,7 @@ impl Handler for KeepaliveHandler {
             tokio::time::sleep(std::time::Duration::from_millis(self.interval_ms)).await;
             services.emitter.emit(&WorkflowRunEvent::Prompt {
                 stage: node.id.clone(),
+                visit: 1,
                 text: "keepalive".to_string(),
                 mode: None,
                 provider: None,

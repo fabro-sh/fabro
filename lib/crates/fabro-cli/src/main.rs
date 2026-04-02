@@ -171,11 +171,11 @@ async fn main_inner() -> (String, Result<()>) {
         None
     };
 
-    let result = async move {
+    let result = Box::pin(async move {
         match *command {
             Commands::Llm(ns) => commands::llm::dispatch(ns, &globals).await?,
             Commands::Exec(args) => commands::exec::execute(args, &globals).await?,
-            Commands::RunCmd(cmd) => commands::run::dispatch(cmd, &globals).await?,
+            Commands::RunCmd(cmd) => Box::pin(commands::run::dispatch(cmd, &globals)).await?,
             Commands::Preflight(args) => commands::preflight::execute(args, &globals).await?,
             Commands::Validate(args) => {
                 let styles = Styles::detect_stderr();
@@ -270,7 +270,7 @@ async fn main_inner() -> (String, Result<()>) {
         }
 
         Ok(())
-    }
+    })
     .await;
 
     // Print upgrade notice after command completes (non-blocking during execution)

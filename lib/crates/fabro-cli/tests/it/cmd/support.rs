@@ -4,7 +4,7 @@ use std::process::Output;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use fabro_store::{RunSnapshot, RunStore, SlateStore, Store};
+use fabro_store::{EventEnvelope, RunSnapshot, RunStore, SlateStore, Store};
 use fabro_test::TestContext;
 use fabro_types::RunId;
 use object_store::local::LocalFileSystem;
@@ -492,6 +492,12 @@ pub(crate) fn run_snapshot(run_dir: &Path) -> RunSnapshot {
         .and_then(|store| block_on(store.get_snapshot()).ok())
         .flatten()
         .expect("run store snapshot should exist")
+}
+
+pub(crate) fn run_events(run_dir: &Path) -> Vec<EventEnvelope> {
+    run_store(run_dir)
+        .and_then(|store| block_on(store.list_events()).ok())
+        .expect("run store events should exist")
 }
 
 pub(crate) fn git_stdout(repo_dir: &Path, args: &[&str]) -> String {

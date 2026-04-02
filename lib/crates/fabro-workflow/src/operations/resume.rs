@@ -3,6 +3,7 @@ use std::path::Path;
 use fabro_store::RuntimeState;
 
 use crate::error::FabroError;
+use crate::event::{WorkflowRunEvent, append_workflow_event};
 use crate::outcome::StageStatus;
 use crate::run_status::{self, RunStatus};
 
@@ -54,6 +55,13 @@ pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, 
         ))
         .await
         .map_err(|err| FabroError::engine(err.to_string()))?;
+    append_workflow_event(
+        services.run_store.as_ref(),
+        &services.run_id,
+        &WorkflowRunEvent::RunSubmitted { reason: None },
+    )
+    .await
+    .map_err(|err| FabroError::engine(err.to_string()))?;
 
     Box::pin(execute_persisted_run(run_dir, Some(checkpoint), services)).await
 }
