@@ -13,7 +13,7 @@ use fabro_workflow::operations::{
 use fabro_workflow::records::CheckpointExt;
 use fabro_workflow::records::{RunRecord, RunRecordExt, StartRecord, StartRecordExt};
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
-use fabro_workflow::run_status::{self, RunStatus};
+use fabro_workflow::run_status::RunStatus;
 use git2::Repository;
 use serde::Serialize;
 
@@ -111,7 +111,6 @@ async fn reset_rewound_run_state(
     let checkpoint = MetadataStore::read_checkpoint(git_store.repo_dir(), &run_id.to_string())?
         .context("rewound metadata branch is missing checkpoint.json")?;
     checkpoint.save(&run_dir.join("checkpoint.json"))?;
-    run_status::write_run_status(run_dir, RunStatus::Submitted, None);
 
     for name in [
         "conclusion.json",
