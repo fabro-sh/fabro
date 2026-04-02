@@ -122,7 +122,7 @@ fn rm_force_deletes_submitted_run() {
 fn rm_force_deletes_run_without_sandbox_json_when_store_has_sandbox() {
     let context = test_context!();
     let setup = setup_local_sandbox_run(&context);
-    std::fs::remove_file(setup.run.run_dir.join("sandbox.json")).unwrap();
+    let _ = std::fs::remove_file(setup.run.run_dir.join("sandbox.json"));
 
     let mut filters = context.filters();
     filters.push((

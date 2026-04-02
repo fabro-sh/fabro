@@ -5,12 +5,11 @@ use crate::error::FabroError;
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::git::{MetadataStore, scan_node_files_from_store};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
-use crate::records::{Checkpoint, CheckpointExt, Conclusion, StageSummary};
+use crate::records::{Checkpoint, Conclusion, StageSummary};
 use crate::run_options::RunOptions;
 use crate::run_status::{RunStatus, StatusReason};
 use crate::sandbox_git::git_push_host;
 use fabro_hooks::{HookContext, HookEvent, HookRunner};
-use fabro_retro::retro::extract_stage_durations;
 use fabro_store::RunStore;
 
 use super::types::{Concluded, FinalizeOptions, Retroed};
@@ -63,105 +62,19 @@ pub fn classify_engine_result(
     }
 }
 
-pub fn build_conclusion(
-    run_dir: &Path,
-    status: StageStatus,
-    failure_reason: Option<String>,
-    run_duration_ms: u64,
-    final_git_commit_sha: Option<String>,
-) -> Conclusion {
-    let checkpoint = Checkpoint::load(&run_dir.join("checkpoint.json")).ok();
-    let stage_durations = extract_stage_durations(run_dir);
-
-    let mut total_input_tokens: i64 = 0;
-    let mut total_output_tokens: i64 = 0;
-    let mut total_cache_read_tokens: i64 = 0;
-    let mut total_cache_write_tokens: i64 = 0;
-    let mut total_reasoning_tokens: i64 = 0;
-    let mut has_pricing = false;
-
-    let (stages, total_cost, total_retries) = if let Some(ref cp) = checkpoint {
-        let mut stages = Vec::new();
-        let mut cost_sum: Option<f64> = None;
-        let mut retries_sum: u32 = 0;
-
-        for node_id in &cp.completed_nodes {
-            let outcome = cp.node_outcomes.get(node_id);
-            let retries = cp
-                .node_retries
-                .get(node_id)
-                .copied()
-                .unwrap_or(1)
-                .saturating_sub(1);
-            retries_sum += retries;
-
-            let cost = outcome.and_then(|o| o.usage.as_ref()).and_then(|u| u.cost);
-            if let Some(c) = cost {
-                *cost_sum.get_or_insert(0.0) += c;
-                has_pricing = true;
-            }
-
-            if let Some(usage) = outcome.and_then(|o| o.usage.as_ref()) {
-                total_input_tokens += usage.input_tokens;
-                total_output_tokens += usage.output_tokens;
-                total_cache_read_tokens += usage.cache_read_tokens.unwrap_or(0);
-                total_cache_write_tokens += usage.cache_write_tokens.unwrap_or(0);
-                total_reasoning_tokens += usage.reasoning_tokens.unwrap_or(0);
-            }
-
-            stages.push(StageSummary {
-                stage_id: node_id.clone(),
-                stage_label: node_id.clone(),
-                duration_ms: stage_durations.get(node_id).copied().unwrap_or(0),
-                cost,
-                retries,
-            });
-        }
-        (stages, cost_sum, retries_sum)
-    } else {
-        (vec![], None, 0)
-    };
-
-    Conclusion {
-        timestamp: chrono::Utc::now(),
-        status,
-        duration_ms: run_duration_ms,
-        failure_reason,
-        final_git_commit_sha,
-        stages,
-        total_cost,
-        total_retries,
-        total_input_tokens,
-        total_output_tokens,
-        total_cache_read_tokens,
-        total_cache_write_tokens,
-        total_reasoning_tokens,
-        has_pricing,
-    }
-}
-
 pub(crate) async fn build_conclusion_from_store(
     run_store: &dyn RunStore,
-    run_dir: &Path,
     status: StageStatus,
     failure_reason: Option<String>,
     run_duration_ms: u64,
     final_git_commit_sha: Option<String>,
 ) -> Conclusion {
-    let checkpoint = match run_store.get_checkpoint().await {
-        Ok(checkpoint) => checkpoint,
-        Err(err) => {
-            tracing::warn!(error = %err, "Failed to load checkpoint from store while building conclusion");
-            Checkpoint::load(&run_dir.join("checkpoint.json")).ok()
-        }
-    };
-    let stage_durations = match run_store.list_events().await {
-        Ok(events) => crate::extract_stage_durations_from_events(&events),
-        Err(err) => {
-            tracing::warn!(error = %err, "Failed to load events from store while building conclusion");
-            extract_stage_durations(run_dir)
-        }
-    };
+    let checkpoint = run_store.get_checkpoint().await.ok().flatten();
+    let stage_durations = run_store
+        .list_events()
+        .await
+        .map(|events| crate::extract_stage_durations_from_events(&events))
+        .unwrap_or_default();
 
     build_conclusion_from_parts(
         checkpoint.as_ref(),
@@ -360,7 +273,6 @@ pub async fn finalize(
         classify_engine_result(&outcome);
     let conclusion = build_conclusion_from_store(
         options.run_store.as_ref(),
-        &options.run_dir,
         final_status,
         failure_reason,
         duration_ms,
@@ -479,9 +391,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let run_store: Arc<dyn fabro_store::RunStore> = Arc::new(
-            fabro_store::DiskProjectingRunStore::new(inner_store, run_dir.clone()),
-        );
+        let run_store: Arc<dyn fabro_store::RunStore> = inner_store;
         let retroed = Retroed {
             graph: Graph::new("test"),
             outcome: Ok(Outcome::success()),

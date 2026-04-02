@@ -5,7 +5,7 @@ use std::sync::Arc;
 use chrono::Utc;
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::Graph as GvGraph;
-use fabro_store::{DiskProjectingRunStore, InMemoryStore, RunStore, Store};
+use fabro_store::{InMemoryStore, Store};
 use fabro_types::run::RunRecord;
 
 use crate::error::Result;
@@ -48,10 +48,7 @@ async fn initialized(
         )
         .await
         .expect("failed to create in-memory run store");
-    let run_store = Arc::new(DiskProjectingRunStore::new(
-        inner_store,
-        run_options.run_dir.clone(),
-    ));
+    let run_store = inner_store;
     run_store
         .put_run(&RunRecord {
             run_id: run_options.run_id,

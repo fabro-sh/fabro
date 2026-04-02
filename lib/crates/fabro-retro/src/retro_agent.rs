@@ -22,8 +22,8 @@ const RETRO_SYSTEM_PROMPT: &str = r"You are a workflow run retrospective analyst
 You have access to the run's data files:
 - `progress.jsonl` — the full event stream (stage starts/completions, agent tool calls, errors, retries)
 - `checkpoint.json` — final execution state with node outcomes
-- `run.json` — run record with config, graph, and metadata (if available)
-- `start.json` — start record with start time and git info (if available)
+- `run.json` — run record with config, graph, and metadata
+- `start.json` — start record with start time and git info
 
 ## Your task
 
@@ -379,7 +379,7 @@ fn build_profile(provider: Provider, model: &str) -> Box<dyn AgentProfile> {
 async fn upload_data_files(
     sandbox: &Arc<dyn Sandbox>,
     run_store: Option<&dyn RunStore>,
-    run_dir: &Path,
+    _run_dir: &Path,
     target_dir: &str,
 ) -> anyhow::Result<()> {
     // Create target directory
@@ -388,37 +388,23 @@ async fn upload_data_files(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to create retro data dir: {e}"))?;
 
-    // progress.jsonl — try store first, fall back to filesystem
-    let progress_content = if let Some(store) = run_store {
-        match store.list_events().await {
-            Ok(envelopes) => {
-                let lines: Vec<String> = envelopes
-                    .into_iter()
-                    .filter_map(|env| serde_json::to_string(env.payload.as_value()).ok())
-                    .collect();
-                if lines.is_empty() {
-                    None
-                } else {
-                    Some(lines.join("\n") + "\n")
-                }
-            }
-            Err(e) => {
-                tracing::debug!(error = %e, "Could not read events from store, falling back to filesystem");
-                None
-            }
-        }
-    } else {
-        None
+    let Some(store) = run_store else {
+        anyhow::bail!("retro analysis now requires a run store");
     };
-    let progress_content = if progress_content.is_some() {
-        progress_content
-    } else {
-        let source = run_dir.join("progress.jsonl");
-        if source.exists() {
-            Some(std::fs::read_to_string(&source)?)
-        } else {
-            None
+
+    let progress_content = match store.list_events().await {
+        Ok(envelopes) => {
+            let lines: Vec<String> = envelopes
+                .into_iter()
+                .filter_map(|env| serde_json::to_string(env.payload.as_value()).ok())
+                .collect();
+            if lines.is_empty() {
+                None
+            } else {
+                Some(lines.join("\n") + "\n")
+            }
         }
+        Err(e) => return Err(anyhow::anyhow!("Failed to load events from store: {e}")),
     };
     if let Some(content) = progress_content {
         sandbox
@@ -427,80 +413,39 @@ async fn upload_data_files(
             .map_err(|e| anyhow::anyhow!("Failed to upload progress.jsonl: {e}"))?;
     }
 
-    // checkpoint.json — try store first, fall back to filesystem
-    let checkpoint_content = if let Some(store) = run_store {
-        match store.get_checkpoint().await {
-            Ok(Some(cp)) => serde_json::to_string_pretty(&cp).ok(),
-            Ok(None) => None,
-            Err(e) => {
-                tracing::debug!(error = %e, "Could not read checkpoint from store, falling back to filesystem");
-                None
-            }
-        }
-    } else {
-        None
-    };
-    upload_file_with_fallback(
-        sandbox,
-        run_dir,
-        target_dir,
-        "checkpoint.json",
-        checkpoint_content,
-    )
-    .await?;
+    let checkpoint_content = store
+        .get_checkpoint()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to load checkpoint from store: {e}"))?
+        .map(|cp| serde_json::to_string_pretty(&cp))
+        .transpose()?;
+    upload_file(sandbox, target_dir, "checkpoint.json", checkpoint_content).await?;
 
-    // run.json — try store first, fall back to filesystem
-    let run_content = if let Some(store) = run_store {
-        match store.get_run().await {
-            Ok(Some(run)) => serde_json::to_string_pretty(&run).ok(),
-            Ok(None) => None,
-            Err(e) => {
-                tracing::debug!(error = %e, "Could not read run from store, falling back to filesystem");
-                None
-            }
-        }
-    } else {
-        None
-    };
-    upload_file_with_fallback(sandbox, run_dir, target_dir, "run.json", run_content).await?;
+    let run_content = store
+        .get_run()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to load run metadata from store: {e}"))?
+        .map(|run| serde_json::to_string_pretty(&run))
+        .transpose()?;
+    upload_file(sandbox, target_dir, "run.json", run_content).await?;
 
-    // start.json — try store first, fall back to filesystem
-    let start_content = if let Some(store) = run_store {
-        match store.get_start().await {
-            Ok(Some(start)) => serde_json::to_string_pretty(&start).ok(),
-            Ok(None) => None,
-            Err(e) => {
-                tracing::debug!(error = %e, "Could not read start from store, falling back to filesystem");
-                None
-            }
-        }
-    } else {
-        None
-    };
-    upload_file_with_fallback(sandbox, run_dir, target_dir, "start.json", start_content).await?;
+    let start_content = store
+        .get_start()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to load start metadata from store: {e}"))?
+        .map(|start| serde_json::to_string_pretty(&start))
+        .transpose()?;
+    upload_file(sandbox, target_dir, "start.json", start_content).await?;
 
     Ok(())
 }
 
-/// Upload a single file to the sandbox. If `store_content` is `Some`, use it directly;
-/// otherwise fall back to reading from `run_dir/filename` on the filesystem.
-async fn upload_file_with_fallback(
+async fn upload_file(
     sandbox: &Arc<dyn Sandbox>,
-    run_dir: &Path,
     target_dir: &str,
     filename: &str,
-    store_content: Option<String>,
+    content: Option<String>,
 ) -> anyhow::Result<()> {
-    let content = if store_content.is_some() {
-        store_content
-    } else {
-        let source = run_dir.join(filename);
-        if source.exists() {
-            Some(std::fs::read_to_string(&source)?)
-        } else {
-            None
-        }
-    };
     if let Some(content) = content {
         sandbox
             .write_file(&format!("{target_dir}/{filename}"), &content)

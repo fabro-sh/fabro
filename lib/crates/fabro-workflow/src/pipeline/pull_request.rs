@@ -8,16 +8,13 @@ use tracing::{debug, info};
 use fabro_github::{self as github_app, GitHubAppCredentials, ssh_url_to_https};
 use fabro_graphviz::parser;
 use fabro_llm::generate::{GenerateParams, generate};
-use fabro_retro::RetroExt;
 use fabro_util::text::strip_goal_decoration;
 
+use super::types::{Concluded, Finalized, PullRequestOptions};
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::outcome::{StageStatus, format_cost as outcome_format_cost};
-use crate::records::{Conclusion, ConclusionExt, RunRecord, RunRecordExt};
+use crate::records::{Conclusion, RunRecord, RunRecordExt};
 use fabro_retro::retro::Retro;
-use tokio::fs::read_to_string;
-
-use super::types::{Concluded, Finalized, PullRequestOptions};
 
 /// Derive a PR title from the workflow goal.
 ///
@@ -199,8 +196,7 @@ fn parse_dot_summary(dot: &str) -> (String, usize, usize) {
     }
 }
 
-/// Read the workflow graph source from `run_dir/workflow.fabro`.
-/// Falls back to `graph.fabro` / `graph.dot` for older runs.
+#[cfg(test)]
 fn read_dot_source(run_dir: &Path) -> Option<String> {
     let workflow_fabro_path = run_dir.join("workflow.fabro");
     if let Ok(content) = std::fs::read_to_string(&workflow_fabro_path) {
@@ -307,9 +303,10 @@ async fn load_pull_request_diff(run_store: Option<&dyn RunStore>, run_dir: &Path
             .ok()
             .flatten()
             .unwrap_or_default(),
-        None => read_to_string(run_dir.join("final.patch"))
-            .await
-            .unwrap_or_default(),
+        None => {
+            let _ = run_dir;
+            String::new()
+        }
     }
 }
 
@@ -336,7 +333,7 @@ pub async fn build_pr_body(
                 })
                 .ok()
                 .flatten(),
-            None => Conclusion::load(&run_dir.join("conclusion.json")).ok(),
+            None => None,
         }
     } else {
         None
@@ -351,7 +348,7 @@ pub async fn build_pr_body(
             })
             .ok()
             .flatten(),
-        None => Retro::load(run_dir).ok(),
+        None => None,
     };
     let run_record = match run_store {
         Some(run_store) => run_store
@@ -362,7 +359,7 @@ pub async fn build_pr_body(
             })
             .ok()
             .flatten(),
-        None => RunRecord::load(run_dir).ok(),
+        None => None,
     };
     let dot_source = match run_store {
         Some(run_store) => run_store
@@ -373,7 +370,7 @@ pub async fn build_pr_body(
             })
             .ok()
             .flatten(),
-        None => read_dot_source(run_dir),
+        None => None,
     };
 
     // Build LLM prompt

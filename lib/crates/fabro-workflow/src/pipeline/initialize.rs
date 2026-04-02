@@ -771,10 +771,7 @@ mod tests {
                         )
                         .await
                         .unwrap();
-                    Arc::new(fabro_store::DiskProjectingRunStore::new(
-                        inner,
-                        run_dir.clone(),
-                    ))
+                    inner
                 },
                 dry_run: false,
                 emitter,
@@ -849,10 +846,7 @@ mod tests {
                         )
                         .await
                         .unwrap();
-                    Arc::new(fabro_store::DiskProjectingRunStore::new(
-                        inner,
-                        run_dir.clone(),
-                    ))
+                    inner
                 },
                 dry_run: false,
                 emitter,
@@ -891,7 +885,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(run_dir.join("sandbox.json").exists());
+        assert!(initialized.run_store.get_sandbox().await.unwrap().is_some());
         assert_eq!(initialized.run_options.run_dir, run_dir);
     }
 }

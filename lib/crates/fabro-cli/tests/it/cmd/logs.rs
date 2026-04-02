@@ -92,7 +92,7 @@ fn logs_completed_run_outputs_raw_ndjson() {
 fn logs_completed_run_reads_store_without_progress_jsonl() {
     let context = test_context!();
     let run = setup_completed_dry_run(&context);
-    std::fs::remove_file(run.run_dir.join("progress.jsonl")).unwrap();
+    let _ = std::fs::remove_file(run.run_dir.join("progress.jsonl"));
 
     let mut filters = context.filters();
     filters.push((

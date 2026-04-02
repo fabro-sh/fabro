@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use fabro_agent::SessionEvent;
-use fabro_retro::retro::{Retro, derive_retro, extract_stage_durations};
+use fabro_retro::retro::{Retro, derive_retro};
 use fabro_retro::retro_agent::{dry_run_narrative, run_retro_agent};
 
 use super::types::{Executed, RetroOptions, Retroed};
@@ -36,8 +36,8 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
     let stage_durations = match options.run_store.list_events().await {
         Ok(events) => crate::extract_stage_durations_from_events(&events),
         Err(err) => {
-            tracing::warn!(error = %err, "Could not load events from store, falling back to disk");
-            extract_stage_durations(&options.run_dir)
+            tracing::warn!(error = %err, "Could not load events from store, skipping stage durations");
+            Default::default()
         }
     };
     let mut retro = derive_retro(
@@ -185,7 +185,7 @@ mod tests {
         fixtures::RUN_1
     }
 
-    fn write_checkpoint(run_dir: &std::path::Path) -> Checkpoint {
+    fn build_checkpoint() -> Checkpoint {
         let context = Context::new();
         context.set("response.work", serde_json::json!("done"));
         let mut outcomes = HashMap::new();
@@ -201,7 +201,6 @@ mod tests {
             HashMap::new(),
             HashMap::new(),
         );
-        checkpoint.save(&run_dir.join("checkpoint.json")).unwrap();
         checkpoint
     }
 
@@ -217,9 +216,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let run_store: Arc<dyn fabro_store::RunStore> = Arc::new(
-            fabro_store::DiskProjectingRunStore::new(inner, run_dir.to_path_buf()),
-        );
+        let run_store: Arc<dyn fabro_store::RunStore> = inner;
         run_store.put_checkpoint(checkpoint).await.unwrap();
         run_store
     }
@@ -245,7 +242,8 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
         std::fs::create_dir_all(&run_dir).unwrap();
-        let checkpoint = write_checkpoint(&run_dir);
+        let checkpoint = build_checkpoint();
+        let run_store = test_run_store(&run_dir, &checkpoint).await;
 
         let emitter = Arc::new(EventEmitter::default());
         let sandbox: Arc<dyn fabro_agent::Sandbox> = Arc::new(fabro_agent::LocalSandbox::new(
@@ -255,7 +253,7 @@ mod tests {
             graph: Graph::new("test"),
             outcome: Ok(crate::outcome::Outcome::success()),
             run_options: test_run_options(&run_dir),
-            run_store: test_run_store(&run_dir, &checkpoint).await,
+            run_store: Arc::clone(&run_store),
             hook_runner: None,
             emitter: Arc::clone(&emitter),
             sandbox: Arc::clone(&sandbox),
@@ -270,7 +268,7 @@ mod tests {
             executed,
             &RetroOptions {
                 run_id: test_run_id(),
-                run_store: test_run_store(&run_dir, &checkpoint).await,
+                run_store,
                 workflow_name: "test".to_string(),
                 goal: "Ship it".to_string(),
                 run_dir: run_dir.clone(),
@@ -286,7 +284,7 @@ mod tests {
         )
         .await;
 
-        assert!(run_dir.join("retro.json").exists());
+        assert!(retroed.run_store.get_retro().await.unwrap().is_some());
         assert!(retroed.retro.is_some());
     }
 
@@ -295,7 +293,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
         std::fs::create_dir_all(&run_dir).unwrap();
-        let checkpoint = write_checkpoint(&run_dir);
+        let checkpoint = build_checkpoint();
 
         let emitter = Arc::new(EventEmitter::default());
         let seen = Arc::new(Mutex::new(Vec::new()));

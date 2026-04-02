@@ -194,11 +194,6 @@ impl Persisted {
         )
     }
 
-    /// Load a previously persisted run from disk.
-    pub fn load(run_dir: &Path) -> Result<Self, FabroError> {
-        super::persist::load(run_dir)
-    }
-
     pub async fn load_from_store(
         run_store: &dyn RunStore,
         run_dir: &Path,

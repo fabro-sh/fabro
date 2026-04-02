@@ -11,16 +11,15 @@ use fabro_config::{project as project_config, run as run_config, sandbox as sand
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_model::{Catalog, FallbackTarget, Provider};
 use fabro_sandbox::{SandboxProvider, SandboxSpec};
-use fabro_store::{DiskProjectingRunStore, ProjectionError, RunStore};
+use fabro_store::RunStore;
 use fabro_types::RunId;
 use serde::Serialize;
 
 use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::{
-    EventEmitter, RunNoticeLevel, StoreProgressLogger, WorkflowRunEvent, append_progress_event,
-    append_progress_event_with_line, canonicalize_event, event_payload_from_redacted_json,
-    redacted_event_json,
+    EventEmitter, RunNoticeLevel, StoreProgressLogger, WorkflowRunEvent, canonicalize_event,
+    event_payload_from_redacted_json, redacted_event_json,
 };
 use crate::git::MetadataStore;
 use crate::handler::HandlerRegistry;
@@ -116,38 +115,10 @@ pub async fn start(run_dir: &Path, services: StartServices) -> Result<Started, F
 pub(super) async fn execute_persisted_run(
     run_dir: &Path,
     checkpoint: Option<Checkpoint>,
-    mut services: StartServices,
+    services: StartServices,
 ) -> Result<Started, FabroError> {
     let cancel_token = services.cancel_token.clone();
     let run_id = services.run_id;
-    let inner_store = Arc::clone(&services.run_store);
-    let projection_run_dir = run_dir.to_path_buf();
-    services.run_store = Arc::new(
-        DiskProjectingRunStore::new(inner_store, run_dir.to_path_buf()).on_projection_error(
-            Arc::new(move |projection_error: ProjectionError| {
-                // Write directly to progress.jsonl/live.json so projection failures do not
-                // recurse back through the decorated store.append_event() path.
-                let envelope = canonicalize_event(
-                    &run_id,
-                    &WorkflowRunEvent::RunNotice {
-                        level: RunNoticeLevel::Warn,
-                        code: "disk_projection_failed".to_string(),
-                        message: format!(
-                            "{}disk projection failed for {}: {}",
-                            if projection_error.critical {
-                                "critical "
-                            } else {
-                                ""
-                            },
-                            projection_error.path.display(),
-                            projection_error.error
-                        ),
-                    },
-                );
-                let _ = append_progress_event(&projection_run_dir, &envelope);
-            }),
-        ),
-    );
     let run_store = Arc::clone(&services.run_store);
     if let Err(err) = run_store
         .put_status(&run_status::RunStatusRecord::new(
@@ -208,7 +179,7 @@ pub(super) async fn execute_persisted_run(
 
     bootstrap_guard.defuse();
     let mut completion_guard =
-        DetachedRunCompletionGuard::arm(run_dir, run_id, Arc::clone(&run_store), cancel_token);
+        DetachedRunCompletionGuard::arm(run_id, Arc::clone(&run_store), cancel_token);
     let run_start = Instant::now();
     let started = Box::pin(session.run(persisted, checkpoint)).await;
 
@@ -228,7 +199,7 @@ pub(super) async fn execute_persisted_run(
 
 async fn persist_terminal_engine_failure(
     run_store: &dyn RunStore,
-    run_dir: &Path,
+    _run_dir: &Path,
     error: &FabroError,
     duration: Duration,
 ) {
@@ -237,7 +208,6 @@ async fn persist_terminal_engine_failure(
         classify_engine_result(&engine_result);
     let conclusion = build_conclusion_from_store(
         run_store,
-        run_dir,
         final_status,
         failure_reason,
         u64::try_from(duration.as_millis()).unwrap(),
@@ -655,7 +625,6 @@ const POSTRUN_ABORTED_MESSAGE: &str = "Run aborted before post-run finalization 
 const POSTRUN_CANCELLED_MESSAGE: &str = "Run cancelled before post-run finalization completed.";
 
 struct DetachedRunCompletionGuard {
-    run_dir: PathBuf,
     run_store: Arc<dyn RunStore>,
     run_id: RunId,
     cancel_token: Option<Arc<AtomicBool>>,
@@ -664,13 +633,11 @@ struct DetachedRunCompletionGuard {
 
 impl DetachedRunCompletionGuard {
     fn arm(
-        run_dir: &Path,
         run_id: RunId,
         run_store: Arc<dyn RunStore>,
         cancel_token: Option<Arc<AtomicBool>>,
     ) -> Self {
         Self {
-            run_dir: run_dir.to_path_buf(),
             run_store,
             run_id,
             cancel_token,
@@ -726,11 +693,6 @@ impl Drop for DetachedRunCompletionGuard {
                 }
             };
             if line.is_empty() {
-                None
-            } else if let Err(err) =
-                append_progress_event_with_line(&self.run_dir, &envelope, &line)
-            {
-                tracing::warn!(error = %err, "Failed to append post-run abort event");
                 None
             } else {
                 Some((self.run_id, line))
@@ -836,8 +798,6 @@ async fn persist_detached_failure(
     };
     let envelope = canonicalize_event(&run_id, &event);
     let line = redacted_event_json(&envelope).map_err(|err| FabroError::Io(err.to_string()))?;
-    append_progress_event_with_line(run_dir, &envelope, &line)
-        .map_err(|err| FabroError::Io(err.to_string()))?;
     match event_payload_from_redacted_json(&line, &run_id) {
         Ok(payload) => {
             if let Err(err) = run_store.append_event(&payload).await {

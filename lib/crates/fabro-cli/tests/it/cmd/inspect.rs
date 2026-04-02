@@ -116,7 +116,7 @@ fn inspect_completed_run_reads_store_without_disk_metadata_files() {
         "checkpoint.json",
         "sandbox.json",
     ] {
-        std::fs::remove_file(run.run_dir.join(name)).unwrap();
+        let _ = std::fs::remove_file(run.run_dir.join(name));
     }
     let output = run_success(&context, &["inspect", &run.run_id]);
 

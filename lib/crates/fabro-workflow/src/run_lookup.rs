@@ -7,10 +7,8 @@ use fabro_store::{ListRunsQuery, Store};
 use fabro_types::RunId;
 use serde::Serialize;
 
-use crate::records::{
-    Conclusion, ConclusionExt, RunRecord, RunRecordExt, StartRecord, StartRecordExt,
-};
-use crate::run_status::{RunStatus, RunStatusRecord, RunStatusRecordExt, StatusReason};
+use crate::records::{RunRecord, RunRecordExt, StartRecord, StartRecordExt};
+use crate::run_status::{RunStatus, StatusReason};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RunInfo {
@@ -263,27 +261,7 @@ impl StatusInfo {
 }
 
 fn read_status(run_dir: &Path) -> StatusInfo {
-    if let Ok(record) = RunStatusRecord::load(&run_dir.join("status.json")) {
-        if record.status.is_terminal() {
-            if let Ok(conclusion) = Conclusion::load(&run_dir.join("conclusion.json")) {
-                return StatusInfo {
-                    status: record.status,
-                    reason: record.reason,
-                    end_time: Some(conclusion.timestamp),
-                    duration_ms: Some(conclusion.duration_ms),
-                    total_cost: conclusion.total_cost,
-                };
-            }
-        }
-        return StatusInfo {
-            status: record.status,
-            reason: record.reason,
-            end_time: None,
-            duration_ms: None,
-            total_cost: None,
-        };
-    }
-
+    let _ = run_dir;
     StatusInfo::simple(RunStatus::Dead)
 }
 

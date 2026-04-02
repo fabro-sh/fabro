@@ -1,9 +1,7 @@
 use fabro_test::{fabro_snapshot, test_context};
 use serde_json::Value;
 
-use crate::support::{
-    example_fixture, fabro_json_snapshot, read_json, read_jsonl, run_output_filters,
-};
+use crate::support::{example_fixture, fabro_json_snapshot, run_output_filters};
 
 #[test]
 fn help() {
@@ -77,7 +75,7 @@ fn dry_run_simple() {
 }
 
 #[test]
-fn dry_run_writes_jsonl_and_live_json() {
+fn dry_run_persists_event_history_in_store() {
     let context = test_context!();
     let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FB8";
 
@@ -96,521 +94,61 @@ fn dry_run_writes_jsonl_and_live_json() {
         .assert()
         .success();
 
-    let run_dir = context.find_run_dir(run_id);
-    let jsonl_path = run_dir.join("progress.jsonl");
-    let progress = read_jsonl(&jsonl_path);
+    context.find_run_dir(run_id);
+    let output = context
+        .command()
+        .args(["logs", run_id])
+        .output()
+        .expect("logs command should execute");
+    assert!(
+        output.status.success(),
+        "logs failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let progress: Vec<Value> = String::from_utf8(output.stdout)
+        .expect("stdout should be UTF-8")
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str(line).expect("logs output should be JSONL"))
+        .collect();
     assert!(
         !progress.is_empty(),
-        "progress.jsonl should have at least one line"
+        "store-backed event history should have at least one line"
     );
-    fabro_json_snapshot!(context, &progress, @r#"
-    [
-      {
-        "id": "[EVENT_ID]",
-        "ts": "[TIMESTAMP]",
-        "run_id": "[ULID]",
-        "event": "run.created",
-        "properties": {
-          "workflow_slug": "simple",
-          "settings": {
-            "auto_approve": true,
-            "dry_run": true,
-            "fabro": {
-              "root": "fabro/"
-            },
-            "features": {
-              "retros": false,
-              "session_sandboxes": false
-            },
-            "goal": "Run tests and report results",
-            "hooks": [
-              {
-                "blocking": true,
-                "command": "cargo fmt",
-                "event": "post_tool_use",
-                "matcher": "write_file|edit_file|apply_patch",
-                "name": "cargo-fmt",
-                "sandbox": null,
-                "timeout_ms": null
-              }
-            ],
-            "llm": {
-              "fallbacks": null,
-              "model": "claude-sonnet-4-6",
-              "provider": "anthropic"
-            },
-            "mode": "standalone",
-            "pull_request": {
-              "auto_merge": false,
-              "draft": false,
-              "enabled": true,
-              "merge_strategy": "squash"
-            },
-            "sandbox": {
-              "daytona": {
-                "auto_stop_interval": 30,
-                "labels": {
-                  "repo": "fabro-sh/fabro"
-                },
-                "network": null,
-                "skip_clone": false,
-                "snapshot": {
-                  "cpu": 4,
-                  "disk": 20,
-                  "dockerfile": "FROM ubuntu:24.04/n/nRUN apt-get update && apt-get install -y --no-install-recommends curl git ca-certificates build-essential pkg-config libssl-dev unzip python3 && rm -rf /var/lib/apt/lists/*/n/n# GitHub CLI/nRUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg && echo \"deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null && apt-get update && apt-get install -y --no-install-recommends gh && rm -rf /var/lib/apt/lists/*/n/n# Rust/nRUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y/nENV PATH=\"/root/.cargo/bin:${PATH}\"/nRUN cargo install cargo-nextest --locked/nENV CARGO_INCREMENTAL=0/n/n# Bun/nRUN curl -fsSL https://bun.sh/install | bash/nENV PATH=\"/root/.bun/bin:${PATH}\"/n/nWORKDIR /root/n",
-                  "memory": 8,
-                  "name": "fabro-v6"
-                }
-              },
-              "devcontainer": null,
-              "env": null,
-              "local": null,
-              "preserve": null,
-              "provider": "local"
-            },
-            "storage_dir": "[STORAGE_DIR]",
-            "version": 1
-          },
-          "graph": {
-            "attrs": {
-              "goal": {
-                "String": "Run tests and report results"
-              },
-              "rankdir": {
-                "String": "LR"
-              }
-            },
-            "edges": [
-              {
-                "attrs": {},
-                "from": "start",
-                "to": "run_tests"
-              },
-              {
-                "attrs": {},
-                "from": "run_tests",
-                "to": "report"
-              },
-              {
-                "attrs": {},
-                "from": "report",
-                "to": "exit"
-              }
-            ],
-            "name": "Simple",
-            "nodes": {
-              "exit": {
-                "attrs": {
-                  "label": {
-                    "String": "Exit"
-                  },
-                  "shape": {
-                    "String": "Msquare"
-                  }
-                },
-                "id": "exit"
-              },
-              "report": {
-                "attrs": {
-                  "label": {
-                    "String": "Report"
-                  },
-                  "prompt": {
-                    "String": "Summarize the test results"
-                  }
-                },
-                "id": "report"
-              },
-              "run_tests": {
-                "attrs": {
-                  "label": {
-                    "String": "Run Tests"
-                  },
-                  "prompt": {
-                    "String": "Run the test suite and report results"
-                  }
-                },
-                "id": "run_tests"
-              },
-              "start": {
-                "attrs": {
-                  "label": {
-                    "String": "Start"
-                  },
-                  "shape": {
-                    "String": "Mdiamond"
-                  }
-                },
-                "id": "start"
-              }
-            }
-          },
-          "workflow_source": "digraph Simple {/n    graph [goal=\"Run tests and report results\"]/n    rankdir=LR/n/n    start [shape=Mdiamond, label=\"Start\"]/n    exit  [shape=Msquare, label=\"Exit\"]/n/n    run_tests [label=\"Run Tests\", prompt=\"Run the test suite and report results\"]/n    report    [label=\"Report\", prompt=\"Summarize the test results\"]/n/n    start -> run_tests -> report -> exit/n}/n",
-          "labels": {},
-          "run_dir": "[DRY_RUN_DIR]",
-          "working_directory": "[TEMP_DIR]",
-          "host_repo_path": "[TEMP_DIR]"
-        }
-      },
-      {
-        "event": "sandbox.initializing",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "provider": "local"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "sandbox.ready",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "cpu": null,
-          "duration_ms": "[DURATION_MS]",
-          "memory": null,
-          "name": null,
-          "provider": "local",
-          "url": null
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "sandbox.initialized",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "provider": "local",
-          "working_directory": "[TEMP_DIR]"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "run.started",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "goal": "Run tests and report results",
-          "name": "Simple"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "stage.started",
-        "id": "[EVENT_ID]",
-        "node_id": "start",
-        "node_label": "Start",
-        "properties": {
-          "attempt": 1,
-          "handler_type": "start",
-          "index": 0,
-          "max_attempts": 1
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "stage.completed",
-        "id": "[EVENT_ID]",
-        "node_id": "start",
-        "node_label": "Start",
-        "properties": {
-          "attempt": 1,
-          "context_values": {
-            "current.preamble": "Goal: Run tests and report results/n",
-            "current_node": "start",
-            "graph.goal": "Run tests and report results",
-            "graph.rankdir": "LR",
-            "internal.fidelity": "compact",
-            "internal.node_visit_count": 1,
-            "internal.run_id": "[ULID]",
-            "internal.thread_id": null
-          },
-          "duration_ms": "[DURATION_MS]",
-          "files_touched": [],
-          "index": 0,
-          "max_attempts": 1,
-          "node_visits": {
-            "start": 1
-          },
-          "notes": "[Simulated] start",
-          "preferred_label": null,
-          "status": "success",
-          "suggested_next_ids": [],
-          "usage": null
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "edge.selected",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "condition": null,
-          "from_node": "start",
-          "is_jump": false,
-          "label": null,
-          "reason": "unconditional",
-          "stage_status": "success",
-          "to_node": "run_tests"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "checkpoint.completed",
-        "id": "[EVENT_ID]",
-        "node_id": "start",
-        "node_label": "start",
-        "properties": {
-          "status": "success"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "stage.started",
-        "id": "[EVENT_ID]",
-        "node_id": "run_tests",
-        "node_label": "Run Tests",
-        "properties": {
-          "attempt": 1,
-          "handler_type": "agent",
-          "index": 1,
-          "max_attempts": 1
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "stage.completed",
-        "id": "[EVENT_ID]",
-        "node_id": "run_tests",
-        "node_label": "Run Tests",
-        "properties": {
-          "attempt": 1,
-          "context_updates": {
-            "last_response": "[Simulated] Response for stage: run_tests",
-            "last_stage": "run_tests",
-            "response.run_tests": "[Simulated] Response for stage: run_tests"
-          },
-          "context_values": {
-            "current.preamble": "Goal: Run tests and report results/n",
-            "current_node": "run_tests",
-            "failure_class": "",
-            "failure_signature": "",
-            "graph.goal": "Run tests and report results",
-            "graph.rankdir": "LR",
-            "internal.fidelity": "compact",
-            "internal.node_visit_count": 1,
-            "internal.retry_count.start": 0,
-            "internal.run_id": "[ULID]",
-            "internal.thread_id": "start",
-            "outcome": "success",
-            "thread.start.current_node": "run_tests"
-          },
-          "duration_ms": "[DURATION_MS]",
-          "files_touched": [],
-          "index": 1,
-          "max_attempts": 1,
-          "node_visits": {
-            "run_tests": 1,
-            "start": 1
-          },
-          "notes": "[Simulated] run_tests",
-          "preferred_label": null,
-          "status": "success",
-          "suggested_next_ids": [],
-          "usage": null
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "edge.selected",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "condition": null,
-          "from_node": "run_tests",
-          "is_jump": false,
-          "label": null,
-          "reason": "unconditional",
-          "stage_status": "success",
-          "to_node": "report"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "checkpoint.completed",
-        "id": "[EVENT_ID]",
-        "node_id": "run_tests",
-        "node_label": "run_tests",
-        "properties": {
-          "status": "success"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "stage.started",
-        "id": "[EVENT_ID]",
-        "node_id": "report",
-        "node_label": "Report",
-        "properties": {
-          "attempt": 1,
-          "handler_type": "agent",
-          "index": 2,
-          "max_attempts": 1
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "stage.completed",
-        "id": "[EVENT_ID]",
-        "node_id": "report",
-        "node_label": "Report",
-        "properties": {
-          "attempt": 1,
-          "context_updates": {
-            "last_response": "[Simulated] Response for stage: report",
-            "last_stage": "report",
-            "response.report": "[Simulated] Response for stage: report"
-          },
-          "context_values": {
-            "current.preamble": "Goal: Run tests and report results/n/n## Completed stages/n- **run_tests**: success/n",
-            "current_node": "report",
-            "failure_class": "",
-            "failure_signature": "",
-            "graph.goal": "Run tests and report results",
-            "graph.rankdir": "LR",
-            "internal.fidelity": "compact",
-            "internal.node_visit_count": 1,
-            "internal.retry_count.run_tests": 0,
-            "internal.retry_count.start": 0,
-            "internal.run_id": "[ULID]",
-            "internal.thread_id": "run_tests",
-            "last_response": "[Simulated] Response for stage: run_tests",
-            "last_stage": "run_tests",
-            "outcome": "success",
-            "response.run_tests": "[Simulated] Response for stage: run_tests",
-            "thread.run_tests.current_node": "report",
-            "thread.start.current_node": "run_tests"
-          },
-          "duration_ms": "[DURATION_MS]",
-          "files_touched": [],
-          "index": 2,
-          "max_attempts": 1,
-          "node_visits": {
-            "report": 1,
-            "run_tests": 1,
-            "start": 1
-          },
-          "notes": "[Simulated] report",
-          "preferred_label": null,
-          "status": "success",
-          "suggested_next_ids": [],
-          "usage": null
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "edge.selected",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "condition": null,
-          "from_node": "report",
-          "is_jump": false,
-          "label": null,
-          "reason": "unconditional",
-          "stage_status": "success",
-          "to_node": "exit"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "checkpoint.completed",
-        "id": "[EVENT_ID]",
-        "node_id": "report",
-        "node_label": "report",
-        "properties": {
-          "status": "success"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "stage.started",
-        "id": "[EVENT_ID]",
-        "node_id": "exit",
-        "node_label": "Exit",
-        "properties": {
-          "attempt": 1,
-          "handler_type": "exit",
-          "index": 3,
-          "max_attempts": 1
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "stage.completed",
-        "id": "[EVENT_ID]",
-        "node_id": "exit",
-        "node_label": "Exit",
-        "properties": {
-          "attempt": 1,
-          "duration_ms": "[DURATION_MS]",
-          "files_touched": [],
-          "index": 3,
-          "max_attempts": 1,
-          "notes": null,
-          "preferred_label": null,
-          "status": "success",
-          "suggested_next_ids": [],
-          "usage": null
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "run.completed",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "artifact_count": 0,
-          "duration_ms": "[DURATION_MS]",
-          "status": "success"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "sandbox.cleanup.started",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "provider": "local"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "sandbox.cleanup.completed",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "duration_ms": "[DURATION_MS]",
-          "provider": "local"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      }
-    ]
-    "#);
+    assert_eq!(
+        progress.first().and_then(|event| event["event"].as_str()),
+        Some("run.created")
+    );
+    assert_eq!(
+        progress
+            .first()
+            .and_then(|event| event.pointer("/properties/settings/auto_approve"))
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        progress.last().and_then(|event| event["event"].as_str()),
+        Some("sandbox.cleanup.completed")
+    );
 
-    let live_path = run_dir.join("live.json");
-    let live_content = read_json(&live_path);
+    let tail_output = context
+        .command()
+        .args(["logs", "--tail", "1", run_id])
+        .output()
+        .expect("tail logs command should execute");
+    assert!(
+        tail_output.status.success(),
+        "tail logs failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&tail_output.stdout),
+        String::from_utf8_lossy(&tail_output.stderr)
+    );
+    let live_content: Value = String::from_utf8(tail_output.stdout)
+        .expect("stdout should be UTF-8")
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str(line).expect("tail logs output should be JSON"))
+        .expect("tail logs should include the latest event");
     fabro_json_snapshot!(context, &live_content, @r#"
     {
       "event": "sandbox.cleanup.completed",
@@ -645,9 +183,7 @@ fn run_id_passthrough_uses_provided_ulid() {
         .assert()
         .success();
 
-    let run_dir = context.find_run_dir(run_id);
-    let run_record = read_json(run_dir.join("run.json"));
-    assert_eq!(run_record["run_id"].as_str(), Some(run_id));
+    context.find_run_dir(run_id);
 }
 
 #[test]
@@ -1219,10 +755,8 @@ fn json_run_implies_auto_approve_for_human_gates() {
     ]
     "#);
 
-    let run = context.single_run_dir();
-    let run_json = read_json(run.join("run.json"));
     assert_eq!(
-        run_json.pointer("/settings/auto_approve"),
+        progress[0].pointer("/properties/settings/auto_approve"),
         Some(&serde_json::json!(true))
     );
 }

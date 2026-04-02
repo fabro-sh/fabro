@@ -6,7 +6,6 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use futures::Stream;
 
-mod disk_projecting;
 mod error;
 mod keys;
 mod memory;
@@ -14,7 +13,6 @@ mod runtime;
 mod slate;
 mod types;
 
-pub use disk_projecting::{DiskProjectingRunStore, ProjectionError};
 pub use error::{Result, StoreError};
 pub use memory::InMemoryStore;
 pub use runtime::RuntimeState;

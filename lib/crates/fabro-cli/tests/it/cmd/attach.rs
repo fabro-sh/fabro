@@ -125,8 +125,8 @@ fn attach_replays_from_store_without_run_json_or_progress_jsonl() {
         .success();
 
     let run = resolve_run(&context, run_id);
-    std::fs::remove_file(run.run_dir.join("run.json")).unwrap();
-    std::fs::remove_file(run.run_dir.join("progress.jsonl")).unwrap();
+    let _ = std::fs::remove_file(run.run_dir.join("run.json"));
+    let _ = std::fs::remove_file(run.run_dir.join("progress.jsonl"));
 
     let mut cmd = context.command();
     cmd.args(["attach", run_id]);

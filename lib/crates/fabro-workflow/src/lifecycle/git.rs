@@ -18,7 +18,6 @@ use crate::git::scan_node_files_from_store;
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::{Outcome, StageStatus, StageUsage};
-use crate::run_dir::node_dir;
 use crate::run_options::RunOptions;
 use crate::sandbox_git::{git_checkpoint, git_diff, git_push_host};
 
@@ -289,8 +288,6 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                             .and_then(|g| g.base_sha.clone())
                     })
                     .unwrap_or_else(|| sha.clone());
-                let diff_dest = node_dir(&self.run_dir, node_id, visit).join("diff.patch");
-
                 match git_diff(&*self.sandbox, &prev).await {
                     Ok(patch) if !patch.is_empty() => {
                         let node_ref = fabro_store::NodeVisitRef {
@@ -309,7 +306,6 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                                 "failed to persist node diff for '{node_id}': {err}"
                             )));
                         }
-                        let _ = std::fs::write(&diff_dest, &patch);
                         git_result.diff = Some(patch);
                     }
                     Ok(_) => {}
@@ -352,7 +348,6 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                 .as_ref()
                 .and_then(|g| g.base_sha.clone())
             {
-                let diff_dest = self.run_dir.join("final.patch");
                 match git_diff(&*self.sandbox, &base_sha).await {
                     Ok(patch) if !patch.is_empty() => {
                         if let Err(err) = self.run_store.put_final_patch(&patch).await {
@@ -365,7 +360,6 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                             });
                             return;
                         }
-                        let _ = std::fs::write(&diff_dest, patch);
                     }
                     Ok(_) => {}
                     Err(err) => {

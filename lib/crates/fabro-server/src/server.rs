@@ -20,7 +20,6 @@ use fabro_llm::types::{
     ContentPart, FinishReason, Message as LlmMessage, Request as LlmRequest,
     Response as LlmResponse, Role, StreamEvent, ToolChoice, ToolDefinition, Usage,
 };
-use fabro_retro::retro::{Retro, extract_stage_durations};
 use fabro_store::{InMemoryStore, Store};
 use fabro_types::RunId;
 use fabro_util::redact::redact_jsonl_line;
@@ -47,7 +46,6 @@ use crate::sessions as sessions_mod;
 use crate::sessions::{SessionStore, new_session_store};
 use crate::web_auth;
 use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
-use fabro_retro::RetroExt;
 use fabro_workflow::context::Context;
 use fabro_workflow::event::{EventEmitter, RunEventEnvelope};
 use fabro_workflow::operations::{self, CreateRunInput, WorkflowInput};
@@ -771,7 +769,7 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
             Ok(events) => fabro_workflow::extract_stage_durations_from_events(&events),
             Err(err) => {
                 tracing::warn!(run_id = %run_id, error = %err, "Failed to load run events from store");
-                extract_stage_durations(&run_dir)
+                Default::default()
             }
         };
         let mut agg = state
@@ -1559,43 +1557,26 @@ async fn get_retro(
         Ok(id) => id,
         Err(response) => return response,
     };
-    let run_dir = {
+    {
         let runs = state.runs.lock().expect("runs lock poisoned");
-        match runs.get(&id) {
-            Some(managed_run) => managed_run.run_dir.clone(),
-            None => return ApiError::not_found("Run not found.").into_response(),
+        if !runs.contains_key(&id) {
+            return ApiError::not_found("Run not found.").into_response();
         }
-    };
-
-    let Some(run_dir) = run_dir else {
-        return (StatusCode::OK, Json(serde_json::json!(null))).into_response();
-    };
+    }
 
     match state.store.open_run_reader(&id).await {
         Ok(Some(run_store)) => match run_store.get_retro().await {
             Ok(Some(retro)) => (StatusCode::OK, Json(retro)).into_response(),
-            Ok(None) => match Retro::load(&run_dir) {
-                Ok(retro) => (StatusCode::OK, Json(retro)).into_response(),
-                Err(_) => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
-            },
+            Ok(None) => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
             Err(err) => {
                 tracing::warn!(run_id = %id, error = %err, "Failed to load retro from store");
-                match Retro::load(&run_dir) {
-                    Ok(retro) => (StatusCode::OK, Json(retro)).into_response(),
-                    Err(_) => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
-                }
+                (StatusCode::OK, Json(serde_json::json!(null))).into_response()
             }
         },
-        Ok(None) => match Retro::load(&run_dir) {
-            Ok(retro) => (StatusCode::OK, Json(retro)).into_response(),
-            Err(_) => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
-        },
+        Ok(None) => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
         Err(err) => {
             tracing::warn!(run_id = %id, error = %err, "Failed to open run store reader");
-            match Retro::load(&run_dir) {
-                Ok(retro) => (StatusCode::OK, Json(retro)).into_response(),
-                Err(_) => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
-            }
+            (StatusCode::OK, Json(serde_json::json!(null))).into_response()
         }
     }
 }
@@ -1643,7 +1624,6 @@ mod tests {
         AuthProvider, AuthSettings, GitAuthorSettings, GitProvider, GitSettings, WebSettings,
     };
     use fabro_types::fixtures;
-    use fabro_workflow::records::{RunRecord, RunRecordExt};
     use tower::ServiceExt;
 
     const MINIMAL_DOT: &str = r#"digraph Test {
@@ -2507,13 +2487,22 @@ mod tests {
         let body = body_json(response.into_body()).await;
         let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
 
-        let run_dir = {
+        let _run_dir = {
             let runs = state.runs.lock().expect("runs lock poisoned");
             runs.get(&run_id)
                 .and_then(|run| run.run_dir.clone())
                 .expect("run_dir should be recorded")
         };
-        let run_record = RunRecord::load(&run_dir).unwrap();
+        let run_record = state
+            .store
+            .open_run_reader(&run_id)
+            .await
+            .unwrap()
+            .expect("run store should exist")
+            .get_run()
+            .await
+            .unwrap()
+            .expect("run record should exist");
         let mut expected_settings = settings;
         expected_settings.goal = Some("Test".to_string());
 

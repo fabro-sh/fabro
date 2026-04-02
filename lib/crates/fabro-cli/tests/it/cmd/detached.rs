@@ -1,6 +1,7 @@
 use fabro_test::{fabro_snapshot, test_context};
 
-use crate::support::{fabro_json_snapshot, read_json};
+use super::support::run_snapshot;
+use crate::support::fabro_json_snapshot;
 
 #[test]
 fn help() {
@@ -86,7 +87,12 @@ digraph CachedGraph {
         .assert()
         .success();
 
-    let conclusion = read_json(run_dir.join("conclusion.json"));
+    let conclusion = serde_json::to_value(
+        run_snapshot(&run_dir)
+            .conclusion
+            .expect("conclusion should exist"),
+    )
+    .unwrap();
     fabro_json_snapshot!(
         context,
         serde_json::json!({
@@ -140,11 +146,11 @@ digraph GitHubApp {
         .success();
 
     let run_dir = context.find_run_dir(run_id);
-    let run_record = read_json(run_dir.join("run.json"));
+    let snapshot = run_snapshot(&run_dir);
     fabro_json_snapshot!(
         context,
         serde_json::json!({
-            "app_id": run_record["settings"]["git"]["app_id"],
+            "app_id": snapshot.run.settings.git.and_then(|git| git.app_id),
         }),
         @r#"
         {
@@ -207,8 +213,6 @@ digraph DetachedStoreOnly {
         .success();
 
     let run_dir = context.find_run_dir(run_id);
-    std::fs::remove_file(run_dir.join("run.json")).unwrap();
-
     context
         .command()
         .args([
@@ -224,7 +228,12 @@ digraph DetachedStoreOnly {
         .assert()
         .success();
 
-    let conclusion = read_json(run_dir.join("conclusion.json"));
+    let conclusion = serde_json::to_value(
+        run_snapshot(&run_dir)
+            .conclusion
+            .expect("conclusion should exist"),
+    )
+    .unwrap();
     fabro_json_snapshot!(
         context,
         serde_json::json!({

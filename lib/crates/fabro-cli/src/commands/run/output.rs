@@ -10,7 +10,7 @@ use fabro_util::text::strip_goal_decoration;
 use fabro_workflow::asset_snapshot::collect_asset_paths;
 use fabro_workflow::outcome::{StageStatus, format_cost};
 use fabro_workflow::pipeline::{Persisted, Validated};
-use fabro_workflow::records::{Checkpoint, CheckpointExt, Conclusion};
+use fabro_workflow::records::Conclusion;
 use indicatif::HumanDuration;
 
 use crate::shared::{format_tokens_human, print_diagnostics, relative_path, tilde_path};
@@ -204,12 +204,12 @@ pub(crate) fn print_run_conclusion(
 
 pub(crate) async fn print_final_output(
     run_store: Option<&dyn fabro_store::RunStore>,
-    run_dir: &Path,
+    _run_dir: &Path,
     styles: &Styles,
 ) {
     let checkpoint = match run_store {
         Some(run_store) => run_store.get_checkpoint().await.ok().flatten(),
-        None => Checkpoint::load(&run_dir.join("checkpoint.json")).ok(),
+        None => None,
     };
     let Some(checkpoint) = checkpoint else {
         return;

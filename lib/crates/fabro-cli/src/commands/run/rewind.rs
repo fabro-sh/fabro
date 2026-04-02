@@ -10,7 +10,6 @@ use fabro_workflow::operations::{
     RewindInput, RewindTarget, RunTimeline, build_timeline_or_rebuild,
     find_run_id_by_prefix_or_store, rewind,
 };
-use fabro_workflow::records::CheckpointExt;
 use fabro_workflow::records::{RunRecord, RunRecordExt, StartRecord, StartRecordExt};
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use fabro_workflow::run_status::RunStatus;
@@ -132,16 +131,8 @@ async fn reset_rewound_run_state(
         .context("failed to restore run record after rewind: missing run metadata")?;
     let checkpoint = MetadataStore::read_checkpoint(git_store.repo_dir(), &run_id.to_string())?
         .context("rewound metadata branch is missing checkpoint.json")?;
-    checkpoint.save(&run_dir.join("checkpoint.json"))?;
 
-    for name in [
-        "conclusion.json",
-        "pull_request.json",
-        "detached_failure.json",
-        "progress.jsonl",
-        "retro.json",
-        "final.patch",
-    ] {
+    for name in ["detached_failure.json"] {
         let _ = std::fs::remove_file(run_dir.join(name));
     }
 
@@ -164,9 +155,7 @@ async fn reset_rewound_run_state(
             .await
             .map_err(|err| anyhow::anyhow!("failed to restore start record after rewind: {err}"))?;
     }
-    if let Some(dot_source) =
-        store_graph.or_else(|| std::fs::read_to_string(run_dir.join("workflow.fabro")).ok())
-    {
+    if let Some(dot_source) = store_graph {
         run_store
             .put_graph(&dot_source)
             .await

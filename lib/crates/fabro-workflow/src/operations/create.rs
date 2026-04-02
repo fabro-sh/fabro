@@ -1,15 +1,13 @@
-use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-
 use chrono::{Local, Utc};
 use fabro_config::{FabroSettings, FabroSettingsExt};
 use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, Provider};
 use fabro_sandbox::SandboxProvider;
-use fabro_store::{DiskProjectingRunStore, RunStore, Store};
+use fabro_store::Store;
 use fabro_types::RunId;
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use crate::error::FabroError;
 use crate::pipeline::types::PersistOptions;
@@ -141,7 +139,7 @@ async fn persist_created_run(
 ) -> Result<(), FabroError> {
     let record = persisted.run_record();
     let run_dir_string = persisted.run_dir().to_string_lossy().to_string();
-    let inner_run_store = match store
+    let run_store = match store
         .create_run(&record.run_id, record.created_at, Some(&run_dir_string))
         .await
     {
@@ -152,10 +150,6 @@ async fn persist_created_run(
             .map_err(|open_err| FabroError::engine(open_err.to_string()))?
             .ok_or_else(|| FabroError::engine(err.to_string()))?,
     };
-    let run_store: Arc<dyn RunStore> = Arc::new(DiskProjectingRunStore::new(
-        inner_run_store,
-        persisted.run_dir().to_path_buf(),
-    ));
 
     run_store.put_run(record).await.map_err(store_error)?;
     if !workflow_source.is_empty() {

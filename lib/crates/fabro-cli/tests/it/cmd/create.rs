@@ -3,9 +3,9 @@ use serde_json::json;
 
 use fabro_test::{fabro_snapshot, test_context};
 
-use crate::support::{fabro_json_snapshot, read_json};
+use crate::support::fabro_json_snapshot;
 
-use super::support::{fixture, output_stdout, resolve_run};
+use super::support::{fixture, output_stdout, resolve_run, run_snapshot};
 
 #[test]
 fn help() {
@@ -77,14 +77,13 @@ digraph BarBaz {
         .success();
 
     let run_dir = context.find_run_dir(run_id);
-    let run_record = read_json(run_dir.join("run.json"));
-    let cached_graph = std::fs::read_to_string(run_dir.join("workflow.fabro")).unwrap();
+    let snapshot = run_snapshot(&run_dir);
     fabro_json_snapshot!(
         context,
         serde_json::json!({
-            "workflow_slug": run_record["workflow_slug"],
-            "graph_name": run_record["graph"]["name"],
-            "cached_graph_lines": cached_graph.lines().collect::<Vec<_>>(),
+            "workflow_slug": snapshot.run.workflow_slug,
+            "graph_name": snapshot.run.graph.name,
+            "cached_graph_lines": snapshot.graph.expect("graph should exist").lines().collect::<Vec<_>>(),
         }),
         @r#"
         {
@@ -133,14 +132,13 @@ digraph FooWorkflow {
         .success();
 
     let run_dir = context.find_run_dir(run_id);
-    let run_record = read_json(run_dir.join("run.json"));
-    let cached_graph = std::fs::read_to_string(run_dir.join("workflow.fabro")).unwrap();
+    let snapshot = run_snapshot(&run_dir);
     fabro_json_snapshot!(
         context,
         serde_json::json!({
-            "workflow_slug": run_record["workflow_slug"],
-            "graph_name": run_record["graph"]["name"],
-            "cached_graph_lines": cached_graph.lines().collect::<Vec<_>>(),
+            "workflow_slug": snapshot.run.workflow_slug,
+            "graph_name": snapshot.run.graph.name,
+            "cached_graph_lines": snapshot.graph.expect("graph should exist").lines().collect::<Vec<_>>(),
         }),
         @r#"
         {
@@ -159,7 +157,7 @@ digraph FooWorkflow {
 }
 
 #[test]
-fn create_persists_requested_overrides_into_run_json() {
+fn create_persists_requested_overrides_into_store() {
     let context = test_context!();
     let workflow = fixture("simple.fabro");
     let mut cmd = context.command();
@@ -200,26 +198,26 @@ fn create_persists_requested_overrides_into_run_json() {
         .expect("create should print a run ID")
         .to_string();
     let run = resolve_run(&context, &run_id);
-    let run_json = read_json(run.run_dir.join("run.json"));
+    let snapshot = run_snapshot(&run.run_dir);
     let labels = json!({
-        "env": run_json.pointer("/labels/env"),
-        "team": run_json.pointer("/labels/team"),
+        "env": snapshot.run.labels.get("env"),
+        "team": snapshot.run.labels.get("team"),
     });
     let compact = json!({
-        "workflow_slug": run_json["workflow_slug"],
+        "workflow_slug": snapshot.run.workflow_slug,
         "settings": {
-            "goal": run_json.pointer("/settings/goal"),
-            "dry_run": run_json.pointer("/settings/dry_run"),
-            "auto_approve": run_json.pointer("/settings/auto_approve"),
-            "no_retro": run_json.pointer("/settings/no_retro"),
-            "verbose": run_json.pointer("/settings/verbose"),
+            "goal": snapshot.run.settings.goal,
+            "dry_run": snapshot.run.settings.dry_run,
+            "auto_approve": snapshot.run.settings.auto_approve,
+            "no_retro": snapshot.run.settings.no_retro,
+            "verbose": snapshot.run.settings.verbose,
             "llm": {
-                "model": run_json.pointer("/settings/llm/model"),
-                "provider": run_json.pointer("/settings/llm/provider"),
+                "model": snapshot.run.settings.llm.as_ref().and_then(|llm| llm.model.clone()),
+                "provider": snapshot.run.settings.llm.as_ref().and_then(|llm| llm.provider.clone()),
             },
             "sandbox": {
-                "provider": run_json.pointer("/settings/sandbox/provider"),
-                "preserve": run_json.pointer("/settings/sandbox/preserve"),
+                "provider": snapshot.run.settings.sandbox.as_ref().and_then(|sandbox| sandbox.provider.clone()),
+                "preserve": snapshot.run.settings.sandbox.as_ref().and_then(|sandbox| sandbox.preserve),
             },
         },
         "labels": labels,
@@ -274,11 +272,10 @@ fn create_json_implies_auto_approve() {
         .as_str()
         .expect("create JSON should include run_id");
     let run = resolve_run(&context, run_id);
-    let run_json = read_json(run.run_dir.join("run.json"));
 
     assert_eq!(
-        run_json.pointer("/settings/auto_approve"),
-        Some(&json!(true))
+        run_snapshot(&run.run_dir).run.settings.auto_approve,
+        Some(true)
     );
 }
 

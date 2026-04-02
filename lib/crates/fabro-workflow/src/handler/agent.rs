@@ -331,9 +331,6 @@ impl Handler for AgentHandler {
                 match result {
                     Ok(CodergenResult::Full(outcome)) => {
                         sync_provider_used_to_store(&stage_dir, &node_ref, services).await?;
-                        let status_json = serde_json::to_string_pretty(&outcome)
-                            .unwrap_or_else(|_| "{}".to_string());
-                        fs::write(stage_dir.join("status.json"), &status_json).await?;
                         return Ok(outcome);
                     }
                     Ok(CodergenResult::Text {
@@ -417,10 +414,6 @@ impl Handler for AgentHandler {
         }
         outcome.usage = stage_usage;
         outcome.files_touched = backend_files_touched;
-
-        let status_json =
-            serde_json::to_string_pretty(&outcome).unwrap_or_else(|_| "{}".to_string());
-        fs::write(stage_dir.join("status.json"), &status_json).await?;
 
         Ok(outcome)
     }

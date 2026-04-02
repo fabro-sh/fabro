@@ -1,11 +1,9 @@
-use std::collections::HashMap;
-use std::path::Path;
-
 use fabro_types::RunId;
 pub use fabro_types::retro::{
     AggregateStats, FrictionKind, FrictionPoint, Learning, LearningCategory, OpenItem,
     OpenItemKind, Retro, RetroNarrative, SmoothnessRating, StageRetro,
 };
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct CompletedStage {
@@ -18,56 +16,6 @@ pub struct CompletedStage {
     pub notes: Option<String>,
     pub failure_reason: Option<String>,
     pub files_touched: Vec<String>,
-}
-
-pub trait RetroExt {
-    fn save(&self, run_dir: &Path) -> anyhow::Result<()>;
-    fn load(run_dir: &Path) -> anyhow::Result<Self>
-    where
-        Self: Sized;
-}
-
-impl RetroExt for Retro {
-    fn save(&self, run_dir: &Path) -> anyhow::Result<()> {
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| anyhow::anyhow!("retro serialize failed: {e}"))?;
-        std::fs::write(run_dir.join("retro.json"), json)?;
-        Ok(())
-    }
-
-    fn load(run_dir: &Path) -> anyhow::Result<Self> {
-        let data = std::fs::read_to_string(run_dir.join("retro.json"))?;
-        serde_json::from_str(&data).map_err(|e| anyhow::anyhow!("retro deserialize failed: {e}"))
-    }
-}
-
-pub fn extract_stage_durations(run_dir: &Path) -> HashMap<String, u64> {
-    let mut durations = HashMap::new();
-    let jsonl_path = run_dir.join("progress.jsonl");
-    let Ok(data) = std::fs::read_to_string(&jsonl_path) else {
-        return durations;
-    };
-    for line in data.lines() {
-        let Ok(envelope) = serde_json::from_str::<serde_json::Value>(line) else {
-            continue;
-        };
-        if envelope.get("event").and_then(|v| v.as_str()) != Some("stage.completed") {
-            continue;
-        }
-        let Some(name) = envelope.get("node_id").and_then(|v| v.as_str()) else {
-            continue;
-        };
-        let Some(duration_ms) = envelope
-            .get("properties")
-            .and_then(serde_json::Value::as_object)
-            .and_then(|properties| properties.get("duration_ms"))
-            .and_then(serde_json::Value::as_u64)
-        else {
-            continue;
-        };
-        durations.insert(name.to_string(), duration_ms);
-    }
-    durations
 }
 
 pub fn derive_retro(

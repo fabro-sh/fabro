@@ -6,7 +6,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use fabro_config::FabroSettingsExt;
 use fabro_types::RunId;
 use futures::StreamExt;
 
@@ -14,7 +13,7 @@ use fabro_interview::{AnswerValue, ConsoleInterviewer};
 use fabro_store::{EventEnvelope, RunStore, RuntimeState};
 use fabro_util::terminal::Styles;
 use fabro_workflow::outcome::StageStatus;
-use fabro_workflow::records::{Conclusion, ConclusionExt, RunRecord, RunRecordExt};
+use fabro_workflow::records::{Conclusion, ConclusionExt};
 use fabro_workflow::run_status::{RunStatus, RunStatusRecord, RunStatusRecordExt};
 use serde_json::{Map, Value};
 use tokio::signal::ctrl_c;
@@ -44,18 +43,10 @@ pub(crate) async fn attach_run(
     engine_child: Option<std::process::Child>,
     json_output: bool,
 ) -> Result<ExitCode> {
-    let run_record = RunRecord::load(run_dir).ok();
     let inferred_storage_dir = infer_storage_dir(run_dir);
-    let fallback_storage_dir = run_record
-        .as_ref()
-        .map(|record| record.settings.storage_dir())
-        .or(inferred_storage_dir);
     let inferred_run_id = infer_run_id(run_dir);
-    let storage_dir = storage_dir.map(Path::to_path_buf).or(fallback_storage_dir);
-    let run_id = run_id
-        .copied()
-        .or_else(|| run_record.as_ref().map(|record| record.run_id))
-        .or(inferred_run_id);
+    let storage_dir = storage_dir.map(Path::to_path_buf).or(inferred_storage_dir);
+    let run_id = run_id.copied().or(inferred_run_id);
 
     if let (Some(storage_dir), Some(run_id)) = (storage_dir.as_deref(), run_id.as_ref()) {
         match store::open_run_reader(storage_dir, run_id).await {
@@ -104,13 +95,9 @@ pub(crate) async fn attach_run(
         }
     }
 
-    let verbose = run_record
-        .as_ref()
-        .map(|record| record.settings.verbose_enabled())
-        .unwrap_or(false);
     attach_run_files(
         run_dir,
-        verbose,
+        false,
         kill_on_detach,
         styles,
         engine_child,

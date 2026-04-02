@@ -13,8 +13,7 @@ pub use execute::execute;
 pub use fabro_types::PullRequestRecord;
 pub(crate) use finalize::build_conclusion_from_store;
 pub use finalize::{
-    build_conclusion, classify_engine_result, finalize, persist_terminal_outcome,
-    write_finalize_commit,
+    classify_engine_result, finalize, persist_terminal_outcome, write_finalize_commit,
 };
 pub use initialize::initialize;
 pub use parse::parse;

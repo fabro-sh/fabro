@@ -26,7 +26,7 @@ use crate::handler::{Handler as HandlerTrait, HandlerRegistry};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::pipeline::initialize;
 use crate::pipeline::types::{InitOptions, LlmSpec, Persisted, SandboxEnvSpec};
-use crate::records::{Checkpoint, CheckpointExt, RunRecord, StartRecordExt};
+use crate::records::RunRecord;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::test_support::run_graph;
 
@@ -163,6 +163,62 @@ async fn test_run_store(_run_dir: &Path, run_id: &RunId) -> Arc<dyn fabro_store:
         .create_run(run_id, chrono::Utc::now(), None)
         .await
         .unwrap()
+}
+
+async fn execute_test_run(run_dir: &Path, graph: Graph, run_id: &str) -> Executed {
+    execute_test_run_with_options(test_run_options(run_dir, run_id), graph, None).await
+}
+
+async fn execute_test_run_with_options(
+    run_options: RunOptions,
+    graph: Graph,
+    registry_override: Option<Arc<HandlerRegistry>>,
+) -> Executed {
+    let run_id_value = run_options.run_id;
+    let git_options = run_options.git.clone();
+    let initialized = initialize(
+        persisted_workflow(graph, String::new(), &run_options.run_dir, run_id_value),
+        InitOptions {
+            run_id: run_id_value,
+            run_store: test_run_store(&run_options.run_dir, &run_id_value).await,
+            dry_run: false,
+            emitter: test_emitter_arc("test-run"),
+            sandbox: SandboxSpec::Local {
+                working_directory: std::env::current_dir().unwrap(),
+            },
+            llm: LlmSpec {
+                model: "test-model".to_string(),
+                provider: fabro_llm::Provider::Anthropic,
+                fallback_chain: Vec::new(),
+                mcp_servers: Vec::new(),
+                dry_run: true,
+            },
+            interviewer: Arc::new(AutoApproveInterviewer),
+            lifecycle: LifecycleOptions {
+                setup_commands: vec![],
+                setup_command_timeout_ms: 1_000,
+                devcontainer_phases: vec![],
+            },
+            run_options,
+            hooks: HookConfig { hooks: vec![] },
+            sandbox_env: SandboxEnvSpec {
+                devcontainer_env: HashMap::new(),
+                toml_env: HashMap::new(),
+                github_permissions: None,
+                origin_url: None,
+            },
+            devcontainer: None,
+            git: git_options,
+            worktree_mode: None,
+            registry_override,
+            checkpoint: None,
+            seed_context: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    execute(initialized).await
 }
 
 #[tokio::test]
@@ -447,16 +503,8 @@ async fn execute_runs_simple_workflow() {
 #[tokio::test]
 async fn execute_saves_checkpoint() {
     let dir = tempfile::tempdir().unwrap();
-    run_graph(
-        make_registry(),
-        test_emitter_arc("test-run"),
-        local_env(),
-        &simple_graph(),
-        &test_run_options(dir.path(), "test-run"),
-    )
-    .await
-    .unwrap();
-    assert!(dir.path().join("checkpoint.json").exists());
+    let executed = execute_test_run(dir.path(), simple_graph(), "test-run").await;
+    assert!(executed.run_store.get_checkpoint().await.unwrap().is_some());
 }
 
 #[tokio::test]
@@ -499,17 +547,8 @@ async fn execute_error_when_no_start_node() {
 #[tokio::test]
 async fn execute_mirrors_graph_goal_to_context() {
     let dir = tempfile::tempdir().unwrap();
-    run_graph(
-        make_registry(),
-        test_emitter_arc("test-run"),
-        local_env(),
-        &simple_graph(),
-        &test_run_options(dir.path(), "test-run"),
-    )
-    .await
-    .unwrap();
-
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let executed = execute_test_run(dir.path(), simple_graph(), "test-run").await;
+    let cp = executed.run_store.get_checkpoint().await.unwrap().unwrap();
     assert_eq!(
         cp.context_values.get(context::keys::GRAPH_GOAL),
         Some(&serde_json::json!("Run tests"))
@@ -548,17 +587,8 @@ async fn execute_conditional_routing_uses_unconditional_success_path() {
     g.edges.push(Edge::new("path_a", "exit"));
     g.edges.push(Edge::new("path_b", "exit"));
 
-    run_graph(
-        make_registry(),
-        test_emitter_arc("test-run"),
-        local_env(),
-        &g,
-        &test_run_options(dir.path(), "test-run"),
-    )
-    .await
-    .unwrap();
-
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let executed = execute_test_run(dir.path(), g, "test-run").await;
+    let cp = executed.run_store.get_checkpoint().await.unwrap().unwrap();
     assert!(cp.completed_nodes.contains(&"path_b".to_string()));
     assert!(!cp.completed_nodes.contains(&"path_a".to_string()));
 }
@@ -573,17 +603,8 @@ async fn execute_writes_start_json_and_node_status() {
         meta_branch: None,
     });
 
-    run_graph(
-        make_registry(),
-        test_emitter_arc("test-run"),
-        local_env(),
-        &simple_graph(),
-        &run_options,
-    )
-    .await
-    .unwrap();
-
-    let start = crate::records::StartRecord::load(dir.path()).unwrap();
+    let executed = execute_test_run_with_options(run_options, simple_graph(), None).await;
+    let start = executed.run_store.get_start().await.unwrap().unwrap();
     assert_eq!(start.run_id, test_run_id("test-run"));
     assert_eq!(
         start.run_branch.as_deref(),
@@ -591,12 +612,19 @@ async fn execute_writes_start_json_and_node_status() {
     );
     assert_eq!(start.base_sha.as_deref(), Some("abc123"));
 
-    let status_path = dir.path().join("nodes").join("start").join("status.json");
-    assert!(status_path.exists());
+    let node = executed
+        .run_store
+        .get_node(&fabro_store::NodeVisitRef {
+            node_id: "start",
+            visit: 1,
+        })
+        .await
+        .unwrap();
+    assert_eq!(node.status.unwrap().status, StageStatus::Success);
 }
 
 #[tokio::test]
-async fn timeout_causes_fail_status_json() {
+async fn timeout_causes_fail_status_record() {
     let dir = tempfile::tempdir().unwrap();
     let mut g = Graph::new("timeout_test");
 
@@ -635,20 +663,23 @@ async fn timeout_causes_fail_status_json() {
 
     let mut registry = make_registry();
     registry.register("slow", Box::new(SlowHandler { sleep_ms: 500 }));
-    run_graph(
-        registry,
-        test_emitter_arc("test-run"),
-        local_env(),
-        &g,
-        &test_run_options(dir.path(), "test-run"),
+    let executed = execute_test_run_with_options(
+        test_run_options(dir.path(), "test-run"),
+        g,
+        Some(Arc::new(registry)),
     )
-    .await
-    .unwrap();
-
-    let status_path = dir.path().join("nodes").join("work").join("status.json");
-    let status: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&status_path).unwrap()).unwrap();
-    assert_eq!(status["status"], "fail");
+    .await;
+    let status = executed
+        .run_store
+        .get_node(&fabro_store::NodeVisitRef {
+            node_id: "work",
+            visit: 1,
+        })
+        .await
+        .unwrap()
+        .status
+        .unwrap();
+    assert_eq!(status.status, StageStatus::Fail);
 }
 
 #[tokio::test]

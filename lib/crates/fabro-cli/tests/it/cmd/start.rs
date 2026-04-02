@@ -97,7 +97,7 @@ fn start_by_run_id_starts_created_run_without_run_json_or_status_json() {
         .success();
 
     let run_dir = context.find_run_dir(run_id);
-    std::fs::remove_file(run_dir.join("run.json")).unwrap();
+    let _ = std::fs::remove_file(run_dir.join("run.json"));
 
     context.command().args(["start", run_id]).assert().success();
     let output = context

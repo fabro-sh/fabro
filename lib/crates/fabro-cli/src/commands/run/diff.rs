@@ -54,7 +54,7 @@ pub(crate) async fn run(args: DiffArgs, globals: &GlobalArgs) -> Result<()> {
 }
 
 async fn resolve_diff(
-    run_dir: &Path,
+    _run_dir: &Path,
     run_store: &dyn fabro_store::RunStore,
     args: &DiffArgs,
 ) -> Result<String> {
@@ -73,11 +73,7 @@ async fn resolve_diff(
             }
         }
 
-        debug!(node_id, "Reading per-node diff");
-        let node_patch = run_dir.join("nodes").join(node_id).join("diff.patch");
-        return std::fs::read_to_string(&node_patch).with_context(|| {
-            format!("No diff found for node '{node_id}' — check the node ID and try again")
-        });
+        bail!("No diff found for node '{node_id}' — check the node ID and try again");
     }
 
     let start = run_store

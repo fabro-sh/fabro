@@ -2,14 +2,13 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use fabro_config::FabroSettingsExt;
-use fabro_sandbox::SandboxRecordExt;
 use fabro_store::Store;
 use tracing::warn;
 
 use fabro_sandbox::reconnect::reconnect as reconnect_sandbox;
 use fabro_workflow::run_lookup::RunInfo;
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
-use fabro_workflow::run_status::{RunStatus, RunStatusRecord, write_run_status};
+use fabro_workflow::run_status::{RunStatus, RunStatusRecord};
 
 use crate::args::{GlobalArgs, RunsRemoveArgs};
 use crate::shared::print_json_pretty;
@@ -116,7 +115,6 @@ pub(crate) async fn remove_run_with_cleanup(store: &dyn Store, run: &RunInfo) ->
 }
 
 async fn remove_run_dir_with_cleanup(store: &dyn Store, run: &RunInfo) -> Result<()> {
-    write_run_status(&run.path, RunStatus::Removing, None);
     let run_store = match store.open_run_reader(&run.run_id).await {
         Ok(run_store) => run_store,
         Err(err) => {
@@ -168,7 +166,7 @@ async fn delete_run_store_state(store: &dyn Store, run: &RunInfo) -> Result<()> 
 }
 
 async fn load_sandbox_record(
-    run_dir: &Path,
+    _run_dir: &Path,
     run_store: Option<&dyn fabro_store::RunStore>,
 ) -> Option<fabro_sandbox::SandboxRecord> {
     if let Some(run_store) = run_store {
@@ -180,7 +178,5 @@ async fn load_sandbox_record(
             }
         }
     }
-
-    let sandbox_path = run_dir.join("sandbox.json");
-    fabro_sandbox::SandboxRecord::load(&sandbox_path).ok()
+    None
 }

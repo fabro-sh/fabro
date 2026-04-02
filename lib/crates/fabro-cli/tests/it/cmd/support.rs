@@ -1,9 +1,13 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Output;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use fabro_store::{RunSnapshot, RunStore, SlateStore, Store};
 use fabro_test::TestContext;
+use fabro_types::RunId;
+use object_store::local::LocalFileSystem;
 use serde_json::Value;
 use shlex::try_quote;
 
@@ -162,10 +166,13 @@ pub(crate) fn setup_detached_dry_run(context: &TestContext) -> RunSetup {
         .to_string();
     let run = resolve_run(context, &run_id);
     let deadline = Instant::now() + COMMAND_TIMEOUT;
-    while !run.run_dir.join("progress.jsonl").exists() {
+    while run_store(&run.run_dir)
+        .and_then(|store| block_on(store.list_events()).ok())
+        .is_none_or(|events| events.is_empty())
+    {
         assert!(
             Instant::now() < deadline,
-            "timed out waiting for progress.jsonl for {run_id}"
+            "timed out waiting for store events for {run_id}"
         );
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -281,8 +288,10 @@ worktree_mode = "never"
 
     let run = run_local_workflow(context, &workspace_dir, "run.toml");
     assert!(
-        run.run_dir.join("sandbox.json").exists(),
-        "setup_local_sandbox_run should persist sandbox.json"
+        run_store(&run.run_dir)
+            .and_then(|store| block_on(store.get_sandbox()).ok())
+            .flatten()
+            .is_some()
     );
 
     WorkspaceRunSetup { run, workspace_dir }
@@ -369,8 +378,10 @@ pub(crate) fn write_gated_workflow(path: &Path, name: &str, goal: &str) -> Workf
 pub(crate) fn wait_for_status(run_dir: &Path, expected: &[&str]) -> String {
     let deadline = Instant::now() + COMMAND_TIMEOUT;
     loop {
-        if let Some(status) = read_json_if_exists(&run_dir.join("status.json"))
-            .and_then(|value| value["status"].as_str().map(ToOwned::to_owned))
+        if let Some(status) = run_store(run_dir)
+            .and_then(|store| block_on(store.get_status()).ok())
+            .flatten()
+            .map(|record| record.status.to_string())
         {
             if expected.iter().any(|candidate| *candidate == status) {
                 return status;
@@ -401,10 +412,7 @@ pub(crate) fn only_run(context: &TestContext) -> RunSetup {
         runs_dir.display()
     );
     let run_dir = entries[0].clone();
-    let run_id = read_json(&run_dir.join("run.json"))["run_id"]
-        .as_str()
-        .expect("run.json should include run_id")
-        .to_string();
+    let run_id = infer_run_id(&run_dir);
     RunSetup { run_id, run_dir }
 }
 
@@ -455,6 +463,42 @@ pub(crate) fn find_run_dir(storage_dir: &Path, run_id: &str) -> Option<PathBuf> 
                     .file_name()
                     .is_some_and(|name| name.to_string_lossy().ends_with(run_id))
         })
+}
+
+fn infer_run_id(run_dir: &Path) -> String {
+    if let Ok(id) = std::fs::read_to_string(run_dir.join("id.txt")) {
+        return id.trim().to_string();
+    }
+    run_dir
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .and_then(|name| name.rsplit('-').next().map(ToOwned::to_owned))
+        .filter(|value| !value.is_empty())
+        .expect("run directory name should contain run id suffix")
+}
+
+fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(future)
+}
+
+fn run_store(run_dir: &Path) -> Option<Arc<dyn RunStore>> {
+    let runs_dir = run_dir.parent()?;
+    let storage_dir = runs_dir.parent()?;
+    let run_id: RunId = infer_run_id(run_dir).parse().ok()?;
+    let object_store = Arc::new(LocalFileSystem::new_with_prefix(storage_dir.join("store")).ok()?);
+    let store = Arc::new(SlateStore::new(object_store, "", Duration::from_millis(5)));
+    block_on(store.open_run_reader(&run_id)).ok().flatten()
+}
+
+pub(crate) fn run_snapshot(run_dir: &Path) -> RunSnapshot {
+    run_store(run_dir)
+        .and_then(|store| block_on(store.get_snapshot()).ok())
+        .flatten()
+        .expect("run store snapshot should exist")
 }
 
 pub(crate) fn git_stdout(repo_dir: &Path, args: &[&str]) -> String {
@@ -724,7 +768,12 @@ fn setup_git_backed_run(context: &TestContext, workflow: GitWorkflowKind) -> Git
     }
 
     let run = only_run(context);
-    let start = read_json(&run.run_dir.join("start.json"));
+    let start = serde_json::to_value(
+        run_snapshot(&run.run_dir)
+            .start
+            .expect("start record should exist"),
+    )
+    .unwrap();
     assert_eq!(
         start["run_branch"].as_str(),
         Some(format!("fabro/run/{}", run.run_id).as_str())
@@ -733,22 +782,27 @@ fn setup_git_backed_run(context: &TestContext, workflow: GitWorkflowKind) -> Git
     match workflow {
         GitWorkflowKind::Changed => {
             assert!(
-                run.run_dir.join("final.patch").exists(),
-                "changed git-backed run should emit final.patch"
+                run_snapshot(&run.run_dir).final_patch.is_some(),
+                "changed git-backed run should persist final patch in store"
+            );
+            let snapshot = run_snapshot(&run.run_dir);
+            assert!(
+                snapshot
+                    .nodes
+                    .iter()
+                    .any(|node| node.node_id == "step_one" && node.diff.is_some())
             );
             assert!(
-                run.run_dir.join("nodes/step_one/diff.patch").exists(),
-                "changed git-backed run should emit a diff for step_one"
-            );
-            assert!(
-                run.run_dir.join("nodes/step_two/diff.patch").exists(),
-                "changed git-backed run should emit a diff for step_two"
+                snapshot
+                    .nodes
+                    .iter()
+                    .any(|node| node.node_id == "step_two" && node.diff.is_some())
             );
         }
         GitWorkflowKind::Noop => {
             assert!(
-                !run.run_dir.join("final.patch").exists(),
-                "no-op git-backed run should not emit final.patch"
+                run_snapshot(&run.run_dir).final_patch.is_none(),
+                "no-op git-backed run should not persist final.patch"
             );
         }
     }
