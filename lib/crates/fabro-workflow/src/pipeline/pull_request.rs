@@ -318,8 +318,7 @@ pub async fn build_pr_body(
                     tracing::warn!(error = %err, "Failed to load conclusion from store for PR body");
                 })
                 .ok()
-                .flatten()
-                .or_else(|| Conclusion::load(&run_dir.join("conclusion.json")).ok()),
+                .flatten(),
             None => Conclusion::load(&run_dir.join("conclusion.json")).ok(),
         }
     } else {
