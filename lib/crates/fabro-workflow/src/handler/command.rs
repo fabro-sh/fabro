@@ -102,6 +102,12 @@ impl Handler for CommandHandler {
             "language": language,
             "timeout_ms": timeout_ms(node),
         });
+        if let Some(ref store) = services.run_store {
+            store
+                .put_node_script_invocation(&node_ref, &invocation)
+                .await
+                .map_err(|err| FabroError::handler(err.to_string()))?;
+        }
         fs::write(
             stage_dir.join("script_invocation.json"),
             serde_json::to_string_pretty(&invocation).unwrap(),
@@ -155,6 +161,12 @@ impl Handler for CommandHandler {
             "exit_code": if result.timed_out { serde_json::Value::Null } else { serde_json::json!(result.exit_code) },
             "timed_out": result.timed_out,
         });
+        if let Some(ref store) = services.run_store {
+            store
+                .put_node_script_timing(&node_ref, &timing)
+                .await
+                .map_err(|err| FabroError::handler(err.to_string()))?;
+        }
         fs::write(
             stage_dir.join("script_timing.json"),
             serde_json::to_string_pretty(&timing).unwrap(),
@@ -217,6 +229,8 @@ mod tests {
     use super::*;
     use crate::outcome::StageStatus;
     use fabro_graphviz::graph::AttrValue;
+    use fabro_store::{InMemoryStore, NodeVisitRef, RunStore, Store};
+    use std::sync::Arc;
     use std::time::Duration;
 
     fn make_services() -> EngineServices {
@@ -559,6 +573,44 @@ mod tests {
         assert!(json["duration_ms"].is_u64());
         assert_eq!(json["exit_code"], serde_json::Value::Null);
         assert_eq!(json["timed_out"], true);
+    }
+
+    #[tokio::test]
+    async fn stores_script_invocation_and_timing_in_run_store() {
+        let handler = CommandHandler;
+        let mut node = Node::new("script_node");
+        node.attrs.insert(
+            "script".to_string(),
+            AttrValue::String("echo hello".to_string()),
+        );
+        let context = Context::new();
+        let graph = Graph::new("test");
+        let run_dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(InMemoryStore::default());
+        let run_store = store
+            .create_run(&fabro_types::fixtures::RUN_1, chrono::Utc::now(), None)
+            .await
+            .unwrap();
+        let services = EngineServices {
+            run_store: Some(Arc::clone(&run_store) as Arc<dyn RunStore>),
+            ..EngineServices::test_default()
+        };
+
+        handler
+            .execute(&node, &context, &graph, run_dir.path(), &services)
+            .await
+            .unwrap();
+
+        let snapshot = run_store
+            .get_node(&NodeVisitRef {
+                node_id: "script_node",
+                visit: 1,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(snapshot.script_invocation.unwrap()["command"], "echo hello");
+        assert_eq!(snapshot.script_timing.unwrap()["exit_code"], 0);
     }
 
     #[tokio::test]

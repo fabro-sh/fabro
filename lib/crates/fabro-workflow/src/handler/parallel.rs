@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use fabro_agent::{Sandbox, WorktreeConfig, WorktreeSandbox};
+use fabro_store::NodeVisitRef;
 use fabro_types::RunId;
 use tokio::sync::Semaphore;
 
@@ -480,6 +481,16 @@ impl Handler for ParallelHandler {
         let visit = visit_from_context(context);
         let node_dir = node_dir(run_dir, &node.id, visit);
         let _ = fs::create_dir_all(&node_dir).await;
+        if let Some(ref store) = services.run_store {
+            let node_ref = NodeVisitRef {
+                node_id: &node.id,
+                visit: u32::try_from(visit).unwrap_or(u32::MAX),
+            };
+            store
+                .put_node_parallel_results(&node_ref, &serde_json::json!(results_json))
+                .await
+                .map_err(|err| FabroError::handler(err.to_string()))?;
+        }
         if let Ok(json) = serde_json::to_string_pretty(&results_json) {
             let _ = fs::write(node_dir.join("parallel_results.json"), json).await;
         }
@@ -583,7 +594,9 @@ fn find_join_node(results: &[BranchResult], graph: &Graph) -> Option<String> {
 mod tests {
     use super::*;
     use fabro_graphviz::graph::{AttrValue, Edge};
+    use fabro_store::{InMemoryStore, RunStore, Store};
     use fabro_types::fixtures;
+    use std::sync::Arc;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
@@ -663,6 +676,52 @@ mod tests {
             "parallel_results.json should be a JSON array"
         );
         assert_eq!(parsed.as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn parallel_handler_stores_results_in_run_store() {
+        let store = Arc::new(InMemoryStore::default());
+        let run_store = store
+            .create_run(&fixtures::RUN_1, chrono::Utc::now(), None)
+            .await
+            .unwrap();
+        let services = EngineServices {
+            run_store: Some(Arc::clone(&run_store) as Arc<dyn RunStore>),
+            ..EngineServices::test_default()
+        };
+        let mut node = Node::new("par");
+        node.attrs.insert(
+            "shape".to_string(),
+            AttrValue::String("component".to_string()),
+        );
+        let context = test_context();
+        let mut graph = Graph::new("test");
+        graph.nodes.insert("par".to_string(), node.clone());
+        graph
+            .nodes
+            .insert("branch_a".to_string(), Node::new("branch_a"));
+        graph
+            .nodes
+            .insert("branch_b".to_string(), Node::new("branch_b"));
+        graph.edges.push(Edge::new("par", "branch_a"));
+        graph.edges.push(Edge::new("par", "branch_b"));
+
+        let tmp = tempfile::tempdir().unwrap();
+        ParallelHandler
+            .execute(&node, &context, &graph, tmp.path(), &services)
+            .await
+            .unwrap();
+
+        let snapshot = run_store
+            .get_node(&NodeVisitRef {
+                node_id: "par",
+                visit: 1,
+            })
+            .await
+            .unwrap();
+        let results = snapshot.parallel_results.unwrap();
+        assert!(results.is_array());
+        assert_eq!(results.as_array().unwrap().len(), 2);
     }
 
     #[tokio::test]

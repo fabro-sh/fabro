@@ -292,6 +292,22 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
 
                 match git_diff(&*self.sandbox, &prev).await {
                     Ok(patch) if !patch.is_empty() => {
+                        let node_ref = fabro_store::NodeVisitRef {
+                            node_id,
+                            visit: u32::try_from(visit).unwrap_or(u32::MAX),
+                        };
+                        if let Err(err) = self.run_store.put_node_diff(&node_ref, &patch).await {
+                            self.emitter.emit(&WorkflowRunEvent::RunNotice {
+                                level: RunNoticeLevel::Warn,
+                                code: "git_diff_store_failed".to_string(),
+                                message: format!(
+                                    "[node: {node_id}] failed to persist diff in run store: {err}"
+                                ),
+                            });
+                            return Err(CoreError::Other(format!(
+                                "failed to persist node diff for '{node_id}': {err}"
+                            )));
+                        }
                         let _ = std::fs::write(&diff_dest, &patch);
                         git_result.diff = Some(patch);
                     }
@@ -338,6 +354,16 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                 let diff_dest = self.run_dir.join("final.patch");
                 match git_diff(&*self.sandbox, &base_sha).await {
                     Ok(patch) if !patch.is_empty() => {
+                        if let Err(err) = self.run_store.put_final_patch(&patch).await {
+                            self.emitter.emit(&WorkflowRunEvent::RunNotice {
+                                level: RunNoticeLevel::Warn,
+                                code: "final_diff_store_failed".to_string(),
+                                message: format!(
+                                    "failed to persist final diff in run store: {err}"
+                                ),
+                            });
+                            return;
+                        }
                         let _ = std::fs::write(&diff_dest, patch);
                     }
                     Ok(_) => {}

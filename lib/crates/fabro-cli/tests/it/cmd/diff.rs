@@ -166,3 +166,47 @@ fn diff_node_outputs_specific_patch() {
     ----- stderr -----
     ");
 }
+
+#[test]
+fn diff_node_reads_store_patch_without_disk_file() {
+    let context = test_context!();
+    let setup = setup_git_backed_changed_run(&context);
+    let run_id: RunId = setup.run.run_id.parse().unwrap();
+    let patch =
+        std::fs::read_to_string(setup.run.run_dir.join("nodes/step_one/diff.patch")).unwrap();
+    std::fs::remove_file(setup.run.run_dir.join("nodes/step_one/diff.patch")).unwrap();
+
+    with_runtime(|runtime| {
+        runtime.block_on(async {
+            let store = build_store(&context.storage_dir);
+            let run_store = store.open_run(&run_id).await.unwrap().unwrap();
+            run_store
+                .put_node_diff(
+                    &fabro_store::NodeVisitRef {
+                        node_id: "step_one",
+                        visit: 1,
+                    },
+                    &patch,
+                )
+                .await
+                .unwrap();
+        });
+    });
+
+    let mut cmd = context.command();
+    cmd.args(["diff", &setup.run.run_id, "--node", "step_one"]);
+
+    fabro_snapshot!(git_filters(&context), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    diff --git a/story.txt b/story.txt
+    index [SHA]..[SHA] 100644
+    --- a/story.txt
+    +++ b/story.txt
+    @@ -1 +1,2 @@
+     line 1
+    +line 2
+    ----- stderr -----
+    ");
+}

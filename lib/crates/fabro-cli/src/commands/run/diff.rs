@@ -59,6 +59,22 @@ async fn resolve_diff(
     args: &DiffArgs,
 ) -> Result<String> {
     if let Some(ref node_id) = args.node {
+        if let Some(run_store) = run_store {
+            if let Ok(visits) = run_store.list_node_visits(node_id).await {
+                if let Some(visit) = visits.into_iter().max() {
+                    if let Ok(node) = run_store
+                        .get_node(&fabro_store::NodeVisitRef { node_id, visit })
+                        .await
+                    {
+                        if let Some(patch) = node.diff {
+                            debug!(node_id, visit, "Reading per-node diff from store");
+                            return Ok(patch);
+                        }
+                    }
+                }
+            }
+        }
+
         debug!(node_id, "Reading per-node diff");
         let node_patch = run_dir.join("nodes").join(node_id).join("diff.patch");
         return std::fs::read_to_string(&node_patch).with_context(|| {
