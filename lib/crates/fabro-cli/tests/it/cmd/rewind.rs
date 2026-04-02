@@ -85,6 +85,7 @@ fn rewind_target_updates_metadata_and_resume_hint() {
 
     let mut cmd = context.command();
     cmd.current_dir(&setup.repo_dir);
+    std::fs::remove_file(setup.run.run_dir.join("run.json")).unwrap();
     cmd.args(["rewind", &setup.run.run_id, "@1", "--no-push"]);
 
     let (snapshot, output) = run_and_format(&mut cmd, &git_filters(&context));
