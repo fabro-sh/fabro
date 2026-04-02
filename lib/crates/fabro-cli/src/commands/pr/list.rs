@@ -53,13 +53,6 @@ async fn list_from(
         if let Ok(Some(run_store)) = store.open_run_reader(&run.run_id).await {
             if let Ok(Some(record)) = run_store.get_pull_request().await {
                 entries.push((run.run_id.to_string(), record));
-                continue;
-            }
-        }
-        let pr_path = run.path.join("pull_request.json");
-        if let Ok(content) = std::fs::read_to_string(&pr_path) {
-            if let Ok(record) = serde_json::from_str::<PullRequestRecord>(&content) {
-                entries.push((run.run_id.to_string(), record));
             }
         }
     }

@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::time::Duration;
 
+use anyhow::Result;
 use fabro_graphviz::graph::Graph;
 use fabro_store::RuntimeState;
 use fabro_types::PullRequestRecord;
@@ -13,6 +14,7 @@ use fabro_workflow::records::{Checkpoint, CheckpointExt, Conclusion, ConclusionE
 use indicatif::HumanDuration;
 
 use crate::shared::{format_tokens_human, print_diagnostics, relative_path, tilde_path};
+use crate::store;
 
 fn print_workflow_header(
     graph: &Graph,
@@ -69,20 +71,31 @@ pub(crate) fn print_diagnostics_from_error(
     print_diagnostics(diagnostics, styles);
 }
 
-pub(crate) fn print_run_summary(run_dir: &Path, run_id: impl std::fmt::Display, styles: &Styles) {
+pub(crate) async fn print_run_summary(
+    storage_dir: &Path,
+    run_dir: &Path,
+    run_id: impl std::fmt::Display,
+    styles: &Styles,
+) -> Result<()> {
     let run_id = run_id.to_string();
     let conclusion_path = run_dir.join("conclusion.json");
     let Ok(conclusion) = Conclusion::load(&conclusion_path) else {
-        return;
+        return Ok(());
     };
 
-    let pr_url = std::fs::read_to_string(run_dir.join("pull_request.json"))
-        .ok()
-        .and_then(|content| {
-            serde_json::from_str::<PullRequestRecord>(&content)
-                .ok()
-                .map(|record| record.html_url)
-        });
+    let pr_url = match run_id.parse() {
+        Ok(parsed_run_id) => {
+            if let Some(run_store) = store::open_run_reader(storage_dir, &parsed_run_id).await? {
+                run_store
+                    .get_pull_request()
+                    .await?
+                    .map(|record: PullRequestRecord| record.html_url)
+            } else {
+                None
+            }
+        }
+        Err(_) => None,
+    };
 
     print_run_conclusion(
         &conclusion,
@@ -94,6 +107,7 @@ pub(crate) fn print_run_summary(run_dir: &Path, run_id: impl std::fmt::Display, 
     );
     print_final_output(run_dir, styles);
     print_assets(run_dir, styles);
+    Ok(())
 }
 
 pub(crate) fn print_run_conclusion(

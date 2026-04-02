@@ -63,8 +63,7 @@ fn pr_view_missing_pull_request_json_errors() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-    error: No pull_request.json found in run directory. Create one first with: fabro pr create [ULID]
-      > No such file or directory (os error 2)
+    error: No pull request found in store. Create one first with: fabro pr create [ULID]
     ");
 }
 

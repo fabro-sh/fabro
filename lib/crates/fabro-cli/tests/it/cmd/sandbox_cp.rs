@@ -45,8 +45,7 @@ fn sandbox_cp_run_without_sandbox_json_errors_cleanly() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-    error: Failed to load sandbox.json — was this run started with a recent version of arc?
-      > failed to read [DRY_RUN_DIR]/sandbox.json: No such file or directory (os error 2)
+    error: Failed to load sandbox record from store
     ");
 }
 
@@ -55,6 +54,27 @@ fn sandbox_cp_downloads_file_from_run() {
     let context = test_context!();
     let setup = setup_local_sandbox_run(&context);
     let dest = context.temp_dir.join("downloaded-root.txt");
+    let mut cmd = context.cp();
+    cmd.args([
+        &format!("{}:sandbox_dir/download_me/root.txt", setup.run.run_id),
+        dest.to_str().unwrap(),
+    ]);
+
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    ");
+    assert_eq!(read_text(&dest), "keep");
+}
+
+#[test]
+fn sandbox_cp_downloads_file_from_store_without_sandbox_json() {
+    let context = test_context!();
+    let setup = setup_local_sandbox_run(&context);
+    std::fs::remove_file(setup.run.run_dir.join("sandbox.json")).unwrap();
+    let dest = context.temp_dir.join("downloaded-from-store.txt");
     let mut cmd = context.cp();
     cmd.args([
         &format!("{}:sandbox_dir/download_me/root.txt", setup.run.run_id),

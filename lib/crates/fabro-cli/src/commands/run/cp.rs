@@ -3,14 +3,14 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use fabro_agent::sandbox::Sandbox;
 use fabro_config::FabroSettingsExt;
-use fabro_sandbox::SandboxRecordExt;
 use fabro_sandbox::reconnect::reconnect;
-use fabro_workflow::run_lookup::{resolve_run, runs_base};
+use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use tokio::fs;
 use tracing::{debug, info};
 
 use crate::args::{CpArgs, GlobalArgs};
 use crate::shared::{print_json_pretty, split_run_path};
+use crate::store;
 use crate::user_config::load_user_settings_with_globals;
 
 enum CopyDirection {
@@ -37,7 +37,7 @@ pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs) -> Result<()>
             remote_path,
             local_path,
         } => {
-            let sandbox = load_sandbox(&base, &run_prefix).await?;
+            let sandbox = load_sandbox(&cli_settings.storage_dir(), &base, &run_prefix).await?;
 
             let file_count = if args.recursive {
                 Some(download_recursive(&*sandbox, &remote_path, &local_path).await?)
@@ -70,7 +70,7 @@ pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs) -> Result<()>
             run_prefix,
             remote_path,
         } => {
-            let sandbox = load_sandbox(&base, &run_prefix).await?;
+            let sandbox = load_sandbox(&cli_settings.storage_dir(), &base, &run_prefix).await?;
 
             let file_count = if args.recursive {
                 Some(upload_recursive(&*sandbox, &local_path, &remote_path).await?)
@@ -124,13 +124,20 @@ fn parse_direction(src: &str, dst: &str) -> Result<CopyDirection> {
     }
 }
 
-async fn load_sandbox(base: &Path, run_prefix: &str) -> Result<Box<dyn Sandbox>> {
-    let run_dir = resolve_run(base, run_prefix)?.path;
-    let sandbox_json = run_dir.join("sandbox.json");
-    debug!(path = %sandbox_json.display(), "Loading sandbox record");
-    let record = fabro_sandbox::SandboxRecord::load(&sandbox_json).context(
-        "Failed to load sandbox.json — was this run started with a recent version of arc?",
-    )?;
+async fn load_sandbox(
+    storage_dir: &Path,
+    base: &Path,
+    run_prefix: &str,
+) -> Result<Box<dyn Sandbox>> {
+    let store = store::build_store(storage_dir)?;
+    let run = resolve_run_combined(store.as_ref(), base, run_prefix).await?;
+    let run_store = store::open_run_reader(storage_dir, &run.run_id)
+        .await?
+        .context("Failed to open run store")?;
+    let record = run_store
+        .get_sandbox()
+        .await?
+        .context("Failed to load sandbox record from store")?;
 
     info!(run_id = %run_prefix, provider = %record.provider, "Connecting to sandbox");
     reconnect(&record).await

@@ -1,13 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use fabro_config::FabroSettingsExt;
-use fabro_sandbox::SandboxRecordExt;
 use fabro_types::RunId;
-use fabro_workflow::records::{CheckpointExt, ConclusionExt, RunRecordExt, StartRecordExt};
 use serde::Serialize;
 
-use fabro_workflow::records::{Checkpoint, Conclusion, RunRecord, StartRecord};
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use fabro_workflow::run_status::RunStatus;
 
@@ -32,12 +29,10 @@ pub(crate) async fn run(args: &InspectArgs, globals: &GlobalArgs) -> Result<()> 
     let base = runs_base(&cli_settings.storage_dir());
     let store = store::build_store(&cli_settings.storage_dir())?;
     let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
-    let output = match store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await? {
-        Some(run_store) => {
-            inspect_run_store(&run.run_id, &run.path, run.status, run_store.as_ref()).await
-        }
-        None => inspect_run_dir(&run.run_id, &run.path, run.status),
-    };
+    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id)
+        .await?
+        .ok_or_else(|| anyhow!("Run {} not found in store", run.run_id))?;
+    let output = inspect_run_store(&run.run_id, &run.path, run.status, run_store.as_ref()).await;
     let json = serde_json::to_string_pretty(&[output])?;
     println!("{json}");
     Ok(())
@@ -49,8 +44,8 @@ async fn inspect_run_store(
     status: RunStatus,
     run_store: &dyn fabro_store::RunStore,
 ) -> InspectOutput {
-    match run_store.get_snapshot().await {
-        Ok(Some(snapshot)) => InspectOutput {
+    if let Ok(Some(snapshot)) = run_store.get_snapshot().await {
+        return InspectOutput {
             run_id: run_id.to_string(),
             run_dir: run_dir.to_path_buf(),
             status: snapshot
@@ -70,36 +65,42 @@ async fn inspect_run_store(
             sandbox: snapshot
                 .sandbox
                 .and_then(|record| serde_json::to_value(record).ok()),
-        },
-        _ => inspect_run_dir(run_id, run_dir, status),
+        };
     }
-}
-
-fn inspect_run_dir(run_id: &RunId, run_dir: &Path, status: RunStatus) -> InspectOutput {
-    let run_record = RunRecord::load(run_dir)
-        .ok()
-        .and_then(|v| serde_json::to_value(v).ok());
-    let start_record = StartRecord::load(run_dir)
-        .ok()
-        .and_then(|v| serde_json::to_value(v).ok());
-    let conclusion = Conclusion::load(&run_dir.join("conclusion.json"))
-        .ok()
-        .and_then(|v| serde_json::to_value(v).ok());
-    let checkpoint = Checkpoint::load(&run_dir.join("checkpoint.json"))
-        .ok()
-        .and_then(|v| serde_json::to_value(v).ok());
-    let sandbox = fabro_sandbox::SandboxRecord::load(&run_dir.join("sandbox.json"))
-        .ok()
-        .and_then(|v| serde_json::to_value(v).ok());
 
     InspectOutput {
         run_id: run_id.to_string(),
         run_dir: run_dir.to_path_buf(),
         status,
-        run_record,
-        start_record,
-        conclusion,
-        checkpoint,
-        sandbox,
+        run_record: run_store
+            .get_run()
+            .await
+            .ok()
+            .flatten()
+            .and_then(|v| serde_json::to_value(v).ok()),
+        start_record: run_store
+            .get_start()
+            .await
+            .ok()
+            .flatten()
+            .and_then(|v| serde_json::to_value(v).ok()),
+        conclusion: run_store
+            .get_conclusion()
+            .await
+            .ok()
+            .flatten()
+            .and_then(|v| serde_json::to_value(v).ok()),
+        checkpoint: run_store
+            .get_checkpoint()
+            .await
+            .ok()
+            .flatten()
+            .and_then(|v| serde_json::to_value(v).ok()),
+        sandbox: run_store
+            .get_sandbox()
+            .await
+            .ok()
+            .flatten()
+            .and_then(|v| serde_json::to_value(v).ok()),
     }
 }

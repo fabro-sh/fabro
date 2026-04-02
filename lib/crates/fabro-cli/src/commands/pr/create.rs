@@ -6,9 +6,7 @@ use fabro_model::Catalog;
 use fabro_sandbox::daytona::detect_repo_info;
 use fabro_workflow::outcome::StageStatus;
 use fabro_workflow::pull_request::maybe_open_pull_request;
-use fabro_workflow::records::{
-    Conclusion, ConclusionExt, RunRecord, RunRecordExt, StartRecord, StartRecordExt,
-};
+use fabro_workflow::records::RunRecordExt;
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use tracing::info;
 
@@ -37,41 +35,24 @@ async fn create_from(
     let store = store::build_store(storage_dir)?;
     let run = resolve_run_combined(store.as_ref(), base, &args.run_id).await?;
     let run_dir = run.path.clone();
-    let run_store = store::open_run_reader(storage_dir, &run.run_id).await?;
+    let run_store = store::open_run_reader(storage_dir, &run.run_id)
+        .await?
+        .context("Failed to open run store")?;
 
-    let record = match run_store.as_ref() {
-        Some(run_store) => run_store
-            .get_run()
-            .await
-            .ok()
-            .flatten()
-            .or_else(|| RunRecord::load(&run_dir).ok())
-            .context("Failed to load run.json")?,
-        None => RunRecord::load(&run_dir).context("Failed to load run.json")?,
-    };
+    let record = run_store
+        .get_run()
+        .await?
+        .context("Failed to load run record from store")?;
 
-    let start = match run_store.as_ref() {
-        Some(run_store) => run_store
-            .get_start()
-            .await
-            .ok()
-            .flatten()
-            .or_else(|| StartRecord::load(&run_dir).ok())
-            .context("Failed to load start.json")?,
-        None => StartRecord::load(&run_dir).context("Failed to load start.json")?,
-    };
+    let start = run_store
+        .get_start()
+        .await?
+        .context("Failed to load start record from store")?;
 
-    let conclusion = match run_store.as_ref() {
-        Some(run_store) => run_store
-            .get_conclusion()
-            .await
-            .ok()
-            .flatten()
-            .or_else(|| Conclusion::load(&run_dir.join("conclusion.json")).ok())
-            .context("Failed to load conclusion.json — is the run finished?")?,
-        None => Conclusion::load(&run_dir.join("conclusion.json"))
-            .context("Failed to load conclusion.json — is the run finished?")?,
-    };
+    let conclusion = run_store
+        .get_conclusion()
+        .await?
+        .context("Failed to load conclusion from store — is the run finished?")?;
 
     match conclusion.status {
         StageStatus::Success | StageStatus::PartialSuccess => {}
@@ -83,17 +64,10 @@ async fn create_from(
         .as_deref()
         .context("Run has no run_branch — was it run with git push enabled?")?;
 
-    let diff = match run_store.as_ref() {
-        Some(run_store) => run_store
-            .get_final_patch()
-            .await
-            .ok()
-            .flatten()
-            .or_else(|| std::fs::read_to_string(run_dir.join("final.patch")).ok())
-            .context("Failed to read final.patch — no diff available")?,
-        None => std::fs::read_to_string(run_dir.join("final.patch"))
-            .context("Failed to read final.patch — no diff available")?,
-    };
+    let diff = run_store
+        .get_final_patch()
+        .await?
+        .context("Failed to load final patch from store — no diff available")?;
     if diff.trim().is_empty() {
         bail!("final.patch is empty — nothing to create a PR for");
     }
@@ -147,7 +121,7 @@ async fn create_from(
         &model,
         true,
         None,
-        run_store.as_deref(),
+        Some(run_store.as_ref()),
         &run_dir,
         None,
     )
@@ -157,10 +131,8 @@ async fn create_from(
     match record {
         Some(record) => {
             info!(pr_url = %record.html_url, "Pull request created");
-            if let Some(run_store) = run_store.as_ref() {
-                if let Err(err) = run_store.put_pull_request(&record).await {
-                    tracing::warn!(error = %err, "Failed to persist pull request in run store");
-                }
+            if let Err(err) = run_store.put_pull_request(&record).await {
+                tracing::warn!(error = %err, "Failed to persist pull request in run store");
             }
             if let Err(err) = record.save(&run_dir.join("pull_request.json")) {
                 tracing::warn!(error = %err, "Failed to save pull_request.json");

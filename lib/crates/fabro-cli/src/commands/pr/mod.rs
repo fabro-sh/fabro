@@ -37,20 +37,11 @@ pub(crate) async fn load_pr_record(
     let store = store::build_store(storage_dir)?;
     let run = resolve_run_combined(store.as_ref(), base, run_id).await?;
     let run_dir = run.path;
-    let run_store = store::open_run_reader(storage_dir, &run.run_id).await?;
-    if let Some(run_store) = run_store {
-        if let Some(record) = run_store.get_pull_request().await.ok().flatten() {
-            return Ok((record, run_dir));
-        }
-    }
-    let pr_path = run_dir.join("pull_request.json");
-    let content = std::fs::read_to_string(&pr_path).with_context(|| {
-        format!(
-            "No pull_request.json found in run directory. \
-             Create one first with: fabro pr create {run_id}"
-        )
+    let run_store = store::open_run_reader(storage_dir, &run.run_id)
+        .await?
+        .context("Failed to open run store")?;
+    let record = run_store.get_pull_request().await?.with_context(|| {
+        format!("No pull request found in store. Create one first with: fabro pr create {run_id}")
     })?;
-    let record: PullRequestRecord =
-        serde_json::from_str(&content).context("Failed to parse pull_request.json")?;
     Ok((record, run_dir))
 }

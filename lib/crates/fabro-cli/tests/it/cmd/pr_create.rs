@@ -43,7 +43,7 @@ fn pr_create_unfinished_run_errors_before_network() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-    error: Failed to load start.json
+    error: Failed to load start record from store
     ");
 }
 
@@ -68,6 +68,8 @@ fn pr_create_uses_store_run_record_without_run_json() {
     let context = test_context!();
     let run = setup_completed_dry_run(&context);
     std::fs::remove_file(run.run_dir.join("run.json")).unwrap();
+    std::fs::remove_file(run.run_dir.join("start.json")).unwrap();
+    std::fs::remove_file(run.run_dir.join("conclusion.json")).unwrap();
 
     let mut cmd = context.command();
     cmd.args(["pr", "create", &run.run_id]);

@@ -106,6 +106,58 @@ fn inspect_completed_run_shows_run_start_conclusion_checkpoint() {
 }
 
 #[test]
+fn inspect_completed_run_reads_store_without_disk_metadata_files() {
+    let context = test_context!();
+    let run = setup_completed_dry_run(&context);
+    for name in [
+        "run.json",
+        "start.json",
+        "conclusion.json",
+        "checkpoint.json",
+        "sandbox.json",
+    ] {
+        std::fs::remove_file(run.run_dir.join(name)).unwrap();
+    }
+    let output = run_success(&context, &["inspect", &run.run_id]);
+
+    assert_snapshot!(serde_json::to_string_pretty(&compact_inspect(&output)).unwrap(), @r###"
+    [
+      {
+        "run_id": "[ULID]",
+        "status": "succeeded",
+        "run_record": {
+          "goal": "Run tests and report results",
+          "workflow_name": "Simple",
+          "workflow_slug": "simple",
+          "sandbox_provider": "local",
+          "dry_run": true
+        },
+        "start_record": {
+          "has_start_time": true
+        },
+        "conclusion": {
+          "status": "success",
+          "duration_ms": "[DURATION_MS]",
+          "stage_count": 3
+        },
+        "checkpoint": {
+          "current_node": "report",
+          "completed_nodes": [
+            "start",
+            "run_tests",
+            "report"
+          ],
+          "next_node_id": "exit"
+        },
+        "sandbox": {
+          "provider": "local"
+        }
+      }
+    ]
+    "###);
+}
+
+#[test]
 fn inspect_git_backed_run_exposes_checkpoint_and_sandbox_state() {
     let context = test_context!();
     let setup = setup_git_backed_changed_run(&context);

@@ -43,7 +43,13 @@ pub(crate) async fn execute(mut args: RunArgs, globals: &GlobalArgs) -> Result<(
         )
         .await?;
         if !globals.json {
-            super::output::print_run_summary(&run_dir, run_id, styles);
+            super::output::print_run_summary(
+                cli_settings.storage_dir().as_path(),
+                &run_dir,
+                run_id,
+                styles,
+            )
+            .await?;
         }
         if exit_code != std::process::ExitCode::SUCCESS {
             std::process::exit(1);

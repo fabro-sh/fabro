@@ -24,10 +24,6 @@ pub(crate) async fn resume_command(
     let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
     let run_dir = run.path;
 
-    // find_run_by_prefix can match orphan directories (no run.json).
-    if !run_dir.join("run.json").exists() {
-        bail!("run directory exists but has no run.json — cannot resume");
-    }
     let run_id = run.run_id;
 
     if launcher_pid_alive(&run_dir) {
@@ -55,7 +51,13 @@ pub(crate) async fn resume_command(
         )
         .await?;
         if !globals.json {
-            super::output::print_run_summary(&run_dir, run_id, styles);
+            super::output::print_run_summary(
+                cli_settings.storage_dir().as_path(),
+                &run_dir,
+                run_id,
+                styles,
+            )
+            .await?;
         }
         if exit_code != std::process::ExitCode::SUCCESS {
             std::process::exit(1);
