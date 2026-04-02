@@ -1,10 +1,12 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use chrono::Utc;
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::Graph as GvGraph;
-use fabro_store::{DiskProjectingRunStore, InMemoryStore, Store};
+use fabro_store::{DiskProjectingRunStore, InMemoryStore, RunStore, Store};
+use fabro_types::run::RunRecord;
 
 use crate::error::Result;
 use crate::event::EventEmitter;
@@ -37,10 +39,11 @@ async fn initialized(
     options: InitializedOptions,
 ) -> Initialized {
     std::fs::create_dir_all(&run_options.run_dir).expect("failed to create run dir");
+    let created_at = Utc::now();
     let inner_store = InMemoryStore::default()
         .create_run(
             &run_options.run_id,
-            Utc::now(),
+            created_at,
             Some(run_options.run_dir.to_string_lossy().as_ref()),
         )
         .await
@@ -49,6 +52,23 @@ async fn initialized(
         inner_store,
         run_options.run_dir.clone(),
     ));
+    run_store
+        .put_run(&RunRecord {
+            run_id: run_options.run_id,
+            created_at,
+            settings: run_options.settings.clone(),
+            graph: graph.clone(),
+            workflow_slug: run_options.workflow_slug.clone(),
+            working_directory: PathBuf::from(sandbox.working_directory()),
+            host_repo_path: run_options
+                .host_repo_path
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            base_branch: run_options.base_branch.clone(),
+            labels: run_options.labels.clone(),
+        })
+        .await
+        .expect("failed to seed run record in run store");
     let emitter = bound_emitter(run_options.run_id, &emitter);
     Initialized {
         graph: graph.clone(),

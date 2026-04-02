@@ -71,24 +71,21 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                 .await
                 .ok()
                 .flatten()
-                .and_then(|record| serde_json::to_vec_pretty(&record).ok())
-                .or_else(|| std::fs::read(self.run_dir.join("run.json")).ok());
+                .and_then(|record| serde_json::to_vec_pretty(&record).ok());
             let start_json = self
                 .run_store
                 .get_start()
                 .await
                 .ok()
                 .flatten()
-                .and_then(|record| serde_json::to_vec_pretty(&record).ok())
-                .or_else(|| std::fs::read(self.run_dir.join("start.json")).ok());
+                .and_then(|record| serde_json::to_vec_pretty(&record).ok());
             let sandbox_json = self
                 .run_store
                 .get_sandbox()
                 .await
                 .ok()
                 .flatten()
-                .and_then(|record| serde_json::to_vec_pretty(&record).ok())
-                .or_else(|| std::fs::read(self.run_dir.join("sandbox.json")).ok());
+                .and_then(|record| serde_json::to_vec_pretty(&record).ok());
             let mut files: Vec<(&str, &[u8])> = Vec::new();
             if let Some(ref data) = run_json {
                 files.push(("run.json", data));
