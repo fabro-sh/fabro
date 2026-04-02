@@ -69,7 +69,18 @@ async fn remove_from(
         }
 
         write_run_status(&run.path, RunStatus::Removing, None);
-        if let Ok(Some(run_store)) = store.open_run_reader(&run.run_id).await {
+        let run_store = match store.open_run_reader(&run.run_id).await {
+            Ok(run_store) => run_store,
+            Err(err) => {
+                warn!(
+                    run_id = %run.run_id,
+                    error = %err,
+                    "failed to open run store during removal"
+                );
+                None
+            }
+        };
+        if let Some(run_store) = run_store.as_ref() {
             if let Err(err) = run_store
                 .put_status(&RunStatusRecord::new(RunStatus::Removing, None))
                 .await
@@ -82,8 +93,7 @@ async fn remove_from(
             }
         }
 
-        let sandbox_path = run.path.join("sandbox.json");
-        if let Ok(record) = fabro_sandbox::SandboxRecord::load(&sandbox_path) {
+        if let Some(record) = load_sandbox_record(&run.path, run_store.as_deref()).await {
             if record.provider != "local" {
                 match reconnect_sandbox(&record).await {
                     Ok(sandbox) => {
@@ -143,4 +153,22 @@ async fn remove_from(
         bail!("some runs could not be removed");
     }
     Ok(())
+}
+
+async fn load_sandbox_record(
+    run_dir: &Path,
+    run_store: Option<&dyn fabro_store::RunStore>,
+) -> Option<fabro_sandbox::SandboxRecord> {
+    if let Some(run_store) = run_store {
+        match run_store.get_sandbox().await {
+            Ok(Some(record)) => return Some(record),
+            Ok(None) => {}
+            Err(err) => {
+                warn!(error = %err, "failed to load sandbox record from store");
+            }
+        }
+    }
+
+    let sandbox_path = run_dir.join("sandbox.json");
+    fabro_sandbox::SandboxRecord::load(&sandbox_path).ok()
 }

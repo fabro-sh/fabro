@@ -1,7 +1,7 @@
 use fabro_test::{fabro_snapshot, test_context};
 use serde_json::Value;
 
-use super::support::{setup_completed_dry_run, setup_created_dry_run};
+use super::support::{setup_completed_dry_run, setup_created_dry_run, setup_local_sandbox_run};
 use walkdir::WalkDir;
 
 #[test]
@@ -116,6 +116,33 @@ fn rm_force_deletes_submitted_run() {
     []
     ----- stderr -----
     "###);
+}
+
+#[test]
+fn rm_force_deletes_run_without_sandbox_json_when_store_has_sandbox() {
+    let context = test_context!();
+    let setup = setup_local_sandbox_run(&context);
+    std::fs::remove_file(setup.run.run_dir.join("sandbox.json")).unwrap();
+
+    let mut filters = context.filters();
+    filters.push((
+        r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
+        "[ULID]".to_string(),
+    ));
+
+    let mut cmd = context.command();
+    cmd.args(["rm", "--force", &setup.run.run_id]);
+    fabro_snapshot!(filters, cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    [ULID]
+    ");
+    assert!(
+        !setup.run.run_dir.exists(),
+        "run directory should be deleted even without sandbox.json"
+    );
 }
 
 #[test]
