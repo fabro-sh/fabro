@@ -1,6 +1,6 @@
 use fabro_test::{fabro_snapshot, test_context};
 
-use crate::support::{example_fixture, fabro_json_snapshot, read_json};
+use crate::support::{example_fixture, fabro_json_snapshot};
 
 use super::support::{output_stdout, resolve_run, wait_for_status, write_gated_workflow};
 
@@ -58,21 +58,21 @@ fn start_by_run_id_starts_created_run() {
         .assert()
         .success();
 
-    let run_dir = context.find_run_dir(run_id);
-    let status = read_json(run_dir.join("status.json"));
-    let conclusion = read_json(run_dir.join("conclusion.json"));
+    let output = context
+        .command()
+        .args(["wait", "--json", run_id])
+        .output()
+        .expect("wait should execute");
+    assert!(output.status.success(), "wait should succeed");
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("wait JSON");
     fabro_json_snapshot!(
         context,
         serde_json::json!({
-            "status": status["status"],
-            "reason": status["reason"],
-            "conclusion_status": conclusion["status"],
+            "status": value["status"],
         }),
         @r#"
         {
-          "status": "succeeded",
-          "reason": "completed",
-          "conclusion_status": "success"
+          "status": "succeeded"
         }
         "#
     );
@@ -98,25 +98,24 @@ fn start_by_run_id_starts_created_run_without_run_json_or_status_json() {
 
     let run_dir = context.find_run_dir(run_id);
     std::fs::remove_file(run_dir.join("run.json")).unwrap();
-    std::fs::remove_file(run_dir.join("status.json")).unwrap();
 
     context.command().args(["start", run_id]).assert().success();
-    context
+    let output = context
         .command()
-        .args(["wait", run_id])
+        .args(["wait", "--json", run_id])
         .timeout(std::time::Duration::from_secs(10))
-        .assert()
-        .success();
-
-    let conclusion = read_json(run_dir.join("conclusion.json"));
+        .output()
+        .expect("wait should execute");
+    assert!(output.status.success(), "wait should succeed");
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).expect("wait JSON");
     fabro_json_snapshot!(
         context,
         serde_json::json!({
-            "conclusion_status": conclusion["status"],
+            "status": value["status"],
         }),
         @r#"
         {
-          "conclusion_status": "success"
+          "status": "succeeded"
         }
         "#
     );
@@ -190,13 +189,20 @@ digraph Smoke {
         .assert()
         .success();
 
-    let new_run_dir = context.find_run_dir(new_run_id);
-    let status = read_json(new_run_dir.join("status.json"));
-    fabro_json_snapshot!(context, &status, @r#"
+    let output = context
+        .command()
+        .args(["wait", "--json", new_run_id])
+        .output()
+        .expect("wait should execute");
+    assert!(output.status.success(), "wait should succeed");
+    let status: serde_json::Value = serde_json::from_slice(&output.stdout).expect("wait JSON");
+    fabro_json_snapshot!(context, &serde_json::json!({
+        "run_id": status["run_id"],
+        "status": status["status"],
+    }), @r#"
     {
-      "status": "succeeded",
-      "reason": "completed",
-      "updated_at": "[TIMESTAMP]"
+      "run_id": "[ULID]",
+      "status": "succeeded"
     }
     "#);
 }

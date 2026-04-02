@@ -5,9 +5,9 @@ use crate::error::FabroError;
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::git::{MetadataStore, scan_node_files_from_store};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
-use crate::records::{Checkpoint, CheckpointExt, Conclusion, ConclusionExt, StageSummary};
+use crate::records::{Checkpoint, CheckpointExt, Conclusion, StageSummary};
 use crate::run_options::RunOptions;
-use crate::run_status::{RunStatus, StatusReason, write_run_status};
+use crate::run_status::{RunStatus, StatusReason};
 use crate::sandbox_git::git_push_host;
 use fabro_hooks::{HookContext, HookEvent, HookRunner};
 use fabro_retro::retro::extract_stage_durations;
@@ -249,13 +249,12 @@ fn build_conclusion_from_parts(
 }
 
 pub fn persist_terminal_outcome(
-    run_dir: &Path,
+    _run_dir: &Path,
     conclusion: &Conclusion,
     run_status: RunStatus,
     status_reason: Option<StatusReason>,
 ) {
-    let _ = conclusion.save(&run_dir.join("conclusion.json"));
-    write_run_status(run_dir, run_status, status_reason);
+    let _ = (conclusion, run_status, status_reason);
 }
 
 /// Write a finalize commit to the shadow branch with retro.json and final node files.
@@ -512,7 +511,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(run_dir.join("conclusion.json").exists());
+        assert!(run_store.get_conclusion().await.unwrap().is_some());
         assert_eq!(concluded.conclusion.status, StageStatus::Success);
     }
 }

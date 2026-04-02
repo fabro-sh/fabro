@@ -46,7 +46,6 @@ pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, 
         .ok_or_else(|| FabroError::Precondition("no checkpoint to resume from".to_string()))?;
 
     cleanup_resume_artifacts(run_dir);
-    run_status::write_run_status(run_dir, RunStatus::Submitted, None);
     services
         .run_store
         .put_status(&run_status::RunStatusRecord::new(

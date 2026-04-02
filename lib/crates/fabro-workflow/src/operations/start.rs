@@ -30,7 +30,7 @@ use crate::pipeline::{
     PullRequestOptions, RetroOptions, SandboxEnvSpec, build_conclusion_from_store,
     classify_engine_result,
 };
-use crate::records::{Checkpoint, Conclusion, ConclusionExt, RunRecord, RunRecordExt};
+use crate::records::{Checkpoint, Conclusion, RunRecord, RunRecordExt};
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::run_status::{self, RunStatus, StatusReason};
 use fabro_config::run::PullRequestSettings;
@@ -600,7 +600,6 @@ impl RunSession {
 }
 
 struct DetachedRunBootstrapGuard {
-    run_dir: PathBuf,
     run_store: Arc<dyn RunStore>,
     cancel_token: Option<Arc<AtomicBool>>,
     active: bool,
@@ -608,17 +607,11 @@ struct DetachedRunBootstrapGuard {
 
 impl DetachedRunBootstrapGuard {
     fn arm(
-        run_dir: &Path,
+        _run_dir: &Path,
         run_store: Arc<dyn RunStore>,
         cancel_token: Option<Arc<AtomicBool>>,
     ) -> Self {
-        run_status::write_run_status(
-            run_dir,
-            RunStatus::Starting,
-            Some(StatusReason::SandboxInitializing),
-        );
         Self {
-            run_dir: run_dir.to_path_buf(),
             run_store,
             cancel_token,
             active: true,
@@ -642,7 +635,6 @@ impl Drop for DetachedRunBootstrapGuard {
             } else {
                 StatusReason::SandboxInitFailed
             };
-            run_status::write_run_status(&self.run_dir, RunStatus::Failed, Some(reason));
             let run_store = Arc::clone(&self.run_store);
             if let Ok(handle) = Handle::try_current() {
                 handle.spawn(async move {
@@ -715,10 +707,6 @@ impl Drop for DetachedRunCompletionGuard {
             "postrun_aborted"
         };
 
-        run_status::write_run_status(&self.run_dir, RunStatus::Failed, Some(reason));
-        if !self.run_dir.join("conclusion.json").exists() {
-            let _ = write_failure_conclusion(&self.run_dir, message, Some(reason));
-        }
         let serialized_notice = load_run_id(&self.run_dir).and_then(|run_id| {
             let envelope = canonicalize_event(
                 &run_id,
@@ -832,8 +820,7 @@ async fn persist_detached_failure(
     )
     .map_err(|err| FabroError::Io(err.to_string()))?;
 
-    let conclusion = write_failure_conclusion(run_dir, &message, Some(reason))?;
-    run_status::write_run_status(run_dir, RunStatus::Failed, Some(reason));
+    let conclusion = build_failure_conclusion(&message);
     if let Err(err) = run_store.put_conclusion(&conclusion).await {
         tracing::warn!(error = %err, "Failed to save detached failure conclusion to store");
     }
@@ -872,20 +859,6 @@ async fn persist_detached_failure(
     Ok(())
 }
 
-fn write_failure_conclusion(
-    run_dir: &Path,
-    message: &str,
-    _reason: Option<StatusReason>,
-) -> Result<Conclusion, FabroError> {
-    if run_dir.join("conclusion.json").exists() {
-        return Conclusion::load(&run_dir.join("conclusion.json"));
-    }
-
-    let conclusion = build_failure_conclusion(message);
-    conclusion.save(&run_dir.join("conclusion.json"))?;
-    Ok(conclusion)
-}
-
 fn build_failure_conclusion(message: &str) -> Conclusion {
     Conclusion {
         timestamp: Utc::now(),
@@ -922,7 +895,7 @@ mod tests {
     use crate::handler::exit::ExitHandler;
     use crate::handler::start::StartHandler;
     use crate::operations::resume;
-    use crate::records::CheckpointExt;
+    use crate::records::{CheckpointExt, ConclusionExt};
 
     const MINIMAL_DOT: &str = r#"digraph Test {
         graph [goal="Build feature"]
@@ -1044,7 +1017,8 @@ mod tests {
         .unwrap();
 
         assert_eq!(started.finalized.conclusion.status, StageStatus::Success);
-        assert!(run_dir.join("conclusion.json").exists());
+        let run_store = store.open_run(&fixtures::RUN_1).await.unwrap().unwrap();
+        assert!(run_store.get_conclusion().await.unwrap().is_some());
     }
 
     #[tokio::test]

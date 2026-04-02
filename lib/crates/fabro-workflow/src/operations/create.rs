@@ -15,7 +15,7 @@ use crate::pipeline::types::PersistOptions;
 use crate::pipeline::{self, Persisted, TransformOptions, Validated};
 use crate::records::RunRecord;
 use crate::run_lookup::default_runs_base;
-use crate::run_status::{RunStatus, RunStatusRecord, write_run_status};
+use crate::run_status::{RunStatus, RunStatusRecord};
 use crate::transforms::{Transform, expand_vars};
 use fabro_sandbox::daytona::detect_repo_info;
 
@@ -120,7 +120,6 @@ pub async fn create(store: &dyn Store, request: CreateRunInput) -> Result<Create
     )?;
 
     write_run_config_snapshot(&run_dir, resolved.workflow_toml_path.as_deref())?;
-    write_run_status(&run_dir, RunStatus::Submitted, None);
     emit_run_created_event(
         &persisted,
         &resolved.raw_source,
@@ -451,8 +450,6 @@ mod tests {
     use std::time::Duration;
 
     use crate::operations::{ValidateInput, validate};
-    use crate::run_status::RunStatusRecordExt;
-
     fn memory_store() -> InMemoryStore {
         InMemoryStore::default()
     }
@@ -752,10 +749,9 @@ mod tests {
             created.persisted.run_record().workflow_slug.as_deref(),
             Some("slug")
         );
+        let run_store = store.open_run(&fixtures::RUN_1).await.unwrap().unwrap();
         assert_eq!(
-            crate::run_status::RunStatusRecord::load(&created.run_dir.join("status.json"))
-                .unwrap()
-                .status,
+            run_store.get_status().await.unwrap().unwrap().status,
             crate::run_status::RunStatus::Submitted
         );
         assert!(!created.run_dir.join("id.txt").exists());
