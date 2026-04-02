@@ -931,26 +931,31 @@ mod tests {
         start -> exit
     }"#;
 
-    fn persisted_workflow(dot: &str, run_dir: &Path) -> Persisted {
-        crate::operations::create(crate::operations::CreateRunInput {
-            workflow: crate::operations::WorkflowInput::DotSource {
-                source: dot.to_string(),
-                base_dir: None,
+    async fn persisted_workflow(dot: &str, run_dir: &Path) -> Persisted {
+        let store = InMemoryStore::default();
+        crate::operations::create(
+            &store,
+            crate::operations::CreateRunInput {
+                workflow: crate::operations::WorkflowInput::DotSource {
+                    source: dot.to_string(),
+                    base_dir: None,
+                },
+                settings: FabroSettings {
+                    dry_run: Some(true),
+                    ..Default::default()
+                },
+                cwd: run_dir
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .to_path_buf(),
+                workflow_slug: Some("test".to_string()),
+                run_dir: Some(run_dir.to_path_buf()),
+                run_id: Some(fixtures::RUN_1),
+                host_repo_path: None,
+                base_branch: None,
             },
-            settings: FabroSettings {
-                dry_run: Some(true),
-                ..Default::default()
-            },
-            cwd: run_dir
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .to_path_buf(),
-            workflow_slug: Some("test".to_string()),
-            run_dir: Some(run_dir.to_path_buf()),
-            run_id: Some(fixtures::RUN_1),
-            host_repo_path: None,
-            base_branch: None,
-        })
+        )
+        .await
         .unwrap()
         .persisted
     }
@@ -1007,7 +1012,7 @@ mod tests {
             });
         }
 
-        persisted_workflow(MINIMAL_DOT, &run_dir);
+        persisted_workflow(MINIMAL_DOT, &run_dir).await;
         let started = start(
             &run_dir,
             test_start_services(&run_dir, emitter, registry).await,
@@ -1030,7 +1035,7 @@ mod tests {
         let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
-        persisted_workflow(MINIMAL_DOT, &run_dir);
+        persisted_workflow(MINIMAL_DOT, &run_dir).await;
 
         let started = start(
             &run_dir,
@@ -1051,7 +1056,7 @@ mod tests {
         let registry = Arc::new(test_registry());
         let visited = Arc::new(Mutex::new(Vec::new()));
 
-        persisted_workflow(MINIMAL_DOT, &run_dir);
+        persisted_workflow(MINIMAL_DOT, &run_dir).await;
 
         let started = start(
             &run_dir,
@@ -1079,7 +1084,7 @@ mod tests {
         let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
-        persisted_workflow(MINIMAL_DOT, &run_dir);
+        persisted_workflow(MINIMAL_DOT, &run_dir).await;
         let services = test_start_services(&run_dir, emitter, registry).await;
 
         // Write a checkpoint to the store (not disk) so start() sees it
@@ -1116,7 +1121,7 @@ mod tests {
         let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
-        persisted_workflow(MINIMAL_DOT, &run_dir);
+        persisted_workflow(MINIMAL_DOT, &run_dir).await;
 
         let result = resume(
             &run_dir,
@@ -1138,7 +1143,7 @@ mod tests {
         let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
-        persisted_workflow(MINIMAL_DOT, &run_dir);
+        persisted_workflow(MINIMAL_DOT, &run_dir).await;
 
         let checkpoint = Checkpoint::from_context(
             &Context::new(),
