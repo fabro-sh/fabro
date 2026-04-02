@@ -57,8 +57,7 @@ pub(crate) async fn attach_run(
                         .await
                         .ok()
                         .flatten()
-                        .map(|record| record.settings.verbose_enabled())
-                        .unwrap_or(false);
+                        .is_some_and(|record| record.settings.verbose_enabled());
                     let event_lines = events
                         .iter()
                         .map(event_payload_line)
@@ -311,11 +310,13 @@ async fn flush_remaining_store_events(
             saw_new_event = true;
         }
 
-        if !saw_new_event || Instant::now() >= deadline {
+        if Instant::now() >= deadline {
             break;
         }
 
-        sleep(Duration::from_millis(100)).await;
+        if !saw_new_event {
+            sleep(Duration::from_millis(100)).await;
+        }
     }
 
     Ok(())
@@ -593,7 +594,7 @@ fn infer_storage_dir(run_dir: &Path) -> Option<PathBuf> {
 }
 
 fn infer_run_id(run_dir: &Path) -> Option<RunId> {
-    super::launcher::active_launcher_record_for_run(run_dir)
+    super::launcher::launcher_record_for_run(run_dir)
         .map(|record| record.run_id)
         .or_else(|| {
             std::fs::read_to_string(run_dir.join("id.txt"))
@@ -765,7 +766,7 @@ async fn determine_exit_code_with_store(run_store: &dyn RunStore) -> ExitCode {
                 return ExitCode::from(0);
             }
             Ok(Some(record)) if record.status.is_terminal() => return ExitCode::from(1),
-            Ok(Some(_)) | Ok(None) | Err(_) => {}
+            Ok(Some(_) | None) | Err(_) => {}
         }
 
         if Instant::now() >= deadline {
@@ -788,6 +789,7 @@ fn process_alive(pid: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::run::launcher;
     use chrono::Utc;
     use fabro_interview::{Answer, AnswerValue};
     use fabro_util::terminal::Styles;
@@ -897,9 +899,9 @@ mod tests {
         let run_dir = storage_dir.join("runs").join("20260401-test");
         std::fs::create_dir_all(&run_dir).unwrap();
 
-        super::launcher::write_launcher_record(
-            &super::launcher::launcher_record_path(&storage_dir, &fabro_types::fixtures::RUN_1),
-            &super::launcher::LauncherRecord {
+        launcher::write_launcher_record(
+            &launcher::launcher_record_path(&storage_dir, &fabro_types::fixtures::RUN_1),
+            &launcher::LauncherRecord {
                 run_id: fabro_types::fixtures::RUN_1,
                 run_dir: run_dir.clone(),
                 pid: u32::MAX,

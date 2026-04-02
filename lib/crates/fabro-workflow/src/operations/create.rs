@@ -808,7 +808,7 @@ mod tests {
         std::fs::create_dir_all(storage_dir.join("store")).unwrap();
         let object_store =
             Arc::new(LocalFileSystem::new_with_prefix(storage_dir.join("store")).unwrap());
-        let store = Arc::new(SlateStore::new(object_store, "", Duration::from_millis(5)));
+        let store = Arc::new(SlateStore::new(object_store, "", Duration::from_millis(1)));
         let created = create(
             store.as_ref(),
             CreateRunInput {

@@ -7,6 +7,8 @@ use fabro_config::user::ExecutionMode;
 use fabro_test::{fabro_snapshot, test_context};
 use predicates::prelude::*;
 
+use super::support::run_snapshot;
+
 #[test]
 fn help() {
     let context = test_context!();
@@ -442,8 +444,8 @@ fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
             )
         });
 
-    let run_record: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(run_dir.join("run.json")).unwrap()).unwrap();
+    let snapshot = run_snapshot(&run_dir);
+    let run_record = serde_json::to_value(&snapshot.run).unwrap();
     assert_eq!(run_record["settings"]["auto_approve"].as_bool(), Some(true));
     assert_eq!(
         run_record["settings"]["storage_dir"].as_str(),

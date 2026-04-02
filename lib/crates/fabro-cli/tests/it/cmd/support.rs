@@ -59,13 +59,6 @@ pub(crate) fn output_stdout(output: &Output) -> String {
     stdout(output)
 }
 
-pub(crate) fn read_json(path: &Path) -> Value {
-    let content = std::fs::read_to_string(path)
-        .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
-    serde_json::from_str(&content)
-        .unwrap_or_else(|err| panic!("failed to parse {}: {err}", path.display()))
-}
-
 pub(crate) fn read_text(path: &Path) -> String {
     std::fs::read_to_string(path)
         .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()))
@@ -490,7 +483,7 @@ fn run_store(run_dir: &Path) -> Option<Arc<dyn RunStore>> {
     let storage_dir = runs_dir.parent()?;
     let run_id: RunId = infer_run_id(run_dir).parse().ok()?;
     let object_store = Arc::new(LocalFileSystem::new_with_prefix(storage_dir.join("store")).ok()?);
-    let store = Arc::new(SlateStore::new(object_store, "", Duration::from_millis(5)));
+    let store = Arc::new(SlateStore::new(object_store, "", Duration::from_millis(1)));
     block_on(store.open_run_reader(&run_id)).ok().flatten()
 }
 
@@ -691,13 +684,6 @@ pub(crate) fn compact_git_inspect(output: &Output) -> Value {
             })
             .collect(),
     )
-}
-
-fn read_json_if_exists(path: &Path) -> Option<Value> {
-    if !path.exists() {
-        return None;
-    }
-    Some(read_json(path))
 }
 
 fn setup_git_backed_run(context: &TestContext, workflow: GitWorkflowKind) -> GitRunSetup {

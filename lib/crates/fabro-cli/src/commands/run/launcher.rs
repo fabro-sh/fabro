@@ -50,8 +50,23 @@ pub(crate) fn remove_launcher_record(path: &Path) {
 }
 
 pub(crate) fn active_launcher_record_for_run(run_dir: &Path) -> Option<LauncherRecord> {
+    let launcher = launcher_record_for_run(run_dir)?;
+    let storage_dir = run_dir.parent()?.parent()?;
+    let path = launcher_record_path(storage_dir, &launcher.run_id);
+    if launcher_record_is_running(&launcher) {
+        Some(launcher)
+    } else {
+        remove_launcher_record(&path);
+        None
+    }
+}
+
+pub(crate) fn launcher_record_for_run(run_dir: &Path) -> Option<LauncherRecord> {
     if let Ok(run_record) = RunRecord::load(run_dir) {
-        return active_launcher_record(&run_record.settings.storage_dir(), &run_record.run_id);
+        return read_launcher_record(&launcher_record_path(
+            &run_record.settings.storage_dir(),
+            &run_record.run_id,
+        ));
     }
 
     let storage_dir = run_dir.parent()?.parent()?;
@@ -63,11 +78,7 @@ pub(crate) fn active_launcher_record_for_run(run_dir: &Path) -> Option<LauncherR
             continue;
         };
         if launcher.run_dir == run_dir {
-            if launcher_record_is_running(&launcher) {
-                return Some(launcher);
-            }
-            remove_launcher_record(&path);
-            return None;
+            return Some(launcher);
         }
     }
 

@@ -57,8 +57,8 @@ fn wait_completed_run_prints_success_summary() {
 fn wait_completed_run_reads_store_without_status_or_conclusion_files() {
     let context = test_context!();
     let run = setup_completed_dry_run(&context);
-    std::fs::remove_file(run.run_dir.join("status.json")).unwrap();
-    std::fs::remove_file(run.run_dir.join("conclusion.json")).unwrap();
+    let _ = std::fs::remove_file(run.run_dir.join("status.json"));
+    let _ = std::fs::remove_file(run.run_dir.join("conclusion.json"));
     let mut filters = context.filters();
     filters.push((
         r"\b\d+(\.\d+)?(ms|s)\b".to_string(),

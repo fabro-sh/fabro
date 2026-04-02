@@ -19,7 +19,7 @@ fn build_store(storage_dir: &std::path::Path) -> Arc<fabro_store::SlateStore> {
     Arc::new(fabro_store::SlateStore::new(
         object_store,
         "",
-        std::time::Duration::from_millis(5),
+        std::time::Duration::from_millis(1),
     ))
 }
 
@@ -83,7 +83,6 @@ fn diff_missing_node_diff_reports_helpful_error() {
     ----- stdout -----
     ----- stderr -----
     error: No diff found for node 'missing' — check the node ID and try again
-      > No such file or directory (os error 2)
     ");
 }
 

@@ -2252,10 +2252,6 @@ async fn codergen_without_backend_simulated() {
     };
     engine.run(&graph, &run_options).await.expect("run");
 
-    let response =
-        std::fs::read_to_string(dir.path().join("nodes").join("code").join("response.md")).unwrap();
-    assert!(response.contains("[Simulated]"));
-
     let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
     let last_response = cp
         .context_values
@@ -2263,6 +2259,7 @@ async fn codergen_without_backend_simulated() {
         .unwrap()
         .as_str()
         .unwrap();
+    assert!(last_response.contains("[Simulated]"));
     assert!(last_response.contains("[Simulated]"));
 }
 

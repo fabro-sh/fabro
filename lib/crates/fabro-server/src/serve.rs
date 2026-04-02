@@ -148,7 +148,7 @@ pub async fn serve_command(
     let store = Arc::new(fabro_store::SlateStore::new(
         object_store,
         "",
-        Duration::from_millis(5),
+        Duration::from_millis(1),
     ));
     let state =
         create_app_state_with_store(db, Arc::clone(&shared_settings), max_concurrent_runs, store);

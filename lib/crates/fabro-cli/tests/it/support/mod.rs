@@ -1,8 +1,6 @@
 use std::path::{Path, PathBuf};
 
 use fabro_test::TestContext;
-use serde_json::Value;
-
 macro_rules! fabro_json_snapshot {
     ($context:expr, $value:expr, @$snapshot:literal) => {{
         let mut filters = $context.filters();
@@ -17,6 +15,10 @@ macro_rules! fabro_json_snapshot {
         filters.push((
             r#""duration_ms":\s*\d+"#.to_string(),
             r#""duration_ms": "[DURATION_MS]""#.to_string(),
+        ));
+        filters.push((
+            r#""run_dir":\s*"\[STORAGE_DIR\]/runs/\d{8}-\[ULID\]""#.to_string(),
+            r#""run_dir": "[RUN_DIR]""#.to_string(),
         ));
         let filters: Vec<(&str, &str)> = filters
             .iter()
@@ -36,19 +38,6 @@ pub(crate) fn example_fixture(name: &str) -> PathBuf {
         .join(format!("../../../test/{name}"))
         .canonicalize()
         .expect("fixture path should exist")
-}
-
-pub(crate) fn read_json(path: impl AsRef<Path>) -> Value {
-    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
-}
-
-pub(crate) fn read_jsonl(path: impl AsRef<Path>) -> Vec<Value> {
-    std::fs::read_to_string(path)
-        .unwrap()
-        .lines()
-        .map(serde_json::from_str)
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap()
 }
 
 pub(crate) fn run_output_filters(context: &TestContext) -> Vec<(String, String)> {

@@ -132,9 +132,7 @@ async fn reset_rewound_run_state(
     let checkpoint = MetadataStore::read_checkpoint(git_store.repo_dir(), &run_id.to_string())?
         .context("rewound metadata branch is missing checkpoint.json")?;
 
-    for name in ["detached_failure.json"] {
-        let _ = std::fs::remove_file(run_dir.join(name));
-    }
+    let _ = std::fs::remove_file(run_dir.join("detached_failure.json"));
 
     durable_store
         .delete_run(run_id)

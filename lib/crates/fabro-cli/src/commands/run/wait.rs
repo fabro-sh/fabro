@@ -144,6 +144,7 @@ mod tests {
     use fabro_types::fixtures;
     use fabro_workflow::outcome::StageStatus;
     use fabro_workflow::records::Conclusion;
+    use fabro_workflow::run_status::{RunStatusRecord, RunStatusRecordExt};
 
     fn no_color_styles() -> Styles {
         Styles::new(false)

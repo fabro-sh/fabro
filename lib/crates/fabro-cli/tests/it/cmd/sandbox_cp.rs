@@ -73,7 +73,7 @@ fn sandbox_cp_downloads_file_from_run() {
 fn sandbox_cp_downloads_file_from_store_without_sandbox_json() {
     let context = test_context!();
     let setup = setup_local_sandbox_run(&context);
-    std::fs::remove_file(setup.run.run_dir.join("sandbox.json")).unwrap();
+    let _ = std::fs::remove_file(setup.run.run_dir.join("sandbox.json"));
     let dest = context.temp_dir.join("downloaded-from-store.txt");
     let mut cmd = context.cp();
     cmd.args([

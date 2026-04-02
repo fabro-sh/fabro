@@ -1,7 +1,7 @@
 use fabro_test::test_context;
 use serde_json::Value;
 
-use super::{fixture, read_json, timeout_for};
+use super::{fixture, run_snapshot, timeout_for};
 use crate::support::{example_fixture, fabro_json_snapshot};
 
 #[fabro_macros::e2e_test()]
@@ -134,8 +134,8 @@ fn dry_run_create_start_attach_works_with_default_run_lookup() {
         }),
         @r#"
         {
-          "run_json_exists": true,
-          "conclusion_json_exists": true
+          "run_json_exists": false,
+          "conclusion_json_exists": false
         }
         "#
     );
@@ -177,7 +177,7 @@ fn dry_run_detach_attach_works_with_default_run_lookup() {
         @r#"
         {
           "run_dir": "[DRY_RUN_DIR]",
-          "conclusion_json_exists": true
+          "conclusion_json_exists": false
         }
         "#
     );
@@ -238,12 +238,12 @@ digraph BarBaz {
         .assert()
         .success();
 
-    let run_record = read_json(&context.find_run_dir(run_id).join("run.json"));
+    let run_record = run_snapshot(&context.find_run_dir(run_id)).run;
     fabro_json_snapshot!(
         context,
         serde_json::json!({
-            "graph_name": run_record["graph"]["name"],
-            "workflow_slug": run_record["workflow_slug"],
+            "graph_name": run_record.graph.name,
+            "workflow_slug": run_record.workflow_slug,
         }),
         @r#"
         {
@@ -297,12 +297,12 @@ digraph FooWorkflow {
         .assert()
         .success();
 
-    let run_record = read_json(&context.find_run_dir(run_id).join("run.json"));
+    let run_record = run_snapshot(&context.find_run_dir(run_id)).run;
     fabro_json_snapshot!(
         context,
         serde_json::json!({
-            "graph_name": run_record["graph"]["name"],
-            "workflow_slug": run_record["workflow_slug"],
+            "graph_name": run_record.graph.name,
+            "workflow_slug": run_record.workflow_slug,
         }),
         @r#"
         {

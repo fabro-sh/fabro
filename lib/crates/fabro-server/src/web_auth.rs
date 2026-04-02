@@ -6,6 +6,8 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::{Json, Router, routing::get, routing::post};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use cookie::{Cookie, CookieJar, Expiration, Key, SameSite, time::Duration};
 use fabro_config::FabroSettings;
 use fabro_types::settings::{ApiAuthStrategy, GitProvider, GitSettings};
@@ -223,9 +225,7 @@ async fn callback_github(
         .expect("settings lock poisoned")
         .clone();
     let cookie_jar = parse_cookie_header(&headers);
-    let stored_state = cookie_jar
-        .get(OAUTH_STATE_COOKIE_NAME)
-        .map(|cookie| cookie.value());
+    let stored_state = cookie_jar.get(OAUTH_STATE_COOKIE_NAME).map(Cookie::value);
     if stored_state != Some(params.state.as_str()) {
         return Redirect::to("/login").into_response();
     }
@@ -242,11 +242,10 @@ async fn callback_github(
             json!({"error": "GITHUB_APP_CLIENT_SECRET is not configured"}),
         );
     };
-    let web_url = settings
-        .web
-        .as_ref()
-        .map(|web| web.url.clone())
-        .unwrap_or_else(|| "http://localhost:3000".to_string());
+    let web_url = settings.web.as_ref().map_or_else(
+        || "http://localhost:3000".to_string(),
+        |web| web.url.clone(),
+    );
 
     let http = reqwest::Client::new();
     let token = match http
@@ -418,8 +417,7 @@ async fn auth_me(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Resp
         .clone();
     let demo_mode = parse_cookie_header(&headers)
         .get("fabro-demo")
-        .map(|cookie| cookie.value() == "1")
-        .unwrap_or(false);
+        .is_some_and(|cookie| cookie.value() == "1");
     Json(AuthMeResponse {
         user: SessionUser {
             login: session.login,
@@ -544,7 +542,7 @@ async fn setup_register(
         ),
         (
             "GITHUB_APP_PRIVATE_KEY".to_string(),
-            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, data.pem),
+            STANDARD.encode(data.pem),
         ),
     ]);
     if let Err(error) = write_env_file(&env_path, &env_updates) {
@@ -563,11 +561,10 @@ async fn setup_register(
 }
 
 fn build_server_toml(settings: &FabroSettings, git: &GitSettings) -> String {
-    let web_url = settings
-        .web
-        .as_ref()
-        .map(|web| web.url.clone())
-        .unwrap_or_else(|| "http://localhost:3000".to_string());
+    let web_url = settings.web.as_ref().map_or_else(
+        || "http://localhost:3000".to_string(),
+        |web| web.url.clone(),
+    );
     let allowed = settings
         .web
         .as_ref()

@@ -22,7 +22,8 @@ fn main() {
         .status()
         .expect("failed to run `bun run build` for embedded web assets");
 
-    if !status.success() {
-        panic!("`bun run build` failed for embedded web assets");
-    }
+    assert!(
+        status.success(),
+        "`bun run build` failed for embedded web assets"
+    );
 }

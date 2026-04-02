@@ -342,7 +342,7 @@ fn json_run_implies_auto_approve_for_human_gates() {
           },
           "host_repo_path": "[TEMP_DIR]",
           "labels": {},
-          "run_dir": "[STORAGE_DIR]/runs/20260401-[ULID]",
+          "run_dir": "[RUN_DIR]",
           "settings": {
             "auto_approve": true,
             "goal": "Route through the default approval path",

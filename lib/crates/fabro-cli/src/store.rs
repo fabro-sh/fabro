@@ -14,7 +14,7 @@ pub(crate) fn build_store(storage_dir: &Path) -> Result<Arc<SlateStore>> {
     Ok(Arc::new(SlateStore::new(
         object_store,
         "",
-        Duration::from_millis(5),
+        Duration::from_millis(1),
     )))
 }
 
