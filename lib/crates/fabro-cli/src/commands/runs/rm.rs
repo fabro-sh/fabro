@@ -7,6 +7,7 @@ use fabro_store::Store;
 use tracing::warn;
 
 use fabro_sandbox::reconnect::reconnect as reconnect_sandbox;
+use fabro_workflow::run_lookup::RunInfo;
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use fabro_workflow::run_status::{RunStatus, RunStatusRecord, write_run_status};
 
@@ -68,50 +69,8 @@ async fn remove_from(
             continue;
         }
 
-        write_run_status(&run.path, RunStatus::Removing, None);
-        let run_store = match store.open_run_reader(&run.run_id).await {
-            Ok(run_store) => run_store,
-            Err(err) => {
-                warn!(
-                    run_id = %run.run_id,
-                    error = %err,
-                    "failed to open run store during removal"
-                );
-                None
-            }
-        };
-        if let Some(run_store) = run_store.as_ref() {
-            if let Err(err) = run_store
-                .put_status(&RunStatusRecord::new(RunStatus::Removing, None))
-                .await
-            {
-                warn!(
-                    run_id = %run.run_id,
-                    error = %err,
-                    "failed to save removing status to store"
-                );
-            }
-        }
-
-        if let Some(record) = load_sandbox_record(&run.path, run_store.as_deref()).await {
-            if record.provider != "local" {
-                match reconnect_sandbox(&record).await {
-                    Ok(sandbox) => {
-                        if let Err(err) = sandbox.cleanup().await {
-                            warn!(run_id = %run.run_id, error = %err, "sandbox cleanup failed");
-                        }
-                    }
-                    Err(err) => {
-                        warn!(run_id = %run.run_id, error = %err, "sandbox reconnect failed");
-                    }
-                }
-            }
-        }
-
         let run_id = run.run_id.to_string();
-        if let Err(err) = std::fs::remove_dir_all(&run.path)
-            .with_context(|| format!("failed to delete {}", run.path.display()))
-        {
+        if let Err(err) = remove_run_dir_with_cleanup(store, &run).await {
             if !globals.json {
                 eprintln!("error: {identifier}: {err}");
             }
@@ -126,11 +85,7 @@ async fn remove_from(
         if !globals.json {
             eprintln!("{}", short_run_id(&run_id));
         }
-        if let Err(err) = store
-            .delete_run(&run.run_id)
-            .await
-            .with_context(|| format!("failed to delete store state for {}", run.run_id))
-        {
+        if let Err(err) = delete_run_store_state(store, &run).await {
             if !globals.json {
                 eprintln!("error: {identifier}: {err}");
             }
@@ -153,6 +108,63 @@ async fn remove_from(
         bail!("some runs could not be removed");
     }
     Ok(())
+}
+
+pub(crate) async fn remove_run_with_cleanup(store: &dyn Store, run: &RunInfo) -> Result<()> {
+    remove_run_dir_with_cleanup(store, run).await?;
+    delete_run_store_state(store, run).await
+}
+
+async fn remove_run_dir_with_cleanup(store: &dyn Store, run: &RunInfo) -> Result<()> {
+    write_run_status(&run.path, RunStatus::Removing, None);
+    let run_store = match store.open_run_reader(&run.run_id).await {
+        Ok(run_store) => run_store,
+        Err(err) => {
+            warn!(
+                run_id = %run.run_id,
+                error = %err,
+                "failed to open run store during removal"
+            );
+            None
+        }
+    };
+    if let Some(run_store) = run_store.as_ref() {
+        if let Err(err) = run_store
+            .put_status(&RunStatusRecord::new(RunStatus::Removing, None))
+            .await
+        {
+            warn!(
+                run_id = %run.run_id,
+                error = %err,
+                "failed to save removing status to store"
+            );
+        }
+    }
+
+    if let Some(record) = load_sandbox_record(&run.path, run_store.as_deref()).await {
+        if record.provider != "local" {
+            match reconnect_sandbox(&record).await {
+                Ok(sandbox) => {
+                    if let Err(err) = sandbox.cleanup().await {
+                        warn!(run_id = %run.run_id, error = %err, "sandbox cleanup failed");
+                    }
+                }
+                Err(err) => {
+                    warn!(run_id = %run.run_id, error = %err, "sandbox reconnect failed");
+                }
+            }
+        }
+    }
+
+    std::fs::remove_dir_all(&run.path)
+        .with_context(|| format!("failed to delete {}", run.path.display()))
+}
+
+async fn delete_run_store_state(store: &dyn Store, run: &RunInfo) -> Result<()> {
+    store
+        .delete_run(&run.run_id)
+        .await
+        .with_context(|| format!("failed to delete store state for {}", run.run_id))
 }
 
 async fn load_sandbox_record(

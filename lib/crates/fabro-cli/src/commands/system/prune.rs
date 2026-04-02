@@ -10,6 +10,7 @@ use tracing::{debug, info};
 use fabro_workflow::run_lookup::{StatusFilter, filter_runs, runs_base, scan_runs_combined};
 
 use crate::args::{GlobalArgs, RunsPruneArgs};
+use crate::commands::runs::rm::remove_run_with_cleanup;
 use crate::shared::{format_size, print_json_pretty};
 use crate::store;
 use crate::user_config::load_user_settings_with_globals;
@@ -120,11 +121,7 @@ async fn prune_from(
     if args.yes {
         for run in &filtered {
             info!(run_id = %run.run_id, path = %run.path.display(), "deleting run");
-            std::fs::remove_dir_all(&run.path)?;
-            store
-                .delete_run(&run.run_id)
-                .await
-                .with_context(|| format!("failed to delete store state for {}", run.run_id))?;
+            remove_run_with_cleanup(store, run).await?;
         }
         if globals.json {
             print_json_pretty(&serde_json::json!({
