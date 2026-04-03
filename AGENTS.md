@@ -40,7 +40,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 The OpenAPI spec at `docs/api-reference/fabro-api.yaml` is the source of truth for the fabro-api HTTP interface.
 
 1. Edit `docs/api-reference/fabro-api.yaml`
-2. `cargo build -p fabro-api-types` — build.rs regenerates Rust types via typify
+2. `cargo build -p fabro-api` — build.rs regenerates Rust types and client via progenitor
 3. Write/update handler in `lib/crates/fabro-server/src/server.rs`, add route to `build_router()`
 4. `cargo nextest run -p fabro-server` — conformance test catches spec/router drift
 5. `cd lib/packages/fabro-api-client && bun run generate` — regenerates TypeScript Axios client
@@ -55,7 +55,7 @@ Fabro is an AI-powered workflow orchestration platform. Workflows are defined as
 - **fabro-agent** — AI coding agent with tool use (Bash, Read, Write, Edit, Glob, Grep, WebFetch). `Sandbox` trait abstracts execution environments
 - **fabro-server** — Axum HTTP server. Routes for runs, sessions, models, completions, usage. SSE event streaming. Demo mode via header
 - **fabro-llm** — Unified LLM client with providers: Anthropic, OpenAI, Gemini, OpenAI-compatible, plus retry/middleware/streaming
-- **fabro-api-types** — Auto-generated Rust types from OpenAPI spec (build.rs + typify)
+- **fabro-api** — Auto-generated Rust types and reqwest HTTP client from OpenAPI spec (build.rs + progenitor)
 - **fabro-github** — GitHub App auth (JWT signing, installation tokens, PR creation)
 - **fabro-db** — SQLite with WAL mode, schema migrations
 - **fabro-mcp** — Model Context Protocol client/server
@@ -72,7 +72,7 @@ Fabro is an AI-powered workflow orchestration platform. Workflows are defined as
 ### Key design patterns
 - **Sandbox trait** — Uniform interface for local, Docker, and Daytona execution environments
 - **Graphviz graph workflows** — Stages and transitions defined as Graphviz graph attributes
-- **OpenAPI-first** — `fabro-api.yaml` drives both Rust type generation (typify) and TypeScript client generation (openapi-generator)
+- **OpenAPI-first** — `fabro-api.yaml` drives Rust type + client generation (progenitor) and TypeScript client generation (openapi-generator)
 - **Checkpoint/resume** — Workflows can be paused, checkpointed, and resumed
 
 ## Strategy docs

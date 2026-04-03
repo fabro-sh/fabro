@@ -27,7 +27,7 @@ fabro-retro = { path = "../fabro-retro" }
 fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
 fabro-db = { path = "../fabro-db" }
-fabro-api-types = { path = "../fabro-api-types" }
+fabro-api = { path = "../fabro-api" }
 fabro-store = { path = "../fabro-store" }
 chrono.workspace = true
 futures-util.workspace = true
