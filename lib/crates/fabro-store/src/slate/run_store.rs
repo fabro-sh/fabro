@@ -1,4 +1,3 @@
-use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -16,10 +15,10 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use crate::keys;
 use crate::run_state::EventProjectionCache;
 use crate::{
-    CatalogRecord, EventEnvelope, EventPayload, NodeOutcomeRecord, NodeSnapshot, NodeVisitRef,
-    Result, RunState, RunSummary, StoreError,
+    CatalogRecord, EventEnvelope, EventPayload, NodeVisitRef, Result, RunState, RunSummary,
+    StoreError,
 };
-use fabro_types::{NodeStatusRecord, RunId};
+use fabro_types::RunId;
 
 #[derive(Clone)]
 pub struct SlateRunStore {
@@ -152,40 +151,6 @@ impl SlateRunStore {
         Ok(state.build_summary(catalog))
     }
 
-    async fn build_node_snapshot(&self, node: &NodeVisitRef<'_>) -> Result<NodeSnapshot> {
-        Ok(NodeSnapshot {
-            node_id: node.node_id.to_string(),
-            visit: node.visit,
-            prompt: self.inner.db.get_text(&keys::node_prompt(node)).await?,
-            response: self.inner.db.get_text(&keys::node_response(node)).await?,
-            status: self.inner.db.get_json(&keys::node_status(node)).await?,
-            outcome: self.inner.db.get_json(&keys::node_outcome(node)).await?,
-            provider_used: self
-                .inner
-                .db
-                .get_json(&keys::node_provider_used(node))
-                .await?,
-            diff: self.inner.db.get_text(&keys::node_diff(node)).await?,
-            script_invocation: self
-                .inner
-                .db
-                .get_json(&keys::node_script_invocation(node))
-                .await?,
-            script_timing: self
-                .inner
-                .db
-                .get_json(&keys::node_script_timing(node))
-                .await?,
-            parallel_results: self
-                .inner
-                .db
-                .get_json(&keys::node_parallel_results(node))
-                .await?,
-            stdout: self.inner.db.get_text(&keys::node_stdout(node)).await?,
-            stderr: self.inner.db.get_text(&keys::node_stderr(node)).await?,
-        })
-    }
-
     async fn projected_state(&self) -> Result<RunState> {
         let next_seq = {
             let cache = self.inner.projection_cache.lock().await;
@@ -202,157 +167,6 @@ impl SlateRunStore {
 }
 
 impl SlateRunStore {
-    pub async fn put_node_prompt(&self, node: &NodeVisitRef<'_>, prompt: &str) -> Result<()> {
-        self.inner
-            .db
-            .put_text(&keys::node_prompt(node), prompt)
-            .await
-    }
-
-    pub async fn put_node_response(&self, node: &NodeVisitRef<'_>, response: &str) -> Result<()> {
-        self.inner
-            .db
-            .put_text(&keys::node_response(node), response)
-            .await
-    }
-
-    pub async fn put_node_status(
-        &self,
-        node: &NodeVisitRef<'_>,
-        status: &NodeStatusRecord,
-    ) -> Result<()> {
-        self.inner
-            .db
-            .put_json(&keys::node_status(node), status)
-            .await
-    }
-
-    pub async fn put_node_outcome(
-        &self,
-        node: &NodeVisitRef<'_>,
-        outcome: &NodeOutcomeRecord,
-    ) -> Result<()> {
-        self.inner
-            .db
-            .put_json(&keys::node_outcome(node), outcome)
-            .await
-    }
-
-    pub async fn put_node_provider_used(
-        &self,
-        node: &NodeVisitRef<'_>,
-        provider_used: &serde_json::Value,
-    ) -> Result<()> {
-        self.inner
-            .db
-            .put_json(&keys::node_provider_used(node), provider_used)
-            .await
-    }
-
-    pub async fn put_node_diff(&self, node: &NodeVisitRef<'_>, diff: &str) -> Result<()> {
-        self.inner.db.put_text(&keys::node_diff(node), diff).await
-    }
-
-    pub async fn put_node_script_invocation(
-        &self,
-        node: &NodeVisitRef<'_>,
-        invocation: &serde_json::Value,
-    ) -> Result<()> {
-        self.inner
-            .db
-            .put_json(&keys::node_script_invocation(node), invocation)
-            .await
-    }
-
-    pub async fn put_node_script_timing(
-        &self,
-        node: &NodeVisitRef<'_>,
-        timing: &serde_json::Value,
-    ) -> Result<()> {
-        self.inner
-            .db
-            .put_json(&keys::node_script_timing(node), timing)
-            .await
-    }
-
-    pub async fn put_node_parallel_results(
-        &self,
-        node: &NodeVisitRef<'_>,
-        results: &serde_json::Value,
-    ) -> Result<()> {
-        self.inner
-            .db
-            .put_json(&keys::node_parallel_results(node), results)
-            .await
-    }
-
-    pub async fn put_node_stdout(&self, node: &NodeVisitRef<'_>, log: &str) -> Result<()> {
-        self.inner.db.put_text(&keys::node_stdout(node), log).await
-    }
-
-    pub async fn put_node_stderr(&self, node: &NodeVisitRef<'_>, log: &str) -> Result<()> {
-        self.inner.db.put_text(&keys::node_stderr(node), log).await
-    }
-
-    pub async fn get_node(&self, node: &NodeVisitRef<'_>) -> Result<NodeSnapshot> {
-        self.build_node_snapshot(node).await
-    }
-
-    pub async fn list_node_visits(&self, node_id: &str) -> Result<Vec<u32>> {
-        let prefix = format!("nodes/{node_id}/visit-");
-        let mut iter = self.inner.db.scan_prefix(prefix.as_bytes()).await?;
-        let mut visits = BTreeSet::new();
-        while let Some(entry) = iter.next().await? {
-            let key = key_to_string(&entry.key)?;
-            if let Some((current_node_id, visit, _)) = keys::parse_node_key(&key) {
-                if current_node_id == node_id {
-                    visits.insert(visit);
-                }
-            }
-        }
-        Ok(visits.into_iter().collect())
-    }
-
-    pub async fn list_node_ids(&self) -> Result<Vec<String>> {
-        let mut iter = self.inner.db.scan_prefix(b"nodes/").await?;
-        let mut node_ids = BTreeSet::new();
-        while let Some(entry) = iter.next().await? {
-            let key = key_to_string(&entry.key)?;
-            if let Some((node_id, _, _)) = keys::parse_node_key(&key) {
-                node_ids.insert(node_id);
-            }
-        }
-
-        let mut asset_iter = self
-            .inner
-            .db
-            .scan_prefix(keys::ARTIFACT_NODES_PREFIX.as_bytes())
-            .await?;
-        while let Some(entry) = asset_iter.next().await? {
-            let key = key_to_string(&entry.key)?;
-            if let Some((node_id, _, _)) = keys::parse_node_asset_key(&key) {
-                node_ids.insert(node_id);
-            }
-        }
-
-        Ok(node_ids.into_iter().collect())
-    }
-
-    pub async fn reset_for_rewind(&self) -> Result<()> {
-        let db = self.inner.db.writer()?;
-        for key in [keys::retro_prompt(), keys::retro_response()] {
-            db.delete(key).await?;
-        }
-        for prefix in [
-            b"nodes/".as_slice(),
-            keys::ARTIFACT_VALUES_PREFIX.as_bytes(),
-            keys::ARTIFACT_NODES_PREFIX.as_bytes(),
-        ] {
-            delete_prefix(db, prefix).await?;
-        }
-        Ok(())
-    }
-
     pub async fn append_event(&self, payload: &EventPayload) -> Result<u32> {
         payload.validate(&self.inner.run_id)?;
         let seq = self.inner.event_seq.fetch_add(1, Ordering::SeqCst);
@@ -374,7 +188,7 @@ impl SlateRunStore {
         self.inner.db.list_events_from(seq).await
     }
 
-    pub async fn watch_events_from(
+    pub fn watch_events_from(
         &self,
         seq: u32,
     ) -> Result<std::pin::Pin<Box<dyn Stream<Item = Result<EventEnvelope>> + Send>>> {
@@ -410,22 +224,6 @@ impl SlateRunStore {
         });
 
         Ok(Box::pin(UnboundedReceiverStream::new(receiver)))
-    }
-
-    pub async fn put_retro_prompt(&self, text: &str) -> Result<()> {
-        self.inner.db.put_text(keys::retro_prompt(), text).await
-    }
-
-    pub async fn get_retro_prompt(&self) -> Result<Option<String>> {
-        self.inner.db.get_text(keys::retro_prompt()).await
-    }
-
-    pub async fn put_retro_response(&self, text: &str) -> Result<()> {
-        self.inner.db.put_text(keys::retro_response(), text).await
-    }
-
-    pub async fn get_retro_response(&self) -> Result<Option<String>> {
-        self.inner.db.get_text(keys::retro_response()).await
     }
 
     pub async fn put_artifact_value(
@@ -522,17 +320,6 @@ impl SlateRunDb {
         put_json(self.writer()?, key, value).await
     }
 
-    async fn get_text(&self, key: &str) -> Result<Option<String>> {
-        match self {
-            Self::Writer(db) => get_text(db, key).await,
-            Self::Reader(db) => get_text(db.as_ref(), key).await,
-        }
-    }
-
-    async fn put_text(&self, key: &str, value: &str) -> Result<()> {
-        put_text(self.writer()?, key, value).await
-    }
-
     async fn get_bytes(&self, key: &str) -> Result<Option<Bytes>> {
         match self {
             Self::Writer(db) => get_bytes(db, key).await,
@@ -596,38 +383,8 @@ where
         .map_err(Into::into)
 }
 
-async fn put_text(db: &slatedb::Db, key: &str, value: &str) -> Result<()> {
-    db.put(key, value.as_bytes()).await?;
-    Ok(())
-}
-
-async fn get_text<R>(db: &R, key: &str) -> Result<Option<String>>
-where
-    R: DbRead + Sync,
-{
-    db.get(key)
-        .await?
-        .map(|value| {
-            String::from_utf8(value.to_vec())
-                .map_err(|err| StoreError::Other(format!("stored text is not valid UTF-8: {err}")))
-        })
-        .transpose()
-}
-
 async fn put_bytes(db: &slatedb::Db, key: &str, value: &[u8]) -> Result<()> {
     db.put(key, value).await?;
-    Ok(())
-}
-
-async fn delete_prefix(db: &slatedb::Db, prefix: &[u8]) -> Result<()> {
-    let mut iter = db.scan_prefix(prefix).await?;
-    let mut keys = Vec::new();
-    while let Some(entry) = iter.next().await? {
-        keys.push(key_to_string(&entry.key)?);
-    }
-    for key in keys {
-        db.delete(key).await?;
-    }
     Ok(())
 }
 

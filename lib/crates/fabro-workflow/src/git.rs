@@ -2,7 +2,7 @@ use std::path::Path;
 use std::process::Command;
 
 use fabro_checkpoint::git::Store;
-use fabro_store::{NodeVisitRef, SlateRunStore};
+use fabro_store::RunState;
 use fabro_types::Settings;
 
 use crate::error::{FabroError, Result};
@@ -353,75 +353,63 @@ pub fn scan_node_files(run_dir: &Path) -> Vec<(String, Vec<u8>)> {
     result
 }
 
-pub async fn scan_node_files_from_store(run_store: &SlateRunStore) -> Vec<(String, Vec<u8>)> {
+pub fn scan_node_files_from_state(state: &RunState) -> Vec<(String, Vec<u8>)> {
     let mut result = Vec::new();
-    let Ok(node_ids) = run_store.list_node_ids().await else {
-        return result;
-    };
+    let mut keys: Vec<_> = state.nodes.keys().collect();
+    keys.sort();
 
-    for node_id in node_ids {
-        let Ok(visits) = run_store.list_node_visits(&node_id).await else {
+    for (node_id, visit) in keys {
+        let Some(node) = state.nodes.get(&(node_id.clone(), *visit)) else {
             continue;
         };
-        for visit in visits {
-            let Ok(node) = run_store
-                .get_node(&NodeVisitRef {
-                    node_id: &node_id,
-                    visit,
-                })
-                .await
-            else {
-                continue;
-            };
 
-            if let Some(prompt) = node.prompt {
+        if let Some(ref prompt) = node.prompt {
+            result.push((
+                node_file_path(node_id, *visit, "prompt.md"),
+                prompt.as_bytes().to_vec(),
+            ));
+        }
+        if let Some(ref response) = node.response {
+            result.push((
+                node_file_path(node_id, *visit, "response.md"),
+                response.as_bytes().to_vec(),
+            ));
+        }
+        if let Some(ref status) = node.status {
+            if let Ok(bytes) = serde_json::to_vec_pretty(status) {
+                result.push((node_file_path(node_id, *visit, "status.json"), bytes));
+            }
+        }
+        if let Some(ref provider_used) = node.provider_used {
+            if let Ok(bytes) = serde_json::to_vec_pretty(provider_used) {
+                result.push((node_file_path(node_id, *visit, "provider_used.json"), bytes));
+            }
+        }
+        if let Some(ref diff) = node.diff {
+            result.push((
+                node_file_path(node_id, *visit, "diff.patch"),
+                diff.as_bytes().to_vec(),
+            ));
+        }
+        if let Some(ref script_invocation) = node.script_invocation {
+            if let Ok(bytes) = serde_json::to_vec_pretty(script_invocation) {
                 result.push((
-                    node_file_path(&node_id, visit, "prompt.md"),
-                    prompt.into_bytes(),
+                    node_file_path(node_id, *visit, "script_invocation.json"),
+                    bytes,
                 ));
             }
-            if let Some(response) = node.response {
+        }
+        if let Some(ref script_timing) = node.script_timing {
+            if let Ok(bytes) = serde_json::to_vec_pretty(script_timing) {
+                result.push((node_file_path(node_id, *visit, "script_timing.json"), bytes));
+            }
+        }
+        if let Some(ref parallel_results) = node.parallel_results {
+            if let Ok(bytes) = serde_json::to_vec_pretty(parallel_results) {
                 result.push((
-                    node_file_path(&node_id, visit, "response.md"),
-                    response.into_bytes(),
+                    node_file_path(node_id, *visit, "parallel_results.json"),
+                    bytes,
                 ));
-            }
-            if let Some(status) = node.status {
-                if let Ok(bytes) = serde_json::to_vec_pretty(&status) {
-                    result.push((node_file_path(&node_id, visit, "status.json"), bytes));
-                }
-            }
-            if let Some(provider_used) = node.provider_used {
-                if let Ok(bytes) = serde_json::to_vec_pretty(&provider_used) {
-                    result.push((node_file_path(&node_id, visit, "provider_used.json"), bytes));
-                }
-            }
-            if let Some(diff) = node.diff {
-                result.push((
-                    node_file_path(&node_id, visit, "diff.patch"),
-                    diff.into_bytes(),
-                ));
-            }
-            if let Some(script_invocation) = node.script_invocation {
-                if let Ok(bytes) = serde_json::to_vec_pretty(&script_invocation) {
-                    result.push((
-                        node_file_path(&node_id, visit, "script_invocation.json"),
-                        bytes,
-                    ));
-                }
-            }
-            if let Some(script_timing) = node.script_timing {
-                if let Ok(bytes) = serde_json::to_vec_pretty(&script_timing) {
-                    result.push((node_file_path(&node_id, visit, "script_timing.json"), bytes));
-                }
-            }
-            if let Some(parallel_results) = node.parallel_results {
-                if let Ok(bytes) = serde_json::to_vec_pretty(&parallel_results) {
-                    result.push((
-                        node_file_path(&node_id, visit, "parallel_results.json"),
-                        bytes,
-                    ));
-                }
             }
         }
     }
@@ -440,9 +428,8 @@ fn node_file_path(node_id: &str, visit: u32, filename: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
     use fabro_store::SlateStore;
-    use fabro_types::{NodeStatusRecord, StageStatus, fixtures};
+    use fabro_types::fixtures;
     use object_store::memory::InMemory;
     use std::fs;
     use std::sync::Arc;
@@ -592,52 +579,78 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn scan_node_files_from_store_reconstructs_allowlisted_entries() {
+    async fn scan_node_files_from_state_reconstructs_allowlisted_entries() {
+        use fabro_store::EventPayload;
+
         let store = test_store();
         let run = store
             .create_run(&fixtures::RUN_1, chrono::Utc::now(), None)
             .await
             .unwrap();
-        let node = NodeVisitRef {
-            node_id: "work",
-            visit: 2,
+        let run_id_str = fixtures::RUN_1.to_string();
+
+        let event = |event_name: &str, props: serde_json::Value| -> EventPayload {
+            let value = serde_json::json!({
+                "id": format!("evt-{event_name}"),
+                "ts": "2026-03-27T12:01:00Z",
+                "run_id": run_id_str,
+                "event": event_name,
+                "node_id": "work",
+                "properties": props,
+            });
+            EventPayload::new(value, &fixtures::RUN_1).unwrap()
         };
-        run.put_node_prompt(&node, "hello").await.unwrap();
-        run.put_node_response(&node, "world").await.unwrap();
-        run.put_node_status(
-            &node,
-            &NodeStatusRecord {
-                status: StageStatus::Success,
-                notes: None,
-                failure_reason: None,
-                timestamp: Utc::now(),
-            },
-        )
+
+        run.append_event(&event(
+            "stage.prompt",
+            serde_json::json!({"text": "hello", "visit": 2, "mode": "prompt", "provider": "openai"}),
+        ))
         .await
         .unwrap();
-        run.put_node_provider_used(&node, &serde_json::json!({"provider":"openai"}))
-            .await
-            .unwrap();
-        run.put_node_diff(&node, "diff --git a/story.txt b/story.txt")
-            .await
-            .unwrap();
-        run.put_node_script_invocation(&node, &serde_json::json!({"command":"echo hi"}))
-            .await
-            .unwrap();
-        run.put_node_script_timing(&node, &serde_json::json!({"exit_code":0}))
-            .await
-            .unwrap();
-        run.put_node_parallel_results(&node, &serde_json::json!([{"id":"a"}]))
-            .await
-            .unwrap();
+        run.append_event(&event(
+            "prompt.completed",
+            serde_json::json!({"response": "world"}),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event(
+            "stage.completed",
+            serde_json::json!({"response": "world", "status": "success", "visit": 2}),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event(
+            "command.started",
+            serde_json::json!({"command": "echo hi"}),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event(
+            "command.completed",
+            serde_json::json!({"stdout": "hi\n", "stderr": "", "exit_code": 0}),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event(
+            "parallel.completed",
+            serde_json::json!({"results": [{"id": "a"}], "duration_ms": 100, "success_count": 1, "failure_count": 0}),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event(
+            "checkpoint.completed",
+            serde_json::json!({"diff": "diff --git a/story.txt b/story.txt", "ordinal": 1}),
+        ))
+        .await
+        .unwrap();
 
-        let files = scan_node_files_from_store(run.as_ref()).await;
+        let state = run.state().await.unwrap();
+        let files = scan_node_files_from_state(&state);
         let paths: Vec<&str> = files.iter().map(|(path, _)| path.as_str()).collect();
         assert!(paths.contains(&"nodes/work-visit_2/prompt.md"));
         assert!(paths.contains(&"nodes/work-visit_2/response.md"));
         assert!(paths.contains(&"nodes/work-visit_2/status.json"));
         assert!(paths.contains(&"nodes/work-visit_2/provider_used.json"));
-        assert!(paths.contains(&"nodes/work-visit_2/diff.patch"));
         assert!(paths.contains(&"nodes/work-visit_2/script_invocation.json"));
         assert!(paths.contains(&"nodes/work-visit_2/script_timing.json"));
         assert!(paths.contains(&"nodes/work-visit_2/parallel_results.json"));

@@ -23,18 +23,15 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
             return None;
         }
     };
-    let cp = match state.checkpoint {
-        Some(cp) => cp,
-        None => {
-            tracing::warn!("Could not load checkpoint, skipping retro");
-            if let Some(ref emitter) = options.emitter {
-                emitter.emit(&WorkflowRunEvent::RetroFailed {
-                    error: "checkpoint not found".to_string(),
-                    duration_ms: 0,
-                });
-            }
-            return None;
+    let Some(cp) = state.checkpoint else {
+        tracing::warn!("Could not load checkpoint, skipping retro");
+        if let Some(ref emitter) = options.emitter {
+            emitter.emit(&WorkflowRunEvent::RetroFailed {
+                error: "checkpoint not found".to_string(),
+                duration_ms: 0,
+            });
         }
+        return None;
     };
 
     let completed_stages = crate::build_completed_stages(&cp, options.failed);

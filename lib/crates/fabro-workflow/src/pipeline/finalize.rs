@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::error::FabroError;
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
-use crate::git::{MetadataStore, scan_node_files_from_store};
+use crate::git::{MetadataStore, scan_node_files_from_state};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::records::{Checkpoint, Conclusion, StageSummary};
 use crate::run_options::RunOptions;
@@ -195,13 +195,14 @@ pub async fn write_finalize_commit(
 
     let git_author = run_options.git_author();
     let store = MetadataStore::new(repo_path, &git_author);
-    let mut entries = scan_node_files_from_store(run_store).await;
-    let retro_bytes = run_store
-        .state()
-        .await
-        .ok()
-        .and_then(|state| state.retro)
-        .and_then(|retro| serde_json::to_vec_pretty(&retro).ok());
+    let Ok(store_state) = run_store.state().await else {
+        return;
+    };
+    let mut entries = scan_node_files_from_state(&store_state);
+    let retro_bytes = store_state
+        .retro
+        .as_ref()
+        .and_then(|retro| serde_json::to_vec_pretty(retro).ok());
     if let Some(bytes) = retro_bytes {
         entries.push(("retro.json".to_string(), bytes));
     }
