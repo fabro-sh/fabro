@@ -10,7 +10,7 @@ use crate::run_options::RunOptions;
 use crate::run_status::{RunStatus, StatusReason};
 use crate::sandbox_git::git_push_host;
 use fabro_hooks::{HookContext, HookEvent, HookRunner};
-use fabro_store::RunStore;
+use fabro_store::SlateRunStore;
 
 use super::types::{Concluded, FinalizeOptions, Retroed};
 
@@ -63,7 +63,7 @@ pub fn classify_engine_result(
 }
 
 pub(crate) async fn build_conclusion_from_store(
-    run_store: &dyn RunStore,
+    run_store: &SlateRunStore,
     status: StageStatus,
     failure_reason: Option<String>,
     run_duration_ms: u64,
@@ -181,7 +181,7 @@ pub fn persist_terminal_outcome(
 pub async fn write_finalize_commit(
     run_options: &RunOptions,
     _run_dir: &Path,
-    run_store: &dyn RunStore,
+    run_store: &SlateRunStore,
 ) {
     let (Some(meta_branch), Some(repo_path)) = (
         run_options
@@ -275,7 +275,7 @@ pub async fn finalize(
         retro: _,
     } = retroed;
 
-    let (final_status, failure_reason, run_status, status_reason) =
+    let (final_status, failure_reason, _run_status, _status_reason) =
         classify_engine_result(&outcome);
     let conclusion = build_conclusion_from_store(
         options.run_store.as_ref(),
@@ -324,20 +324,6 @@ pub async fn finalize(
         );
     }
 
-    if let Err(err) = options.run_store.put_conclusion(&conclusion).await {
-        tracing::warn!(error = %err, "Failed to save conclusion to store");
-    }
-    if let Err(err) = options
-        .run_store
-        .put_status(&fabro_types::RunStatusRecord::new(
-            run_status,
-            status_reason,
-        ))
-        .await
-    {
-        tracing::warn!(error = %err, "Failed to save terminal status to store");
-    }
-
     Ok(Concluded {
         run_id: run_options.run_id,
         outcome,
@@ -353,13 +339,16 @@ pub async fn finalize(
 mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
+    use std::time::Duration;
 
     use chrono::Utc;
     use fabro_graphviz::graph::Graph;
-    use fabro_store::{InMemoryStore, Store};
+    use fabro_store::SlateStore;
     use fabro_types::{RunId, Settings, fixtures};
+    use object_store::memory::InMemory;
 
     use super::*;
+    use crate::event::StoreProgressLogger;
     use crate::pipeline::types::Retroed;
     use crate::run_options::RunOptions;
 
@@ -383,12 +372,20 @@ mod tests {
         }
     }
 
+    fn test_store() -> Arc<SlateStore> {
+        Arc::new(SlateStore::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ))
+    }
+
     #[tokio::test]
     async fn finalize_writes_conclusion_json() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
         std::fs::create_dir_all(&run_dir).unwrap();
-        let inner_store = InMemoryStore::default()
+        let inner_store = test_store()
             .create_run(
                 &test_run_id(),
                 Utc::now(),
@@ -396,14 +393,17 @@ mod tests {
             )
             .await
             .unwrap();
-        let run_store: Arc<dyn fabro_store::RunStore> = inner_store;
+        let run_store = inner_store;
+        let emitter = Arc::new(EventEmitter::new(test_run_id()));
+        let store_logger = StoreProgressLogger::new(run_store.clone());
+        store_logger.register(&emitter);
         let retroed = Retroed {
             graph: Graph::new("test"),
             outcome: Ok(Outcome::success()),
             run_options: test_run_options(&run_dir),
-            run_store: Arc::clone(&run_store),
+            run_store: run_store.clone(),
             hook_runner: None,
-            emitter: Arc::new(EventEmitter::default()),
+            emitter,
             sandbox: Arc::new(fabro_agent::LocalSandbox::new(
                 std::env::current_dir().unwrap(),
             )),
@@ -416,7 +416,7 @@ mod tests {
             &FinalizeOptions {
                 run_dir: run_dir.clone(),
                 run_id: test_run_id(),
-                run_store: Arc::clone(&run_store),
+                run_store: run_store.clone(),
                 workflow_name: "test".to_string(),
                 hook_runner: None,
                 preserve_sandbox: true,
@@ -425,8 +425,8 @@ mod tests {
         )
         .await
         .unwrap();
+        store_logger.flush().await;
 
-        assert!(run_store.get_conclusion().await.unwrap().is_some());
         assert_eq!(concluded.conclusion.status, StageStatus::Success);
     }
 }

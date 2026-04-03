@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
-use fabro_store::RunStore;
+use fabro_store::SlateRunStore;
 use fabro_util::redact::redact_jsonl_line;
 use fabro_util::terminal::Styles;
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
@@ -138,7 +138,7 @@ fn try_parse_relative_duration(s: &str) -> Option<chrono::Duration> {
 }
 
 async fn follow_store_logs(
-    run_store: &dyn RunStore,
+    run_store: &SlateRunStore,
     run_dir: &Path,
     seq: u32,
     pretty: bool,
@@ -187,16 +187,19 @@ async fn follow_store_logs(
     Ok(())
 }
 
-async fn run_concluded(run_store: &dyn RunStore, _run_dir: &Path) -> Result<bool> {
+async fn run_concluded(run_store: &SlateRunStore, _run_dir: &Path) -> Result<bool> {
     let state = run_store
         .state()
         .await
         .context("Failed to read run state from store while following logs")?;
-    Ok(state.conclusion.is_some() || state.status.is_some_and(|record| record.status.is_terminal()))
+    Ok(state.conclusion.is_some()
+        || state
+            .status
+            .is_some_and(|record| record.status.is_terminal()))
 }
 
 async fn flush_remaining_store_events(
-    run_store: &dyn RunStore,
+    run_store: &SlateRunStore,
     next_seq: u32,
     pretty: bool,
     styles: &Styles,

@@ -13,13 +13,14 @@ use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_hooks::HookSettings;
 use fabro_interview::AutoApproveInterviewer;
 use fabro_sandbox::SandboxSpec;
-use fabro_store::InMemoryStore;
+use fabro_store::{SlateStore, StoreHandle};
 use fabro_types::{RunId, Settings, fixtures};
+use object_store::memory::InMemory;
 
 use super::*;
 use crate::context::{self, Context};
 use crate::error::FabroError;
-use crate::event::{EventEmitter, RunEventEnvelope};
+use crate::event::{EventEmitter, RunEventEnvelope, StoreProgressLogger};
 use crate::handler::start::StartHandler;
 use crate::handler::{Handler as HandlerTrait, HandlerRegistry};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
@@ -156,8 +157,12 @@ fn test_lifecycle(setup_commands: Vec<String>) -> LifecycleOptions {
     }
 }
 
-async fn test_run_store(_run_dir: &Path, run_id: &RunId) -> Arc<dyn fabro_store::RunStore> {
-    let store: &dyn fabro_store::Store = &InMemoryStore::default();
+async fn test_run_store(_run_dir: &Path, run_id: &RunId) -> fabro_store::RunStoreHandle {
+    let store: StoreHandle = Arc::new(SlateStore::new(
+        Arc::new(InMemory::new()),
+        "",
+        Duration::from_millis(1),
+    ));
     store
         .create_run(run_id, chrono::Utc::now(), None)
         .await
@@ -175,13 +180,17 @@ async fn execute_test_run_with_options(
 ) -> Executed {
     let run_id_value = run_options.run_id;
     let git_options = run_options.git.clone();
+    let run_store = test_run_store(&run_options.run_dir, &run_id_value).await;
+    let emitter = test_emitter_arc("test-run");
+    let store_logger = StoreProgressLogger::new(run_store.clone());
+    store_logger.register(&emitter);
     let initialized = initialize(
         persisted_workflow(graph, String::new(), &run_options.run_dir, run_id_value),
         InitOptions {
             run_id: run_id_value,
-            run_store: test_run_store(&run_options.run_dir, &run_id_value).await,
+            run_store,
             dry_run: false,
-            emitter: test_emitter_arc("test-run"),
+            emitter,
             sandbox: SandboxSpec::Local {
                 working_directory: std::env::current_dir().unwrap(),
             },
@@ -217,7 +226,9 @@ async fn execute_test_run_with_options(
     .await
     .unwrap();
 
-    execute(initialized).await
+    let executed = execute(initialized).await;
+    store_logger.flush().await;
+    executed
 }
 
 #[tokio::test]
@@ -503,7 +514,15 @@ async fn execute_runs_simple_workflow() {
 async fn execute_saves_checkpoint() {
     let dir = tempfile::tempdir().unwrap();
     let executed = execute_test_run(dir.path(), simple_graph(), "test-run").await;
-    assert!(executed.run_store.get_checkpoint().await.unwrap().is_some());
+    assert!(
+        executed
+            .run_store
+            .state()
+            .await
+            .unwrap()
+            .checkpoint
+            .is_some()
+    );
 }
 
 #[tokio::test]
@@ -547,7 +566,13 @@ async fn execute_error_when_no_start_node() {
 async fn execute_mirrors_graph_goal_to_context() {
     let dir = tempfile::tempdir().unwrap();
     let executed = execute_test_run(dir.path(), simple_graph(), "test-run").await;
-    let cp = executed.run_store.get_checkpoint().await.unwrap().unwrap();
+    let cp = executed
+        .run_store
+        .state()
+        .await
+        .unwrap()
+        .checkpoint
+        .unwrap();
     assert_eq!(
         cp.context_values.get(context::keys::GRAPH_GOAL),
         Some(&serde_json::json!("Run tests"))
@@ -587,7 +612,13 @@ async fn execute_conditional_routing_uses_unconditional_success_path() {
     g.edges.push(Edge::new("path_b", "exit"));
 
     let executed = execute_test_run(dir.path(), g, "test-run").await;
-    let cp = executed.run_store.get_checkpoint().await.unwrap().unwrap();
+    let cp = executed
+        .run_store
+        .state()
+        .await
+        .unwrap()
+        .checkpoint
+        .unwrap();
     assert!(cp.completed_nodes.contains(&"path_b".to_string()));
     assert!(!cp.completed_nodes.contains(&"path_a".to_string()));
 }
@@ -603,7 +634,8 @@ async fn execute_writes_start_json_and_node_status() {
     });
 
     let executed = execute_test_run_with_options(run_options, simple_graph(), None).await;
-    let start = executed.run_store.get_start().await.unwrap().unwrap();
+    let state = executed.run_store.state().await.unwrap();
+    let start = state.start.as_ref().unwrap();
     assert_eq!(start.run_id, test_run_id("test-run"));
     assert_eq!(
         start.run_branch.as_deref(),
@@ -611,15 +643,13 @@ async fn execute_writes_start_json_and_node_status() {
     );
     assert_eq!(start.base_sha.as_deref(), Some("abc123"));
 
-    let node = executed
-        .run_store
-        .get_node(&fabro_store::NodeVisitRef {
+    let node = state
+        .node(&fabro_store::NodeVisitRef {
             node_id: "start",
             visit: 1,
         })
-        .await
         .unwrap();
-    assert_eq!(node.status.unwrap().status, StageStatus::Success);
+    assert_eq!(node.status.as_ref().unwrap().status, StageStatus::Success);
 }
 
 #[tokio::test]
@@ -668,15 +698,15 @@ async fn timeout_causes_fail_status_record() {
         Some(Arc::new(registry)),
     )
     .await;
-    let status = executed
-        .run_store
-        .get_node(&fabro_store::NodeVisitRef {
+    let state = executed.run_store.state().await.unwrap();
+    let status = state
+        .node(&fabro_store::NodeVisitRef {
             node_id: "work",
             visit: 1,
         })
-        .await
         .unwrap()
         .status
+        .as_ref()
         .unwrap();
     assert_eq!(status.status, StageStatus::Fail);
 }

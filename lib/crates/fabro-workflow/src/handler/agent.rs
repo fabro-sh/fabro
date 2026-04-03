@@ -373,30 +373,40 @@ mod tests {
     use super::*;
     use crate::event::EventEmitter;
     use fabro_graphviz::graph::AttrValue;
-    use fabro_store::{InMemoryStore, NodeVisitRef, RunStore, Store};
+    use fabro_store::{NodeVisitRef, RunStoreHandle, SlateStore};
     use fabro_types::fixtures;
+    use object_store::memory::InMemory;
     use std::sync::Arc;
+    use std::time::Duration;
     use tempfile::TempDir;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
     }
 
+    fn test_store() -> Arc<SlateStore> {
+        Arc::new(SlateStore::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ))
+    }
+
     async fn make_services_with_run_store() -> (
         EngineServices,
-        Arc<dyn RunStore>,
+        RunStoreHandle,
         crate::event::StoreProgressLogger,
     ) {
-        let store = InMemoryStore::default();
+        let store = test_store();
         let run_store = store
             .create_run(&fixtures::RUN_1, chrono::Utc::now(), None)
             .await
             .unwrap();
         let services = EngineServices {
-            run_store: Arc::clone(&run_store),
+            run_store: run_store.clone(),
             ..EngineServices::test_default()
         };
-        let logger = crate::event::StoreProgressLogger::new(Arc::clone(&run_store));
+        let logger = crate::event::StoreProgressLogger::new(run_store.clone());
         logger.register(services.emitter.as_ref());
         (services, run_store, logger)
     }

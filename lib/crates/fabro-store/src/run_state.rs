@@ -131,17 +131,20 @@ impl RunState {
             "run.failed" => {
                 self.status = Some(run_status_record(RunStatus::Failed, &properties, ts)?);
                 self.conclusion = Some(conclusion_from_failed(&properties, ts));
-                self.last_git_sha =
-                    optional_string(&properties, "git_commit_sha").or_else(|| self.last_git_sha.clone());
+                self.last_git_sha = optional_string(&properties, "git_commit_sha")
+                    .or_else(|| self.last_git_sha.clone());
             }
             "run.rewound" => {
                 self.reset_for_rewind();
-                self.last_git_sha =
-                    optional_string(&properties, "run_commit_sha").or_else(|| self.last_git_sha.clone());
+                self.last_git_sha = optional_string(&properties, "run_commit_sha")
+                    .or_else(|| self.last_git_sha.clone());
             }
             "checkpoint.completed" => {
                 let checkpoint = checkpoint_from_properties(&properties, ts)?;
-                self.last_git_sha = checkpoint.git_commit_sha.clone().or_else(|| self.last_git_sha.clone());
+                self.last_git_sha = checkpoint
+                    .git_commit_sha
+                    .clone()
+                    .or_else(|| self.last_git_sha.clone());
                 if let Some(node_id) = value.get("node_id").and_then(Value::as_str) {
                     let visit = checkpoint
                         .node_visits
@@ -270,57 +273,6 @@ impl RunState {
         Ok(())
     }
 
-    pub fn merge_legacy(
-        &mut self,
-        snapshot: Option<RunSnapshot>,
-        graph_source: Option<String>,
-        retro_prompt: Option<String>,
-        retro_response: Option<String>,
-        checkpoints: Vec<(u32, Checkpoint)>,
-    ) {
-        let Some(snapshot) = snapshot else {
-            self.graph_source = self.graph_source.clone().or(graph_source);
-            self.retro_prompt = self.retro_prompt.clone().or(retro_prompt);
-            self.retro_response = self.retro_response.clone().or(retro_response);
-            if self.checkpoints.is_empty() {
-                self.checkpoints = checkpoints;
-            }
-            if self.checkpoint.is_none() {
-                self.checkpoint = self.checkpoints.last().map(|(_, checkpoint)| checkpoint.clone());
-            }
-            return;
-        };
-
-        if self.run.is_none() {
-            self.run = Some(snapshot.run);
-        }
-        self.start = self.start.clone().or(snapshot.start);
-        self.status = self.status.clone().or(snapshot.status);
-        self.checkpoint = self.checkpoint.clone().or(snapshot.checkpoint);
-        self.conclusion = self.conclusion.clone().or(snapshot.conclusion);
-        self.retro = self.retro.clone().or(snapshot.retro);
-        self.graph_source = self.graph_source.clone().or(snapshot.graph).or(graph_source);
-        self.sandbox = self.sandbox.clone().or(snapshot.sandbox);
-        self.final_patch = self.final_patch.clone().or(snapshot.final_patch);
-        self.pull_request = self.pull_request.clone().or(snapshot.pull_request);
-        self.retro_prompt = self.retro_prompt.clone().or(retro_prompt);
-        self.retro_response = self.retro_response.clone().or(retro_response);
-        if self.checkpoints.is_empty() {
-            self.checkpoints = checkpoints;
-        }
-        if self.checkpoint.is_none() {
-            self.checkpoint = self.checkpoints.last().map(|(_, checkpoint)| checkpoint.clone());
-        }
-
-        for node in snapshot.nodes {
-            let entry = self
-                .nodes
-                .entry((node.node_id.clone(), node.visit))
-                .or_default();
-            merge_node_snapshot(entry, node);
-        }
-    }
-
     pub fn node(&self, node: &NodeVisitRef<'_>) -> Option<&NodeState> {
         self.nodes.get(&(node.node_id.to_string(), node.visit))
     }
@@ -355,21 +307,23 @@ impl RunState {
         let nodes = node_keys
             .into_iter()
             .filter_map(|(node_id, visit)| {
-                self.nodes.get(&(node_id.clone(), visit)).map(|node| NodeSnapshot {
-                    node_id,
-                    visit,
-                    prompt: node.prompt.clone(),
-                    response: node.response.clone(),
-                    status: node.status.clone(),
-                    outcome: node.outcome.clone(),
-                    provider_used: node.provider_used.clone(),
-                    diff: node.diff.clone(),
-                    script_invocation: node.script_invocation.clone(),
-                    script_timing: node.script_timing.clone(),
-                    parallel_results: node.parallel_results.clone(),
-                    stdout: node.stdout.clone(),
-                    stderr: node.stderr.clone(),
-                })
+                self.nodes
+                    .get(&(node_id.clone(), visit))
+                    .map(|node| NodeSnapshot {
+                        node_id,
+                        visit,
+                        prompt: node.prompt.clone(),
+                        response: node.response.clone(),
+                        status: node.status.clone(),
+                        outcome: node.outcome.clone(),
+                        provider_used: node.provider_used.clone(),
+                        diff: node.diff.clone(),
+                        script_invocation: node.script_invocation.clone(),
+                        script_timing: node.script_timing.clone(),
+                        parallel_results: node.parallel_results.clone(),
+                        stdout: node.stdout.clone(),
+                        stderr: node.stderr.clone(),
+                    })
             })
             .collect();
 
@@ -417,7 +371,10 @@ impl RunState {
             start_time: self.start.as_ref().map(|start| start.start_time),
             status: self.status.as_ref().map(|status| status.status),
             status_reason: self.status.as_ref().and_then(|status| status.reason),
-            duration_ms: self.conclusion.as_ref().map(|conclusion| conclusion.duration_ms),
+            duration_ms: self
+                .conclusion
+                .as_ref()
+                .map(|conclusion| conclusion.duration_ms),
             total_cost: self
                 .conclusion
                 .as_ref()
@@ -426,9 +383,7 @@ impl RunState {
     }
 
     fn node_mut(&mut self, node_id: &str, visit: u32) -> &mut NodeState {
-        self.nodes
-            .entry((node_id.to_string(), visit))
-            .or_default()
+        self.nodes.entry((node_id.to_string(), visit)).or_default()
     }
 
     fn current_visit_for(&self, node_id: &str) -> Option<u32> {
@@ -452,20 +407,6 @@ impl RunState {
         self.pull_request = None;
         self.nodes.clear();
     }
-}
-
-fn merge_node_snapshot(node: &mut NodeState, snapshot: NodeSnapshot) {
-    node.prompt = node.prompt.clone().or(snapshot.prompt);
-    node.response = node.response.clone().or(snapshot.response);
-    node.status = node.status.clone().or(snapshot.status);
-    node.outcome = node.outcome.clone().or(snapshot.outcome);
-    node.provider_used = node.provider_used.clone().or(snapshot.provider_used);
-    node.diff = node.diff.clone().or(snapshot.diff);
-    node.script_invocation = node.script_invocation.clone().or(snapshot.script_invocation);
-    node.script_timing = node.script_timing.clone().or(snapshot.script_timing);
-    node.parallel_results = node.parallel_results.clone().or(snapshot.parallel_results);
-    node.stdout = node.stdout.clone().or(snapshot.stdout);
-    node.stderr = node.stderr.clone().or(snapshot.stderr);
 }
 
 fn parse_ts(value: &Value) -> Result<DateTime<Utc>> {
@@ -493,7 +434,9 @@ fn required_string(properties: &serde_json::Map<String, Value>, key: &str) -> Re
         .get(key)
         .and_then(Value::as_str)
         .map(ToString::to_string)
-        .ok_or_else(|| StoreError::InvalidEvent(format!("event missing string property {key}")).into())
+        .ok_or_else(|| {
+            StoreError::InvalidEvent(format!("event missing string property {key}")).into()
+        })
 }
 
 fn optional_string(properties: &serde_json::Map<String, Value>, key: &str) -> Option<String> {
@@ -504,10 +447,9 @@ fn optional_string(properties: &serde_json::Map<String, Value>, key: &str) -> Op
 }
 
 fn required_u64(properties: &serde_json::Map<String, Value>, key: &str) -> Result<u64> {
-    properties
-        .get(key)
-        .and_then(Value::as_u64)
-        .ok_or_else(|| StoreError::InvalidEvent(format!("event missing integer property {key}")).into())
+    properties.get(key).and_then(Value::as_u64).ok_or_else(|| {
+        StoreError::InvalidEvent(format!("event missing integer property {key}")).into()
+    })
 }
 
 fn required_u32(properties: &serde_json::Map<String, Value>, key: &str) -> Result<u32> {
@@ -604,9 +546,9 @@ fn conclusion_from_completed(
     let usage = optional_json::<fabro_types::StageUsage>(properties, "usage")?;
     Ok(Conclusion {
         timestamp,
-        status: StageStatus::from_str(&required_string(properties, "status")?).map_err(
-            |err| StoreError::InvalidEvent(format!("invalid completed stage status: {err}")),
-        )?,
+        status: StageStatus::from_str(&required_string(properties, "status")?).map_err(|err| {
+            StoreError::InvalidEvent(format!("invalid completed stage status: {err}"))
+        })?,
         duration_ms: required_u64(properties, "duration_ms")?,
         failure_reason: None,
         final_git_commit_sha: optional_string(properties, "final_git_commit_sha"),
@@ -656,7 +598,11 @@ fn conclusion_from_failed(
     }
 }
 
-fn stage_visit(node_id: &str, properties: &serde_json::Map<String, Value>, state: &RunState) -> Option<u32> {
+fn stage_visit(
+    node_id: &str,
+    properties: &serde_json::Map<String, Value>,
+    state: &RunState,
+) -> Option<u32> {
     properties
         .get("node_visits")
         .and_then(|value| serde_json::from_value::<HashMap<String, usize>>(value.clone()).ok())
@@ -668,9 +614,8 @@ fn stage_visit(node_id: &str, properties: &serde_json::Map<String, Value>, state
 fn stage_outcome_from_properties(
     properties: &serde_json::Map<String, Value>,
 ) -> Result<NodeOutcomeRecord> {
-    let status = StageStatus::from_str(&required_string(properties, "status")?).map_err(|err| {
-        StoreError::InvalidEvent(format!("invalid stage status: {err}"))
-    })?;
+    let status = StageStatus::from_str(&required_string(properties, "status")?)
+        .map_err(|err| StoreError::InvalidEvent(format!("invalid stage status: {err}")))?;
     Ok(Outcome {
         status,
         preferred_label: optional_string(properties, "preferred_label"),
@@ -685,11 +630,17 @@ fn stage_outcome_from_properties(
     })
 }
 
-fn node_status_from_outcome(outcome: &NodeOutcomeRecord, timestamp: DateTime<Utc>) -> NodeStatusRecord {
+fn node_status_from_outcome(
+    outcome: &NodeOutcomeRecord,
+    timestamp: DateTime<Utc>,
+) -> NodeStatusRecord {
     NodeStatusRecord {
         status: outcome.status.clone(),
         notes: outcome.notes.clone(),
-        failure_reason: outcome.failure.as_ref().map(|failure| failure.message.clone()),
+        failure_reason: outcome
+            .failure
+            .as_ref()
+            .map(|failure| failure.message.clone()),
         timestamp,
     }
 }

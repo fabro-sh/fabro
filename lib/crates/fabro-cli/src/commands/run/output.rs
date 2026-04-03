@@ -198,12 +198,16 @@ pub(crate) fn print_run_conclusion(
 }
 
 pub(crate) async fn print_final_output(
-    run_store: Option<&dyn fabro_store::RunStore>,
+    run_store: Option<&fabro_store::SlateRunStore>,
     _run_dir: &Path,
     styles: &Styles,
 ) {
     let checkpoint = match run_store {
-        Some(run_store) => run_store.state().await.ok().and_then(|state| state.checkpoint),
+        Some(run_store) => run_store
+            .state()
+            .await
+            .ok()
+            .and_then(|state| state.checkpoint),
         None => None,
     };
     let Some(checkpoint) = checkpoint else {

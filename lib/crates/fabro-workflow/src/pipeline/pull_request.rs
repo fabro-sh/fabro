@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use fabro_config::run::MergeStrategy;
-use fabro_store::RunStore;
+use fabro_store::SlateRunStore;
 use fabro_types::PullRequestRecord;
 use tracing::{debug, info};
 
@@ -292,7 +292,7 @@ fn emit_run_notice(
     });
 }
 
-async fn load_pull_request_diff(run_store: &dyn RunStore, run_dir: &Path) -> String {
+async fn load_pull_request_diff(run_store: &SlateRunStore, run_dir: &Path) -> String {
     let _ = run_dir;
     run_store
         .state()
@@ -311,7 +311,7 @@ pub async fn build_pr_body(
     diff: &str,
     goal: &str,
     model: &str,
-    run_store: &dyn RunStore,
+    run_store: &SlateRunStore,
     run_dir: &Path,
     conclusion: Option<&Conclusion>,
 ) -> Result<String, String> {
@@ -340,7 +340,9 @@ pub async fn build_pr_body(
         .ok();
     let retro = run_state.as_ref().and_then(|state| state.retro.clone());
     let run_record = run_state.as_ref().and_then(|state| state.run.clone());
-    let dot_source = run_state.as_ref().and_then(|state| state.graph_source.clone());
+    let dot_source = run_state
+        .as_ref()
+        .and_then(|state| state.graph_source.clone());
 
     // Build LLM prompt
     let system = if plan_text.is_some() {
@@ -418,7 +420,7 @@ pub async fn maybe_open_pull_request(
     model: &str,
     draft: bool,
     auto_merge: Option<AutoMergeOptions>,
-    run_store: &dyn RunStore,
+    run_store: &SlateRunStore,
     run_dir: &Path,
     conclusion: Option<&Conclusion>,
 ) -> Result<Option<PullRequestRecord>, String> {
@@ -489,11 +491,6 @@ pub async fn maybe_open_pull_request(
         title,
     };
 
-    run_store
-        .put_pull_request(&record)
-        .await
-        .map_err(|err| format!("failed to persist pull request in run store: {err}"))?;
-
     Ok(Some(record))
 }
 
@@ -522,7 +519,8 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                 result.status,
                 StageStatus::Success | StageStatus::PartialSuccess
             ) {
-                let diff = load_pull_request_diff(options.run_store.as_ref(), &options.run_dir).await;
+                let diff =
+                    load_pull_request_diff(options.run_store.as_ref(), &options.run_dir).await;
                 if let (Some(base_branch), Some(run_branch), Some(creds), Some(origin)) = (
                     &run_options.base_branch,
                     pushed_branch.as_deref(),
@@ -598,6 +596,7 @@ mod tests {
     use std::sync::{Arc, Once};
 
     use super::*;
+    use crate::event::{WorkflowRunEvent, append_workflow_event};
     use crate::records::StageSummary;
     use chrono::Utc;
     use fabro_graphviz::graph::Graph;
@@ -609,9 +608,11 @@ mod tests {
     use fabro_retro::retro::{
         AggregateStats, FrictionKind, FrictionPoint, OpenItem, OpenItemKind, StageRetro,
     };
-    use fabro_store::{InMemoryStore, Store};
+    use fabro_store::SlateStore;
     use fabro_types::{RunRecord, Settings, fixtures};
     use futures::stream;
+    use object_store::memory::InMemory;
+    use std::time::Duration;
 
     struct MockProvider {
         response_text: String,
@@ -682,6 +683,14 @@ mod tests {
             ];
             Ok(Box::pin(stream::iter(events)))
         }
+    }
+
+    fn test_store() -> Arc<SlateStore> {
+        Arc::new(SlateStore::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ))
     }
 
     fn install_mock_llm() {
@@ -1034,7 +1043,7 @@ mod tests {
         install_mock_llm();
 
         let tmp = tempfile::tempdir().unwrap();
-        let store = InMemoryStore::default();
+        let store = test_store();
         let run_store = store
             .create_run(
                 &fixtures::RUN_1,
@@ -1066,7 +1075,7 @@ mod tests {
         install_mock_llm();
 
         let tmp = tempfile::tempdir().unwrap();
-        let store = InMemoryStore::default();
+        let store = test_store();
         let created_at = Utc::now();
         let run_store = store
             .create_run(
@@ -1077,32 +1086,55 @@ mod tests {
             .await
             .unwrap();
 
-        run_store
-            .put_run(&RunRecord {
+        let run_record = RunRecord {
+            run_id: fixtures::RUN_1,
+            created_at,
+            settings: Settings::default(),
+            graph: Graph::new("test"),
+            workflow_slug: Some("test".to_string()),
+            working_directory: PathBuf::from("/tmp/project"),
+            host_repo_path: Some("/tmp/project".to_string()),
+            base_branch: Some("main".to_string()),
+            labels: HashMap::new(),
+        };
+        append_workflow_event(
+            run_store.as_ref(),
+            &fixtures::RUN_1,
+            &WorkflowRunEvent::RunCreated {
                 run_id: fixtures::RUN_1,
-                created_at,
-                settings: Settings::default(),
-                graph: Graph::new("test"),
-                workflow_slug: Some("test".to_string()),
-                working_directory: PathBuf::from("/tmp/project"),
-                host_repo_path: Some("/tmp/project".to_string()),
-                base_branch: Some("main".to_string()),
-                labels: HashMap::new(),
-            })
-            .await
-            .unwrap();
-        run_store
-            .put_graph("digraph test { plan -> code }")
-            .await
-            .unwrap();
-        run_store.put_retro(&make_test_retro()).await.unwrap();
+                settings: serde_json::to_value(&run_record.settings).unwrap(),
+                graph: serde_json::to_value(&run_record.graph).unwrap(),
+                workflow_source: Some("digraph test { plan -> code }".to_string()),
+                workflow_config: None,
+                labels: run_record.labels.clone().into_iter().collect(),
+                run_dir: tmp.path().display().to_string(),
+                working_directory: run_record.working_directory.display().to_string(),
+                host_repo_path: run_record.host_repo_path.clone(),
+                base_branch: run_record.base_branch.clone(),
+                workflow_slug: run_record.workflow_slug.clone(),
+                db_prefix: None,
+            },
+        )
+        .await
+        .unwrap();
+        append_workflow_event(
+            run_store.as_ref(),
+            &fixtures::RUN_1,
+            &WorkflowRunEvent::RetroCompleted {
+                duration_ms: 1,
+                response: Some(String::new()),
+                retro: Some(serde_json::to_value(make_test_retro()).unwrap()),
+            },
+        )
+        .await
+        .unwrap();
 
         let conclusion = make_test_conclusion();
         let body = build_pr_body(
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
             "Implement feature",
             "mock-model",
-                        run_store.as_ref(),
+            run_store.as_ref(),
             tmp.path(),
             Some(&conclusion),
         )
@@ -1292,7 +1324,7 @@ mod tests {
     #[tokio::test]
     async fn empty_diff_returns_none() {
         let tmp = tempfile::tempdir().unwrap();
-        let store = InMemoryStore::default();
+        let store = test_store();
         let run_store = store
             .create_run(
                 &fixtures::RUN_1,
@@ -1327,7 +1359,7 @@ mod tests {
     #[tokio::test]
     async fn load_pull_request_diff_uses_store_without_disk_patch() {
         let tmp = tempfile::tempdir().unwrap();
-        let store = InMemoryStore::default();
+        let store = test_store();
         let created_at = Utc::now();
         let run_store = store
             .create_run(
@@ -1337,24 +1369,55 @@ mod tests {
             )
             .await
             .unwrap();
-        run_store
-            .put_run(&RunRecord {
+        let run_record = RunRecord {
+            run_id: fixtures::RUN_1,
+            created_at,
+            settings: Settings::default(),
+            graph: Graph::new("test"),
+            workflow_slug: None,
+            working_directory: tmp.path().to_path_buf(),
+            host_repo_path: None,
+            base_branch: None,
+            labels: std::collections::HashMap::new(),
+        };
+        append_workflow_event(
+            run_store.as_ref(),
+            &fixtures::RUN_1,
+            &WorkflowRunEvent::RunCreated {
                 run_id: fixtures::RUN_1,
-                created_at,
-                settings: Settings::default(),
-                graph: Graph::new("test"),
-                workflow_slug: None,
-                working_directory: tmp.path().to_path_buf(),
+                settings: serde_json::to_value(&run_record.settings).unwrap(),
+                graph: serde_json::to_value(&run_record.graph).unwrap(),
+                workflow_source: None,
+                workflow_config: None,
+                labels: run_record.labels.clone().into_iter().collect(),
+                run_dir: tmp.path().display().to_string(),
+                working_directory: tmp.path().display().to_string(),
                 host_repo_path: None,
                 base_branch: None,
-                labels: std::collections::HashMap::new(),
-            })
-            .await
-            .unwrap();
-        run_store
-            .put_final_patch("diff --git a/src/lib.rs b/src/lib.rs\n+fn from_store() {}\n")
-            .await
-            .unwrap();
+                workflow_slug: None,
+                db_prefix: None,
+            },
+        )
+        .await
+        .unwrap();
+        append_workflow_event(
+            run_store.as_ref(),
+            &fixtures::RUN_1,
+            &WorkflowRunEvent::WorkflowRunCompleted {
+                duration_ms: 1,
+                artifact_count: 0,
+                status: "success".to_string(),
+                reason: None,
+                total_cost: None,
+                final_git_commit_sha: None,
+                final_patch: Some(
+                    "diff --git a/src/lib.rs b/src/lib.rs\n+fn from_store() {}\n".to_string(),
+                ),
+                usage: None,
+            },
+        )
+        .await
+        .unwrap();
 
         let diff = load_pull_request_diff(run_store.as_ref(), tmp.path()).await;
 

@@ -17,8 +17,9 @@ use crate::run_options::RunOptions;
 use async_trait::async_trait;
 use chrono::Utc;
 use fabro_graphviz::graph::{AttrValue, Graph, Node};
-use fabro_store::{InMemoryStore, Store};
+use fabro_store::SlateStore;
 use fabro_types::Settings;
+use object_store::memory::InMemory;
 use tokio::time::{sleep, timeout};
 
 use super::{EngineServices, Handler};
@@ -192,7 +193,12 @@ impl Handler for SubWorkflowHandler {
         let hook_runner = services.hook_runner.clone();
         let env = services.env.clone();
         let dry_run = services.dry_run;
-        let run_store = InMemoryStore::default()
+        let store = Arc::new(SlateStore::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ));
+        let run_store = store
             .create_run(
                 &child_run_options.run_id,
                 Utc::now(),

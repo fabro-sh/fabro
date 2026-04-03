@@ -520,9 +520,6 @@ pub async fn initialize(
         host_working_directory: sandbox_record.host_working_directory.clone(),
         container_mount_point: sandbox_record.container_mount_point.clone(),
     });
-    if let Err(err) = options.run_store.put_sandbox(&sandbox_record).await {
-        tracing::warn!(error = %err, "Failed to save sandbox record to store");
-    }
 
     let env = build_sandbox_env(
         &options.sandbox_env,
@@ -670,21 +667,32 @@ pub async fn initialize(
 mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
+    use std::time::Duration;
 
     use chrono::Utc;
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
     use fabro_interview::AutoApproveInterviewer;
     use fabro_sandbox::SandboxSpec;
-    use fabro_store::InMemoryStore;
+    use fabro_store::{SlateStore, StoreHandle};
     use fabro_types::{RunId, Settings, fixtures};
+    use object_store::memory::InMemory;
 
     use super::*;
+    use crate::event::StoreProgressLogger;
     use crate::pipeline::types::InitOptions;
     use crate::records::RunRecord;
     use crate::run_options::RunOptions;
 
     fn test_run_id() -> RunId {
         fixtures::RUN_1
+    }
+
+    fn memory_store() -> StoreHandle {
+        Arc::new(SlateStore::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ))
     }
 
     fn simple_graph() -> (Graph, String) {
@@ -754,14 +762,14 @@ mod tests {
         std::fs::create_dir_all(&run_dir).unwrap();
         let (graph, source) = simple_graph();
         let persisted = test_persisted(graph, source.clone(), &run_dir);
-        let emitter = Arc::new(crate::event::EventEmitter::default());
+        let emitter = Arc::new(crate::event::EventEmitter::new(test_run_id()));
 
         let initialized = initialize(
             persisted,
             InitOptions {
                 run_id: test_run_id(),
                 run_store: {
-                    let store: &dyn fabro_store::Store = &InMemoryStore::default();
+                    let store = memory_store();
                     let inner = store
                         .create_run(
                             &test_run_id(),
@@ -829,24 +837,29 @@ mod tests {
         std::fs::create_dir_all(&run_dir).unwrap();
         let (graph, source) = simple_graph();
         let persisted = test_persisted(graph, source, &run_dir);
-        let emitter = Arc::new(crate::event::EventEmitter::default());
+        let emitter = Arc::new(crate::event::EventEmitter::new(test_run_id()));
+        let store = memory_store();
+        let run_store = store
+            .create_run(
+                &test_run_id(),
+                chrono::Utc::now(),
+                Some(run_dir.to_string_lossy().as_ref()),
+            )
+            .await
+            .unwrap();
+        let store_logger = StoreProgressLogger::new(run_store.clone());
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        emitter.on_event({
+            let seen = Arc::clone(&seen);
+            move |event| seen.lock().unwrap().push(event.event.clone())
+        });
+        store_logger.register(&emitter);
 
         let initialized = initialize(
             persisted,
             InitOptions {
                 run_id: test_run_id(),
-                run_store: {
-                    let store: &dyn fabro_store::Store = &InMemoryStore::default();
-                    let inner = store
-                        .create_run(
-                            &test_run_id(),
-                            chrono::Utc::now(),
-                            Some(run_dir.to_string_lossy().as_ref()),
-                        )
-                        .await
-                        .unwrap();
-                    inner
-                },
+                run_store,
                 dry_run: false,
                 emitter,
                 sandbox: SandboxSpec::Local {
@@ -883,8 +896,14 @@ mod tests {
         )
         .await
         .unwrap();
+        store_logger.flush().await;
 
-        assert!(initialized.run_store.get_sandbox().await.unwrap().is_some());
         assert_eq!(initialized.run_options.run_dir, run_dir);
+        assert!(
+            seen.lock()
+                .unwrap()
+                .iter()
+                .any(|event| event == "sandbox.initialized")
+        );
     }
 }

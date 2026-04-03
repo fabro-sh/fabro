@@ -10,7 +10,7 @@ use fabro_agent::{
 use fabro_llm::client::Client;
 use fabro_llm::provider::Provider;
 use fabro_llm::types::ToolDefinition;
-use fabro_store::RunStore;
+use fabro_store::SlateRunStore;
 use fabro_util::redact::redact_jsonl_line;
 use tokio::sync::broadcast::Receiver;
 use tokio::task::JoinHandle;
@@ -137,7 +137,7 @@ pub fn build_retro_prompt(retro_data_dir: &str) -> String {
 /// files via tool access, then calls `submit_retro` with its analysis.
 pub async fn run_retro_agent(
     sandbox: &Arc<dyn Sandbox>,
-    run_store: &dyn RunStore,
+    run_store: &SlateRunStore,
     run_dir: &Path,
     llm_client: &Client,
     provider: Provider,
@@ -286,26 +286,20 @@ pub fn dry_run_narrative() -> RetroNarrative {
 }
 
 async fn write_retro_prompt(
-    run_store: &dyn RunStore,
+    _run_store: &SlateRunStore,
     retro_dir: &Path,
     prompt: &str,
 ) -> anyhow::Result<()> {
-    if let Err(err) = run_store.put_retro_prompt(prompt).await {
-        tracing::warn!(error = %err, "Failed to save retro prompt to store");
-        std::fs::write(retro_dir.join("prompt.md"), prompt)?;
-    }
+    std::fs::write(retro_dir.join("prompt.md"), prompt)?;
     Ok(())
 }
 
 async fn write_retro_response(
-    run_store: &dyn RunStore,
+    _run_store: &SlateRunStore,
     retro_dir: &Path,
     response: &str,
 ) -> anyhow::Result<()> {
-    if let Err(err) = run_store.put_retro_response(response).await {
-        tracing::warn!(error = %err, "Failed to save retro response to store");
-        std::fs::write(retro_dir.join("response.md"), response)?;
-    }
+    std::fs::write(retro_dir.join("response.md"), response)?;
     Ok(())
 }
 
@@ -385,7 +379,7 @@ fn build_profile(provider: Provider, model: &str) -> Box<dyn AgentProfile> {
 
 async fn upload_data_files(
     sandbox: &Arc<dyn Sandbox>,
-    run_store: &dyn RunStore,
+    run_store: &SlateRunStore,
     _run_dir: &Path,
     target_dir: &str,
 ) -> anyhow::Result<()> {
@@ -416,26 +410,24 @@ async fn upload_data_files(
             .map_err(|e| anyhow::anyhow!("Failed to upload progress.jsonl: {e}"))?;
     }
 
-    let checkpoint_content = run_store
-        .get_checkpoint()
+    let state = run_store
+        .state()
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to load checkpoint from store: {e}"))?
+        .map_err(|e| anyhow::anyhow!("Failed to load run state from store: {e}"))?;
+    let checkpoint_content = state
+        .checkpoint
         .map(|cp| serde_json::to_string_pretty(&cp))
         .transpose()?;
     upload_file(sandbox, target_dir, "checkpoint.json", checkpoint_content).await?;
 
-    let run_content = run_store
-        .get_run()
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to load run metadata from store: {e}"))?
+    let run_content = state
+        .run
         .map(|run| serde_json::to_string_pretty(&run))
         .transpose()?;
     upload_file(sandbox, target_dir, "run.json", run_content).await?;
 
-    let start_content = run_store
-        .get_start()
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to load start metadata from store: {e}"))?
+    let start_content = state
+        .start
         .map(|start| serde_json::to_string_pretty(&start))
         .transpose()?;
     upload_file(sandbox, target_dir, "start.json", start_content).await?;

@@ -1,27 +1,6 @@
-use std::sync::Arc;
-
-use fabro_store::Store;
 use fabro_test::{fabro_snapshot, test_context};
-use fabro_types::RunId;
-use object_store::local::LocalFileSystem;
 
 use super::support::{git_filters, setup_git_backed_changed_run, setup_git_backed_noop_run};
-
-fn with_runtime<T>(f: impl FnOnce(&tokio::runtime::Runtime) -> T) -> T {
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    f(&runtime)
-}
-
-fn build_store(storage_dir: &std::path::Path) -> Arc<fabro_store::SlateStore> {
-    let store_path = storage_dir.join("store");
-    std::fs::create_dir_all(&store_path).unwrap();
-    let object_store = Arc::new(LocalFileSystem::new_with_prefix(&store_path).unwrap());
-    Arc::new(fabro_store::SlateStore::new(
-        object_store,
-        "",
-        std::time::Duration::from_millis(1),
-    ))
-}
 
 #[test]
 fn help() {
@@ -113,23 +92,7 @@ fn diff_completed_run_with_changes_prints_patch() {
 fn diff_completed_run_reads_store_final_patch_without_disk_file() {
     let context = test_context!();
     let setup = setup_git_backed_changed_run(&context);
-    let run_id: RunId = setup.run.run_id.parse().unwrap();
-    let patch = with_runtime(|runtime| {
-        runtime.block_on(async {
-            let store = build_store(&context.storage_dir);
-            let run_store = store.open_run(&run_id).await.unwrap();
-            run_store.get_final_patch().await.unwrap().unwrap()
-        })
-    });
     let _ = std::fs::remove_file(setup.run.run_dir.join("final.patch"));
-
-    with_runtime(|runtime| {
-        runtime.block_on(async {
-            let store = build_store(&context.storage_dir);
-            let run_store = store.open_run(&run_id).await.unwrap();
-            run_store.put_final_patch(&patch).await.unwrap();
-        });
-    });
 
     let mut cmd = context.command();
     cmd.args(["diff", &setup.run.run_id]);
@@ -176,40 +139,7 @@ fn diff_node_outputs_specific_patch() {
 fn diff_node_reads_store_patch_without_disk_file() {
     let context = test_context!();
     let setup = setup_git_backed_changed_run(&context);
-    let run_id: RunId = setup.run.run_id.parse().unwrap();
-    let patch = with_runtime(|runtime| {
-        runtime.block_on(async {
-            let store = build_store(&context.storage_dir);
-            let run_store = store.open_run(&run_id).await.unwrap();
-            run_store
-                .get_node(&fabro_store::NodeVisitRef {
-                    node_id: "step_one",
-                    visit: 1,
-                })
-                .await
-                .unwrap()
-                .diff
-                .unwrap()
-        })
-    });
     let _ = std::fs::remove_file(setup.run.run_dir.join("nodes/step_one/diff.patch"));
-
-    with_runtime(|runtime| {
-        runtime.block_on(async {
-            let store = build_store(&context.storage_dir);
-            let run_store = store.open_run(&run_id).await.unwrap();
-            run_store
-                .put_node_diff(
-                    &fabro_store::NodeVisitRef {
-                        node_id: "step_one",
-                        visit: 1,
-                    },
-                    &patch,
-                )
-                .await
-                .unwrap();
-        });
-    });
 
     let mut cmd = context.command();
     cmd.args(["diff", &setup.run.run_id, "--node", "step_one"]);

@@ -33,8 +33,8 @@ pub(crate) async fn run(args: &WaitArgs, styles: &Styles, globals: &GlobalArgs) 
     let started_waiting_at = std::time::Instant::now();
 
     let final_status = loop {
-        let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run_info.run_id)
-            .await?;
+        let run_store =
+            store::open_run_reader(&cli_settings.storage_dir(), &run_info.run_id).await?;
         let status = run_store.state().await?.status.map(|record| record.status);
         let status = status.unwrap_or_else(|| {
             if started_waiting_at.elapsed() < WAIT_STARTUP_GRACE {
@@ -63,8 +63,7 @@ pub(crate) async fn run(args: &WaitArgs, styles: &Styles, globals: &GlobalArgs) 
         }
     };
 
-    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run_info.run_id)
-        .await?;
+    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run_info.run_id).await?;
     let conclusion = run_store.state().await?.conclusion;
 
     if globals.json {

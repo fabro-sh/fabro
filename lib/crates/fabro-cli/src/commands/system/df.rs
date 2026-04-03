@@ -64,7 +64,7 @@ pub(super) async fn df_command(args: &DfArgs, globals: &GlobalArgs) -> Result<()
 #[allow(clippy::print_stdout)]
 async fn df_from(
     args: &DfArgs,
-    store: &dyn fabro_store::Store,
+    store: &fabro_store::SlateStore,
     data_dir: &Path,
     runs_base: &Path,
     logs_base: &Path,

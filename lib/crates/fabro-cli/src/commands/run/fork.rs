@@ -21,7 +21,7 @@ pub(crate) async fn run(args: &ForkArgs, styles: &Styles, globals: &GlobalArgs) 
     let store = Store::new(repo);
     let run_store = open_run_reader(&cli_settings.storage_dir(), &run_id).await?;
 
-    let timeline = build_timeline_or_rebuild(&store, Some(run_store.as_ref()), &run_id).await?;
+    let timeline = build_timeline_or_rebuild(&store, Some(&run_store), &run_id).await?;
 
     if args.list {
         if globals.json {

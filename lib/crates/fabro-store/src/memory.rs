@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use futures::Stream;
@@ -16,12 +15,9 @@ use crate::keys;
 use crate::run_state::EventProjectionCache;
 use crate::{
     CatalogRecord, EventEnvelope, EventPayload, ListRunsQuery, NodeOutcomeRecord, NodeSnapshot,
-    NodeVisitRef, Result, RunSnapshot, RunState, RunStore, RunSummary, Store, StoreError,
+    NodeVisitRef, Result, RunState, RunSummary, StoreError,
 };
-use fabro_types::{
-    Checkpoint, Conclusion, NodeStatusRecord, PullRequestRecord, Retro, RunId, RunRecord,
-    RunStatusRecord, SandboxRecord, StartRecord,
-};
+use fabro_types::{NodeStatusRecord, RunId};
 
 #[derive(Debug, Default)]
 pub struct InMemoryStore {
@@ -35,12 +31,10 @@ struct InMemoryCatalog {
 }
 
 #[derive(Debug)]
-struct InMemoryRunStore {
+pub struct InMemoryRunStore {
     run_id: RunId,
-    created_at: DateTime<Utc>,
     data: Mutex<BTreeMap<String, Vec<u8>>>,
     event_seq: AtomicU32,
-    checkpoint_seq: AtomicU32,
     watchers: Mutex<Vec<mpsc::UnboundedSender<EventEnvelope>>>,
     projection_cache: Mutex<EventProjectionCache>,
 }
@@ -62,10 +56,8 @@ impl InMemoryRunStore {
         data.insert(keys::init().to_string(), serde_json::to_vec(&record)?);
         Ok(Self {
             run_id: *run_id,
-            created_at,
             data: Mutex::new(data),
             event_seq: AtomicU32::new(1),
-            checkpoint_seq: AtomicU32::new(1),
             watchers: Mutex::new(Vec::new()),
             projection_cache: Mutex::new(EventProjectionCache::default()),
         })
@@ -174,19 +166,6 @@ impl InMemoryRunStore {
         Ok(events)
     }
 
-    async fn list_checkpoints_inner(&self) -> Result<Vec<(u32, Checkpoint)>> {
-        let data = self.snapshot_data().await;
-        let mut checkpoints = Vec::new();
-        for (key, value) in &data {
-            let Some(seq) = keys::parse_checkpoint_seq(key) else {
-                continue;
-            };
-            checkpoints.push((seq, serde_json::from_slice(value)?));
-        }
-        checkpoints.sort_by_key(|(seq, _)| *seq);
-        Ok(checkpoints)
-    }
-
     async fn list_artifact_values_inner(&self) -> Result<Vec<String>> {
         let data = self.snapshot_data().await;
         let mut artifact_ids = Vec::new();
@@ -213,61 +192,6 @@ impl InMemoryRunStore {
         Ok(assets)
     }
 
-    fn build_snapshot_from_data(
-        &self,
-        data: &BTreeMap<String, Vec<u8>>,
-    ) -> Result<Option<RunSnapshot>> {
-        let Some(run) = read_json::<RunRecord>(data, keys::run())? else {
-            return Ok(None);
-        };
-
-        let mut visits = BTreeSet::new();
-        for key in data.keys() {
-            if let Some((node_id, visit, _)) = keys::parse_node_key(key) {
-                visits.insert((node_id, visit));
-            }
-        }
-
-        let mut nodes = Vec::new();
-        for (node_id, visit) in visits {
-            let node = NodeVisitRef {
-                node_id: &node_id,
-                visit,
-            };
-            nodes.push(self.build_node_snapshot_from_data(data, &node)?);
-        }
-
-        Ok(Some(RunSnapshot {
-            run,
-            start: read_json(data, keys::start())?,
-            status: read_json(data, keys::status())?,
-            checkpoint: read_json(data, keys::checkpoint())?,
-            conclusion: read_json(data, keys::conclusion())?,
-            retro: read_json(data, keys::retro())?,
-            graph: read_text(data, keys::graph())?,
-            sandbox: read_json(data, keys::sandbox())?,
-            final_patch: read_text(data, keys::final_patch())?,
-            pull_request: read_json(data, keys::pull_request())?,
-            nodes,
-        }))
-    }
-
-    fn validate_run_record(&self, record: &RunRecord) -> Result<()> {
-        if record.created_at != self.created_at {
-            return Err(StoreError::Other(format!(
-                "run record created_at {:?} does not match store created_at {:?}",
-                record.created_at, self.created_at
-            )));
-        }
-        if record.run_id != self.run_id {
-            return Err(StoreError::Other(format!(
-                "run record run_id {:?} does not match store run_id {:?}",
-                record.run_id, self.run_id
-            )));
-        }
-        Ok(())
-    }
-
     async fn projected_state(&self) -> Result<RunState> {
         let next_seq = {
             let cache = self.projection_cache.lock().await;
@@ -283,18 +207,17 @@ impl InMemoryRunStore {
     }
 }
 
-#[async_trait]
-impl Store for InMemoryStore {
-    async fn create_run(
+impl InMemoryStore {
+    pub async fn create_run(
         &self,
         run_id: &RunId,
         created_at: DateTime<Utc>,
         run_dir: Option<&str>,
-    ) -> Result<Arc<dyn RunStore>> {
+    ) -> Result<Arc<InMemoryRunStore>> {
         let mut runs = self.runs.lock().await;
         if let Some(existing) = runs.get(run_id) {
             if existing.record.created_at == created_at {
-                return Ok(Arc::clone(&existing.run_store) as Arc<dyn RunStore>);
+                return Ok(Arc::clone(&existing.run_store));
             }
             return Err(StoreError::RunAlreadyExists(run_id.to_string()));
         }
@@ -313,24 +236,24 @@ impl Store for InMemoryStore {
                 db_prefix,
                 run_dir: run_dir.map(ToOwned::to_owned),
             },
-            run_store: Arc::clone(&run_store),
+            run_store: run_store.clone(),
         };
         runs.insert(*run_id, catalog);
-        Ok(run_store as Arc<dyn RunStore>)
+        Ok(run_store)
     }
 
-    async fn open_run(&self, run_id: &RunId) -> Result<Arc<dyn RunStore>> {
+    pub async fn open_run(&self, run_id: &RunId) -> Result<Arc<InMemoryRunStore>> {
         let runs = self.runs.lock().await;
         runs.get(run_id)
-            .map(|catalog| Arc::clone(&catalog.run_store) as Arc<dyn RunStore>)
+            .map(|catalog| Arc::clone(&catalog.run_store))
             .ok_or_else(|| StoreError::RunNotFound(run_id.to_string()))
     }
 
-    async fn open_run_reader(&self, run_id: &RunId) -> Result<Arc<dyn RunStore>> {
+    pub async fn open_run_reader(&self, run_id: &RunId) -> Result<Arc<InMemoryRunStore>> {
         self.open_run(run_id).await
     }
 
-    async fn list_runs(&self, query: &ListRunsQuery) -> Result<Vec<RunSummary>> {
+    pub async fn list_runs(&self, query: &ListRunsQuery) -> Result<Vec<RunSummary>> {
         let catalogs = {
             let runs = self.runs.lock().await;
             runs.values().cloned().collect::<Vec<_>>()
@@ -341,110 +264,36 @@ impl Store for InMemoryStore {
             if !matches_query(&catalog.record.created_at, query) {
                 continue;
             }
-            summaries.push(catalog.run_store.state().await?.build_summary(&catalog.record));
+            summaries.push(
+                catalog
+                    .run_store
+                    .state()
+                    .await?
+                    .build_summary(&catalog.record),
+            );
         }
         summaries.sort_by(|a, b| b.created_at.cmp(&a.created_at));
         Ok(summaries)
     }
 
-    async fn delete_run(&self, run_id: &RunId) -> Result<()> {
+    pub async fn delete_run(&self, run_id: &RunId) -> Result<()> {
         self.runs.lock().await.remove(run_id);
         Ok(())
     }
 }
 
-#[async_trait]
-impl RunStore for InMemoryRunStore {
-    async fn put_run(&self, record: &RunRecord) -> Result<()> {
-        self.validate_run_record(record)?;
-        self.put_json(keys::run().to_string(), record).await
-    }
-
-    async fn get_run(&self) -> Result<Option<RunRecord>> {
-        self.get_json(keys::run()).await
-    }
-
-    async fn put_start(&self, record: &StartRecord) -> Result<()> {
-        self.put_json(keys::start().to_string(), record).await
-    }
-
-    async fn get_start(&self) -> Result<Option<StartRecord>> {
-        self.get_json(keys::start()).await
-    }
-
-    async fn put_status(&self, record: &RunStatusRecord) -> Result<()> {
-        self.put_json(keys::status().to_string(), record).await
-    }
-
-    async fn get_status(&self) -> Result<Option<RunStatusRecord>> {
-        self.get_json(keys::status()).await
-    }
-
-    async fn put_checkpoint(&self, record: &Checkpoint) -> Result<()> {
-        self.put_json(keys::checkpoint().to_string(), record).await
-    }
-
-    async fn get_checkpoint(&self) -> Result<Option<Checkpoint>> {
-        self.get_json(keys::checkpoint()).await
-    }
-
-    async fn append_checkpoint(&self, record: &Checkpoint) -> Result<u32> {
-        let seq = self.checkpoint_seq.fetch_add(1, Ordering::SeqCst);
-        let now = Utc::now().timestamp_millis();
-        self.put_checkpoint(record).await?;
-        self.put_json(keys::checkpoint_history_key(seq, now), record)
-            .await?;
-        Ok(seq)
-    }
-
-    async fn list_checkpoints(&self) -> Result<Vec<(u32, Checkpoint)>> {
-        self.list_checkpoints_inner().await
-    }
-
-    async fn put_conclusion(&self, record: &Conclusion) -> Result<()> {
-        self.put_json(keys::conclusion().to_string(), record).await
-    }
-
-    async fn get_conclusion(&self) -> Result<Option<Conclusion>> {
-        self.get_json(keys::conclusion()).await
-    }
-
-    async fn put_retro(&self, retro: &Retro) -> Result<()> {
-        self.put_json(keys::retro().to_string(), retro).await
-    }
-
-    async fn get_retro(&self) -> Result<Option<Retro>> {
-        self.get_json(keys::retro()).await
-    }
-
-    async fn put_graph(&self, dot_source: &str) -> Result<()> {
-        self.put_text(keys::graph().to_string(), dot_source).await;
-        Ok(())
-    }
-
-    async fn get_graph(&self) -> Result<Option<String>> {
-        self.get_text(keys::graph()).await
-    }
-
-    async fn put_sandbox(&self, record: &SandboxRecord) -> Result<()> {
-        self.put_json(keys::sandbox().to_string(), record).await
-    }
-
-    async fn get_sandbox(&self) -> Result<Option<SandboxRecord>> {
-        self.get_json(keys::sandbox()).await
-    }
-
-    async fn put_node_prompt(&self, node: &NodeVisitRef<'_>, prompt: &str) -> Result<()> {
+impl InMemoryRunStore {
+    pub async fn put_node_prompt(&self, node: &NodeVisitRef<'_>, prompt: &str) -> Result<()> {
         self.put_text(keys::node_prompt(node), prompt).await;
         Ok(())
     }
 
-    async fn put_node_response(&self, node: &NodeVisitRef<'_>, response: &str) -> Result<()> {
+    pub async fn put_node_response(&self, node: &NodeVisitRef<'_>, response: &str) -> Result<()> {
         self.put_text(keys::node_response(node), response).await;
         Ok(())
     }
 
-    async fn put_node_status(
+    pub async fn put_node_status(
         &self,
         node: &NodeVisitRef<'_>,
         status: &NodeStatusRecord,
@@ -452,7 +301,7 @@ impl RunStore for InMemoryRunStore {
         self.put_json(keys::node_status(node), status).await
     }
 
-    async fn put_node_outcome(
+    pub async fn put_node_outcome(
         &self,
         node: &NodeVisitRef<'_>,
         outcome: &NodeOutcomeRecord,
@@ -460,7 +309,7 @@ impl RunStore for InMemoryRunStore {
         self.put_json(keys::node_outcome(node), outcome).await
     }
 
-    async fn put_node_provider_used(
+    pub async fn put_node_provider_used(
         &self,
         node: &NodeVisitRef<'_>,
         provider_used: &serde_json::Value,
@@ -469,12 +318,12 @@ impl RunStore for InMemoryRunStore {
             .await
     }
 
-    async fn put_node_diff(&self, node: &NodeVisitRef<'_>, diff: &str) -> Result<()> {
+    pub async fn put_node_diff(&self, node: &NodeVisitRef<'_>, diff: &str) -> Result<()> {
         self.put_text(keys::node_diff(node), diff).await;
         Ok(())
     }
 
-    async fn put_node_script_invocation(
+    pub async fn put_node_script_invocation(
         &self,
         node: &NodeVisitRef<'_>,
         invocation: &serde_json::Value,
@@ -483,7 +332,7 @@ impl RunStore for InMemoryRunStore {
             .await
     }
 
-    async fn put_node_script_timing(
+    pub async fn put_node_script_timing(
         &self,
         node: &NodeVisitRef<'_>,
         timing: &serde_json::Value,
@@ -491,7 +340,7 @@ impl RunStore for InMemoryRunStore {
         self.put_json(keys::node_script_timing(node), timing).await
     }
 
-    async fn put_node_parallel_results(
+    pub async fn put_node_parallel_results(
         &self,
         node: &NodeVisitRef<'_>,
         results: &serde_json::Value,
@@ -500,22 +349,22 @@ impl RunStore for InMemoryRunStore {
             .await
     }
 
-    async fn put_node_stdout(&self, node: &NodeVisitRef<'_>, log: &str) -> Result<()> {
+    pub async fn put_node_stdout(&self, node: &NodeVisitRef<'_>, log: &str) -> Result<()> {
         self.put_text(keys::node_stdout(node), log).await;
         Ok(())
     }
 
-    async fn put_node_stderr(&self, node: &NodeVisitRef<'_>, log: &str) -> Result<()> {
+    pub async fn put_node_stderr(&self, node: &NodeVisitRef<'_>, log: &str) -> Result<()> {
         self.put_text(keys::node_stderr(node), log).await;
         Ok(())
     }
 
-    async fn get_node(&self, node: &NodeVisitRef<'_>) -> Result<NodeSnapshot> {
+    pub async fn get_node(&self, node: &NodeVisitRef<'_>) -> Result<NodeSnapshot> {
         let data = self.snapshot_data().await;
         self.build_node_snapshot_from_data(&data, node)
     }
 
-    async fn list_node_visits(&self, node_id: &str) -> Result<Vec<u32>> {
+    pub async fn list_node_visits(&self, node_id: &str) -> Result<Vec<u32>> {
         let data = self.snapshot_data().await;
         let mut visits = BTreeSet::new();
         for key in data.keys() {
@@ -529,41 +378,17 @@ impl RunStore for InMemoryRunStore {
         Ok(visits.into_iter().collect())
     }
 
-    async fn list_node_ids(&self) -> Result<Vec<String>> {
+    pub async fn list_node_ids(&self) -> Result<Vec<String>> {
         Ok(self.list_node_ids_inner().await)
     }
 
-    async fn put_final_patch(&self, patch: &str) -> Result<()> {
-        self.put_text(keys::final_patch().to_string(), patch).await;
-        Ok(())
-    }
-
-    async fn get_final_patch(&self) -> Result<Option<String>> {
-        self.get_text(keys::final_patch()).await
-    }
-
-    async fn put_pull_request(&self, record: &PullRequestRecord) -> Result<()> {
-        self.put_json(keys::pull_request().to_string(), record)
-            .await
-    }
-
-    async fn get_pull_request(&self) -> Result<Option<PullRequestRecord>> {
-        self.get_json(keys::pull_request()).await
-    }
-
-    async fn reset_for_rewind(&self) -> Result<()> {
+    pub async fn reset_for_rewind(&self) -> Result<()> {
         let mut data = self.data.lock().await;
-        data.retain(|key, _| {
-            key == keys::init()
-                || key == keys::run()
-                || key == keys::start()
-                || key == keys::graph()
-                || key.starts_with(keys::EVENTS_PREFIX)
-        });
+        data.retain(|key, _| key == keys::init() || key.starts_with(keys::EVENTS_PREFIX));
         Ok(())
     }
 
-    async fn append_event(&self, payload: &EventPayload) -> Result<u32> {
+    pub async fn append_event(&self, payload: &EventPayload) -> Result<u32> {
         payload.validate(&self.run_id)?;
 
         let seq = self.event_seq.fetch_add(1, Ordering::SeqCst);
@@ -582,15 +407,15 @@ impl RunStore for InMemoryRunStore {
         Ok(seq)
     }
 
-    async fn list_events(&self) -> Result<Vec<EventEnvelope>> {
+    pub async fn list_events(&self) -> Result<Vec<EventEnvelope>> {
         self.list_events_from_inner(1).await
     }
 
-    async fn list_events_from(&self, seq: u32) -> Result<Vec<EventEnvelope>> {
+    pub async fn list_events_from(&self, seq: u32) -> Result<Vec<EventEnvelope>> {
         self.list_events_from_inner(seq).await
     }
 
-    async fn watch_events_from(
+    pub async fn watch_events_from(
         &self,
         seq: u32,
     ) -> Result<std::pin::Pin<Box<dyn Stream<Item = Result<EventEnvelope>> + Send>>> {
@@ -620,51 +445,64 @@ impl RunStore for InMemoryRunStore {
         Ok(Box::pin(UnboundedReceiverStream::new(receiver).map(Ok)))
     }
 
-    async fn put_retro_prompt(&self, text: &str) -> Result<()> {
+    pub async fn put_retro_prompt(&self, text: &str) -> Result<()> {
         self.put_text(keys::retro_prompt().to_string(), text).await;
         Ok(())
     }
 
-    async fn get_retro_prompt(&self) -> Result<Option<String>> {
+    pub async fn get_retro_prompt(&self) -> Result<Option<String>> {
         self.get_text(keys::retro_prompt()).await
     }
 
-    async fn put_retro_response(&self, text: &str) -> Result<()> {
+    pub async fn put_retro_response(&self, text: &str) -> Result<()> {
         self.put_text(keys::retro_response().to_string(), text)
             .await;
         Ok(())
     }
 
-    async fn get_retro_response(&self) -> Result<Option<String>> {
+    pub async fn get_retro_response(&self) -> Result<Option<String>> {
         self.get_text(keys::retro_response()).await
     }
 
-    async fn put_artifact_value(&self, artifact_id: &str, value: &serde_json::Value) -> Result<()> {
+    pub async fn put_artifact_value(
+        &self,
+        artifact_id: &str,
+        value: &serde_json::Value,
+    ) -> Result<()> {
         self.put_json(keys::artifact_value(artifact_id), value)
             .await
     }
 
-    async fn get_artifact_value(&self, artifact_id: &str) -> Result<Option<serde_json::Value>> {
+    pub async fn get_artifact_value(&self, artifact_id: &str) -> Result<Option<serde_json::Value>> {
         self.get_json(&keys::artifact_value(artifact_id)).await
     }
 
-    async fn list_artifact_values(&self) -> Result<Vec<String>> {
+    pub async fn list_artifact_values(&self) -> Result<Vec<String>> {
         self.list_artifact_values_inner().await
     }
 
-    async fn put_asset(&self, node: &NodeVisitRef<'_>, filename: &str, data: &[u8]) -> Result<()> {
+    pub async fn put_asset(
+        &self,
+        node: &NodeVisitRef<'_>,
+        filename: &str,
+        data: &[u8],
+    ) -> Result<()> {
         self.put_bytes(keys::node_asset(node, filename), data).await;
         Ok(())
     }
 
-    async fn get_asset(&self, node: &NodeVisitRef<'_>, filename: &str) -> Result<Option<Bytes>> {
+    pub async fn get_asset(
+        &self,
+        node: &NodeVisitRef<'_>,
+        filename: &str,
+    ) -> Result<Option<Bytes>> {
         Ok(self
             .get_bytes(&keys::node_asset(node, filename))
             .await
             .map(Bytes::from))
     }
 
-    async fn list_assets(&self, node: &NodeVisitRef<'_>) -> Result<Vec<String>> {
+    pub async fn list_assets(&self, node: &NodeVisitRef<'_>) -> Result<Vec<String>> {
         let prefix = format!("{}/", keys::node_asset_prefix(node));
         let data = self.snapshot_data().await;
         let mut assets = Vec::new();
@@ -677,25 +515,12 @@ impl RunStore for InMemoryRunStore {
         Ok(assets)
     }
 
-    async fn list_all_assets(&self) -> Result<Vec<(String, u32, String)>> {
+    pub async fn list_all_assets(&self) -> Result<Vec<(String, u32, String)>> {
         self.list_all_assets_inner().await
     }
 
-    async fn state(&self) -> Result<RunState> {
-        let mut state = self.projected_state().await?;
-        let data = self.snapshot_data().await;
-        state.merge_legacy(
-            self.build_snapshot_from_data(&data)?,
-            read_text(&data, keys::graph())?,
-            read_text(&data, keys::retro_prompt())?,
-            read_text(&data, keys::retro_response())?,
-            self.list_checkpoints_inner().await?,
-        );
-        Ok(state)
-    }
-
-    async fn get_snapshot(&self) -> Result<Option<RunSnapshot>> {
-        self.state().await.map(|state| state.to_snapshot())
+    pub async fn state(&self) -> Result<RunState> {
+        self.projected_state().await
     }
 }
 
@@ -741,8 +566,9 @@ mod tests {
 
     use chrono::Duration as ChronoDuration;
     use fabro_types::{
-        AttrValue, Graph, PullRequestRecord, RunId, RunStatus, Settings, StageStatus, StatusReason,
-        fixtures,
+        AttrValue, Checkpoint, Conclusion, Graph, PullRequestRecord, Retro, RunId, RunRecord,
+        RunStatus, RunStatusRecord, SandboxRecord, Settings, StageStatus, StartRecord,
+        StatusReason, fixtures,
     };
     use tokio::time::timeout;
 
@@ -921,7 +747,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_run_put_get_and_snapshot_round_trip() {
+    async fn create_run_state_and_node_storage_round_trip() {
         let store = InMemoryStore::default();
         let created_at = dt("2026-03-27T12:00:00Z");
         let run = store
@@ -949,14 +775,83 @@ mod tests {
         let parallel_results = serde_json::json!([{"node_id": "lint", "status": "success"}]);
         let pull_request = sample_pull_request();
 
-        run.put_run(&run_record).await.unwrap();
-        run.put_start(&start_record).await.unwrap();
-        run.put_status(&status_record).await.unwrap();
-        run.put_checkpoint(&checkpoint).await.unwrap();
-        run.put_conclusion(&conclusion).await.unwrap();
-        run.put_retro(&retro).await.unwrap();
-        run.put_graph("digraph night_sky {}").await.unwrap();
-        run.put_sandbox(&sandbox).await.unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:00Z",
+            "run.created",
+            None,
+            serde_json::json!({
+                "settings": run_record.settings,
+                "graph": run_record.graph,
+                "workflow_source": "digraph night_sky {}",
+                "workflow_slug": run_record.workflow_slug,
+                "working_directory": run_record.working_directory,
+                "host_repo_path": run_record.host_repo_path,
+                "base_branch": run_record.base_branch,
+                "labels": run_record.labels,
+            }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:05Z",
+            "run.started",
+            None,
+            serde_json::json!({
+                "run_branch": start_record.run_branch,
+                "base_sha": start_record.base_sha,
+            }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:06Z",
+            "run.running",
+            None,
+            serde_json::json!({
+                "reason": status_record.reason,
+            }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:07Z",
+            "checkpoint.completed",
+            Some("code"),
+            serde_json::json!({
+                "status": "success",
+                "current_node": checkpoint.current_node,
+                "completed_nodes": checkpoint.completed_nodes,
+                "node_retries": checkpoint.node_retries,
+                "context_values": checkpoint.context_values,
+                "node_outcomes": checkpoint.node_outcomes,
+                "next_node_id": checkpoint.next_node_id,
+                "git_commit_sha": checkpoint.git_commit_sha,
+                "loop_failure_signatures": serde_json::json!({}),
+                "restart_failure_signatures": serde_json::json!({}),
+                "node_visits": checkpoint.node_visits,
+            }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:08Z",
+            "sandbox.initialized",
+            None,
+            serde_json::json!({
+                "provider": sandbox.provider,
+                "working_directory": sandbox.working_directory,
+                "identifier": sandbox.identifier,
+                "host_working_directory": sandbox.host_working_directory,
+                "container_mount_point": sandbox.container_mount_point,
+            }),
+        ))
+        .await
+        .unwrap();
         run.put_node_prompt(&node, "Plan the fix").await.unwrap();
         run.put_node_response(&node, "Implemented").await.unwrap();
         run.put_node_status(&node, &node_status).await.unwrap();
@@ -978,10 +873,50 @@ mod tests {
             .unwrap();
         run.put_node_stdout(&node, "ok").await.unwrap();
         run.put_node_stderr(&node, "").await.unwrap();
-        run.put_final_patch("diff --git a/src/lib.rs b/src/lib.rs\n")
-            .await
-            .unwrap();
-        run.put_pull_request(&pull_request).await.unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:09Z",
+            "retro.completed",
+            None,
+            serde_json::json!({
+                "response": "Smooth enough",
+                "retro": retro,
+            }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:10Z",
+            "run.completed",
+            None,
+            serde_json::json!({
+                "status": conclusion.status,
+                "duration_ms": conclusion.duration_ms,
+                "total_cost": conclusion.total_cost,
+                "final_git_commit_sha": conclusion.final_git_commit_sha,
+                "final_patch": "diff --git a/src/lib.rs b/src/lib.rs\n",
+            }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:11Z",
+            "pull_request.created",
+            None,
+            serde_json::json!({
+                "pr_url": pull_request.html_url,
+                "pr_number": pull_request.number,
+                "owner": pull_request.owner,
+                "repo": pull_request.repo,
+                "base_branch": pull_request.base_branch,
+                "head_branch": pull_request.head_branch,
+                "title": pull_request.title,
+            }),
+        ))
+        .await
+        .unwrap();
         run.put_retro_prompt("How did it go?").await.unwrap();
         run.put_retro_response("Smooth enough").await.unwrap();
         run.put_artifact_value("summary", &serde_json::json!({"done": true}))
@@ -991,37 +926,35 @@ mod tests {
             .await
             .unwrap();
 
-        let stored_run = run.get_run().await.unwrap().unwrap();
+        let state = run.state().await.unwrap();
+        let stored_run = state.run.as_ref().unwrap();
         assert_eq!(stored_run.run_id, run_record.run_id);
         assert_eq!(stored_run.created_at, run_record.created_at);
         assert_eq!(stored_run.workflow_slug, run_record.workflow_slug);
         assert_eq!(stored_run.graph.name, run_record.graph.name);
+        assert_eq!(state.graph_source.as_deref(), Some("digraph night_sky {}"));
 
-        let stored_start = run.get_start().await.unwrap().unwrap();
+        let stored_start = state.start.as_ref().unwrap();
         assert_eq!(stored_start.run_id, start_record.run_id);
         assert_eq!(stored_start.start_time, start_record.start_time);
 
-        let stored_status = run.get_status().await.unwrap().unwrap();
-        assert_eq!(stored_status.status, status_record.status);
-        assert_eq!(stored_status.reason, status_record.reason);
+        let stored_status = state.status.as_ref().unwrap();
+        assert_eq!(stored_status.status, RunStatus::Succeeded);
+        assert_eq!(stored_status.reason, None);
 
-        let stored_checkpoint = run.get_checkpoint().await.unwrap().unwrap();
+        let stored_checkpoint = state.checkpoint.as_ref().unwrap();
         assert_eq!(stored_checkpoint.current_node, checkpoint.current_node);
         assert_eq!(stored_checkpoint.next_node_id, checkpoint.next_node_id);
 
-        let stored_conclusion = run.get_conclusion().await.unwrap().unwrap();
+        let stored_conclusion = state.conclusion.as_ref().unwrap();
         assert_eq!(stored_conclusion.status, conclusion.status);
         assert_eq!(stored_conclusion.duration_ms, conclusion.duration_ms);
         assert_eq!(stored_conclusion.total_cost, conclusion.total_cost);
 
-        let stored_retro = run.get_retro().await.unwrap().unwrap();
+        let stored_retro = state.retro.as_ref().unwrap();
         assert_eq!(stored_retro.run_id, retro.run_id);
         assert_eq!(stored_retro.intent, retro.intent);
-        assert_eq!(
-            run.get_graph().await.unwrap(),
-            Some("digraph night_sky {}".to_string())
-        );
-        let stored_sandbox = run.get_sandbox().await.unwrap().unwrap();
+        let stored_sandbox = state.sandbox.as_ref().unwrap();
         assert_eq!(stored_sandbox.provider, sandbox.provider);
         assert_eq!(stored_sandbox.working_directory, sandbox.working_directory);
         assert_eq!(
@@ -1041,75 +974,19 @@ mod tests {
             Some(Bytes::from_static(b"fn main() {}"))
         );
         assert_eq!(
-            run.get_final_patch().await.unwrap().as_deref(),
+            state.final_patch.as_deref(),
             Some("diff --git a/src/lib.rs b/src/lib.rs\n")
         );
-        assert_eq!(
-            run.get_pull_request().await.unwrap(),
-            Some(pull_request.clone())
-        );
+        assert_eq!(state.pull_request, Some(pull_request.clone()));
         assert_eq!(run.list_node_ids().await.unwrap(), vec!["code".to_string()]);
         assert_eq!(
             run.list_assets(&node).await.unwrap(),
             vec!["src/lib.rs".to_string()]
         );
-
-        let snapshot = run.get_snapshot().await.unwrap().unwrap();
-        assert_eq!(snapshot.run.run_id, run_record.run_id);
-        assert_eq!(snapshot.run.created_at, run_record.created_at);
-        assert_eq!(
-            snapshot
-                .checkpoint
-                .as_ref()
-                .map(|checkpoint| checkpoint.current_node.as_str()),
-            Some("code")
-        );
-        assert_eq!(
-            snapshot
-                .conclusion
-                .as_ref()
-                .map(|conclusion| conclusion.duration_ms),
-            Some(3210)
-        );
-        assert_eq!(snapshot.nodes.len(), 1);
-        assert_eq!(snapshot.nodes[0].node_id, "code");
-        assert_eq!(snapshot.nodes[0].visit, 2);
-        let snapshot_status = snapshot.nodes[0].status.as_ref().unwrap();
-        assert_eq!(snapshot_status.status, node_status.status);
-        assert_eq!(snapshot_status.failure_reason, node_status.failure_reason);
-        assert_eq!(
-            snapshot.nodes[0].outcome.as_ref().unwrap().status,
-            StageStatus::Success
-        );
-        assert_eq!(
-            snapshot.nodes[0].provider_used.as_ref(),
-            Some(&provider_used)
-        );
-        assert_eq!(
-            snapshot.nodes[0].diff.as_deref(),
-            Some("diff --git a/src/lib.rs b/src/lib.rs")
-        );
-        assert_eq!(
-            snapshot.nodes[0].script_invocation.as_ref(),
-            Some(&script_invocation)
-        );
-        assert_eq!(
-            snapshot.nodes[0].script_timing.as_ref(),
-            Some(&script_timing)
-        );
-        assert_eq!(
-            snapshot.nodes[0].parallel_results.as_ref(),
-            Some(&parallel_results)
-        );
-        assert_eq!(
-            snapshot.final_patch.as_deref(),
-            Some("diff --git a/src/lib.rs b/src/lib.rs\n")
-        );
-        assert_eq!(snapshot.pull_request, Some(pull_request));
     }
 
     #[tokio::test]
-    async fn state_projects_event_stream_and_compat_fields() {
+    async fn state_projects_event_stream() {
         let store = InMemoryStore::default();
         let created_at = dt("2026-03-27T12:00:00Z");
         let run = store
@@ -1279,17 +1156,44 @@ mod tests {
         .unwrap();
 
         let state = run.state().await.unwrap();
-        assert_eq!(state.run.as_ref().map(|run| run.run_id), Some(test_run_id("run-1")));
+        assert_eq!(
+            state.run.as_ref().map(|run| run.run_id),
+            Some(test_run_id("run-1"))
+        );
         assert_eq!(state.graph_source.as_deref(), Some("digraph night_sky {}"));
-        assert_eq!(state.start.as_ref().and_then(|start| start.run_branch.as_deref()), Some("fabro/run/demo"));
-        assert_eq!(state.status.as_ref().map(|status| status.status), Some(RunStatus::Succeeded));
-        assert_eq!(state.checkpoint.as_ref().map(|checkpoint| checkpoint.current_node.as_str()), Some("code"));
+        assert_eq!(
+            state
+                .start
+                .as_ref()
+                .and_then(|start| start.run_branch.as_deref()),
+            Some("fabro/run/demo")
+        );
+        assert_eq!(
+            state.status.as_ref().map(|status| status.status),
+            Some(RunStatus::Succeeded)
+        );
+        assert_eq!(
+            state
+                .checkpoint
+                .as_ref()
+                .map(|checkpoint| checkpoint.current_node.as_str()),
+            Some("code")
+        );
         assert_eq!(state.checkpoints.len(), 1);
-        assert_eq!(state.final_patch.as_deref(), Some("diff --git a/src/lib.rs b/src/lib.rs\n"));
+        assert_eq!(
+            state.final_patch.as_deref(),
+            Some("diff --git a/src/lib.rs b/src/lib.rs\n")
+        );
         assert_eq!(state.retro_prompt.as_deref(), Some("How did it go?"));
         assert_eq!(state.retro_response.as_deref(), Some("Smooth enough"));
         assert_eq!(state.pull_request.as_ref().map(|pr| pr.number), Some(123));
-        assert_eq!(state.sandbox.as_ref().map(|sandbox| sandbox.provider.as_str()), Some("local"));
+        assert_eq!(
+            state
+                .sandbox
+                .as_ref()
+                .map(|sandbox| sandbox.provider.as_str()),
+            Some("local")
+        );
         assert_eq!(state.list_node_visits("code"), vec![2]);
         let node = state
             .node(&NodeVisitRef {
@@ -1299,9 +1203,15 @@ mod tests {
             .unwrap();
         assert_eq!(node.prompt.as_deref(), Some("Plan the fix"));
         assert_eq!(node.response.as_deref(), Some("Implemented"));
-        assert_eq!(node.diff.as_deref(), Some("diff --git a/src/lib.rs b/src/lib.rs"));
         assert_eq!(
-            node.provider_used.as_ref().and_then(|value| value.get("provider")).and_then(|value| value.as_str()),
+            node.diff.as_deref(),
+            Some("diff --git a/src/lib.rs b/src/lib.rs")
+        );
+        assert_eq!(
+            node.provider_used
+                .as_ref()
+                .and_then(|value| value.get("provider"))
+                .and_then(|value| value.as_str()),
             Some("openai")
         );
     }
@@ -1410,12 +1320,21 @@ mod tests {
         .unwrap();
 
         let state = run.state().await.unwrap();
-        assert_eq!(state.status.as_ref().map(|status| status.status), Some(RunStatus::Submitted));
+        assert_eq!(
+            state.status.as_ref().map(|status| status.status),
+            Some(RunStatus::Submitted)
+        );
         assert!(state.conclusion.is_none());
         assert!(state.final_patch.is_none());
         assert!(state.pull_request.is_none());
         assert_eq!(state.checkpoints.len(), 1);
-        assert_eq!(state.checkpoint.as_ref().map(|checkpoint| checkpoint.current_node.as_str()), Some("plan"));
+        assert_eq!(
+            state
+                .checkpoint
+                .as_ref()
+                .map(|checkpoint| checkpoint.current_node.as_str()),
+            Some("plan")
+        );
         assert!(state.list_node_ids().is_empty());
     }
 
@@ -1425,9 +1344,6 @@ mod tests {
         let created_at = dt("2026-03-27T12:00:00Z");
         let run = store
             .create_run(&test_run_id("run-1"), created_at, None)
-            .await
-            .unwrap();
-        run.put_run(&sample_run_record("run-1", created_at))
             .await
             .unwrap();
 
@@ -1477,9 +1393,8 @@ mod tests {
             vec!["artifact-only".to_string(), "code".to_string()]
         );
 
-        let snapshot = run.get_snapshot().await.unwrap().unwrap();
-        assert_eq!(snapshot.nodes.len(), 1);
-        assert_eq!(snapshot.nodes[0].node_id, "code");
+        let code_node = run.get_node(&snapshot_node).await.unwrap();
+        assert_eq!(code_node.node_id, "code");
     }
 
     #[tokio::test]
@@ -1506,24 +1421,6 @@ mod tests {
         .unwrap();
         let err = run.append_event(&invalid_run_id).await.unwrap_err();
         assert!(matches!(err, StoreError::InvalidEvent(_)));
-    }
-
-    #[tokio::test]
-    async fn put_run_rejects_created_at_mismatch() {
-        let store = InMemoryStore::default();
-        let created_at = dt("2026-03-27T12:00:00Z");
-        let run = store
-            .create_run(&test_run_id("run-1"), created_at, None)
-            .await
-            .unwrap();
-        let err = run
-            .put_run(&sample_run_record(
-                "run-1",
-                created_at + ChronoDuration::minutes(1),
-            ))
-            .await
-            .unwrap_err();
-        assert!(matches!(err, StoreError::Other(_)));
     }
 
     #[tokio::test]
@@ -1580,22 +1477,44 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn checkpoint_history_round_trips() {
+    async fn state_retains_checkpoint_history_by_event_sequence() {
         let store = InMemoryStore::default();
         let run = store
             .create_run(&test_run_id("run-1"), dt("2026-03-27T12:00:00Z"), None)
             .await
             .unwrap();
         let checkpoint = sample_checkpoint();
-        let seq = run.append_checkpoint(&checkpoint).await.unwrap();
+        let seq = run
+            .append_event(&event_payload(
+                "run-1",
+                "2026-03-27T12:00:00Z",
+                "checkpoint.completed",
+                Some(&checkpoint.current_node),
+                serde_json::json!({
+                    "status": "success",
+                    "current_node": checkpoint.current_node,
+                    "completed_nodes": checkpoint.completed_nodes,
+                    "node_retries": checkpoint.node_retries,
+                    "context_values": checkpoint.context_values,
+                    "node_outcomes": checkpoint.node_outcomes,
+                    "next_node_id": checkpoint.next_node_id,
+                    "git_commit_sha": checkpoint.git_commit_sha,
+                    "loop_failure_signatures": serde_json::json!({}),
+                    "restart_failure_signatures": serde_json::json!({}),
+                    "node_visits": checkpoint.node_visits,
+                }),
+            ))
+            .await
+            .unwrap();
+        let state = run.state().await.unwrap();
         assert_eq!(seq, 1);
-        let checkpoints = run.list_checkpoints().await.unwrap();
-        assert_eq!(checkpoints.len(), 1);
-        assert_eq!(checkpoints[0].0, 1);
-        assert_eq!(checkpoints[0].1.current_node, checkpoint.current_node);
-
-        let latest = run.get_checkpoint().await.unwrap().unwrap();
-        assert_eq!(latest.current_node, checkpoint.current_node);
+        assert_eq!(state.checkpoints.len(), 1);
+        assert_eq!(state.checkpoints[0].0, 1);
+        assert_eq!(state.checkpoints[0].1.current_node, checkpoint.current_node);
+        assert_eq!(
+            state.checkpoint.as_ref().unwrap().current_node,
+            checkpoint.current_node
+        );
     }
 
     #[tokio::test]
@@ -1635,8 +1554,23 @@ mod tests {
             .create_run(&test_run_id("run-early"), early, None)
             .await
             .unwrap();
+        let early_record = sample_run_record("run-early", early);
         early_run
-            .put_run(&sample_run_record("run-early", early))
+            .append_event(&event_payload(
+                "run-early",
+                "2026-03-27T10:00:00Z",
+                "run.created",
+                None,
+                serde_json::json!({
+                    "settings": early_record.settings,
+                    "graph": early_record.graph,
+                    "workflow_slug": early_record.workflow_slug,
+                    "working_directory": early_record.working_directory,
+                    "host_repo_path": early_record.host_repo_path,
+                    "base_branch": early_record.base_branch,
+                    "labels": early_record.labels,
+                }),
+            ))
             .await
             .unwrap();
 
@@ -1644,22 +1578,54 @@ mod tests {
             .create_run(&test_run_id("run-late"), late, None)
             .await
             .unwrap();
+        let late_record = sample_run_record("run-late", late);
         late_run
-            .put_run(&sample_run_record("run-late", late))
-            .await
-            .unwrap();
-        late_run
-            .put_start(&sample_start_record("run-late", late))
-            .await
-            .unwrap();
-        late_run
-            .put_status(&sample_status(
-                RunStatus::Succeeded,
-                Some(StatusReason::Completed),
+            .append_event(&event_payload(
+                "run-late",
+                "2026-03-27T12:00:00Z",
+                "run.created",
+                None,
+                serde_json::json!({
+                    "settings": late_record.settings,
+                    "graph": late_record.graph,
+                    "workflow_slug": late_record.workflow_slug,
+                    "working_directory": late_record.working_directory,
+                    "host_repo_path": late_record.host_repo_path,
+                    "base_branch": late_record.base_branch,
+                    "labels": late_record.labels,
+                }),
             ))
             .await
             .unwrap();
-        late_run.put_conclusion(&sample_conclusion()).await.unwrap();
+        late_run
+            .append_event(&event_payload(
+                "run-late",
+                "2026-03-27T12:00:01Z",
+                "run.started",
+                None,
+                serde_json::json!({
+                    "run_branch": "fabro/run/demo",
+                    "base_sha": "abc123",
+                }),
+            ))
+            .await
+            .unwrap();
+        late_run
+            .append_event(&event_payload(
+                "run-late",
+                "2026-03-27T12:00:02Z",
+                "run.completed",
+                None,
+                serde_json::json!({
+                    "duration_ms": 3210,
+                    "artifact_count": 1,
+                    "status": "success",
+                    "reason": "completed",
+                    "total_cost": 1.25,
+                }),
+            ))
+            .await
+            .unwrap();
 
         let all = store.list_runs(&ListRunsQuery::default()).await.unwrap();
         assert_eq!(all.len(), 2);
@@ -1695,12 +1661,10 @@ mod tests {
             .unwrap();
         store.delete_run(&test_run_id("run-1")).await.unwrap();
         store.delete_run(&test_run_id("run-1")).await.unwrap();
-        assert!(
-            matches!(
-                store.open_run(&test_run_id("run-1")).await,
-                Err(StoreError::RunNotFound(_))
-            )
-        );
+        assert!(matches!(
+            store.open_run(&test_run_id("run-1")).await,
+            Err(StoreError::RunNotFound(_))
+        ));
     }
 
     #[tokio::test]

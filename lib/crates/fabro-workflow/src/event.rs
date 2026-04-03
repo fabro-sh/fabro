@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use anyhow::{Context, Result};
 use chrono::{SecondsFormat, Utc};
-use fabro_store::{EventPayload, NodeVisitRef, RunStore};
+use fabro_store::{EventPayload, NodeVisitRef, RunStoreHandle, SlateRunStore};
 use fabro_types::RunId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -1517,7 +1517,7 @@ pub fn event_payload_from_redacted_json(line: &str, run_id: &RunId) -> Result<Ev
 }
 
 pub async fn append_workflow_event(
-    run_store: &dyn RunStore,
+    run_store: &SlateRunStore,
     run_id: &RunId,
     event: &WorkflowRunEvent,
 ) -> Result<()> {
@@ -1562,7 +1562,7 @@ pub struct StoreProgressLogger {
 
 impl StoreProgressLogger {
     #[must_use]
-    pub fn new(run_store: Arc<dyn RunStore>) -> Self {
+    pub fn new(run_store: RunStoreHandle) -> Self {
         let (tx, mut rx) = mpsc::unbounded_channel();
 
         tokio::spawn(async move {
@@ -1627,7 +1627,7 @@ impl StoreProgressLogger {
 }
 
 async fn project_provider_used_from_event_payload(
-    run_store: &dyn RunStore,
+    run_store: &SlateRunStore,
     payload: &EventPayload,
 ) -> Result<()> {
     let value = payload.as_value();

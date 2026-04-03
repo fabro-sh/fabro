@@ -2,7 +2,7 @@ use std::path::Path;
 use std::process::Command;
 
 use fabro_checkpoint::git::Store;
-use fabro_store::{NodeVisitRef, RunStore};
+use fabro_store::{NodeVisitRef, SlateRunStore};
 use fabro_types::Settings;
 
 use crate::error::{FabroError, Result};
@@ -353,7 +353,7 @@ pub fn scan_node_files(run_dir: &Path) -> Vec<(String, Vec<u8>)> {
     result
 }
 
-pub async fn scan_node_files_from_store(run_store: &dyn RunStore) -> Vec<(String, Vec<u8>)> {
+pub async fn scan_node_files_from_store(run_store: &SlateRunStore) -> Vec<(String, Vec<u8>)> {
     let mut result = Vec::new();
     let Ok(node_ids) = run_store.list_node_ids().await else {
         return result;
@@ -441,10 +441,12 @@ fn node_file_path(node_id: &str, visit: u32, filename: &str) -> String {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use fabro_graphviz::graph::Graph;
-    use fabro_store::{InMemoryStore, Store};
-    use fabro_types::{NodeStatusRecord, RunRecord, StageStatus, fixtures};
+    use fabro_store::SlateStore;
+    use fabro_types::{NodeStatusRecord, StageStatus, fixtures};
+    use object_store::memory::InMemory;
     use std::fs;
+    use std::sync::Arc;
+    use std::time::Duration;
 
     /// Create a temporary git repo with an initial commit.
     fn init_repo(dir: &Path) {
@@ -467,6 +469,14 @@ mod tests {
             .current_dir(dir)
             .output()
             .unwrap();
+    }
+
+    fn test_store() -> Arc<SlateStore> {
+        Arc::new(SlateStore::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ))
     }
 
     #[test]
@@ -583,25 +593,11 @@ mod tests {
 
     #[tokio::test]
     async fn scan_node_files_from_store_reconstructs_allowlisted_entries() {
-        let store = InMemoryStore::default();
-        let created_at = Utc::now();
+        let store = test_store();
         let run = store
-            .create_run(&fixtures::RUN_1, created_at, None)
+            .create_run(&fixtures::RUN_1, chrono::Utc::now(), None)
             .await
             .unwrap();
-        run.put_run(&RunRecord {
-            run_id: fixtures::RUN_1,
-            created_at,
-            settings: Settings::default(),
-            graph: Graph::new("test"),
-            workflow_slug: None,
-            working_directory: std::path::PathBuf::from("."),
-            host_repo_path: None,
-            base_branch: None,
-            labels: std::collections::HashMap::new(),
-        })
-        .await
-        .unwrap();
         let node = NodeVisitRef {
             node_id: "work",
             visit: 2,

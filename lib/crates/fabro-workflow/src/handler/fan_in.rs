@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
-use fabro_store::{NodeVisitRef, RunStore};
+use fabro_store::{NodeVisitRef, RunStoreHandle};
 
 use crate::context::Context;
 use crate::context::keys;
@@ -226,7 +226,7 @@ async fn llm_evaluate(
     node_id: &str,
     emitter: &Arc<EventEmitter>,
     sandbox: &Arc<dyn Sandbox>,
-    run_store: Arc<dyn RunStore>,
+    run_store: RunStoreHandle,
 ) -> Result<Candidate, FabroError> {
     let results_text =
         serde_json::to_string_pretty(results).unwrap_or_else(|_| results.to_string());

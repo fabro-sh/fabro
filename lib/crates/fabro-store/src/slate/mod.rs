@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
 use object_store::ObjectStore;
@@ -15,9 +14,10 @@ use slatedb::config::{DbReaderOptions, Settings};
 use tokio::sync::Mutex;
 
 use crate::keys;
-use crate::{CatalogRecord, ListRunsQuery, Result, RunStore, RunSummary, Store, StoreError};
+use crate::{CatalogRecord, ListRunsQuery, Result, RunStoreHandle, RunSummary, StoreError};
 use fabro_types::RunId;
-use run_store::{SlateRunStore, SlateRunStoreInner};
+pub use run_store::SlateRunStore;
+use run_store::SlateRunStoreInner;
 
 #[derive(Clone)]
 pub struct SlateStore {
@@ -173,14 +173,13 @@ impl SlateStore {
     }
 }
 
-#[async_trait]
-impl Store for SlateStore {
-    async fn create_run(
+impl SlateStore {
+    pub async fn create_run(
         &self,
         run_id: &RunId,
         created_at: DateTime<Utc>,
         run_dir: Option<&str>,
-    ) -> Result<Arc<dyn RunStore>> {
+    ) -> Result<RunStoreHandle> {
         let locator =
             catalog::read_locator(self.object_store.clone(), &self.base_prefix, run_id).await?;
         if let Some(active) = self.get_active_run(run_id).await {
@@ -201,7 +200,7 @@ impl Store for SlateStore {
                 run_dir,
             )
             .await?;
-            return Ok(Arc::new(active) as Arc<dyn RunStore>);
+            return Ok(Arc::new(active));
         }
 
         let db_prefix = match locator {
@@ -233,10 +232,10 @@ impl Store for SlateStore {
             run_dir,
         )
         .await?;
-        Ok(Arc::new(run_store) as Arc<dyn RunStore>)
+        Ok(Arc::new(run_store))
     }
 
-    async fn open_run(&self, run_id: &RunId) -> Result<Arc<dyn RunStore>> {
+    pub async fn open_run(&self, run_id: &RunId) -> Result<RunStoreHandle> {
         let locator = catalog::read_locator(self.object_store.clone(), &self.base_prefix, run_id)
             .await?
             .ok_or_else(|| StoreError::RunNotFound(run_id.to_string()))?;
@@ -245,10 +244,10 @@ impl Store for SlateStore {
             .open_run_store(&locator)
             .await?
             .ok_or_else(|| StoreError::RunNotFound(run_id.to_string()))?;
-        Ok(Arc::new(run_store) as Arc<dyn RunStore>)
+        Ok(Arc::new(run_store))
     }
 
-    async fn open_run_reader(&self, run_id: &RunId) -> Result<Arc<dyn RunStore>> {
+    pub async fn open_run_reader(&self, run_id: &RunId) -> Result<RunStoreHandle> {
         let locator = catalog::read_locator(self.object_store.clone(), &self.base_prefix, run_id)
             .await?
             .ok_or_else(|| StoreError::RunNotFound(run_id.to_string()))?;
@@ -257,10 +256,10 @@ impl Store for SlateStore {
             .open_run_reader_store(&locator)
             .await?
             .ok_or_else(|| StoreError::RunNotFound(run_id.to_string()))?;
-        Ok(Arc::new(run_store) as Arc<dyn RunStore>)
+        Ok(Arc::new(run_store))
     }
 
-    async fn list_runs(&self, query: &ListRunsQuery) -> Result<Vec<RunSummary>> {
+    pub async fn list_runs(&self, query: &ListRunsQuery) -> Result<Vec<RunSummary>> {
         let catalogs =
             catalog::list_catalogs(self.object_store.clone(), &self.base_prefix, query).await?;
         let mut summaries = Vec::new();
@@ -293,7 +292,7 @@ impl Store for SlateStore {
         Ok(summaries)
     }
 
-    async fn delete_run(&self, run_id: &RunId) -> Result<()> {
+    pub async fn delete_run(&self, run_id: &RunId) -> Result<()> {
         let active = self.remove_active_run(run_id).await;
         let active_record = active.as_ref().map(SlateRunStore::record);
         if let Some(active) = &active {
@@ -384,8 +383,8 @@ mod tests {
 
     use bytes::Bytes;
     use fabro_types::{
-        AttrValue, Checkpoint, Conclusion, Graph, NodeStatusRecord, RunId, RunRecord, RunStatus,
-        RunStatusRecord, Settings, StageStatus, StartRecord, StatusReason, fixtures,
+        AttrValue, Graph, NodeStatusRecord, RunId, RunRecord, RunStatus, Settings, StageStatus,
+        StatusReason, fixtures,
     };
     use object_store::memory::InMemory;
     use slatedb::config::Settings as SlateSettings;
@@ -433,58 +432,6 @@ mod tests {
         }
     }
 
-    fn sample_start_record(run_id: &str, created_at: DateTime<Utc>) -> StartRecord {
-        StartRecord {
-            run_id: test_run_id(run_id),
-            start_time: created_at + chrono::Duration::seconds(5),
-            run_branch: Some("fabro/run/demo".to_string()),
-            base_sha: Some("abc123".to_string()),
-        }
-    }
-
-    fn sample_status(status: RunStatus, reason: Option<StatusReason>) -> RunStatusRecord {
-        RunStatusRecord {
-            status,
-            reason,
-            updated_at: dt("2026-03-27T12:05:00Z"),
-        }
-    }
-
-    fn sample_checkpoint() -> Checkpoint {
-        Checkpoint {
-            timestamp: dt("2026-03-27T12:10:00Z"),
-            current_node: "code".to_string(),
-            completed_nodes: vec!["plan".to_string()],
-            node_retries: std::collections::HashMap::from([("code".to_string(), 1)]),
-            context_values: std::collections::HashMap::new(),
-            node_outcomes: std::collections::HashMap::new(),
-            next_node_id: Some("review".to_string()),
-            git_commit_sha: Some("def456".to_string()),
-            loop_failure_signatures: std::collections::HashMap::new(),
-            restart_failure_signatures: std::collections::HashMap::new(),
-            node_visits: std::collections::HashMap::from([("code".to_string(), 2)]),
-        }
-    }
-
-    fn sample_conclusion() -> Conclusion {
-        Conclusion {
-            timestamp: dt("2026-03-27T12:15:00Z"),
-            status: StageStatus::Success,
-            duration_ms: 3210,
-            failure_reason: None,
-            final_git_commit_sha: Some("feedbeef".to_string()),
-            stages: Vec::new(),
-            total_cost: Some(1.25),
-            total_retries: 2,
-            total_input_tokens: 10,
-            total_output_tokens: 20,
-            total_cache_read_tokens: 30,
-            total_cache_write_tokens: 40,
-            total_reasoning_tokens: 50,
-            has_pricing: true,
-        }
-    }
-
     fn sample_node_status() -> NodeStatusRecord {
         NodeStatusRecord {
             status: StageStatus::Success,
@@ -494,17 +441,24 @@ mod tests {
         }
     }
 
-    fn event_payload(run_id: &str, ts: &str, event: &str) -> EventPayload {
-        EventPayload::new(
-            serde_json::json!({
-                "id": format!("evt-{run_id}-{event}"),
-                "ts": ts,
-                "run_id": test_run_id(run_id).to_string(),
-                "event": event
-            }),
-            &test_run_id(run_id),
-        )
-        .unwrap()
+    fn event_payload(
+        run_id: &str,
+        ts: &str,
+        event: &str,
+        node_id: Option<&str>,
+        properties: serde_json::Value,
+    ) -> EventPayload {
+        let mut value = serde_json::json!({
+            "id": format!("evt-{run_id}-{event}"),
+            "ts": ts,
+            "run_id": test_run_id(run_id).to_string(),
+            "event": event,
+            "properties": properties,
+        });
+        if let Some(node_id) = node_id {
+            value["node_id"] = serde_json::Value::String(node_id.to_string());
+        }
+        EventPayload::new(value, &test_run_id(run_id)).unwrap()
     }
 
     async fn list_paths(store: Arc<dyn ObjectStore>, prefix: &str) -> Vec<String> {
@@ -552,19 +506,51 @@ mod tests {
             .await
             .unwrap();
 
-        run.put_run(&sample_run_record("run-1", created_at))
-            .await
-            .unwrap();
-        run.put_start(&sample_start_record("run-1", created_at))
-            .await
-            .unwrap();
-        run.put_status(&sample_status(
-            RunStatus::Succeeded,
-            Some(StatusReason::Completed),
+        let run_record = sample_run_record("run-1", created_at);
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:00Z",
+            "run.created",
+            None,
+            serde_json::json!({
+                "settings": run_record.settings,
+                "graph": run_record.graph,
+                "workflow_slug": run_record.workflow_slug,
+                "working_directory": run_record.working_directory,
+                "host_repo_path": run_record.host_repo_path,
+                "base_branch": run_record.base_branch,
+                "labels": run_record.labels,
+            }),
         ))
         .await
         .unwrap();
-        run.put_conclusion(&sample_conclusion()).await.unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:01Z",
+            "run.started",
+            None,
+            serde_json::json!({
+                "run_branch": "fabro/run/demo",
+                "base_sha": "abc123",
+            }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:02Z",
+            "run.completed",
+            None,
+            serde_json::json!({
+                "duration_ms": 3210,
+                "artifact_count": 1,
+                "status": "success",
+                "reason": "completed",
+                "total_cost": 1.25,
+            }),
+        ))
+        .await
+        .unwrap();
 
         let by_id = catalog::by_id_path("runs/", &test_run_id("run-1"));
         let by_start = catalog::by_start_path("runs/", created_at, &test_run_id("run-1"));
@@ -579,20 +565,12 @@ mod tests {
         assert_eq!(summary[0].status, Some(RunStatus::Succeeded));
         assert_eq!(summary[0].status_reason, Some(StatusReason::Completed));
 
-        let reopened = store
-            .open_run(&test_run_id("run-1"))
-            .await
-            .unwrap();
-        let stored = reopened.get_run().await.unwrap().unwrap();
+        let reopened = store.open_run(&test_run_id("run-1")).await.unwrap();
+        let stored = reopened.state().await.unwrap().run.unwrap();
         assert_eq!(stored.run_id, test_run_id("run-1"));
 
         store.delete_run(&test_run_id("run-1")).await.unwrap();
-        assert!(
-            store
-                .open_run(&test_run_id("run-1"))
-                .await
-                .is_err()
-        );
+        assert!(store.open_run(&test_run_id("run-1")).await.is_err());
         assert!(!object_exists(object_store.clone(), &by_id).await);
         assert!(!object_exists(object_store.clone(), &by_start).await);
         assert!(list_paths(object_store, "runs/db").await.is_empty());
@@ -611,8 +589,23 @@ mod tests {
 
         let db = seed_db(object_store.clone(), &record, true).await;
         db.put(
-            keys::run(),
-            serde_json::to_vec(&sample_run_record("run-1", created_at)).unwrap(),
+            keys::event_key(1, created_at.timestamp_millis()),
+            serde_json::to_vec(&event_payload(
+                "run-1",
+                "2026-03-27T12:00:00Z",
+                "run.created",
+                None,
+                serde_json::json!({
+                    "settings": sample_run_record("run-1", created_at).settings,
+                    "graph": sample_run_record("run-1", created_at).graph,
+                    "workflow_slug": sample_run_record("run-1", created_at).workflow_slug,
+                    "working_directory": sample_run_record("run-1", created_at).working_directory,
+                    "host_repo_path": sample_run_record("run-1", created_at).host_repo_path,
+                    "base_branch": sample_run_record("run-1", created_at).base_branch,
+                    "labels": sample_run_record("run-1", created_at).labels,
+                }),
+            ))
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -626,12 +619,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(
-            store
-                .open_run(&test_run_id("run-1"))
-                .await
-                .is_ok()
-        );
+        assert!(store.open_run(&test_run_id("run-1")).await.is_ok());
         assert!(
             store
                 .list_runs(&ListRunsQuery::default())
@@ -653,43 +641,63 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reopen_recovers_event_and_checkpoint_sequences() {
+    async fn reopen_recovers_event_sequences() {
         let (_object_store, store) = make_store();
         let created_at = dt("2026-03-27T12:00:00Z");
         let run = store
             .create_run(&test_run_id("run-1"), created_at, None)
             .await
             .unwrap();
-        run.put_run(&sample_run_record("run-1", created_at))
-            .await
-            .unwrap();
-        run.append_event(&event_payload("run-1", "2026-03-27T12:00:00Z", "Started"))
-            .await
-            .unwrap();
-        run.append_event(&event_payload("run-1", "2026-03-27T12:00:01Z", "Next"))
-            .await
-            .unwrap();
-        run.append_checkpoint(&sample_checkpoint()).await.unwrap();
+        let run_record = sample_run_record("run-1", created_at);
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:00Z",
+            "run.created",
+            None,
+            serde_json::json!({
+                "settings": run_record.settings,
+                "graph": run_record.graph,
+                "workflow_slug": run_record.workflow_slug,
+                "working_directory": run_record.working_directory,
+                "host_repo_path": run_record.host_repo_path,
+                "base_branch": run_record.base_branch,
+                "labels": run_record.labels,
+            }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:01Z",
+            "Started",
+            None,
+            serde_json::json!({}),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:02Z",
+            "Next",
+            None,
+            serde_json::json!({}),
+        ))
+        .await
+        .unwrap();
         drop(run);
 
-        let reopened = store
-            .open_run(&test_run_id("run-1"))
-            .await
-            .unwrap();
+        let reopened = store.open_run(&test_run_id("run-1")).await.unwrap();
         let next_event = reopened
             .append_event(&event_payload(
                 "run-1",
                 "2026-03-27T12:00:02Z",
                 "AfterReopen",
+                None,
+                serde_json::json!({}),
             ))
             .await
             .unwrap();
-        let next_checkpoint = reopened
-            .append_checkpoint(&sample_checkpoint())
-            .await
-            .unwrap();
-        assert_eq!(next_event, 3);
-        assert_eq!(next_checkpoint, 2);
+        assert_eq!(next_event, 4);
     }
 
     #[tokio::test]
@@ -720,12 +728,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(
-            store
-                .open_run(&test_run_id("run-1"))
-                .await
-                .is_err()
-        );
+        assert!(store.open_run(&test_run_id("run-1")).await.is_err());
         assert!(
             store
                 .list_runs(&ListRunsQuery::default())
@@ -766,35 +769,51 @@ mod tests {
             .create_run(&test_run_id("run-1"), created_at, None)
             .await
             .unwrap();
-        run.put_run(&sample_run_record("run-1", created_at))
-            .await
-            .unwrap();
+        let run_record = sample_run_record("run-1", created_at);
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:00Z",
+            "run.created",
+            None,
+            serde_json::json!({
+                "settings": run_record.settings,
+                "graph": run_record.graph,
+                "workflow_slug": run_record.workflow_slug,
+                "working_directory": run_record.working_directory,
+                "host_repo_path": run_record.host_repo_path,
+                "base_branch": run_record.base_branch,
+                "labels": run_record.labels,
+            }),
+        ))
+        .await
+        .unwrap();
 
         let listed = store.list_runs(&ListRunsQuery::default()).await.unwrap();
         assert_eq!(listed.len(), 1);
 
-        let reopened = store
-            .open_run(&test_run_id("run-1"))
-            .await
-            .unwrap();
+        let reopened = store.open_run(&test_run_id("run-1")).await.unwrap();
         let first_event = run
-            .append_event(&event_payload("run-1", "2026-03-27T12:00:00Z", "Started"))
+            .append_event(&event_payload(
+                "run-1",
+                "2026-03-27T12:00:00Z",
+                "Started",
+                None,
+                serde_json::json!({}),
+            ))
             .await
             .unwrap();
         let second_event = reopened
-            .append_event(&event_payload("run-1", "2026-03-27T12:00:01Z", "Continued"))
+            .append_event(&event_payload(
+                "run-1",
+                "2026-03-27T12:00:01Z",
+                "Continued",
+                None,
+                serde_json::json!({}),
+            ))
             .await
             .unwrap();
-        let first_checkpoint = run.append_checkpoint(&sample_checkpoint()).await.unwrap();
-        let second_checkpoint = reopened
-            .append_checkpoint(&sample_checkpoint())
-            .await
-            .unwrap();
-
-        assert_eq!(first_event, 1);
-        assert_eq!(second_event, 2);
-        assert_eq!(first_checkpoint, 1);
-        assert_eq!(second_checkpoint, 2);
+        assert_eq!(first_event, 2);
+        assert_eq!(second_event, 3);
     }
 
     #[tokio::test]
@@ -807,9 +826,15 @@ mod tests {
             .unwrap();
         let mut stream = run.watch_events_from(1).await.unwrap();
 
-        run.append_event(&event_payload("run-1", "2026-03-27T12:00:00Z", "Started"))
-            .await
-            .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:00Z",
+            "Started",
+            None,
+            serde_json::json!({}),
+        ))
+        .await
+        .unwrap();
 
         let event = timeout(
             Duration::from_secs(2),
@@ -834,8 +859,23 @@ mod tests {
         };
         let db = seed_db(object_store.clone(), &record, true).await;
         db.put(
-            keys::run(),
-            serde_json::to_vec(&sample_run_record("run-1", created_at)).unwrap(),
+            keys::event_key(1, created_at.timestamp_millis()),
+            serde_json::to_vec(&event_payload(
+                "run-1",
+                "2026-03-27T12:00:00Z",
+                "run.created",
+                None,
+                serde_json::json!({
+                    "settings": sample_run_record("run-1", created_at).settings,
+                    "graph": sample_run_record("run-1", created_at).graph,
+                    "workflow_slug": sample_run_record("run-1", created_at).workflow_slug,
+                    "working_directory": sample_run_record("run-1", created_at).working_directory,
+                    "host_repo_path": sample_run_record("run-1", created_at).host_repo_path,
+                    "base_branch": sample_run_record("run-1", created_at).base_branch,
+                    "labels": sample_run_record("run-1", created_at).labels,
+                }),
+            ))
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -861,23 +901,21 @@ mod tests {
             .create_run(&test_run_id("run-1"), created_at, None)
             .await
             .unwrap();
-        run.put_run(&sample_run_record("run-1", created_at))
+        run.put_artifact_value("summary", &serde_json::json!({"done": true}))
             .await
             .unwrap();
 
         store.delete_run(&test_run_id("run-1")).await.unwrap();
 
-        let err = run.put_graph("digraph night_sky {}").await.unwrap_err();
+        let err = run
+            .put_artifact_value("summary", &serde_json::json!({"done": false}))
+            .await
+            .unwrap_err();
         assert!(matches!(
             err,
             StoreError::Slate(err) if matches!(err.kind(), ErrorKind::Closed(CloseReason::Clean))
         ));
-        assert!(
-            store
-                .open_run(&test_run_id("run-1"))
-                .await
-                .is_err()
-        );
+        assert!(store.open_run(&test_run_id("run-1")).await.is_err());
         assert!(list_paths(object_store, "runs").await.is_empty());
     }
 
@@ -890,7 +928,7 @@ mod tests {
             .create_run(&test_run_id("run-1"), created_at, None)
             .await
             .unwrap();
-        run.put_run(&sample_run_record("run-1", created_at))
+        run.put_artifact_value("summary", &serde_json::json!({"done": true}))
             .await
             .unwrap();
 
@@ -927,14 +965,13 @@ mod tests {
         assert_ne!(orphan.db_prefix, new_prefix);
 
         let db = seed_db(object_store.clone(), &orphan, true).await;
-        db.put(keys::graph(), b"stale graph").await.unwrap();
         db.close().await.unwrap();
 
         let run = store
             .create_run(&test_run_id("run-1"), new_created_at, None)
             .await
             .unwrap();
-        assert_eq!(run.get_graph().await.unwrap(), None);
+        assert!(run.state().await.unwrap().graph_source.is_none());
 
         let locator = catalog::read_locator(object_store, "runs/", &test_run_id("run-1"))
             .await
@@ -988,9 +1025,6 @@ mod tests {
             .create_run(&test_run_id("run-1"), created_at, None)
             .await
             .unwrap();
-        run.put_run(&sample_run_record("run-1", created_at))
-            .await
-            .unwrap();
         let node = NodeVisitRef {
             node_id: "code",
             visit: 2,
@@ -1023,10 +1057,6 @@ mod tests {
             .create_run(&test_run_id("run-1"), created_at, None)
             .await
             .unwrap();
-        run.put_run(&sample_run_record("run-1", created_at))
-            .await
-            .unwrap();
-
         run.put_artifact_value("summary", &serde_json::json!({"done": true}))
             .await
             .unwrap();
@@ -1067,8 +1097,7 @@ mod tests {
             ]
         );
 
-        let snapshot = run.get_snapshot().await.unwrap().unwrap();
-        assert_eq!(snapshot.nodes.len(), 1);
-        assert_eq!(snapshot.nodes[0].node_id, "code");
+        let code_node = run.get_node(&snapshot_node).await.unwrap();
+        assert_eq!(code_node.node_id, "code");
     }
 }

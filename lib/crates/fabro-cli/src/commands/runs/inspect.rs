@@ -39,50 +39,26 @@ async fn inspect_run_store(
     run_id: &RunId,
     run_dir: &Path,
     status: RunStatus,
-    run_store: &dyn fabro_store::RunStore,
+    run_store: &fabro_store::SlateRunStore,
 ) -> InspectOutput {
     if let Ok(state) = run_store.state().await {
-        if let Some(snapshot) = state.to_snapshot() {
-            return InspectOutput {
-                run_id: run_id.to_string(),
-                run_dir: run_dir.to_path_buf(),
-                status: state.status.as_ref().map_or(status, |record| record.status),
-                run_record: serde_json::to_value(snapshot.run).ok(),
-                start_record: snapshot
-                    .start
-                    .and_then(|record| serde_json::to_value(record).ok()),
-                conclusion: snapshot
-                    .conclusion
-                    .and_then(|record| serde_json::to_value(record).ok()),
-                checkpoint: snapshot
-                    .checkpoint
-                    .and_then(|record| serde_json::to_value(record).ok()),
-                sandbox: snapshot
-                    .sandbox
-                    .and_then(|record| serde_json::to_value(record).ok()),
-            };
-        }
-    }
-
-    if let Ok(Some(snapshot)) = run_store.get_snapshot().await {
         return InspectOutput {
             run_id: run_id.to_string(),
             run_dir: run_dir.to_path_buf(),
-            status: snapshot
-                .status
-                .as_ref()
-                .map_or(status, |record| record.status),
-            run_record: serde_json::to_value(snapshot.run).ok(),
-            start_record: snapshot
+            status: state.status.as_ref().map_or(status, |record| record.status),
+            run_record: state
+                .run
+                .and_then(|record| serde_json::to_value(record).ok()),
+            start_record: state
                 .start
                 .and_then(|record| serde_json::to_value(record).ok()),
-            conclusion: snapshot
+            conclusion: state
                 .conclusion
                 .and_then(|record| serde_json::to_value(record).ok()),
-            checkpoint: snapshot
+            checkpoint: state
                 .checkpoint
                 .and_then(|record| serde_json::to_value(record).ok()),
-            sandbox: snapshot
+            sandbox: state
                 .sandbox
                 .and_then(|record| serde_json::to_value(record).ok()),
         };
@@ -92,35 +68,10 @@ async fn inspect_run_store(
         run_id: run_id.to_string(),
         run_dir: run_dir.to_path_buf(),
         status,
-        run_record: run_store
-            .get_run()
-            .await
-            .ok()
-            .flatten()
-            .and_then(|v| serde_json::to_value(v).ok()),
-        start_record: run_store
-            .get_start()
-            .await
-            .ok()
-            .flatten()
-            .and_then(|v| serde_json::to_value(v).ok()),
-        conclusion: run_store
-            .get_conclusion()
-            .await
-            .ok()
-            .flatten()
-            .and_then(|v| serde_json::to_value(v).ok()),
-        checkpoint: run_store
-            .get_checkpoint()
-            .await
-            .ok()
-            .flatten()
-            .and_then(|v| serde_json::to_value(v).ok()),
-        sandbox: run_store
-            .get_sandbox()
-            .await
-            .ok()
-            .flatten()
-            .and_then(|v| serde_json::to_value(v).ok()),
+        run_record: None,
+        start_record: None,
+        conclusion: None,
+        checkpoint: None,
+        sandbox: None,
     }
 }

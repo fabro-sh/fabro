@@ -4,7 +4,7 @@ use std::process::Output;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use fabro_store::{EventEnvelope, RunSnapshot, RunStore, SlateStore, Store};
+use fabro_store::{EventEnvelope, RunSnapshot, RunStoreHandle, SlateStore};
 use fabro_test::TestContext;
 use fabro_types::RunId;
 use object_store::local::LocalFileSystem;
@@ -284,9 +284,9 @@ worktree_mode = "never"
     let run = run_local_workflow(context, &workspace_dir, "run.toml");
     let store = run_store(&run.run_dir);
     assert!(
-        block_on(store.get_sandbox())
+        block_on(store.state())
             .ok()
-            .flatten()
+            .and_then(|state| state.sandbox)
             .is_some()
     );
 
@@ -374,10 +374,9 @@ pub(crate) fn write_gated_workflow(path: &Path, name: &str, goal: &str) -> Workf
 pub(crate) fn wait_for_status(run_dir: &Path, expected: &[&str]) -> String {
     let deadline = Instant::now() + COMMAND_TIMEOUT;
     loop {
-        if let Some(status) = block_on(run_store(run_dir).get_status())
+        if let Some(status) = block_on(run_store(run_dir).state())
             .ok()
-            .flatten()
-            .map(|record| record.status.to_string())
+            .and_then(|state| state.status.map(|record| record.status.to_string()))
         {
             if expected.iter().any(|candidate| *candidate == status) {
                 return status;
@@ -481,7 +480,7 @@ fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
         .block_on(future)
 }
 
-fn run_store(run_dir: &Path) -> Arc<dyn RunStore> {
+fn run_store(run_dir: &Path) -> RunStoreHandle {
     let runs_dir = run_dir.parent().expect("run dir should have parent");
     let storage_dir = runs_dir.parent().expect("runs dir should have parent");
     let run_id: RunId = infer_run_id(run_dir).parse().expect("run id should parse");
@@ -495,9 +494,9 @@ fn run_store(run_dir: &Path) -> Arc<dyn RunStore> {
 
 pub(crate) fn run_snapshot(run_dir: &Path) -> RunSnapshot {
     let store = run_store(run_dir);
-    block_on(store.get_snapshot())
+    block_on(store.state())
         .ok()
-        .flatten()
+        .and_then(|state| state.to_snapshot())
         .expect("run store snapshot should exist")
 }
 

@@ -15,12 +15,16 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+#[cfg(test)]
+use std::time::Duration;
 
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
-use fabro_store::RunStore;
+use fabro_store::RunStoreHandle;
 #[cfg(test)]
-use fabro_store::Store;
+use fabro_store::SlateStore;
+#[cfg(test)]
+use object_store::memory::InMemory;
 
 use crate::context::Context;
 use crate::error::FabroError;
@@ -36,7 +40,7 @@ pub struct EngineServices {
     pub registry: Arc<HandlerRegistry>,
     pub emitter: Arc<EventEmitter>,
     pub sandbox: Arc<dyn Sandbox>,
-    pub run_store: Arc<dyn RunStore>,
+    pub run_store: RunStoreHandle,
     /// Git state for the current run. Set via `set_git_state` at the start of
     /// `run_via_core` and read by parallel/fan-in handlers.
     pub(crate) git_state: std::sync::RwLock<Option<Arc<GitState>>>,
@@ -71,6 +75,11 @@ impl EngineServices {
     /// Test-only default: empty registry, no hooks, local sandbox at cwd.
     #[cfg(test)]
     pub fn test_default() -> Self {
+        let store = Arc::new(SlateStore::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ));
         Self {
             registry: Arc::new(HandlerRegistry::new(Box::new(start::StartHandler))),
             emitter: Arc::new(EventEmitter::default()),
@@ -78,10 +87,10 @@ impl EngineServices {
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             )),
             run_store: futures::executor::block_on(async {
-                fabro_store::InMemoryStore::default()
+                store
                     .create_run(&fabro_types::RunId::new(), chrono::Utc::now(), None)
                     .await
-                    .expect("in-memory test run store should initialize")
+                    .expect("slate-backed test run store should initialize")
             }),
             git_state: std::sync::RwLock::new(None),
             hook_runner: None,

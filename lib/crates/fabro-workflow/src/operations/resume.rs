@@ -5,7 +5,7 @@ use fabro_store::RuntimeState;
 use crate::error::FabroError;
 use crate::event::{WorkflowRunEvent, append_workflow_event};
 use crate::outcome::StageStatus;
-use crate::run_status::{self, RunStatus};
+use crate::run_status::RunStatus;
 
 use super::start::{StartServices, Started, execute_persisted_run};
 
@@ -40,14 +40,6 @@ pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, 
         .ok_or_else(|| FabroError::Precondition("no checkpoint to resume from".to_string()))?;
 
     cleanup_resume_artifacts(run_dir);
-    services
-        .run_store
-        .put_status(&run_status::RunStatusRecord::new(
-            RunStatus::Submitted,
-            None,
-        ))
-        .await
-        .map_err(|err| FabroError::engine(err.to_string()))?;
     append_workflow_event(
         services.run_store.as_ref(),
         &services.run_id,

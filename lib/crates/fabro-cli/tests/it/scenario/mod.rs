@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use fabro_store::{RunSnapshot, RunStore, SlateStore, Store};
+use fabro_store::{RunSnapshot, RunStoreHandle, SlateStore};
 use fabro_types::RunId;
 use object_store::local::LocalFileSystem;
 pub(super) fn fixture(name: &str) -> PathBuf {
@@ -23,7 +23,7 @@ fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
         .block_on(future)
 }
 
-fn run_store(run_dir: &Path) -> Arc<dyn RunStore> {
+fn run_store(run_dir: &Path) -> RunStoreHandle {
     let runs_dir = run_dir.parent().expect("run dir should have parent");
     let storage_dir = runs_dir.parent().expect("runs dir should have parent");
     let run_id: RunId = std::fs::read_to_string(run_dir.join("id.txt"))
@@ -48,9 +48,9 @@ fn run_store(run_dir: &Path) -> Arc<dyn RunStore> {
 
 pub(super) fn run_snapshot(run_dir: &Path) -> RunSnapshot {
     let store = run_store(run_dir);
-    block_on(store.get_snapshot())
+    block_on(store.state())
         .ok()
-        .flatten()
+        .and_then(|state| state.to_snapshot())
         .expect("run store snapshot should exist")
 }
 

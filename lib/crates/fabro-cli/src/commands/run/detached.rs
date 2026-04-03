@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use fabro_interview::FileInterviewer;
-use fabro_store::{RuntimeState, Store};
+use fabro_store::RuntimeState;
 use fabro_types::RunId;
 use fabro_workflow::event::EventEmitter;
 use fabro_workflow::operations::{StartServices, resume as resume_run, start as start_run};
@@ -31,8 +31,9 @@ pub(crate) async fn execute(
     let store = store::build_store(&storage_dir)?;
     let run_store = store.open_run(&run_id).await?;
     let run_record = run_store
-        .get_run()
+        .state()
         .await?
+        .run
         .ok_or_else(|| anyhow!("Run {run_id} has no run record in store"))?;
     let on_node: fabro_workflow::OnNodeCallback = Some({
         let run_id = run_record.run_id.to_string();

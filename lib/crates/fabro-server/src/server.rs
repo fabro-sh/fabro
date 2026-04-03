@@ -19,12 +19,13 @@ use fabro_llm::types::{
     ContentPart, FinishReason, Message as LlmMessage, Request as LlmRequest,
     Response as LlmResponse, Role, StreamEvent, ToolChoice, ToolDefinition, Usage,
 };
-use fabro_store::{InMemoryStore, Store};
+use fabro_store::StoreHandle;
 use fabro_types::{RunId, Settings};
 use fabro_util::redact::redact_jsonl_line;
 use fabro_workflow::error::FabroError;
 use fabro_workflow::handler::HandlerRegistry;
 use futures_util::stream;
+use object_store::memory::InMemory as MemoryObjectStore;
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
 use tokio::sync::{Notify, OnceCell};
@@ -124,7 +125,7 @@ type RegistryFactoryOverride = dyn Fn(Arc<dyn Interviewer>) -> HandlerRegistry +
 pub struct AppState {
     runs: Mutex<HashMap<RunId, ManagedRun>>,
     aggregate_usage: Mutex<AggregateUsageTotals>,
-    store: Arc<dyn Store>,
+    store: StoreHandle,
     pub db: sqlx::SqlitePool,
     max_concurrent_runs: usize,
     scheduler_notify: Notify,
@@ -417,7 +418,7 @@ pub fn create_app_state_with_registry_factory(
         Arc::new(RwLock::new(Settings::default())),
         Some(Box::new(registry_factory_override)),
         5,
-        Arc::new(InMemoryStore::default()),
+        test_store(),
     )
 }
 
@@ -431,15 +432,23 @@ pub fn create_app_state_with_options(
         db,
         Arc::new(RwLock::new(settings)),
         max_concurrent_runs,
-        Arc::new(InMemoryStore::default()),
+        test_store(),
     )
+}
+
+fn test_store() -> StoreHandle {
+    Arc::new(fabro_store::SlateStore::new(
+        Arc::new(MemoryObjectStore::new()),
+        "",
+        Duration::from_millis(1),
+    ))
 }
 
 pub fn create_app_state_with_store(
     db: sqlx::SqlitePool,
     settings: Arc<RwLock<Settings>>,
     max_concurrent_runs: usize,
-    store: Arc<dyn Store>,
+    store: StoreHandle,
 ) -> Arc<AppState> {
     build_app_state(db, settings, None, max_concurrent_runs, store)
 }
@@ -449,7 +458,7 @@ fn build_app_state(
     settings: Arc<RwLock<Settings>>,
     registry_factory_override: Option<Box<RegistryFactoryOverride>>,
     max_concurrent_runs: usize,
-    store: Arc<dyn Store>,
+    store: StoreHandle,
 ) -> Arc<AppState> {
     Arc::new(AppState {
         runs: Mutex::new(HashMap::new()),
@@ -728,7 +737,7 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
         cancel_token: Some(Arc::clone(&cancel_token)),
         emitter: Arc::clone(&emitter),
         interviewer: Arc::clone(&interviewer) as Arc<dyn Interviewer>,
-        run_store: Arc::clone(&run_store),
+        run_store: run_store.clone(),
         github_app,
         on_node: None,
         registry_override,
@@ -2521,10 +2530,10 @@ mod tests {
             .open_run_reader(&run_id)
             .await
             .unwrap()
-            .expect("run store should exist")
-            .get_run()
+            .state()
             .await
             .unwrap()
+            .run
             .expect("run record should exist");
         let mut expected_settings = settings;
         expected_settings.goal = Some("Test".to_string());
@@ -2656,16 +2665,11 @@ mod tests {
         assert_eq!(managed_run.status, RunStatus::Cancelled);
         drop(runs);
 
-        let run_store = state
-            .store
-            .open_run_reader(&run_id)
-            .await
-            .unwrap()
-            .expect("run store should exist");
+        let run_store = state.store.open_run_reader(&run_id).await.unwrap();
 
         let mut status_record = None;
         for _ in 0..50 {
-            if let Some(record) = run_store.get_status().await.unwrap() {
+            if let Some(record) = run_store.state().await.unwrap().status {
                 if record.status == fabro_workflow::run_status::RunStatus::Failed
                     && record.reason == Some(fabro_workflow::run_status::StatusReason::Cancelled)
                 {

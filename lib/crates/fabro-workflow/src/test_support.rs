@@ -1,15 +1,16 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use chrono::Utc;
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::Graph as GvGraph;
-use fabro_store::{InMemoryStore, RunStore, Store};
-use fabro_types::run::RunRecord;
+use fabro_store::{SlateRunStore, SlateStore};
+use object_store::memory::InMemory;
 
 use crate::error::Result;
-use crate::event::EventEmitter;
+use crate::event::{EventEmitter, WorkflowRunEvent, append_workflow_event};
 use crate::git::scan_node_files_from_store;
 use crate::handler::HandlerRegistry;
 use crate::outcome::Outcome;
@@ -41,32 +42,50 @@ async fn initialized(
 ) -> Initialized {
     std::fs::create_dir_all(&run_options.run_dir).expect("failed to create run dir");
     let created_at = Utc::now();
-    let inner_store = InMemoryStore::default()
+    let store = Arc::new(SlateStore::new(
+        Arc::new(InMemory::new()),
+        "",
+        Duration::from_millis(1),
+    ));
+    let inner_store = store
         .create_run(
             &run_options.run_id,
             created_at,
             Some(run_options.run_dir.to_string_lossy().as_ref()),
         )
         .await
-        .expect("failed to create in-memory run store");
+        .expect("failed to create slate-backed test run store");
     let run_store = inner_store;
-    run_store
-        .put_run(&RunRecord {
+    append_workflow_event(
+        run_store.as_ref(),
+        &run_options.run_id,
+        &WorkflowRunEvent::RunCreated {
             run_id: run_options.run_id,
-            created_at,
-            settings: run_options.settings.clone(),
-            graph: graph.clone(),
-            workflow_slug: run_options.workflow_slug.clone(),
-            working_directory: PathBuf::from(sandbox.working_directory()),
+            settings: serde_json::to_value(&run_options.settings)
+                .expect("failed to serialize settings"),
+            graph: serde_json::to_value(graph).expect("failed to serialize graph"),
+            workflow_source: None,
+            workflow_config: None,
+            labels: run_options
+                .labels
+                .clone()
+                .into_iter()
+                .collect::<BTreeMap<_, _>>(),
+            run_dir: run_options.run_dir.display().to_string(),
+            working_directory: PathBuf::from(sandbox.working_directory())
+                .display()
+                .to_string(),
             host_repo_path: run_options
                 .host_repo_path
                 .as_ref()
                 .map(|path| path.display().to_string()),
             base_branch: run_options.base_branch.clone(),
-            labels: run_options.labels.clone(),
-        })
-        .await
-        .expect("failed to seed run record in run store");
+            workflow_slug: run_options.workflow_slug.clone(),
+            db_prefix: None,
+        },
+    )
+    .await
+    .expect("failed to seed run.created event in run store");
     let emitter = bound_emitter(run_options.run_id, &emitter);
     Initialized {
         graph: graph.clone(),
@@ -166,12 +185,17 @@ pub async fn run_graph_from_checkpoint(
     executed.outcome
 }
 
-async fn persist_run_artifacts_for_tests(run_store: &dyn RunStore, run_dir: &std::path::Path) {
-    if let Ok(Some(checkpoint)) = run_store.get_checkpoint().await {
+async fn persist_run_artifacts_for_tests(run_store: &SlateRunStore, run_dir: &std::path::Path) {
+    let state: fabro_store::RunState = match run_store.state().await {
+        Ok(state) => state,
+        Err(_) => return,
+    };
+
+    if let Some(checkpoint) = state.checkpoint.as_ref() {
         let _ = checkpoint.save(&run_dir.join("checkpoint.json"));
     }
 
-    if let Ok(Some(final_patch)) = run_store.get_final_patch().await {
+    if let Some(final_patch) = state.final_patch.as_ref() {
         let _ = std::fs::write(run_dir.join("final.patch"), final_patch);
     }
 

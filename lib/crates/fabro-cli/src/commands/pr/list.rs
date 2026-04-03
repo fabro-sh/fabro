@@ -33,7 +33,7 @@ pub(super) async fn list_command(
 }
 
 async fn list_from(
-    store: &dyn fabro_store::Store,
+    store: &fabro_store::SlateStore,
     base: &Path,
     args: PrListArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,

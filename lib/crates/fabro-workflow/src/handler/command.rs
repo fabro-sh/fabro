@@ -1,12 +1,12 @@
 use std::path::Path;
 
-use async_trait::async_trait;
 use crate::context::Context;
 use crate::context::keys;
 use crate::error::FabroError;
 use crate::event::WorkflowRunEvent;
 use crate::outcome::{Outcome, OutcomeExt};
 use crate::run_dir::{node_dir, visit_from_context};
+use async_trait::async_trait;
 use fabro_graphviz::graph::{Graph, Node};
 use tokio::fs;
 
@@ -199,8 +199,9 @@ mod tests {
     use super::*;
     use crate::outcome::StageStatus;
     use fabro_graphviz::graph::AttrValue;
-    use fabro_store::{InMemoryStore, NodeVisitRef, RunStore, Store};
+    use fabro_store::{NodeVisitRef, RunStoreHandle, SlateStore};
     use fabro_types::fixtures;
+    use object_store::memory::InMemory;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -208,22 +209,30 @@ mod tests {
         EngineServices::test_default()
     }
 
+    fn test_store() -> Arc<SlateStore> {
+        Arc::new(SlateStore::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ))
+    }
+
     async fn make_services_with_run_store() -> (
         EngineServices,
-        Arc<dyn RunStore>,
+        RunStoreHandle,
         crate::event::StoreProgressLogger,
     ) {
-        let store = InMemoryStore::default();
+        let store = test_store();
         let run_store = store
             .create_run(&fixtures::RUN_1, chrono::Utc::now(), None)
             .await
             .unwrap();
         let services = EngineServices {
             emitter: Arc::new(crate::event::EventEmitter::new(fixtures::RUN_1)),
-            run_store: Arc::clone(&run_store),
+            run_store: run_store.clone(),
             ..EngineServices::test_default()
         };
-        let logger = crate::event::StoreProgressLogger::new(Arc::clone(&run_store));
+        let logger = crate::event::StoreProgressLogger::new(run_store.clone());
         logger.register(services.emitter.as_ref());
         (services, run_store, logger)
     }
@@ -585,10 +594,7 @@ mod tests {
             .unwrap();
         logger.flush().await;
 
-        let snapshot = run_store
-            .state()
-            .await
-            .unwrap();
+        let snapshot = run_store.state().await.unwrap();
         let node = snapshot
             .node(&NodeVisitRef {
                 node_id: "script_node",

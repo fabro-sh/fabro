@@ -594,12 +594,22 @@ fn find_join_node(results: &[BranchResult], graph: &Graph) -> Option<String> {
 mod tests {
     use super::*;
     use fabro_graphviz::graph::{AttrValue, Edge};
-    use fabro_store::{InMemoryStore, RunStore, Store};
+    use fabro_store::SlateStore;
     use fabro_types::fixtures;
+    use object_store::memory::InMemory;
     use std::sync::Arc;
+    use std::time::Duration;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
+    }
+
+    fn test_store() -> Arc<SlateStore> {
+        Arc::new(SlateStore::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ))
     }
 
     fn test_context() -> Context {
@@ -680,13 +690,13 @@ mod tests {
 
     #[tokio::test]
     async fn parallel_handler_stores_results_in_run_store() {
-        let store = Arc::new(InMemoryStore::default());
+        let store = test_store();
         let run_store = store
             .create_run(&fixtures::RUN_1, chrono::Utc::now(), None)
             .await
             .unwrap();
         let services = EngineServices {
-            run_store: Arc::clone(&run_store) as Arc<dyn RunStore>,
+            run_store: run_store.clone(),
             ..EngineServices::test_default()
         };
         let mut node = Node::new("par");

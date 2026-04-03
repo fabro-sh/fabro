@@ -1,65 +1,14 @@
 use crate::NodeVisitRef;
 
 pub(crate) const INIT_KEY: &str = "_init.json";
-pub(crate) const RUN_KEY: &str = "run.json";
-pub(crate) const START_KEY: &str = "start.json";
-pub(crate) const STATUS_KEY: &str = "status.json";
-pub(crate) const CHECKPOINT_KEY: &str = "checkpoint.json";
-pub(crate) const CONCLUSION_KEY: &str = "conclusion.json";
-pub(crate) const RETRO_KEY: &str = "retro.json";
-pub(crate) const GRAPH_KEY: &str = "graph.fabro";
-pub(crate) const SANDBOX_KEY: &str = "sandbox.json";
-pub(crate) const FINAL_PATCH_KEY: &str = "final.patch";
-pub(crate) const PULL_REQUEST_KEY: &str = "pull_request.json";
 pub(crate) const RETRO_PROMPT_KEY: &str = "retro/prompt.md";
 pub(crate) const RETRO_RESPONSE_KEY: &str = "retro/response.md";
 pub(crate) const EVENTS_PREFIX: &str = "events/";
-pub(crate) const CHECKPOINTS_PREFIX: &str = "checkpoints/";
 pub(crate) const ARTIFACT_VALUES_PREFIX: &str = "artifacts/values/";
 pub(crate) const ARTIFACT_NODES_PREFIX: &str = "artifacts/nodes/";
 
 pub(crate) fn init() -> &'static str {
     INIT_KEY
-}
-
-pub(crate) fn run() -> &'static str {
-    RUN_KEY
-}
-
-pub(crate) fn start() -> &'static str {
-    START_KEY
-}
-
-pub(crate) fn status() -> &'static str {
-    STATUS_KEY
-}
-
-pub(crate) fn checkpoint() -> &'static str {
-    CHECKPOINT_KEY
-}
-
-pub(crate) fn conclusion() -> &'static str {
-    CONCLUSION_KEY
-}
-
-pub(crate) fn retro() -> &'static str {
-    RETRO_KEY
-}
-
-pub(crate) fn graph() -> &'static str {
-    GRAPH_KEY
-}
-
-pub(crate) fn sandbox() -> &'static str {
-    SANDBOX_KEY
-}
-
-pub(crate) fn final_patch() -> &'static str {
-    FINAL_PATCH_KEY
-}
-
-pub(crate) fn pull_request() -> &'static str {
-    PULL_REQUEST_KEY
 }
 
 pub(crate) fn node_visit_prefix(node: &NodeVisitRef<'_>) -> String {
@@ -122,10 +71,6 @@ pub(crate) fn event_key(seq: u32, epoch_ms: i64) -> String {
     format!("{EVENTS_PREFIX}{seq:06}-{epoch_ms}.json")
 }
 
-pub(crate) fn checkpoint_history_key(seq: u32, epoch_ms: i64) -> String {
-    format!("{CHECKPOINTS_PREFIX}{seq:04}-{epoch_ms}.json")
-}
-
 pub(crate) fn artifact_value(artifact_id: &str) -> String {
     format!("{ARTIFACT_VALUES_PREFIX}{artifact_id}.json")
 }
@@ -143,10 +88,6 @@ pub(crate) fn node_asset(node: &NodeVisitRef<'_>, filename: &str) -> String {
 
 pub(crate) fn parse_event_seq(key: &str) -> Option<u32> {
     parse_seq(key, EVENTS_PREFIX)
-}
-
-pub(crate) fn parse_checkpoint_seq(key: &str) -> Option<u32> {
-    parse_seq(key, CHECKPOINTS_PREFIX)
 }
 
 pub(crate) fn parse_artifact_value_id(key: &str) -> Option<String> {
@@ -181,10 +122,7 @@ mod tests {
     #[test]
     fn top_level_keys_match_spec() {
         assert_eq!(init(), "_init.json");
-        assert_eq!(run(), "run.json");
-        assert_eq!(graph(), "graph.fabro");
-        assert_eq!(final_patch(), "final.patch");
-        assert_eq!(pull_request(), "pull_request.json");
+        assert_eq!(event_key(7, 123), "events/000007-123.json");
         assert_eq!(retro_prompt(), "retro/prompt.md");
         assert_eq!(retro_response(), "retro/response.md");
     }
@@ -224,7 +162,6 @@ mod tests {
     #[test]
     fn sequence_keys_are_zero_padded() {
         assert_eq!(event_key(7, 123), "events/000007-123.json");
-        assert_eq!(checkpoint_history_key(42, 456), "checkpoints/0042-456.json");
     }
 
     #[test]
@@ -243,7 +180,6 @@ mod tests {
     #[test]
     fn parse_helpers_extract_sequences_and_node_visits() {
         assert_eq!(parse_event_seq("events/000007-123.json"), Some(7));
-        assert_eq!(parse_checkpoint_seq("checkpoints/0042-456.json"), Some(42));
         assert_eq!(
             parse_artifact_value_id("artifacts/values/summary.json"),
             Some("summary".to_string())
@@ -261,7 +197,6 @@ mod tests {
     #[test]
     fn parse_helpers_reject_invalid_keys() {
         assert_eq!(parse_event_seq("events/not-a-seq.json"), None);
-        assert_eq!(parse_checkpoint_seq("checkpoints/oops.json"), None);
         assert_eq!(
             parse_artifact_value_id("artifacts/values/summary.txt"),
             None

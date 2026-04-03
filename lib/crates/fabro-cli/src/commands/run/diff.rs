@@ -52,7 +52,7 @@ pub(crate) async fn run(args: DiffArgs, globals: &GlobalArgs) -> Result<()> {
 
 async fn resolve_diff(
     _run_dir: &Path,
-    run_store: &dyn fabro_store::RunStore,
+    run_store: &fabro_store::SlateRunStore,
     args: &DiffArgs,
 ) -> Result<String> {
     let state = run_store.state().await?;

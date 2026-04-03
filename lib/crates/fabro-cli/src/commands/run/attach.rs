@@ -10,7 +10,7 @@ use fabro_types::RunId;
 use futures::StreamExt;
 
 use fabro_interview::{AnswerValue, ConsoleInterviewer};
-use fabro_store::{EventEnvelope, RunStore, RuntimeState};
+use fabro_store::{EventEnvelope, RuntimeState, SlateRunStore};
 use fabro_util::terminal::Styles;
 use fabro_workflow::outcome::StageStatus;
 use fabro_workflow::records::{Conclusion, ConclusionExt};
@@ -106,7 +106,7 @@ pub(crate) async fn attach_run(
 
 async fn attach_run_store(
     run_dir: &Path,
-    run_store: &dyn RunStore,
+    run_store: &SlateRunStore,
     verbose: bool,
     existing_events: Vec<String>,
     last_seq: u32,
@@ -156,15 +156,12 @@ async fn attach_run_store(
                 }
                 // Wait briefly for a terminal status or conclusion
                 for _ in 0..20 {
-                    if run_store
-                        .state()
-                        .await
-                        .ok()
-                        .is_some_and(|state| {
-                            state.conclusion.is_some()
-                                || state.status.is_some_and(|record| record.status.is_terminal())
-                        })
-                    {
+                    if run_store.state().await.ok().is_some_and(|state| {
+                        state.conclusion.is_some()
+                            || state
+                                .status
+                                .is_some_and(|record| record.status.is_terminal())
+                    }) {
                         break;
                     }
                     sleep(Duration::from_millis(100)).await;
@@ -288,7 +285,7 @@ async fn attach_run_store(
 }
 
 async fn flush_remaining_store_events(
-    run_store: &dyn RunStore,
+    run_store: &SlateRunStore,
     mut next_seq: u32,
     progress_ui: &mut run_progress::ProgressUI,
     json_output: bool,
@@ -745,7 +742,7 @@ fn determine_exit_code(conclusion_path: &Path, status_record: Option<RunStatusRe
     }
 }
 
-async fn determine_exit_code_with_store(run_store: &dyn RunStore) -> ExitCode {
+async fn determine_exit_code_with_store(run_store: &SlateRunStore) -> ExitCode {
     let deadline = Instant::now() + ATTACH_FINAL_STATUS_GRACE;
     loop {
         match run_store.state().await {

@@ -37,9 +37,7 @@ async fn create_from(
     let run_store = store::open_run_reader(storage_dir, &run.run_id).await?;
     let state = run_store.state().await?;
 
-    let record = state
-        .run
-        .context("Failed to load run record from store")?;
+    let record = state.run.context("Failed to load run record from store")?;
 
     let start = state
         .start

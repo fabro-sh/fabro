@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use fabro_store::RunStore;
+use fabro_store::RunStoreHandle;
 use fabro_types::RunId;
 
 use fabro_core::error::{CoreError, Result as CoreResult};
@@ -39,7 +39,7 @@ pub(crate) struct GitLifecycle {
     pub emitter: Arc<EventEmitter>,
     pub run_dir: PathBuf,
     pub run_id: RunId,
-    pub run_store: Arc<dyn RunStore>,
+    pub run_store: RunStoreHandle,
     pub run_options: Arc<RunOptions>,
     pub start_node_id: Option<String>,
     // Cross-lifecycle data (shared with EventLifecycle)
@@ -66,27 +66,19 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
         ) {
             let git_author = self.run_options.git_author();
             let store = MetadataStore::new(repo_path, &git_author);
-            let run_json = self
-                .run_store
-                .get_run()
-                .await
-                .ok()
-                .flatten()
-                .and_then(|record| serde_json::to_vec_pretty(&record).ok());
-            let start_json = self
-                .run_store
-                .get_start()
-                .await
-                .ok()
-                .flatten()
-                .and_then(|record| serde_json::to_vec_pretty(&record).ok());
-            let sandbox_json = self
-                .run_store
-                .get_sandbox()
-                .await
-                .ok()
-                .flatten()
-                .and_then(|record| serde_json::to_vec_pretty(&record).ok());
+            let state = self.run_store.state().await.ok();
+            let run_json = state
+                .as_ref()
+                .and_then(|state| state.run.as_ref())
+                .and_then(|record| serde_json::to_vec_pretty(record).ok());
+            let start_json = state
+                .as_ref()
+                .and_then(|state| state.start.as_ref())
+                .and_then(|record| serde_json::to_vec_pretty(record).ok());
+            let sandbox_json = state
+                .as_ref()
+                .and_then(|state| state.sandbox.as_ref())
+                .and_then(|record| serde_json::to_vec_pretty(record).ok());
             let mut files: Vec<(&str, &[u8])> = Vec::new();
             if let Some(ref data) = run_json {
                 files.push(("run.json", data));
@@ -137,10 +129,10 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
             // Build checkpoint JSON for shadow branch
             if let Some(cp_json) = self
                 .run_store
-                .get_checkpoint()
+                .state()
                 .await
                 .ok()
-                .flatten()
+                .and_then(|state| state.checkpoint)
                 .and_then(|checkpoint| serde_json::to_vec_pretty(&checkpoint).ok())
             {
                 let mut extra_entries: Vec<(String, Vec<u8>)> = {
@@ -205,31 +197,6 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                     diff: None,
                 };
 
-                match self.run_store.get_checkpoint().await {
-                    Ok(Some(mut checkpoint)) => {
-                        checkpoint.git_commit_sha = Some(sha.clone());
-                        if let Err(err) = self.run_store.put_checkpoint(&checkpoint).await {
-                            self.emitter.emit(&WorkflowRunEvent::RunNotice {
-                                level: RunNoticeLevel::Warn,
-                                code: "checkpoint_store_resave_failed".to_string(),
-                                message: format!(
-                                    "[node: {node_id}] checkpoint store re-save with SHA failed: {err}"
-                                ),
-                            });
-                        }
-                    }
-                    Ok(None) => {}
-                    Err(err) => {
-                        self.emitter.emit(&WorkflowRunEvent::RunNotice {
-                            level: RunNoticeLevel::Warn,
-                            code: "checkpoint_store_load_failed".to_string(),
-                            message: format!(
-                                "[node: {node_id}] checkpoint store load failed: {err}"
-                            ),
-                        });
-                    }
-                }
-
                 // Push run branch (skip in dry-run mode)
                 if !self.run_options.dry_run_enabled() {
                     if let Some(branch) = self
@@ -277,7 +244,6 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                 }
 
                 // Save diff.patch
-                let visit = state.node_visits.get(node_id).copied().unwrap_or(1);
                 let prev = self
                     .last_git_sha
                     .lock()
@@ -292,22 +258,6 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                     .unwrap_or_else(|| sha.clone());
                 match git_diff(&*self.sandbox, &prev).await {
                     Ok(patch) if !patch.is_empty() => {
-                        let node_ref = fabro_store::NodeVisitRef {
-                            node_id,
-                            visit: u32::try_from(visit).unwrap_or(u32::MAX),
-                        };
-                        if let Err(err) = self.run_store.put_node_diff(&node_ref, &patch).await {
-                            self.emitter.emit(&WorkflowRunEvent::RunNotice {
-                                level: RunNoticeLevel::Warn,
-                                code: "git_diff_store_failed".to_string(),
-                                message: format!(
-                                    "[node: {node_id}] failed to persist diff in run store: {err}"
-                                ),
-                            });
-                            return Err(CoreError::Other(format!(
-                                "failed to persist node diff for '{node_id}': {err}"
-                            )));
-                        }
                         git_result.diff = Some(patch);
                     }
                     Ok(_) => {}
@@ -353,15 +303,6 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                 match git_diff(&*self.sandbox, &base_sha).await {
                     Ok(patch) if !patch.is_empty() => {
                         *self.final_patch.lock().unwrap() = Some(patch.clone());
-                        if let Err(err) = self.run_store.put_final_patch(&patch).await {
-                            self.emitter.emit(&WorkflowRunEvent::RunNotice {
-                                level: RunNoticeLevel::Warn,
-                                code: "final_diff_store_failed".to_string(),
-                                message: format!(
-                                    "failed to persist final diff in run store: {err}"
-                                ),
-                            });
-                        }
                     }
                     Ok(_) => {
                         *self.final_patch.lock().unwrap() = None;

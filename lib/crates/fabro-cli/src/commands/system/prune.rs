@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
-use fabro_store::Store;
+use fabro_store::SlateStore;
 use serde::Serialize;
 use tracing::{debug, info};
 
@@ -47,7 +47,7 @@ pub(crate) fn parse_duration(s: &str) -> Result<chrono::Duration> {
 
 async fn prune_from(
     args: &RunsPruneArgs,
-    store: &dyn Store,
+    store: &SlateStore,
     base: &Path,
     globals: &GlobalArgs,
 ) -> Result<()> {
