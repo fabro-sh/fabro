@@ -12,7 +12,6 @@ pub use fabro_types::settings::project::ProjectSettings;
 const CONFIG_FILENAME: &str = "fabro.toml";
 const SUPPORTED_VERSION: u32 = 1;
 const RUN_GRAPH_FILE: &str = "workflow.fabro";
-const LEGACY_RUN_GRAPH_FILE: &str = "graph.fabro";
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct ProjectConfig {
@@ -98,24 +97,6 @@ fn workflow_slug_from_path(workflow_path: &Path) -> Option<String> {
     Some(file_stem.into_owned())
 }
 
-fn cached_workflow_graph_path(path: &Path) -> Option<PathBuf> {
-    if path.file_name().and_then(|name| name.to_str()) != Some("workflow.toml") {
-        return None;
-    }
-
-    let canonical = path.with_file_name(RUN_GRAPH_FILE);
-    if canonical.exists() {
-        return Some(canonical);
-    }
-
-    let legacy = path.with_file_name(LEGACY_RUN_GRAPH_FILE);
-    if legacy.exists() {
-        return Some(legacy);
-    }
-
-    None
-}
-
 /// Resolve a workflow argument to a path.
 ///
 /// - If the arg has a file extension (`.toml`, `.fabro`, etc.), return it as-is.
@@ -146,18 +127,7 @@ pub fn resolve_workflow_path(
                     workflow_slug,
                 })
             }
-            Err(_) if !path.exists() => {
-                let Some(dot_path) = cached_workflow_graph_path(&path) else {
-                    anyhow::bail!("Workflow not found: {}", path.display());
-                };
-                Ok(WorkflowPathResolution {
-                    resolved_workflow_path: path,
-                    dot_path,
-                    workflow_config: None,
-                    workflow_toml_path: None,
-                    workflow_slug,
-                })
-            }
+            Err(_) if !path.exists() => anyhow::bail!("Workflow not found: {}", path.display()),
             Err(err) => Err(err),
         }
     } else {

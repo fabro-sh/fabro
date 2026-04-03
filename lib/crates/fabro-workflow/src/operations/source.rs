@@ -110,36 +110,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolve_workflow_uses_cached_graph_sibling_for_missing_workflow_toml() {
-        let dir = tempfile::tempdir().unwrap();
-        let run_dir = dir
-            .path()
-            .join("custom-storage")
-            .join("runs")
-            .join("run-123");
-        std::fs::create_dir_all(&run_dir).unwrap();
-        std::fs::write(
-            run_dir.join("workflow.fabro"),
-            "digraph Test { start -> exit }",
-        )
-        .unwrap();
-
-        let resolved = resolve_workflow(ResolveWorkflowInput {
-            workflow: WorkflowInput::Path(run_dir.join("workflow.toml")),
-            settings: Settings::default(),
-            cwd: dir.path().to_path_buf(),
-        })
-        .unwrap();
-
-        let expected_dot_path = run_dir.join("workflow.fabro");
-        assert_eq!(
-            resolved.dot_path.as_deref(),
-            Some(expected_dot_path.as_path())
-        );
-        assert!(resolved.workflow_toml_path.is_none());
-    }
-
-    #[test]
     fn resolve_workflow_uses_explicit_cwd_for_relative_work_dir() {
         let dir = tempfile::tempdir().unwrap();
         let resolved = resolve_workflow(ResolveWorkflowInput {

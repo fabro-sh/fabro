@@ -21,8 +21,6 @@ use crate::event::{
     WorkflowRunEvent, append_workflow_event, canonicalize_event_at, normalize_json_value,
 };
 
-const RUN_CONFIG_FILE: &str = "workflow.toml";
-
 #[derive(Clone, Debug)]
 pub struct CreateRunInput {
     pub workflow: WorkflowInput,
@@ -116,7 +114,6 @@ pub async fn create(store: &SlateStore, request: CreateRunInput) -> Result<Creat
         goal_override.as_deref(),
     )?;
 
-    write_run_config_snapshot(&run_dir, resolved.workflow_toml_path.as_deref())?;
     let workflow_config = resolved
         .workflow_toml_path
         .as_deref()
@@ -210,20 +207,6 @@ fn validate_sandbox_provider(settings: &Settings) -> Result<(), FabroError> {
         provider
             .parse::<SandboxProvider>()
             .map_err(|err| FabroError::Precondition(format!("Invalid sandbox provider: {err}")))?;
-    }
-
-    Ok(())
-}
-
-fn write_run_config_snapshot(
-    run_dir: &Path,
-    workflow_toml_path: Option<&Path>,
-) -> Result<(), FabroError> {
-    if let Some(toml_path) = workflow_toml_path {
-        if toml_path.is_file() {
-            std::fs::copy(toml_path, run_dir.join(RUN_CONFIG_FILE))
-                .map_err(|err| FabroError::Io(err.to_string()))?;
-        }
     }
 
     Ok(())
@@ -715,45 +698,6 @@ mod tests {
             crate::run_status::RunStatus::Submitted
         );
         assert!(!created.run_dir.join("id.txt").exists());
-    }
-
-    #[tokio::test]
-    async fn create_copies_workflow_toml_snapshot() {
-        let dir = tempfile::tempdir().unwrap();
-        let workflow_dir = dir.path().join("workflow");
-        std::fs::create_dir_all(&workflow_dir).unwrap();
-        std::fs::write(workflow_dir.join("workflow.fabro"), MINIMAL_DOT).unwrap();
-        std::fs::write(
-            workflow_dir.join("workflow.toml"),
-            "version = 1\ngraph = \"workflow.fabro\"\n",
-        )
-        .unwrap();
-
-        let store = memory_store();
-        let created = create(
-            &store,
-            CreateRunInput {
-                workflow: WorkflowInput::Path(workflow_dir.join("workflow.toml")),
-                settings: Settings {
-                    storage_dir: Some(dir.path().join("storage")),
-                    dry_run: Some(true),
-                    ..Default::default()
-                },
-                cwd: dir.path().to_path_buf(),
-                workflow_slug: None,
-                run_dir: None,
-                run_id: None,
-                host_repo_path: None,
-                base_branch: None,
-            },
-        )
-        .await
-        .unwrap();
-
-        assert_eq!(
-            std::fs::read_to_string(created.run_dir.join("workflow.toml")).unwrap(),
-            "version = 1\ngraph = \"workflow.fabro\"\n"
-        );
     }
 
     #[tokio::test]
