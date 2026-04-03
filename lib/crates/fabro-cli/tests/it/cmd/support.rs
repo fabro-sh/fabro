@@ -4,7 +4,7 @@ use std::process::Output;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use fabro_store::{EventEnvelope, RunSnapshot, RunStoreHandle, SlateStore};
+use fabro_store::{EventEnvelope, RunState, RunStoreHandle, SlateStore};
 use fabro_test::TestContext;
 use fabro_types::RunId;
 use object_store::local::LocalFileSystem;
@@ -492,12 +492,9 @@ fn run_store(run_dir: &Path) -> RunStoreHandle {
     block_on(store.open_run_reader(&run_id)).expect("run store should exist")
 }
 
-pub(crate) fn run_snapshot(run_dir: &Path) -> RunSnapshot {
+pub(crate) fn run_state(run_dir: &Path) -> RunState {
     let store = run_store(run_dir);
-    block_on(store.state())
-        .ok()
-        .and_then(|state| state.to_snapshot())
-        .expect("run store snapshot should exist")
+    block_on(store.state()).expect("run store state should exist")
 }
 
 pub(crate) fn run_events(run_dir: &Path) -> Vec<EventEnvelope> {
@@ -768,7 +765,7 @@ fn setup_git_backed_run(context: &TestContext, workflow: GitWorkflowKind) -> Git
 
     let run = only_run(context);
     let start = serde_json::to_value(
-        run_snapshot(&run.run_dir)
+        run_state(&run.run_dir)
             .start
             .expect("start record should exist"),
     )
@@ -781,26 +778,26 @@ fn setup_git_backed_run(context: &TestContext, workflow: GitWorkflowKind) -> Git
     match workflow {
         GitWorkflowKind::Changed => {
             assert!(
-                run_snapshot(&run.run_dir).final_patch.is_some(),
+                run_state(&run.run_dir).final_patch.is_some(),
                 "changed git-backed run should persist final patch in store"
             );
-            let snapshot = run_snapshot(&run.run_dir);
+            let state = run_state(&run.run_dir);
             assert!(
-                snapshot
+                state
                     .nodes
                     .iter()
-                    .any(|node| node.node_id == "step_one" && node.diff.is_some())
+                    .any(|((node_id, _), node)| node_id == "step_one" && node.diff.is_some())
             );
             assert!(
-                snapshot
+                state
                     .nodes
                     .iter()
-                    .any(|node| node.node_id == "step_two" && node.diff.is_some())
+                    .any(|((node_id, _), node)| node_id == "step_two" && node.diff.is_some())
             );
         }
         GitWorkflowKind::Noop => {
             assert!(
-                run_snapshot(&run.run_dir).final_patch.is_none(),
+                run_state(&run.run_dir).final_patch.is_none(),
                 "no-op git-backed run should not persist final.patch"
             );
         }

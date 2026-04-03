@@ -1,6 +1,6 @@
 use fabro_test::{fabro_snapshot, test_context};
 
-use super::support::run_snapshot;
+use super::support::run_state;
 use crate::support::fabro_json_snapshot;
 
 #[test]
@@ -89,7 +89,7 @@ digraph CachedGraph {
         .success();
 
     let conclusion = serde_json::to_value(
-        run_snapshot(&run_dir)
+        run_state(&run_dir)
             .conclusion
             .expect("conclusion should exist"),
     )
@@ -147,11 +147,12 @@ digraph GitHubApp {
         .success();
 
     let run_dir = context.find_run_dir(run_id);
-    let snapshot = run_snapshot(&run_dir);
+    let state = run_state(&run_dir);
+    let run = state.run.as_ref().expect("run record should exist");
     fabro_json_snapshot!(
         context,
         serde_json::json!({
-            "app_id": snapshot.run.settings.git.and_then(|git| git.app_id),
+            "app_id": run.settings.git.clone().and_then(|git| git.app_id),
         }),
         @r#"
         {
@@ -230,7 +231,7 @@ digraph DetachedStoreOnly {
         .success();
 
     let conclusion = serde_json::to_value(
-        run_snapshot(&run_dir)
+        run_state(&run_dir)
             .conclusion
             .expect("conclusion should exist"),
     )

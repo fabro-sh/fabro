@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use fabro_store::{RunSnapshot, RunStoreHandle, SlateStore};
+use fabro_store::{RunState, RunStoreHandle, SlateStore};
 use fabro_types::RunId;
 use object_store::local::LocalFileSystem;
 pub(super) fn fixture(name: &str) -> PathBuf {
@@ -47,12 +47,9 @@ fn run_store(run_dir: &Path) -> RunStoreHandle {
     block_on(store.open_run_reader(&run_id)).expect("run store should exist")
 }
 
-pub(super) fn run_snapshot(run_dir: &Path) -> RunSnapshot {
+pub(super) fn run_state(run_dir: &Path) -> RunState {
     let store = run_store(run_dir);
-    block_on(store.state())
-        .ok()
-        .and_then(|state| state.to_snapshot())
-        .expect("run store snapshot should exist")
+    block_on(store.state()).expect("run store state should exist")
 }
 
 pub(super) fn timeout_for(sandbox: &str) -> Duration {

@@ -3,11 +3,8 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{NodeOutcomeRecord, Result, StoreError};
-use fabro_types::{
-    Checkpoint, Conclusion, NodeStatusRecord, PullRequestRecord, Retro, RunId, RunRecord,
-    RunStatus, RunStatusRecord, SandboxRecord, StartRecord, StatusReason,
-};
+use crate::{Result, StoreError};
+use fabro_types::{RunId, RunStatus, StatusReason};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NodeVisitRef<'a> {
@@ -39,38 +36,6 @@ pub struct RunSummary {
     pub status_reason: Option<StatusReason>,
     pub duration_ms: Option<u64>,
     pub total_cost: Option<f64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RunSnapshot {
-    pub run: RunRecord,
-    pub start: Option<StartRecord>,
-    pub status: Option<RunStatusRecord>,
-    pub checkpoint: Option<Checkpoint>,
-    pub conclusion: Option<Conclusion>,
-    pub retro: Option<Retro>,
-    pub graph: Option<String>,
-    pub sandbox: Option<SandboxRecord>,
-    pub final_patch: Option<String>,
-    pub pull_request: Option<PullRequestRecord>,
-    pub nodes: Vec<NodeSnapshot>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NodeSnapshot {
-    pub node_id: String,
-    pub visit: u32,
-    pub prompt: Option<String>,
-    pub response: Option<String>,
-    pub status: Option<NodeStatusRecord>,
-    pub outcome: Option<NodeOutcomeRecord>,
-    pub provider_used: Option<serde_json::Value>,
-    pub diff: Option<String>,
-    pub script_invocation: Option<serde_json::Value>,
-    pub script_timing: Option<serde_json::Value>,
-    pub parallel_results: Option<serde_json::Value>,
-    pub stdout: Option<String>,
-    pub stderr: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

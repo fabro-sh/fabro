@@ -1,7 +1,7 @@
 use fabro_test::test_context;
 use serde_json::Value;
 
-use super::{fixture, run_snapshot, timeout_for};
+use super::{fixture, run_state, timeout_for};
 use crate::support::{example_fixture, fabro_json_snapshot};
 
 #[fabro_macros::e2e_test()]
@@ -238,7 +238,9 @@ digraph BarBaz {
         .assert()
         .success();
 
-    let run_record = run_snapshot(&context.find_run_dir(run_id)).run;
+    let run_record = run_state(&context.find_run_dir(run_id))
+        .run
+        .expect("run record should exist");
     fabro_json_snapshot!(
         context,
         serde_json::json!({
@@ -297,7 +299,9 @@ digraph FooWorkflow {
         .assert()
         .success();
 
-    let run_record = run_snapshot(&context.find_run_dir(run_id)).run;
+    let run_record = run_state(&context.find_run_dir(run_id))
+        .run
+        .expect("run record should exist");
     fabro_json_snapshot!(
         context,
         serde_json::json!({

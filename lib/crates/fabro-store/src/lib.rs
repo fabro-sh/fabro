@@ -4,20 +4,16 @@ use chrono::{DateTime, Utc};
 
 mod error;
 mod keys;
-mod memory;
 mod run_state;
 mod runtime;
 mod slate;
 mod types;
 
 pub use error::{Result, StoreError};
-pub use memory::{InMemoryRunStore, InMemoryStore};
 pub use run_state::{NodeState, RunState};
 pub use runtime::RuntimeState;
 pub use slate::{SlateRunStore, SlateStore};
-pub use types::{
-    CatalogRecord, EventEnvelope, EventPayload, NodeSnapshot, NodeVisitRef, RunSnapshot, RunSummary,
-};
+pub use types::{CatalogRecord, EventEnvelope, EventPayload, NodeVisitRef, RunSummary};
 
 use fabro_types::{Outcome, StageUsage};
 

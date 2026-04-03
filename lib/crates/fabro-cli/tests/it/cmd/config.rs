@@ -6,7 +6,7 @@ use fabro_test::{fabro_snapshot, test_context};
 use fabro_types::Settings;
 use predicates::prelude::*;
 
-use super::support::run_snapshot;
+use super::support::run_state;
 
 #[test]
 fn help() {
@@ -444,8 +444,9 @@ fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
             )
         });
 
-    let snapshot = run_snapshot(&run_dir);
-    let run_record = serde_json::to_value(&snapshot.run).unwrap();
+    let state = run_state(&run_dir);
+    let run_record =
+        serde_json::to_value(state.run.as_ref().expect("run record should exist")).unwrap();
     assert_eq!(run_record["settings"]["auto_approve"].as_bool(), Some(true));
     assert_eq!(
         run_record["settings"]["storage_dir"].as_str(),

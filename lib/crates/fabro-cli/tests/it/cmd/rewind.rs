@@ -4,7 +4,7 @@ use fabro_test::{fabro_snapshot, run_and_format, test_context};
 
 use super::support::{
     git_filters, git_stdout, output_stderr as support_stderr, run_branch_commits_since_base,
-    run_events, run_snapshot, setup_git_backed_changed_run,
+    run_events, run_state, setup_git_backed_changed_run,
 };
 
 #[test]
@@ -176,25 +176,22 @@ fn rewind_preserves_event_history_and_clears_terminal_snapshot_state() {
         "run.submitted"
     );
 
-    let snapshot = run_snapshot(&setup.run.run_dir);
+    let state = run_state(&setup.run.run_dir);
     assert_eq!(
-        snapshot.status.as_ref().map(|status| &status.status),
+        state.status.as_ref().map(|status| &status.status),
         Some(&fabro_types::RunStatus::Submitted)
     );
+    assert!(state.conclusion.is_none(), "rewind should clear conclusion");
     assert!(
-        snapshot.conclusion.is_none(),
-        "rewind should clear conclusion"
-    );
-    assert!(
-        snapshot.final_patch.is_none(),
+        state.final_patch.is_none(),
         "rewind should clear final patch"
     );
     assert!(
-        snapshot.pull_request.is_none(),
+        state.pull_request.is_none(),
         "rewind should clear pull request"
     );
     assert!(
-        snapshot.nodes.is_empty(),
-        "rewind should clear node snapshots that belonged to the prior execution"
+        state.nodes.is_empty(),
+        "rewind should clear node state that belonged to the prior execution"
     );
 }

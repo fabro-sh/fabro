@@ -5,7 +5,7 @@ use fabro_test::{fabro_snapshot, test_context};
 
 use crate::support::fabro_json_snapshot;
 
-use super::support::{fixture, output_stdout, resolve_run, run_snapshot};
+use super::support::{fixture, output_stdout, resolve_run, run_state};
 
 #[test]
 fn help() {
@@ -78,13 +78,14 @@ digraph BarBaz {
         .success();
 
     let run_dir = context.find_run_dir(run_id);
-    let snapshot = run_snapshot(&run_dir);
+    let state = run_state(&run_dir);
+    let run = state.run.as_ref().expect("run record should exist");
     fabro_json_snapshot!(
         context,
         serde_json::json!({
-            "workflow_slug": snapshot.run.workflow_slug,
-            "graph_name": snapshot.run.graph.name,
-            "cached_graph_lines": snapshot.graph.expect("graph should exist").lines().collect::<Vec<_>>(),
+            "workflow_slug": run.workflow_slug,
+            "graph_name": run.graph.name,
+            "cached_graph_lines": state.graph_source.as_ref().expect("graph should exist").lines().collect::<Vec<_>>(),
         }),
         @r#"
         {
@@ -133,13 +134,14 @@ digraph FooWorkflow {
         .success();
 
     let run_dir = context.find_run_dir(run_id);
-    let snapshot = run_snapshot(&run_dir);
+    let state = run_state(&run_dir);
+    let run = state.run.as_ref().expect("run record should exist");
     fabro_json_snapshot!(
         context,
         serde_json::json!({
-            "workflow_slug": snapshot.run.workflow_slug,
-            "graph_name": snapshot.run.graph.name,
-            "cached_graph_lines": snapshot.graph.expect("graph should exist").lines().collect::<Vec<_>>(),
+            "workflow_slug": run.workflow_slug,
+            "graph_name": run.graph.name,
+            "cached_graph_lines": state.graph_source.as_ref().expect("graph should exist").lines().collect::<Vec<_>>(),
         }),
         @r#"
         {
@@ -199,26 +201,27 @@ fn create_persists_requested_overrides_into_store() {
         .expect("create should print a run ID")
         .to_string();
     let run = resolve_run(&context, &run_id);
-    let snapshot = run_snapshot(&run.run_dir);
+    let state = run_state(&run.run_dir);
+    let run_record = state.run.as_ref().expect("run record should exist");
     let labels = json!({
-        "env": snapshot.run.labels.get("env"),
-        "team": snapshot.run.labels.get("team"),
+        "env": run_record.labels.get("env"),
+        "team": run_record.labels.get("team"),
     });
     let compact = json!({
-        "workflow_slug": snapshot.run.workflow_slug,
+        "workflow_slug": run_record.workflow_slug,
         "settings": {
-            "goal": snapshot.run.settings.goal,
-            "dry_run": snapshot.run.settings.dry_run,
-            "auto_approve": snapshot.run.settings.auto_approve,
-            "no_retro": snapshot.run.settings.no_retro,
-            "verbose": snapshot.run.settings.verbose,
+            "goal": run_record.settings.goal,
+            "dry_run": run_record.settings.dry_run,
+            "auto_approve": run_record.settings.auto_approve,
+            "no_retro": run_record.settings.no_retro,
+            "verbose": run_record.settings.verbose,
             "llm": {
-                "model": snapshot.run.settings.llm.as_ref().and_then(|llm| llm.model.clone()),
-                "provider": snapshot.run.settings.llm.as_ref().and_then(|llm| llm.provider.clone()),
+                "model": run_record.settings.llm.as_ref().and_then(|llm| llm.model.clone()),
+                "provider": run_record.settings.llm.as_ref().and_then(|llm| llm.provider.clone()),
             },
             "sandbox": {
-                "provider": snapshot.run.settings.sandbox.as_ref().and_then(|sandbox| sandbox.provider.clone()),
-                "preserve": snapshot.run.settings.sandbox.as_ref().and_then(|sandbox| sandbox.preserve),
+                "provider": run_record.settings.sandbox.as_ref().and_then(|sandbox| sandbox.provider.clone()),
+                "preserve": run_record.settings.sandbox.as_ref().and_then(|sandbox| sandbox.preserve),
             },
         },
         "labels": labels,
@@ -275,7 +278,12 @@ fn create_json_implies_auto_approve() {
     let run = resolve_run(&context, run_id);
 
     assert_eq!(
-        run_snapshot(&run.run_dir).run.settings.auto_approve,
+        run_state(&run.run_dir)
+            .run
+            .as_ref()
+            .expect("run record should exist")
+            .settings
+            .auto_approve,
         Some(true)
     );
 }

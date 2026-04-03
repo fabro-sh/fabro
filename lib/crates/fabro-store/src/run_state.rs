@@ -7,8 +7,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::{
-    CatalogRecord, EventEnvelope, NodeOutcomeRecord, NodeSnapshot, NodeVisitRef, Result,
-    RunSnapshot, RunSummary, StoreError,
+    CatalogRecord, EventEnvelope, NodeOutcomeRecord, NodeVisitRef, Result, RunSummary, StoreError,
 };
 use fabro_types::{
     Checkpoint, Conclusion, FailureSignature, NodeStatusRecord, Outcome, PullRequestRecord, Retro,
@@ -306,48 +305,6 @@ impl RunState {
         visits.sort_unstable();
         visits.dedup();
         visits
-    }
-
-    pub fn to_snapshot(&self) -> Option<RunSnapshot> {
-        let run = self.run.clone()?;
-        let mut node_keys = self.nodes.keys().cloned().collect::<Vec<_>>();
-        node_keys.sort();
-        let nodes = node_keys
-            .into_iter()
-            .filter_map(|(node_id, visit)| {
-                self.nodes
-                    .get(&(node_id.clone(), visit))
-                    .map(|node| NodeSnapshot {
-                        node_id,
-                        visit,
-                        prompt: node.prompt.clone(),
-                        response: node.response.clone(),
-                        status: node.status.clone(),
-                        outcome: node.outcome.clone(),
-                        provider_used: node.provider_used.clone(),
-                        diff: node.diff.clone(),
-                        script_invocation: node.script_invocation.clone(),
-                        script_timing: node.script_timing.clone(),
-                        parallel_results: node.parallel_results.clone(),
-                        stdout: node.stdout.clone(),
-                        stderr: node.stderr.clone(),
-                    })
-            })
-            .collect();
-
-        Some(RunSnapshot {
-            run,
-            start: self.start.clone(),
-            status: self.status.clone(),
-            checkpoint: self.checkpoint.clone(),
-            conclusion: self.conclusion.clone(),
-            retro: self.retro.clone(),
-            graph: self.graph_source.clone(),
-            sandbox: self.sandbox.clone(),
-            final_patch: self.final_patch.clone(),
-            pull_request: self.pull_request.clone(),
-            nodes,
-        })
     }
 
     pub fn build_summary(&self, catalog: &CatalogRecord) -> RunSummary {

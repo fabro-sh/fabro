@@ -11,7 +11,6 @@ use object_store::memory::InMemory;
 
 use crate::error::Result;
 use crate::event::{EventEmitter, WorkflowRunEvent, append_workflow_event};
-use crate::git::scan_node_files_from_state;
 use crate::handler::HandlerRegistry;
 use crate::outcome::Outcome;
 use crate::pipeline;
@@ -185,30 +184,7 @@ pub async fn run_graph_from_checkpoint(
     executed.outcome
 }
 
-async fn persist_run_artifacts_for_tests(run_store: &SlateRunStore, run_dir: &std::path::Path) {
-    let state: fabro_store::RunState = match run_store.state().await {
-        Ok(state) => state,
-        Err(_) => return,
-    };
-
-    if let Some(checkpoint) = state.checkpoint.as_ref() {
-        if let Ok(json) = serde_json::to_string_pretty(checkpoint) {
-            let _ = std::fs::write(run_dir.join("checkpoint.json"), json);
-        }
-    }
-
-    if let Some(final_patch) = state.final_patch.as_ref() {
-        let _ = std::fs::write(run_dir.join("final.patch"), final_patch);
-    }
-
-    for (relative_path, contents) in scan_node_files_from_state(&state) {
-        let path = run_dir.join(relative_path);
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let _ = std::fs::write(path, contents);
-    }
-}
+async fn persist_run_artifacts_for_tests(_run_store: &SlateRunStore, _run_dir: &std::path::Path) {}
 
 pub struct WorkflowRunner {
     registry: std::sync::Mutex<Option<HandlerRegistry>>,
