@@ -95,13 +95,13 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         } else {
             format!("{node_id}-visit_{visit}")
         };
-        let stage_dir = self
+        let asset_capture_dir = self
             .assets_dir
             .join(&node_slug)
             .join(format!("retry_{}", ctx.attempt));
-        let _ = std::fs::create_dir_all(&stage_dir);
+        let _ = std::fs::create_dir_all(&asset_capture_dir);
 
-        match collect_assets(&*self.sandbox, &stage_dir, &self.asset_globs, epoch).await {
+        match collect_assets(&*self.sandbox, &asset_capture_dir, &self.asset_globs, epoch).await {
             Ok(summary) if summary.files_copied > 0 => {
                 for asset in &summary.captured_assets {
                     self.emitter.emit(&WorkflowRunEvent::AssetCaptured {

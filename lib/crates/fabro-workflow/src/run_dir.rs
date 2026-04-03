@@ -1,20 +1,4 @@
-use std::path::{Path, PathBuf};
-
 use crate::context::Context;
-
-/// Return the directory for a node's logs.
-///
-/// First visit (`visit <= 1`): `{run_dir}/nodes/{node_id}`
-/// Subsequent visits: `{run_dir}/nodes/{node_id}-visit_{visit}`
-pub(crate) fn node_dir(run_dir: &Path, node_id: &str, visit: usize) -> PathBuf {
-    if visit <= 1 {
-        run_dir.join("nodes").join(node_id)
-    } else {
-        run_dir
-            .join("nodes")
-            .join(format!("{node_id}-visit_{visit}"))
-    }
-}
 
 /// Read the workflow visit ordinal from context.
 ///
@@ -44,29 +28,5 @@ mod tests {
             serde_json::json!(3),
         );
         assert_eq!(visit_from_context(&ctx), 3);
-    }
-
-    #[test]
-    fn node_dir_first_visit() {
-        let root = Path::new("/tmp/logs");
-        assert_eq!(node_dir(root, "work", 1), root.join("nodes").join("work"));
-    }
-
-    #[test]
-    fn node_dir_second_visit() {
-        let root = Path::new("/tmp/logs");
-        assert_eq!(
-            node_dir(root, "work", 2),
-            root.join("nodes").join("work-visit_2")
-        );
-    }
-
-    #[test]
-    fn node_dir_fifth_visit() {
-        let root = Path::new("/tmp/logs");
-        assert_eq!(
-            node_dir(root, "work", 5),
-            root.join("nodes").join("work-visit_5")
-        );
     }
 }

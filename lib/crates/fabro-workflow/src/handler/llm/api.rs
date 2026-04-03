@@ -268,7 +268,6 @@ impl CodergenBackend for AgentApiBackend {
         node: &Node,
         prompt: &str,
         system_prompt: Option<&str>,
-        _stage_dir: &std::path::Path,
     ) -> Result<CodergenResult, FabroError> {
         let client = Client::from_env()
             .await
@@ -412,7 +411,6 @@ impl CodergenBackend for AgentApiBackend {
         context: &Context,
         thread_id: Option<&str>,
         emitter: &Arc<EventEmitter>,
-        _stage_dir: &std::path::Path,
         sandbox: &Arc<dyn Sandbox>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
     ) -> Result<CodergenResult, FabroError> {

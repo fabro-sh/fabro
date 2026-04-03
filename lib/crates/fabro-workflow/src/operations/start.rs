@@ -1119,7 +1119,11 @@ mod tests {
             HashMap::new(),
             HashMap::new(),
         );
-        checkpoint.save(&run_dir.join("checkpoint.json")).unwrap();
+        std::fs::write(
+            run_dir.join("checkpoint.json"),
+            serde_json::to_string_pretty(&checkpoint).unwrap(),
+        )
+        .unwrap();
 
         let conclusion = crate::records::Conclusion {
             timestamp: Utc::now(),

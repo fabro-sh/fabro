@@ -7,10 +7,9 @@ use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
 use crate::event::WorkflowRunEvent;
 use crate::outcome::Outcome;
-use crate::run_dir::{node_dir, visit_from_context};
+use crate::run_dir::visit_from_context;
 use fabro_graphviz::graph::{Graph, Node};
 use fabro_model::Provider;
-use tokio::fs;
 
 use super::agent::{
     CodergenBackend, CodergenResult, expand_variables, extract_status_fields, truncate,
@@ -47,7 +46,7 @@ impl Handler for PromptHandler {
         node: &Node,
         context: &Context,
         graph: &Graph,
-        run_dir: &Path,
+        _run_dir: &Path,
         services: &EngineServices,
     ) -> Result<Outcome, FabroError> {
         // 1. Build prompt (prepend fidelity preamble if present)
@@ -87,10 +86,6 @@ impl Handler for PromptHandler {
             None
         };
 
-        let visit = visit_from_context(context);
-        let stage_dir = node_dir(run_dir, &node.id, visit);
-        fs::create_dir_all(&stage_dir).await?;
-
         let prompt_provider = node
             .provider()
             .map(String::from)
@@ -98,7 +93,7 @@ impl Handler for PromptHandler {
         let prompt_model = node.model().map(String::from);
         services.emitter.emit(&WorkflowRunEvent::Prompt {
             stage: node.id.clone(),
-            visit: u32::try_from(visit).unwrap_or(u32::MAX),
+            visit: u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX),
             text: prompt.clone(),
             mode: Some("prompt".to_string()),
             provider: prompt_provider.clone(),
@@ -109,7 +104,7 @@ impl Handler for PromptHandler {
         let (response_text, stage_usage, backend_files_touched) =
             if let Some(backend) = &self.backend {
                 let result = backend
-                    .one_shot(node, &prompt, system_prompt.as_deref(), &stage_dir)
+                    .one_shot(node, &prompt, system_prompt.as_deref())
                     .await;
                 match result {
                     Ok(CodergenResult::Full(outcome)) => return Ok(outcome),
@@ -268,7 +263,6 @@ mod tests {
                 _context: &Context,
                 _thread_id: Option<&str>,
                 _emitter: &Arc<crate::event::EventEmitter>,
-                _stage_dir: &Path,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
@@ -280,7 +274,6 @@ mod tests {
                 _node: &Node,
                 _prompt: &str,
                 _system_prompt: Option<&str>,
-                _stage_dir: &Path,
             ) -> Result<CodergenResult, FabroError> {
                 Ok(CodergenResult::Text {
                     text: "one-shot response".to_string(),
@@ -307,14 +300,12 @@ mod tests {
             .unwrap();
         assert_eq!(outcome.status, crate::outcome::StageStatus::Success);
 
-        let response_content = std::fs::read_to_string(
-            tmp.path()
-                .join("nodes")
-                .join("classify")
-                .join("response.md"),
-        )
-        .unwrap();
-        assert_eq!(response_content, "one-shot response");
+        assert_eq!(
+            outcome
+                .context_updates
+                .get(&crate::context::keys::response_key("classify")),
+            Some(&serde_json::json!("one-shot response"))
+        );
     }
 
     #[tokio::test]
@@ -332,7 +323,6 @@ mod tests {
                 _context: &Context,
                 _thread_id: Option<&str>,
                 _emitter: &Arc<crate::event::EventEmitter>,
-                _stage_dir: &Path,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
@@ -344,7 +334,6 @@ mod tests {
                 _node: &Node,
                 _prompt: &str,
                 _system_prompt: Option<&str>,
-                _stage_dir: &Path,
             ) -> Result<CodergenResult, FabroError> {
                 Ok(CodergenResult::Text {
                     text: "one-shot response".to_string(),
@@ -396,7 +385,6 @@ mod tests {
             _context: &Context,
             _thread_id: Option<&str>,
             _emitter: &Arc<crate::event::EventEmitter>,
-            _stage_dir: &Path,
             _sandbox: &Arc<dyn fabro_agent::Sandbox>,
             _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
         ) -> Result<CodergenResult, FabroError> {
@@ -408,7 +396,6 @@ mod tests {
             _node: &Node,
             prompt: &str,
             system_prompt: Option<&str>,
-            _stage_dir: &Path,
         ) -> Result<CodergenResult, FabroError> {
             *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());
             *self.captured_system_prompt.lock().unwrap() = Some(system_prompt.map(String::from));

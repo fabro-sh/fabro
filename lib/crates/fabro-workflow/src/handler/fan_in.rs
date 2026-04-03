@@ -6,12 +6,11 @@ use crate::context::keys;
 use crate::error::FabroError;
 use crate::event::{EventEmitter, WorkflowRunEvent};
 use crate::outcome::{Outcome, OutcomeExt};
-use crate::run_dir::{node_dir, visit_from_context};
+use crate::run_dir::visit_from_context;
 use crate::sandbox_git::git_merge_ff_only;
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::{Graph, Node};
-use tokio::fs;
 
 use super::agent::{CodergenBackend, CodergenResult};
 use super::{EngineServices, Handler};
@@ -219,7 +218,7 @@ async fn llm_evaluate(
     prompt: &str,
     results: &serde_json::Value,
     context: &Context,
-    run_dir: &Path,
+    _run_dir: &Path,
     node_id: &str,
     emitter: &Arc<EventEmitter>,
     sandbox: &Arc<dyn Sandbox>,
@@ -232,10 +231,7 @@ async fn llm_evaluate(
          Respond with the ID of the best candidate."
     );
 
-    let visit = visit_from_context(context);
-    let visit_u32 = u32::try_from(visit).unwrap_or(u32::MAX);
-    let stage_dir = node_dir(run_dir, node_id, visit);
-    fs::create_dir_all(&stage_dir).await?;
+    let visit_u32 = u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX);
 
     emitter.emit(&WorkflowRunEvent::Prompt {
         stage: node_id.to_string(),
@@ -257,7 +253,6 @@ async fn llm_evaluate(
             context,
             None,
             emitter,
-            &stage_dir,
             sandbox,
             None,
         )
@@ -464,7 +459,6 @@ mod tests {
                 _context: &Context,
                 _thread_id: Option<&str>,
                 _emitter: &Arc<EventEmitter>,
-                _stage_dir: &std::path::Path,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
@@ -505,17 +499,6 @@ mod tests {
             outcome.context_updates.get(keys::PARALLEL_FAN_IN_BEST_ID),
             Some(&serde_json::json!("branch_b"))
         );
-
-        // Verify prompt and response files were written
-        let prompt_path = tmp.path().join("nodes").join("fan_in").join("prompt.md");
-        assert!(prompt_path.exists());
-        let prompt_content = std::fs::read_to_string(&prompt_path).unwrap();
-        assert!(prompt_content.contains("Pick the best branch"));
-
-        let response_path = tmp.path().join("nodes").join("fan_in").join("response.md");
-        assert!(response_path.exists());
-        let response_content = std::fs::read_to_string(&response_path).unwrap();
-        assert!(response_content.contains("branch_b"));
     }
 
     #[tokio::test]

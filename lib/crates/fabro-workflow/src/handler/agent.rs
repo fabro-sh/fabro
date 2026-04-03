@@ -13,10 +13,8 @@ use crate::event::EventEmitter;
 use crate::outcome::{
     FailureCategory, FailureDetail, Outcome, OutcomeExt, StageStatus, StageUsage,
 };
-use crate::run_dir::{node_dir, visit_from_context};
 use crate::vars::expand_vars;
 use fabro_graphviz::graph::{Graph, Node};
-use tokio::fs;
 
 use super::{EngineServices, Handler};
 
@@ -43,7 +41,6 @@ pub trait CodergenBackend: Send + Sync {
         context: &Context,
         thread_id: Option<&str>,
         emitter: &Arc<EventEmitter>,
-        stage_dir: &Path,
         sandbox: &Arc<dyn Sandbox>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
     ) -> Result<CodergenResult, FabroError>;
@@ -54,7 +51,6 @@ pub trait CodergenBackend: Send + Sync {
         _node: &Node,
         _prompt: &str,
         _system_prompt: Option<&str>,
-        _stage_dir: &Path,
     ) -> Result<CodergenResult, FabroError> {
         Err(FabroError::Validation(
             "one_shot mode not supported by this backend".into(),
@@ -236,7 +232,7 @@ impl Handler for AgentHandler {
         node: &Node,
         context: &Context,
         graph: &Graph,
-        run_dir: &Path,
+        _run_dir: &Path,
         services: &EngineServices,
     ) -> Result<Outcome, FabroError> {
         // 1. Build prompt (prepend fidelity preamble if present)
@@ -251,10 +247,6 @@ impl Handler for AgentHandler {
         } else {
             format!("{preamble}\n\n{expanded}")
         };
-
-        let visit = visit_from_context(context);
-        let stage_dir = node_dir(run_dir, &node.id, visit);
-        fs::create_dir_all(&stage_dir).await?;
 
         // 3. Call LLM backend (agent loop)
         let thread_id = context.thread_id();
@@ -282,7 +274,6 @@ impl Handler for AgentHandler {
                         context,
                         thread_id.as_deref(),
                         &services.emitter,
-                        &stage_dir,
                         &services.sandbox,
                         tool_hooks,
                     )
@@ -563,7 +554,6 @@ mod tests {
                 _context: &Context,
                 _thread_id: Option<&str>,
                 _emitter: &Arc<EventEmitter>,
-                _stage_dir: &Path,
                 _sandbox: &Arc<dyn fabro_agent::Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
@@ -620,7 +610,6 @@ mod tests {
                 _context: &Context,
                 _thread_id: Option<&str>,
                 _emitter: &Arc<EventEmitter>,
-                _stage_dir: &Path,
                 _sandbox: &Arc<dyn fabro_agent::Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
@@ -679,7 +668,6 @@ mod tests {
                 context: &Context,
                 _thread_id: Option<&str>,
                 emitter: &Arc<EventEmitter>,
-                _stage_dir: &Path,
                 _sandbox: &Arc<dyn fabro_agent::Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
@@ -791,7 +779,6 @@ mod tests {
                 _context: &Context,
                 thread_id: Option<&str>,
                 _emitter: &Arc<EventEmitter>,
-                _stage_dir: &Path,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
@@ -844,7 +831,6 @@ mod tests {
                 _context: &Context,
                 thread_id: Option<&str>,
                 _emitter: &Arc<EventEmitter>,
-                _stage_dir: &Path,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
@@ -892,7 +878,6 @@ mod tests {
                 _context: &Context,
                 _thread_id: Option<&str>,
                 _emitter: &Arc<EventEmitter>,
-                _stage_dir: &Path,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
@@ -1036,7 +1021,6 @@ Some text in between.
                 _context: &Context,
                 _thread_id: Option<&str>,
                 _emitter: &Arc<EventEmitter>,
-                _stage_dir: &Path,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
@@ -1075,7 +1059,6 @@ Some text in between.
                 _context: &Context,
                 _thread_id: Option<&str>,
                 _emitter: &Arc<EventEmitter>,
-                _stage_dir: &std::path::Path,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
@@ -1145,7 +1128,6 @@ Some text in between.
                 _context: &Context,
                 _thread_id: Option<&str>,
                 _emitter: &Arc<EventEmitter>,
-                _stage_dir: &std::path::Path,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {

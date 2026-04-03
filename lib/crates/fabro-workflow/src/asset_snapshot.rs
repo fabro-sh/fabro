@@ -275,10 +275,13 @@ fn compute_asset_info(
     })
 }
 
-fn write_asset_manifest(stage_dir: &Path, summary: &AssetCollectionSummary) -> Result<(), String> {
+fn write_asset_manifest(
+    asset_capture_dir: &Path,
+    summary: &AssetCollectionSummary,
+) -> Result<(), String> {
     let json = serde_json::to_string_pretty(summary)
         .map_err(|e| format!("failed to serialize manifest: {e}"))?;
-    let manifest_path = stage_dir.join("manifest.json");
+    let manifest_path = asset_capture_dir.join("manifest.json");
     if let Some(parent) = manifest_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
             format!(
@@ -292,18 +295,18 @@ fn write_asset_manifest(stage_dir: &Path, summary: &AssetCollectionSummary) -> R
     Ok(())
 }
 
-fn cleanup_asset_stage_dir(stage_dir: &Path) -> Result<(), String> {
-    if !stage_dir.exists() {
+fn cleanup_asset_capture_dir(asset_capture_dir: &Path) -> Result<(), String> {
+    if !asset_capture_dir.exists() {
         return Ok(());
     }
-    std::fs::remove_dir_all(stage_dir)
-        .map_err(|e| format!("failed to clean up {}: {e}", stage_dir.display()))
+    std::fs::remove_dir_all(asset_capture_dir)
+        .map_err(|e| format!("failed to clean up {}: {e}", asset_capture_dir.display()))
 }
 
 /// Collect asset files matching the configured globs that were created during this stage.
 pub async fn collect_assets(
     sandbox: &dyn Sandbox,
-    stage_dir: &Path,
+    asset_capture_dir: &Path,
     globs: &[String],
     command_start_epoch: f64,
 ) -> Result<AssetCollectionSummary, String> {
@@ -330,7 +333,7 @@ pub async fn collect_assets(
     let mut captured_assets: Vec<CapturedAssetInfo> = Vec::new();
 
     for file in &to_collect {
-        let dest = stage_dir.join(&file.relative_path);
+        let dest = asset_capture_dir.join(&file.relative_path);
         match sandbox
             .download_file_to_local(&file.relative_path, &dest)
             .await
@@ -373,8 +376,8 @@ pub async fn collect_assets(
     };
 
     if files_copied > 0 {
-        if let Err(e) = write_asset_manifest(stage_dir, &summary) {
-            let cleanup_suffix = match cleanup_asset_stage_dir(stage_dir) {
+        if let Err(e) = write_asset_manifest(asset_capture_dir, &summary) {
+            let cleanup_suffix = match cleanup_asset_capture_dir(asset_capture_dir) {
                 Ok(()) => String::new(),
                 Err(cleanup_err) => format!("; cleanup failed: {cleanup_err}"),
             };
@@ -786,7 +789,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn write_asset_manifest_failure_cleans_up_stage_dir() {
+    fn write_asset_manifest_failure_cleans_up_asset_capture_dir() {
         use std::fs::Permissions;
         use std::os::unix::fs::PermissionsExt;
 
@@ -816,7 +819,7 @@ mod tests {
         assert!(err.contains("failed to write"));
 
         fs::set_permissions(&stage_dir, Permissions::from_mode(0o755)).unwrap();
-        cleanup_asset_stage_dir(&stage_dir).unwrap();
+        cleanup_asset_capture_dir(&stage_dir).unwrap();
         assert!(!stage_dir.exists());
     }
 

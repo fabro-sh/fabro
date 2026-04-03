@@ -1431,32 +1431,6 @@ mod tests {
         assert_eq!(pr_title_from_goal("Fix bug"), "Fix bug");
     }
 
-    #[test]
-    fn pull_request_record_save_writes_json() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("pull_request.json");
-        let record = PullRequestRecord {
-            html_url: "https://github.com/owner/repo/pull/42".to_string(),
-            number: 42,
-            owner: "owner".to_string(),
-            repo: "repo".to_string(),
-            base_branch: "main".to_string(),
-            head_branch: "fabro/run/abc".to_string(),
-            title: "Fix the thing".to_string(),
-        };
-        record.save(&path).unwrap();
-
-        let content: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(content["html_url"], "https://github.com/owner/repo/pull/42");
-        assert_eq!(content["number"], 42);
-        assert_eq!(content["owner"], "owner");
-        assert_eq!(content["repo"], "repo");
-        assert_eq!(content["base_branch"], "main");
-        assert_eq!(content["head_branch"], "fabro/run/abc");
-        assert_eq!(content["title"], "Fix the thing");
-    }
-
     #[tokio::test]
     async fn empty_diff_returns_none() {
         let tmp = tempfile::tempdir().unwrap();

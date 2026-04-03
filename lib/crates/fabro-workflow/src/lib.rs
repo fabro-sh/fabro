@@ -19,7 +19,6 @@ use std::sync::Arc;
 
 use fabro_retro::retro::CompletedStage;
 use fabro_store::EventEnvelope;
-use serde::de::DeserializeOwned;
 
 /// Callback invoked when a workflow node starts executing.
 pub type OnNodeCallback = Option<Arc<dyn Fn(&str) + Send + Sync>>;
@@ -27,16 +26,6 @@ pub type OnNodeCallback = Option<Arc<dyn Fn(&str) + Send + Sync>>;
 /// Convert a Duration's milliseconds to u64, saturating on overflow.
 pub(crate) fn millis_u64(d: std::time::Duration) -> u64 {
     u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
-}
-
-/// Load a value from a JSON file.
-pub(crate) fn load_json<T: DeserializeOwned>(
-    path: &std::path::Path,
-    label: &str,
-) -> error::Result<T> {
-    let data = std::fs::read_to_string(path)?;
-    serde_json::from_str(&data)
-        .map_err(|e| error::FabroError::Checkpoint(format!("{label} deserialize failed: {e}")))
 }
 
 /// Build `Vec<CompletedStage>` from a `Checkpoint`, mapping workflow-engine

@@ -62,6 +62,15 @@ fn test_run_id(label: &str) -> RunId {
     RunId::from(Ulid(u128::from(hasher.finish())))
 }
 
+fn load_checkpoint(path: &Path) -> Result<Checkpoint, Box<dyn std::error::Error>> {
+    let data = std::fs::read_to_string(path)?;
+    Ok(serde_json::from_str(&data)?)
+}
+
+fn save_checkpoint(path: &Path, checkpoint: &Checkpoint) {
+    std::fs::write(path, serde_json::to_string_pretty(checkpoint).unwrap()).unwrap();
+}
+
 // ---------------------------------------------------------------------------
 // 1. Parse and validate all 3 spec examples (Section 2.13)
 // ---------------------------------------------------------------------------
@@ -236,7 +245,7 @@ async fn end_to_end_linear_pipeline() {
     let checkpoint_path = dir.path().join("checkpoint.json");
     assert!(checkpoint_path.exists(), "checkpoint.json should exist");
 
-    let checkpoint = Checkpoint::load(&checkpoint_path).expect("checkpoint should load");
+    let checkpoint = load_checkpoint(&checkpoint_path).expect("checkpoint should load");
     assert!(checkpoint.completed_nodes.contains(&"start".to_string()));
     assert!(
         checkpoint
@@ -372,7 +381,7 @@ async fn end_to_end_branching_pipeline() {
         .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let checkpoint = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert!(
         checkpoint
             .completed_nodes
@@ -491,7 +500,7 @@ async fn end_to_end_human_gate_pipeline() {
         .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let checkpoint = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert!(
         checkpoint.completed_nodes.contains(&"reject".to_string()),
         "should have traversed reject path"
@@ -597,7 +606,7 @@ async fn human_gate_aborted_input_fails_closed_without_fail_route() {
         "unexpected outcome: {outcome:?}"
     );
 
-    let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let checkpoint = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert!(
         checkpoint.node_outcomes.contains_key("gate"),
         "gate outcome should be checkpointed before termination"
@@ -696,7 +705,7 @@ async fn human_gate_aborted_input_routes_via_outcome_fail_condition() {
         .expect("aborted human gate should follow explicit fail route");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let checkpoint = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert!(
         checkpoint
             .completed_nodes
@@ -928,7 +937,7 @@ async fn goal_gate_routes_to_retry_target_when_present() {
         .expect("run should eventually succeed after retry");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let checkpoint = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     // gated_work should appear in completed nodes (at least twice -- first fail, then succeed)
     let gated_work_count = checkpoint
         .completed_nodes
@@ -1313,7 +1322,7 @@ async fn pipeline_with_many_nodes() {
         .expect("large pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let checkpoint = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     // All 10 step nodes should be in completed_nodes
     for name in &node_names {
         assert!(
@@ -1349,9 +1358,9 @@ fn checkpoint_save_and_resume_roundtrip() {
         std::collections::HashMap::new(),
     );
 
-    checkpoint.save(&path).expect("save should succeed");
+    save_checkpoint(&path, &checkpoint);
 
-    let loaded = Checkpoint::load(&path).expect("load should succeed");
+    let loaded = load_checkpoint(&path).expect("load should succeed");
     assert_eq!(loaded.current_node, "step_2");
     assert_eq!(loaded.completed_nodes.len(), 2);
     assert!(loaded.completed_nodes.contains(&"start".to_string()));
@@ -1382,7 +1391,6 @@ impl CodergenBackend for MockCodergenBackend {
         _context: &Context,
         _thread_id: Option<&str>,
         _emitter: &Arc<EventEmitter>,
-        _stage_dir: &std::path::Path,
         _sandbox: &Arc<dyn fabro_agent::Sandbox>,
         _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
     ) -> Result<CodergenResult, FabroError> {
@@ -1634,7 +1642,7 @@ async fn smoke_test_with_mock_codergen_backend() {
         .expect("smoke test should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let checkpoint = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert!(
         checkpoint.completed_nodes.contains(&"plan".to_string()),
         "plan should have executed"
@@ -1734,7 +1742,7 @@ async fn end_to_end_parallel_fan_out_fan_in() {
         .expect("parallel pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let checkpoint = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
 
     // The parallel node (fan_out) and fan_in_node should be in completed_nodes.
     // Branch nodes run inside the parallel handler, so they are not recorded
@@ -1847,7 +1855,7 @@ async fn resume_from_checkpoint_completes_pipeline() {
     assert_eq!(outcome.status, StageStatus::Success);
 
     // Verify checkpoint written after resume contains step_b
-    let final_cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let final_cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert!(
         final_cp.completed_nodes.contains(&"step_b".to_string()),
         "step_b should have been executed after resume"
@@ -1982,7 +1990,7 @@ async fn graph_goal_in_context() {
     };
     engine.run(&graph, &run_options).await.expect("run");
 
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert_eq!(
         cp.context_values.get("graph.goal"),
         Some(&serde_json::json!("Ship the widget"))
@@ -2092,7 +2100,7 @@ async fn context_flow_between_stages() {
     };
     engine.run(&graph, &run_options).await.expect("run");
 
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert_eq!(
         cp.context_values.get("last_stage"),
         Some(&serde_json::json!("step_b"))
@@ -2145,7 +2153,7 @@ async fn tool_handler_e2e() {
     let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     let command_output = cp
         .context_values
         .get("command.output")
@@ -2216,7 +2224,7 @@ async fn auto_approve_interviewer_e2e() {
     let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert!(cp.completed_nodes.contains(&"approve".to_string()));
     assert!(!cp.completed_nodes.contains(&"reject".to_string()));
 }
@@ -2251,7 +2259,7 @@ async fn codergen_without_backend_simulated() {
     };
     engine.run(&graph, &run_options).await.expect("run");
 
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     let last_response = cp
         .context_values
         .get("last_response")
@@ -2353,7 +2361,7 @@ async fn branching_loop_back_on_failure() {
     let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     let implement_count = cp
         .completed_nodes
         .iter()
@@ -2435,7 +2443,7 @@ async fn human_gate_loops_back() {
     let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     let gate_count = cp.completed_nodes.iter().filter(|n| *n == "gate").count();
     assert!(
         gate_count >= 2,
@@ -2492,7 +2500,7 @@ async fn scenario_ship_a_feature() {
     let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     let command_output = cp
         .context_values
         .get("command.output")
@@ -2573,7 +2581,7 @@ async fn scenario_parallel_expert_review() {
     let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     let results = cp
         .context_values
         .get("parallel.results")
@@ -2656,7 +2664,7 @@ async fn scenario_node_retries_on_retry_status() {
     let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     let retry_count = cp
         .node_retries
         .get("flaky")
@@ -2784,7 +2792,7 @@ async fn scenario_bug_triage_router() {
     let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert!(
         cp.completed_nodes.contains(&"critical".to_string()),
         "critical should be selected (highest weight)"
@@ -2845,7 +2853,7 @@ async fn scenario_crash_recovery() {
         .expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert!(cp.completed_nodes.contains(&"b".to_string()));
     assert!(cp.completed_nodes.contains(&"c".to_string()));
     assert!(cp.completed_nodes.contains(&"a".to_string()));
@@ -2949,7 +2957,7 @@ async fn manager_loop_stop_condition_satisfied_e2e() {
     };
     let outcome = engine.run(&graph, &run_options).await.expect("run");
 
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     let manager_outcome = cp.node_outcomes.get("manager").expect("manager outcome");
     assert_eq!(manager_outcome.status, StageStatus::Success);
     assert!(
@@ -3027,7 +3035,7 @@ async fn manager_loop_max_cycles_exceeded_e2e() {
     };
     let outcome = engine.run(&graph, &run_options).await.expect("run");
 
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     let manager_outcome = cp.node_outcomes.get("manager").expect("manager outcome");
     assert_eq!(manager_outcome.status, StageStatus::Fail);
     assert!(
@@ -3165,7 +3173,7 @@ async fn conditional_branching_success_fail_paths() {
     let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert!(cp.completed_nodes.contains(&"fail_path".to_string()));
     assert!(!cp.completed_nodes.contains(&"success_path".to_string()));
 }
@@ -3216,7 +3224,7 @@ async fn edge_selection_condition_match_wins_over_weight() {
     };
     engine.run(&graph, &run_options).await.expect("run");
 
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert!(cp.completed_nodes.contains(&"cond_target".to_string()));
     assert!(!cp.completed_nodes.contains(&"weighted_target".to_string()));
 }
@@ -3262,7 +3270,7 @@ async fn edge_selection_weight_breaks_ties() {
     };
     engine.run(&graph, &run_options).await.expect("run");
 
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert!(cp.completed_nodes.contains(&"high".to_string()));
     assert!(!cp.completed_nodes.contains(&"low".to_string()));
 }
@@ -3300,7 +3308,7 @@ async fn edge_selection_lexical_tiebreak() {
     };
     engine.run(&graph, &run_options).await.expect("run");
 
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert!(cp.completed_nodes.contains(&"alpha".to_string()));
     assert!(!cp.completed_nodes.contains(&"beta".to_string()));
 }
@@ -3357,7 +3365,7 @@ async fn context_updates_visible_across_nodes() {
     };
     engine.run(&graph, &run_options).await.expect("run");
 
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert!(cp.completed_nodes.contains(&"yes".to_string()));
     assert!(!cp.completed_nodes.contains(&"no".to_string()));
 }
@@ -3455,7 +3463,7 @@ async fn custom_handler_registration_and_execution() {
     };
     engine.run(&graph, &run_options).await.expect("run");
 
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert_eq!(
         cp.context_values.get("custom.ran"),
         Some(&serde_json::json!("true"))
@@ -3527,7 +3535,7 @@ async fn integration_smoke_plan_implement_review_done() {
     assert_eq!(outcome.status, StageStatus::Success);
 
     // Verify all nodes completed
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert!(cp.completed_nodes.contains(&"plan".to_string()));
     assert!(cp.completed_nodes.contains(&"implement".to_string()));
     assert!(cp.completed_nodes.contains(&"review".to_string()));
@@ -3630,7 +3638,7 @@ async fn manager_loop_runs_child_engine_e2e() {
         .expect("manager loop E2E should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let checkpoint = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert!(
         checkpoint
             .completed_nodes
@@ -3761,7 +3769,7 @@ async fn manager_loop_context_flows_e2e() {
     assert_eq!(outcome.status, StageStatus::Success);
 
     // Check that child's context updates were propagated through the manager
-    let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let checkpoint = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     let sup_outcome = checkpoint.node_outcomes.get("supervisor").unwrap();
     assert_eq!(
         sup_outcome.context_updates.get("review.result"),
@@ -3936,7 +3944,7 @@ async fn import_e2e_through_engine() {
         .expect("import E2E should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let checkpoint = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert!(
         checkpoint
             .completed_nodes
@@ -4989,7 +4997,7 @@ async fn fidelity_stored_in_checkpoint_context() {
     };
     engine.run(&graph, &run_options).await.expect("run");
 
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert_eq!(
         cp.context_values.get("internal.fidelity"),
         Some(&serde_json::json!("summary:low")),
@@ -5635,15 +5643,15 @@ async fn fidelity_checkpoint_roundtrip_preserves_fidelity() {
 
     // Load, save, load again to verify roundtrip
     let checkpoint_path = dir.path().join("checkpoint.json");
-    let cp1 = Checkpoint::load(&checkpoint_path).expect("first load");
+    let cp1 = load_checkpoint(&checkpoint_path).expect("first load");
     assert_eq!(
         cp1.context_values.get("internal.fidelity"),
         Some(&serde_json::json!("summary:high")),
     );
 
     let roundtrip_path = dir.path().join("checkpoint_roundtrip.json");
-    cp1.save(&roundtrip_path).expect("save");
-    let cp2 = Checkpoint::load(&roundtrip_path).expect("second load");
+    save_checkpoint(&roundtrip_path, &cp1);
+    let cp2 = load_checkpoint(&roundtrip_path).expect("second load");
     assert_eq!(
         cp2.context_values.get("internal.fidelity"),
         Some(&serde_json::json!("summary:high")),
@@ -5799,7 +5807,7 @@ async fn fidelity_resume_preserves_context_values_across_checkpoint() {
     );
 
     // Verify the final checkpoint still has the fidelity
-    let final_cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let final_cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert_eq!(
         final_cp.context_values.get("internal.fidelity"),
         Some(&serde_json::json!("summary:low")),
@@ -5841,7 +5849,6 @@ mod real_llm {
             _context: &Context,
             _thread_id: Option<&str>,
             _emitter: &Arc<EventEmitter>,
-            _stage_dir: &std::path::Path,
             _sandbox: &Arc<dyn fabro_agent::Sandbox>,
             _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
         ) -> Result<CodergenResult, FabroError> {
@@ -5853,7 +5860,6 @@ mod real_llm {
             _node: &Node,
             prompt: &str,
             _system_prompt: Option<&str>,
-            _stage_dir: &std::path::Path,
         ) -> Result<CodergenResult, FabroError> {
             self.complete(prompt).await
         }
@@ -5938,7 +5944,7 @@ mod real_llm {
         })
     }
 
-    use super::{local_env, test_run_id};
+    use super::{load_checkpoint, local_env, test_run_id};
     use fabro_graphviz::graph::{AttrValue, Edge, Graph};
     use fabro_interview::AutoApproveInterviewer;
     use fabro_workflow::event::EventEmitter;
@@ -5947,7 +5953,6 @@ mod real_llm {
     use fabro_workflow::handler::human::HumanHandler;
     use fabro_workflow::handler::start::StartHandler;
     use fabro_workflow::outcome::StageStatus;
-    use fabro_workflow::records::{Checkpoint, CheckpointExt};
     use fabro_workflow::run_options::RunOptions;
     use fabro_workflow::test_support::WorkflowRunner;
 
@@ -6036,7 +6041,7 @@ mod real_llm {
 
         assert_eq!(outcome.status, StageStatus::Success);
 
-        let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+        let checkpoint = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
         assert!(checkpoint.completed_nodes.contains(&"plan".to_string()));
         assert!(checkpoint.completed_nodes.contains(&"review".to_string()));
 
@@ -6143,7 +6148,7 @@ mod real_llm {
 
         assert_eq!(outcome.status, StageStatus::Success);
 
-        let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+        let checkpoint = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
         let last_stage = checkpoint
             .context_values
             .get("last_stage")
@@ -6275,7 +6280,7 @@ mod real_llm {
 
         assert_eq!(outcome.status, StageStatus::Success);
 
-        let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+        let checkpoint = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
         assert!(
             checkpoint.completed_nodes.contains(&"write".to_string()),
             "write should be completed"
@@ -6466,7 +6471,7 @@ async fn human_gate_freeform_only_routes_text() {
         .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let checkpoint = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert!(
         checkpoint
             .completed_nodes
@@ -6595,7 +6600,7 @@ async fn human_gate_freeform_with_fixed_choice_match() {
         .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let checkpoint = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert!(
         checkpoint.completed_nodes.contains(&"approve".to_string()),
         "fixed choice match should route to approve"
@@ -6709,7 +6714,7 @@ async fn human_gate_freeform_fallback_on_unmatched_text() {
         .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let checkpoint = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let checkpoint = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert!(
         checkpoint
             .completed_nodes
@@ -8431,8 +8436,8 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
     assert_eq!(outcome.status, StageStatus::Success);
 
     // The checkpoint context should contain an artifact pointer, not the full value
-    let checkpoint = fabro_workflow::records::Checkpoint::load(&dir.path().join("checkpoint.json"))
-        .expect("checkpoint should load");
+    let checkpoint =
+        load_checkpoint(&dir.path().join("checkpoint.json")).expect("checkpoint should load");
     let pointer_value = checkpoint
         .context_values
         .get("response.big_output")
@@ -8650,7 +8655,7 @@ async fn artifact_pointers_rewritten_for_remote_sandbox() {
 
     // The checkpoint context should contain a pointer rewritten for the remote env
     let checkpoint =
-        Checkpoint::load(&dir.path().join("checkpoint.json")).expect("checkpoint should load");
+        load_checkpoint(&dir.path().join("checkpoint.json")).expect("checkpoint should load");
     let pointer_value = checkpoint
         .context_values
         .get("response.big_output")
@@ -9049,7 +9054,6 @@ async fn cli_backend_run_writes_prompt_and_calls_exec() {
             &context,
             None,
             &emitter,
-            dir.path(),
             &env,
             None,
         )
@@ -9123,7 +9127,6 @@ async fn cli_backend_run_detects_changed_files() {
             &context,
             None,
             &emitter,
-            dir.path(),
             &env,
             None,
         )
@@ -9152,16 +9155,7 @@ async fn cli_backend_run_with_codex_provider() {
     let dir = tempfile::tempdir().unwrap();
 
     let result = backend
-        .run(
-            &node,
-            "Build the API",
-            &context,
-            None,
-            &emitter,
-            dir.path(),
-            &env,
-            None,
-        )
+        .run(&node, "Build the API", &context, None, &emitter, &env, None)
         .await
         .expect("CLI backend should succeed");
 
@@ -9326,7 +9320,6 @@ async fn cli_backend_run_fails_on_nonzero_exit() {
             &context,
             None,
             &emitter,
-            dir.path(),
             &failing_env,
             None,
         )
@@ -9359,16 +9352,7 @@ async fn cli_backend_run_fails_on_unparseable_output() {
     let dir = tempfile::tempdir().unwrap();
 
     let result = backend
-        .run(
-            &node,
-            "do something",
-            &context,
-            None,
-            &emitter,
-            dir.path(),
-            &env,
-            None,
-        )
+        .run(&node, "do something", &context, None, &emitter, &env, None)
         .await;
 
     let err = match result {
@@ -9402,16 +9386,7 @@ async fn cli_backend_run_uses_node_model_override() {
     let dir = tempfile::tempdir().unwrap();
 
     backend
-        .run(
-            &node,
-            "test",
-            &context,
-            None,
-            &emitter,
-            dir.path(),
-            &env,
-            None,
-        )
+        .run(&node, "test", &context, None, &emitter, &env, None)
         .await
         .expect("should succeed");
 
@@ -9453,16 +9428,7 @@ async fn cli_backend_run_uses_node_provider_override() {
     let dir = tempfile::tempdir().unwrap();
 
     backend
-        .run(
-            &node,
-            "test",
-            &context,
-            None,
-            &emitter,
-            dir.path(),
-            &env,
-            None,
-        )
+        .run(&node, "test", &context, None, &emitter, &env, None)
         .await
         .expect("should succeed");
 
@@ -9488,16 +9454,7 @@ async fn cli_backend_run_returns_text_and_usage() {
     let dir = tempfile::tempdir().unwrap();
 
     let result = backend
-        .run(
-            &node,
-            "test",
-            &context,
-            None,
-            &emitter,
-            dir.path(),
-            &env,
-            None,
-        )
+        .run(&node, "test", &context, None, &emitter, &env, None)
         .await
         .expect("should succeed");
 
@@ -9538,16 +9495,7 @@ async fn backend_router_delegates_to_cli_for_cli_node() {
     let dir = tempfile::tempdir().unwrap();
 
     let result = router
-        .run(
-            &node,
-            "Fix the bug",
-            &context,
-            None,
-            &emitter,
-            dir.path(),
-            &env,
-            None,
-        )
+        .run(&node, "Fix the bug", &context, None, &emitter, &env, None)
         .await
         .expect("router should succeed");
 
@@ -9582,16 +9530,7 @@ async fn backend_router_delegates_to_api_for_normal_node() {
     let dir = tempfile::tempdir().unwrap();
 
     let result = router
-        .run(
-            &node,
-            "Plan the work",
-            &context,
-            None,
-            &emitter,
-            dir.path(),
-            &env,
-            None,
-        )
+        .run(&node, "Plan the work", &context, None, &emitter, &env, None)
         .await
         .expect("router should succeed");
 
@@ -9629,16 +9568,7 @@ async fn backend_router_delegates_to_cli_for_backend_attr() {
     let dir = tempfile::tempdir().unwrap();
 
     let result = router
-        .run(
-            &node,
-            "Build it",
-            &context,
-            None,
-            &emitter,
-            dir.path(),
-            &env,
-            None,
-        )
+        .run(&node, "Build it", &context, None, &emitter, &env, None)
         .await
         .expect("router should succeed");
 
@@ -10115,7 +10045,7 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
 
     // 8. Verify checkpoint.json has git_commit_sha
     let checkpoint =
-        Checkpoint::load(&run_dir.path().join("checkpoint.json")).expect("checkpoint should load");
+        load_checkpoint(&run_dir.path().join("checkpoint.json")).expect("checkpoint should load");
     assert!(
         checkpoint.git_commit_sha.is_some(),
         "checkpoint should have git_commit_sha"
@@ -10460,7 +10390,7 @@ async fn parallel_git_branching_host_e2e() {
 
     // 6. Verify parallel.results has head_sha for each branch
     let checkpoint =
-        Checkpoint::load(&run_dir.path().join("checkpoint.json")).expect("checkpoint should load");
+        load_checkpoint(&run_dir.path().join("checkpoint.json")).expect("checkpoint should load");
     let parallel_results = checkpoint
         .context_values
         .get("parallel.results")
@@ -11323,7 +11253,7 @@ async fn e2e_failure_signature_persisted_in_context() {
     assert_eq!(outcome.status, StageStatus::Success);
 
     // Verify checkpoint has failure_signature in context
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     let sig_value = cp
         .context_values
         .get("failure_signature")
@@ -11382,7 +11312,7 @@ async fn e2e_failure_signature_hint_overrides_reason_in_context() {
     };
     let _outcome = engine.run(&graph, &run_options).await.unwrap();
 
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     let sig_str = cp
         .context_values
         .get("failure_signature")
@@ -11439,7 +11369,7 @@ async fn e2e_signature_maps_persist_in_checkpoint() {
     assert_eq!(outcome.status, StageStatus::Success);
 
     // Load checkpoint and verify signature maps
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     // The pipeline had 3 deterministic failures at "work" before succeeding.
     // loop_failure_signatures should have recorded them.
     assert!(
@@ -11520,9 +11450,9 @@ fn e2e_checkpoint_signatures_roundtrip() {
         restart_sigs,
         std::collections::HashMap::new(),
     );
-    cp.save(&path).unwrap();
+    save_checkpoint(&path, &cp);
 
-    let loaded = Checkpoint::load(&path).unwrap();
+    let loaded = load_checkpoint(&path).unwrap();
     assert_eq!(loaded.loop_failure_signatures.len(), 1);
     assert_eq!(loaded.restart_failure_signatures.len(), 1);
     assert_eq!(loaded.loop_failure_signatures.get(&sig1), Some(&2));
@@ -11633,7 +11563,7 @@ async fn e2e_circuit_breaker_does_not_fire_below_limit() {
     );
 
     // Verify signatures were tracked but didn't trigger abort
-    let cp = Checkpoint::load(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     let total_failures: usize = cp.loop_failure_signatures.values().sum();
     assert_eq!(
         total_failures, 4,

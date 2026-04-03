@@ -31,7 +31,7 @@ use fabro_workflow::handler::exit::ExitHandler;
 use fabro_workflow::handler::start::StartHandler;
 use fabro_workflow::handler::{Handler, HandlerRegistry};
 use fabro_workflow::outcome::{Outcome, OutcomeExt, StageStatus};
-use fabro_workflow::records::{Checkpoint, CheckpointExt};
+use fabro_workflow::records::Checkpoint;
 use fabro_workflow::run_options::{GitCheckpointOptions, RunOptions};
 use fabro_workflow::test_support::WorkflowRunner;
 use ulid::Ulid;
@@ -40,6 +40,11 @@ fn test_run_id(label: &str) -> RunId {
     let mut hasher = DefaultHasher::new();
     label.hash(&mut hasher);
     RunId::from(Ulid(u128::from(hasher.finish())))
+}
+
+fn load_checkpoint(path: &Path) -> Result<Checkpoint, Box<dyn std::error::Error>> {
+    let data = std::fs::read_to_string(path)?;
+    Ok(serde_json::from_str(&data)?)
 }
 
 async fn create_env() -> DaytonaSandbox {
@@ -410,7 +415,7 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
 
     // Checkpoint should have a pointer rewritten for Daytona
     let checkpoint =
-        Checkpoint::load(&dir.path().join("checkpoint.json")).expect("checkpoint should load");
+        load_checkpoint(&dir.path().join("checkpoint.json")).expect("checkpoint should load");
     let pointer_value = checkpoint
         .context_values
         .get("response.big_output")
@@ -638,7 +643,7 @@ async fn daytona_git_checkpoint_remote_emits_events() {
 
     // Verify checkpoint.json has git_commit_sha
     let checkpoint =
-        Checkpoint::load(&dir.path().join("checkpoint.json")).expect("checkpoint should load");
+        load_checkpoint(&dir.path().join("checkpoint.json")).expect("checkpoint should load");
     assert!(
         checkpoint.git_commit_sha.is_some(),
         "checkpoint should have git_commit_sha"
@@ -789,7 +794,7 @@ async fn daytona_parallel_git_branching_e2e() {
 
     // Verify parallel.results has head_sha for each branch
     let checkpoint =
-        Checkpoint::load(&run_tmp.path().join("checkpoint.json")).expect("checkpoint should load");
+        load_checkpoint(&run_tmp.path().join("checkpoint.json")).expect("checkpoint should load");
     let parallel_results = checkpoint
         .context_values
         .get("parallel.results")
@@ -958,7 +963,6 @@ async fn run_daytona_cli_test(provider: Provider, model: &str, install_command: 
             &context,
             None,
             &emitter,
-            dir.path(),
             &env,
             None,
         )

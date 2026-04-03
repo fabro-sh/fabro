@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -465,7 +464,6 @@ impl CodergenBackend for AgentCliBackend {
         _context: &Context,
         _thread_id: Option<&str>,
         emitter: &Arc<EventEmitter>,
-        _stage_dir: &Path,
         sandbox: &Arc<dyn Sandbox>,
         _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
     ) -> Result<CodergenResult, FabroError> {
@@ -755,20 +753,19 @@ impl CodergenBackend for BackendRouter {
         context: &Context,
         thread_id: Option<&str>,
         emitter: &Arc<EventEmitter>,
-        stage_dir: &Path,
         sandbox: &Arc<dyn Sandbox>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
     ) -> Result<CodergenResult, FabroError> {
         if self.should_use_cli(node) {
             self.cli_backend
                 .run(
-                    node, prompt, context, thread_id, emitter, stage_dir, sandbox, tool_hooks,
+                    node, prompt, context, thread_id, emitter, sandbox, tool_hooks,
                 )
                 .await
         } else {
             self.api_backend
                 .run(
-                    node, prompt, context, thread_id, emitter, stage_dir, sandbox, tool_hooks,
+                    node, prompt, context, thread_id, emitter, sandbox, tool_hooks,
                 )
                 .await
         }
@@ -779,12 +776,9 @@ impl CodergenBackend for BackendRouter {
         node: &Node,
         prompt: &str,
         system_prompt: Option<&str>,
-        stage_dir: &Path,
     ) -> Result<CodergenResult, FabroError> {
         // CLI backend doesn't support one_shot, always route to API
-        self.api_backend
-            .one_shot(node, prompt, system_prompt, stage_dir)
-            .await
+        self.api_backend.one_shot(node, prompt, system_prompt).await
     }
 }
 
@@ -792,6 +786,7 @@ impl CodergenBackend for BackendRouter {
 mod tests {
     use super::*;
     use fabro_graphviz::graph::AttrValue;
+    use std::path::Path;
 
     // -- AgentCli --
 
@@ -1196,7 +1191,6 @@ mod tests {
             _context: &Context,
             _thread_id: Option<&str>,
             _emitter: &Arc<EventEmitter>,
-            _stage_dir: &Path,
             _sandbox: &Arc<dyn Sandbox>,
             _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
         ) -> Result<CodergenResult, FabroError> {
