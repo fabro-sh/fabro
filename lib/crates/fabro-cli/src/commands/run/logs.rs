@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
-use fabro_store::RunStore;
+use fabro_store::SlateRunStore;
 use fabro_util::redact::redact_jsonl_line;
 use fabro_util::terminal::Styles;
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
@@ -31,9 +31,7 @@ pub(crate) async fn run(args: &LogsArgs, styles: &Styles, globals: &GlobalArgs) 
         None => None,
     };
 
-    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id)
-        .await?
-        .with_context(|| format!("Run '{}' not found in store", run.run_id))?;
+    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await?;
     let (all_lines, last_seq) = match run_store.list_events().await {
         Ok(events) => {
             let last_seq = events.last().map_or(0, |event| event.seq);
@@ -140,7 +138,7 @@ fn try_parse_relative_duration(s: &str) -> Option<chrono::Duration> {
 }
 
 async fn follow_store_logs(
-    run_store: &dyn RunStore,
+    run_store: &SlateRunStore,
     run_dir: &Path,
     seq: u32,
     pretty: bool,
@@ -189,25 +187,19 @@ async fn follow_store_logs(
     Ok(())
 }
 
-async fn run_concluded(run_store: &dyn RunStore, _run_dir: &Path) -> Result<bool> {
-    if run_store
-        .get_conclusion()
+async fn run_concluded(run_store: &SlateRunStore, _run_dir: &Path) -> Result<bool> {
+    let state = run_store
+        .state()
         .await
-        .context("Failed to read conclusion from store while following logs")?
-        .is_some()
-    {
-        return Ok(true);
-    }
-
-    Ok(run_store
-        .get_status()
-        .await
-        .context("Failed to read status from store while following logs")?
-        .is_some_and(|record| record.status.is_terminal()))
+        .context("Failed to read run state from store while following logs")?;
+    Ok(state.conclusion.is_some()
+        || state
+            .status
+            .is_some_and(|record| record.status.is_terminal()))
 }
 
 async fn flush_remaining_store_events(
-    run_store: &dyn RunStore,
+    run_store: &SlateRunStore,
     next_seq: u32,
     pretty: bool,
     styles: &Styles,

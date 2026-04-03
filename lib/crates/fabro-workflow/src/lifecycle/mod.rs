@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use async_trait::async_trait;
-use fabro_store::RunStore;
+use fabro_store::RunStoreHandle;
 use fabro_store::RuntimeState;
 use fabro_types::RunId;
 
@@ -85,7 +85,7 @@ impl WorkflowLifecycle {
         sandbox: &Arc<dyn Sandbox>,
         graph: Arc<GvGraph>,
         run_dir: &PathBuf,
-        run_store: Arc<dyn RunStore>,
+        run_store: RunStoreHandle,
         run_options: &Arc<RunOptions>,
         is_resume: bool,
         on_node: crate::OnNodeCallback,
@@ -122,7 +122,7 @@ impl WorkflowLifecycle {
             run_start: Mutex::new(Instant::now()),
             restarted_from: Arc::clone(&restarted_from),
             base_branch: run_options.base_branch.clone(),
-            base_sha: run_options.display_base_sha.clone(),
+            base_sha: run_options.git.as_ref().and_then(|g| g.base_sha.clone()),
             run_branch: run_options.git.as_ref().and_then(|g| g.run_branch.clone()),
             worktree_dir: working_directory.clone(),
             goal: (!graph.goal().is_empty()).then(|| graph.goal().to_string()),
@@ -146,7 +146,7 @@ impl WorkflowLifecycle {
         let disk = DiskLifecycle {
             run_dir: run_dir.clone(),
             run_id: run_options.run_id,
-            run_store: Arc::clone(&run_store),
+            run_store: run_store.clone(),
             graph: Arc::clone(&graph),
             run_options: Arc::clone(run_options),
             emitter: Arc::clone(emitter),

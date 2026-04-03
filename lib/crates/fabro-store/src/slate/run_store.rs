@@ -3,7 +3,6 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use futures::Stream;
@@ -15,18 +14,27 @@ use tokio::time;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::keys;
+use crate::run_state::EventProjectionCache;
 use crate::{
     CatalogRecord, EventEnvelope, EventPayload, NodeOutcomeRecord, NodeSnapshot, NodeVisitRef,
-    Result, RunSnapshot, RunStore, RunSummary, StoreError,
+    Result, RunState, RunSummary, StoreError,
 };
-use fabro_types::{
-    Checkpoint, Conclusion, NodeStatusRecord, PullRequestRecord, Retro, RunId, RunRecord,
-    RunStatusRecord, SandboxRecord, StartRecord,
-};
+use fabro_types::{NodeStatusRecord, RunId};
 
 #[derive(Clone)]
-pub(crate) struct SlateRunStore {
+pub struct SlateRunStore {
     inner: Arc<SlateRunStoreInner>,
+}
+
+impl std::fmt::Debug for SlateRunStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SlateRunStore")
+            .field("run_id", &self.inner.run_id)
+            .field("created_at", &self.inner.created_at)
+            .field("db_prefix", &self.inner.db_prefix)
+            .field("run_dir", &self.inner.run_dir)
+            .finish_non_exhaustive()
+    }
 }
 
 pub(crate) struct SlateRunStoreInner {
@@ -36,8 +44,8 @@ pub(crate) struct SlateRunStoreInner {
     run_dir: Option<String>,
     db: SlateRunDb,
     event_seq: AtomicU32,
-    checkpoint_seq: AtomicU32,
     close_lock: Mutex<()>,
+    projection_cache: Mutex<EventProjectionCache>,
 }
 
 enum SlateRunDb {
@@ -48,8 +56,6 @@ enum SlateRunDb {
 impl SlateRunStore {
     pub(crate) async fn open_writer(record: CatalogRecord, db: slatedb::Db) -> Result<Self> {
         let event_seq = recover_next_seq(&db, keys::EVENTS_PREFIX, keys::parse_event_seq).await?;
-        let checkpoint_seq =
-            recover_next_seq(&db, keys::CHECKPOINTS_PREFIX, keys::parse_checkpoint_seq).await?;
         Ok(Self {
             inner: Arc::new(SlateRunStoreInner {
                 run_id: record.run_id,
@@ -58,16 +64,14 @@ impl SlateRunStore {
                 run_dir: record.run_dir,
                 db: SlateRunDb::Writer(db),
                 event_seq: AtomicU32::new(event_seq),
-                checkpoint_seq: AtomicU32::new(checkpoint_seq),
                 close_lock: Mutex::new(()),
+                projection_cache: Mutex::new(EventProjectionCache::default()),
             }),
         })
     }
 
     pub(crate) async fn open_reader(record: CatalogRecord, db: DbReader) -> Result<Self> {
         let event_seq = recover_next_seq(&db, keys::EVENTS_PREFIX, keys::parse_event_seq).await?;
-        let checkpoint_seq =
-            recover_next_seq(&db, keys::CHECKPOINTS_PREFIX, keys::parse_checkpoint_seq).await?;
         Ok(Self {
             inner: Arc::new(SlateRunStoreInner {
                 run_id: record.run_id,
@@ -76,8 +80,8 @@ impl SlateRunStore {
                 run_dir: record.run_dir,
                 db: SlateRunDb::Reader(Box::new(db)),
                 event_seq: AtomicU32::new(event_seq),
-                checkpoint_seq: AtomicU32::new(checkpoint_seq),
                 close_lock: Mutex::new(()),
+                projection_cache: Mutex::new(EventProjectionCache::default()),
             }),
         })
     }
@@ -143,58 +147,9 @@ impl SlateRunStore {
     where
         R: DbRead + Sync,
     {
-        let run = get_json::<_, RunRecord>(db, keys::run()).await?;
-        let start = get_json::<_, StartRecord>(db, keys::start()).await?;
-        let status = get_json::<_, RunStatusRecord>(db, keys::status()).await?;
-        let conclusion = get_json::<_, Conclusion>(db, keys::conclusion()).await?;
-
-        let workflow_name = run.as_ref().map(|run| {
-            if run.graph.name.is_empty() {
-                "unnamed".to_string()
-            } else {
-                run.graph.name.clone()
-            }
-        });
-        let goal = run.as_ref().and_then(|run| {
-            let goal = run.graph.goal();
-            (!goal.is_empty()).then(|| goal.to_string())
-        });
-
-        Ok(RunSummary {
-            run_id: catalog.run_id,
-            created_at: catalog.created_at,
-            db_prefix: catalog.db_prefix.clone(),
-            run_dir: catalog.run_dir.clone(),
-            workflow_name,
-            workflow_slug: run.as_ref().and_then(|run| run.workflow_slug.clone()),
-            goal,
-            labels: run
-                .as_ref()
-                .map(|run| run.labels.clone())
-                .unwrap_or_default(),
-            host_repo_path: run.as_ref().and_then(|run| run.host_repo_path.clone()),
-            start_time: start.map(|start| start.start_time),
-            status: status.as_ref().map(|status| status.status),
-            status_reason: status.and_then(|status| status.reason),
-            duration_ms: conclusion.as_ref().map(|conclusion| conclusion.duration_ms),
-            total_cost: conclusion.and_then(|conclusion| conclusion.total_cost),
-        })
-    }
-
-    fn validate_run_record(&self, record: &RunRecord) -> Result<()> {
-        if record.created_at != self.inner.created_at {
-            return Err(StoreError::Other(format!(
-                "run record created_at {:?} does not match store created_at {:?}",
-                record.created_at, self.inner.created_at
-            )));
-        }
-        if record.run_id != self.inner.run_id {
-            return Err(StoreError::Other(format!(
-                "run record run_id {:?} does not match store run_id {:?}",
-                record.run_id, self.inner.run_id
-            )));
-        }
-        Ok(())
+        let events = list_events_from(db, 1).await?;
+        let state = RunState::apply_events(&events)?;
+        Ok(state.build_summary(catalog))
     }
 
     async fn build_node_snapshot(&self, node: &NodeVisitRef<'_>) -> Result<NodeSnapshot> {
@@ -230,107 +185,38 @@ impl SlateRunStore {
             stderr: self.inner.db.get_text(&keys::node_stderr(node)).await?,
         })
     }
+
+    async fn projected_state(&self) -> Result<RunState> {
+        let next_seq = {
+            let cache = self.inner.projection_cache.lock().await;
+            cache.last_seq.saturating_add(1)
+        };
+        let events = self.inner.db.list_events_from(next_seq).await?;
+        let mut cache = self.inner.projection_cache.lock().await;
+        for event in &events {
+            cache.state.apply_event(event)?;
+            cache.last_seq = event.seq;
+        }
+        Ok(cache.state.clone())
+    }
 }
 
-#[async_trait]
-impl RunStore for SlateRunStore {
-    async fn put_run(&self, record: &RunRecord) -> Result<()> {
-        self.validate_run_record(record)?;
-        self.inner.db.put_json(keys::run(), record).await
-    }
-
-    async fn get_run(&self) -> Result<Option<RunRecord>> {
-        self.inner.db.get_json(keys::run()).await
-    }
-
-    async fn put_start(&self, record: &StartRecord) -> Result<()> {
-        self.inner.db.put_json(keys::start(), record).await
-    }
-
-    async fn get_start(&self) -> Result<Option<StartRecord>> {
-        self.inner.db.get_json(keys::start()).await
-    }
-
-    async fn put_status(&self, record: &RunStatusRecord) -> Result<()> {
-        self.inner.db.put_json(keys::status(), record).await
-    }
-
-    async fn get_status(&self) -> Result<Option<RunStatusRecord>> {
-        self.inner.db.get_json(keys::status()).await
-    }
-
-    async fn put_checkpoint(&self, record: &Checkpoint) -> Result<()> {
-        self.inner.db.put_json(keys::checkpoint(), record).await
-    }
-
-    async fn get_checkpoint(&self) -> Result<Option<Checkpoint>> {
-        self.inner.db.get_json(keys::checkpoint()).await
-    }
-
-    async fn append_checkpoint(&self, record: &Checkpoint) -> Result<u32> {
-        let seq = self.inner.checkpoint_seq.fetch_add(1, Ordering::SeqCst);
-        self.put_checkpoint(record).await?;
-        self.inner
-            .db
-            .put_json(
-                &keys::checkpoint_history_key(seq, Utc::now().timestamp_millis()),
-                record,
-            )
-            .await?;
-        Ok(seq)
-    }
-
-    async fn list_checkpoints(&self) -> Result<Vec<(u32, Checkpoint)>> {
-        self.inner.db.list_checkpoints().await
-    }
-
-    async fn put_conclusion(&self, record: &Conclusion) -> Result<()> {
-        self.inner.db.put_json(keys::conclusion(), record).await
-    }
-
-    async fn get_conclusion(&self) -> Result<Option<Conclusion>> {
-        self.inner.db.get_json(keys::conclusion()).await
-    }
-
-    async fn put_retro(&self, retro: &Retro) -> Result<()> {
-        self.inner.db.put_json(keys::retro(), retro).await
-    }
-
-    async fn get_retro(&self) -> Result<Option<Retro>> {
-        self.inner.db.get_json(keys::retro()).await
-    }
-
-    async fn put_graph(&self, dot_source: &str) -> Result<()> {
-        self.inner.db.put_text(keys::graph(), dot_source).await
-    }
-
-    async fn get_graph(&self) -> Result<Option<String>> {
-        self.inner.db.get_text(keys::graph()).await
-    }
-
-    async fn put_sandbox(&self, record: &SandboxRecord) -> Result<()> {
-        self.inner.db.put_json(keys::sandbox(), record).await
-    }
-
-    async fn get_sandbox(&self) -> Result<Option<SandboxRecord>> {
-        self.inner.db.get_json(keys::sandbox()).await
-    }
-
-    async fn put_node_prompt(&self, node: &NodeVisitRef<'_>, prompt: &str) -> Result<()> {
+impl SlateRunStore {
+    pub async fn put_node_prompt(&self, node: &NodeVisitRef<'_>, prompt: &str) -> Result<()> {
         self.inner
             .db
             .put_text(&keys::node_prompt(node), prompt)
             .await
     }
 
-    async fn put_node_response(&self, node: &NodeVisitRef<'_>, response: &str) -> Result<()> {
+    pub async fn put_node_response(&self, node: &NodeVisitRef<'_>, response: &str) -> Result<()> {
         self.inner
             .db
             .put_text(&keys::node_response(node), response)
             .await
     }
 
-    async fn put_node_status(
+    pub async fn put_node_status(
         &self,
         node: &NodeVisitRef<'_>,
         status: &NodeStatusRecord,
@@ -341,7 +227,7 @@ impl RunStore for SlateRunStore {
             .await
     }
 
-    async fn put_node_outcome(
+    pub async fn put_node_outcome(
         &self,
         node: &NodeVisitRef<'_>,
         outcome: &NodeOutcomeRecord,
@@ -352,7 +238,7 @@ impl RunStore for SlateRunStore {
             .await
     }
 
-    async fn put_node_provider_used(
+    pub async fn put_node_provider_used(
         &self,
         node: &NodeVisitRef<'_>,
         provider_used: &serde_json::Value,
@@ -363,11 +249,11 @@ impl RunStore for SlateRunStore {
             .await
     }
 
-    async fn put_node_diff(&self, node: &NodeVisitRef<'_>, diff: &str) -> Result<()> {
+    pub async fn put_node_diff(&self, node: &NodeVisitRef<'_>, diff: &str) -> Result<()> {
         self.inner.db.put_text(&keys::node_diff(node), diff).await
     }
 
-    async fn put_node_script_invocation(
+    pub async fn put_node_script_invocation(
         &self,
         node: &NodeVisitRef<'_>,
         invocation: &serde_json::Value,
@@ -378,7 +264,7 @@ impl RunStore for SlateRunStore {
             .await
     }
 
-    async fn put_node_script_timing(
+    pub async fn put_node_script_timing(
         &self,
         node: &NodeVisitRef<'_>,
         timing: &serde_json::Value,
@@ -389,7 +275,7 @@ impl RunStore for SlateRunStore {
             .await
     }
 
-    async fn put_node_parallel_results(
+    pub async fn put_node_parallel_results(
         &self,
         node: &NodeVisitRef<'_>,
         results: &serde_json::Value,
@@ -400,19 +286,19 @@ impl RunStore for SlateRunStore {
             .await
     }
 
-    async fn put_node_stdout(&self, node: &NodeVisitRef<'_>, log: &str) -> Result<()> {
+    pub async fn put_node_stdout(&self, node: &NodeVisitRef<'_>, log: &str) -> Result<()> {
         self.inner.db.put_text(&keys::node_stdout(node), log).await
     }
 
-    async fn put_node_stderr(&self, node: &NodeVisitRef<'_>, log: &str) -> Result<()> {
+    pub async fn put_node_stderr(&self, node: &NodeVisitRef<'_>, log: &str) -> Result<()> {
         self.inner.db.put_text(&keys::node_stderr(node), log).await
     }
 
-    async fn get_node(&self, node: &NodeVisitRef<'_>) -> Result<NodeSnapshot> {
+    pub async fn get_node(&self, node: &NodeVisitRef<'_>) -> Result<NodeSnapshot> {
         self.build_node_snapshot(node).await
     }
 
-    async fn list_node_visits(&self, node_id: &str) -> Result<Vec<u32>> {
+    pub async fn list_node_visits(&self, node_id: &str) -> Result<Vec<u32>> {
         let prefix = format!("nodes/{node_id}/visit-");
         let mut iter = self.inner.db.scan_prefix(prefix.as_bytes()).await?;
         let mut visits = BTreeSet::new();
@@ -427,7 +313,7 @@ impl RunStore for SlateRunStore {
         Ok(visits.into_iter().collect())
     }
 
-    async fn list_node_ids(&self) -> Result<Vec<String>> {
+    pub async fn list_node_ids(&self) -> Result<Vec<String>> {
         let mut iter = self.inner.db.scan_prefix(b"nodes/").await?;
         let mut node_ids = BTreeSet::new();
         while let Some(entry) = iter.next().await? {
@@ -452,40 +338,13 @@ impl RunStore for SlateRunStore {
         Ok(node_ids.into_iter().collect())
     }
 
-    async fn put_final_patch(&self, patch: &str) -> Result<()> {
-        self.inner.db.put_text(keys::final_patch(), patch).await
-    }
-
-    async fn get_final_patch(&self) -> Result<Option<String>> {
-        self.inner.db.get_text(keys::final_patch()).await
-    }
-
-    async fn put_pull_request(&self, record: &PullRequestRecord) -> Result<()> {
-        self.inner.db.put_json(keys::pull_request(), record).await
-    }
-
-    async fn get_pull_request(&self) -> Result<Option<PullRequestRecord>> {
-        self.inner.db.get_json(keys::pull_request()).await
-    }
-
-    async fn reset_for_rewind(&self) -> Result<()> {
+    pub async fn reset_for_rewind(&self) -> Result<()> {
         let db = self.inner.db.writer()?;
-        for key in [
-            keys::status(),
-            keys::checkpoint(),
-            keys::conclusion(),
-            keys::retro(),
-            keys::sandbox(),
-            keys::final_patch(),
-            keys::pull_request(),
-            keys::retro_prompt(),
-            keys::retro_response(),
-        ] {
+        for key in [keys::retro_prompt(), keys::retro_response()] {
             db.delete(key).await?;
         }
         for prefix in [
             b"nodes/".as_slice(),
-            keys::CHECKPOINTS_PREFIX.as_bytes(),
             keys::ARTIFACT_VALUES_PREFIX.as_bytes(),
             keys::ARTIFACT_NODES_PREFIX.as_bytes(),
         ] {
@@ -494,7 +353,7 @@ impl RunStore for SlateRunStore {
         Ok(())
     }
 
-    async fn append_event(&self, payload: &EventPayload) -> Result<u32> {
+    pub async fn append_event(&self, payload: &EventPayload) -> Result<u32> {
         payload.validate(&self.inner.run_id)?;
         let seq = self.inner.event_seq.fetch_add(1, Ordering::SeqCst);
         self.inner
@@ -507,15 +366,15 @@ impl RunStore for SlateRunStore {
         Ok(seq)
     }
 
-    async fn list_events(&self) -> Result<Vec<EventEnvelope>> {
+    pub async fn list_events(&self) -> Result<Vec<EventEnvelope>> {
         self.inner.db.list_events_from(1).await
     }
 
-    async fn list_events_from(&self, seq: u32) -> Result<Vec<EventEnvelope>> {
+    pub async fn list_events_from(&self, seq: u32) -> Result<Vec<EventEnvelope>> {
         self.inner.db.list_events_from(seq).await
     }
 
-    async fn watch_events_from(
+    pub async fn watch_events_from(
         &self,
         seq: u32,
     ) -> Result<std::pin::Pin<Box<dyn Stream<Item = Result<EventEnvelope>> + Send>>> {
@@ -553,55 +412,68 @@ impl RunStore for SlateRunStore {
         Ok(Box::pin(UnboundedReceiverStream::new(receiver)))
     }
 
-    async fn put_retro_prompt(&self, text: &str) -> Result<()> {
+    pub async fn put_retro_prompt(&self, text: &str) -> Result<()> {
         self.inner.db.put_text(keys::retro_prompt(), text).await
     }
 
-    async fn get_retro_prompt(&self) -> Result<Option<String>> {
+    pub async fn get_retro_prompt(&self) -> Result<Option<String>> {
         self.inner.db.get_text(keys::retro_prompt()).await
     }
 
-    async fn put_retro_response(&self, text: &str) -> Result<()> {
+    pub async fn put_retro_response(&self, text: &str) -> Result<()> {
         self.inner.db.put_text(keys::retro_response(), text).await
     }
 
-    async fn get_retro_response(&self) -> Result<Option<String>> {
+    pub async fn get_retro_response(&self) -> Result<Option<String>> {
         self.inner.db.get_text(keys::retro_response()).await
     }
 
-    async fn put_artifact_value(&self, artifact_id: &str, value: &serde_json::Value) -> Result<()> {
+    pub async fn put_artifact_value(
+        &self,
+        artifact_id: &str,
+        value: &serde_json::Value,
+    ) -> Result<()> {
         self.inner
             .db
             .put_json(&keys::artifact_value(artifact_id), value)
             .await
     }
 
-    async fn get_artifact_value(&self, artifact_id: &str) -> Result<Option<serde_json::Value>> {
+    pub async fn get_artifact_value(&self, artifact_id: &str) -> Result<Option<serde_json::Value>> {
         self.inner
             .db
             .get_json(&keys::artifact_value(artifact_id))
             .await
     }
 
-    async fn list_artifact_values(&self) -> Result<Vec<String>> {
+    pub async fn list_artifact_values(&self) -> Result<Vec<String>> {
         self.inner.db.list_artifact_values().await
     }
 
-    async fn put_asset(&self, node: &NodeVisitRef<'_>, filename: &str, data: &[u8]) -> Result<()> {
+    pub async fn put_asset(
+        &self,
+        node: &NodeVisitRef<'_>,
+        filename: &str,
+        data: &[u8],
+    ) -> Result<()> {
         self.inner
             .db
             .put_bytes(&keys::node_asset(node, filename), data)
             .await
     }
 
-    async fn get_asset(&self, node: &NodeVisitRef<'_>, filename: &str) -> Result<Option<Bytes>> {
+    pub async fn get_asset(
+        &self,
+        node: &NodeVisitRef<'_>,
+        filename: &str,
+    ) -> Result<Option<Bytes>> {
         self.inner
             .db
             .get_bytes(&keys::node_asset(node, filename))
             .await
     }
 
-    async fn list_assets(&self, node: &NodeVisitRef<'_>) -> Result<Vec<String>> {
+    pub async fn list_assets(&self, node: &NodeVisitRef<'_>) -> Result<Vec<String>> {
         let prefix = format!("{}/", keys::node_asset_prefix(node));
         let mut iter = self.inner.db.scan_prefix(prefix.as_bytes()).await?;
         let mut assets = Vec::new();
@@ -615,46 +487,12 @@ impl RunStore for SlateRunStore {
         Ok(assets)
     }
 
-    async fn list_all_assets(&self) -> Result<Vec<(String, u32, String)>> {
+    pub async fn list_all_assets(&self) -> Result<Vec<(String, u32, String)>> {
         self.inner.db.list_all_assets().await
     }
 
-    async fn get_snapshot(&self) -> Result<Option<RunSnapshot>> {
-        let Some(run) = self.get_run().await? else {
-            return Ok(None);
-        };
-
-        let mut iter = self.inner.db.scan_prefix(b"nodes/").await?;
-        let mut visits = BTreeSet::new();
-        while let Some(entry) = iter.next().await? {
-            let key = key_to_string(&entry.key)?;
-            if let Some((node_id, visit, _)) = keys::parse_node_key(&key) {
-                visits.insert((node_id, visit));
-            }
-        }
-
-        let mut nodes = Vec::new();
-        for (node_id, visit) in visits {
-            let node = NodeVisitRef {
-                node_id: &node_id,
-                visit,
-            };
-            nodes.push(self.build_node_snapshot(&node).await?);
-        }
-
-        Ok(Some(RunSnapshot {
-            run,
-            start: self.get_start().await?,
-            status: self.get_status().await?,
-            checkpoint: self.get_checkpoint().await?,
-            conclusion: self.get_conclusion().await?,
-            retro: self.get_retro().await?,
-            graph: self.get_graph().await?,
-            sandbox: self.get_sandbox().await?,
-            final_patch: self.get_final_patch().await?,
-            pull_request: self.get_pull_request().await?,
-            nodes,
-        }))
+    pub async fn state(&self) -> Result<RunState> {
+        self.projected_state().await
     }
 }
 
@@ -723,13 +561,6 @@ impl SlateRunDb {
         match self {
             Self::Writer(db) => list_events_from(db, start_seq).await,
             Self::Reader(db) => list_events_from(db.as_ref(), start_seq).await,
-        }
-    }
-
-    async fn list_checkpoints(&self) -> Result<Vec<(u32, Checkpoint)>> {
-        match self {
-            Self::Writer(db) => list_checkpoints(db).await,
-            Self::Reader(db) => list_checkpoints(db.as_ref()).await,
         }
     }
 
@@ -840,23 +671,6 @@ where
     }
     events.sort_by_key(|event| event.seq);
     Ok(events)
-}
-
-async fn list_checkpoints<R>(db: &R) -> Result<Vec<(u32, Checkpoint)>>
-where
-    R: DbRead + Sync,
-{
-    let mut iter = db.scan_prefix(keys::CHECKPOINTS_PREFIX.as_bytes()).await?;
-    let mut checkpoints = Vec::new();
-    while let Some(entry) = iter.next().await? {
-        let key = key_to_string(&entry.key)?;
-        let Some(seq) = keys::parse_checkpoint_seq(&key) else {
-            continue;
-        };
-        checkpoints.push((seq, serde_json::from_slice(&entry.value)?));
-    }
-    checkpoints.sort_by_key(|(seq, _)| *seq);
-    Ok(checkpoints)
 }
 
 async fn list_artifact_values<R>(db: &R) -> Result<Vec<String>>

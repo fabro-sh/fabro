@@ -129,7 +129,9 @@ fn rewind_preserves_event_history_and_clears_terminal_snapshot_state() {
     let setup = setup_git_backed_changed_run(&context);
     let before_events = run_events(&setup.run.run_dir);
     assert!(
-        before_events.iter().any(|event| event.payload.as_value()["event"] == "run.completed"),
+        before_events
+            .iter()
+            .any(|event| event.payload.as_value()["event"] == "run.completed"),
         "setup run should be completed before rewind"
     );
 
@@ -179,9 +181,18 @@ fn rewind_preserves_event_history_and_clears_terminal_snapshot_state() {
         snapshot.status.as_ref().map(|status| &status.status),
         Some(&fabro_types::RunStatus::Submitted)
     );
-    assert!(snapshot.conclusion.is_none(), "rewind should clear conclusion");
-    assert!(snapshot.final_patch.is_none(), "rewind should clear final patch");
-    assert!(snapshot.pull_request.is_none(), "rewind should clear pull request");
+    assert!(
+        snapshot.conclusion.is_none(),
+        "rewind should clear conclusion"
+    );
+    assert!(
+        snapshot.final_patch.is_none(),
+        "rewind should clear final patch"
+    );
+    assert!(
+        snapshot.pull_request.is_none(),
+        "rewind should clear pull request"
+    );
     assert!(
         snapshot.nodes.is_empty(),
         "rewind should clear node snapshots that belonged to the prior execution"

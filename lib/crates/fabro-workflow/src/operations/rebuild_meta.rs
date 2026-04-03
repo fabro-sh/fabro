@@ -6,7 +6,7 @@ use anyhow::{Context, Result, bail};
 use fabro_checkpoint::branch::BranchStore;
 use fabro_checkpoint::git::Store as GitStore;
 use fabro_store::{
-    ListRunsQuery, NodeVisitRef, RunStore as DurableRunStore, Store as DurableStore,
+    ListRunsQuery, NodeVisitRef, RunStoreHandle as DurableRunStore, SlateStore as DurableStore,
 };
 use fabro_types::RunId;
 use git2::{Repository, Signature};
@@ -18,7 +18,7 @@ use crate::records::Checkpoint;
 
 pub async fn rebuild_metadata_branch(
     git_store: &GitStore,
-    run_store: &dyn DurableRunStore,
+    run_store: &DurableRunStore,
     run_id: &RunId,
 ) -> Result<()> {
     let branch = MetadataStore::branch_name(&run_id.to_string());
@@ -26,9 +26,10 @@ pub async fn rebuild_metadata_branch(
         bail!("metadata branch already exists for run {run_id}");
     }
 
-    let run_record = run_store
-        .get_run()
-        .await?
+    let state = run_store.state().await?;
+    let run_record = state
+        .run
+        .clone()
         .ok_or_else(|| anyhow::anyhow!("run record not found for {run_id}"))?;
 
     let sig = Signature::now("Fabro", "noreply@fabro.sh")?;
@@ -43,10 +44,10 @@ pub async fn rebuild_metadata_branch(
             "run.json".to_string(),
             serde_json::to_vec_pretty(&run_record)?,
         ));
-        if let Some(start) = run_store.get_start().await? {
+        if let Some(start) = state.start.clone() {
             init_entries.push(("start.json".to_string(), serde_json::to_vec_pretty(&start)?));
         }
-        if let Some(sandbox) = run_store.get_sandbox().await? {
+        if let Some(sandbox) = state.sandbox.clone() {
             init_entries.push((
                 "sandbox.json".to_string(),
                 serde_json::to_vec_pretty(&sandbox)?,
@@ -54,7 +55,7 @@ pub async fn rebuild_metadata_branch(
         }
         write_entries(&bs, &init_entries, "init run")?;
 
-        let mut checkpoints = run_store.list_checkpoints().await?;
+        let mut checkpoints = state.checkpoints.clone();
         backfill_missing_checkpoint_shas(git_store, run_id, &mut checkpoints);
 
         for (_seq, checkpoint) in checkpoints {
@@ -69,7 +70,9 @@ pub async fn rebuild_metadata_branch(
                 for visit in 1..=max_visit {
                     let visit = u32::try_from(visit)
                         .with_context(|| format!("visit {visit} for node {node_id} exceeds u32"))?;
-                    let node = run_store.get_node(&NodeVisitRef { node_id, visit }).await?;
+                    let Some(node) = state.node(&NodeVisitRef { node_id, visit }).cloned() else {
+                        continue;
+                    };
 
                     if let Some(prompt) = node.prompt {
                         entries.push((
@@ -125,7 +128,7 @@ pub async fn rebuild_metadata_branch(
             write_entries(&bs, &entries, "checkpoint")?;
         }
 
-        if let Some(retro) = run_store.get_retro().await? {
+        if let Some(retro) = state.retro.clone() {
             let entries = vec![("retro.json".to_string(), serde_json::to_vec_pretty(&retro)?)];
             write_entries(&bs, &entries, "finalize run")?;
         }
@@ -151,7 +154,7 @@ pub async fn rebuild_metadata_branch(
 
 pub async fn build_timeline_or_rebuild(
     git_store: &GitStore,
-    run_store: Option<&dyn DurableRunStore>,
+    run_store: Option<&DurableRunStore>,
     run_id: &RunId,
 ) -> Result<RunTimeline> {
     let branch = MetadataStore::branch_name(&run_id.to_string());
@@ -172,7 +175,7 @@ pub async fn build_timeline_or_rebuild(
 
 pub async fn find_run_id_by_prefix_or_store(
     repo: &Repository,
-    fabro_store: &dyn DurableStore,
+    fabro_store: &DurableStore,
     prefix: &str,
 ) -> Result<RunId> {
     if let Some(run_id) = find_run_id_by_prefix_in_refs(repo, prefix)? {
@@ -328,19 +331,18 @@ fn resolve_prefix_matches(prefix: &str, matches: Vec<RunId>) -> Result<RunId> {
 
 #[cfg(test)]
 mod tests {
+    use chrono::{TimeZone, Utc};
+    use fabro_graphviz::graph::Graph;
+    use fabro_store::{NodeVisitRef, SlateStore, StoreHandle};
+    use fabro_types::{RunId, RunRecord, SandboxRecord, Settings, StartRecord, fixtures};
+    use object_store::memory::InMemory;
     use std::collections::HashMap;
     use std::path::PathBuf;
     use std::sync::Arc;
-
-    use chrono::{TimeZone, Utc};
-    use fabro_graphviz::graph::Graph;
-    use fabro_store::{InMemoryStore, NodeVisitRef, Store as _};
-    use fabro_types::{
-        NodeStatusRecord, RunId, RunRecord, SandboxRecord, Settings, StageStatus, StartRecord,
-        fixtures,
-    };
+    use std::time::Duration;
 
     use super::*;
+    use crate::event::{WorkflowRunEvent, append_workflow_event};
     use crate::operations::test_support::{make_checkpoint_json, temp_repo, test_sig};
     use crate::records::Checkpoint;
 
@@ -354,6 +356,14 @@ mod tests {
 
     fn test_run_id() -> RunId {
         fixtures::RUN_1
+    }
+
+    fn memory_store() -> StoreHandle {
+        Arc::new(SlateStore::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ))
     }
 
     fn sample_run_record(run_id: RunId, host_repo_path: Option<&str>) -> RunRecord {
@@ -416,26 +426,130 @@ mod tests {
         }
     }
 
-    fn sample_node_status() -> NodeStatusRecord {
-        NodeStatusRecord {
-            status: StageStatus::Success,
-            notes: Some("done".to_string()),
-            failure_reason: None,
-            timestamp: created_at(),
-        }
-    }
-
     async fn create_run_store(
-        store: &InMemoryStore,
+        store: &SlateStore,
         run_id: RunId,
         host_repo_path: Option<&str>,
-    ) -> Arc<dyn DurableRunStore> {
+    ) -> DurableRunStore {
         let run_store = store.create_run(&run_id, created_at(), None).await.unwrap();
+        let run_record = sample_run_record(run_id, host_repo_path);
+        append_workflow_event(
+            run_store.as_ref(),
+            &run_id,
+            &WorkflowRunEvent::RunCreated {
+                run_id,
+                settings: serde_json::to_value(&run_record.settings).unwrap(),
+                graph: serde_json::to_value(&run_record.graph).unwrap(),
+                workflow_source: None,
+                workflow_config: None,
+                labels: run_record.labels.clone().into_iter().collect(),
+                run_dir: String::new(),
+                working_directory: run_record.working_directory.display().to_string(),
+                host_repo_path: run_record.host_repo_path.clone(),
+                base_branch: run_record.base_branch.clone(),
+                workflow_slug: run_record.workflow_slug.clone(),
+                db_prefix: None,
+            },
+        )
+        .await
+        .unwrap();
         run_store
-            .put_run(&sample_run_record(run_id, host_repo_path))
-            .await
-            .unwrap();
-        run_store
+    }
+
+    async fn append_start_event(run_store: &DurableRunStore, run_id: RunId) {
+        let start = sample_start_record(run_id);
+        append_workflow_event(
+            run_store,
+            &run_id,
+            &WorkflowRunEvent::WorkflowRunStarted {
+                name: "test".to_string(),
+                run_id,
+                base_branch: None,
+                base_sha: start.base_sha,
+                run_branch: start.run_branch,
+                worktree_dir: None,
+                goal: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn append_sandbox_event(run_store: &DurableRunStore, run_id: RunId) {
+        let sandbox = sample_sandbox_record();
+        append_workflow_event(
+            run_store,
+            &run_id,
+            &WorkflowRunEvent::SandboxInitialized {
+                provider: sandbox.provider,
+                working_directory: sandbox.working_directory,
+                identifier: sandbox.identifier,
+                host_working_directory: sandbox.host_working_directory,
+                container_mount_point: sandbox.container_mount_point,
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn append_checkpoint_event(
+        run_store: &DurableRunStore,
+        run_id: RunId,
+        checkpoint: Checkpoint,
+    ) {
+        append_workflow_event(
+            run_store,
+            &run_id,
+            &WorkflowRunEvent::CheckpointCompleted {
+                node_id: checkpoint.current_node.clone(),
+                status: "success".to_string(),
+                current_node: checkpoint.current_node.clone(),
+                completed_nodes: checkpoint.completed_nodes.clone(),
+                node_retries: checkpoint.node_retries.clone().into_iter().collect(),
+                context_values: checkpoint.context_values.clone().into_iter().collect(),
+                node_outcomes: checkpoint.node_outcomes.clone().into_iter().collect(),
+                next_node_id: checkpoint.next_node_id.clone(),
+                git_commit_sha: checkpoint.git_commit_sha.clone(),
+                loop_failure_signatures: checkpoint
+                    .loop_failure_signatures
+                    .clone()
+                    .into_iter()
+                    .map(|(signature, count)| (signature.to_string(), count))
+                    .collect(),
+                restart_failure_signatures: checkpoint
+                    .restart_failure_signatures
+                    .clone()
+                    .into_iter()
+                    .map(|(signature, count)| (signature.to_string(), count))
+                    .collect(),
+                node_visits: checkpoint.node_visits.clone().into_iter().collect(),
+                diff: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn append_prompt_event(
+        run_store: &DurableRunStore,
+        run_id: RunId,
+        node: &NodeVisitRef<'_>,
+        text: &str,
+    ) {
+        append_workflow_event(
+            run_store,
+            &run_id,
+            &WorkflowRunEvent::Prompt {
+                stage: node.node_id.to_string(),
+                visit: node.visit,
+                text: text.to_string(),
+                mode: None,
+                provider: None,
+                model: None,
+            },
+        )
+        .await
+        .unwrap();
     }
 
     fn seed_run_branch(git_store: &GitStore, run_id: RunId, nodes: &[&str]) -> Vec<String> {
@@ -466,46 +580,41 @@ mod tests {
     #[tokio::test]
     async fn rebuild_metadata_branch_round_trips_timeline() {
         let (_dir, git_store) = temp_repo();
-        let durable_store = InMemoryStore::default();
+        let durable_store = memory_store();
         let run_store = create_run_store(&durable_store, test_run_id(), None).await;
-        run_store
-            .put_start(&sample_start_record(test_run_id()))
-            .await
-            .unwrap();
-        run_store
-            .put_sandbox(&sample_sandbox_record())
-            .await
-            .unwrap();
+        append_start_event(&run_store, test_run_id()).await;
+        append_sandbox_event(&run_store, test_run_id()).await;
 
-        run_store
-            .append_checkpoint(&sample_checkpoint(
-                "start",
-                &["start"],
-                &[("start", 1)],
-                Some("aaa"),
-            ))
-            .await
-            .unwrap();
-        run_store
-            .append_checkpoint(&sample_checkpoint(
+        append_checkpoint_event(
+            &run_store,
+            test_run_id(),
+            sample_checkpoint("start", &["start"], &[("start", 1)], Some("aaa")),
+        )
+        .await;
+        append_checkpoint_event(
+            &run_store,
+            test_run_id(),
+            sample_checkpoint(
                 "build",
                 &["start", "build"],
                 &[("start", 1), ("build", 1)],
                 Some("bbb"),
-            ))
-            .await
-            .unwrap();
-        run_store
-            .append_checkpoint(&sample_checkpoint(
+            ),
+        )
+        .await;
+        append_checkpoint_event(
+            &run_store,
+            test_run_id(),
+            sample_checkpoint(
                 "build",
                 &["start", "build"],
                 &[("start", 1), ("build", 2)],
                 Some("ccc"),
-            ))
-            .await
-            .unwrap();
+            ),
+        )
+        .await;
 
-        rebuild_metadata_branch(&git_store, run_store.as_ref(), &test_run_id())
+        rebuild_metadata_branch(&git_store, &run_store, &test_run_id())
             .await
             .unwrap();
 
@@ -525,51 +634,35 @@ mod tests {
     #[tokio::test]
     async fn rebuild_metadata_branch_preserves_historical_node_visits() {
         let (_dir, git_store) = temp_repo();
-        let durable_store = InMemoryStore::default();
+        let durable_store = memory_store();
         let run_store = create_run_store(&durable_store, test_run_id(), None).await;
 
         let build_v1 = NodeVisitRef {
             node_id: "build",
             visit: 1,
         };
-        run_store
-            .put_node_prompt(&build_v1, "visit one")
-            .await
-            .unwrap();
-        run_store
-            .put_node_status(&build_v1, &sample_node_status())
-            .await
-            .unwrap();
+        append_prompt_event(&run_store, test_run_id(), &build_v1, "visit one").await;
 
         let build_v2 = NodeVisitRef {
             node_id: "build",
             visit: 2,
         };
-        run_store
-            .put_node_prompt(&build_v2, "visit two")
-            .await
-            .unwrap();
+        append_prompt_event(&run_store, test_run_id(), &build_v2, "visit two").await;
 
-        run_store
-            .append_checkpoint(&sample_checkpoint(
-                "build",
-                &["build"],
-                &[("build", 1)],
-                Some("aaa"),
-            ))
-            .await
-            .unwrap();
-        run_store
-            .append_checkpoint(&sample_checkpoint(
-                "build",
-                &["build"],
-                &[("build", 2)],
-                Some("bbb"),
-            ))
-            .await
-            .unwrap();
+        append_checkpoint_event(
+            &run_store,
+            test_run_id(),
+            sample_checkpoint("build", &["build"], &[("build", 1)], Some("aaa")),
+        )
+        .await;
+        append_checkpoint_event(
+            &run_store,
+            test_run_id(),
+            sample_checkpoint("build", &["build"], &[("build", 2)], Some("bbb")),
+        )
+        .await;
 
-        rebuild_metadata_branch(&git_store, run_store.as_ref(), &test_run_id())
+        rebuild_metadata_branch(&git_store, &run_store, &test_run_id())
             .await
             .unwrap();
 
@@ -618,7 +711,7 @@ mod tests {
     #[tokio::test]
     async fn rebuild_metadata_branch_refuses_to_overwrite_existing_branch() {
         let (_dir, git_store) = temp_repo();
-        let durable_store = InMemoryStore::default();
+        let durable_store = memory_store();
         let run_store = create_run_store(&durable_store, test_run_id(), None).await;
 
         let sig = test_sig();
@@ -627,7 +720,7 @@ mod tests {
         bs.ensure_branch().unwrap();
         bs.write_entry("run.json", b"{}", "init run").unwrap();
 
-        let err = rebuild_metadata_branch(&git_store, run_store.as_ref(), &test_run_id())
+        let err = rebuild_metadata_branch(&git_store, &run_store, &test_run_id())
             .await
             .unwrap_err();
         assert!(err.to_string().contains("metadata branch already exists"));
@@ -636,22 +729,18 @@ mod tests {
     #[tokio::test]
     async fn build_timeline_or_rebuild_rebuilds_missing_branch() {
         let (_dir, git_store) = temp_repo();
-        let durable_store = InMemoryStore::default();
+        let durable_store = memory_store();
         let run_store = create_run_store(&durable_store, test_run_id(), None).await;
-        run_store
-            .append_checkpoint(&sample_checkpoint(
-                "start",
-                &["start"],
-                &[("start", 1)],
-                Some("aaa"),
-            ))
+        append_checkpoint_event(
+            &run_store,
+            test_run_id(),
+            sample_checkpoint("start", &["start"], &[("start", 1)], Some("aaa")),
+        )
+        .await;
+
+        let timeline = build_timeline_or_rebuild(&git_store, Some(&run_store), &test_run_id())
             .await
             .unwrap();
-
-        let timeline =
-            build_timeline_or_rebuild(&git_store, Some(run_store.as_ref()), &test_run_id())
-                .await
-                .unwrap();
 
         assert_eq!(timeline.entries.len(), 1);
         assert_eq!(timeline.entries[0].node_name, "start");
@@ -660,35 +749,36 @@ mod tests {
     #[tokio::test]
     async fn build_timeline_or_rebuild_preserves_existing_branch() {
         let (_dir, git_store) = temp_repo();
-        let durable_store = InMemoryStore::default();
+        let durable_store = memory_store();
         let run_store = create_run_store(&durable_store, test_run_id(), None).await;
-        run_store
-            .append_checkpoint(&sample_checkpoint(
-                "start",
-                &["start"],
-                &[("start", 1)],
-                Some("aaa"),
-            ))
-            .await
-            .unwrap();
-        run_store
-            .append_checkpoint(&sample_checkpoint(
+        append_checkpoint_event(
+            &run_store,
+            test_run_id(),
+            sample_checkpoint("start", &["start"], &[("start", 1)], Some("aaa")),
+        )
+        .await;
+        append_checkpoint_event(
+            &run_store,
+            test_run_id(),
+            sample_checkpoint(
                 "build",
                 &["start", "build"],
                 &[("start", 1), ("build", 1)],
                 Some("bbb"),
-            ))
-            .await
-            .unwrap();
-        run_store
-            .append_checkpoint(&sample_checkpoint(
+            ),
+        )
+        .await;
+        append_checkpoint_event(
+            &run_store,
+            test_run_id(),
+            sample_checkpoint(
                 "test",
                 &["start", "build", "test"],
                 &[("start", 1), ("build", 1), ("test", 1)],
                 Some("ccc"),
-            ))
-            .await
-            .unwrap();
+            ),
+        )
+        .await;
 
         let sig = test_sig();
         let branch = MetadataStore::branch_name(&test_run_id().to_string());
@@ -708,10 +798,9 @@ mod tests {
         )
         .unwrap();
 
-        let timeline =
-            build_timeline_or_rebuild(&git_store, Some(run_store.as_ref()), &test_run_id())
-                .await
-                .unwrap();
+        let timeline = build_timeline_or_rebuild(&git_store, Some(&run_store), &test_run_id())
+            .await
+            .unwrap();
 
         assert_eq!(timeline.entries.len(), 2);
         assert_eq!(timeline.entries[0].node_name, "start");
@@ -731,13 +820,13 @@ mod tests {
     #[tokio::test]
     async fn rebuild_metadata_branch_errors_when_run_record_is_missing() {
         let (_dir, git_store) = temp_repo();
-        let durable_store = InMemoryStore::default();
+        let durable_store = memory_store();
         let run_store = durable_store
             .create_run(&test_run_id(), created_at(), None)
             .await
             .unwrap();
 
-        let err = rebuild_metadata_branch(&git_store, run_store.as_ref(), &test_run_id())
+        let err = rebuild_metadata_branch(&git_store, &run_store, &test_run_id())
             .await
             .unwrap_err();
         assert!(err.to_string().contains("run record not found"));
@@ -746,7 +835,7 @@ mod tests {
     #[tokio::test]
     async fn find_run_id_by_prefix_or_store_falls_back_to_store() {
         let (dir, git_store) = temp_repo();
-        let durable_store = InMemoryStore::default();
+        let durable_store = memory_store();
         let repo_path = dir.path().to_string_lossy().to_string();
         let repo_run_id = parse_run_id("01ARZ3NDEKTSV4RRFFQ69G5FAV");
         let _run_store = create_run_store(&durable_store, repo_run_id, Some(&repo_path)).await;
@@ -763,7 +852,7 @@ mod tests {
     async fn find_run_id_by_prefix_or_store_excludes_other_repos() {
         let (_dir, git_store) = temp_repo();
         let (other_dir, _other_git_store) = temp_repo();
-        let durable_store = InMemoryStore::default();
+        let durable_store = memory_store();
         let other_repo_path = other_dir.path().to_string_lossy().to_string();
         let other_run_id = parse_run_id("01ARZ3NDEKTSV4RRFFQ69G5FAV");
         let _run_store =
@@ -780,7 +869,7 @@ mod tests {
     #[tokio::test]
     async fn find_run_id_by_prefix_or_store_requires_exact_match_without_repo_path() {
         let (_dir, git_store) = temp_repo();
-        let durable_store = InMemoryStore::default();
+        let durable_store = memory_store();
         let repo_run_id = parse_run_id("01ARZ3NDEKTSV4RRFFQ69G5FAV");
         let _run_store = create_run_store(&durable_store, repo_run_id, None).await;
         let prefix = &repo_run_id.to_string()[..6];
@@ -803,7 +892,7 @@ mod tests {
     #[tokio::test]
     async fn exact_match_wins_over_prefix_ambiguity() {
         let (_dir, git_store) = temp_repo();
-        let durable_store = InMemoryStore::default();
+        let durable_store = memory_store();
         let repo_path = git_store.repo_dir().to_string_lossy().to_string();
         let exact_run_id = parse_run_id("01ARZ3NDEKTSV4RRFFQ69G5FAV");
         let other_run_id = parse_run_id("01ARZ3NDEKTSV4RRFFQ69G5FAW");
@@ -847,31 +936,30 @@ mod tests {
     #[tokio::test]
     async fn rebuild_metadata_branch_persists_backfilled_run_shas_in_checkpoint_blobs() {
         let (_dir, git_store) = temp_repo();
-        let durable_store = InMemoryStore::default();
+        let durable_store = memory_store();
         let run_store = create_run_store(&durable_store, test_run_id(), None).await;
 
-        run_store
-            .append_checkpoint(&sample_checkpoint(
-                "start",
-                &["start"],
-                &[("start", 1)],
-                None,
-            ))
-            .await
-            .unwrap();
-        run_store
-            .append_checkpoint(&sample_checkpoint(
+        append_checkpoint_event(
+            &run_store,
+            test_run_id(),
+            sample_checkpoint("start", &["start"], &[("start", 1)], None),
+        )
+        .await;
+        append_checkpoint_event(
+            &run_store,
+            test_run_id(),
+            sample_checkpoint(
                 "build",
                 &["start", "build"],
                 &[("start", 1), ("build", 1)],
                 None,
-            ))
-            .await
-            .unwrap();
+            ),
+        )
+        .await;
 
         let expected_shas = seed_run_branch(&git_store, test_run_id(), &["start", "build"]);
 
-        rebuild_metadata_branch(&git_store, run_store.as_ref(), &test_run_id())
+        rebuild_metadata_branch(&git_store, &run_store, &test_run_id())
             .await
             .unwrap();
 
@@ -915,7 +1003,7 @@ mod tests {
     #[tokio::test]
     async fn rebuild_metadata_branch_is_atomic_on_failure() {
         let (_dir, git_store) = temp_repo();
-        let durable_store = InMemoryStore::default();
+        let durable_store = memory_store();
         let run_store = create_run_store(&durable_store, test_run_id(), None).await;
 
         let bad_node = "bad\0node";
@@ -923,21 +1011,15 @@ mod tests {
             node_id: bad_node,
             visit: 1,
         };
-        run_store
-            .put_node_prompt(&bad_visit, "prompt")
-            .await
-            .unwrap();
-        run_store
-            .append_checkpoint(&sample_checkpoint(
-                bad_node,
-                &[bad_node],
-                &[(bad_node, 1)],
-                None,
-            ))
-            .await
-            .unwrap();
+        append_prompt_event(&run_store, test_run_id(), &bad_visit, "prompt").await;
+        append_checkpoint_event(
+            &run_store,
+            test_run_id(),
+            sample_checkpoint(bad_node, &[bad_node], &[(bad_node, 1)], None),
+        )
+        .await;
 
-        let err = rebuild_metadata_branch(&git_store, run_store.as_ref(), &test_run_id())
+        let err = rebuild_metadata_branch(&git_store, &run_store, &test_run_id())
             .await
             .unwrap_err();
         assert!(err.to_string().contains("nul") || err.to_string().contains("NUL"));

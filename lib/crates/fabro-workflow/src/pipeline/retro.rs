@@ -10,10 +10,10 @@ use super::types::{Executed, RetroOptions, Retroed};
 use crate::event::WorkflowRunEvent;
 
 pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
-    let cp = match options.run_store.get_checkpoint().await {
-        Ok(Some(cp)) => cp,
+    let state = match options.run_store.state().await {
+        Ok(state) => state,
         Err(e) => {
-            tracing::warn!(error = %e, "Could not load checkpoint, skipping retro");
+            tracing::warn!(error = %e, "Could not load run state, skipping retro");
             if let Some(ref emitter) = options.emitter {
                 emitter.emit(&WorkflowRunEvent::RetroFailed {
                     error: e.to_string(),
@@ -22,7 +22,10 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
             }
             return None;
         }
-        Ok(None) => {
+    };
+    let cp = match state.checkpoint {
+        Some(cp) => cp,
+        None => {
             tracing::warn!("Could not load checkpoint, skipping retro");
             if let Some(ref emitter) = options.emitter {
                 emitter.emit(&WorkflowRunEvent::RetroFailed {
@@ -50,10 +53,6 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
         options.run_duration_ms,
         &stage_durations,
     );
-
-    if let Err(err) = options.run_store.put_retro(&retro).await {
-        tracing::warn!(error = %err, "Failed to save initial retro to store");
-    }
 
     let retro_start = std::time::Instant::now();
     let retro_prompt = build_retro_prompt(RETRO_DATA_DIR);
@@ -86,7 +85,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
             });
         run_retro_agent(
             &options.sandbox,
-            Some(&*options.run_store),
+            options.run_store.as_ref(),
             &options.run_dir,
             client,
             options.provider,
@@ -109,9 +108,6 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
                     response: Some(response),
                     retro: serde_json::to_value(&retro).ok(),
                 });
-            }
-            if let Err(err) = options.run_store.put_retro(&retro).await {
-                tracing::warn!(error = %err, "Failed to save retro with narrative to store");
             }
         }
         Err(e) => {
@@ -173,17 +169,20 @@ pub async fn retro(executed: Executed, options: &RetroOptions) -> Retroed {
 mod tests {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     use chrono::Utc;
     use fabro_graphviz::graph::Graph;
-    use fabro_store::{InMemoryStore, Store};
+    use fabro_store::SlateStore;
     use fabro_types::{RunId, Settings, fixtures};
+    use object_store::memory::InMemory;
 
     use super::*;
     use crate::context::Context;
     use crate::event::EventEmitter;
+    use crate::event::{StoreProgressLogger, WorkflowRunEvent, append_workflow_event};
     use crate::pipeline::types::Executed;
-    use crate::records::{Checkpoint, CheckpointExt};
+    use crate::records::{Checkpoint, CheckpointExt, RunRecord};
     use crate::run_options::RunOptions;
 
     fn test_run_id() -> RunId {
@@ -209,20 +208,90 @@ mod tests {
         checkpoint
     }
 
+    fn test_store() -> Arc<SlateStore> {
+        Arc::new(SlateStore::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ))
+    }
+
     async fn test_run_store(
         run_dir: &std::path::Path,
         checkpoint: &Checkpoint,
-    ) -> Arc<dyn fabro_store::RunStore> {
-        let inner = InMemoryStore::default()
+    ) -> fabro_store::RunStoreHandle {
+        let created_at = Utc::now();
+        let inner = test_store()
             .create_run(
                 &test_run_id(),
-                Utc::now(),
+                created_at,
                 Some(run_dir.to_string_lossy().as_ref()),
             )
             .await
             .unwrap();
-        let run_store: Arc<dyn fabro_store::RunStore> = inner;
-        run_store.put_checkpoint(checkpoint).await.unwrap();
+        let run_store = inner;
+        let run_record = RunRecord {
+            run_id: test_run_id(),
+            created_at,
+            settings: Settings::default(),
+            graph: Graph::new("test"),
+            workflow_slug: None,
+            working_directory: run_dir.to_path_buf(),
+            host_repo_path: None,
+            base_branch: None,
+            labels: std::collections::HashMap::new(),
+        };
+        append_workflow_event(
+            run_store.as_ref(),
+            &test_run_id(),
+            &WorkflowRunEvent::RunCreated {
+                run_id: test_run_id(),
+                settings: serde_json::to_value(&run_record.settings).unwrap(),
+                graph: serde_json::to_value(&run_record.graph).unwrap(),
+                workflow_source: None,
+                workflow_config: None,
+                labels: run_record.labels.clone().into_iter().collect(),
+                run_dir: run_dir.to_string_lossy().to_string(),
+                working_directory: run_dir.to_string_lossy().to_string(),
+                host_repo_path: None,
+                base_branch: None,
+                workflow_slug: None,
+                db_prefix: None,
+            },
+        )
+        .await
+        .unwrap();
+        append_workflow_event(
+            run_store.as_ref(),
+            &test_run_id(),
+            &WorkflowRunEvent::CheckpointCompleted {
+                node_id: checkpoint.current_node.clone(),
+                status: "success".to_string(),
+                current_node: checkpoint.current_node.clone(),
+                completed_nodes: checkpoint.completed_nodes.clone(),
+                node_retries: checkpoint.node_retries.clone().into_iter().collect(),
+                context_values: checkpoint.context_values.clone().into_iter().collect(),
+                node_outcomes: checkpoint.node_outcomes.clone().into_iter().collect(),
+                next_node_id: checkpoint.next_node_id.clone(),
+                git_commit_sha: checkpoint.git_commit_sha.clone(),
+                loop_failure_signatures: checkpoint
+                    .loop_failure_signatures
+                    .clone()
+                    .into_iter()
+                    .map(|(signature, count)| (signature.to_string(), count))
+                    .collect(),
+                restart_failure_signatures: checkpoint
+                    .restart_failure_signatures
+                    .clone()
+                    .into_iter()
+                    .map(|(signature, count)| (signature.to_string(), count))
+                    .collect(),
+                node_visits: checkpoint.node_visits.clone().into_iter().collect(),
+                diff: None,
+            },
+        )
+        .await
+        .unwrap();
         run_store
     }
 
@@ -250,7 +319,9 @@ mod tests {
         let checkpoint = build_checkpoint();
         let run_store = test_run_store(&run_dir, &checkpoint).await;
 
-        let emitter = Arc::new(EventEmitter::default());
+        let emitter = Arc::new(EventEmitter::new(test_run_id()));
+        let store_logger = StoreProgressLogger::new(run_store.clone());
+        store_logger.register(&emitter);
         let sandbox: Arc<dyn fabro_agent::Sandbox> = Arc::new(fabro_agent::LocalSandbox::new(
             std::env::current_dir().unwrap(),
         ));
@@ -258,7 +329,7 @@ mod tests {
             graph: Graph::new("test"),
             outcome: Ok(crate::outcome::Outcome::success()),
             run_options: test_run_options(&run_dir),
-            run_store: Arc::clone(&run_store),
+            run_store: run_store.clone(),
             hook_runner: None,
             emitter: Arc::clone(&emitter),
             sandbox: Arc::clone(&sandbox),
@@ -288,8 +359,8 @@ mod tests {
             },
         )
         .await;
+        store_logger.flush().await;
 
-        assert!(retroed.run_store.get_retro().await.unwrap().is_some());
         assert!(retroed.retro.is_some());
     }
 

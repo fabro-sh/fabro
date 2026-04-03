@@ -481,16 +481,15 @@ impl Handler for ParallelHandler {
         let visit = visit_from_context(context);
         let node_dir = node_dir(run_dir, &node.id, visit);
         let _ = fs::create_dir_all(&node_dir).await;
-        if let Some(ref store) = services.run_store {
-            let node_ref = NodeVisitRef {
-                node_id: &node.id,
-                visit: u32::try_from(visit).unwrap_or(u32::MAX),
-            };
-            store
-                .put_node_parallel_results(&node_ref, &serde_json::json!(results_json))
-                .await
-                .map_err(|err| FabroError::handler(err.to_string()))?;
-        }
+        let node_ref = NodeVisitRef {
+            node_id: &node.id,
+            visit: u32::try_from(visit).unwrap_or(u32::MAX),
+        };
+        services
+            .run_store
+            .put_node_parallel_results(&node_ref, &serde_json::json!(results_json))
+            .await
+            .map_err(|err| FabroError::handler(err.to_string()))?;
         if let Ok(json) = serde_json::to_string_pretty(&results_json) {
             let _ = fs::write(node_dir.join("parallel_results.json"), json).await;
         }
@@ -595,12 +594,22 @@ fn find_join_node(results: &[BranchResult], graph: &Graph) -> Option<String> {
 mod tests {
     use super::*;
     use fabro_graphviz::graph::{AttrValue, Edge};
-    use fabro_store::{InMemoryStore, RunStore, Store};
+    use fabro_store::SlateStore;
     use fabro_types::fixtures;
+    use object_store::memory::InMemory;
     use std::sync::Arc;
+    use std::time::Duration;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
+    }
+
+    fn test_store() -> Arc<SlateStore> {
+        Arc::new(SlateStore::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ))
     }
 
     fn test_context() -> Context {
@@ -681,13 +690,13 @@ mod tests {
 
     #[tokio::test]
     async fn parallel_handler_stores_results_in_run_store() {
-        let store = Arc::new(InMemoryStore::default());
+        let store = test_store();
         let run_store = store
             .create_run(&fixtures::RUN_1, chrono::Utc::now(), None)
             .await
             .unwrap();
         let services = EngineServices {
-            run_store: Some(Arc::clone(&run_store) as Arc<dyn RunStore>),
+            run_store: run_store.clone(),
             ..EngineServices::test_default()
         };
         let mut node = Node::new("par");

@@ -2,7 +2,7 @@ use std::io::{ErrorKind, Write};
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use fabro_store::{NodeVisitRef, RunSnapshot, RunStore};
+use fabro_store::{NodeVisitRef, RunSnapshot, RunState, SlateRunStore};
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use serde::Serialize;
 #[cfg(test)]
@@ -18,14 +18,7 @@ pub(crate) async fn dump_command(args: &StoreDumpArgs, globals: &GlobalArgs) -> 
     let base = runs_base(&cli_settings.storage_dir());
     let store = store::build_store(&cli_settings.storage_dir())?;
     let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
-    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id)
-        .await?
-        .with_context(|| {
-            format!(
-                "run {} is not in the store (it may be a legacy filesystem-only run)",
-                run.run_id
-            )
-        })?;
+    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await?;
 
     let file_count = export_run(run_store.as_ref(), &args.output).await?;
     if globals.json {
@@ -44,10 +37,10 @@ pub(crate) async fn dump_command(args: &StoreDumpArgs, globals: &GlobalArgs) -> 
     Ok(())
 }
 
-pub(crate) async fn export_run(run_store: &dyn RunStore, output_dir: &Path) -> Result<usize> {
-    let snapshot = run_store
-        .get_snapshot()
-        .await?
+pub(crate) async fn export_run(run_store: &SlateRunStore, output_dir: &Path) -> Result<usize> {
+    let state = run_store.state().await?;
+    let snapshot = state
+        .to_snapshot()
         .context("run has no data in the store")?;
 
     let output_state = inspect_output_dir(output_dir)?;
@@ -66,7 +59,7 @@ pub(crate) async fn export_run(run_store: &dyn RunStore, output_dir: &Path) -> R
         })?;
     let staging_path = staging_dir.path().to_path_buf();
 
-    let file_count = export_run_to_dir(run_store, &snapshot, &staging_path).await?;
+    let file_count = export_run_to_dir(run_store, &state, &snapshot, &staging_path).await?;
 
     if matches!(output_state, OutputDirState::ExistingEmpty) {
         std::fs::remove_dir(output_dir)
@@ -85,7 +78,8 @@ pub(crate) async fn export_run(run_store: &dyn RunStore, output_dir: &Path) -> R
 }
 
 async fn export_run_to_dir(
-    run_store: &dyn RunStore,
+    run_store: &SlateRunStore,
+    state: &RunState,
     snapshot: &RunSnapshot,
     output_dir: &Path,
 ) -> Result<usize> {
@@ -152,11 +146,11 @@ async fn export_run_to_dir(
 
     file_count += usize::from(write_optional_text_file(
         &output_dir.join("retro").join("prompt.md"),
-        run_store.get_retro_prompt().await?.as_deref(),
+        state.retro_prompt.as_deref(),
     )?);
     file_count += usize::from(write_optional_text_file(
         &output_dir.join("retro").join("response.md"),
-        run_store.get_retro_response().await?.as_deref(),
+        state.retro_response.as_deref(),
     )?);
 
     write_events_jsonl(
@@ -165,12 +159,12 @@ async fn export_run_to_dir(
     )?;
     file_count += 1;
 
-    for (seq, checkpoint) in run_store.list_checkpoints().await? {
+    for (seq, checkpoint) in &state.checkpoints {
         write_json_file(
             &output_dir
                 .join("checkpoints")
                 .join(format!("{seq:04}.json")),
-            &checkpoint,
+            checkpoint,
         )?;
         file_count += 1;
     }
@@ -355,14 +349,18 @@ mod tests {
 
     use std::collections::HashMap;
     use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::time::Duration;
 
     use chrono::{DateTime, Utc};
-    use fabro_store::{EventEnvelope, EventPayload, InMemoryStore, Store as _};
+    use fabro_store::{EventEnvelope, EventPayload, SlateStore};
     use fabro_types::{
         AggregateStats, AttrValue, Checkpoint, Conclusion, Graph, NodeStatusRecord, Retro, RunId,
         RunRecord, RunStatus, RunStatusRecord, SandboxRecord, Settings, StageStatus, StartRecord,
         StatusReason, fixtures,
     };
+    use fabro_workflow::event::{WorkflowRunEvent, append_workflow_event};
+    use object_store::memory::InMemory;
 
     fn dt(rfc3339: &str) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(rfc3339)
@@ -372,6 +370,14 @@ mod tests {
 
     fn test_run_id() -> RunId {
         fixtures::RUN_1
+    }
+
+    fn test_store() -> Arc<SlateStore> {
+        Arc::new(SlateStore::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ))
     }
 
     fn sample_run_record(run_id: RunId, created_at: DateTime<Utc>) -> RunRecord {
@@ -482,82 +488,256 @@ mod tests {
         }
     }
 
-    fn sample_node_status() -> NodeStatusRecord {
-        NodeStatusRecord {
-            status: StageStatus::PartialSuccess,
-            notes: Some("captured output".to_string()),
-            failure_reason: Some("minor lint".to_string()),
-            timestamp: dt("2026-03-27T12:12:00Z"),
-        }
-    }
-
-    fn event_payload(run_id: RunId, ts: &str, event: &str) -> EventPayload {
-        EventPayload::new(
-            serde_json::json!({
-                "id": format!("evt-{run_id}-{event}"),
-                "ts": ts,
-                "run_id": run_id.to_string(),
-                "event": event
-            }),
-            &run_id,
-        )
-        .unwrap()
-    }
-
     fn read_json<T: DeserializeOwned>(path: &Path) -> T {
-        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+        let bytes = std::fs::read(path)
+            .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
+        serde_json::from_slice(&bytes)
+            .unwrap_or_else(|err| panic!("failed to parse {}: {err}", path.display()))
     }
 
     #[tokio::test]
     async fn export_run_writes_expected_directory_tree() {
-        let store = InMemoryStore::default();
+        let store = test_store();
         let created_at = dt("2026-03-27T12:00:00Z");
         let run_id = test_run_id();
         let run = store.create_run(&run_id, created_at, None).await.unwrap();
-
-        run.put_run(&sample_run_record(run_id, created_at))
-            .await
-            .unwrap();
-        run.put_start(&sample_start_record(run_id, created_at))
-            .await
-            .unwrap();
-        run.put_status(&sample_status()).await.unwrap();
-        run.append_checkpoint(&sample_checkpoint("plan", 1))
-            .await
-            .unwrap();
-        run.append_checkpoint(&sample_checkpoint("code", 2))
-            .await
-            .unwrap();
-        run.put_conclusion(&sample_conclusion()).await.unwrap();
-        run.put_retro(&sample_retro(run_id)).await.unwrap();
-        run.put_graph("digraph night_sky {}").await.unwrap();
-        run.put_sandbox(&sample_sandbox()).await.unwrap();
+        let run_record = sample_run_record(run_id, created_at);
+        let start_record = sample_start_record(run_id, created_at);
+        let status_record = sample_status();
+        let first_checkpoint = sample_checkpoint("plan", 1);
+        let second_checkpoint = sample_checkpoint("code", 2);
+        let conclusion = sample_conclusion();
+        let retro = sample_retro(run_id);
+        let sandbox = sample_sandbox();
 
         let node = NodeVisitRef {
             node_id: "code",
             visit: 2,
         };
-        run.put_node_prompt(&node, "Plan the fix").await.unwrap();
-        run.put_node_response(&node, "Implemented").await.unwrap();
-        run.put_node_status(&node, &sample_node_status())
-            .await
-            .unwrap();
-        run.put_node_stdout(&node, "stdout line").await.unwrap();
-        run.put_node_stderr(&node, "").await.unwrap();
-        run.put_retro_prompt("How did it go?").await.unwrap();
-        run.put_retro_response("Smooth enough").await.unwrap();
-        run.append_event(&event_payload(
-            run_id,
-            "2026-03-27T12:00:00.000Z",
-            "run.started",
-        ))
+        append_workflow_event(
+            run.as_ref(),
+            &run_id,
+            &WorkflowRunEvent::RunCreated {
+                run_id,
+                settings: serde_json::to_value(&run_record.settings).unwrap(),
+                graph: serde_json::to_value(&run_record.graph).unwrap(),
+                workflow_source: Some("digraph night_sky {}".to_string()),
+                workflow_config: None,
+                labels: run_record.labels.clone().into_iter().collect(),
+                run_dir: "/tmp/night-sky-run".to_string(),
+                working_directory: run_record.working_directory.display().to_string(),
+                host_repo_path: run_record.host_repo_path.clone(),
+                base_branch: run_record.base_branch.clone(),
+                workflow_slug: run_record.workflow_slug.clone(),
+                db_prefix: None,
+            },
+        )
         .await
         .unwrap();
-        run.append_event(&event_payload(
-            run_id,
-            "2026-03-27T12:00:01.000Z",
-            "stage.completed",
-        ))
+        append_workflow_event(
+            run.as_ref(),
+            &run_id,
+            &WorkflowRunEvent::WorkflowRunStarted {
+                name: "night-sky".to_string(),
+                run_id,
+                base_branch: run_record.base_branch.clone(),
+                base_sha: start_record.base_sha.clone(),
+                run_branch: start_record.run_branch.clone(),
+                worktree_dir: None,
+                goal: Some("map the constellations".to_string()),
+            },
+        )
+        .await
+        .unwrap();
+        append_workflow_event(
+            run.as_ref(),
+            &run_id,
+            &WorkflowRunEvent::RunRunning {
+                reason: status_record.reason,
+            },
+        )
+        .await
+        .unwrap();
+        for checkpoint in [&first_checkpoint, &second_checkpoint] {
+            append_workflow_event(
+                run.as_ref(),
+                &run_id,
+                &WorkflowRunEvent::CheckpointCompleted {
+                    node_id: checkpoint.current_node.clone(),
+                    status: "success".to_string(),
+                    current_node: checkpoint.current_node.clone(),
+                    completed_nodes: checkpoint.completed_nodes.clone(),
+                    node_retries: checkpoint.node_retries.clone().into_iter().collect(),
+                    context_values: checkpoint.context_values.clone().into_iter().collect(),
+                    node_outcomes: checkpoint.node_outcomes.clone().into_iter().collect(),
+                    next_node_id: checkpoint.next_node_id.clone(),
+                    git_commit_sha: checkpoint.git_commit_sha.clone(),
+                    loop_failure_signatures: checkpoint
+                        .loop_failure_signatures
+                        .clone()
+                        .into_iter()
+                        .map(|(signature, count)| (signature.to_string(), count))
+                        .collect(),
+                    restart_failure_signatures: checkpoint
+                        .restart_failure_signatures
+                        .clone()
+                        .into_iter()
+                        .map(|(signature, count)| (signature.to_string(), count))
+                        .collect(),
+                    node_visits: checkpoint.node_visits.clone().into_iter().collect(),
+                    diff: None,
+                },
+            )
+            .await
+            .unwrap();
+        }
+        append_workflow_event(
+            run.as_ref(),
+            &run_id,
+            &WorkflowRunEvent::SandboxInitialized {
+                working_directory: sandbox.working_directory.clone(),
+                provider: sandbox.provider.clone(),
+                identifier: sandbox.identifier.clone(),
+                host_working_directory: sandbox.host_working_directory.clone(),
+                container_mount_point: sandbox.container_mount_point.clone(),
+            },
+        )
+        .await
+        .unwrap();
+        append_workflow_event(
+            run.as_ref(),
+            &run_id,
+            &WorkflowRunEvent::Prompt {
+                stage: "code".to_string(),
+                visit: 2,
+                text: "Plan the fix".to_string(),
+                mode: None,
+                provider: None,
+                model: None,
+            },
+        )
+        .await
+        .unwrap();
+        append_workflow_event(
+            run.as_ref(),
+            &run_id,
+            &WorkflowRunEvent::PromptCompleted {
+                node_id: "code".to_string(),
+                response: "Implemented".to_string(),
+                model: "gpt-5".to_string(),
+                provider: "openai".to_string(),
+                usage: None,
+            },
+        )
+        .await
+        .unwrap();
+        append_workflow_event(
+            run.as_ref(),
+            &run_id,
+            &WorkflowRunEvent::StageCompleted {
+                node_id: "code".to_string(),
+                name: "Code".to_string(),
+                index: 1,
+                duration_ms: 250,
+                status: "partial_success".to_string(),
+                preferred_label: None,
+                suggested_next_ids: Vec::new(),
+                usage: None,
+                failure: None,
+                notes: Some("captured output".to_string()),
+                files_touched: Vec::new(),
+                context_updates: None,
+                jump_to_node: None,
+                context_values: None,
+                node_visits: Some(std::collections::BTreeMap::from([(
+                    "code".to_string(),
+                    2usize,
+                )])),
+                loop_failure_signatures: None,
+                restart_failure_signatures: None,
+                response: Some("Implemented".to_string()),
+                attempt: 1,
+                max_attempts: 1,
+            },
+        )
+        .await
+        .unwrap();
+        append_workflow_event(
+            run.as_ref(),
+            &run_id,
+            &WorkflowRunEvent::CommandStarted {
+                node_id: "code".to_string(),
+                script: "echo hi".to_string(),
+                language: "sh".to_string(),
+                timeout_ms: None,
+            },
+        )
+        .await
+        .unwrap();
+        append_workflow_event(
+            run.as_ref(),
+            &run_id,
+            &WorkflowRunEvent::CommandCompleted {
+                node_id: "code".to_string(),
+                stdout: "stdout line".to_string(),
+                stderr: String::new(),
+                exit_code: Some(0),
+                duration_ms: 100,
+                timed_out: false,
+            },
+        )
+        .await
+        .unwrap();
+        append_workflow_event(
+            run.as_ref(),
+            &run_id,
+            &WorkflowRunEvent::RetroStarted {
+                prompt: Some("How did it go?".to_string()),
+                provider: None,
+                model: None,
+            },
+        )
+        .await
+        .unwrap();
+        append_workflow_event(
+            run.as_ref(),
+            &run_id,
+            &WorkflowRunEvent::RetroCompleted {
+                duration_ms: 50,
+                response: Some("Smooth enough".to_string()),
+                retro: Some(serde_json::to_value(&retro).unwrap()),
+            },
+        )
+        .await
+        .unwrap();
+        append_workflow_event(
+            run.as_ref(),
+            &run_id,
+            &WorkflowRunEvent::WorkflowRunCompleted {
+                duration_ms: conclusion.duration_ms,
+                artifact_count: 0,
+                status: "success".to_string(),
+                reason: None,
+                total_cost: conclusion.total_cost,
+                final_git_commit_sha: conclusion.final_git_commit_sha.clone(),
+                final_patch: None,
+                usage: None,
+            },
+        )
+        .await
+        .unwrap();
+        run.append_event(
+            &EventPayload::new(
+                serde_json::json!({
+                    "id": format!("evt-{run_id}-stage-completed"),
+                    "ts": "2026-03-27T12:00:01.000Z",
+                    "run_id": run_id.to_string(),
+                    "event": "stage.completed"
+                }),
+                &run_id,
+            )
+            .unwrap(),
+        )
         .await
         .unwrap();
         run.put_artifact_value("summary", &serde_json::json!({"done": true}))
@@ -589,7 +769,7 @@ mod tests {
         assert_eq!(exported_start.run_id, run_id);
 
         let exported_status: RunStatusRecord = read_json(&output.path().join("status.json"));
-        assert_eq!(exported_status.status, RunStatus::Running);
+        assert_eq!(exported_status.status, RunStatus::Succeeded);
 
         let exported_checkpoint: Checkpoint = read_json(&output.path().join("checkpoint.json"));
         assert_eq!(exported_checkpoint.current_node, "code");
@@ -632,12 +812,12 @@ mod tests {
             .lines()
             .map(|line| serde_json::from_str(line).unwrap())
             .collect();
-        assert_eq!(events.len(), 2);
+        assert_eq!(events.len(), 15);
         assert_eq!(events[0].seq, 1);
-        assert_eq!(events[1].seq, 2);
+        assert_eq!(events.last().unwrap().seq, 15);
 
-        let first_checkpoint: Checkpoint = read_json(&output.path().join("checkpoints/0001.json"));
-        let second_checkpoint: Checkpoint = read_json(&output.path().join("checkpoints/0002.json"));
+        let first_checkpoint: Checkpoint = read_json(&output.path().join("checkpoints/0004.json"));
+        let second_checkpoint: Checkpoint = read_json(&output.path().join("checkpoints/0005.json"));
         assert_eq!(first_checkpoint.current_node, "plan");
         assert_eq!(second_checkpoint.current_node, "code");
 
@@ -671,14 +851,31 @@ mod tests {
 
     #[tokio::test]
     async fn export_run_rejects_path_traversal_and_leaves_no_partial_output() {
-        let store = InMemoryStore::default();
+        let store = test_store();
         let created_at = dt("2026-03-27T12:00:00Z");
         let run_id = test_run_id();
         let run = store.create_run(&run_id, created_at, None).await.unwrap();
-
-        run.put_run(&sample_run_record(run_id, created_at))
-            .await
-            .unwrap();
+        let run_record = sample_run_record(run_id, created_at);
+        append_workflow_event(
+            run.as_ref(),
+            &run_id,
+            &WorkflowRunEvent::RunCreated {
+                run_id,
+                settings: serde_json::to_value(&run_record.settings).unwrap(),
+                graph: serde_json::to_value(&run_record.graph).unwrap(),
+                workflow_source: Some("digraph night_sky {}".to_string()),
+                workflow_config: None,
+                labels: run_record.labels.clone().into_iter().collect(),
+                run_dir: "/tmp/night-sky-run".to_string(),
+                working_directory: run_record.working_directory.display().to_string(),
+                host_repo_path: run_record.host_repo_path.clone(),
+                base_branch: run_record.base_branch.clone(),
+                workflow_slug: run_record.workflow_slug.clone(),
+                db_prefix: None,
+            },
+        )
+        .await
+        .unwrap();
         run.put_asset(
             &NodeVisitRef {
                 node_id: "code",

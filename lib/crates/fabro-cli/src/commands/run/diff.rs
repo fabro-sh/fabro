@@ -18,9 +18,7 @@ pub(crate) async fn run(args: DiffArgs, globals: &GlobalArgs) -> Result<()> {
     let base = runs_base(&cli_settings.storage_dir());
     let store = store::build_store(&cli_settings.storage_dir())?;
     let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
-    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id)
-        .await?
-        .context("Failed to open run store")?;
+    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await?;
 
     let patch = resolve_diff(&run.path, run_store.as_ref(), &args).await?;
 
@@ -54,20 +52,16 @@ pub(crate) async fn run(args: DiffArgs, globals: &GlobalArgs) -> Result<()> {
 
 async fn resolve_diff(
     _run_dir: &Path,
-    run_store: &dyn fabro_store::RunStore,
+    run_store: &fabro_store::SlateRunStore,
     args: &DiffArgs,
 ) -> Result<String> {
+    let state = run_store.state().await?;
     if let Some(ref node_id) = args.node {
-        if let Ok(visits) = run_store.list_node_visits(node_id).await {
-            if let Some(visit) = visits.into_iter().max() {
-                if let Ok(node) = run_store
-                    .get_node(&fabro_store::NodeVisitRef { node_id, visit })
-                    .await
-                {
-                    if let Some(patch) = node.diff {
-                        debug!(node_id, visit, "Reading per-node diff from store");
-                        return Ok(patch);
-                    }
+        if let Some(visit) = state.list_node_visits(node_id).into_iter().max() {
+            if let Some(node) = state.node(&fabro_store::NodeVisitRef { node_id, visit }) {
+                if let Some(patch) = node.diff.clone() {
+                    debug!(node_id, visit, "Reading per-node diff from projected state");
+                    return Ok(patch);
                 }
             }
         }
@@ -75,9 +69,8 @@ async fn resolve_diff(
         bail!("No diff found for node '{node_id}' — check the node ID and try again");
     }
 
-    let start = run_store
-        .get_start()
-        .await?
+    let start = state
+        .start
         .context("Failed to load start record from store")?;
 
     let base_sha = start
@@ -85,12 +78,12 @@ async fn resolve_diff(
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("This run was not git-checkpointed; no diff available"))?;
 
-    if let Ok(Some(patch)) = run_store.get_final_patch().await {
+    if let Some(patch) = state.final_patch {
         debug!("Reading final.patch from store");
         return Ok(patch);
     }
 
-    let run_concluded = run_store.get_conclusion().await?.is_some();
+    let run_concluded = state.conclusion.is_some();
     if run_concluded {
         bail!(
             "Run completed but no final.patch exists — the run may not have produced any changes"
@@ -98,9 +91,8 @@ async fn resolve_diff(
     }
 
     debug!("No final.patch found; attempting live diff from sandbox");
-    let record = run_store
-        .get_sandbox()
-        .await?
+    let record = state
+        .sandbox
         .context("Failed to load sandbox record from store")?;
 
     info!(provider = %record.provider, "Reconnecting to sandbox for live diff");

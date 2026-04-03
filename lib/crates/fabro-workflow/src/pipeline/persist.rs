@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use fabro_store::RunStore;
+use fabro_store::SlateRunStore;
 
 use crate::error::FabroError;
 
@@ -26,20 +26,18 @@ pub(crate) fn persist(
 }
 
 pub(crate) async fn load_from_store(
-    run_store: &dyn RunStore,
+    run_store: &SlateRunStore,
     run_dir: &Path,
 ) -> Result<Persisted, FabroError> {
-    let run_record = run_store
-        .get_run()
+    let state = run_store
+        .state()
         .await
-        .map_err(|err| FabroError::engine(err.to_string()))?
+        .map_err(|err| FabroError::engine(err.to_string()))?;
+    let run_record = state
+        .run
         .ok_or_else(|| FabroError::Precondition("run record missing from store".to_string()))?;
     let graph = run_record.graph.clone();
-    let source = run_store
-        .get_graph()
-        .await
-        .map_err(|err| FabroError::engine(err.to_string()))?
-        .unwrap_or_default();
+    let source = state.graph_source.unwrap_or_default();
 
     Ok(Persisted::new(
         graph,
@@ -57,11 +55,23 @@ mod tests {
 
     use chrono::Utc;
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
-    use fabro_store::{InMemoryStore, Store};
+    use fabro_store::{RunStoreHandle, SlateStore, StoreHandle};
     use fabro_types::{Settings, fixtures};
+    use object_store::memory::InMemory;
+    use std::sync::Arc;
+    use std::time::Duration;
 
     use super::*;
+    use crate::event::{WorkflowRunEvent, append_workflow_event};
     use crate::records::RunRecord;
+
+    fn memory_store() -> StoreHandle {
+        Arc::new(SlateStore::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ))
+    }
 
     fn graph_and_source() -> (Graph, String) {
         let source = r#"digraph test {
@@ -132,8 +142,8 @@ mod tests {
         run_dir: &Path,
         record: &RunRecord,
         source: Option<&str>,
-    ) -> std::sync::Arc<dyn RunStore> {
-        let store = InMemoryStore::default();
+    ) -> RunStoreHandle {
+        let store = memory_store();
         let run_store = store
             .create_run(
                 &record.run_id,
@@ -142,10 +152,26 @@ mod tests {
             )
             .await
             .unwrap();
-        run_store.put_run(record).await.unwrap();
-        if let Some(source) = source {
-            run_store.put_graph(source).await.unwrap();
-        }
+        append_workflow_event(
+            run_store.as_ref(),
+            &record.run_id,
+            &WorkflowRunEvent::RunCreated {
+                run_id: record.run_id,
+                settings: serde_json::to_value(&record.settings).unwrap(),
+                graph: serde_json::to_value(&record.graph).unwrap(),
+                workflow_source: source.map(ToOwned::to_owned),
+                workflow_config: None,
+                labels: record.labels.clone().into_iter().collect(),
+                run_dir: run_dir.to_string_lossy().to_string(),
+                working_directory: record.working_directory.display().to_string(),
+                host_repo_path: record.host_repo_path.clone(),
+                base_branch: record.base_branch.clone(),
+                workflow_slug: record.workflow_slug.clone(),
+                db_prefix: None,
+            },
+        )
+        .await
+        .unwrap();
         run_store
     }
 
@@ -216,10 +242,23 @@ mod tests {
         let run_store = seeded_store(&run_dir, &expected, Some(&source)).await;
         let loaded = load_from_store(run_store.as_ref(), &run_dir).await.unwrap();
 
-        assert_eq!(
-            serde_json::to_value(loaded.run_record()).unwrap(),
-            serde_json::to_value(expected).unwrap()
+        let loaded_record = loaded.run_record();
+        assert_eq!(loaded_record.run_id, expected.run_id);
+        assert!(
+            (loaded_record.created_at.timestamp_millis() - expected.created_at.timestamp_millis())
+                .abs()
+                <= 1
         );
+        assert_eq!(loaded_record.settings, expected.settings);
+        assert_eq!(
+            serde_json::to_value(&loaded_record.graph).unwrap(),
+            serde_json::to_value(&expected.graph).unwrap()
+        );
+        assert_eq!(loaded_record.workflow_slug, expected.workflow_slug);
+        assert_eq!(loaded_record.working_directory, expected.working_directory);
+        assert_eq!(loaded_record.host_repo_path, expected.host_repo_path);
+        assert_eq!(loaded_record.base_branch, expected.base_branch);
+        assert_eq!(loaded_record.labels, expected.labels);
         assert_eq!(loaded.source(), source);
         assert!(loaded.diagnostics().is_empty());
     }

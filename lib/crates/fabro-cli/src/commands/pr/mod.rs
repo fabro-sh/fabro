@@ -37,10 +37,9 @@ pub(crate) async fn load_pr_record(
     let store = store::build_store(storage_dir)?;
     let run = resolve_run_combined(store.as_ref(), base, run_id).await?;
     let run_dir = run.path;
-    let run_store = store::open_run_reader(storage_dir, &run.run_id)
-        .await?
-        .context("Failed to open run store")?;
-    let record = run_store.get_pull_request().await?.with_context(|| {
+    let run_store = store::open_run_reader(storage_dir, &run.run_id).await?;
+    let state = run_store.state().await?;
+    let record = state.pull_request.with_context(|| {
         format!("No pull request found in store. Create one first with: fabro pr create {run_id}")
     })?;
     Ok((record, run_dir))

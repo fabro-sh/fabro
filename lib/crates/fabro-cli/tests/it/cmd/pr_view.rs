@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use fabro_store::Store;
 use fabro_test::{fabro_snapshot, test_context};
-use fabro_types::{PullRequestRecord, RunId};
+use fabro_types::RunId;
+use fabro_workflow::event::{WorkflowRunEvent, append_workflow_event};
 use object_store::local::LocalFileSystem;
 
 use super::support::setup_completed_dry_run;
@@ -76,19 +76,23 @@ fn pr_view_reads_pull_request_from_store_without_pull_request_json() {
     with_runtime(|runtime| {
         runtime.block_on(async {
             let store = build_store(&context.storage_dir);
-            let run_store = store.open_run(&run_id).await.unwrap().unwrap();
-            run_store
-                .put_pull_request(&PullRequestRecord {
-                    html_url: "https://github.com/fabro-sh/fabro/pull/123".to_string(),
-                    number: 123,
+            let run_store = store.open_run(&run_id).await.unwrap();
+            append_workflow_event(
+                run_store.as_ref(),
+                &run_id,
+                &WorkflowRunEvent::PullRequestCreated {
+                    pr_url: "https://github.com/fabro-sh/fabro/pull/123".to_string(),
+                    pr_number: 123,
                     owner: "fabro-sh".to_string(),
                     repo: "fabro".to_string(),
                     base_branch: "main".to_string(),
                     head_branch: "fabro/run/demo".to_string(),
                     title: "Map the constellations".to_string(),
-                })
-                .await
-                .unwrap();
+                    draft: false,
+                },
+            )
+            .await
+            .unwrap();
         });
     });
 

@@ -2,7 +2,7 @@ use chrono::{Local, Utc};
 use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, Provider};
 use fabro_sandbox::SandboxProvider;
-use fabro_store::Store;
+use fabro_store::SlateStore;
 use fabro_types::{RunId, Settings};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -13,7 +13,6 @@ use crate::pipeline::types::PersistOptions;
 use crate::pipeline::{self, Persisted, TransformOptions, Validated};
 use crate::records::RunRecord;
 use crate::run_lookup::default_runs_base;
-use crate::run_status::{RunStatus, RunStatusRecord};
 use crate::transforms::{Transform, expand_vars};
 use fabro_sandbox::daytona::detect_repo_info;
 
@@ -56,7 +55,7 @@ struct PersistCreateOptions {
 }
 
 /// Resolve workflow inputs, normalize settings, and persist a run directory.
-pub async fn create(store: &dyn Store, request: CreateRunInput) -> Result<CreatedRun, FabroError> {
+pub async fn create(store: &SlateStore, request: CreateRunInput) -> Result<CreatedRun, FabroError> {
     let resolved = resolve_workflow(ResolveWorkflowInput {
         workflow: request.workflow,
         settings: request.settings,
@@ -133,7 +132,7 @@ pub async fn create(store: &dyn Store, request: CreateRunInput) -> Result<Create
 }
 
 async fn persist_created_run(
-    store: &dyn Store,
+    store: &SlateStore,
     persisted: &Persisted,
     workflow_source: &str,
     workflow_config: Option<String>,
@@ -148,21 +147,9 @@ async fn persist_created_run(
         Err(err) => store
             .open_run(&record.run_id)
             .await
-            .map_err(|open_err| FabroError::engine(open_err.to_string()))?
-            .ok_or_else(|| FabroError::engine(err.to_string()))?,
+            .map_err(|open_err| FabroError::engine(open_err.to_string()))
+            .or_else(|_| Err(FabroError::engine(err.to_string())))?,
     };
-
-    run_store.put_run(record).await.map_err(store_error)?;
-    if !workflow_source.is_empty() {
-        run_store
-            .put_graph(workflow_source)
-            .await
-            .map_err(store_error)?;
-    }
-    run_store
-        .put_status(&RunStatusRecord::new(RunStatus::Submitted, None))
-        .await
-        .map_err(store_error)?;
 
     let envelope = canonicalize_event_at(
         &record.run_id,
@@ -411,15 +398,20 @@ pub(crate) fn make_run_dir(runs_base: &Path, run_id: &str, dry_run: bool) -> Pat
 mod tests {
     use super::*;
     use fabro_graphviz::graph::AttrValue;
-    use fabro_store::{InMemoryStore, SlateStore, Store};
+    use fabro_store::{SlateStore, StoreHandle};
     use fabro_types::fixtures;
     use object_store::local::LocalFileSystem;
+    use object_store::memory::InMemory;
     use std::sync::Arc;
     use std::time::Duration;
 
     use crate::operations::{ValidateInput, validate};
-    fn memory_store() -> InMemoryStore {
-        InMemoryStore::default()
+    fn memory_store() -> StoreHandle {
+        Arc::new(SlateStore::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ))
     }
 
     fn validate_dot(dot_source: &str, settings: Settings) -> Validated {
@@ -717,9 +709,9 @@ mod tests {
             created.persisted.run_record().workflow_slug.as_deref(),
             Some("slug")
         );
-        let run_store = store.open_run(&fixtures::RUN_1).await.unwrap().unwrap();
+        let run_store = store.open_run(&fixtures::RUN_1).await.unwrap();
         assert_eq!(
-            run_store.get_status().await.unwrap().unwrap().status,
+            run_store.state().await.unwrap().status.unwrap().status,
             crate::run_status::RunStatus::Submitted
         );
         assert!(!created.run_dir.join("id.txt").exists());
@@ -816,7 +808,11 @@ mod tests {
         std::fs::create_dir_all(storage_dir.join("store")).unwrap();
         let object_store =
             Arc::new(LocalFileSystem::new_with_prefix(storage_dir.join("store")).unwrap());
-        let store = Arc::new(SlateStore::new(object_store, "", Duration::from_millis(1)));
+        let store = StoreHandle::from(Arc::new(SlateStore::new(
+            object_store,
+            "",
+            Duration::from_millis(1),
+        )));
         let created = create(
             store.as_ref(),
             CreateRunInput {
@@ -839,11 +835,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let run_store = store
-            .open_run_reader(&created.run_id)
-            .await
-            .unwrap()
-            .unwrap();
+        let run_store = store.open_run_reader(&created.run_id).await.unwrap();
         let events = run_store.list_events().await.unwrap();
 
         assert_eq!(

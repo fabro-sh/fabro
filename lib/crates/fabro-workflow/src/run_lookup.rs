@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
-use fabro_store::{ListRunsQuery, Store};
+use fabro_store::{ListRunsQuery, SlateStore};
 use fabro_types::RunId;
 use serde::Serialize;
 
@@ -170,7 +170,7 @@ fn scan_runs_inner(base: &Path, include_status: bool) -> Result<Vec<RunInfo>> {
     Ok(runs)
 }
 
-pub async fn scan_runs_combined(store: &dyn Store, base: &Path) -> Result<Vec<RunInfo>> {
+pub async fn scan_runs_combined(store: &SlateStore, base: &Path) -> Result<Vec<RunInfo>> {
     let mut runs_by_id: HashMap<RunId, RunInfo> = HashMap::new();
 
     if let Ok(store_runs) = store.list_runs(&ListRunsQuery::default()).await {
@@ -373,7 +373,7 @@ pub fn resolve_run(base: &Path, identifier: &str) -> Result<RunInfo> {
 }
 
 pub async fn resolve_run_combined(
-    store: &dyn Store,
+    store: &SlateStore,
     base: &Path,
     identifier: &str,
 ) -> Result<RunInfo> {
@@ -438,14 +438,26 @@ fn run_id_matches(run_id: RunId, prefix: &str) -> bool {
 mod tests {
     use std::collections::HashMap;
     use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::time::Duration;
 
     use chrono::Utc;
     use fabro_graphviz::graph::Graph;
-    use fabro_store::{InMemoryStore, Store};
-    use fabro_types::{RunStatus, RunStatusRecord, Settings, fixtures};
+    use fabro_store::{SlateStore, StoreHandle};
+    use fabro_types::{RunStatus, Settings, fixtures};
+    use object_store::memory::InMemory;
 
     use super::scan_runs_combined;
+    use crate::event::{WorkflowRunEvent, append_workflow_event};
     use crate::records::{RunRecord, RunRecordExt};
+
+    fn memory_store() -> StoreHandle {
+        Arc::new(SlateStore::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ))
+    }
 
     fn sample_run_record() -> RunRecord {
         RunRecord {
@@ -471,7 +483,7 @@ mod tests {
         run_record.save(&run_dir).unwrap();
         std::fs::write(run_dir.join("id.txt"), format!("{}\n", fixtures::RUN_1)).unwrap();
 
-        let store = InMemoryStore::default();
+        let store = memory_store();
         let run_dir_string = run_dir.to_string_lossy().to_string();
         let run_store = store
             .create_run(
@@ -481,11 +493,33 @@ mod tests {
             )
             .await
             .unwrap();
-        run_store.put_run(&run_record).await.unwrap();
-        run_store
-            .put_status(&RunStatusRecord::new(RunStatus::Submitted, None))
-            .await
-            .unwrap();
+        append_workflow_event(
+            run_store.as_ref(),
+            &fixtures::RUN_1,
+            &WorkflowRunEvent::RunCreated {
+                run_id: fixtures::RUN_1,
+                settings: serde_json::to_value(&run_record.settings).unwrap(),
+                graph: serde_json::to_value(&run_record.graph).unwrap(),
+                workflow_source: None,
+                workflow_config: None,
+                labels: run_record.labels.clone().into_iter().collect(),
+                run_dir: run_dir_string.clone(),
+                working_directory: run_record.working_directory.display().to_string(),
+                host_repo_path: run_record.host_repo_path.clone(),
+                base_branch: run_record.base_branch.clone(),
+                workflow_slug: run_record.workflow_slug.clone(),
+                db_prefix: None,
+            },
+        )
+        .await
+        .unwrap();
+        append_workflow_event(
+            run_store.as_ref(),
+            &fixtures::RUN_1,
+            &WorkflowRunEvent::RunSubmitted { reason: None },
+        )
+        .await
+        .unwrap();
 
         let runs = scan_runs_combined(&store, temp.path()).await.unwrap();
         let run = runs

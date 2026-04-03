@@ -19,12 +19,13 @@ use fabro_llm::types::{
     ContentPart, FinishReason, Message as LlmMessage, Request as LlmRequest,
     Response as LlmResponse, Role, StreamEvent, ToolChoice, ToolDefinition, Usage,
 };
-use fabro_store::{InMemoryStore, Store};
+use fabro_store::StoreHandle;
 use fabro_types::{RunId, Settings};
 use fabro_util::redact::redact_jsonl_line;
 use fabro_workflow::error::FabroError;
 use fabro_workflow::handler::HandlerRegistry;
 use futures_util::stream;
+use object_store::memory::InMemory as MemoryObjectStore;
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
 use tokio::sync::{Notify, OnceCell};
@@ -124,7 +125,7 @@ type RegistryFactoryOverride = dyn Fn(Arc<dyn Interviewer>) -> HandlerRegistry +
 pub struct AppState {
     runs: Mutex<HashMap<RunId, ManagedRun>>,
     aggregate_usage: Mutex<AggregateUsageTotals>,
-    store: Arc<dyn Store>,
+    store: StoreHandle,
     pub db: sqlx::SqlitePool,
     max_concurrent_runs: usize,
     scheduler_notify: Notify,
@@ -417,7 +418,7 @@ pub fn create_app_state_with_registry_factory(
         Arc::new(RwLock::new(Settings::default())),
         Some(Box::new(registry_factory_override)),
         5,
-        Arc::new(InMemoryStore::default()),
+        test_store(),
     )
 }
 
@@ -431,15 +432,23 @@ pub fn create_app_state_with_options(
         db,
         Arc::new(RwLock::new(settings)),
         max_concurrent_runs,
-        Arc::new(InMemoryStore::default()),
+        test_store(),
     )
+}
+
+fn test_store() -> StoreHandle {
+    Arc::new(fabro_store::SlateStore::new(
+        Arc::new(MemoryObjectStore::new()),
+        "",
+        Duration::from_millis(1),
+    ))
 }
 
 pub fn create_app_state_with_store(
     db: sqlx::SqlitePool,
     settings: Arc<RwLock<Settings>>,
     max_concurrent_runs: usize,
-    store: Arc<dyn Store>,
+    store: StoreHandle,
 ) -> Arc<AppState> {
     build_app_state(db, settings, None, max_concurrent_runs, store)
 }
@@ -449,7 +458,7 @@ fn build_app_state(
     settings: Arc<RwLock<Settings>>,
     registry_factory_override: Option<Box<RegistryFactoryOverride>>,
     max_concurrent_runs: usize,
-    store: Arc<dyn Store>,
+    store: StoreHandle,
 ) -> Arc<AppState> {
     Arc::new(AppState {
         runs: Mutex::new(HashMap::new()),
@@ -680,18 +689,7 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
     }
 
     let run_store = match state.store.open_run(&run_id).await {
-        Ok(Some(run_store)) => run_store,
-        Ok(None) => {
-            tracing::error!(run_id = %run_id, "Run store missing");
-            let mut runs = state.runs.lock().expect("runs lock poisoned");
-            if let Some(managed_run) = runs.get_mut(&run_id) {
-                managed_run.status = RunStatus::Failed;
-                managed_run.error = Some("Run store missing".to_string());
-                clear_live_run_state(managed_run);
-            }
-            state.scheduler_notify.notify_one();
-            return;
-        }
+        Ok(run_store) => run_store,
         Err(e) => {
             tracing::error!(run_id = %run_id, error = %e, "Failed to open run store");
             let mut runs = state.runs.lock().expect("runs lock poisoned");
@@ -739,7 +737,7 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
         cancel_token: Some(Arc::clone(&cancel_token)),
         emitter: Arc::clone(&emitter),
         interviewer: Arc::clone(&interviewer) as Arc<dyn Interviewer>,
-        run_store: Arc::clone(&run_store),
+        run_store: run_store.clone(),
         github_app,
         on_node: None,
         registry_override,
@@ -754,10 +752,10 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
     };
 
     // Save final checkpoint
-    let checkpoint = match run_store.get_checkpoint().await {
-        Ok(checkpoint) => checkpoint,
+    let checkpoint = match run_store.state().await {
+        Ok(state) => state.checkpoint,
         Err(err) => {
-            tracing::warn!(run_id = %run_id, error = %err, "Failed to load checkpoint from store");
+            tracing::warn!(run_id = %run_id, error = %err, "Failed to load run state from store");
             None
         }
     };
@@ -1069,13 +1067,32 @@ async fn get_checkpoint(
         Ok(id) => id,
         Err(response) => return response,
     };
-    let runs = state.runs.lock().expect("runs lock poisoned");
-    match runs.get(&id) {
-        Some(managed_run) => match &managed_run.checkpoint {
-            Some(cp) => (StatusCode::OK, Json(cp.clone())).into_response(),
-            None => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
+    let live_checkpoint = {
+        let runs = state.runs.lock().expect("runs lock poisoned");
+        match runs.get(&id) {
+            Some(managed_run) => managed_run.checkpoint.clone(),
+            None => return ApiError::not_found("Run not found.").into_response(),
+        }
+    };
+    if let Some(cp) = live_checkpoint {
+        return (StatusCode::OK, Json(cp)).into_response();
+    }
+
+    match state.store.open_run_reader(&id).await {
+        Ok(run_store) => match run_store.state().await {
+            Ok(run_state) => match run_state.checkpoint {
+                Some(cp) => (StatusCode::OK, Json(cp)).into_response(),
+                None => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
+            },
+            Err(err) => {
+                tracing::warn!(run_id = %id, error = %err, "Failed to load checkpoint state from store");
+                (StatusCode::OK, Json(serde_json::json!(null))).into_response()
+            }
         },
-        None => ApiError::not_found("Run not found.").into_response(),
+        Err(err) => {
+            tracing::warn!(run_id = %id, error = %err, "Failed to open run store reader");
+            ApiError::not_found("Run not found.").into_response()
+        }
     }
 }
 
@@ -1564,18 +1581,19 @@ async fn get_retro(
     }
 
     match state.store.open_run_reader(&id).await {
-        Ok(Some(run_store)) => match run_store.get_retro().await {
-            Ok(Some(retro)) => (StatusCode::OK, Json(retro)).into_response(),
-            Ok(None) => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
+        Ok(run_store) => match run_store.state().await {
+            Ok(run_state) => match run_state.retro {
+                Some(retro) => (StatusCode::OK, Json(retro)).into_response(),
+                None => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
+            },
             Err(err) => {
-                tracing::warn!(run_id = %id, error = %err, "Failed to load retro from store");
+                tracing::warn!(run_id = %id, error = %err, "Failed to load retro state from store");
                 (StatusCode::OK, Json(serde_json::json!(null))).into_response()
             }
         },
-        Ok(None) => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
         Err(err) => {
             tracing::warn!(run_id = %id, error = %err, "Failed to open run store reader");
-            (StatusCode::OK, Json(serde_json::json!(null))).into_response()
+            ApiError::not_found("Run not found.").into_response()
         }
     }
 }
@@ -1603,15 +1621,27 @@ async fn get_graph(
         Ok(id) => id,
         Err(response) => return response,
     };
-    let dot_source = {
+    let live_dot_source = {
         let runs = state.runs.lock().expect("runs lock poisoned");
         match runs.get(&id) {
             Some(managed_run) => managed_run.dot_source.clone(),
             None => return ApiError::not_found("Run not found.").into_response(),
         }
     };
+    if !live_dot_source.is_empty() {
+        return render_dot_svg(&live_dot_source).await;
+    }
 
-    render_dot_svg(&dot_source).await
+    match state.store.open_run_reader(&id).await {
+        Ok(run_store) => match run_store.state().await {
+            Ok(run_state) => match run_state.graph_source {
+                Some(dot_source) => render_dot_svg(&dot_source).await,
+                None => ApiError::new(StatusCode::NOT_FOUND, "Graph not found.").into_response(),
+            },
+            Err(err) => ApiError::new(StatusCode::BAD_GATEWAY, err.to_string()).into_response(),
+        },
+        Err(_) => ApiError::new(StatusCode::NOT_FOUND, "Run not found.").into_response(),
+    }
 }
 
 #[cfg(test)]
@@ -2500,10 +2530,10 @@ mod tests {
             .open_run_reader(&run_id)
             .await
             .unwrap()
-            .expect("run store should exist")
-            .get_run()
+            .state()
             .await
             .unwrap()
+            .run
             .expect("run record should exist");
         let mut expected_settings = settings;
         expected_settings.goal = Some("Test".to_string());
@@ -2635,16 +2665,11 @@ mod tests {
         assert_eq!(managed_run.status, RunStatus::Cancelled);
         drop(runs);
 
-        let run_store = state
-            .store
-            .open_run_reader(&run_id)
-            .await
-            .unwrap()
-            .expect("run store should exist");
+        let run_store = state.store.open_run_reader(&run_id).await.unwrap();
 
         let mut status_record = None;
         for _ in 0..50 {
-            if let Some(record) = run_store.get_status().await.unwrap() {
+            if let Some(record) = run_store.state().await.unwrap().status {
                 if record.status == fabro_workflow::run_status::RunStatus::Failed
                     && record.reason == Some(fabro_workflow::run_status::StatusReason::Cancelled)
                 {

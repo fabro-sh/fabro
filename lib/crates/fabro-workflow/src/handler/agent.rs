@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
-use fabro_store::NodeVisitRef;
 use fabro_types::RunId;
 
 use crate::context::keys;
@@ -257,18 +256,7 @@ impl Handler for AgentHandler {
         let visit = visit_from_context(context);
         let stage_dir = node_dir(run_dir, &node.id, visit);
         fs::create_dir_all(&stage_dir).await?;
-        let node_ref = NodeVisitRef {
-            node_id: &node.id,
-            visit: u32::try_from(visit).unwrap_or(u32::MAX),
-        };
-        if let Some(ref store) = services.run_store {
-            store
-                .put_node_prompt(&node_ref, &prompt)
-                .await
-                .map_err(|err| FabroError::handler(err.to_string()))?;
-        } else {
-            fs::write(stage_dir.join("prompt.md"), &prompt).await?;
-        }
+        fs::write(stage_dir.join("prompt.md"), &prompt).await?;
 
         // 3. Call LLM backend (agent loop)
         let thread_id = context.thread_id();
@@ -326,14 +314,7 @@ impl Handler for AgentHandler {
             };
 
         // 4. Write response to logs
-        if let Some(ref store) = services.run_store {
-            store
-                .put_node_response(&node_ref, &response_text)
-                .await
-                .map_err(|err| FabroError::handler(err.to_string()))?;
-        } else {
-            fs::write(stage_dir.join("response.md"), &response_text).await?;
-        }
+        fs::write(stage_dir.join("response.md"), &response_text).await?;
         // 7. Build and write status
         let mut outcome = Outcome::success();
         outcome.notes = Some(format!("Stage completed: {}", node.id));
@@ -392,30 +373,40 @@ mod tests {
     use super::*;
     use crate::event::EventEmitter;
     use fabro_graphviz::graph::AttrValue;
-    use fabro_store::{InMemoryStore, RunStore, Store};
+    use fabro_store::{NodeVisitRef, RunStoreHandle, SlateStore};
     use fabro_types::fixtures;
+    use object_store::memory::InMemory;
     use std::sync::Arc;
+    use std::time::Duration;
     use tempfile::TempDir;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
     }
 
+    fn test_store() -> Arc<SlateStore> {
+        Arc::new(SlateStore::new(
+            Arc::new(InMemory::new()),
+            "",
+            Duration::from_millis(1),
+        ))
+    }
+
     async fn make_services_with_run_store() -> (
         EngineServices,
-        Arc<dyn RunStore>,
+        RunStoreHandle,
         crate::event::StoreProgressLogger,
     ) {
-        let store = InMemoryStore::default();
+        let store = test_store();
         let run_store = store
             .create_run(&fixtures::RUN_1, chrono::Utc::now(), None)
             .await
             .unwrap();
         let services = EngineServices {
-            run_store: Some(Arc::clone(&run_store)),
+            run_store: run_store.clone(),
             ..EngineServices::test_default()
         };
-        let logger = crate::event::StoreProgressLogger::new(Arc::clone(&run_store));
+        let logger = crate::event::StoreProgressLogger::new(run_store.clone());
         logger.register(services.emitter.as_ref());
         (services, run_store, logger)
     }
