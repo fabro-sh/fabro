@@ -16,7 +16,7 @@ use crate::handler::HandlerRegistry;
 use crate::outcome::Outcome;
 use crate::pipeline;
 use crate::pipeline::types::Initialized;
-use crate::records::{Checkpoint, CheckpointExt};
+use crate::records::Checkpoint;
 use crate::run_options::RunOptions;
 
 struct InitializedOptions {
@@ -192,7 +192,9 @@ async fn persist_run_artifacts_for_tests(run_store: &SlateRunStore, run_dir: &st
     };
 
     if let Some(checkpoint) = state.checkpoint.as_ref() {
-        let _ = checkpoint.save(&run_dir.join("checkpoint.json"));
+        if let Ok(json) = serde_json::to_string_pretty(checkpoint) {
+            let _ = std::fs::write(run_dir.join("checkpoint.json"), json);
+        }
     }
 
     if let Some(final_patch) = state.final_patch.as_ref() {

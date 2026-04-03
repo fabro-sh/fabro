@@ -22,7 +22,6 @@ pub trait CheckpointExt {
     ) -> Self
     where
         Self: Sized;
-    fn save(&self, path: &Path) -> CrateResult<()>;
     fn load(path: &Path) -> CrateResult<Self>
     where
         Self: Sized;
@@ -53,11 +52,6 @@ impl CheckpointExt for Checkpoint {
             restart_failure_signatures,
             node_visits,
         }
-    }
-
-    fn save(&self, path: &Path) -> CrateResult<()> {
-        tracing::debug!(path = %path.display(), node = %self.current_node, "Saving checkpoint");
-        crate::save_json(self, path, "checkpoint")
     }
 
     fn load(path: &Path) -> CrateResult<Self> {
