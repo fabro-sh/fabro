@@ -27,6 +27,7 @@ fn help() {
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
       -q, --quiet                      Only display run IDs
           --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+          --server-url <SERVER_URL>    Server URL (overrides server.base_url from user.toml) [env: FABRO_SERVER_URL=]
       -h, --help                       Print help
     ----- stderr -----
     ");

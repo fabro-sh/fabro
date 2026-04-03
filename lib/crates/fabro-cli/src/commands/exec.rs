@@ -1,7 +1,5 @@
 use anyhow::Result;
-#[cfg(feature = "server")]
-use fabro_agent::cli::run_with_args_and_client;
-use fabro_agent::cli::{AgentArgs, OutputFormat, run_with_args};
+use fabro_agent::cli::{AgentArgs, OutputFormat, run_with_args, run_with_args_and_client};
 use fabro_config::mcp::McpServerEntry;
 use fabro_mcp::config::McpServerSettings;
 
@@ -22,7 +20,6 @@ pub(crate) async fn execute(mut args: AgentArgs, globals: &GlobalArgs) -> Result
     if globals.json {
         args.output_format = Some(OutputFormat::Json);
     }
-    #[cfg(feature = "server")]
     let resolved = user_config::resolve_mode(
         globals.storage_dir.as_deref(),
         globals.server_url.as_deref(),
@@ -33,40 +30,31 @@ pub(crate) async fn execute(mut args: AgentArgs, globals: &GlobalArgs) -> Result
         .into_iter()
         .map(|(name, entry): (String, McpServerEntry)| entry.into_config(name))
         .collect();
-    #[cfg(feature = "server")]
-    {
-        match resolved.mode {
-            user_config::ExecutionMode::Server => {
-                tracing::info!(mode = "server", "Agent session starting");
-                let http_client = user_config::build_server_client(resolved.tls.as_ref())?;
-                let provider_name = args
-                    .provider
-                    .clone()
-                    .unwrap_or_else(|| "anthropic".to_string());
-                let adapter = std::sync::Arc::new(fabro_llm::providers::FabroServerAdapter::new(
-                    http_client,
-                    &resolved.server_base_url,
-                    &provider_name,
-                ));
-                let mut client =
-                    fabro_llm::client::Client::new(std::collections::HashMap::new(), None, vec![]);
-                client
-                    .register_provider(adapter)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("Failed to register fabro server adapter: {e}"))?;
-                run_with_args_and_client(args, Some(client), mcp_servers).await?
-            }
-            user_config::ExecutionMode::Standalone => {
-                tracing::info!(mode = "standalone", "Agent session starting");
-                run_with_args(args, mcp_servers).await?
-            }
+    match resolved.mode {
+        user_config::ExecutionMode::Server => {
+            tracing::info!(mode = "server", "Agent session starting");
+            let http_client = user_config::build_server_client(resolved.tls.as_ref())?;
+            let provider_name = args
+                .provider
+                .clone()
+                .unwrap_or_else(|| "anthropic".to_string());
+            let adapter = std::sync::Arc::new(fabro_llm::providers::FabroServerAdapter::new(
+                http_client,
+                &resolved.server_base_url,
+                &provider_name,
+            ));
+            let mut client =
+                fabro_llm::client::Client::new(std::collections::HashMap::new(), None, vec![]);
+            client
+                .register_provider(adapter)
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to register fabro server adapter: {e}"))?;
+            run_with_args_and_client(args, Some(client), mcp_servers).await?
         }
-    }
-    #[cfg(not(feature = "server"))]
-    {
-        let _ = globals;
-        tracing::info!(mode = "standalone", "Agent session starting");
-        run_with_args(args, mcp_servers).await?;
+        user_config::ExecutionMode::Standalone => {
+            tracing::info!(mode = "standalone", "Agent session starting");
+            run_with_args(args, mcp_servers).await?
+        }
     }
 
     Ok(())

@@ -29,6 +29,7 @@ fn help() {
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
           --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+          --server-url <SERVER_URL>    Server URL (overrides server.base_url from user.toml) [env: FABRO_SERVER_URL=]
       -h, --help                       Print help
     ----- stderr -----
     "#);
@@ -66,10 +67,10 @@ fn logs_completed_run_outputs_raw_ndjson() {
     {"event":"run.submitted","id":"[EVENT_ID]","properties":{},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
     {"event":"run.starting","id":"[EVENT_ID]","properties":{"reason":"sandbox_initializing"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
     {"event":"sandbox.initializing","id":"[EVENT_ID]","properties":{"provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
+    {"event":"run.running","id":"[EVENT_ID]","properties":{},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
     {"event":"sandbox.ready","id":"[EVENT_ID]","properties":{"cpu":null,"duration_ms": [DURATION_MS],"memory":null,"name":null,"provider":"local","url":null},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
     {"event":"sandbox.initialized","id":"[EVENT_ID]","properties":{"provider":"local","working_directory":"[TEMP_DIR]"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
     {"event":"run.started","id":"[EVENT_ID]","properties":{"goal":"Run tests and report results","name":"Simple"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
-    {"event":"run.running","id":"[EVENT_ID]","properties":{},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
     {"event":"stage.started","id":"[EVENT_ID]","node_id":"start","node_label":"Start","properties":{"attempt":1,"handler_type":"start","index":0,"max_attempts":1},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
     {"event":"stage.completed","id":"[EVENT_ID]","node_id":"start","node_label":"Start","properties":{"attempt":1,"context_values":{"current.preamble":"Goal: Run tests and report results/n","current_node":"start","graph.goal":"Run tests and report results","graph.rankdir":"LR","internal.fidelity":"compact","internal.node_visit_count":1,"internal.run_id":"[ULID]","internal.thread_id":null},"duration_ms": [DURATION_MS],"files_touched":[],"index":0,"max_attempts":1,"node_visits":{"start":1},"notes":"[Simulated] start","preferred_label":null,"status":"success","suggested_next_ids":[],"usage":null},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
     {"event":"edge.selected","id":"[EVENT_ID]","properties":{"condition":null,"from_node":"start","is_jump":false,"label":null,"reason":"unconditional","stage_status":"success","to_node":"run_tests"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
@@ -231,10 +232,10 @@ fn logs_follow_detached_run_streams_until_completion() {
     {"event":"run.submitted","id":"[EVENT_ID]","properties":{},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
     {"event":"run.starting","id":"[EVENT_ID]","properties":{"reason":"sandbox_initializing"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
     {"event":"sandbox.initializing","id":"[EVENT_ID]","properties":{"provider":"local"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
+    {"event":"run.running","id":"[EVENT_ID]","properties":{},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
     {"event":"sandbox.ready","id":"[EVENT_ID]","properties":{"cpu":null,"duration_ms": [DURATION_MS],"memory":null,"name":null,"provider":"local","url":null},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
     {"event":"sandbox.initialized","id":"[EVENT_ID]","properties":{"provider":"local","working_directory":"[TEMP_DIR]"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
     {"event":"run.started","id":"[EVENT_ID]","properties":{"goal":"Run tests and report results","name":"Simple"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
-    {"event":"run.running","id":"[EVENT_ID]","properties":{},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
     {"event":"stage.started","id":"[EVENT_ID]","node_id":"start","node_label":"Start","properties":{"attempt":1,"handler_type":"start","index":0,"max_attempts":1},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
     {"event":"stage.completed","id":"[EVENT_ID]","node_id":"start","node_label":"Start","properties":{"attempt":1,"context_values":{"current.preamble":"Goal: Run tests and report results/n","current_node":"start","graph.goal":"Run tests and report results","graph.rankdir":"LR","internal.fidelity":"compact","internal.node_visit_count":1,"internal.run_id":"[ULID]","internal.thread_id":null},"duration_ms": [DURATION_MS],"files_touched":[],"index":0,"max_attempts":1,"node_visits":{"start":1},"notes":"[Simulated] start","preferred_label":null,"status":"success","suggested_next_ids":[],"usage":null},"run_id":"[ULID]","ts":"[TIMESTAMP]"}
     {"event":"edge.selected","id":"[EVENT_ID]","properties":{"condition":null,"from_node":"start","is_jump":false,"label":null,"reason":"unconditional","stage_status":"success","to_node":"run_tests"},"run_id":"[ULID]","ts":"[TIMESTAMP]"}

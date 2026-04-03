@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use fabro_config::mcp::McpTransport;
-#[cfg(feature = "server")]
 use fabro_config::user::ExecutionMode;
 use fabro_test::{fabro_snapshot, test_context};
 use fabro_types::Settings;
@@ -32,6 +31,7 @@ fn help() {
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
           --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+          --server-url <SERVER_URL>    Server URL (overrides server.base_url from user.toml) [env: FABRO_SERVER_URL=]
       -h, --help                       Print help
     ----- stderr -----
     ");
@@ -570,7 +570,6 @@ shared = "legacy"
 }
 
 #[test]
-#[cfg(feature = "server")]
 fn settings_server_url_overrides_cli_defaults() {
     let context = test_context!();
     let project = setup_settings_fixture(&context);
@@ -585,6 +584,7 @@ fn settings_server_url_overrides_cli_defaults() {
 
     let output = context
         .command()
+        .env_remove("FABRO_STORAGE_DIR")
         .current_dir(project.path())
         .args(["--server-url", "https://cli.example.com", "settings"])
         .assert()

@@ -30,6 +30,7 @@ fn help() {
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
           --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+          --server-url <SERVER_URL>    Server URL (overrides server.base_url from user.toml) [env: FABRO_SERVER_URL=]
       -h, --help                       Print help
     ----- stderr -----
     ");
@@ -473,19 +474,19 @@ fn attach_json_errors_without_prompting_for_human_input() {
         "ts": "[TIMESTAMP]"
       },
       {
+        "event": "run.running",
+        "id": "[EVENT_ID]",
+        "properties": {},
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
+      },
+      {
         "event": "run.started",
         "id": "[EVENT_ID]",
         "properties": {
           "goal": "Wait for approval",
           "name": "HumanGate"
         },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "run.running",
-        "id": "[EVENT_ID]",
-        "properties": {},
         "run_id": "[ULID]",
         "ts": "[TIMESTAMP]"
       },

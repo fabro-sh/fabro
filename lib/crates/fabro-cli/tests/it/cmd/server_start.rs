@@ -1,7 +1,6 @@
 use fabro_test::{fabro_snapshot, test_context};
 
 #[test]
-#[cfg(feature = "server")]
 fn help() {
     let context = test_context!();
     let mut cmd = context.command();
@@ -52,7 +51,6 @@ fn help() {
 }
 
 #[test]
-#[cfg(feature = "server")]
 fn start_already_running_exits_with_error() {
     let context = test_context!();
 

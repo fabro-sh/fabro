@@ -41,7 +41,6 @@ pub(crate) struct GlobalArgs {
     #[arg(long, global = true, env = "FABRO_STORAGE_DIR")]
     pub storage_dir: Option<PathBuf>,
 
-    #[cfg(feature = "server")]
     /// Server URL (overrides server.base_url from user.toml)
     #[arg(
         long,
@@ -767,7 +766,6 @@ pub(crate) enum Commands {
         command: Option<ModelsCommand>,
     },
     /// Server operations
-    #[cfg(feature = "server")]
     Server(ServerNamespace),
     /// Check environment and integration health
     Doctor {
@@ -855,7 +853,6 @@ impl Commands {
                 Some(ModelsCommand::Test { .. }) => "model test",
                 None => "model",
             },
-            #[cfg(feature = "server")]
             Self::Server(ns) => match &ns.command {
                 ServerCommand::Start { .. } => "server start",
                 ServerCommand::Stop { .. } => "server stop",
@@ -972,17 +969,14 @@ pub(crate) enum SecretCommand {
     Set(SecretSetArgs),
 }
 
-#[cfg(feature = "server")]
 #[derive(Args)]
 pub(crate) struct ServerNamespace {
     #[command(subcommand)]
     pub(crate) command: ServerCommand,
 }
 
-#[cfg(feature = "server")]
 use fabro_server::serve::ServeArgs;
 
-#[cfg(feature = "server")]
 #[derive(Subcommand)]
 pub(crate) enum ServerCommand {
     /// Start the HTTP API server

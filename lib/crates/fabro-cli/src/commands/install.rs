@@ -1,4 +1,3 @@
-#[cfg(feature = "server")]
 use std::io::Write as _;
 use std::net::SocketAddr;
 use std::path::Path;
@@ -29,11 +28,10 @@ use crate::shared::provider_auth::{
 };
 
 // ---------------------------------------------------------------------------
-// OpenSSL helpers (server mode only)
+// OpenSSL helpers
 // ---------------------------------------------------------------------------
 
 /// Run an openssl subcommand and return stdout on success.
-#[cfg(feature = "server")]
 fn run_openssl(args: &[&str], description: &str) -> Result<Vec<u8>> {
     let output = Command::new("openssl")
         .args(args)
@@ -49,7 +47,6 @@ fn run_openssl(args: &[&str], description: &str) -> Result<Vec<u8>> {
 }
 
 /// Run an openssl subcommand that reads key material from stdin.
-#[cfg(feature = "server")]
 fn run_openssl_with_stdin(args: &[&str], stdin_data: &[u8], description: &str) -> Result<Vec<u8>> {
     let mut child = Command::new("openssl")
         .args(args)
@@ -77,10 +74,9 @@ fn run_openssl_with_stdin(args: &[&str], stdin_data: &[u8], description: &str) -
 }
 
 // ---------------------------------------------------------------------------
-// Session secret (server mode only)
+// Session secret
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "server")]
 fn generate_session_secret() -> String {
     let mut rng = rand::thread_rng();
     let bytes: [u8; 32] = rng.gen();
@@ -88,10 +84,9 @@ fn generate_session_secret() -> String {
 }
 
 // ---------------------------------------------------------------------------
-// JWT keypair generation (server mode only)
+// JWT keypair generation
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "server")]
 fn generate_jwt_keypair() -> Result<(String, String)> {
     let private_pem = run_openssl(&["genpkey", "-algorithm", "Ed25519"], "generate keypair")?;
     let public_pem =
@@ -103,10 +98,9 @@ fn generate_jwt_keypair() -> Result<(String, String)> {
 }
 
 // ---------------------------------------------------------------------------
-// mTLS certificate generation (server mode only)
+// mTLS certificate generation
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "server")]
 fn generate_mtls_certs(dir: &Path) -> Result<()> {
     std::fs::create_dir_all(dir).context("failed to create certs directory")?;
 
@@ -185,10 +179,9 @@ fn generate_mtls_certs(dir: &Path) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// Config TOML generation (server mode only)
+// Config TOML generation
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "server")]
 fn format_config_toml(username: &str) -> String {
     format!(
         r#"[web]
@@ -229,7 +222,6 @@ fn detect_binary_on_path(binary: &str) -> bool {
 // Interactive setup
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "server")]
 fn prompt_input(prompt: &str) -> Result<String> {
     Ok(dialoguer::Input::with_theme(&ColorfulTheme::default())
         .with_prompt(prompt)
@@ -508,8 +500,7 @@ pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<(
         .join(".fabro");
     std::fs::create_dir_all(&arc_dir)?;
 
-    // Pre-flight checks (server mode only — standalone doesn't need openssl/node/dot)
-    #[cfg(feature = "server")]
+    // Pre-flight checks
     {
         eprintln!(
             "  {}",
@@ -680,8 +671,7 @@ pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<(
     }
     eprintln!();
 
-    // Server configuration (server mode only)
-    #[cfg(feature = "server")]
+    // Server configuration
     {
         eprintln!("  {}", s.bold.apply_to("Server · Configuration"));
         eprintln!("  {}", s.dim.apply_to("─────────────────────"));
@@ -713,8 +703,7 @@ pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<(
         eprintln!();
     }
 
-    // Secrets and certificates (server mode only)
-    #[cfg(feature = "server")]
+    // Secrets and certificates
     {
         eprintln!(
             "  {}",
@@ -772,10 +761,9 @@ pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<(
 }
 
 // ---------------------------------------------------------------------------
-// Hex encoding (server mode only — used by generate_session_secret)
+// Hex encoding (used by generate_session_secret)
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "server")]
 mod hex {
     pub fn encode(bytes: &[u8]) -> String {
         bytes.iter().map(|b| format!("{b:02x}")).collect()
@@ -802,33 +790,29 @@ mod tests {
         assert!(!detect_binary_on_path("arc_nonexistent_xyz"));
     }
 
-    // -- Session secret (server only) --
+    // -- Session secret --
 
     #[test]
-    #[cfg(feature = "server")]
     fn session_secret_length() {
         let secret = generate_session_secret();
         assert_eq!(secret.len(), 64);
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn session_secret_is_hex() {
         let secret = generate_session_secret();
         assert!(secret.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn session_secret_is_lowercase() {
         let secret = generate_session_secret();
         assert!(secret.chars().all(|c| !c.is_ascii_uppercase()));
     }
 
-    // -- JWT keypair (server only) --
+    // -- JWT keypair --
 
     #[test]
-    #[cfg(feature = "server")]
     fn jwt_keypair_private_pem_header() {
         let (private, _) = generate_jwt_keypair().unwrap();
         assert!(
@@ -838,7 +822,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn jwt_keypair_public_pem_header() {
         let (_, public) = generate_jwt_keypair().unwrap();
         assert!(
@@ -848,16 +831,14 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn jwt_keypair_public_parses() {
         let (_, public) = generate_jwt_keypair().unwrap();
         jsonwebtoken::DecodingKey::from_ed_pem(public.as_bytes()).expect("public key should parse");
     }
 
-    // -- mTLS cert generation (server only) --
+    // -- mTLS cert generation --
 
     #[test]
-    #[cfg(feature = "server")]
     fn mtls_certs_creates_files() {
         let dir = tempfile::tempdir().unwrap();
         let certs_dir = dir.path().join("certs");
@@ -870,7 +851,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn mtls_ca_cert_is_pem() {
         let dir = tempfile::tempdir().unwrap();
         let certs_dir = dir.path().join("certs");
@@ -884,7 +864,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn mtls_server_cert_is_pem() {
         let dir = tempfile::tempdir().unwrap();
         let certs_dir = dir.path().join("certs");
@@ -898,7 +877,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn mtls_certs_parse_via_rustls() {
         let dir = tempfile::tempdir().unwrap();
         let certs_dir = dir.path().join("certs");
@@ -919,10 +897,9 @@ mod tests {
         assert_eq!(server_certs.len(), 1);
     }
 
-    // -- Config TOML generation (server only) --
+    // -- Config TOML generation --
 
     #[test]
-    #[cfg(feature = "server")]
     fn config_toml_roundtrips() {
         let toml_str = format_config_toml("brynary");
         let settings: fabro_types::Settings =
@@ -934,7 +911,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn config_toml_has_auth_strategies() {
         let toml_str = format_config_toml("alice");
         let settings: fabro_types::Settings = toml::from_str(&toml_str).unwrap();
@@ -948,7 +924,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn config_toml_has_tls_paths() {
         use std::path::PathBuf;
         let toml_str = format_config_toml("bob");

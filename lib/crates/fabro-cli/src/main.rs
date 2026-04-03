@@ -10,9 +10,7 @@ mod store;
 mod user_config;
 
 use anyhow::Result;
-use args::{Commands, GlobalArgs, LONG_VERSION, RunCommands};
-#[cfg(feature = "server")]
-use args::{ServerCommand, ServerNamespace};
+use args::{Commands, GlobalArgs, LONG_VERSION, RunCommands, ServerCommand, ServerNamespace};
 use clap::{CommandFactory, Parser};
 use fabro_telemetry::{git, panic as tel_panic, sanitize, sender};
 use fabro_util::printer::Printer;
@@ -106,37 +104,24 @@ async fn main_inner() -> (String, Result<()>) {
     let command_name = command.name().to_string();
 
     let (config_log_level, upgrade_check_enabled) = {
-        #[cfg(feature = "server")]
+        if let Commands::Server(ServerNamespace {
+            command:
+                ServerCommand::Start {
+                    serve_args: args, ..
+                }
+                | ServerCommand::Serve {
+                    serve_args: args, ..
+                },
+        }) = command.as_ref()
         {
-            if let Commands::Server(ServerNamespace {
-                command:
-                    ServerCommand::Start {
-                        serve_args: args, ..
-                    }
-                    | ServerCommand::Serve {
-                        serve_args: args, ..
-                    },
-            }) = command.as_ref()
-            {
-                match fabro_config::server::load_server_settings(args.config.as_deref()) {
-                    Ok(server_settings) => (
-                        server_settings.log.as_ref().and_then(|l| l.level.clone()),
-                        false,
-                    ),
-                    Err(err) => return (command_name, Err(err)),
-                }
-            } else {
-                match user_config::load_user_settings() {
-                    Ok(cli_settings) => (
-                        cli_settings.log.as_ref().and_then(|l| l.level.clone()),
-                        cli_settings.upgrade_check_enabled(),
-                    ),
-                    Err(err) => return (command_name, Err(err)),
-                }
+            match fabro_config::server::load_server_settings(args.config.as_deref()) {
+                Ok(server_settings) => (
+                    server_settings.log.as_ref().and_then(|l| l.level.clone()),
+                    false,
+                ),
+                Err(err) => return (command_name, Err(err)),
             }
-        }
-        #[cfg(not(feature = "server"))]
-        {
+        } else {
             match user_config::load_user_settings() {
                 Ok(cli_settings) => (
                     cli_settings.log.as_ref().and_then(|l| l.level.clone()),
@@ -192,7 +177,6 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::Store(ns) => commands::store::dispatch(ns, &globals).await?,
             Commands::RunsCmd(cmd) => commands::runs::dispatch(cmd, &globals).await?,
             Commands::Model { command } => commands::model::execute(command, &globals).await?,
-            #[cfg(feature = "server")]
             Commands::Server(ns) => {
                 commands::server::dispatch(ns.command, &globals).await?;
             }
@@ -369,7 +353,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn parse_server_url_conflicts_with_storage_dir() {
         let result = Cli::try_parse_from([
             "fabro",

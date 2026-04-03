@@ -30,6 +30,7 @@ fn help() {
           --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+          --server-url <SERVER_URL>    Server URL (overrides server.base_url from user.toml) [env: FABRO_SERVER_URL=]
       -h, --help                       Print help
     ----- stderr -----
     ");
@@ -60,13 +61,21 @@ fn dry_run_flag() {
       [!] Cloud sandbox (no sandbox configured)
       [!] Brave Search (not configured)
 
-    Found issues in 4 categories.
+      Server
+      [!] System dependencies (some issues)
+      [✓] Fabro API (http://localhost:3000/api/v1)
+      [✓] Fabro Web (http://localhost:3000)
+      [!] Cryptographic keys (no authentication configured)
+
+    Found issues in 6 categories.
 
     Warnings:
       • Configuration — Create ~/.fabro/user.toml
       • GitHub App — Configure GitHub App in server.toml and set env vars to enable GitHub integration
       • Cloud sandbox — Set DAYTONA_API_KEY to enable cloud sandbox execution
       • Brave Search — Set BRAVE_SEARCH_API_KEY to enable web search
+      • System dependencies — Install missing system dependencies
+      • Cryptographic keys — Configure authentication_strategies in [api] section of server.toml
     ----- stderr -----
     ");
 }

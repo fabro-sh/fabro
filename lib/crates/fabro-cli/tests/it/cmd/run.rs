@@ -31,6 +31,7 @@ fn help() {
           --model <MODEL>              Override default LLM model
           --provider <PROVIDER>        Override default LLM provider
           --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+          --server-url <SERVER_URL>    Server URL (overrides server.base_url from user.toml) [env: FABRO_SERVER_URL=]
       -v, --verbose                    Enable verbose output
           --sandbox <SANDBOX>          Sandbox for agent tools [possible values: local, docker, daytona]
           --label <KEY=VALUE>          Attach a label to this run (repeatable, format: KEY=VALUE)
@@ -396,6 +397,13 @@ fn json_run_implies_auto_approve_for_human_gates() {
         "ts": "[TIMESTAMP]"
       },
       {
+        "event": "run.running",
+        "id": "[EVENT_ID]",
+        "properties": {},
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
+      },
+      {
         "event": "sandbox.ready",
         "id": "[EVENT_ID]",
         "properties": {
@@ -426,13 +434,6 @@ fn json_run_implies_auto_approve_for_human_gates() {
           "goal": "Route through the default approval path",
           "name": "HumanGate"
         },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "run.running",
-        "id": "[EVENT_ID]",
-        "properties": {},
         "run_id": "[ULID]",
         "ts": "[TIMESTAMP]"
       },

@@ -1,7 +1,6 @@
 use fabro_test::{fabro_snapshot, test_context};
 
 #[test]
-#[cfg(feature = "server")]
 fn start_status_stop_lifecycle() {
     let context = test_context!();
 

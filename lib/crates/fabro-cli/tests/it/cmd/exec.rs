@@ -35,6 +35,7 @@ fn help() {
           --debug                          Print LLM request/response debug info to stderr
           --storage-dir <STORAGE_DIR>      Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
           --verbose                        Print full LLM request/response JSON to stderr
+          --server-url <SERVER_URL>        Server URL (overrides server.base_url from user.toml) [env: FABRO_SERVER_URL=]
           --skills-dir <SKILLS_DIR>        Directory containing skill files (overrides default discovery)
           --output-format <OUTPUT_FORMAT>  Output format (text for human-readable, json for NDJSON event stream) [possible values: text, json]
       -h, --help                           Print help

@@ -1,16 +1,12 @@
-#[cfg(feature = "server")]
 use std::path::Path;
 
-#[allow(unused_imports)]
 pub(crate) use fabro_config::user::*;
 
 use fabro_config::ConfigLayer;
 use fabro_types::Settings;
+use tracing::debug;
 
 use crate::args::GlobalArgs;
-
-#[cfg(feature = "server")]
-use tracing::debug;
 
 pub(crate) fn load_user_settings() -> anyhow::Result<Settings> {
     ConfigLayer::user()?.resolve()
@@ -31,7 +27,6 @@ pub(crate) fn apply_global_overrides(mut layer: ConfigLayer, globals: &GlobalArg
         layer.mode = Some(ExecutionMode::Standalone);
     }
 
-    #[cfg(feature = "server")]
     if let Some(url) = &globals.server_url {
         layer.server.get_or_insert_with(Default::default).base_url = Some(url.clone());
         layer.mode = Some(ExecutionMode::Server);
@@ -40,7 +35,6 @@ pub(crate) fn apply_global_overrides(mut layer: ConfigLayer, globals: &GlobalArg
     layer
 }
 
-#[cfg(feature = "server")]
 #[derive(Debug, PartialEq)]
 pub(crate) struct ResolvedMode {
     pub mode: ExecutionMode,
@@ -48,10 +42,8 @@ pub(crate) struct ResolvedMode {
     pub tls: Option<ClientTlsSettings>,
 }
 
-#[cfg(feature = "server")]
 const DEFAULT_SERVER_URL: &str = "http://localhost:3000/api/v1";
 
-#[cfg(feature = "server")]
 pub(crate) fn resolve_mode(
     cli_storage_dir: Option<&Path>,
     cli_server_url: Option<&str>,
@@ -83,7 +75,6 @@ pub(crate) fn resolve_mode(
     }
 }
 
-#[cfg(feature = "server")]
 pub(crate) fn build_server_client(
     tls: Option<&ClientTlsSettings>,
 ) -> anyhow::Result<reqwest::Client> {
@@ -115,7 +106,7 @@ pub(crate) fn build_server_client(
     Ok(client)
 }
 
-#[cfg(all(test, feature = "server"))]
+#[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
 

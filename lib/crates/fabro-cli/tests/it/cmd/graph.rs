@@ -66,6 +66,11 @@ fn help() {
               
               [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
 
+          --server-url <SERVER_URL>
+              Server URL (overrides server.base_url from user.toml)
+              
+              [env: FABRO_SERVER_URL=]
+
       -h, --help
               Print help (see a summary with '-h')
     ----- stderr -----

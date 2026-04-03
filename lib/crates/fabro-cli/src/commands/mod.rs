@@ -15,7 +15,6 @@ pub(crate) mod run;
 pub(crate) mod runs;
 pub(crate) mod sandbox;
 pub(crate) mod secret;
-#[cfg(feature = "server")]
 pub(crate) mod server;
 pub(crate) mod skill;
 pub(crate) mod store;

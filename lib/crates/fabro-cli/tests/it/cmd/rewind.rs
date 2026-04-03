@@ -33,6 +33,7 @@ fn help() {
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
           --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+          --server-url <SERVER_URL>    Server URL (overrides server.base_url from user.toml) [env: FABRO_SERVER_URL=]
       -h, --help                       Print help
     ----- stderr -----
     ");
@@ -68,8 +69,7 @@ fn rewind_list_prints_timeline_for_completed_git_run() {
     ----- stdout -----
     ----- stderr -----
     @   Node      Details 
-     @1  step_one          
-     @2  step_two
+     @1  step_one
     ");
 }
 
@@ -94,8 +94,8 @@ fn rewind_target_updates_metadata_and_resume_hint() {
     exit_code: 0
     ----- stdout -----
     ----- stderr -----
-    Rewound metadata branch to @1 (step_one)
-    Rewound run branch fabro/run/[ULID] to [SHA]
+    Rewound metadata branch to @1 (start)
+    Warning: checkpoint @1 has no git_commit_sha; run branch not moved
 
     To resume: fabro resume [RUN_PREFIX]
     ");

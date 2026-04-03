@@ -12,7 +12,6 @@ path = "src/main.rs"
 
 [features]
 default = []
-server = ["dep:fabro-server"]
 sleep_inhibitor = ["dep:core-foundation"]
 
 [lints]
@@ -36,7 +35,7 @@ fabro-checkpoint = { path = "../fabro-checkpoint" }
 fabro-graphviz = { path = "../fabro-graphviz" }
 fabro-validate = { path = "../fabro-validate" }
 fabro-workflow = { path = "../fabro-workflow" }
-fabro-server = { path = "../fabro-server", optional = true }
+fabro-server = { path = "../fabro-server" }
 fabro-telemetry = { path = "../fabro-telemetry" }
 fabro-store = { path = "../fabro-store" }
 fabro-types = { path = "../fabro-types" }

@@ -1,12 +1,9 @@
 use std::path::PathBuf;
-#[cfg(feature = "server")]
 use std::process::Command;
-#[cfg(feature = "server")]
 use std::sync::LazyLock;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-#[cfg(feature = "server")]
 use fabro_config::server::{ApiAuthStrategy, AuthProvider};
 use fabro_config::user::{default_user_config_path, legacy_user_config_path};
 use fabro_llm::client::Client as LlmClient;
@@ -17,9 +14,7 @@ pub(crate) use fabro_util::check_report::{
 };
 use fabro_util::terminal::Styles;
 use futures::future::join_all;
-#[cfg(feature = "server")]
 use regex::Regex;
-#[cfg(feature = "server")]
 use semver::Version;
 
 use crate::args::GlobalArgs;
@@ -30,7 +25,6 @@ use crate::user_config::load_user_settings;
 // System dependency types and parsers (server mode only)
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "server")]
 pub struct DepSpec {
     pub name: &'static str,
     command: &'static [&'static str],
@@ -39,7 +33,6 @@ pub struct DepSpec {
     pattern: &'static LazyLock<Regex>,
 }
 
-#[cfg(feature = "server")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProbeOutcome {
     NotFound,
@@ -47,16 +40,12 @@ pub enum ProbeOutcome {
     Ok { version: Option<Version> },
 }
 
-#[cfg(feature = "server")]
 static OPENSSL_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?:OpenSSL|LibreSSL)\s+(\d+)\.(\d+)\.(\d+)").unwrap());
-#[cfg(feature = "server")]
 static NODE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"v(\d+)\.(\d+)\.(\d+)").unwrap());
-#[cfg(feature = "server")]
 static DOT_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"graphviz version (\d+)\.(\d+)\.(\d+)").unwrap());
 
-#[cfg(feature = "server")]
 fn parse_version(re: &Regex, output: &str) -> Option<Version> {
     let caps = re.captures(output)?;
     Some(Version::new(
@@ -66,7 +55,6 @@ fn parse_version(re: &Regex, output: &str) -> Option<Version> {
     ))
 }
 
-#[cfg(feature = "server")]
 pub const DEP_SPECS: &[DepSpec] = &[
     DepSpec {
         name: "openssl",
@@ -91,7 +79,6 @@ pub const DEP_SPECS: &[DepSpec] = &[
     },
 ];
 
-#[cfg(feature = "server")]
 pub fn probe_system_deps() -> Vec<ProbeOutcome> {
     DEP_SPECS
         .iter()
@@ -116,7 +103,6 @@ pub fn probe_system_deps() -> Vec<ProbeOutcome> {
         .collect()
 }
 
-#[cfg(feature = "server")]
 fn dep_issue(name: &str, issue: &str, required: bool) -> (CheckStatus, String) {
     let severity = if required { "required" } else { "optional" };
     let status = if required {
@@ -127,7 +113,6 @@ fn dep_issue(name: &str, issue: &str, required: bool) -> (CheckStatus, String) {
     (status, format!("{name}: {issue} ({severity})"))
 }
 
-#[cfg(feature = "server")]
 pub fn check_system_deps(specs: &[DepSpec], outcomes: &[ProbeOutcome]) -> CheckResult {
     let mut details = Vec::new();
     let mut worst_status = CheckStatus::Pass;
@@ -414,11 +399,8 @@ pub(crate) struct GithubAppStatus {
     /// Result of attempting to sign a JWT with the configured credentials.
     /// `None` if app_id or private key is missing.
     pub sign_result: Option<Result<(), String>>,
-    #[cfg(feature = "server")]
     pub client_id: bool,
-    #[cfg(feature = "server")]
     pub client_secret: bool,
-    #[cfg(feature = "server")]
     pub webhook_secret: bool,
 }
 
@@ -429,17 +411,9 @@ impl GithubAppStatus {
 
     fn none_set(&self) -> bool {
         let core_none = self.app_id.is_none() && !self.private_key_set;
-        #[cfg(feature = "server")]
-        {
-            core_none && !self.client_id && !self.client_secret && !self.webhook_secret
-        }
-        #[cfg(not(feature = "server"))]
-        {
-            core_none
-        }
+        core_none && !self.client_id && !self.client_secret && !self.webhook_secret
     }
 
-    #[cfg(feature = "server")]
     fn all_set(&self) -> bool {
         self.core_set() && self.client_id && self.client_secret && self.webhook_secret
     }
@@ -463,13 +437,11 @@ pub(crate) fn check_github_app(status: &GithubAppStatus) -> CheckResult {
         }
     )));
 
-    #[allow(unused_mut)]
     let mut fields: Vec<(&str, bool)> = vec![
         ("git.app_id", status.app_id.is_some()),
         ("GITHUB_APP_PRIVATE_KEY", status.private_key_set),
     ];
 
-    #[cfg(feature = "server")]
     {
         let server_fields: Vec<(&str, bool)> = vec![
             ("git.client_id", status.client_id),
@@ -530,23 +502,11 @@ pub(crate) fn check_github_app(status: &GithubAppStatus) -> CheckResult {
         };
     }
 
-    #[cfg(feature = "server")]
     if status.all_set() {
         return CheckResult {
             name: "GitHub App".to_string(),
             status: CheckStatus::Pass,
             summary: "fully configured".to_string(),
-            details,
-            remediation: None,
-        };
-    }
-
-    #[cfg(not(feature = "server"))]
-    if status.core_set() {
-        return CheckResult {
-            name: "GitHub App".to_string(),
-            status: CheckStatus::Pass,
-            summary: "configured".to_string(),
             details,
             remediation: None,
         };
@@ -566,13 +526,11 @@ pub(crate) fn check_github_app(status: &GithubAppStatus) -> CheckResult {
     }
 }
 
-#[cfg(feature = "server")]
 pub struct ApiStatus {
     pub base_url: String,
     pub authentication_strategies: Vec<ApiAuthStrategy>,
 }
 
-#[cfg(feature = "server")]
 fn format_auth_strategies(strategies: &[ApiAuthStrategy]) -> String {
     strategies
         .iter()
@@ -584,7 +542,6 @@ fn format_auth_strategies(strategies: &[ApiAuthStrategy]) -> String {
         .join(", ")
 }
 
-#[cfg(feature = "server")]
 pub fn check_api(status: &ApiStatus, live_result: Option<&Result<(), String>>) -> CheckResult {
     let mut details = vec![
         CheckDetail::new(format!("Base URL: {}", status.base_url)),
@@ -609,14 +566,12 @@ pub fn check_api(status: &ApiStatus, live_result: Option<&Result<(), String>>) -
     }
 }
 
-#[cfg(feature = "server")]
 pub struct WebStatus {
     pub url: String,
     pub auth_provider: AuthProvider,
     pub allowed_usernames_count: usize,
 }
 
-#[cfg(feature = "server")]
 fn format_auth_provider(provider: &AuthProvider) -> &'static str {
     match provider {
         AuthProvider::Github => "github",
@@ -624,7 +579,6 @@ fn format_auth_provider(provider: &AuthProvider) -> &'static str {
     }
 }
 
-#[cfg(feature = "server")]
 pub fn check_web(status: &WebStatus, live_result: Option<&Result<(), String>>) -> CheckResult {
     let mut details = vec![
         CheckDetail::new(format!("URL: {}", status.url)),
@@ -657,14 +611,12 @@ pub fn check_web(status: &WebStatus, live_result: Option<&Result<(), String>>) -
 // Cryptographic key validation
 // ---------------------------------------------------------------------------
 
-#[cfg(feature = "server")]
 pub struct TlsCheckInput {
     pub cert_pem: String,
     pub key_pem: String,
     pub ca_pem: String,
 }
 
-#[cfg(feature = "server")]
 pub struct CryptoInput {
     pub auth_strategies: Vec<ApiAuthStrategy>,
     pub tls_files: Option<Result<TlsCheckInput, String>>,
@@ -674,7 +626,6 @@ pub struct CryptoInput {
     pub now_epoch: i64,
 }
 
-#[cfg(feature = "server")]
 fn decode_pem_value(name: &str, value: &str) -> Result<String, String> {
     if value.starts_with("-----") {
         return Ok(value.to_string());
@@ -684,7 +635,6 @@ fn decode_pem_value(name: &str, value: &str) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|e| format!("{name} base64 decoded to invalid UTF-8: {e}"))
 }
 
-#[cfg(feature = "server")]
 fn validate_tls_cert(pem: &str, now_epoch: i64) -> Result<String, String> {
     let mut reader = std::io::Cursor::new(pem.as_bytes());
     let certs: Vec<_> = rustls_pemfile::certs(&mut reader)
@@ -708,7 +658,6 @@ fn validate_tls_cert(pem: &str, now_epoch: i64) -> Result<String, String> {
     Ok(format!("CN={cn}, valid"))
 }
 
-#[cfg(feature = "server")]
 fn validate_tls_private_key(pem: &str) -> Result<(), String> {
     let mut reader = std::io::Cursor::new(pem.as_bytes());
     rustls_pemfile::private_key(&mut reader)
@@ -717,7 +666,6 @@ fn validate_tls_private_key(pem: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(feature = "server")]
 fn validate_tls_ca(pem: &str) -> Result<(), String> {
     let mut reader = std::io::Cursor::new(pem.as_bytes());
     let certs: Vec<_> = rustls_pemfile::certs(&mut reader)
@@ -729,7 +677,6 @@ fn validate_tls_ca(pem: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(feature = "server")]
 fn validate_session_secret(value: &str) -> Result<(), String> {
     if value.len() < 64 {
         return Err(format!(
@@ -743,14 +690,12 @@ fn validate_session_secret(value: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(feature = "server")]
 struct CryptoCheckState {
     details: Vec<CheckDetail>,
     errors: Vec<String>,
     worst: CheckStatus,
 }
 
-#[cfg(feature = "server")]
 impl CryptoCheckState {
     fn new() -> Self {
         Self {
@@ -787,7 +732,6 @@ impl CryptoCheckState {
     }
 }
 
-#[cfg(feature = "server")]
 pub fn check_crypto(input: &CryptoInput) -> CheckResult {
     let has_jwt = input.auth_strategies.contains(&ApiAuthStrategy::Jwt);
     let has_mtls = input.auth_strategies.contains(&ApiAuthStrategy::Mtls);
@@ -942,7 +886,6 @@ async fn probe_brave_search(http: &reqwest::Client) -> Result<(), String> {
     }
 }
 
-#[cfg(feature = "server")]
 async fn probe_url(http: &reqwest::Client, url: &str) -> Result<(), String> {
     http.get(url)
         .send()
@@ -988,10 +931,8 @@ pub(crate) async fn run_doctor(
 
     let daytona_configured = std::env::var("DAYTONA_API_KEY").is_ok();
 
-    #[cfg(feature = "server")]
     let server_settings = fabro_config::server::load_server_settings(None).unwrap_or_default();
 
-    #[cfg(feature = "server")]
     let api_status = {
         let api = server_settings.api.clone().unwrap_or_default();
         ApiStatus {
@@ -1000,7 +941,6 @@ pub(crate) async fn run_doctor(
         }
     };
 
-    #[cfg(feature = "server")]
     let web_status = {
         let web = server_settings.web.clone().unwrap_or_default();
         WebStatus {
@@ -1010,13 +950,10 @@ pub(crate) async fn run_doctor(
         }
     };
 
-    #[cfg(feature = "server")]
     let server_git = server_settings.git.clone().unwrap_or_default();
 
-    #[cfg(feature = "server")]
     let server_api = server_settings.api.clone().unwrap_or_default();
 
-    #[cfg(feature = "server")]
     let server_web = server_settings.web.clone().unwrap_or_default();
 
     let git_app_id = cli_settings.app_id().map(str::to_owned);
@@ -1050,15 +987,11 @@ pub(crate) async fn run_doctor(
         slug: cli_settings.slug().map(str::to_owned),
         private_key_set: private_key_raw.is_some(),
         sign_result,
-        #[cfg(feature = "server")]
         client_id: server_git.client_id.is_some(),
-        #[cfg(feature = "server")]
         client_secret: std::env::var("GITHUB_APP_CLIENT_SECRET").is_ok(),
-        #[cfg(feature = "server")]
         webhook_secret: std::env::var("GITHUB_APP_WEBHOOK_SECRET").is_ok(),
     };
 
-    #[cfg(feature = "server")]
     let crypto_input = {
         let has_mtls = server_api
             .authentication_strategies
@@ -1089,16 +1022,13 @@ pub(crate) async fn run_doctor(
         }
     };
 
-    #[cfg(feature = "server")]
     let dep_results = probe_system_deps();
 
     // Live probes (only when --live is set)
     let sandbox_status;
     let llm_live_results: Option<Vec<(Provider, Result<(), String>)>>;
     let brave_live_result: Option<Result<(), String>>;
-    #[cfg(feature = "server")]
     let api_live_result: Option<Result<(), String>>;
-    #[cfg(feature = "server")]
     let web_live_result: Option<Result<(), String>>;
 
     if live {
@@ -1134,30 +1064,18 @@ pub(crate) async fn run_doctor(
         };
         let brave_fut = probe_brave_search(&http);
 
-        #[cfg(feature = "server")]
-        {
-            let api_url = format!("{}/runs", server_api.base_url);
-            let api_fut = probe_url(&http, &api_url);
-            let web_fut = probe_url(&http, &server_web.url);
+        let api_url = format!("{}/runs", server_api.base_url);
+        let api_fut = probe_url(&http, &api_url);
+        let web_fut = probe_url(&http, &server_web.url);
 
-            let (sandbox, llm, brave, api, web) =
-                tokio::join!(sandbox_fut, llm_fut, brave_fut, api_fut, web_fut);
+        let (sandbox, llm, brave, api, web) =
+            tokio::join!(sandbox_fut, llm_fut, brave_fut, api_fut, web_fut);
 
-            sandbox_status = sandbox;
-            llm_live_results = llm;
-            brave_live_result = Some(brave);
-            api_live_result = Some(api);
-            web_live_result = Some(web);
-        }
-
-        #[cfg(not(feature = "server"))]
-        {
-            let (sandbox, llm, brave) = tokio::join!(sandbox_fut, llm_fut, brave_fut);
-
-            sandbox_status = sandbox;
-            llm_live_results = llm;
-            brave_live_result = Some(brave);
-        }
+        sandbox_status = sandbox;
+        llm_live_results = llm;
+        brave_live_result = Some(brave);
+        api_live_result = Some(api);
+        web_live_result = Some(web);
     } else {
         sandbox_status = SandboxStatus {
             daytona_configured,
@@ -1165,15 +1083,11 @@ pub(crate) async fn run_doctor(
         };
         llm_live_results = None;
         brave_live_result = None;
-        #[cfg(feature = "server")]
-        {
-            api_live_result = None;
-            web_live_result = None;
-        }
+        api_live_result = None;
+        web_live_result = None;
     }
 
     // Run pure checks
-    #[allow(unused_mut)]
     let mut sections = vec![
         CheckSection {
             title: "Required".into(),
@@ -1203,7 +1117,6 @@ pub(crate) async fn run_doctor(
         },
     ];
 
-    #[cfg(feature = "server")]
     sections.push(CheckSection {
         title: "Server".into(),
         checks: vec![
@@ -1421,11 +1334,8 @@ mod tests {
             sign_result: Some(Err(
                 "Signing failed: signature error: UnexpectedError".to_string()
             )),
-            #[cfg(feature = "server")]
             client_id: true,
-            #[cfg(feature = "server")]
             client_secret: true,
-            #[cfg(feature = "server")]
             webhook_secret: true,
         };
         let result = check_github_app(&status);
@@ -1446,11 +1356,8 @@ mod tests {
             slug: None,
             private_key_set: false,
             sign_result: None,
-            #[cfg(feature = "server")]
             client_id: false,
-            #[cfg(feature = "server")]
             client_secret: false,
-            #[cfg(feature = "server")]
             webhook_secret: false,
         };
         let result = check_github_app(&status);
@@ -1459,7 +1366,6 @@ mod tests {
 
     // -- Server-only checks (check_api, check_web, check_crypto) --
 
-    #[cfg(feature = "server")]
     mod server_tests {
         use super::*;
 
@@ -1652,7 +1558,6 @@ mod tests {
     // -- parse_version (server only) --
 
     #[test]
-    #[cfg(feature = "server")]
     fn parse_version_openssl() {
         assert_eq!(
             parse_version(
@@ -1664,7 +1569,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn parse_version_libressl() {
         assert_eq!(
             parse_version(&OPENSSL_RE, "LibreSSL 3.3.6"),
@@ -1673,7 +1577,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn parse_version_node() {
         assert_eq!(
             parse_version(&NODE_RE, "v22.14.0"),
@@ -1682,7 +1585,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn parse_version_dot() {
         assert_eq!(
             parse_version(&DOT_RE, "dot - graphviz version 12.2.1 (20241206.2024)"),
@@ -1691,7 +1593,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn parse_version_garbage_returns_none() {
         assert_eq!(parse_version(&OPENSSL_RE, "not a version"), None);
         assert_eq!(parse_version(&NODE_RE, "node not found"), None);
@@ -1700,10 +1601,8 @@ mod tests {
 
     // -- check_system_deps (server only) --
 
-    #[cfg(feature = "server")]
     static TEST_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"unused").unwrap());
 
-    #[cfg(feature = "server")]
     fn spec(name: &'static str, required: bool, min_version: Version) -> DepSpec {
         DepSpec {
             name,
@@ -1715,7 +1614,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn check_system_deps_all_present() {
         let specs = [
             spec("openssl", true, Version::new(3, 0, 0)),
@@ -1743,7 +1641,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn check_system_deps_required_missing_is_error() {
         let specs = [spec("openssl", true, Version::new(3, 0, 0))];
         let outcomes = [ProbeOutcome::NotFound];
@@ -1753,7 +1650,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn check_system_deps_optional_missing_is_warning() {
         let specs = [spec("gh", false, Version::new(2, 0, 0))];
         let outcomes = [ProbeOutcome::NotFound];
@@ -1763,7 +1659,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn check_system_deps_outdated_is_warning() {
         let specs = [spec("openssl", true, Version::new(3, 0, 0))];
         let outcomes = [ProbeOutcome::Ok {
@@ -1776,7 +1671,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn check_system_deps_unparseable_success_is_pass() {
         let specs = [spec("openssl", true, Version::new(3, 0, 0))];
         let outcomes = [ProbeOutcome::Ok { version: None }];
@@ -1786,7 +1680,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn check_system_deps_required_command_failed_is_error() {
         let specs = [spec("node", true, Version::new(20, 0, 0))];
         let outcomes = [ProbeOutcome::Failed];
@@ -1796,7 +1689,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn check_system_deps_optional_command_failed_is_warning() {
         let specs = [spec("gh", false, Version::new(2, 0, 0))];
         let outcomes = [ProbeOutcome::Failed];
@@ -1806,7 +1698,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "server")]
     fn check_system_deps_error_beats_warning() {
         let specs = [
             spec("openssl", true, Version::new(3, 0, 0)),
@@ -1819,7 +1710,6 @@ mod tests {
 
     // -- check_crypto --
 
-    #[cfg(feature = "server")]
     mod server_crypto_tests {
         use super::*;
 

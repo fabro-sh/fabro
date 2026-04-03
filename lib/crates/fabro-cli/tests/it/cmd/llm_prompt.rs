@@ -1,7 +1,5 @@
 use fabro_test::{fabro_snapshot, test_context};
-#[cfg(feature = "server")]
 use httpmock::prelude::*;
-#[cfg(feature = "server")]
 use serde_json::Value;
 
 #[test]
@@ -33,13 +31,13 @@ fn help() {
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
       -o, --option <OPTION>            key=value options (temperature, `max_tokens`, `top_p`)
           --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+          --server-url <SERVER_URL>    Server URL (overrides server.base_url from user.toml) [env: FABRO_SERVER_URL=]
       -h, --help                       Print help
     ----- stderr -----
     ");
 }
 
 #[test]
-#[cfg(feature = "server")]
 fn prompt_json_streaming_server_reports_resolved_model() {
     let context = test_context!();
     let server = MockServer::start();
