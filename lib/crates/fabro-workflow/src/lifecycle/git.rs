@@ -9,7 +9,7 @@ use fabro_core::error::{CoreError, Result as CoreResult};
 use fabro_core::graph::NodeSpec;
 use fabro_core::lifecycle::RunLifecycle;
 use fabro_core::outcome::NodeResult;
-use fabro_core::state::RunState;
+use fabro_core::state::ExecutionState;
 
 use crate::artifact::ArtifactStore;
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
@@ -21,7 +21,7 @@ use crate::run_dump::RunDump;
 use crate::run_options::RunOptions;
 use crate::sandbox_git::{git_checkpoint, git_diff, git_push_host};
 
-type WfRunState = RunState<Option<StageUsage>>;
+type WfRunState = ExecutionState<Option<StageUsage>>;
 type WfNodeResult = NodeResult<Option<StageUsage>>;
 
 /// Result of a git checkpoint operation, shared with EventLifecycle.

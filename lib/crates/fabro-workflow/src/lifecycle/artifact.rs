@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use fabro_core::graph::NodeSpec;
 use fabro_core::lifecycle::{AttemptContext, AttemptResultContext, RunLifecycle};
 use fabro_core::outcome::NodeResult;
-use fabro_core::state::RunState;
+use fabro_core::state::ExecutionState;
 
 use crate::artifact::{ArtifactStore, offload_large_values, sync_artifacts_to_env};
 use crate::asset_snapshot::collect_assets;
@@ -17,7 +17,7 @@ use crate::outcome::StageUsage;
 use fabro_core::error::Result as CoreResult;
 use fabro_core::lifecycle::NodeDecision;
 
-type WfRunState = RunState<Option<StageUsage>>;
+type WfRunState = ExecutionState<Option<StageUsage>>;
 type WfNodeResult = NodeResult<Option<StageUsage>>;
 type WfNodeDecision = NodeDecision<Option<StageUsage>>;
 

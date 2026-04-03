@@ -24,7 +24,7 @@ use fabro_core::lifecycle::{
     AttemptContext, AttemptResultContext, EdgeContext, EdgeDecision, NodeDecision, RunLifecycle,
 };
 use fabro_core::outcome::NodeResult;
-use fabro_core::state::RunState;
+use fabro_core::state::ExecutionState;
 
 use crate::artifact::ArtifactStore;
 use crate::context;
@@ -48,7 +48,7 @@ use self::git::{GitCheckpointResult, GitLifecycle};
 use self::hook::HookLifecycle;
 use crate::outcome::OutcomeExt;
 
-type WfRunState = RunState<Option<StageUsage>>;
+type WfRunState = ExecutionState<Option<StageUsage>>;
 type WfNodeResult = NodeResult<Option<StageUsage>>;
 type WfNodeDecision = NodeDecision<Option<StageUsage>>;
 

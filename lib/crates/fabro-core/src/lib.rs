@@ -26,4 +26,4 @@ pub use outcome::{
 };
 pub use retry::{BackoffPolicy, RetryPolicy};
 pub use stall::{ActivityMonitor, StallGuard, StallWatchdog};
-pub use state::RunState;
+pub use state::ExecutionState;

@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use fabro_core::executor::ExecutorBuilder;
 use fabro_core::handler::NodeHandler;
-use fabro_core::state::RunState;
+use fabro_core::state::ExecutionState;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
@@ -114,7 +114,7 @@ pub async fn execute(init: Initialized) -> Executed {
     }
 
     let state = if let Some(ref cp) = checkpoint {
-        match RunState::new(&wf_graph).map_err(|e| FabroError::engine(e.to_string())) {
+        match ExecutionState::new(&wf_graph).map_err(|e| FabroError::engine(e.to_string())) {
             Ok(mut s) => {
                 for (k, v) in &cp.context_values {
                     s.context.set(k.clone(), v.clone());
@@ -162,7 +162,7 @@ pub async fn execute(init: Initialized) -> Executed {
             }
         }
     } else if let Some(seed) = seed_context {
-        match RunState::new(&wf_graph).map_err(|e| FabroError::engine(e.to_string())) {
+        match ExecutionState::new(&wf_graph).map_err(|e| FabroError::engine(e.to_string())) {
             Ok(s) => {
                 for (k, v) in seed.snapshot() {
                     s.context.set(k, v);
@@ -187,7 +187,7 @@ pub async fn execute(init: Initialized) -> Executed {
             }
         }
     } else {
-        match RunState::new(&wf_graph).map_err(|e| FabroError::engine(e.to_string())) {
+        match ExecutionState::new(&wf_graph).map_err(|e| FabroError::engine(e.to_string())) {
             Ok(s) => s,
             Err(err) => {
                 return Executed {

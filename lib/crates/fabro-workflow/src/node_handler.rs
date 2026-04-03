@@ -137,7 +137,7 @@ mod tests {
     use fabro_core::executor::ExecutorBuilder;
     use fabro_core::lifecycle::NoopLifecycle;
     use fabro_core::outcome::StageStatus;
-    use fabro_core::state::RunState;
+    use fabro_core::state::ExecutionState;
     use fabro_graphviz::graph::AttrValue;
     use fabro_graphviz::graph::types::{Edge, Graph, Node};
 
@@ -183,7 +183,7 @@ mod tests {
 
         let wf_graph = WorkflowGraph(Arc::new(graph));
         let handler: Arc<dyn NodeHandler<WorkflowGraph>> = Arc::new(SpikeHandler);
-        let state = RunState::new(&wf_graph).unwrap();
+        let state = ExecutionState::new(&wf_graph).unwrap();
 
         let executor = ExecutorBuilder::new(handler)
             .lifecycle(Box::new(NoopLifecycle))

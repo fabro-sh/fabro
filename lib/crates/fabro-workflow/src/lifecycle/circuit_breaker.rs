@@ -6,14 +6,14 @@ use async_trait::async_trait;
 use fabro_core::error::{CoreError, Result as CoreResult};
 use fabro_core::lifecycle::{EdgeContext, EdgeDecision, RunLifecycle};
 use fabro_core::outcome::NodeResult;
-use fabro_core::state::RunState;
+use fabro_core::state::ExecutionState;
 
 use crate::error::{FailureCategory, FailureSignature, FailureSignatureExt};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::{OutcomeExt, StageStatus, StageUsage};
 
-type WfRunState = RunState<Option<StageUsage>>;
+type WfRunState = ExecutionState<Option<StageUsage>>;
 type WfNodeResult = NodeResult<Option<StageUsage>>;
 
 /// Sub-lifecycle responsible for tracking failure signatures and tripping the

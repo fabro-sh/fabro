@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use fabro_core::error::Result as CoreResult;
 use fabro_core::graph::NodeSpec;
 use fabro_core::lifecycle::{EdgeContext, EdgeDecision, NodeDecision, RunLifecycle};
-use fabro_core::state::RunState;
+use fabro_core::state::ExecutionState;
 use fabro_graphviz::graph::types::{Edge as GvEdge, Graph as GvGraph, Node as GvNode};
 
 use crate::context::keys;
@@ -14,7 +14,7 @@ use crate::graph::WorkflowNode;
 use crate::handler::llm::preamble::build_preamble;
 use crate::outcome::StageUsage;
 
-type WfRunState = RunState<Option<StageUsage>>;
+type WfRunState = ExecutionState<Option<StageUsage>>;
 type WfNodeDecision = NodeDecision<Option<StageUsage>>;
 
 /// Graphviz edge captured from edge selection, passed to the next node's before_node

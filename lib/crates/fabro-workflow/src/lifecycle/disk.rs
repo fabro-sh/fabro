@@ -9,7 +9,7 @@ use fabro_core::error::Result as CoreResult;
 use fabro_core::graph::NodeSpec;
 use fabro_core::lifecycle::RunLifecycle;
 use fabro_core::outcome::NodeResult;
-use fabro_core::state::RunState;
+use fabro_core::state::ExecutionState;
 
 use super::circuit_breaker::CircuitBreakerLifecycle;
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent, append_workflow_event};
@@ -19,7 +19,7 @@ use crate::outcome::StageUsage;
 use crate::run_options::RunOptions;
 use fabro_graphviz::graph::types::Graph as GvGraph;
 
-type WfRunState = RunState<Option<StageUsage>>;
+type WfRunState = ExecutionState<Option<StageUsage>>;
 type WfNodeResult = NodeResult<Option<StageUsage>>;
 
 /// Sub-lifecycle responsible for emitting store-backed run lifecycle events.

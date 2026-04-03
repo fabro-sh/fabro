@@ -8,7 +8,7 @@ use fabro_core::lifecycle::{
     AttemptContext, EdgeContext, EdgeDecision, NodeDecision, RunLifecycle,
 };
 use fabro_core::outcome::NodeResult;
-use fabro_core::state::RunState;
+use fabro_core::state::ExecutionState;
 
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
@@ -18,7 +18,7 @@ use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
 use fabro_sandbox::Sandbox;
 use fabro_types::RunId;
 
-type WfRunState = RunState<Option<StageUsage>>;
+type WfRunState = ExecutionState<Option<StageUsage>>;
 type WfNodeResult = NodeResult<Option<StageUsage>>;
 type WfNodeDecision = NodeDecision<Option<StageUsage>>;
 
