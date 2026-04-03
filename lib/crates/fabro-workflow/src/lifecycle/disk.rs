@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use fabro_store::RunStoreHandle;
+use fabro_store::SlateRunStore;
 use fabro_types::RunId;
 
 use fabro_core::error::Result as CoreResult;
@@ -26,7 +26,7 @@ type WfNodeResult = NodeResult<Option<StageUsage>>;
 pub(crate) struct DiskLifecycle {
     pub run_dir: PathBuf,
     pub run_id: RunId,
-    pub run_store: RunStoreHandle,
+    pub run_store: SlateRunStore,
     pub graph: Arc<GvGraph>,
     pub run_options: Arc<RunOptions>,
     pub emitter: Arc<EventEmitter>,
@@ -38,7 +38,7 @@ pub(crate) struct DiskLifecycle {
 impl RunLifecycle<WorkflowGraph> for DiskLifecycle {
     async fn on_run_start(&self, _graph: &WorkflowGraph, _state: &WfRunState) -> CoreResult<()> {
         if let Err(err) = append_workflow_event(
-            self.run_store.as_ref(),
+            &self.run_store,
             &self.run_id,
             &WorkflowRunEvent::RunRunning { reason: None },
         )

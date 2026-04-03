@@ -56,7 +56,7 @@ async fn initialized(
         .expect("failed to create slate-backed test run store");
     let run_store = inner_store;
     append_workflow_event(
-        run_store.as_ref(),
+        &run_store,
         &run_options.run_id,
         &WorkflowRunEvent::RunCreated {
             run_id: run_options.run_id,

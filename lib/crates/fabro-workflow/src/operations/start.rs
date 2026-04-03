@@ -9,7 +9,7 @@ use fabro_config::{project as project_config, run as run_config, sandbox as sand
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_model::{Catalog, FallbackTarget, Provider};
 use fabro_sandbox::{SandboxProvider, SandboxSpec};
-use fabro_store::{RunStoreHandle, SlateRunStore};
+use fabro_store::SlateRunStore;
 use fabro_types::{RunId, Settings};
 
 use crate::context::Context;
@@ -47,7 +47,7 @@ struct RunSession {
     sandbox_env: SandboxEnvSpec,
     devcontainer: Option<DevcontainerSpec>,
     seed_context: Option<Context>,
-    run_store: RunStoreHandle,
+    run_store: SlateRunStore,
     git: Option<GitCheckpointOptions>,
     github_app: Option<fabro_github::GitHubAppCredentials>,
     worktree_mode: Option<WorktreeMode>,
@@ -65,7 +65,7 @@ pub struct StartServices {
     pub cancel_token: Option<Arc<AtomicBool>>,
     pub emitter: Arc<EventEmitter>,
     pub interviewer: Arc<dyn Interviewer>,
-    pub run_store: RunStoreHandle,
+    pub run_store: SlateRunStore,
     pub github_app: Option<fabro_github::GitHubAppCredentials>,
     pub on_node: crate::OnNodeCallback,
     pub registry_override: Option<Arc<HandlerRegistry>>,
@@ -115,7 +115,7 @@ pub(super) async fn execute_persisted_run(
         let error = FabroError::engine(err.to_string());
         let _ = persist_detached_failure(
             run_id,
-            run_store.as_ref(),
+            &run_store,
             run_dir,
             "bootstrap",
             StatusReason::BootstrapFailed,
@@ -125,7 +125,7 @@ pub(super) async fn execute_persisted_run(
         return Err(error);
     }
     if let Err(err) = append_workflow_event(
-        run_store.as_ref(),
+        &run_store,
         &run_id,
         &WorkflowRunEvent::RunStarting {
             reason: Some(StatusReason::SandboxInitializing),
@@ -136,7 +136,7 @@ pub(super) async fn execute_persisted_run(
         let error = FabroError::engine(err.to_string());
         let _ = persist_detached_failure(
             run_id,
-            run_store.as_ref(),
+            &run_store,
             run_dir,
             "bootstrap",
             StatusReason::BootstrapFailed,
@@ -149,12 +149,12 @@ pub(super) async fn execute_persisted_run(
     let mut bootstrap_guard =
         DetachedRunBootstrapGuard::arm(run_id, run_dir, run_store.clone(), cancel_token.clone());
 
-    let persisted = match Persisted::load_from_store(services.run_store.as_ref(), run_dir).await {
+    let persisted = match Persisted::load_from_store(&services.run_store, run_dir).await {
         Ok(persisted) => persisted,
         Err(err) => {
             let _ = persist_detached_failure(
                 run_id,
-                run_store.as_ref(),
+                &run_store,
                 run_dir,
                 "bootstrap",
                 StatusReason::BootstrapFailed,
@@ -171,7 +171,7 @@ pub(super) async fn execute_persisted_run(
         Err(err) => {
             let _ = persist_detached_failure(
                 run_id,
-                run_store.as_ref(),
+                &run_store,
                 run_dir,
                 "bootstrap",
                 StatusReason::BootstrapFailed,
@@ -195,14 +195,8 @@ pub(super) async fn execute_persisted_run(
             Ok(started)
         }
         Err(err) => {
-            persist_terminal_engine_failure(
-                run_id,
-                run_store.as_ref(),
-                run_dir,
-                &err,
-                run_start.elapsed(),
-            )
-            .await;
+            persist_terminal_engine_failure(run_id, &run_store, run_dir, &err, run_start.elapsed())
+                .await;
             completion_guard.defuse();
             Err(err)
         }
@@ -590,7 +584,7 @@ impl RunSession {
 
 struct DetachedRunBootstrapGuard {
     run_id: RunId,
-    run_store: RunStoreHandle,
+    run_store: SlateRunStore,
     cancel_token: Option<Arc<AtomicBool>>,
     active: bool,
 }
@@ -599,7 +593,7 @@ impl DetachedRunBootstrapGuard {
     fn arm(
         run_id: RunId,
         _run_dir: &Path,
-        run_store: RunStoreHandle,
+        run_store: SlateRunStore,
         cancel_token: Option<Arc<AtomicBool>>,
     ) -> Self {
         Self {
@@ -632,7 +626,7 @@ impl Drop for DetachedRunBootstrapGuard {
             if let Ok(handle) = Handle::try_current() {
                 handle.spawn(async move {
                     let _ = append_workflow_event(
-                        run_store.as_ref(),
+                        &run_store,
                         &run_id,
                         &WorkflowRunEvent::WorkflowRunFailed {
                             error: FabroError::engine(format!("{reason:?}")),
@@ -652,18 +646,14 @@ const POSTRUN_ABORTED_MESSAGE: &str = "Run aborted before post-run finalization 
 const POSTRUN_CANCELLED_MESSAGE: &str = "Run cancelled before post-run finalization completed.";
 
 struct DetachedRunCompletionGuard {
-    run_store: RunStoreHandle,
+    run_store: SlateRunStore,
     run_id: RunId,
     cancel_token: Option<Arc<AtomicBool>>,
     active: bool,
 }
 
 impl DetachedRunCompletionGuard {
-    fn arm(
-        run_id: RunId,
-        run_store: RunStoreHandle,
-        cancel_token: Option<Arc<AtomicBool>>,
-    ) -> Self {
+    fn arm(run_id: RunId, run_store: SlateRunStore, cancel_token: Option<Arc<AtomicBool>>) -> Self {
         Self {
             run_store,
             run_id,
@@ -730,7 +720,7 @@ impl Drop for DetachedRunCompletionGuard {
         if let Ok(handle) = Handle::try_current() {
             handle.spawn(async move {
                 let _ = append_workflow_event(
-                    run_store.as_ref(),
+                    &run_store,
                     &run_id,
                     &WorkflowRunEvent::WorkflowRunFailed {
                         error: FabroError::engine(message.to_string()),
@@ -1033,7 +1023,7 @@ mod tests {
             node_visits: HashMap::new(),
         };
         append_workflow_event(
-            services.run_store.as_ref(),
+            &services.run_store,
             &services.run_id,
             &WorkflowRunEvent::CheckpointCompleted {
                 node_id: checkpoint.current_node.clone(),

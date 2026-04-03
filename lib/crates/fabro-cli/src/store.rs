@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use fabro_store::{RunStoreHandle, SlateStore};
+use fabro_store::{SlateRunStore, SlateStore};
 use fabro_types::RunId;
 use object_store::local::LocalFileSystem;
 
@@ -18,7 +18,7 @@ pub(crate) fn build_store(storage_dir: &Path) -> Result<Arc<SlateStore>> {
     )))
 }
 
-pub(crate) async fn open_run_reader(storage_dir: &Path, run_id: &RunId) -> Result<RunStoreHandle> {
+pub(crate) async fn open_run_reader(storage_dir: &Path, run_id: &RunId) -> Result<SlateRunStore> {
     build_store(storage_dir)?
         .open_run_reader(run_id)
         .await

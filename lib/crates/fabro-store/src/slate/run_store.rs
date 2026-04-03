@@ -313,19 +313,6 @@ impl SlateRunDb {
         put_bytes(self.writer()?, key, value).await
     }
 
-    async fn scan_prefix<P>(
-        &self,
-        prefix: P,
-    ) -> std::result::Result<slatedb::DbIterator, slatedb::Error>
-    where
-        P: AsRef<[u8]> + Send,
-    {
-        match self {
-            Self::Writer(db) => db.scan_prefix(prefix).await,
-            Self::Reader(db) => db.scan_prefix(prefix).await,
-        }
-    }
-
     async fn list_events_from(&self, start_seq: u32) -> Result<Vec<EventEnvelope>> {
         match self {
             Self::Writer(db) => list_events_from(db, start_seq).await,

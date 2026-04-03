@@ -126,7 +126,7 @@ async fn remove_run_dir_with_cleanup(store: &SlateStore, run: &RunInfo) -> Resul
     };
     if let Some(run_store) = run_store.as_ref() {
         if let Err(err) = append_workflow_event(
-            run_store.as_ref(),
+            run_store,
             &run.run_id,
             &WorkflowRunEvent::RunRemoving { reason: None },
         )
@@ -140,7 +140,7 @@ async fn remove_run_dir_with_cleanup(store: &SlateStore, run: &RunInfo) -> Resul
         }
     }
 
-    if let Some(record) = load_sandbox_record(&run.path, run_store.as_deref()).await {
+    if let Some(record) = load_sandbox_record(&run.path, run_store.as_ref()).await {
         if record.provider != "local" {
             match reconnect_sandbox(&record).await {
                 Ok(sandbox) => {

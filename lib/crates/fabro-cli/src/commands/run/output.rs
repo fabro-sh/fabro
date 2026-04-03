@@ -103,7 +103,7 @@ pub(crate) async fn print_run_summary(
         pr_url.as_deref(),
         styles,
     );
-    print_final_output(run_store.as_deref(), run_dir, styles).await;
+    print_final_output(run_store.as_ref(), run_dir, styles).await;
     print_assets(run_dir, styles);
     Ok(())
 }

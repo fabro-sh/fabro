@@ -187,7 +187,7 @@ async fn persist_created_run(
         .map(|_| ())
         .map_err(store_error)?;
     append_workflow_event(
-        run_store.as_ref(),
+        &run_store,
         &record.run_id,
         &WorkflowRunEvent::RunSubmitted { reason: None },
     )

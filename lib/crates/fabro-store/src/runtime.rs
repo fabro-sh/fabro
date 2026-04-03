@@ -60,14 +60,6 @@ impl RuntimeState {
             .join(node_slug)
             .join(format!("retry_{attempt}"))
     }
-
-    pub fn ensure_runtime_dir(&self) -> std::io::Result<()> {
-        std::fs::create_dir_all(self.runtime_dir())
-    }
-
-    pub fn ensure_artifact_values_dir(&self) -> std::io::Result<()> {
-        std::fs::create_dir_all(self.artifact_values_dir())
-    }
 }
 
 #[cfg(test)]
@@ -118,17 +110,5 @@ mod tests {
                 .join("plan")
                 .join("retry_2")
         );
-    }
-
-    #[test]
-    fn ensure_methods_create_directories() {
-        let dir = tempfile::tempdir().unwrap();
-        let state = RuntimeState::new(dir.path());
-
-        state.ensure_runtime_dir().unwrap();
-        state.ensure_artifact_values_dir().unwrap();
-
-        assert!(state.runtime_dir().is_dir());
-        assert!(state.artifact_values_dir().is_dir());
     }
 }

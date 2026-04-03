@@ -4,7 +4,7 @@ use std::process::Output;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use fabro_store::{EventEnvelope, RunState, RunStoreHandle, SlateStore};
+use fabro_store::{EventEnvelope, RunState, SlateRunStore, SlateStore};
 use fabro_test::TestContext;
 use fabro_types::RunId;
 use object_store::local::LocalFileSystem;
@@ -480,7 +480,7 @@ fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
         .block_on(future)
 }
 
-fn run_store(run_dir: &Path) -> RunStoreHandle {
+fn run_store(run_dir: &Path) -> SlateRunStore {
     let runs_dir = run_dir.parent().expect("run dir should have parent");
     let storage_dir = runs_dir.parent().expect("runs dir should have parent");
     let run_id: RunId = infer_run_id(run_dir).parse().expect("run id should parse");

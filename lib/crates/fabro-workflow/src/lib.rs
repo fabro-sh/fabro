@@ -141,15 +141,3 @@ pub mod sandbox_git;
 pub mod test_support;
 #[doc(hidden)]
 pub mod transforms;
-
-// Re-export aliases (back-compat with `fabro_workflow::transform::*` imports)
-#[doc(hidden)]
-pub mod transform {
-    pub use crate::transforms::*;
-}
-#[doc(hidden)]
-pub mod vars {
-    pub use crate::transforms::variable_expansion::*;
-}
-#[doc(hidden)]
-pub use transforms::stylesheet;

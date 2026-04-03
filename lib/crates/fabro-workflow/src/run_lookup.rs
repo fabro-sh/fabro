@@ -370,7 +370,7 @@ mod tests {
             .await
             .unwrap();
         append_workflow_event(
-            run_store.as_ref(),
+            &run_store,
             &fixtures::RUN_1,
             &WorkflowRunEvent::RunCreated {
                 run_id: fixtures::RUN_1,
@@ -390,7 +390,7 @@ mod tests {
         .await
         .unwrap();
         append_workflow_event(
-            run_store.as_ref(),
+            &run_store,
             &fixtures::RUN_1,
             &WorkflowRunEvent::RunSubmitted { reason: None },
         )

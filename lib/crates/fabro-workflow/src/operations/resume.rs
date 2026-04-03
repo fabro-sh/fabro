@@ -41,7 +41,7 @@ pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, 
 
     cleanup_resume_artifacts(run_dir);
     append_workflow_event(
-        services.run_store.as_ref(),
+        &services.run_store,
         &services.run_id,
         &WorkflowRunEvent::RunSubmitted { reason: None },
     )

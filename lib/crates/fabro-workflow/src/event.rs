@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use anyhow::{Context, Result};
 use chrono::{SecondsFormat, Utc};
-use fabro_store::{EventPayload, RunStoreHandle, SlateRunStore};
+use fabro_store::{EventPayload, SlateRunStore};
 use fabro_types::RunId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -1510,7 +1510,7 @@ pub struct StoreProgressLogger {
 
 impl StoreProgressLogger {
     #[must_use]
-    pub fn new(run_store: RunStoreHandle) -> Self {
+    pub fn new(run_store: SlateRunStore) -> Self {
         let (tx, mut rx) = mpsc::unbounded_channel();
 
         tokio::spawn(async move {

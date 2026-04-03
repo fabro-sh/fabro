@@ -43,9 +43,9 @@ use fabro_workflow::handler::{Handler, HandlerRegistry};
 use fabro_workflow::outcome::{Outcome, OutcomeExt, StageStatus};
 use fabro_workflow::records::{Checkpoint, CheckpointExt};
 use fabro_workflow::run_options::{GitCheckpointOptions, RunOptions};
-use fabro_workflow::stylesheet::{apply_stylesheet, parse_stylesheet};
 use fabro_workflow::test_support::{WorkflowRunner, run_graph_with_hooks};
-use fabro_workflow::transform::{
+use fabro_workflow::transforms::stylesheet::{apply_stylesheet, parse_stylesheet};
+use fabro_workflow::transforms::{
     StylesheetApplicationTransform, Transform, VariableExpansionTransform,
 };
 use ulid::Ulid;

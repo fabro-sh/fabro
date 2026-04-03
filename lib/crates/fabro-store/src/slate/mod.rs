@@ -14,7 +14,7 @@ use slatedb::config::{DbReaderOptions, Settings};
 use tokio::sync::Mutex;
 
 use crate::keys;
-use crate::{CatalogRecord, ListRunsQuery, Result, RunStoreHandle, RunSummary, StoreError};
+use crate::{CatalogRecord, ListRunsQuery, Result, RunSummary, StoreError};
 use fabro_types::RunId;
 pub use run_store::SlateRunStore;
 use run_store::SlateRunStoreInner;
@@ -175,7 +175,7 @@ impl SlateStore {
         run_id: &RunId,
         created_at: DateTime<Utc>,
         run_dir: Option<&str>,
-    ) -> Result<RunStoreHandle> {
+    ) -> Result<SlateRunStore> {
         let locator =
             catalog::read_locator(self.object_store.clone(), &self.base_prefix, run_id).await?;
         if let Some(active) = self.get_active_run(run_id).await {
@@ -196,7 +196,7 @@ impl SlateStore {
                 run_dir,
             )
             .await?;
-            return Ok(Arc::new(active));
+            return Ok(active);
         }
 
         let db_prefix = match locator {
@@ -228,10 +228,10 @@ impl SlateStore {
             run_dir,
         )
         .await?;
-        Ok(Arc::new(run_store))
+        Ok(run_store)
     }
 
-    pub async fn open_run(&self, run_id: &RunId) -> Result<RunStoreHandle> {
+    pub async fn open_run(&self, run_id: &RunId) -> Result<SlateRunStore> {
         let locator = catalog::read_locator(self.object_store.clone(), &self.base_prefix, run_id)
             .await?
             .ok_or_else(|| StoreError::RunNotFound(run_id.to_string()))?;
@@ -240,10 +240,10 @@ impl SlateStore {
             .open_run_store(&locator)
             .await?
             .ok_or_else(|| StoreError::RunNotFound(run_id.to_string()))?;
-        Ok(Arc::new(run_store))
+        Ok(run_store)
     }
 
-    pub async fn open_run_reader(&self, run_id: &RunId) -> Result<RunStoreHandle> {
+    pub async fn open_run_reader(&self, run_id: &RunId) -> Result<SlateRunStore> {
         let locator = catalog::read_locator(self.object_store.clone(), &self.base_prefix, run_id)
             .await?
             .ok_or_else(|| StoreError::RunNotFound(run_id.to_string()))?;
@@ -252,7 +252,7 @@ impl SlateStore {
             .open_run_reader_store(&locator)
             .await?
             .ok_or_else(|| StoreError::RunNotFound(run_id.to_string()))?;
-        Ok(Arc::new(run_store))
+        Ok(run_store)
     }
 
     pub async fn list_runs(&self, query: &ListRunsQuery) -> Result<Vec<RunSummary>> {
@@ -1146,10 +1146,6 @@ mod tests {
             run.get_asset(&node, "src/lib.rs").await.unwrap(),
             Some(Bytes::from_static(b"fn main() {}"))
         );
-        assert_eq!(
-            run.list_assets(&node).await.unwrap(),
-            vec!["src/lib.rs".to_string()]
-        );
     }
 
     #[tokio::test]
@@ -1497,7 +1493,7 @@ mod tests {
             Some("diff --git a/src/lib.rs b/src/lib.rs\n")
         );
         assert_eq!(state.pull_request, Some(pull_request.clone()));
-        assert_eq!(state.list_node_ids(), vec!["code".to_string()]);
+        assert!(state.nodes.keys().any(|(id, _)| id == "code"));
         let node_state = state
             .node(&node)
             .expect("node state should exist for code:2");
@@ -1516,10 +1512,6 @@ mod tests {
                 .and_then(|v| v.get("provider"))
                 .and_then(|v| v.as_str()),
             Some("openai")
-        );
-        assert_eq!(
-            run.list_assets(&node).await.unwrap(),
-            vec!["src/lib.rs".to_string()]
         );
     }
 
@@ -1873,7 +1865,7 @@ mod tests {
                 .map(|checkpoint| checkpoint.current_node.as_str()),
             Some("plan")
         );
-        assert!(state.list_node_ids().is_empty());
+        assert!(state.nodes.is_empty());
     }
 
     #[tokio::test]

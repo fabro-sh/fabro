@@ -82,7 +82,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
             });
         run_retro_agent(
             &options.sandbox,
-            options.run_store.as_ref(),
+            &options.run_store,
             &options.run_dir,
             client,
             options.provider,
@@ -215,7 +215,7 @@ mod tests {
     async fn test_run_store(
         run_dir: &std::path::Path,
         checkpoint: &Checkpoint,
-    ) -> fabro_store::RunStoreHandle {
+    ) -> fabro_store::SlateRunStore {
         let created_at = Utc::now();
         let inner = test_store()
             .create_run(
@@ -238,7 +238,7 @@ mod tests {
             labels: std::collections::HashMap::new(),
         };
         append_workflow_event(
-            run_store.as_ref(),
+            &run_store,
             &test_run_id(),
             &WorkflowRunEvent::RunCreated {
                 run_id: test_run_id(),
@@ -258,7 +258,7 @@ mod tests {
         .await
         .unwrap();
         append_workflow_event(
-            run_store.as_ref(),
+            &run_store,
             &test_run_id(),
             &WorkflowRunEvent::CheckpointCompleted {
                 node_id: checkpoint.current_node.clone(),
