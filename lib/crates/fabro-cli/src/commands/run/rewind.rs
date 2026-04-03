@@ -10,7 +10,6 @@ use fabro_workflow::operations::{
     RewindInput, RewindTarget, RunTimeline, TimelineEntry, build_timeline_or_rebuild,
     find_run_id_by_prefix_or_store, rewind,
 };
-use fabro_workflow::records::{RunRecord, RunRecordExt};
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use git2::Repository;
 use serde::Serialize;
@@ -124,7 +123,6 @@ async fn reset_rewound_run_state(
 
     let _run_record = state
         .run
-        .or_else(|| RunRecord::load(run_dir).ok())
         .context("failed to restore run record after rewind: missing run metadata")?;
     let checkpoint = MetadataStore::read_checkpoint(git_store.repo_dir(), &run_id.to_string())?
         .context("rewound metadata branch is missing checkpoint.json")?;

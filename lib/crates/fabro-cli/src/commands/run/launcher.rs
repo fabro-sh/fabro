@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use fabro_types::RunId;
-use fabro_workflow::records::{RunRecord, RunRecordExt};
 use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
@@ -61,13 +60,6 @@ pub(crate) fn active_launcher_record_for_run(run_dir: &Path) -> Option<LauncherR
 }
 
 pub(crate) fn launcher_record_for_run(run_dir: &Path) -> Option<LauncherRecord> {
-    if let Ok(run_record) = RunRecord::load(run_dir) {
-        return read_launcher_record(&launcher_record_path(
-            &run_record.settings.storage_dir(),
-            &run_record.run_id,
-        ));
-    }
-
     let storage_dir = run_dir.parent()?.parent()?;
     let launchers_dir = launcher_dir(storage_dir);
     let entries = std::fs::read_dir(&launchers_dir).ok()?;
@@ -131,33 +123,14 @@ fn launcher_process_matches(_record: &LauncherRecord) -> bool {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use fabro_graphviz::graph::Graph;
-    use fabro_types::{Settings, fixtures};
-    use fabro_workflow::records::RunRecord;
+    use fabro_types::fixtures;
 
     #[test]
     fn active_launcher_record_for_run_removes_stale_record() {
         let dir = tempfile::tempdir().unwrap();
         let storage_dir = dir.path().join("storage");
-        let run_dir = dir.path().join("run");
+        let run_dir = storage_dir.join("runs").join("run");
         std::fs::create_dir_all(&run_dir).unwrap();
-
-        RunRecord {
-            run_id: fixtures::RUN_1,
-            created_at: Utc::now(),
-            settings: Settings {
-                storage_dir: Some(storage_dir.clone()),
-                ..Default::default()
-            },
-            graph: Graph::default(),
-            workflow_slug: None,
-            working_directory: dir.path().to_path_buf(),
-            host_repo_path: None,
-            base_branch: None,
-            labels: std::collections::HashMap::new(),
-        }
-        .save(&run_dir)
-        .unwrap();
 
         let launcher_path = launcher_record_path(&storage_dir, &fixtures::RUN_1);
         write_launcher_record(

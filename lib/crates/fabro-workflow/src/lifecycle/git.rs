@@ -14,10 +14,10 @@ use fabro_core::state::RunState;
 use crate::artifact::ArtifactStore;
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::git::MetadataStore;
-use crate::git::scan_node_files_from_state;
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::{Outcome, StageStatus, StageUsage};
+use crate::run_dump::RunDump;
 use crate::run_options::RunOptions;
 use crate::sandbox_git::{git_checkpoint, git_diff, git_push_host};
 
@@ -67,29 +67,16 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
             let git_author = self.run_options.git_author();
             let store = MetadataStore::new(repo_path, &git_author);
             let state = self.run_store.state().await.ok();
-            let run_json = state
+            let init_dump = state.as_ref().map(RunDump::metadata_init);
+            let init_entries = init_dump
                 .as_ref()
-                .and_then(|state| state.run.as_ref())
-                .and_then(|record| serde_json::to_vec_pretty(record).ok());
-            let start_json = state
-                .as_ref()
-                .and_then(|state| state.start.as_ref())
-                .and_then(|record| serde_json::to_vec_pretty(record).ok());
-            let sandbox_json = state
-                .as_ref()
-                .and_then(|state| state.sandbox.as_ref())
-                .and_then(|record| serde_json::to_vec_pretty(record).ok());
-            let mut files: Vec<(&str, &[u8])> = Vec::new();
-            if let Some(ref data) = run_json {
-                files.push(("run.json", data));
-            }
-            if let Some(ref data) = start_json {
-                files.push(("start.json", data));
-            }
-            if let Some(ref data) = sandbox_json {
-                files.push(("sandbox.json", data));
-            }
-            if let Err(e) = store.init_run(&self.run_id.to_string(), &files) {
+                .and_then(|dump| dump.git_entries().ok())
+                .unwrap_or_default();
+            let refs: Vec<(&str, &[u8])> = init_entries
+                .iter()
+                .map(|(path, bytes)| (path.as_str(), bytes.as_slice()))
+                .collect();
+            if let Err(e) = store.init_run(&self.run_id.to_string(), &refs) {
                 tracing::warn!(
                     run_id = %self.run_id,
                     error = %e,
@@ -150,7 +137,11 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                         .collect()
                 };
                 if let Ok(store_state) = self.run_store.state().await {
-                    extra_entries.extend(scan_node_files_from_state(&store_state));
+                    if let Ok(mut dump_entries) =
+                        RunDump::metadata_checkpoint(&store_state).git_entries()
+                    {
+                        extra_entries.append(&mut dump_entries);
+                    }
                 }
                 let extra_refs: Vec<(&str, &[u8])> = extra_entries
                     .iter()

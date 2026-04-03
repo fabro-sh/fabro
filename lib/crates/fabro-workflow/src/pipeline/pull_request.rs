@@ -13,7 +13,7 @@ use fabro_util::text::strip_goal_decoration;
 use super::types::{Concluded, Finalized, PullRequestOptions};
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::outcome::{StageStatus, format_cost as outcome_format_cost};
-use crate::records::{Conclusion, RunRecord, RunRecordExt};
+use crate::records::{Conclusion, RunRecord};
 use fabro_retro::retro::Retro;
 
 /// Derive a PR title from the workflow goal.
@@ -144,9 +144,14 @@ fn format_arc_details_section(
 
     // Workflow graph summary — prefer RunRecord's graph, fall back to DOT parsing
     if let Some(record) = run_record {
-        let graph_name = format!("{}.fabro", record.workflow_name());
-        let node_count = record.node_count();
-        let edge_count = record.edge_count();
+        let workflow_name = if record.graph.name.is_empty() {
+            "unnamed"
+        } else {
+            &record.graph.name
+        };
+        let graph_name = format!("{workflow_name}.fabro");
+        let node_count = record.graph.nodes.len();
+        let edge_count = record.graph.edges.len();
 
         parts.push(String::new());
         parts.push(format!(

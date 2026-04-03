@@ -1,17 +1,16 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-pub use fabro_types::checkpoint::Checkpoint;
-
 use crate::context::Context;
-use crate::error::{FabroError, FailureSignature, Result as CrateResult};
+use crate::error::{FabroError, Result as CrateResult};
 use crate::outcome::Outcome;
+pub use fabro_types::checkpoint::Checkpoint;
+use fabro_types::failure_signature::FailureSignature;
 
 pub trait CheckpointExt {
-    #[allow(clippy::too_many_arguments)]
     fn from_context(
         context: &Context,
-        current_node: impl Into<String>,
+        current_node: &str,
         completed_nodes: Vec<String>,
         node_retries: HashMap<String, u32>,
         node_outcomes: HashMap<String, Outcome>,
@@ -19,9 +18,8 @@ pub trait CheckpointExt {
         loop_failure_signatures: HashMap<FailureSignature, usize>,
         restart_failure_signatures: HashMap<FailureSignature, usize>,
         node_visits: HashMap<String, usize>,
-    ) -> Self
-    where
-        Self: Sized;
+    ) -> Self;
+
     fn save(&self, path: &Path) -> CrateResult<()>;
     fn load(path: &Path) -> CrateResult<Self>
     where
@@ -31,7 +29,7 @@ pub trait CheckpointExt {
 impl CheckpointExt for Checkpoint {
     fn from_context(
         context: &Context,
-        current_node: impl Into<String>,
+        current_node: &str,
         completed_nodes: Vec<String>,
         node_retries: HashMap<String, u32>,
         node_outcomes: HashMap<String, Outcome>,
@@ -42,7 +40,7 @@ impl CheckpointExt for Checkpoint {
     ) -> Self {
         Self {
             timestamp: chrono::Utc::now(),
-            current_node: current_node.into(),
+            current_node: current_node.to_string(),
             completed_nodes,
             node_retries,
             context_values: context.snapshot(),

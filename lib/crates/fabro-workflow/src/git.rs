@@ -2,7 +2,6 @@ use std::path::Path;
 use std::process::Command;
 
 use fabro_checkpoint::git::Store;
-use fabro_store::RunState;
 use fabro_types::Settings;
 
 use crate::error::{FabroError, Result};
@@ -353,81 +352,10 @@ pub fn scan_node_files(run_dir: &Path) -> Vec<(String, Vec<u8>)> {
     result
 }
 
-pub fn scan_node_files_from_state(state: &RunState) -> Vec<(String, Vec<u8>)> {
-    let mut result = Vec::new();
-    let mut keys: Vec<_> = state.nodes.keys().collect();
-    keys.sort();
-
-    for (node_id, visit) in keys {
-        let Some(node) = state.nodes.get(&(node_id.clone(), *visit)) else {
-            continue;
-        };
-
-        if let Some(ref prompt) = node.prompt {
-            result.push((
-                node_file_path(node_id, *visit, "prompt.md"),
-                prompt.as_bytes().to_vec(),
-            ));
-        }
-        if let Some(ref response) = node.response {
-            result.push((
-                node_file_path(node_id, *visit, "response.md"),
-                response.as_bytes().to_vec(),
-            ));
-        }
-        if let Some(ref status) = node.status {
-            if let Ok(bytes) = serde_json::to_vec_pretty(status) {
-                result.push((node_file_path(node_id, *visit, "status.json"), bytes));
-            }
-        }
-        if let Some(ref provider_used) = node.provider_used {
-            if let Ok(bytes) = serde_json::to_vec_pretty(provider_used) {
-                result.push((node_file_path(node_id, *visit, "provider_used.json"), bytes));
-            }
-        }
-        if let Some(ref diff) = node.diff {
-            result.push((
-                node_file_path(node_id, *visit, "diff.patch"),
-                diff.as_bytes().to_vec(),
-            ));
-        }
-        if let Some(ref script_invocation) = node.script_invocation {
-            if let Ok(bytes) = serde_json::to_vec_pretty(script_invocation) {
-                result.push((
-                    node_file_path(node_id, *visit, "script_invocation.json"),
-                    bytes,
-                ));
-            }
-        }
-        if let Some(ref script_timing) = node.script_timing {
-            if let Ok(bytes) = serde_json::to_vec_pretty(script_timing) {
-                result.push((node_file_path(node_id, *visit, "script_timing.json"), bytes));
-            }
-        }
-        if let Some(ref parallel_results) = node.parallel_results {
-            if let Ok(bytes) = serde_json::to_vec_pretty(parallel_results) {
-                result.push((
-                    node_file_path(node_id, *visit, "parallel_results.json"),
-                    bytes,
-                ));
-            }
-        }
-    }
-
-    result
-}
-
-fn node_file_path(node_id: &str, visit: u32, filename: &str) -> String {
-    if visit <= 1 {
-        format!("nodes/{node_id}/{filename}")
-    } else {
-        format!("nodes/{node_id}-visit_{visit}/{filename}")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::run_dump::RunDump;
     use fabro_store::SlateStore;
     use fabro_types::fixtures;
     use object_store::memory::InMemory;
@@ -645,7 +573,7 @@ mod tests {
         .unwrap();
 
         let state = run.state().await.unwrap();
-        let files = scan_node_files_from_state(&state);
+        let files = RunDump::metadata_checkpoint(&state).git_entries().unwrap();
         let paths: Vec<&str> = files.iter().map(|(path, _)| path.as_str()).collect();
         assert!(paths.contains(&"nodes/work-visit_2/prompt.md"));
         assert!(paths.contains(&"nodes/work-visit_2/response.md"));

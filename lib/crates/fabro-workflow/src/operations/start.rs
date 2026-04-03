@@ -835,7 +835,7 @@ mod tests {
     use crate::handler::exit::ExitHandler;
     use crate::handler::start::StartHandler;
     use crate::operations::resume;
-    use crate::records::{CheckpointExt, ConclusionExt};
+    use crate::records::CheckpointExt;
 
     const MINIMAL_DOT: &str = r#"digraph Test {
         graph [goal="Build feature"]
@@ -1019,17 +1019,19 @@ mod tests {
         let services = test_start_services(&store, &run_dir, emitter, registry).await;
 
         // Seed an authoritative checkpoint event so start() sees it
-        let checkpoint = Checkpoint::from_context(
-            &Context::new(),
-            "start",
-            vec!["start".to_string()],
-            HashMap::new(),
-            HashMap::new(),
-            Some("exit".to_string()),
-            HashMap::new(),
-            HashMap::new(),
-            HashMap::new(),
-        );
+        let checkpoint = Checkpoint {
+            timestamp: chrono::Utc::now(),
+            current_node: "start".into(),
+            completed_nodes: vec!["start".to_string()],
+            node_retries: HashMap::new(),
+            context_values: Context::new().snapshot(),
+            node_outcomes: HashMap::new(),
+            next_node_id: Some("exit".to_string()),
+            git_commit_sha: None,
+            loop_failure_signatures: HashMap::new(),
+            restart_failure_signatures: HashMap::new(),
+            node_visits: HashMap::new(),
+        };
         append_workflow_event(
             services.run_store.as_ref(),
             &services.run_id,
@@ -1119,7 +1121,7 @@ mod tests {
         );
         checkpoint.save(&run_dir.join("checkpoint.json")).unwrap();
 
-        crate::records::Conclusion {
+        let conclusion = crate::records::Conclusion {
             timestamp: Utc::now(),
             status: StageStatus::Success,
             duration_ms: 1,
@@ -1134,8 +1136,11 @@ mod tests {
             total_cache_write_tokens: 0,
             total_reasoning_tokens: 0,
             has_pricing: false,
-        }
-        .save(&run_dir.join("conclusion.json"))
+        };
+        std::fs::write(
+            run_dir.join("conclusion.json"),
+            serde_json::to_string_pretty(&conclusion).unwrap(),
+        )
         .unwrap();
 
         let result = resume(

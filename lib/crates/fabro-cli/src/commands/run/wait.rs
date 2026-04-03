@@ -140,7 +140,7 @@ mod tests {
     use fabro_types::fixtures;
     use fabro_workflow::outcome::StageStatus;
     use fabro_workflow::records::Conclusion;
-    use fabro_workflow::run_status::{RunStatusRecord, RunStatusRecordExt};
+    use fabro_workflow::run_status::RunStatusRecord;
 
     fn no_color_styles() -> Styles {
         Styles::new(false)
@@ -247,18 +247,25 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let status_path = dir.path().join("status.json");
         let record = RunStatusRecord::new(RunStatus::Succeeded, None);
-        record.save(&status_path).unwrap();
+        std::fs::write(&status_path, serde_json::to_string_pretty(&record).unwrap()).unwrap();
 
         // Simulate what the poll loop does
-        let status = RunStatusRecord::load(&status_path).unwrap().status;
+        let status = serde_json::from_str::<RunStatusRecord>(
+            &std::fs::read_to_string(&status_path).unwrap(),
+        )
+        .unwrap()
+        .status;
         assert!(status.is_terminal());
         assert_eq!(status, RunStatus::Succeeded);
     }
 
     #[test]
     fn missing_status_treated_as_dead() {
-        let status = match RunStatusRecord::load(std::path::Path::new("/nonexistent/status.json")) {
-            Ok(record) => record.status,
+        let status = match std::fs::read_to_string(std::path::Path::new("/nonexistent/status.json"))
+        {
+            Ok(data) => serde_json::from_str::<RunStatusRecord>(&data)
+                .map(|record| record.status)
+                .unwrap_or(RunStatus::Dead),
             Err(_) => RunStatus::Dead,
         };
         assert_eq!(status, RunStatus::Dead);

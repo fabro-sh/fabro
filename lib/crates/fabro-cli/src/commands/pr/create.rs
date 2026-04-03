@@ -5,7 +5,6 @@ use fabro_model::Catalog;
 use fabro_sandbox::daytona::detect_repo_info;
 use fabro_workflow::outcome::StageStatus;
 use fabro_workflow::pull_request::maybe_open_pull_request;
-use fabro_workflow::records::RunRecordExt;
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 use tracing::info;
 
@@ -108,7 +107,7 @@ async fn create_from(
         &origin_url,
         base_branch,
         run_branch,
-        record.goal(),
+        record.graph.goal(),
         &diff,
         &model,
         true,

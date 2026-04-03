@@ -7,7 +7,6 @@ use fabro_store::{ListRunsQuery, SlateStore};
 use fabro_types::RunId;
 use serde::Serialize;
 
-use crate::records::{RunRecord, RunRecordExt, StartRecord, StartRecordExt};
 use crate::run_status::{RunStatus, StatusReason};
 
 #[derive(Debug, Clone, Serialize)]
@@ -61,15 +60,7 @@ pub fn default_runs_base() -> PathBuf {
     runs_base(&default_storage_dir())
 }
 
-pub fn scan_runs(base: &Path) -> Result<Vec<RunInfo>> {
-    scan_runs_inner(base, true)
-}
-
-fn scan_runs_without_status(base: &Path) -> Result<Vec<RunInfo>> {
-    scan_runs_inner(base, false)
-}
-
-fn scan_runs_inner(base: &Path, include_status: bool) -> Result<Vec<RunInfo>> {
+fn scan_orphan_runs(base: &Path) -> Result<Vec<RunInfo>> {
     let entries = match std::fs::read_dir(base) {
         Ok(entries) => entries,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -85,85 +76,40 @@ fn scan_runs_inner(base: &Path, include_status: bool) -> Result<Vec<RunInfo>> {
         }
 
         let dir_name = entry.file_name().to_string_lossy().to_string();
+        let mtime_dt = entry
+            .metadata()
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .map(|time| -> DateTime<Utc> { time.into() });
+        let mtime = mtime_dt.map(|dt| dt.to_rfc3339()).unwrap_or_default();
 
-        if let Ok(record) = RunRecord::load(&path) {
-            let created_at = record.created_at;
-            let start_time_dt = StartRecord::load(&path)
-                .map(|s| s.start_time)
-                .unwrap_or(created_at);
-            let start_time = start_time_dt.to_rfc3339();
-            let workflow_name = record.workflow_name().to_string();
-            let goal = record.goal().to_string();
-            let status_info = if include_status {
-                read_status(&path)
-            } else {
-                StatusInfo::simple(RunStatus::Dead)
-            };
+        let run_id = std::fs::read_to_string(path.join("id.txt"))
+            .ok()
+            .and_then(|s| parse_run_id(&s))
+            .or_else(|| parse_run_id(&dir_name));
+        let Some(run_id) = run_id else {
+            continue;
+        };
 
-            runs.push(RunInfo {
-                run_id: record.run_id,
-                dir_name,
-                workflow_name,
-                workflow_slug: record.workflow_slug,
-                status: status_info.status,
-                status_reason: status_info.reason,
-                start_time,
-                labels: record.labels,
-                duration_ms: status_info.duration_ms,
-                total_cost: status_info.total_cost,
-                host_repo_path: record.host_repo_path,
-                start_time_dt: Some(created_at),
-                end_time: status_info.end_time,
-                path,
-                goal,
-                is_orphan: false,
-            });
-        } else {
-            let mtime_dt = entry
-                .metadata()
-                .ok()
-                .and_then(|m| m.modified().ok())
-                .map(|time| -> DateTime<Utc> { time.into() });
-            let mtime = mtime_dt.map(|dt| dt.to_rfc3339()).unwrap_or_default();
-
-            let run_id = std::fs::read_to_string(path.join("id.txt"))
-                .ok()
-                .and_then(|s| parse_run_id(&s))
-                .or_else(|| parse_run_id(&dir_name));
-            let Some(run_id) = run_id else {
-                continue;
-            };
-
-            let status_info = if include_status {
-                read_status(&path)
-            } else {
-                StatusInfo::simple(RunStatus::Dead)
-            };
-            let is_orphan = !include_status || matches!(status_info.status, RunStatus::Dead);
-            runs.push(RunInfo {
-                run_id,
-                dir_name,
-                workflow_name: if is_orphan {
-                    "[no run record]"
-                } else {
-                    "[starting]"
-                }
-                .to_string(),
-                workflow_slug: None,
-                status: status_info.status,
-                status_reason: status_info.reason,
-                start_time: mtime,
-                labels: HashMap::new(),
-                duration_ms: status_info.duration_ms,
-                total_cost: status_info.total_cost,
-                host_repo_path: None,
-                start_time_dt: mtime_dt,
-                end_time: status_info.end_time,
-                path,
-                goal: String::new(),
-                is_orphan,
-            });
-        }
+        let status_info = StatusInfo::simple(RunStatus::Dead);
+        runs.push(RunInfo {
+            run_id,
+            dir_name,
+            workflow_name: "[no run record]".to_string(),
+            workflow_slug: None,
+            status: status_info.status,
+            status_reason: status_info.reason,
+            start_time: mtime,
+            labels: HashMap::new(),
+            duration_ms: status_info.duration_ms,
+            total_cost: status_info.total_cost,
+            host_repo_path: None,
+            start_time_dt: mtime_dt,
+            end_time: status_info.end_time,
+            path,
+            goal: String::new(),
+            is_orphan: true,
+        });
     }
 
     runs.sort_by(|a, b| b.start_time_dt.cmp(&a.start_time_dt));
@@ -186,7 +132,7 @@ pub async fn scan_runs_combined(store: &SlateStore, base: &Path) -> Result<Vec<R
         .keys()
         .copied()
         .collect::<std::collections::HashSet<_>>();
-    for run in scan_runs_without_status(base)?
+    for run in scan_orphan_runs(base)?
         .into_iter()
         .filter(|run| run.is_orphan && !store_run_ids.contains(&run.run_id))
     {
@@ -260,11 +206,6 @@ impl StatusInfo {
     }
 }
 
-fn read_status(run_dir: &Path) -> StatusInfo {
-    let _ = run_dir;
-    StatusInfo::simple(RunStatus::Dead)
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatusFilter {
     RunningOnly,
@@ -307,69 +248,6 @@ pub fn filter_runs(
         })
         .cloned()
         .collect()
-}
-
-pub fn find_run_by_prefix(base: &Path, prefix: &str) -> Result<PathBuf> {
-    let runs = scan_runs(base).context("Failed to scan runs")?;
-    let matches: Vec<_> = runs
-        .iter()
-        .filter(|run| run_id_matches(run.run_id, prefix))
-        .collect();
-
-    match matches.len() {
-        0 => bail!("No run found matching prefix '{prefix}'"),
-        1 => Ok(matches[0].path.clone()),
-        count => {
-            let ids: Vec<String> = matches.iter().map(|run| run.run_id.to_string()).collect();
-            bail!(
-                "Ambiguous prefix '{prefix}': {count} runs match: {}",
-                ids.join(", ")
-            )
-        }
-    }
-}
-
-pub fn resolve_run(base: &Path, identifier: &str) -> Result<RunInfo> {
-    let runs = scan_runs(base).context("Failed to scan runs")?;
-
-    let id_matches: Vec<_> = runs
-        .iter()
-        .filter(|run| run_id_matches(run.run_id, identifier))
-        .collect();
-
-    match id_matches.len() {
-        1 => return Ok(id_matches[0].clone()),
-        count if count > 1 => {
-            let ids: Vec<String> = id_matches
-                .iter()
-                .map(|run| run.run_id.to_string())
-                .collect();
-            bail!(
-                "Ambiguous prefix '{identifier}': {count} runs match: {}",
-                ids.join(", ")
-            )
-        }
-        _ => {}
-    }
-
-    let id_lower = identifier.to_lowercase();
-    let id_collapsed = collapse_separators(&id_lower);
-    let workflow_match = runs.iter().filter(|run| !run.is_orphan).find(|run| {
-        if let Some(slug) = &run.workflow_slug {
-            if slug.to_lowercase() == id_lower {
-                return true;
-            }
-        }
-        let name_lower = run.workflow_name.to_lowercase();
-        name_lower.contains(&id_lower) || collapse_separators(&name_lower).contains(&id_collapsed)
-    });
-
-    match workflow_match {
-        Some(run) => Ok(run.clone()),
-        None => {
-            bail!("No run found matching '{identifier}' (tried run ID prefix and workflow name)")
-        }
-    }
 }
 
 pub async fn resolve_run_combined(
@@ -449,7 +327,7 @@ mod tests {
 
     use super::scan_runs_combined;
     use crate::event::{WorkflowRunEvent, append_workflow_event};
-    use crate::records::{RunRecord, RunRecordExt};
+    use crate::records::RunRecord;
 
     fn memory_store() -> StoreHandle {
         Arc::new(SlateStore::new(
@@ -478,13 +356,11 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join(fixtures::RUN_1.to_string());
         std::fs::create_dir_all(&run_dir).unwrap();
-
-        let run_record = sample_run_record();
-        run_record.save(&run_dir).unwrap();
         std::fs::write(run_dir.join("id.txt"), format!("{}\n", fixtures::RUN_1)).unwrap();
 
         let store = memory_store();
         let run_dir_string = run_dir.to_string_lossy().to_string();
+        let run_record = sample_run_record();
         let run_store = store
             .create_run(
                 &fixtures::RUN_1,

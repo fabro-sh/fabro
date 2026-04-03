@@ -3,9 +3,10 @@ use std::sync::Arc;
 
 use crate::error::FabroError;
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
-use crate::git::{MetadataStore, scan_node_files_from_state};
+use crate::git::MetadataStore;
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::records::{Checkpoint, Conclusion, StageSummary};
+use crate::run_dump::RunDump;
 use crate::run_options::RunOptions;
 use crate::run_status::{RunStatus, StatusReason};
 use crate::sandbox_git::git_push_host;
@@ -198,19 +199,10 @@ pub async fn write_finalize_commit(
     let Ok(store_state) = run_store.state().await else {
         return;
     };
-    let mut entries = scan_node_files_from_state(&store_state);
-    let retro_bytes = store_state
-        .retro
-        .as_ref()
-        .and_then(|retro| serde_json::to_vec_pretty(retro).ok());
-    if let Some(bytes) = retro_bytes {
-        entries.push(("retro.json".to_string(), bytes));
-    }
-    let refs: Vec<(&str, &[u8])> = entries
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.as_slice()))
-        .collect();
-    if let Err(e) = store.write_files(&run_options.run_id.to_string(), &refs, "finalize run") {
+    let dump = RunDump::metadata_finalize(&store_state);
+    if let Err(e) =
+        dump.write_to_metadata_store(&store, &run_options.run_id.to_string(), "finalize run")
+    {
         tracing::warn!(error = %e, "Failed to write finalize commit to metadata branch");
         return;
     }

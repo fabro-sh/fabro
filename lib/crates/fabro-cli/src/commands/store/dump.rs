@@ -1,10 +1,12 @@
-use std::io::{ErrorKind, Write};
-use std::path::{Component, Path, PathBuf};
+use std::io::ErrorKind;
+use std::path::Path;
 
-use anyhow::{Context, Result, bail};
-use fabro_store::{NodeVisitRef, RunSnapshot, RunState, SlateRunStore};
+use anyhow::{Context, Result};
+#[cfg(test)]
+use fabro_store::NodeVisitRef;
+use fabro_store::{RunState, SlateRunStore};
+use fabro_workflow::run_dump::RunDump;
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
-use serde::Serialize;
 #[cfg(test)]
 use serde::de::DeserializeOwned;
 
@@ -39,9 +41,7 @@ pub(crate) async fn dump_command(args: &StoreDumpArgs, globals: &GlobalArgs) -> 
 
 pub(crate) async fn export_run(run_store: &SlateRunStore, output_dir: &Path) -> Result<usize> {
     let state = run_store.state().await?;
-    let snapshot = state
-        .to_snapshot()
-        .context("run has no data in the store")?;
+    anyhow::ensure!(state.run.is_some(), "run has no data in the store");
 
     let output_state = inspect_output_dir(output_dir)?;
     let staging_parent = output_parent_dir(output_dir);
@@ -59,7 +59,7 @@ pub(crate) async fn export_run(run_store: &SlateRunStore, output_dir: &Path) -> 
         })?;
     let staging_path = staging_dir.path().to_path_buf();
 
-    let file_count = export_run_to_dir(run_store, &state, &snapshot, &staging_path).await?;
+    let file_count = export_run_to_dir(run_store, &state, &staging_path).await?;
 
     if matches!(output_state, OutputDirState::ExistingEmpty) {
         std::fs::remove_dir(output_dir)
@@ -80,139 +80,10 @@ pub(crate) async fn export_run(run_store: &SlateRunStore, output_dir: &Path) -> 
 async fn export_run_to_dir(
     run_store: &SlateRunStore,
     state: &RunState,
-    snapshot: &RunSnapshot,
     output_dir: &Path,
 ) -> Result<usize> {
-    let mut file_count = 0;
-
-    write_json_file(&output_dir.join("run.json"), &snapshot.run)?;
-    file_count += 1;
-    file_count += usize::from(write_optional_json_file(
-        &output_dir.join("start.json"),
-        snapshot.start.as_ref(),
-    )?);
-    file_count += usize::from(write_optional_json_file(
-        &output_dir.join("status.json"),
-        snapshot.status.as_ref(),
-    )?);
-    file_count += usize::from(write_optional_json_file(
-        &output_dir.join("checkpoint.json"),
-        snapshot.checkpoint.as_ref(),
-    )?);
-    file_count += usize::from(write_optional_json_file(
-        &output_dir.join("conclusion.json"),
-        snapshot.conclusion.as_ref(),
-    )?);
-    file_count += usize::from(write_optional_json_file(
-        &output_dir.join("retro.json"),
-        snapshot.retro.as_ref(),
-    )?);
-    file_count += usize::from(write_optional_text_file(
-        &output_dir.join("graph.fabro"),
-        snapshot.graph.as_deref(),
-    )?);
-    file_count += usize::from(write_optional_json_file(
-        &output_dir.join("sandbox.json"),
-        snapshot.sandbox.as_ref(),
-    )?);
-
-    for node in &snapshot.nodes {
-        let node_id = validate_single_path_segment("node id", &node.node_id)?;
-        let base = output_dir
-            .join("nodes")
-            .join(node_id)
-            .join(format!("visit-{}", node.visit));
-        file_count += usize::from(write_optional_text_file(
-            &base.join("prompt.md"),
-            node.prompt.as_deref(),
-        )?);
-        file_count += usize::from(write_optional_text_file(
-            &base.join("response.md"),
-            node.response.as_deref(),
-        )?);
-        file_count += usize::from(write_optional_json_file(
-            &base.join("status.json"),
-            node.status.as_ref(),
-        )?);
-        file_count += usize::from(write_optional_text_file(
-            &base.join("stdout.log"),
-            node.stdout.as_deref(),
-        )?);
-        file_count += usize::from(write_optional_text_file(
-            &base.join("stderr.log"),
-            node.stderr.as_deref(),
-        )?);
-    }
-
-    file_count += usize::from(write_optional_text_file(
-        &output_dir.join("retro").join("prompt.md"),
-        state.retro_prompt.as_deref(),
-    )?);
-    file_count += usize::from(write_optional_text_file(
-        &output_dir.join("retro").join("response.md"),
-        state.retro_response.as_deref(),
-    )?);
-
-    write_events_jsonl(
-        &output_dir.join("events.jsonl"),
-        &run_store.list_events().await?,
-    )?;
-    file_count += 1;
-
-    for (seq, checkpoint) in &state.checkpoints {
-        write_json_file(
-            &output_dir
-                .join("checkpoints")
-                .join(format!("{seq:04}.json")),
-            checkpoint,
-        )?;
-        file_count += 1;
-    }
-
-    for artifact_id in run_store.list_artifact_values().await? {
-        let artifact_id_segment = validate_single_path_segment("artifact id", &artifact_id)?;
-        let value = run_store
-            .get_artifact_value(&artifact_id)
-            .await?
-            .with_context(|| format!("artifact value {artifact_id:?} is missing from the store"))?;
-        write_json_file(
-            &output_dir
-                .join("artifacts")
-                .join("values")
-                .join(format!("{}.json", artifact_id_segment.display())),
-            &value,
-        )?;
-        file_count += 1;
-    }
-
-    for (node_id, visit, filename) in run_store.list_all_assets().await? {
-        let node_id_segment = validate_single_path_segment("node id", &node_id)?;
-        let filename_path = validate_relative_path("asset filename", &filename)?;
-        let node = NodeVisitRef {
-            node_id: &node_id,
-            visit,
-        };
-        let data = run_store
-            .get_asset(&node, &filename)
-            .await?
-            .with_context(|| {
-                format!(
-                    "asset {filename:?} for node {node_id:?} visit {visit} is missing from the store"
-                )
-            })?;
-        write_bytes_file(
-            &output_dir
-                .join("artifacts")
-                .join("nodes")
-                .join(node_id_segment)
-                .join(format!("visit-{visit}"))
-                .join(filename_path),
-            data.as_ref(),
-        )?;
-        file_count += 1;
-    }
-
-    Ok(file_count)
+    let dump = RunDump::store_export(run_store, state).await?;
+    dump.write_to_dir(output_dir)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -253,94 +124,6 @@ fn output_parent_dir(path: &Path) -> &Path {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),
     }
-}
-
-fn validate_single_path_segment(kind: &str, value: &str) -> Result<PathBuf> {
-    let path = validate_relative_path(kind, value)?;
-    if path.components().count() != 1 {
-        bail!("{kind} {value:?} must be a single path segment");
-    }
-    Ok(path)
-}
-
-fn validate_relative_path(kind: &str, value: &str) -> Result<PathBuf> {
-    let mut normalized = PathBuf::new();
-    for component in Path::new(value).components() {
-        match component {
-            Component::Normal(part) => normalized.push(part),
-            Component::CurDir => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                bail!("{kind} {value:?} must be a relative path without '..'");
-            }
-        }
-    }
-    if normalized.as_os_str().is_empty() {
-        bail!("{kind} {value:?} must not be empty");
-    }
-    Ok(normalized)
-}
-
-fn write_optional_json_file<T>(path: &Path, value: Option<&T>) -> Result<bool>
-where
-    T: Serialize,
-{
-    match value {
-        Some(value) => {
-            write_json_file(path, value)?;
-            Ok(true)
-        }
-        None => Ok(false),
-    }
-}
-
-fn write_json_file<T>(path: &Path, value: &T) -> Result<()>
-where
-    T: Serialize,
-{
-    ensure_parent_dir(path)?;
-    let bytes = serde_json::to_vec_pretty(value)?;
-    std::fs::write(path, bytes).with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
-}
-
-fn write_optional_text_file(path: &Path, value: Option<&str>) -> Result<bool> {
-    match value {
-        Some(value) => {
-            write_text_file(path, value)?;
-            Ok(true)
-        }
-        None => Ok(false),
-    }
-}
-
-fn write_text_file(path: &Path, value: &str) -> Result<()> {
-    write_bytes_file(path, value.as_bytes())
-}
-
-fn write_bytes_file(path: &Path, value: &[u8]) -> Result<()> {
-    ensure_parent_dir(path)?;
-    std::fs::write(path, value).with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(())
-}
-
-fn write_events_jsonl(path: &Path, events: &[fabro_store::EventEnvelope]) -> Result<()> {
-    ensure_parent_dir(path)?;
-    let mut file = std::fs::File::create(path)
-        .with_context(|| format!("failed to create {}", path.display()))?;
-    for event in events {
-        serde_json::to_writer(&mut file, event)?;
-        file.write_all(b"\n")?;
-    }
-    Ok(())
-}
-
-fn ensure_parent_dir(path: &Path) -> Result<()> {
-    let parent = path
-        .parent()
-        .with_context(|| format!("path {} has no parent", path.display()))?;
-    std::fs::create_dir_all(parent)
-        .with_context(|| format!("failed to create {}", parent.display()))?;
-    Ok(())
 }
 
 #[cfg(test)]

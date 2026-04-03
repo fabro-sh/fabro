@@ -143,6 +143,7 @@ pub mod pull_request;
 pub mod records;
 mod retry;
 pub(crate) mod run_dir;
+pub mod run_dump;
 pub mod run_lookup;
 pub mod run_options;
 pub mod run_status;
