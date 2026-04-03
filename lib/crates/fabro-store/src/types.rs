@@ -49,7 +49,7 @@ impl EventPayload {
         Ok(payload)
     }
 
-    pub fn validate(&self, expected_run_id: &RunId) -> Result<()> {
+    pub(crate) fn validate(&self, expected_run_id: &RunId) -> Result<()> {
         let obj = self.0.as_object().ok_or_else(|| {
             StoreError::InvalidEvent("event payload must be a JSON object".into())
         })?;

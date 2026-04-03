@@ -56,7 +56,7 @@ pub(crate) struct EventProjectionCache {
 }
 
 impl RunState {
-    pub fn apply_events(events: &[EventEnvelope]) -> Result<Self> {
+    pub(crate) fn apply_events(events: &[EventEnvelope]) -> Result<Self> {
         let mut state = Self::default();
         for event in events {
             state.apply_event(event)?;
@@ -64,7 +64,7 @@ impl RunState {
         Ok(state)
     }
 
-    pub fn apply_event(&mut self, event: &EventEnvelope) -> Result<()> {
+    pub(crate) fn apply_event(&mut self, event: &EventEnvelope) -> Result<()> {
         let value = event.payload.as_value();
         let ts = parse_ts(value)?;
         let event_name = value
@@ -284,17 +284,6 @@ impl RunState {
         self.nodes.get(&(node.node_id.to_string(), node.visit))
     }
 
-    pub fn list_node_ids(&self) -> Vec<String> {
-        let mut ids = self
-            .nodes
-            .keys()
-            .map(|(node_id, _)| node_id.clone())
-            .collect::<Vec<_>>();
-        ids.sort();
-        ids.dedup();
-        ids
-    }
-
     pub fn list_node_visits(&self, node_id: &str) -> Vec<u32> {
         let mut visits = self
             .nodes
@@ -307,7 +296,7 @@ impl RunState {
         visits
     }
 
-    pub fn build_summary(&self, catalog: &CatalogRecord) -> RunSummary {
+    pub(crate) fn build_summary(&self, catalog: &CatalogRecord) -> RunSummary {
         let workflow_name = self.run.as_ref().map(|run| {
             if run.graph.name.is_empty() {
                 "unnamed".to_string()

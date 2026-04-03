@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use fabro_config::run::MergeStrategy;
 use fabro_store::{RunState, SlateRunStore};
 use fabro_types::PullRequestRecord;
@@ -201,29 +199,6 @@ fn parse_dot_summary(dot: &str) -> (String, usize, usize) {
     }
 }
 
-#[cfg(test)]
-fn read_dot_source(run_dir: &Path) -> Option<String> {
-    let workflow_fabro_path = run_dir.join("workflow.fabro");
-    if let Ok(content) = std::fs::read_to_string(&workflow_fabro_path) {
-        debug!(path = %workflow_fabro_path.display(), "Read workflow graph for PR body");
-        return Some(content);
-    }
-
-    let legacy_fabro_path = run_dir.join("graph.fabro");
-    if let Ok(content) = std::fs::read_to_string(&legacy_fabro_path) {
-        debug!(path = %legacy_fabro_path.display(), "Read workflow graph for PR body (legacy)");
-        return Some(content);
-    }
-    let dot_path = run_dir.join("graph.dot");
-    match std::fs::read_to_string(&dot_path) {
-        Ok(content) => {
-            debug!(path = %dot_path.display(), "Read workflow graph for PR body (dot fallback)");
-            Some(content)
-        }
-        Err(_) => None,
-    }
-}
-
 /// Read plan text from the first `plan*` node response in run state.
 ///
 /// Nodes are sorted alphabetically so `plan` is preferred over `planning`.
@@ -306,8 +281,7 @@ fn emit_run_notice(
     });
 }
 
-async fn load_pull_request_diff(run_store: &SlateRunStore, run_dir: &Path) -> String {
-    let _ = run_dir;
+async fn load_pull_request_diff(run_store: &SlateRunStore) -> String {
     run_store
         .state()
         .await
@@ -326,7 +300,6 @@ pub async fn build_pr_body(
     goal: &str,
     model: &str,
     run_store: &SlateRunStore,
-    _run_dir: &Path,
     conclusion: Option<&Conclusion>,
 ) -> Result<String, String> {
     debug!("Building PR body");
@@ -435,7 +408,6 @@ pub async fn maybe_open_pull_request(
     draft: bool,
     auto_merge: Option<AutoMergeOptions>,
     run_store: &SlateRunStore,
-    run_dir: &Path,
     conclusion: Option<&Conclusion>,
 ) -> Result<Option<PullRequestRecord>, String> {
     if diff.is_empty() {
@@ -446,7 +418,7 @@ pub async fn maybe_open_pull_request(
     let https_url = ssh_url_to_https(origin_url);
     let (owner, repo) = github_app::parse_github_owner_repo(&https_url)?;
 
-    let body = build_pr_body(diff, goal, model, run_store, run_dir, conclusion).await?;
+    let body = build_pr_body(diff, goal, model, run_store, conclusion).await?;
     let body = truncate_pr_body(&body);
 
     let title = pr_title_from_goal(goal);
@@ -533,8 +505,7 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                 result.status,
                 StageStatus::Success | StageStatus::PartialSuccess
             ) {
-                let diff =
-                    load_pull_request_diff(options.run_store.as_ref(), &options.run_dir).await;
+                let diff = load_pull_request_diff(&options.run_store).await;
                 if let (Some(base_branch), Some(run_branch), Some(creds), Some(origin)) = (
                     &run_options.base_branch,
                     pushed_branch.as_deref(),
@@ -559,8 +530,7 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                         &options.model,
                         pr_cfg.draft,
                         auto_merge,
-                        options.run_store.as_ref(),
-                        &options.run_dir,
+                        &options.run_store,
                         Some(&conclusion),
                     )
                     .await
@@ -1103,8 +1073,7 @@ mod tests {
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
             "Implement feature",
             "mock-model",
-            run_store.as_ref(),
-            tmp.path(),
+            &run_store,
             Some(&conclusion),
         )
         .await
@@ -1144,7 +1113,7 @@ mod tests {
             labels: HashMap::new(),
         };
         append_workflow_event(
-            run_store.as_ref(),
+            &run_store,
             &fixtures::RUN_1,
             &WorkflowRunEvent::RunCreated {
                 run_id: fixtures::RUN_1,
@@ -1164,7 +1133,7 @@ mod tests {
         .await
         .unwrap();
         append_workflow_event(
-            run_store.as_ref(),
+            &run_store,
             &fixtures::RUN_1,
             &WorkflowRunEvent::RetroCompleted {
                 duration_ms: 1,
@@ -1180,8 +1149,7 @@ mod tests {
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
             "Implement feature",
             "mock-model",
-            run_store.as_ref(),
-            tmp.path(),
+            &run_store,
             Some(&conclusion),
         )
         .await
@@ -1221,7 +1189,7 @@ mod tests {
             labels: HashMap::new(),
         };
         append_workflow_event(
-            run_store.as_ref(),
+            &run_store,
             &fixtures::RUN_1,
             &WorkflowRunEvent::RunCreated {
                 run_id: fixtures::RUN_1,
@@ -1241,7 +1209,7 @@ mod tests {
         .await
         .unwrap();
         append_workflow_event(
-            run_store.as_ref(),
+            &run_store,
             &fixtures::RUN_1,
             &WorkflowRunEvent::StageCompleted {
                 node_id: "plan".to_string(),
@@ -1273,8 +1241,7 @@ mod tests {
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
             "Implement feature",
             "mock-model",
-            run_store.as_ref(),
-            tmp.path(),
+            &run_store,
             Some(&make_test_conclusion()),
         )
         .await
@@ -1322,39 +1289,6 @@ mod tests {
     #[test]
     fn format_duration_zero() {
         assert_eq!(format_duration_ms(0), "0s");
-    }
-
-    // ── read_dot_source tests ───────────────────────────────────────────
-
-    #[test]
-    fn read_dot_source_found() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("workflow.fabro"), "digraph test {}").unwrap();
-        let result = read_dot_source(tmp.path());
-        assert_eq!(result, Some("digraph test {}".to_string()));
-    }
-
-    #[test]
-    fn read_dot_source_legacy_fabro_fallback() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("graph.fabro"), "digraph legacy {}").unwrap();
-        let result = read_dot_source(tmp.path());
-        assert_eq!(result, Some("digraph legacy {}".to_string()));
-    }
-
-    #[test]
-    fn read_dot_source_dot_fallback() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("graph.dot"), "digraph old {}").unwrap();
-        let result = read_dot_source(tmp.path());
-        assert_eq!(result, Some("digraph old {}".to_string()));
-    }
-
-    #[test]
-    fn read_dot_source_not_found() {
-        let tmp = tempfile::tempdir().unwrap();
-        let result = read_dot_source(tmp.path());
-        assert_eq!(result, None);
     }
 
     // ── Existing tests ─────────────────────────────────────────────────
@@ -1458,8 +1392,7 @@ mod tests {
             "claude-sonnet-4-20250514",
             false,
             None,
-            run_store.as_ref(),
-            tmp.path(),
+            &run_store,
             None,
         )
         .await;
@@ -1492,7 +1425,7 @@ mod tests {
             labels: std::collections::HashMap::new(),
         };
         append_workflow_event(
-            run_store.as_ref(),
+            &run_store,
             &fixtures::RUN_1,
             &WorkflowRunEvent::RunCreated {
                 run_id: fixtures::RUN_1,
@@ -1512,7 +1445,7 @@ mod tests {
         .await
         .unwrap();
         append_workflow_event(
-            run_store.as_ref(),
+            &run_store,
             &fixtures::RUN_1,
             &WorkflowRunEvent::WorkflowRunCompleted {
                 duration_ms: 1,
@@ -1530,7 +1463,7 @@ mod tests {
         .await
         .unwrap();
 
-        let diff = load_pull_request_diff(run_store.as_ref(), tmp.path()).await;
+        let diff = load_pull_request_diff(&run_store).await;
 
         assert!(diff.contains("from_store"));
     }

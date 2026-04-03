@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::sync::Arc;
 
 use crate::error::FabroError;
@@ -166,24 +165,11 @@ fn build_conclusion_from_parts(
     }
 }
 
-pub fn persist_terminal_outcome(
-    _run_dir: &Path,
-    conclusion: &Conclusion,
-    run_status: RunStatus,
-    status_reason: Option<StatusReason>,
-) {
-    let _ = (conclusion, run_status, status_reason);
-}
-
 /// Write a finalize commit to the shadow branch with retro.json and final node files.
 ///
 /// This captures the last diff.patch (written after the final checkpoint) and retro.json.
 /// Best-effort: errors are logged as warnings.
-pub async fn write_finalize_commit(
-    run_options: &RunOptions,
-    _run_dir: &Path,
-    run_store: &SlateRunStore,
-) {
+pub async fn write_finalize_commit(run_options: &RunOptions, run_store: &SlateRunStore) {
     let (Some(meta_branch), Some(repo_path)) = (
         run_options
             .git
@@ -271,7 +257,7 @@ pub async fn finalize(
     let (final_status, failure_reason, _run_status, _status_reason) =
         classify_engine_result(&outcome);
     let conclusion = build_conclusion_from_store(
-        options.run_store.as_ref(),
+        &options.run_store,
         final_status,
         failure_reason,
         duration_ms,
@@ -279,7 +265,7 @@ pub async fn finalize(
     )
     .await;
 
-    write_finalize_commit(&run_options, &options.run_dir, options.run_store.as_ref()).await;
+    write_finalize_commit(&run_options, &options.run_store).await;
 
     if options.preserve_sandbox {
         let info = sandbox.sandbox_info();

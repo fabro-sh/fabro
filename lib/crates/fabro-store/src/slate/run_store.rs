@@ -184,10 +184,6 @@ impl SlateRunStore {
         self.inner.db.list_events_from(1).await
     }
 
-    pub async fn list_events_from(&self, seq: u32) -> Result<Vec<EventEnvelope>> {
-        self.inner.db.list_events_from(seq).await
-    }
-
     pub fn watch_events_from(
         &self,
         seq: u32,
@@ -269,20 +265,6 @@ impl SlateRunStore {
             .db
             .get_bytes(&keys::node_asset(node, filename))
             .await
-    }
-
-    pub async fn list_assets(&self, node: &NodeVisitRef<'_>) -> Result<Vec<String>> {
-        let prefix = format!("{}/", keys::node_asset_prefix(node));
-        let mut iter = self.inner.db.scan_prefix(prefix.as_bytes()).await?;
-        let mut assets = Vec::new();
-        while let Some(entry) = iter.next().await? {
-            let key = key_to_string(&entry.key)?;
-            if let Some(asset) = key.strip_prefix(&prefix) {
-                assets.push(asset.to_string());
-            }
-        }
-        assets.sort();
-        Ok(assets)
     }
 
     pub async fn list_all_assets(&self) -> Result<Vec<(String, u32, String)>> {

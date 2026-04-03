@@ -157,7 +157,7 @@ fn test_lifecycle(setup_commands: Vec<String>) -> LifecycleOptions {
     }
 }
 
-async fn test_run_store(_run_dir: &Path, run_id: &RunId) -> fabro_store::RunStoreHandle {
+async fn test_run_store(run_id: &RunId) -> fabro_store::SlateRunStore {
     let store: StoreHandle = Arc::new(SlateStore::new(
         Arc::new(InMemory::new()),
         "",
@@ -180,7 +180,7 @@ async fn execute_test_run_with_options(
 ) -> Executed {
     let run_id_value = run_options.run_id;
     let git_options = run_options.git.clone();
-    let run_store = test_run_store(&run_options.run_dir, &run_id_value).await;
+    let run_store = test_run_store(&run_id_value).await;
     let emitter = test_emitter_arc("test-run");
     let store_logger = StoreProgressLogger::new(run_store.clone());
     store_logger.register(&emitter);
@@ -241,7 +241,7 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
         persisted_workflow(graph, source, &run_dir, test_run_id("run-test")),
         InitOptions {
             run_id: test_run_id("run-test"),
-            run_store: test_run_store(&run_dir, &test_run_id("run-test")).await,
+            run_store: test_run_store(&test_run_id("run-test")).await,
             dry_run: false,
             emitter: test_emitter_arc("run-test"),
             sandbox: SandboxSpec::Local {
@@ -308,7 +308,7 @@ async fn run_with_lifecycle(
         persisted_workflow(graph.clone(), String::new(), &run_dir, run_id),
         InitOptions {
             run_id,
-            run_store: test_run_store(&run_dir, &run_id).await,
+            run_store: test_run_store(&run_id).await,
             dry_run: false,
             emitter,
             sandbox: SandboxSpec::Local {
