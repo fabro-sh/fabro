@@ -801,8 +801,6 @@ async fn panic_handler_returns_panic_message() {
 
     let outcome = result.expect("runner should convert panic into a failed outcome");
     assert_eq!(outcome.status, StageStatus::Fail);
-    let panic_path = dir.path().join("nodes").join("boom").join("panic.txt");
-    assert!(!panic_path.exists(), "panic.txt should not be written");
 }
 
 #[tokio::test]

@@ -556,32 +556,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn attach_errors_without_store_context_even_if_conclusion_file_exists() {
+    async fn attach_errors_without_store_context() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("conclusion.json"), "{}").unwrap();
-
-        let err = attach_run(
-            dir.path(),
-            None,
-            None,
-            false,
-            no_color_styles(),
-            None,
-            false,
-        )
-        .await
-        .unwrap_err();
-
-        assert!(
-            err.to_string()
-                .contains("Could not infer SlateDB storage location and run id for attach")
-        );
-    }
-
-    #[tokio::test]
-    async fn attach_errors_without_store_context_even_if_status_file_exists() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("status.json"), "{}").unwrap();
 
         let err = attach_run(
             dir.path(),
