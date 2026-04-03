@@ -20,7 +20,7 @@ pub(crate) async fn run(args: DiffArgs, globals: &GlobalArgs) -> Result<()> {
     let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
     let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await?;
 
-    let patch = resolve_diff(&run.path, run_store.as_ref(), &args).await?;
+    let patch = resolve_diff(&run.path, &run_store, &args).await?;
 
     if globals.json {
         let mut value = serde_json::json!({

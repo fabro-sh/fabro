@@ -63,7 +63,7 @@ pub(crate) async fn attach_run(
                         .collect::<Result<Vec<_>>>()?;
                     return attach_run_store(
                         run_dir,
-                        run_store.as_ref(),
+                        &run_store,
                         verbose,
                         event_lines,
                         events.last().map_or(0, |event| event.seq),

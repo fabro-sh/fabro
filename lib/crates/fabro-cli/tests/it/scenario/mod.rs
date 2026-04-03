@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use fabro_store::{RunState, RunStoreHandle, SlateStore};
+use fabro_store::{RunState, SlateRunStore, SlateStore};
 use fabro_types::RunId;
 use object_store::local::LocalFileSystem;
 pub(super) fn fixture(name: &str) -> PathBuf {
@@ -24,7 +24,7 @@ fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
         .block_on(future)
 }
 
-fn run_store(run_dir: &Path) -> RunStoreHandle {
+fn run_store(run_dir: &Path) -> SlateRunStore {
     let runs_dir = run_dir.parent().expect("run dir should have parent");
     let storage_dir = runs_dir.parent().expect("runs dir should have parent");
     let run_id: RunId = std::fs::read_to_string(run_dir.join("id.txt"))

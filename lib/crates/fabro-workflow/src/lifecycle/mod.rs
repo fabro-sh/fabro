@@ -14,8 +14,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use async_trait::async_trait;
-use fabro_store::RunStoreHandle;
 use fabro_store::RuntimeState;
+use fabro_store::SlateRunStore;
 use fabro_types::RunId;
 
 use fabro_core::error::Result as CoreResult;
@@ -85,7 +85,7 @@ impl WorkflowLifecycle {
         sandbox: &Arc<dyn Sandbox>,
         graph: Arc<GvGraph>,
         run_dir: &PathBuf,
-        run_store: RunStoreHandle,
+        run_store: SlateRunStore,
         run_options: &Arc<RunOptions>,
         is_resume: bool,
         on_node: crate::OnNodeCallback,

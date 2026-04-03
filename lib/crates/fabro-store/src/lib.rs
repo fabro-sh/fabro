@@ -19,7 +19,6 @@ use fabro_types::{Outcome, StageUsage};
 
 pub type NodeOutcomeRecord = Outcome<Option<StageUsage>>;
 pub type StoreHandle = Arc<SlateStore>;
-pub type RunStoreHandle = Arc<SlateRunStore>;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ListRunsQuery {

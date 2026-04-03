@@ -175,7 +175,7 @@ impl Handler for PromptHandler {
 mod tests {
     use super::*;
     use fabro_graphviz::graph::AttrValue;
-    use fabro_store::{NodeVisitRef, RunStoreHandle, SlateStore};
+    use fabro_store::{NodeVisitRef, SlateRunStore, SlateStore};
     use fabro_types::fixtures;
     use object_store::memory::InMemory;
     use std::sync::Arc;
@@ -196,7 +196,7 @@ mod tests {
 
     async fn make_services_with_run_store() -> (
         EngineServices,
-        RunStoreHandle,
+        SlateRunStore,
         crate::event::StoreProgressLogger,
     ) {
         let store = test_store();

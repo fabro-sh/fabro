@@ -102,6 +102,7 @@ pub(crate) async fn read_catalog_path(
 #[cfg(test)]
 pub(super) mod test_support {
     use super::*;
+    use std::collections::{HashMap, HashSet};
 
     pub(crate) async fn repair_catalog(
         store: Arc<dyn ObjectStore>,

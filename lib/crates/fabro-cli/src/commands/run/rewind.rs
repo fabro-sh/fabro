@@ -134,7 +134,7 @@ async fn reset_rewound_run_state(
         anyhow::anyhow!("failed to open durable store run for rewind reset: {err}")
     })?;
     append_workflow_event(
-        run_store.as_ref(),
+        &run_store,
         run_id,
         &WorkflowRunEvent::RunRewound {
             target_checkpoint_ordinal: entry.ordinal,
@@ -146,15 +146,11 @@ async fn reset_rewound_run_state(
     )
     .await
     .map_err(|err| anyhow::anyhow!("failed to append run rewound event: {err}"))?;
+    append_workflow_event(&run_store, run_id, &restored_checkpoint_event(&checkpoint))
+        .await
+        .map_err(|err| anyhow::anyhow!("failed to append restored checkpoint event: {err}"))?;
     append_workflow_event(
-        run_store.as_ref(),
-        run_id,
-        &restored_checkpoint_event(&checkpoint),
-    )
-    .await
-    .map_err(|err| anyhow::anyhow!("failed to append restored checkpoint event: {err}"))?;
-    append_workflow_event(
-        run_store.as_ref(),
+        &run_store,
         run_id,
         &WorkflowRunEvent::RunSubmitted { reason: None },
     )

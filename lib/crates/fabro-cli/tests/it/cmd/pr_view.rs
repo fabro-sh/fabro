@@ -79,7 +79,7 @@ fn pr_view_reads_pull_request_from_store_without_pull_request_json() {
             let store = build_store(&context.storage_dir);
             let run_store = store.open_run(&run_id).await.unwrap();
             append_workflow_event(
-                run_store.as_ref(),
+                &run_store,
                 &run_id,
                 &WorkflowRunEvent::PullRequestCreated {
                     pr_url: "https://github.com/fabro-sh/fabro/pull/123".to_string(),

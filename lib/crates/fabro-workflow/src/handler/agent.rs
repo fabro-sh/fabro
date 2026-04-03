@@ -13,7 +13,7 @@ use crate::event::EventEmitter;
 use crate::outcome::{
     FailureCategory, FailureDetail, Outcome, OutcomeExt, StageStatus, StageUsage,
 };
-use crate::vars::expand_vars;
+use crate::transforms::variable_expansion::expand_vars;
 use fabro_graphviz::graph::{Graph, Node};
 
 use super::{EngineServices, Handler};
@@ -360,7 +360,7 @@ mod tests {
     use super::*;
     use crate::event::EventEmitter;
     use fabro_graphviz::graph::AttrValue;
-    use fabro_store::{NodeVisitRef, RunStoreHandle, SlateStore};
+    use fabro_store::{NodeVisitRef, SlateRunStore, SlateStore};
     use fabro_types::fixtures;
     use object_store::memory::InMemory;
     use std::sync::Arc;
@@ -381,7 +381,7 @@ mod tests {
 
     async fn make_services_with_run_store() -> (
         EngineServices,
-        RunStoreHandle,
+        SlateRunStore,
         crate::event::StoreProgressLogger,
     ) {
         let store = test_store();

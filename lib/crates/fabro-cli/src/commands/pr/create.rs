@@ -32,7 +32,6 @@ async fn create_from(
     let storage_dir = base.parent().unwrap_or(base);
     let store = store::build_store(storage_dir)?;
     let run = resolve_run_combined(store.as_ref(), base, &args.run_id).await?;
-    let run_dir = run.path.clone();
     let run_store = store::open_run_reader(storage_dir, &run.run_id).await?;
     let state = run_store.state().await?;
 
@@ -112,8 +111,7 @@ async fn create_from(
         &model,
         true,
         None,
-        run_store.as_ref(),
-        &run_dir,
+        &run_store,
         None,
     )
     .await

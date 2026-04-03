@@ -55,7 +55,7 @@ mod tests {
 
     use chrono::Utc;
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
-    use fabro_store::{RunStoreHandle, SlateStore, StoreHandle};
+    use fabro_store::{SlateRunStore, SlateStore, StoreHandle};
     use fabro_types::{Settings, fixtures};
     use object_store::memory::InMemory;
     use std::sync::Arc;
@@ -142,7 +142,7 @@ mod tests {
         run_dir: &Path,
         record: &RunRecord,
         source: Option<&str>,
-    ) -> RunStoreHandle {
+    ) -> SlateRunStore {
         let store = memory_store();
         let run_store = store
             .create_run(
@@ -153,7 +153,7 @@ mod tests {
             .await
             .unwrap();
         append_workflow_event(
-            run_store.as_ref(),
+            &run_store,
             &record.run_id,
             &WorkflowRunEvent::RunCreated {
                 run_id: record.run_id,
@@ -240,7 +240,7 @@ mod tests {
         .unwrap();
 
         let run_store = seeded_store(&run_dir, &expected, Some(&source)).await;
-        let loaded = load_from_store(run_store.as_ref(), &run_dir).await.unwrap();
+        let loaded = load_from_store(&run_store, &run_dir).await.unwrap();
 
         let loaded_record = loaded.run_record();
         assert_eq!(loaded_record.run_id, expected.run_id);
@@ -292,7 +292,7 @@ mod tests {
         record.graph = graph;
 
         let run_store = seeded_store(&run_dir, &record, None).await;
-        let loaded = load_from_store(run_store.as_ref(), &run_dir).await.unwrap();
+        let loaded = load_from_store(&run_store, &run_dir).await.unwrap();
 
         assert!(loaded.source().is_empty());
     }
@@ -308,7 +308,7 @@ mod tests {
         record.graph = graph.clone();
 
         let run_store = seeded_store(&run_dir, &record, Some(&source)).await;
-        let loaded = load_from_store(run_store.as_ref(), &run_dir).await.unwrap();
+        let loaded = load_from_store(&run_store, &run_dir).await.unwrap();
 
         assert_eq!(
             serde_json::to_value(loaded.graph()).unwrap(),

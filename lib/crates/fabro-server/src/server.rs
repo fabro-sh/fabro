@@ -702,7 +702,7 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
             return;
         }
     };
-    let persisted = match Persisted::load_from_store(run_store.as_ref(), &run_dir).await {
+    let persisted = match Persisted::load_from_store(&run_store, &run_dir).await {
         Ok(persisted) => persisted,
         Err(e) => {
             tracing::error!(run_id = %run_id, error = %e, "Failed to load persisted run");

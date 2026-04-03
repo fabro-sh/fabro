@@ -64,7 +64,7 @@ pub(crate) async fn run(args: &LogsArgs, styles: &Styles, globals: &GlobalArgs) 
 
     if args.follow {
         follow_store_logs(
-            run_store.as_ref(),
+            &run_store,
             &run.path,
             if last_seq == 0 { 1 } else { last_seq + 1 },
             pretty,

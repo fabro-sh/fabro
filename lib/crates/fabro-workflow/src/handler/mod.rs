@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
-use fabro_store::RunStoreHandle;
+use fabro_store::SlateRunStore;
 #[cfg(test)]
 use fabro_store::SlateStore;
 #[cfg(test)]
@@ -40,7 +40,7 @@ pub struct EngineServices {
     pub registry: Arc<HandlerRegistry>,
     pub emitter: Arc<EventEmitter>,
     pub sandbox: Arc<dyn Sandbox>,
-    pub run_store: RunStoreHandle,
+    pub run_store: SlateRunStore,
     /// Git state for the current run. Set via `set_git_state` at the start of
     /// `run_via_core` and read by parallel/fan-in handlers.
     pub(crate) git_state: std::sync::RwLock<Option<Arc<GitState>>>,

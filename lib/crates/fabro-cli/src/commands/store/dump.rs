@@ -22,7 +22,7 @@ pub(crate) async fn dump_command(args: &StoreDumpArgs, globals: &GlobalArgs) -> 
     let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
     let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await?;
 
-    let file_count = export_run(run_store.as_ref(), &args.output).await?;
+    let file_count = export_run(&run_store, &args.output).await?;
     if globals.json {
         print_json_pretty(&serde_json::json!({
             "run_id": run.run_id,

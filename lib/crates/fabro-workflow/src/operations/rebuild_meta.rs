@@ -6,7 +6,7 @@ use anyhow::{Context, Result, bail};
 use fabro_checkpoint::branch::BranchStore;
 use fabro_checkpoint::git::Store as GitStore;
 use fabro_store::{
-    ListRunsQuery, NodeVisitRef, RunStoreHandle as DurableRunStore, SlateStore as DurableStore,
+    ListRunsQuery, NodeVisitRef, SlateRunStore as DurableRunStore, SlateStore as DurableStore,
 };
 use fabro_types::RunId;
 use git2::{Repository, Signature};
@@ -434,7 +434,7 @@ mod tests {
         let run_store = store.create_run(&run_id, created_at(), None).await.unwrap();
         let run_record = sample_run_record(run_id, host_repo_path);
         append_workflow_event(
-            run_store.as_ref(),
+            &run_store,
             &run_id,
             &WorkflowRunEvent::RunCreated {
                 run_id,
