@@ -71,65 +71,6 @@ pub(crate) async fn list_catalogs(
     Ok(records)
 }
 
-pub(super) async fn repair_catalog(store: Arc<dyn ObjectStore>, base_prefix: &str) -> Result<()> {
-    let by_id_prefix = Path::from(format!("{base_prefix}by-id"));
-    let by_start_prefix = Path::from(format!("{base_prefix}by-start"));
-
-    let by_id_metas = store
-        .list(Some(&by_id_prefix))
-        .try_collect::<Vec<_>>()
-        .await?;
-    let mut canonical = HashMap::new();
-    for meta in by_id_metas {
-        if let Some(record) = read_catalog_path(store.clone(), meta.location).await? {
-            canonical.insert(record.run_id, record);
-        }
-    }
-
-    for record in canonical.values() {
-        let path = by_start_path(base_prefix, record.created_at, &record.run_id);
-        if !object_exists(store.clone(), &path).await? {
-            store.put(&path, serde_json::to_vec(record)?.into()).await?;
-        }
-    }
-
-    let by_start_metas = store
-        .list(Some(&by_start_prefix))
-        .try_collect::<Vec<_>>()
-        .await?;
-    let mut seen = HashSet::new();
-    for meta in by_start_metas {
-        let location = meta.location.clone();
-        let Some(record) = read_catalog_path(store.clone(), location.clone()).await? else {
-            delete_if_exists(store.clone(), &location).await?;
-            continue;
-        };
-        let expected = canonical.get(&record.run_id).map(|canonical_record| {
-            by_start_path(base_prefix, canonical_record.created_at, &record.run_id)
-        });
-        match expected {
-            Some(expected) if expected == location => {
-                seen.insert(record.run_id);
-            }
-            _ => {
-                delete_if_exists(store.clone(), &location).await?;
-            }
-        }
-    }
-
-    for record in canonical.values() {
-        if !seen.contains(&record.run_id) {
-            store
-                .put(
-                    &by_start_path(base_prefix, record.created_at, &record.run_id),
-                    serde_json::to_vec(record)?.into(),
-                )
-                .await?;
-        }
-    }
-    Ok(())
-}
-
 pub(crate) fn db_prefix(base_prefix: &str, created_at: DateTime<Utc>, run_id: &RunId) -> String {
     format!(
         "{base_prefix}db/{}/{run_id}/",
@@ -159,17 +100,84 @@ pub(crate) async fn read_catalog_path(
     }
 }
 
-async fn object_exists(store: Arc<dyn ObjectStore>, path: &Path) -> Result<bool> {
-    match store.head(path).await {
-        Ok(_) => Ok(true),
-        Err(object_store::Error::NotFound { .. }) => Ok(false),
-        Err(err) => Err(err.into()),
-    }
-}
+#[cfg(test)]
+pub(super) mod test_support {
+    use super::*;
 
-async fn delete_if_exists(store: Arc<dyn ObjectStore>, path: &Path) -> Result<()> {
-    match store.delete(path).await {
-        Ok(()) | Err(object_store::Error::NotFound { .. }) => Ok(()),
-        Err(err) => Err(err.into()),
+    pub(crate) async fn repair_catalog(
+        store: Arc<dyn ObjectStore>,
+        base_prefix: &str,
+    ) -> Result<()> {
+        let by_id_prefix = Path::from(format!("{base_prefix}by-id"));
+        let by_start_prefix = Path::from(format!("{base_prefix}by-start"));
+
+        let by_id_metas = store
+            .list(Some(&by_id_prefix))
+            .try_collect::<Vec<_>>()
+            .await?;
+        let mut canonical = HashMap::new();
+        for meta in by_id_metas {
+            if let Some(record) = read_catalog_path(store.clone(), meta.location).await? {
+                canonical.insert(record.run_id, record);
+            }
+        }
+
+        for record in canonical.values() {
+            let path = by_start_path(base_prefix, record.created_at, &record.run_id);
+            if !object_exists(store.clone(), &path).await? {
+                store.put(&path, serde_json::to_vec(record)?.into()).await?;
+            }
+        }
+
+        let by_start_metas = store
+            .list(Some(&by_start_prefix))
+            .try_collect::<Vec<_>>()
+            .await?;
+        let mut seen = HashSet::new();
+        for meta in by_start_metas {
+            let location = meta.location.clone();
+            let Some(record) = read_catalog_path(store.clone(), location.clone()).await? else {
+                delete_if_exists(store.clone(), &location).await?;
+                continue;
+            };
+            let expected = canonical.get(&record.run_id).map(|canonical_record| {
+                by_start_path(base_prefix, canonical_record.created_at, &record.run_id)
+            });
+            match expected {
+                Some(expected) if expected == location => {
+                    seen.insert(record.run_id);
+                }
+                _ => {
+                    delete_if_exists(store.clone(), &location).await?;
+                }
+            }
+        }
+
+        for record in canonical.values() {
+            if !seen.contains(&record.run_id) {
+                store
+                    .put(
+                        &by_start_path(base_prefix, record.created_at, &record.run_id),
+                        serde_json::to_vec(record)?.into(),
+                    )
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn object_exists(store: Arc<dyn ObjectStore>, path: &Path) -> Result<bool> {
+        match store.head(path).await {
+            Ok(_) => Ok(true),
+            Err(object_store::Error::NotFound { .. }) => Ok(false),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    async fn delete_if_exists(store: Arc<dyn ObjectStore>, path: &Path) -> Result<()> {
+        match store.delete(path).await {
+            Ok(()) | Err(object_store::Error::NotFound { .. }) => Ok(()),
+            Err(err) => Err(err.into()),
+        }
     }
 }

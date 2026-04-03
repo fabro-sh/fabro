@@ -50,10 +50,6 @@ impl SlateStore {
         }
     }
 
-    pub async fn repair_catalog(&self) -> Result<()> {
-        catalog::repair_catalog(self.object_store.clone(), &self.base_prefix).await
-    }
-
     async fn open_db(&self, db_prefix: &str) -> Result<slatedb::Db> {
         Ok(
             slatedb::Db::builder(db_prefix.to_string(), self.object_store.clone())
@@ -408,6 +404,10 @@ mod tests {
         (object_store, store)
     }
 
+    async fn repair_catalog_for_tests(store: &SlateStore) -> Result<()> {
+        catalog::test_support::repair_catalog(store.object_store.clone(), &store.base_prefix).await
+    }
+
     fn test_run_id(label: &str) -> RunId {
         match label {
             "run-1" => fixtures::RUN_1,
@@ -725,7 +725,7 @@ mod tests {
                 .is_empty()
         );
 
-        store.repair_catalog().await.unwrap();
+        repair_catalog_for_tests(&store).await.unwrap();
         let listed = store.list_runs(&ListRunsQuery::default()).await.unwrap();
         assert_eq!(listed.len(), 1);
         assert!(
@@ -1041,7 +1041,7 @@ mod tests {
             .await
             .unwrap();
 
-        store.repair_catalog().await.unwrap();
+        repair_catalog_for_tests(&store).await.unwrap();
         let paths = list_paths(object_store, "runs/by-start").await;
         assert_eq!(paths.len(), 1);
         assert!(paths[0].contains(&format!("2026-03-27-12-00/{}.json", test_run_id("run-1"))));
