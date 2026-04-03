@@ -8,6 +8,7 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use fabro_api::types::{RunStatus, RunStatusResponse, SessionTurn, SmoothnessRating};
 use serde_json::json;
 
 use crate::error::ApiError;
@@ -21,7 +22,7 @@ pub(crate) struct RetroListParams {
     #[serde(rename = "page[offset]", default)]
     offset: u32,
     workflow: Option<String>,
-    smoothness: Option<fabro_api_types::SmoothnessRating>,
+    smoothness: Option<SmoothnessRating>,
 }
 
 fn paginated_response<T: serde::Serialize>(
@@ -141,9 +142,9 @@ pub(crate) async fn get_run_status(
     match runs::list_items().into_iter().find(|r| r.id == id) {
         Some(item) => (
             StatusCode::OK,
-            Json(fabro_api_types::RunStatusResponse {
+            Json(RunStatusResponse {
                 id: id.clone(),
-                status: fabro_api_types::RunStatus::Running,
+                status: RunStatus::Running,
                 error: None,
                 queue_position: None,
                 created_at: item.created_at,
@@ -470,13 +471,9 @@ pub(crate) async fn session_events_stub(
 
     for turn in &session.turns {
         let (event_type, data) = match turn {
-            fabro_api_types::SessionTurn::UserTurn(_) => continue,
-            fabro_api_types::SessionTurn::AssistantTurn(t) => {
-                ("assistant_turn", serde_json::to_string(t).unwrap())
-            }
-            fabro_api_types::SessionTurn::ToolTurn(t) => {
-                ("tool_turn", serde_json::to_string(t).unwrap())
-            }
+            SessionTurn::UserTurn(_) => continue,
+            SessionTurn::AssistantTurn(t) => ("assistant_turn", serde_json::to_string(t).unwrap()),
+            SessionTurn::ToolTurn(t) => ("tool_turn", serde_json::to_string(t).unwrap()),
         };
 
         if last_event_id.is_none() || seq > last_event_id.unwrap() {
@@ -620,7 +617,7 @@ fn ts(s: &str) -> DateTime<Utc> {
 
 mod runs {
     use super::ts;
-    use fabro_api_types::*;
+    use fabro_api::types::*;
 
     pub(super) fn list_items() -> Vec<RunListItem> {
         vec![
@@ -1241,7 +1238,7 @@ mod runs {
         }
     }
 
-    pub(super) fn verifications() -> Vec<fabro_api_types::RunVerification> {
+    pub(super) fn verifications() -> Vec<RunVerification> {
         super::verifications::run_verifications()
     }
 
@@ -1340,7 +1337,7 @@ mod runs {
 }
 
 mod usage {
-    use fabro_api_types::*;
+    use fabro_api::types::*;
 
     pub(super) fn aggregate() -> AggregateUsage {
         AggregateUsage {
@@ -1392,7 +1389,7 @@ mod usage {
 
 mod workflows {
     use super::ts;
-    use fabro_api_types::*;
+    use fabro_api::types::*;
 
     pub(super) fn list_items() -> Vec<WorkflowListItem> {
         vec![
@@ -1764,7 +1761,7 @@ mod workflows {
 
 mod verifications {
     use super::ts;
-    use fabro_api_types::*;
+    use fabro_api::types::*;
 
     // ── Category definitions (name, question, controls) ─────────────────
 
@@ -2823,7 +2820,7 @@ mod verifications {
 
 mod signoffs {
     use super::ts;
-    use fabro_api_types::*;
+    use fabro_api::types::*;
 
     struct SignoffDef {
         id: &'static str,
@@ -2938,7 +2935,7 @@ mod signoffs {
 
 mod retros {
     use super::ts;
-    use fabro_api_types::*;
+    use fabro_api::types::*;
 
     #[allow(clippy::too_many_arguments)]
     fn stage(
@@ -3272,7 +3269,7 @@ mod retros {
 
 mod sessions {
     use super::ts;
-    use fabro_api_types::*;
+    use fabro_api::types::*;
     use uuid::Uuid;
 
     fn uid(n: u128) -> Uuid {
@@ -3414,7 +3411,7 @@ mod sessions {
 
 mod insights {
     use super::ts;
-    use fabro_api_types::*;
+    use fabro_api::types::*;
 
     pub(super) fn saved_queries() -> Vec<SavedQuery> {
         vec![

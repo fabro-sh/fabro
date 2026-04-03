@@ -184,7 +184,7 @@ impl Default for McpConnectionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rmcp::model::{Content, RawTextContent};
+    use rmcp::model::Content;
 
     #[test]
     fn qualified_tool_name_basic() {
@@ -242,21 +242,14 @@ mod tests {
     }
 
     fn make_text_content(text: &str) -> Content {
-        Content {
-            raw: RawContent::Text(RawTextContent {
-                text: text.to_string(),
-                meta: None,
-            }),
-            annotations: None,
-        }
+        Content::text(text)
     }
 
     fn make_call_result(content: Vec<Content>, is_error: Option<bool>) -> CallToolResult {
-        CallToolResult {
-            content,
-            structured_content: None,
-            is_error,
-            meta: None,
+        if is_error == Some(true) {
+            CallToolResult::error(content)
+        } else {
+            CallToolResult::success(content)
         }
     }
 
@@ -292,20 +285,7 @@ mod tests {
 
     #[test]
     fn call_result_to_string_image_placeholder() {
-        use rmcp::model::RawImageContent;
-        let result = CallToolResult {
-            content: vec![Content {
-                raw: RawContent::Image(RawImageContent {
-                    data: "base64data".to_string(),
-                    mime_type: "image/png".to_string(),
-                    meta: None,
-                }),
-                annotations: None,
-            }],
-            structured_content: None,
-            is_error: None,
-            meta: None,
-        };
+        let result = CallToolResult::success(vec![Content::image("base64data", "image/png")]);
         assert_eq!(
             call_result_to_string(&result),
             Ok("[image content]".to_string())

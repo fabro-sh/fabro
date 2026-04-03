@@ -212,12 +212,10 @@ impl McpClient {
             }
         };
 
-        let params = CallToolRequestParams {
-            meta: None,
-            name: name.to_string().into(),
-            arguments: args,
-            task: None,
-        };
+        let mut params = CallToolRequestParams::new(name.to_string());
+        if let Some(arguments) = args {
+            params = params.with_arguments(arguments);
+        }
 
         debug!(server = %self.server_name, tool = %name, "Calling MCP tool");
 

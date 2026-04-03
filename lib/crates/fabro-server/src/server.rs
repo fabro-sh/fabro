@@ -52,10 +52,13 @@ use fabro_workflow::operations::{self, CreateRunInput, WorkflowInput};
 use fabro_workflow::pipeline::Persisted;
 use fabro_workflow::records::Checkpoint;
 
-pub use fabro_api_types::{
-    ApiQuestion, ApiQuestionOption, PaginatedRunList, PaginationMeta,
-    QuestionType as ApiQuestionType, RunStatus, RunStatusResponse, StartRunRequest,
-    SubmitAnswerRequest,
+use fabro_api::types::AggregateUsageTotals as ApiAggregateUsageTotals;
+pub use fabro_api::types::{
+    AggregateUsage, ApiQuestion, ApiQuestionOption, CompletionContentPart, CompletionMessage,
+    CompletionMessageRole, CompletionResponse, CompletionToolChoiceMode, CompletionUsage,
+    CreateCompletionRequest, ModelReference, PaginatedRunList, PaginationMeta,
+    QuestionType as ApiQuestionType, RunError, RunStatus, RunStatusResponse, StartRunRequest,
+    SubmitAnswerRequest, TokenUsage, UsageByModel,
 };
 
 pub fn default_page_limit() -> u32 {
@@ -377,21 +380,21 @@ async fn get_aggregate_usage(
         .aggregate_usage
         .lock()
         .expect("aggregate_usage lock poisoned");
-    let by_model: Vec<fabro_api_types::UsageByModel> = agg
+    let by_model: Vec<UsageByModel> = agg
         .by_model
         .iter()
-        .map(|(model, totals)| fabro_api_types::UsageByModel {
-            model: fabro_api_types::ModelReference { id: model.clone() },
+        .map(|(model, totals)| UsageByModel {
+            model: ModelReference { id: model.clone() },
             stages: totals.stages,
-            usage: fabro_api_types::TokenUsage {
+            usage: TokenUsage {
                 input_tokens: totals.input_tokens,
                 output_tokens: totals.output_tokens,
                 cost: totals.cost,
             },
         })
         .collect();
-    let response = fabro_api_types::AggregateUsage {
-        totals: fabro_api_types::AggregateUsageTotals {
+    let response = AggregateUsage {
+        totals: ApiAggregateUsageTotals {
             runs: agg.total_runs,
             input_tokens: by_model.iter().map(|m| m.usage.input_tokens).sum(),
             output_tokens: by_model.iter().map(|m| m.usage.output_tokens).sum(),
@@ -489,12 +492,9 @@ async fn list_runs(
         .map(|(id, managed_run)| RunStatusResponse {
             id: id.to_string(),
             status: managed_run.status,
-            error: managed_run
-                .error
-                .as_ref()
-                .map(|msg| fabro_api_types::RunError {
-                    message: msg.clone(),
-                }),
+            error: managed_run.error.as_ref().map(|msg| RunError {
+                message: msg.clone(),
+            }),
             queue_position: queue_positions.get(id).copied(),
             created_at: managed_run.created_at,
         })
@@ -891,12 +891,9 @@ async fn get_run_status(
                 Json(RunStatusResponse {
                     id: id.to_string(),
                     status: managed_run.status,
-                    error: managed_run
-                        .error
-                        .as_ref()
-                        .map(|msg| fabro_api_types::RunError {
-                            message: msg.clone(),
-                        }),
+                    error: managed_run.error.as_ref().map(|msg| RunError {
+                        message: msg.clone(),
+                    }),
                     created_at: managed_run.created_at,
                     queue_position,
                 }),
@@ -1276,13 +1273,13 @@ fn finish_reason_to_api_stop_reason(reason: &FinishReason) -> String {
     }
 }
 
-fn convert_api_message(msg: &fabro_api_types::CompletionMessage) -> LlmMessage {
+fn convert_api_message(msg: &CompletionMessage) -> LlmMessage {
     let role = match msg.role {
-        fabro_api_types::CompletionMessageRole::System => Role::System,
-        fabro_api_types::CompletionMessageRole::User => Role::User,
-        fabro_api_types::CompletionMessageRole::Assistant => Role::Assistant,
-        fabro_api_types::CompletionMessageRole::Tool => Role::Tool,
-        fabro_api_types::CompletionMessageRole::Developer => Role::Developer,
+        CompletionMessageRole::System => Role::System,
+        CompletionMessageRole::User => Role::User,
+        CompletionMessageRole::Assistant => Role::Assistant,
+        CompletionMessageRole::Tool => Role::Tool,
+        CompletionMessageRole::Developer => Role::Developer,
     };
     let content: Vec<ContentPart> = msg
         .content
@@ -1300,15 +1297,15 @@ fn convert_api_message(msg: &fabro_api_types::CompletionMessage) -> LlmMessage {
     }
 }
 
-fn convert_llm_message(msg: &LlmMessage) -> fabro_api_types::CompletionMessage {
+fn convert_llm_message(msg: &LlmMessage) -> CompletionMessage {
     let role = match msg.role {
-        Role::System => fabro_api_types::CompletionMessageRole::System,
-        Role::User => fabro_api_types::CompletionMessageRole::User,
-        Role::Assistant => fabro_api_types::CompletionMessageRole::Assistant,
-        Role::Tool => fabro_api_types::CompletionMessageRole::Tool,
-        Role::Developer => fabro_api_types::CompletionMessageRole::Developer,
+        Role::System => CompletionMessageRole::System,
+        Role::User => CompletionMessageRole::User,
+        Role::Assistant => CompletionMessageRole::Assistant,
+        Role::Tool => CompletionMessageRole::Tool,
+        Role::Developer => CompletionMessageRole::Developer,
     };
-    let content: Vec<fabro_api_types::CompletionContentPart> = msg
+    let content: Vec<CompletionContentPart> = msg
         .content
         .iter()
         .filter_map(|part| {
@@ -1316,7 +1313,7 @@ fn convert_llm_message(msg: &LlmMessage) -> fabro_api_types::CompletionMessage {
             serde_json::from_value(json).ok()
         })
         .collect();
-    fabro_api_types::CompletionMessage {
+    CompletionMessage {
         role,
         content,
         name: msg.name.clone(),
@@ -1327,7 +1324,7 @@ fn convert_llm_message(msg: &LlmMessage) -> fabro_api_types::CompletionMessage {
 async fn create_completion(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
-    Json(req): Json<fabro_api_types::CreateCompletionRequest>,
+    Json(req): Json<CreateCompletionRequest>,
 ) -> Response {
     // Resolve model
     let model_id = req.model.unwrap_or_else(|| {
@@ -1373,12 +1370,10 @@ async fn create_completion(
 
     // Convert tool_choice
     let tool_choice: Option<ToolChoice> = req.tool_choice.map(|tc| match tc.mode {
-        fabro_api_types::CompletionToolChoiceMode::Auto => ToolChoice::Auto,
-        fabro_api_types::CompletionToolChoiceMode::None => ToolChoice::None,
-        fabro_api_types::CompletionToolChoiceMode::Required => ToolChoice::Required,
-        fabro_api_types::CompletionToolChoiceMode::Named => {
-            ToolChoice::named(tc.tool_name.unwrap_or_default())
-        }
+        CompletionToolChoiceMode::Auto => ToolChoice::Auto,
+        CompletionToolChoiceMode::None => ToolChoice::None,
+        CompletionToolChoiceMode::Required => ToolChoice::Required,
+        CompletionToolChoiceMode::Named => ToolChoice::named(tc.tool_name.unwrap_or_default()),
     });
 
     // Build the LLM request
@@ -1431,18 +1426,18 @@ async fn create_completion(
             )]);
             return Sse::new(sse_stream).into_response();
         }
-        let empty_msg = fabro_api_types::CompletionMessage {
-            role: fabro_api_types::CompletionMessageRole::Assistant,
+        let empty_msg = CompletionMessage {
+            role: CompletionMessageRole::Assistant,
             content: vec![],
             name: None,
             tool_call_id: None,
         };
-        return Json(fabro_api_types::CompletionResponse {
+        return Json(CompletionResponse {
             id: msg_id,
             model: model_id,
             message: empty_msg,
             stop_reason: "end_turn".to_string(),
-            usage: fabro_api_types::CompletionUsage {
+            usage: CompletionUsage {
                 input_tokens: 0,
                 output_tokens: 0,
             },
@@ -1528,12 +1523,12 @@ async fn create_completion(
                 params = params.top_p(top_p);
             }
             match generate_object(params, schema).await {
-                Ok(result) => Json(fabro_api_types::CompletionResponse {
+                Ok(result) => Json(CompletionResponse {
                     id: msg_id,
                     model: model_id,
                     message: convert_llm_message(&result.response.message),
                     stop_reason: finish_reason_to_api_stop_reason(&result.finish_reason),
-                    usage: fabro_api_types::CompletionUsage {
+                    usage: CompletionUsage {
                         input_tokens: result.usage.input_tokens,
                         output_tokens: result.usage.output_tokens,
                     },
@@ -1545,12 +1540,12 @@ async fn create_completion(
             }
         } else {
             match client.complete(&request).await {
-                Ok(response) => Json(fabro_api_types::CompletionResponse {
+                Ok(response) => Json(CompletionResponse {
                     id: response.id,
                     model: response.model,
                     message: convert_llm_message(&response.message),
                     stop_reason: finish_reason_to_api_stop_reason(&response.finish_reason),
-                    usage: fabro_api_types::CompletionUsage {
+                    usage: CompletionUsage {
                         input_tokens: response.usage.input_tokens,
                         output_tokens: response.usage.output_tokens,
                     },
