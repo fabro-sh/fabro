@@ -13,7 +13,6 @@ use fabro_llm::types::{Message, Request, Usage};
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::FallbackTarget;
 use fabro_model::Provider;
-use tokio::fs;
 use tokio::sync::Mutex as TokioMutex;
 
 use super::super::agent::{CodergenBackend, CodergenResult};
@@ -269,7 +268,7 @@ impl CodergenBackend for AgentApiBackend {
         node: &Node,
         prompt: &str,
         system_prompt: Option<&str>,
-        stage_dir: &std::path::Path,
+        _stage_dir: &std::path::Path,
     ) -> Result<CodergenResult, FabroError> {
         let client = Client::from_env()
             .await
@@ -309,11 +308,6 @@ impl CodergenBackend for AgentApiBackend {
             metadata: None,
             provider_options: None,
         };
-
-        let _ = fs::create_dir_all(stage_dir).await;
-        if let Ok(json) = serde_json::to_string_pretty(&request) {
-            let _ = fs::write(stage_dir.join("api_request.json"), json).await;
-        }
 
         // Build per-request fallback chain: if the node overrides the provider,
         // no failover is available; otherwise use the backend's.
@@ -390,10 +384,6 @@ impl CodergenBackend for AgentApiBackend {
             }
             Err(sdk_err) => return Err(FabroError::Llm(sdk_err)),
         };
-
-        if let Ok(json) = serde_json::to_string_pretty(&response) {
-            let _ = fs::write(stage_dir.join("api_response.json"), json).await;
-        }
 
         let mut stage_usage = StageUsage {
             model: actual_model,

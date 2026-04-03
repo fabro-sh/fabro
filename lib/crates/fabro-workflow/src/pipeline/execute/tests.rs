@@ -768,7 +768,7 @@ async fn max_node_visits_errors_on_cycle() {
 }
 
 #[tokio::test]
-async fn panic_handler_writes_panic_txt() {
+async fn panic_handler_returns_panic_message() {
     let dir = tempfile::tempdir().unwrap();
     let mut g = Graph::new("panic_test");
     let mut start = Node::new("start");
@@ -790,7 +790,7 @@ async fn panic_handler_writes_panic_txt() {
 
     let mut registry = make_registry();
     registry.register("panicker", Box::new(PanickingHandler));
-    let _ = run_graph(
+    let result = run_graph(
         registry,
         test_emitter_arc("test-run"),
         local_env(),
@@ -799,10 +799,10 @@ async fn panic_handler_writes_panic_txt() {
     )
     .await;
 
+    let outcome = result.expect("runner should convert panic into a failed outcome");
+    assert_eq!(outcome.status, StageStatus::Fail);
     let panic_path = dir.path().join("nodes").join("boom").join("panic.txt");
-    assert!(panic_path.exists());
-    let content = std::fs::read_to_string(&panic_path).unwrap();
-    assert!(content.contains("test panic message"));
+    assert!(!panic_path.exists(), "panic.txt should not be written");
 }
 
 #[tokio::test]

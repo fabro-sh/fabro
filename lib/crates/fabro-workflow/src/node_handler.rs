@@ -17,7 +17,6 @@ use crate::graph::WorkflowNode;
 use crate::handler::{EngineServices, dispatch_handler, format_panic_message};
 use crate::outcome::{Outcome, StageStatus};
 use crate::retry::build_retry_policy;
-use crate::run_dir;
 use fabro_graphviz::graph::types::Graph as GvGraph;
 use tokio::time::timeout;
 
@@ -100,10 +99,6 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
             }
             Err(panic_payload) => {
                 let msg = format_panic_message(&panic_payload);
-                let visit = context.node_visit_count().max(1);
-                let panic_dir = run_dir::node_dir(&self.run_dir, &gv_node.id, visit);
-                let _ = std::fs::create_dir_all(&panic_dir);
-                let _ = std::fs::write(panic_dir.join("panic.txt"), &msg);
                 Err(CoreError::handler(HandlerErrorDetail {
                     message: msg,
                     retryable: false,

@@ -9475,7 +9475,7 @@ async fn cli_backend_run_uses_node_provider_override() {
 }
 
 #[tokio::test]
-async fn cli_backend_run_writes_provider_used_json() {
+async fn cli_backend_run_returns_text_and_usage() {
     let claude_output =
         r#"{"type":"result","result":"done","usage":{"input_tokens":10,"output_tokens":5}}"#;
     let env: Arc<dyn fabro_agent::Sandbox> = Arc::new(CliTestEnv::new(claude_output));
@@ -9487,7 +9487,7 @@ async fn cli_backend_run_writes_provider_used_json() {
     let emitter = Arc::new(EventEmitter::default());
     let dir = tempfile::tempdir().unwrap();
 
-    backend
+    let result = backend
         .run(
             &node,
             "test",
@@ -9501,19 +9501,16 @@ async fn cli_backend_run_writes_provider_used_json() {
         .await
         .expect("should succeed");
 
-    let provider_path = dir.path().join("provider_used.json");
-    assert!(provider_path.exists(), "should write provider_used.json");
-    let provider_json: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&provider_path).unwrap()).unwrap();
-    assert_eq!(provider_json["mode"], "cli");
-    assert_eq!(provider_json["provider"], "anthropic");
-    assert_eq!(provider_json["model"], "claude-opus-4-6");
-    assert!(
-        provider_json["command"]
-            .as_str()
-            .unwrap()
-            .contains("claude")
-    );
+    match result {
+        CodergenResult::Text { text, usage, .. } => {
+            assert_eq!(text, "done");
+            let usage = usage.expect("CLI backend should report usage");
+            assert_eq!(usage.input_tokens, 10);
+            assert_eq!(usage.output_tokens, 5);
+            assert_eq!(usage.model, "claude-opus-4-6");
+        }
+        CodergenResult::Full(_) => panic!("expected Text result"),
+    }
 }
 
 // -- BackendRouter e2e: delegates to correct backend --

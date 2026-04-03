@@ -982,16 +982,6 @@ async fn run_daytona_cli_test(provider: Provider, model: &str, install_command: 
         Err(e) => panic!("{provider}/{model} on Daytona failed: {e}"),
     }
 
-    // Verify log files
-    let provider_path = dir.path().join("provider_used.json");
-    assert!(
-        provider_path.exists(),
-        "{provider}/{model}: provider_used.json should exist"
-    );
-    let provider_json: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&provider_path).unwrap()).unwrap();
-    assert_eq!(provider_json["mode"], "cli");
-
     env.cleanup().await.unwrap();
 }
 

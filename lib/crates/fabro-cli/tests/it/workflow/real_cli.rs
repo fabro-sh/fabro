@@ -25,8 +25,6 @@ async fn run_real_cli_test(provider: Provider, model: &str) {
 
     let context = Context::new();
     let emitter = Arc::new(EventEmitter::default());
-    let dir = tempfile::tempdir().unwrap();
-
     let result = backend
         .run(
             &node,
@@ -34,7 +32,7 @@ async fn run_real_cli_test(provider: Provider, model: &str) {
             &context,
             None,
             &emitter,
-            dir.path(),
+            workspace.path(),
             &env,
             None,
         )
@@ -56,29 +54,6 @@ async fn run_real_cli_test(provider: Provider, model: &str) {
         }
         CodergenResult::Full(_) => panic!("expected Text result from {provider}/{model}"),
     }
-
-    // Verify log files were written
-    let provider_path = dir.path().join("provider_used.json");
-    assert!(
-        provider_path.exists(),
-        "{provider}/{model}: provider_used.json should exist"
-    );
-    let provider_json: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&provider_path).unwrap()).unwrap();
-    assert_eq!(provider_json["mode"], "cli");
-    assert_eq!(provider_json["provider"], provider.as_str());
-
-    // Verify CLI output was streamed to stage_dir during poll
-    let stdout_log = dir.path().join("cli_stdout.log");
-    assert!(
-        stdout_log.exists(),
-        "{provider}/{model}: cli_stdout.log should be written during poll"
-    );
-    let stdout_content = std::fs::read_to_string(&stdout_log).unwrap();
-    assert!(
-        !stdout_content.is_empty(),
-        "{provider}/{model}: cli_stdout.log should not be empty"
-    );
 }
 
 #[fabro_macros::e2e_test(live("ANTHROPIC_API_KEY"))]

@@ -6,7 +6,6 @@ use async_trait::async_trait;
 use fabro_agent::Sandbox;
 use fabro_agent::sandbox::ExecResult;
 use fabro_model::Provider;
-use tokio::fs;
 use tokio::time::sleep;
 
 use super::super::agent::{CodergenBackend, CodergenResult};
@@ -466,7 +465,7 @@ impl CodergenBackend for AgentCliBackend {
         _context: &Context,
         _thread_id: Option<&str>,
         emitter: &Arc<EventEmitter>,
-        stage_dir: &Path,
+        _stage_dir: &Path,
         sandbox: &Arc<dyn Sandbox>,
         _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
     ) -> Result<CodergenResult, FabroError> {
@@ -507,8 +506,6 @@ impl CodergenBackend for AgentCliBackend {
             model: model.to_string(),
             command: command.clone(),
         });
-
-        let _ = fs::create_dir_all(stage_dir).await;
 
         // Forward provider API key and custom env vars so the CLI tool can authenticate.
         // Build a HashMap to pass via exec_command's env_vars parameter — this
@@ -602,21 +599,6 @@ impl CodergenBackend for AgentCliBackend {
                 .map_err(|e| FabroError::handler(format!("Failed to poll CLI command: {e}")))?;
             let status = poll_result.stdout.trim();
 
-            // Sync CLI output to stage_dir for visibility (best-effort)
-            for (remote, local) in [
-                (&stdout_path, "cli_stdout.log"),
-                (&stderr_path, "cli_stderr.log"),
-            ] {
-                if let Ok(r) = sandbox
-                    .exec_command(&format!("cat {remote}"), 30_000, None, None, None)
-                    .await
-                {
-                    if !r.stdout.is_empty() {
-                        let _ = fs::write(stage_dir.join(local), &r.stdout).await;
-                    }
-                }
-            }
-
             if status != "running" {
                 break status.parse::<i32>().unwrap_or(-1);
             }
@@ -653,19 +635,7 @@ impl CodergenBackend for AgentCliBackend {
             .exec_command(&format!("rm -f {tmp_prefix}_*"), 30_000, None, None, None)
             .await;
 
-        if let Ok(json) = serde_json::to_string_pretty(&serde_json::json!({
-            "exit_code": result.exit_code,
-            "stdout_len": result.stdout.len(),
-            "stderr_len": result.stderr.len(),
-            "duration_ms": result.duration_ms,
-        })) {
-            let _ = fs::write(stage_dir.join("cli_result_meta.json"), json).await;
-        }
-
         if result.exit_code != 0 {
-            let _ = fs::write(stage_dir.join("cli_stdout.log"), &result.stdout).await;
-            let _ = fs::write(stage_dir.join("cli_stderr.log"), &result.stderr).await;
-
             let tail = |s: &str, n: usize| -> String {
                 s.chars()
                     .rev()
