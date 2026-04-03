@@ -954,7 +954,6 @@ async fn run_daytona_cli_test(provider: Provider, model: &str, install_command: 
     let node = Node::new("daytona_cli_test");
     let context = Context::new();
     let emitter = Arc::new(EventEmitter::default());
-    let dir = tempfile::tempdir().unwrap();
 
     let result = backend
         .run(

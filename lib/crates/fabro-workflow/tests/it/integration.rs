@@ -9045,7 +9045,6 @@ async fn cli_backend_run_writes_prompt_and_calls_exec() {
     let node = Node::new("fix_code");
     let context = Context::new();
     let emitter = Arc::new(EventEmitter::default());
-    let dir = tempfile::tempdir().unwrap();
 
     let result = backend
         .run(
@@ -9118,7 +9117,6 @@ async fn cli_backend_run_detects_changed_files() {
     let node = Node::new("implement");
     let context = Context::new();
     let emitter = Arc::new(EventEmitter::default());
-    let dir = tempfile::tempdir().unwrap();
 
     let result = backend
         .run(
@@ -9152,7 +9150,6 @@ async fn cli_backend_run_with_codex_provider() {
     let node = Node::new("implement");
     let context = Context::new();
     let emitter = Arc::new(EventEmitter::default());
-    let dir = tempfile::tempdir().unwrap();
 
     let result = backend
         .run(&node, "Build the API", &context, None, &emitter, &env, None)
@@ -9309,7 +9306,6 @@ async fn cli_backend_run_fails_on_nonzero_exit() {
     let node = Node::new("step");
     let context = Context::new();
     let emitter = Arc::new(EventEmitter::default());
-    let dir = tempfile::tempdir().unwrap();
 
     let _ = env; // unused, just for the above struct
 
@@ -9349,7 +9345,6 @@ async fn cli_backend_run_fails_on_unparseable_output() {
     let node = Node::new("step");
     let context = Context::new();
     let emitter = Arc::new(EventEmitter::default());
-    let dir = tempfile::tempdir().unwrap();
 
     let result = backend
         .run(&node, "do something", &context, None, &emitter, &env, None)
@@ -9383,7 +9378,6 @@ async fn cli_backend_run_uses_node_model_override() {
 
     let context = Context::new();
     let emitter = Arc::new(EventEmitter::default());
-    let dir = tempfile::tempdir().unwrap();
 
     backend
         .run(&node, "test", &context, None, &emitter, &env, None)
@@ -9425,7 +9419,6 @@ async fn cli_backend_run_uses_node_provider_override() {
 
     let context = Context::new();
     let emitter = Arc::new(EventEmitter::default());
-    let dir = tempfile::tempdir().unwrap();
 
     backend
         .run(&node, "test", &context, None, &emitter, &env, None)
@@ -9451,7 +9444,6 @@ async fn cli_backend_run_returns_text_and_usage() {
     let node = Node::new("step");
     let context = Context::new();
     let emitter = Arc::new(EventEmitter::default());
-    let dir = tempfile::tempdir().unwrap();
 
     let result = backend
         .run(&node, "test", &context, None, &emitter, &env, None)
@@ -9492,7 +9484,6 @@ async fn backend_router_delegates_to_cli_for_cli_node() {
 
     let context = Context::new();
     let emitter = Arc::new(EventEmitter::default());
-    let dir = tempfile::tempdir().unwrap();
 
     let result = router
         .run(&node, "Fix the bug", &context, None, &emitter, &env, None)
@@ -9527,7 +9518,6 @@ async fn backend_router_delegates_to_api_for_normal_node() {
 
     let context = Context::new();
     let emitter = Arc::new(EventEmitter::default());
-    let dir = tempfile::tempdir().unwrap();
 
     let result = router
         .run(&node, "Plan the work", &context, None, &emitter, &env, None)
@@ -9565,7 +9555,6 @@ async fn backend_router_delegates_to_cli_for_backend_attr() {
 
     let context = Context::new();
     let emitter = Arc::new(EventEmitter::default());
-    let dir = tempfile::tempdir().unwrap();
 
     let result = router
         .run(&node, "Build it", &context, None, &emitter, &env, None)
