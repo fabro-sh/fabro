@@ -51,26 +51,29 @@ fn store_dump_exports_completed_run_snapshot() {
     success: true
     exit_code: 0
     ----- stdout -----
-    Exported 14 files for run [ULID] to [TEMP_DIR]/export
+    Exported 17 files for run [ULID] to [TEMP_DIR]/export
     ----- stderr -----
     ");
 
-    assert_snapshot!(dump_file_summary(&output_dir), @r###"
+    assert_snapshot!(dump_file_summary(&output_dir), @"
     checkpoint.json
-    checkpoints/0001.json
-    checkpoints/0002.json
-    checkpoints/0003.json
+    checkpoints/0012.json
+    checkpoints/0016.json
+    checkpoints/0020.json
     conclusion.json
     events.jsonl
     graph.fabro
+    nodes/exit/visit-1/status.json
+    nodes/report/visit-1/response.md
     nodes/report/visit-1/status.json
+    nodes/run_tests/visit-1/response.md
     nodes/run_tests/visit-1/status.json
     nodes/start/visit-1/status.json
     run.json
     sandbox.json
     start.json
     status.json
-    "###);
+    ");
 }
 
 #[test]

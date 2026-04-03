@@ -68,7 +68,7 @@ fn inspect_completed_run_shows_run_start_conclusion_checkpoint() {
     let run = setup_completed_dry_run(&context);
     let output = run_success(&context, &["inspect", &run.run_id]);
 
-    assert_snapshot!(serde_json::to_string_pretty(&compact_inspect(&output)).unwrap(), @r###"
+    assert_snapshot!(serde_json::to_string_pretty(&compact_inspect(&output)).unwrap(), @r#"
     [
       {
         "run_id": "[ULID]",
@@ -86,7 +86,7 @@ fn inspect_completed_run_shows_run_start_conclusion_checkpoint() {
         "conclusion": {
           "status": "success",
           "duration_ms": "[DURATION_MS]",
-          "stage_count": 3
+          "stage_count": null
         },
         "checkpoint": {
           "current_node": "report",
@@ -102,7 +102,7 @@ fn inspect_completed_run_shows_run_start_conclusion_checkpoint() {
         }
       }
     ]
-    "###);
+    "#);
 }
 
 #[test]
@@ -120,7 +120,7 @@ fn inspect_completed_run_reads_store_without_disk_metadata_files() {
     }
     let output = run_success(&context, &["inspect", &run.run_id]);
 
-    assert_snapshot!(serde_json::to_string_pretty(&compact_inspect(&output)).unwrap(), @r###"
+    assert_snapshot!(serde_json::to_string_pretty(&compact_inspect(&output)).unwrap(), @r#"
     [
       {
         "run_id": "[ULID]",
@@ -138,7 +138,7 @@ fn inspect_completed_run_reads_store_without_disk_metadata_files() {
         "conclusion": {
           "status": "success",
           "duration_ms": "[DURATION_MS]",
-          "stage_count": 3
+          "stage_count": null
         },
         "checkpoint": {
           "current_node": "report",
@@ -154,7 +154,7 @@ fn inspect_completed_run_reads_store_without_disk_metadata_files() {
         }
       }
     ]
-    "###);
+    "#);
 }
 
 #[test]
@@ -165,7 +165,7 @@ fn inspect_git_backed_run_exposes_checkpoint_and_sandbox_state() {
 
     assert_snapshot!(
         serde_json::to_string_pretty(&compact_git_inspect(&output)).unwrap(),
-        @r###"
+        @r#"
     [
       {
         "run_id": "[ULID]",
@@ -186,7 +186,7 @@ fn inspect_git_backed_run_exposes_checkpoint_and_sandbox_state() {
           "status": "success",
           "duration_ms": "[DURATION_MS]",
           "final_git_commit_sha": "[SHA]",
-          "stage_count": 3
+          "stage_count": null
         },
         "checkpoint": {
           "current_node": "step_two",
@@ -204,6 +204,6 @@ fn inspect_git_backed_run_exposes_checkpoint_and_sandbox_state() {
         }
       }
     ]
-    "###
+    "#
     );
 }

@@ -4,7 +4,6 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use fabro_agent::{Sandbox, WorktreeOptions, WorktreeSandbox};
-use fabro_store::NodeVisitRef;
 use fabro_types::RunId;
 use tokio::sync::Semaphore;
 
@@ -713,14 +712,14 @@ mod tests {
             .await
             .unwrap();
 
-        let snapshot = run_store
-            .get_node(&NodeVisitRef {
+        let state = run_store.state().await.unwrap();
+        let node_state = state
+            .node(&fabro_store::NodeVisitRef {
                 node_id: "par",
                 visit: 1,
             })
-            .await
             .unwrap();
-        let results = snapshot.parallel_results.unwrap();
+        let results = node_state.parallel_results.as_ref().unwrap();
         assert!(results.is_array());
         assert_eq!(results.as_array().unwrap().len(), 2);
     }

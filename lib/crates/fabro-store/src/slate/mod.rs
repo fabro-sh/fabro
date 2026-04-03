@@ -383,8 +383,7 @@ mod tests {
 
     use bytes::Bytes;
     use fabro_types::{
-        AttrValue, Graph, NodeStatusRecord, RunId, RunRecord, RunStatus, Settings, StageStatus,
-        StatusReason, fixtures,
+        AttrValue, Graph, RunId, RunRecord, RunStatus, Settings, StatusReason, fixtures,
     };
     use object_store::memory::InMemory;
     use slatedb::config::Settings as SlateSettings;
@@ -429,15 +428,6 @@ mod tests {
             host_repo_path: Some("github.com/fabro-sh/fabro".to_string()),
             base_branch: Some("main".to_string()),
             labels: std::collections::HashMap::from([("team".to_string(), "infra".to_string())]),
-        }
-    }
-
-    fn sample_node_status() -> NodeStatusRecord {
-        NodeStatusRecord {
-            status: StageStatus::Success,
-            notes: Some("done".to_string()),
-            failure_reason: None,
-            timestamp: dt("2026-03-27T12:12:00Z"),
         }
     }
 

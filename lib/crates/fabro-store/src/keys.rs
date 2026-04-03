@@ -1,70 +1,12 @@
 use crate::NodeVisitRef;
 
 pub(crate) const INIT_KEY: &str = "_init.json";
-pub(crate) const RETRO_PROMPT_KEY: &str = "retro/prompt.md";
-pub(crate) const RETRO_RESPONSE_KEY: &str = "retro/response.md";
 pub(crate) const EVENTS_PREFIX: &str = "events/";
 pub(crate) const ARTIFACT_VALUES_PREFIX: &str = "artifacts/values/";
 pub(crate) const ARTIFACT_NODES_PREFIX: &str = "artifacts/nodes/";
 
 pub(crate) fn init() -> &'static str {
     INIT_KEY
-}
-
-pub(crate) fn node_visit_prefix(node: &NodeVisitRef<'_>) -> String {
-    format!("nodes/{}/visit-{}", node.node_id, node.visit)
-}
-
-pub(crate) fn node_prompt(node: &NodeVisitRef<'_>) -> String {
-    format!("{}/prompt.md", node_visit_prefix(node))
-}
-
-pub(crate) fn node_response(node: &NodeVisitRef<'_>) -> String {
-    format!("{}/response.md", node_visit_prefix(node))
-}
-
-pub(crate) fn node_status(node: &NodeVisitRef<'_>) -> String {
-    format!("{}/status.json", node_visit_prefix(node))
-}
-
-pub(crate) fn node_outcome(node: &NodeVisitRef<'_>) -> String {
-    format!("{}/outcome.json", node_visit_prefix(node))
-}
-
-pub(crate) fn node_provider_used(node: &NodeVisitRef<'_>) -> String {
-    format!("{}/provider_used.json", node_visit_prefix(node))
-}
-
-pub(crate) fn node_diff(node: &NodeVisitRef<'_>) -> String {
-    format!("{}/diff.patch", node_visit_prefix(node))
-}
-
-pub(crate) fn node_script_invocation(node: &NodeVisitRef<'_>) -> String {
-    format!("{}/script_invocation.json", node_visit_prefix(node))
-}
-
-pub(crate) fn node_script_timing(node: &NodeVisitRef<'_>) -> String {
-    format!("{}/script_timing.json", node_visit_prefix(node))
-}
-
-pub(crate) fn node_parallel_results(node: &NodeVisitRef<'_>) -> String {
-    format!("{}/parallel_results.json", node_visit_prefix(node))
-}
-
-pub(crate) fn node_stdout(node: &NodeVisitRef<'_>) -> String {
-    format!("{}/stdout.log", node_visit_prefix(node))
-}
-
-pub(crate) fn node_stderr(node: &NodeVisitRef<'_>) -> String {
-    format!("{}/stderr.log", node_visit_prefix(node))
-}
-
-pub(crate) fn retro_prompt() -> &'static str {
-    RETRO_PROMPT_KEY
-}
-
-pub(crate) fn retro_response() -> &'static str {
-    RETRO_RESPONSE_KEY
 }
 
 pub(crate) fn event_key(seq: u32, epoch_ms: i64) -> String {
@@ -96,10 +38,6 @@ pub(crate) fn parse_artifact_value_id(key: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
-pub(crate) fn parse_node_key(key: &str) -> Option<(String, u32, String)> {
-    parse_visit_scoped_key(key, "nodes/")
-}
-
 pub(crate) fn parse_node_asset_key(key: &str) -> Option<(String, u32, String)> {
     parse_visit_scoped_key(key, ARTIFACT_NODES_PREFIX)
 }
@@ -123,40 +61,6 @@ mod tests {
     fn top_level_keys_match_spec() {
         assert_eq!(init(), "_init.json");
         assert_eq!(event_key(7, 123), "events/000007-123.json");
-        assert_eq!(retro_prompt(), "retro/prompt.md");
-        assert_eq!(retro_response(), "retro/response.md");
-    }
-
-    #[test]
-    fn node_keys_match_spec() {
-        let node = NodeVisitRef {
-            node_id: "plan",
-            visit: 3,
-        };
-        assert_eq!(node_visit_prefix(&node), "nodes/plan/visit-3");
-        assert_eq!(node_prompt(&node), "nodes/plan/visit-3/prompt.md");
-        assert_eq!(node_response(&node), "nodes/plan/visit-3/response.md");
-        assert_eq!(node_status(&node), "nodes/plan/visit-3/status.json");
-        assert_eq!(node_outcome(&node), "nodes/plan/visit-3/outcome.json");
-        assert_eq!(
-            node_provider_used(&node),
-            "nodes/plan/visit-3/provider_used.json"
-        );
-        assert_eq!(node_diff(&node), "nodes/plan/visit-3/diff.patch");
-        assert_eq!(
-            node_script_invocation(&node),
-            "nodes/plan/visit-3/script_invocation.json"
-        );
-        assert_eq!(
-            node_script_timing(&node),
-            "nodes/plan/visit-3/script_timing.json"
-        );
-        assert_eq!(
-            node_parallel_results(&node),
-            "nodes/plan/visit-3/parallel_results.json"
-        );
-        assert_eq!(node_stdout(&node), "nodes/plan/visit-3/stdout.log");
-        assert_eq!(node_stderr(&node), "nodes/plan/visit-3/stderr.log");
     }
 
     #[test]
@@ -185,10 +89,6 @@ mod tests {
             Some("summary".to_string())
         );
         assert_eq!(
-            parse_node_key("nodes/plan/visit-3/status.json"),
-            Some(("plan".to_string(), 3, "status.json".to_string()))
-        );
-        assert_eq!(
             parse_node_asset_key("artifacts/nodes/code/visit-2/src/main.rs"),
             Some(("code".to_string(), 2, "src/main.rs".to_string()))
         );
@@ -201,7 +101,6 @@ mod tests {
             parse_artifact_value_id("artifacts/values/summary.txt"),
             None
         );
-        assert_eq!(parse_node_key("nodes/plan/status.json"), None);
         assert_eq!(
             parse_node_asset_key("artifacts/nodes/code/status.json"),
             None

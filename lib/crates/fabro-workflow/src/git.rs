@@ -639,7 +639,7 @@ mod tests {
         .unwrap();
         run.append_event(&event(
             "checkpoint.completed",
-            serde_json::json!({"diff": "diff --git a/story.txt b/story.txt", "ordinal": 1}),
+            serde_json::json!({"diff": "diff --git a/story.txt b/story.txt", "ordinal": 1, "current_node": "work", "node_visits": {"work": 2}}),
         ))
         .await
         .unwrap();
