@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use fabro_config::run::MergeStrategy;
-use fabro_store::SlateRunStore;
+use fabro_store::{RunState, SlateRunStore};
 use fabro_types::PullRequestRecord;
 use tracing::{debug, info};
 
@@ -219,22 +219,26 @@ fn read_dot_source(run_dir: &Path) -> Option<String> {
     }
 }
 
-/// Read plan text from the first `nodes/plan*/response.md` found in run_dir.
+/// Read plan text from the first `plan*` node response in run state.
 ///
-/// Entries are sorted alphabetically so `plan` is preferred over `planning`.
-fn read_plan_text(run_dir: &Path) -> Option<String> {
-    let nodes_dir = run_dir.join("nodes");
-    let mut entries: Vec<_> = std::fs::read_dir(&nodes_dir).ok()?.flatten().collect();
-    entries.sort_by_key(std::fs::DirEntry::file_name);
-    for entry in entries {
-        let dir_name = entry.file_name();
-        let dir_name_str = dir_name.to_string_lossy();
-        if dir_name_str.starts_with("plan") && entry.file_type().is_ok_and(|ft| ft.is_dir()) {
-            let response_path = entry.path().join("response.md");
-            if let Ok(content) = std::fs::read_to_string(&response_path) {
-                debug!(node_dir = %dir_name_str, "Found plan node response for PR body");
-                return Some(content);
-            }
+/// Nodes are sorted alphabetically so `plan` is preferred over `planning`.
+/// For repeated visits, earlier visits sort first to match the prior on-disk
+/// directory scan behavior.
+fn read_plan_text(state: &RunState) -> Option<String> {
+    let mut plan_nodes = state
+        .nodes
+        .iter()
+        .filter_map(|((node_id, visit), node)| {
+            node_id
+                .starts_with("plan")
+                .then_some((node_id.as_str(), *visit, node.response.as_deref()))
+        })
+        .collect::<Vec<_>>();
+    plan_nodes.sort_by(|left, right| left.0.cmp(right.0).then(left.1.cmp(&right.1)));
+    for (node_id, visit, response) in plan_nodes {
+        if let Some(response) = response {
+            debug!(node_id, visit, "Found plan node response for PR body from run state");
+            return Some(response.to_string());
         }
     }
     None
@@ -312,12 +316,11 @@ pub async fn build_pr_body(
     goal: &str,
     model: &str,
     run_store: &SlateRunStore,
-    run_dir: &Path,
+    _run_dir: &Path,
     conclusion: Option<&Conclusion>,
 ) -> Result<String, String> {
     debug!("Building PR body");
 
-    let plan_text = read_plan_text(run_dir);
     let loaded_conclusion = if conclusion.is_none() {
         run_store
             .state()
@@ -338,6 +341,7 @@ pub async fn build_pr_body(
             tracing::warn!(error = %err, "Failed to load run state from store for PR body");
         })
         .ok();
+    let plan_text = run_state.as_ref().and_then(read_plan_text);
     let retro = run_state.as_ref().and_then(|state| state.retro.clone());
     let run_record = run_state.as_ref().and_then(|state| state.run.clone());
     let dot_source = run_state
@@ -923,40 +927,71 @@ mod tests {
 
     #[test]
     fn read_plan_text_found() {
-        let tmp = tempfile::tempdir().unwrap();
-        let plan_dir = tmp.path().join("nodes").join("plan");
-        std::fs::create_dir_all(&plan_dir).unwrap();
-        std::fs::write(plan_dir.join("response.md"), "This is the plan").unwrap();
+        let mut state = RunState::default();
+        state.nodes.insert(
+            ("plan".to_string(), 1),
+            fabro_store::NodeState {
+                response: Some("This is the plan".to_string()),
+                ..Default::default()
+            },
+        );
 
-        let result = read_plan_text(tmp.path());
+        let result = read_plan_text(&state);
         assert_eq!(result, Some("This is the plan".to_string()));
     }
 
     #[test]
     fn read_plan_text_prefix_match() {
-        let tmp = tempfile::tempdir().unwrap();
-        let plan_dir = tmp.path().join("nodes").join("planning");
-        std::fs::create_dir_all(&plan_dir).unwrap();
-        std::fs::write(plan_dir.join("response.md"), "Planning content").unwrap();
+        let mut state = RunState::default();
+        state.nodes.insert(
+            ("planning".to_string(), 1),
+            fabro_store::NodeState {
+                response: Some("Planning content".to_string()),
+                ..Default::default()
+            },
+        );
 
-        let result = read_plan_text(tmp.path());
+        let result = read_plan_text(&state);
         assert_eq!(result, Some("Planning content".to_string()));
     }
 
     #[test]
-    fn read_plan_text_not_found() {
-        let tmp = tempfile::tempdir().unwrap();
-        let nodes_dir = tmp.path().join("nodes").join("implement");
-        std::fs::create_dir_all(nodes_dir).unwrap();
+    fn read_plan_text_prefers_alphabetically_first_plan_node() {
+        let mut state = RunState::default();
+        state.nodes.insert(
+            ("planning".to_string(), 1),
+            fabro_store::NodeState {
+                response: Some("Planning content".to_string()),
+                ..Default::default()
+            },
+        );
+        state.nodes.insert(
+            ("plan".to_string(), 1),
+            fabro_store::NodeState {
+                response: Some("Plan content".to_string()),
+                ..Default::default()
+            },
+        );
 
-        let result = read_plan_text(tmp.path());
+        let result = read_plan_text(&state);
+        assert_eq!(result, Some("Plan content".to_string()));
+    }
+
+    #[test]
+    fn read_plan_text_not_found() {
+        let mut state = RunState::default();
+        state
+            .nodes
+            .insert(("implement".to_string(), 1), Default::default());
+
+        let result = read_plan_text(&state);
         assert_eq!(result, None);
     }
 
     #[test]
-    fn read_plan_text_no_nodes_dir() {
-        let tmp = tempfile::tempdir().unwrap();
-        let result = read_plan_text(tmp.path());
+    fn read_plan_text_empty_state() {
+        let state = RunState::default();
+        let result = read_plan_text(&state);
         assert_eq!(result, None);
     }
 
@@ -1145,6 +1180,97 @@ mod tests {
         assert!(body.contains("### Retro"));
         assert!(body.contains("### Fabro Details"));
         assert!(body.contains("test.fabro"));
+    }
+
+    #[tokio::test]
+    async fn build_pr_body_uses_plan_text_from_store_without_response_md() {
+        install_mock_llm();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let store = test_store();
+        let created_at = Utc::now();
+        let run_store = store
+            .create_run(
+                &fixtures::RUN_1,
+                created_at,
+                Some(&tmp.path().display().to_string()),
+            )
+            .await
+            .unwrap();
+
+        let run_record = RunRecord {
+            run_id: fixtures::RUN_1,
+            created_at,
+            settings: Settings::default(),
+            graph: Graph::new("test"),
+            workflow_slug: Some("test".to_string()),
+            working_directory: PathBuf::from("/tmp/project"),
+            host_repo_path: Some("/tmp/project".to_string()),
+            base_branch: Some("main".to_string()),
+            labels: HashMap::new(),
+        };
+        append_workflow_event(
+            run_store.as_ref(),
+            &fixtures::RUN_1,
+            &WorkflowRunEvent::RunCreated {
+                run_id: fixtures::RUN_1,
+                settings: serde_json::to_value(&run_record.settings).unwrap(),
+                graph: serde_json::to_value(&run_record.graph).unwrap(),
+                workflow_source: Some("digraph test { plan -> code }".to_string()),
+                workflow_config: None,
+                labels: run_record.labels.clone().into_iter().collect(),
+                run_dir: tmp.path().display().to_string(),
+                working_directory: run_record.working_directory.display().to_string(),
+                host_repo_path: run_record.host_repo_path.clone(),
+                base_branch: run_record.base_branch.clone(),
+                workflow_slug: run_record.workflow_slug.clone(),
+                db_prefix: None,
+            },
+        )
+        .await
+        .unwrap();
+        append_workflow_event(
+            run_store.as_ref(),
+            &fixtures::RUN_1,
+            &WorkflowRunEvent::StageCompleted {
+                node_id: "plan".to_string(),
+                name: "plan".to_string(),
+                index: 0,
+                duration_ms: 1,
+                status: "success".to_string(),
+                preferred_label: None,
+                suggested_next_ids: vec![],
+                usage: None,
+                failure: None,
+                notes: None,
+                files_touched: vec![],
+                context_updates: None,
+                jump_to_node: None,
+                context_values: None,
+                node_visits: None,
+                loop_failure_signatures: None,
+                restart_failure_signatures: None,
+                response: Some("Plan from store".to_string()),
+                attempt: 1,
+                max_attempts: 1,
+            },
+        )
+        .await
+        .unwrap();
+
+        let body = build_pr_body(
+            "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
+            "Implement feature",
+            "mock-model",
+            run_store.as_ref(),
+            tmp.path(),
+            Some(&make_test_conclusion()),
+        )
+        .await
+        .unwrap();
+
+        assert!(body.contains("<summary>Full plan</summary>"));
+        assert!(body.contains("Plan from store"));
     }
 
     // ── parse_dot_summary tests ─────────────────────────────────────────
