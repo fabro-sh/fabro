@@ -229,15 +229,20 @@ fn read_plan_text(state: &RunState) -> Option<String> {
         .nodes
         .iter()
         .filter_map(|((node_id, visit), node)| {
-            node_id
-                .starts_with("plan")
-                .then_some((node_id.as_str(), *visit, node.response.as_deref()))
+            node_id.starts_with("plan").then_some((
+                node_id.as_str(),
+                *visit,
+                node.response.as_deref(),
+            ))
         })
         .collect::<Vec<_>>();
     plan_nodes.sort_by(|left, right| left.0.cmp(right.0).then(left.1.cmp(&right.1)));
     for (node_id, visit, response) in plan_nodes {
         if let Some(response) = response {
-            debug!(node_id, visit, "Found plan node response for PR body from run state");
+            debug!(
+                node_id,
+                visit, "Found plan node response for PR body from run state"
+            );
             return Some(response.to_string());
         }
     }

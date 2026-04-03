@@ -1,5 +1,3 @@
-use std::io::Write;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -1453,27 +1451,6 @@ pub fn build_redacted_event_payload(
     event_payload_from_redacted_json(&line, run_id)
 }
 
-pub fn append_progress_event(run_dir: &Path, envelope: &RunEventEnvelope) -> Result<()> {
-    let line = redacted_event_json(envelope)?;
-    append_progress_event_with_line(run_dir, &line)
-}
-
-pub fn append_progress_event_with_line(run_dir: &Path, line: &str) -> Result<()> {
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(run_dir.join("progress.jsonl"))
-        .with_context(|| {
-            format!(
-                "Failed to open {}",
-                run_dir.join("progress.jsonl").display()
-            )
-        })?;
-    writeln!(file, "{line}")?;
-
-    Ok(())
-}
-
 pub fn redacted_event_json(envelope: &RunEventEnvelope) -> Result<String> {
     let line = serde_json::to_string(&normalized_envelope_value(envelope)?)?;
     Ok(redact_jsonl_line(&line))
@@ -1519,26 +1496,6 @@ pub async fn append_workflow_event(
         .await
         .map(|_| ())
         .map_err(anyhow::Error::from)
-}
-
-pub struct ProgressLogger {
-    run_dir: PathBuf,
-}
-
-impl ProgressLogger {
-    #[must_use]
-    pub fn new(run_dir: impl Into<PathBuf>) -> Self {
-        Self {
-            run_dir: run_dir.into(),
-        }
-    }
-
-    pub fn register(self, emitter: &EventEmitter) {
-        let run_dir = self.run_dir;
-        emitter.on_event(move |event| {
-            let _ = append_progress_event(&run_dir, event);
-        });
-    }
 }
 
 enum StoreProgressCommand {
@@ -1927,9 +1884,17 @@ mod tests {
         assert_eq!(envelope.properties["duration_ms"], 900);
     }
 
-    #[test]
-    fn append_progress_event_writes_envelope_shape() {
-        let dir = tempfile::tempdir().unwrap();
+    #[tokio::test]
+    async fn append_workflow_event_writes_store_event_shape() {
+        let store = fabro_store::SlateStore::new(
+            std::sync::Arc::new(object_store::memory::InMemory::new()),
+            "",
+            std::time::Duration::from_millis(1),
+        );
+        let run_store = store
+            .create_run(&fixtures::RUN_7, Utc::now(), None)
+            .await
+            .unwrap();
         let envelope = canonicalize_event(
             &fixtures::RUN_7,
             &WorkflowRunEvent::RunNotice {
@@ -1939,10 +1904,15 @@ mod tests {
             },
         );
 
-        append_progress_event(dir.path(), &envelope).unwrap();
+        let payload = build_redacted_event_payload(&envelope, &fixtures::RUN_7).unwrap();
+        run_store.append_event(&payload).await.unwrap();
 
-        let progress = std::fs::read_to_string(dir.path().join("progress.jsonl")).unwrap();
-        let line: serde_json::Value = serde_json::from_str(progress.trim()).unwrap();
+        let events = run_store.list_events().await.unwrap();
+        let line = events
+            .into_iter()
+            .next()
+            .map(|event| event.payload.as_value().clone())
+            .unwrap();
         assert!(line.get("id").is_some());
         assert_eq!(line["event"], "run.notice");
         assert_eq!(line["properties"]["code"], "example");
