@@ -990,9 +990,10 @@ mod tests {
     #[test]
     fn read_plan_text_not_found() {
         let mut state = RunState::default();
-        state
-            .nodes
-            .insert(("implement".to_string(), 1), Default::default());
+        state.nodes.insert(
+            ("implement".to_string(), 1),
+            fabro_store::NodeState::default(),
+        );
 
         let result = read_plan_text(&state);
         assert_eq!(result, None);

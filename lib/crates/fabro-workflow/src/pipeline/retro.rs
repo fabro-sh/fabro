@@ -191,7 +191,7 @@ mod tests {
         context.set("response.work", serde_json::json!("done"));
         let mut outcomes = HashMap::new();
         outcomes.insert("work".to_string(), crate::outcome::Outcome::success());
-        let checkpoint = Checkpoint::from_context(
+        Checkpoint::from_context(
             &context,
             "work",
             vec!["work".to_string()],
@@ -201,8 +201,7 @@ mod tests {
             HashMap::new(),
             HashMap::new(),
             HashMap::new(),
-        );
-        checkpoint
+        )
     }
 
     fn test_store() -> Arc<SlateStore> {

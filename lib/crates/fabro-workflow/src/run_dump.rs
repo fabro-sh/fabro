@@ -66,7 +66,7 @@ impl RunDump {
             if let Some(status) = node.status.as_ref() {
                 push_json_entry_path(
                     &mut entries,
-                    metadata_node_file_path(node_id, *visit, "status.json").into(),
+                    &PathBuf::from(metadata_node_file_path(node_id, *visit, "status.json")),
                     status,
                 );
             }
@@ -153,28 +153,28 @@ impl RunDump {
 
             if let Some(prompt) = node.prompt.as_ref() {
                 entries.push(RunDumpEntry::text_path(
-                    base.join("prompt.md"),
+                    &base.join("prompt.md"),
                     prompt.clone(),
                 ));
             }
             if let Some(response) = node.response.as_ref() {
                 entries.push(RunDumpEntry::text_path(
-                    base.join("response.md"),
+                    &base.join("response.md"),
                     response.clone(),
                 ));
             }
             if let Some(status) = node.status.as_ref() {
-                push_json_entry_path(&mut entries, base.join("status.json"), status);
+                push_json_entry_path(&mut entries, &base.join("status.json"), status);
             }
             if let Some(stdout) = node.stdout.as_ref() {
                 entries.push(RunDumpEntry::text_path(
-                    base.join("stdout.log"),
+                    &base.join("stdout.log"),
                     stdout.clone(),
                 ));
             }
             if let Some(stderr) = node.stderr.as_ref() {
                 entries.push(RunDumpEntry::text_path(
-                    base.join("stderr.log"),
+                    &base.join("stderr.log"),
                     stderr.clone(),
                 ));
             }
@@ -197,7 +197,7 @@ impl RunDump {
         for (seq, checkpoint) in &state.checkpoints {
             push_json_entry_path(
                 &mut entries,
-                PathBuf::from("checkpoints").join(format!("{seq:04}.json")),
+                &PathBuf::from("checkpoints").join(format!("{seq:04}.json")),
                 checkpoint,
             );
         }
@@ -211,7 +211,7 @@ impl RunDump {
                     format!("artifact value {artifact_id:?} is missing from the store")
                 })?;
             entries.push(RunDumpEntry::json_path(
-                PathBuf::from("artifacts")
+                &PathBuf::from("artifacts")
                     .join("values")
                     .join(format!("{}.json", artifact_id_segment.display())),
                 value,
@@ -234,7 +234,7 @@ impl RunDump {
                     )
                 })?;
             entries.push(RunDumpEntry::bytes_path(
-                PathBuf::from("artifacts")
+                &PathBuf::from("artifacts")
                     .join("nodes")
                     .join(node_id_segment)
                     .join(format!("visit-{visit}"))
@@ -293,7 +293,7 @@ impl RunDumpEntry {
         }
     }
 
-    fn text_path(path: PathBuf, contents: String) -> Self {
+    fn text_path(path: &Path, contents: String) -> Self {
         Self {
             path: path_to_string(path),
             contents: RunDumpContents::Text(contents),
@@ -307,7 +307,7 @@ impl RunDumpEntry {
         }
     }
 
-    fn json_path(path: PathBuf, contents: serde_json::Value) -> Self {
+    fn json_path(path: &Path, contents: serde_json::Value) -> Self {
         Self {
             path: path_to_string(path),
             contents: RunDumpContents::Json(contents),
@@ -321,7 +321,7 @@ impl RunDumpEntry {
         }
     }
 
-    fn bytes_path(path: PathBuf, contents: Vec<u8>) -> Self {
+    fn bytes_path(path: &Path, contents: Vec<u8>) -> Self {
         Self {
             path: path_to_string(path),
             contents: RunDumpContents::Bytes(contents),
@@ -357,7 +357,7 @@ where
     }
 }
 
-fn push_json_entry_path<T>(entries: &mut Vec<RunDumpEntry>, path: PathBuf, value: &T)
+fn push_json_entry_path<T>(entries: &mut Vec<RunDumpEntry>, path: &Path, value: &T)
 where
     T: serde::Serialize,
 {
@@ -374,7 +374,7 @@ fn metadata_node_file_path(node_id: &str, visit: u32, filename: &str) -> String 
     }
 }
 
-fn path_to_string(path: PathBuf) -> String {
+fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 

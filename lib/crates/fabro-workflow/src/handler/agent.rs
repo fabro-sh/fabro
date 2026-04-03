@@ -673,7 +673,8 @@ mod tests {
             ) -> Result<CodergenResult, FabroError> {
                 emitter.emit(&crate::event::WorkflowRunEvent::Agent {
                     stage: node.id.clone(),
-                    visit: crate::run_dir::visit_from_context(context) as u32,
+                    visit: u32::try_from(crate::run_dir::visit_from_context(context))
+                        .unwrap_or(u32::MAX),
                     event: fabro_agent::AgentEvent::SessionStarted {
                         provider: Some("openai".to_string()),
                         model: Some("gpt-5.4".to_string()),

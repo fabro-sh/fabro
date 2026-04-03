@@ -6,7 +6,7 @@ use std::time::Duration;
 use chrono::Utc;
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::Graph as GvGraph;
-use fabro_store::{SlateRunStore, SlateStore};
+use fabro_store::SlateStore;
 use object_store::memory::InMemory;
 
 use crate::error::Result;
@@ -127,7 +127,6 @@ pub async fn run_graph(
     )
     .await;
     let executed = pipeline::execute(initialized).await;
-    persist_run_artifacts_for_tests(executed.run_store.as_ref(), &run_options.run_dir).await;
     executed.outcome
 }
 
@@ -154,7 +153,6 @@ pub async fn run_graph_with_hooks(
     )
     .await;
     let executed = pipeline::execute(initialized).await;
-    persist_run_artifacts_for_tests(executed.run_store.as_ref(), &run_options.run_dir).await;
     executed.outcome
 }
 
@@ -180,11 +178,8 @@ pub async fn run_graph_from_checkpoint(
     )
     .await;
     let executed = pipeline::execute(initialized).await;
-    persist_run_artifacts_for_tests(executed.run_store.as_ref(), &run_options.run_dir).await;
     executed.outcome
 }
-
-async fn persist_run_artifacts_for_tests(_run_store: &SlateRunStore, _run_dir: &std::path::Path) {}
 
 pub struct WorkflowRunner {
     registry: std::sync::Mutex<Option<HandlerRegistry>>,
