@@ -236,7 +236,6 @@ async fn llm_evaluate(
     let visit_u32 = u32::try_from(visit).unwrap_or(u32::MAX);
     let stage_dir = node_dir(run_dir, node_id, visit);
     fs::create_dir_all(&stage_dir).await?;
-    fs::write(stage_dir.join("prompt.md"), &full_prompt).await?;
 
     emitter.emit(&WorkflowRunEvent::Prompt {
         stage: node_id.to_string(),
@@ -282,7 +281,6 @@ async fn llm_evaluate(
                 provider: String::new(),
                 usage: None,
             });
-            fs::write(stage_dir.join("response.md"), &response_text).await?;
             Ok(Candidate {
                 id: best_id,
                 status: outcome.status.to_string(),
@@ -297,7 +295,6 @@ async fn llm_evaluate(
                 provider: String::new(),
                 usage: None,
             });
-            fs::write(stage_dir.join("response.md"), &text).await?;
 
             // The LLM responded with text; try to find a matching candidate ID
             let text = text.trim().to_string();

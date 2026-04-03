@@ -252,11 +252,9 @@ impl Handler for AgentHandler {
             format!("{preamble}\n\n{expanded}")
         };
 
-        // 2. Write prompt to logs
         let visit = visit_from_context(context);
         let stage_dir = node_dir(run_dir, &node.id, visit);
         fs::create_dir_all(&stage_dir).await?;
-        fs::write(stage_dir.join("prompt.md"), &prompt).await?;
 
         // 3. Call LLM backend (agent loop)
         let thread_id = context.thread_id();
@@ -313,9 +311,7 @@ impl Handler for AgentHandler {
                 )
             };
 
-        // 4. Write response to logs
-        fs::write(stage_dir.join("response.md"), &response_text).await?;
-        // 7. Build and write status
+        // Build and write status
         let mut outcome = Outcome::success();
         outcome.notes = Some(format!("Stage completed: {}", node.id));
         outcome

@@ -1455,14 +1455,10 @@ pub fn build_redacted_event_payload(
 
 pub fn append_progress_event(run_dir: &Path, envelope: &RunEventEnvelope) -> Result<()> {
     let line = redacted_event_json(envelope)?;
-    append_progress_event_with_line(run_dir, envelope, &line)
+    append_progress_event_with_line(run_dir, &line)
 }
 
-pub fn append_progress_event_with_line(
-    run_dir: &Path,
-    envelope: &RunEventEnvelope,
-    line: &str,
-) -> Result<()> {
+pub fn append_progress_event_with_line(run_dir: &Path, line: &str) -> Result<()> {
     let mut file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -1474,11 +1470,6 @@ pub fn append_progress_event_with_line(
             )
         })?;
     writeln!(file, "{line}")?;
-
-    let pretty = serde_json::to_string_pretty(&normalized_envelope_value(envelope)?)?;
-    let pretty = redact_jsonl_line(&pretty);
-    std::fs::write(run_dir.join("live.json"), pretty)
-        .with_context(|| format!("Failed to write {}", run_dir.join("live.json").display()))?;
 
     Ok(())
 }

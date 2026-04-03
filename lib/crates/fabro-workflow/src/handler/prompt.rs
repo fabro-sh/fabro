@@ -87,11 +87,9 @@ impl Handler for PromptHandler {
             None
         };
 
-        // 2. Write prompt to logs
         let visit = visit_from_context(context);
         let stage_dir = node_dir(run_dir, &node.id, visit);
         fs::create_dir_all(&stage_dir).await?;
-        fs::write(stage_dir.join("prompt.md"), &prompt).await?;
 
         let prompt_provider = node
             .provider()
@@ -155,10 +153,7 @@ impl Handler for PromptHandler {
             usage: stage_usage.clone(),
         });
 
-        // 4. Write response to logs
-        fs::write(stage_dir.join("response.md"), &response_text).await?;
-
-        // 5. Build and write status
+        // 4. Build and write status
         let mut outcome = Outcome::success();
         outcome.notes = Some(format!("Stage completed: {}", node.id));
         outcome

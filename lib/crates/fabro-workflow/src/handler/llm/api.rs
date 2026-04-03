@@ -327,7 +327,7 @@ impl CodergenBackend for AgentApiBackend {
 
         let default_provider = self.provider.as_str().to_string();
 
-        let (response, actual_model, actual_provider) = match result {
+        let (response, actual_model, _actual_provider) = match result {
             Ok(resp) => (
                 resp,
                 request.model.clone(),
@@ -393,15 +393,6 @@ impl CodergenBackend for AgentApiBackend {
 
         if let Ok(json) = serde_json::to_string_pretty(&response) {
             let _ = fs::write(stage_dir.join("api_response.json"), json).await;
-        }
-
-        let provider_used = serde_json::json!({
-            "mode": "prompt",
-            "provider": &actual_provider,
-            "model": &actual_model,
-        });
-        if let Ok(json) = serde_json::to_string_pretty(&provider_used) {
-            let _ = fs::write(stage_dir.join("provider_used.json"), json).await;
         }
 
         let mut stage_usage = StageUsage {

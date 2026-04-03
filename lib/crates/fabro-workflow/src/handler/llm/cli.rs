@@ -509,15 +509,6 @@ impl CodergenBackend for AgentCliBackend {
         });
 
         let _ = fs::create_dir_all(stage_dir).await;
-        let provider_used = serde_json::json!({
-            "mode": "cli",
-            "provider": provider.as_str(),
-            "model": model,
-            "command": &command,
-        });
-        if let Ok(json) = serde_json::to_string_pretty(&provider_used) {
-            let _ = fs::write(stage_dir.join("provider_used.json"), json).await;
-        }
 
         // Forward provider API key and custom env vars so the CLI tool can authenticate.
         // Build a HashMap to pass via exec_command's env_vars parameter — this

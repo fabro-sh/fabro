@@ -4,7 +4,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use chrono::Utc;
 use fabro_config::sandbox::WorktreeMode;
 use fabro_config::{project as project_config, run as run_config, sandbox as sandbox_config};
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
@@ -12,7 +11,6 @@ use fabro_model::{Catalog, FallbackTarget, Provider};
 use fabro_sandbox::{SandboxProvider, SandboxSpec};
 use fabro_store::{RunStoreHandle, SlateRunStore};
 use fabro_types::{RunId, Settings};
-use serde::Serialize;
 
 use crate::context::Context;
 use crate::error::FabroError;
@@ -775,32 +773,12 @@ impl Drop for DetachedRunCompletionGuard {
 async fn persist_detached_failure(
     run_id: RunId,
     run_store: &SlateRunStore,
-    run_dir: &Path,
+    _run_dir: &Path,
     phase: &'static str,
     reason: StatusReason,
     error: &FabroError,
 ) -> Result<(), FabroError> {
-    #[derive(Serialize)]
-    struct DetachedFailureRecord<'a> {
-        timestamp: chrono::DateTime<Utc>,
-        phase: &'a str,
-        reason: StatusReason,
-        error: String,
-    }
-
     let message = error.to_string();
-    let record = DetachedFailureRecord {
-        timestamp: Utc::now(),
-        phase,
-        reason,
-        error: message.clone(),
-    };
-
-    std::fs::write(
-        run_dir.join("detached_failure.json"),
-        serde_json::to_string_pretty(&record).map_err(|err| FabroError::Io(err.to_string()))?,
-    )
-    .map_err(|err| FabroError::Io(err.to_string()))?;
 
     if let Err(err) = append_workflow_event(
         run_store,

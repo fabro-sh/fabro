@@ -15,11 +15,10 @@ use crate::git::sanitize_ref_component;
 use crate::hook_context::set_hook_node;
 use crate::millis_u64;
 use crate::outcome::{FailureCategory, FailureDetail, Outcome, OutcomeExt, StageStatus};
-use crate::run_dir::{node_dir, visit_from_context};
+use crate::run_dir::visit_from_context;
 use crate::sandbox_git::{GIT_REMOTE, git_checkpoint, git_merge_ff_only, git_remove_worktree};
 use fabro_graphviz::graph::{AttrValue, Graph, Node};
 use fabro_hooks::{HookContext, HookEvent};
-use tokio::fs;
 
 use super::{EngineServices, Handler};
 
@@ -476,13 +475,6 @@ impl Handler for ParallelHandler {
             .collect();
         context.set(keys::PARALLEL_RESULTS, serde_json::json!(results_json));
         context.set(keys::PARALLEL_BRANCH_COUNT, serde_json::json!(total));
-
-        let visit = visit_from_context(context);
-        let node_dir = node_dir(run_dir, &node.id, visit);
-        let _ = fs::create_dir_all(&node_dir).await;
-        if let Ok(json) = serde_json::to_string_pretty(&results_json) {
-            let _ = fs::write(node_dir.join("parallel_results.json"), json).await;
-        }
 
         services.emitter.emit(&WorkflowRunEvent::ParallelCompleted {
             duration_ms: millis_u64(parallel_start.elapsed()),
