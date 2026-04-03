@@ -56,22 +56,25 @@ fn store_dump_exports_completed_run_snapshot() {
     ----- stderr -----
     ");
 
-    assert_snapshot!(dump_file_summary(&output_dir), @r###"
+    assert_snapshot!(dump_file_summary(&output_dir), @"
     checkpoint.json
-    checkpoints/0001.json
-    checkpoints/0002.json
-    checkpoints/0003.json
+    checkpoints/0012.json
+    checkpoints/0016.json
+    checkpoints/0020.json
     conclusion.json
     events.jsonl
     graph.fabro
+    nodes/exit/visit-1/status.json
+    nodes/report/visit-1/response.md
     nodes/report/visit-1/status.json
+    nodes/run_tests/visit-1/response.md
     nodes/run_tests/visit-1/status.json
     nodes/start/visit-1/status.json
     run.json
     sandbox.json
     start.json
     status.json
-    "###);
+    ");
 }
 
 #[test]

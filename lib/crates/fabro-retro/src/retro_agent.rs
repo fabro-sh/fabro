@@ -207,7 +207,7 @@ pub async fn run_retro_agent(
 
     let prompt = build_retro_prompt(RETRO_DATA_DIR);
 
-    write_retro_prompt(run_store, &retro_dir, &prompt).await?;
+    write_retro_prompt(run_store, &retro_dir, &prompt)?;
 
     let process_result = session
         .process_input(&prompt)
@@ -250,7 +250,7 @@ pub async fn run_retro_agent(
     };
 
     // Write artifacts (on both success and failure)
-    write_retro_response(run_store, &retro_dir, &response_text).await?;
+    write_retro_response(run_store, &retro_dir, &response_text)?;
     write_retro_artifacts(
         &retro_dir,
         provider.as_str(),
@@ -285,7 +285,7 @@ pub fn dry_run_narrative() -> RetroNarrative {
     }
 }
 
-async fn write_retro_prompt(
+fn write_retro_prompt(
     _run_store: &SlateRunStore,
     retro_dir: &Path,
     prompt: &str,
@@ -294,7 +294,7 @@ async fn write_retro_prompt(
     Ok(())
 }
 
-async fn write_retro_response(
+fn write_retro_response(
     _run_store: &SlateRunStore,
     retro_dir: &Path,
     response: &str,

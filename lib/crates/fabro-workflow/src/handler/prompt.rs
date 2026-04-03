@@ -377,14 +377,14 @@ mod tests {
             .unwrap();
         logger.flush().await;
 
-        let snapshot = run_store
-            .get_node(&NodeVisitRef {
+        let state = run_store.state().await.unwrap();
+        let node_state = state
+            .node(&NodeVisitRef {
                 node_id: "classify",
                 visit: 1,
             })
-            .await
             .unwrap();
-        assert_eq!(snapshot.provider_used.unwrap()["mode"], "prompt");
+        assert_eq!(node_state.provider_used.as_ref().unwrap()["mode"], "prompt");
     }
 
     struct OneShotCapturingBackend {

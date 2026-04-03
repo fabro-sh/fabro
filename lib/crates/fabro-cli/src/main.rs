@@ -208,7 +208,7 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::Install { web_url } => {
                 commands::install::run_install(&web_url, &globals).await?;
             }
-            Commands::Pr(ns) => commands::pr::dispatch(ns, &globals).await?,
+            Commands::Pr(ns) => Box::pin(commands::pr::dispatch(ns, &globals)).await?,
             Commands::Secret(ns) => commands::secret::dispatch(ns, &globals)?,
             Commands::Settings(args) => commands::config::execute(&args, &globals)?,
             Commands::Workflow(ns) => commands::workflow::dispatch(ns, &globals)?,

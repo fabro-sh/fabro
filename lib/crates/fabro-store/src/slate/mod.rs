@@ -383,8 +383,7 @@ mod tests {
 
     use bytes::Bytes;
     use fabro_types::{
-        AttrValue, Graph, NodeStatusRecord, RunId, RunRecord, RunStatus, Settings, StageStatus,
-        StatusReason, fixtures,
+        AttrValue, Graph, RunId, RunRecord, RunStatus, Settings, StatusReason, fixtures,
     };
     use object_store::memory::InMemory;
     use slatedb::config::Settings as SlateSettings;
@@ -429,15 +428,6 @@ mod tests {
             host_repo_path: Some("github.com/fabro-sh/fabro".to_string()),
             base_branch: Some("main".to_string()),
             labels: std::collections::HashMap::from([("team".to_string(), "infra".to_string())]),
-        }
-    }
-
-    fn sample_node_status() -> NodeStatusRecord {
-        NodeStatusRecord {
-            status: StageStatus::Success,
-            notes: Some("done".to_string()),
-            failure_reason: None,
-            timestamp: dt("2026-03-27T12:12:00Z"),
         }
     }
 
@@ -824,7 +814,7 @@ mod tests {
             .create_run(&test_run_id("run-1"), created_at, None)
             .await
             .unwrap();
-        let mut stream = run.watch_events_from(1).await.unwrap();
+        let mut stream = run.watch_events_from(1).unwrap();
 
         run.append_event(&event_payload(
             "run-1",
@@ -1018,7 +1008,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn slate_run_store_round_trips_node_data_and_assets() {
+    async fn slate_run_store_round_trips_assets_and_projects_events() {
         let (_object_store, store) = make_store();
         let created_at = dt("2026-03-27T12:00:00Z");
         let run = store
@@ -1029,16 +1019,22 @@ mod tests {
             node_id: "code",
             visit: 2,
         };
-        run.put_node_prompt(&node, "Plan").await.unwrap();
-        run.put_node_status(&node, &sample_node_status())
-            .await
-            .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:01:00Z",
+            "stage.prompt",
+            Some("code"),
+            serde_json::json!({"text": "Plan", "visit": 2}),
+        ))
+        .await
+        .unwrap();
         run.put_asset(&node, "src/lib.rs", b"fn main() {}")
             .await
             .unwrap();
 
-        let snapshot = run.get_node(&node).await.unwrap();
-        assert_eq!(snapshot.prompt, Some("Plan".to_string()));
+        let state = run.state().await.unwrap();
+        let node_state = state.node(&node).unwrap();
+        assert_eq!(node_state.prompt, Some("Plan".to_string()));
         assert_eq!(
             run.get_asset(&node, "src/lib.rs").await.unwrap(),
             Some(Bytes::from_static(b"fn main() {}"))
@@ -1050,7 +1046,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn slate_run_store_lists_artifact_values_and_asset_only_visits() {
+    async fn slate_run_store_lists_artifact_values_and_assets() {
         let (_object_store, store) = make_store();
         let created_at = dt("2026-03-27T12:00:00Z");
         let run = store
@@ -1068,7 +1064,6 @@ mod tests {
             node_id: "code",
             visit: 2,
         };
-        run.put_node_prompt(&snapshot_node, "Plan").await.unwrap();
         run.put_asset(&snapshot_node, "src/lib.rs", b"fn main() {}")
             .await
             .unwrap();
@@ -1096,8 +1091,5 @@ mod tests {
                 ("code".to_string(), 2, "src/lib.rs".to_string())
             ]
         );
-
-        let code_node = run.get_node(&snapshot_node).await.unwrap();
-        assert_eq!(code_node.node_id, "code");
     }
 }

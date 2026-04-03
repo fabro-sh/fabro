@@ -553,7 +553,7 @@ impl RunSession {
         };
 
         let retro_start = Instant::now();
-        let retroed = pipeline::retro(executed, &retro_opts).await;
+        let retroed = Box::pin(pipeline::retro(executed, &retro_opts)).await;
         let retro_duration = retro_start.elapsed();
 
         let finalize_opts = FinalizeOptions {

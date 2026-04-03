@@ -4,7 +4,6 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use fabro_agent::{Sandbox, WorktreeOptions, WorktreeSandbox};
-use fabro_store::NodeVisitRef;
 use fabro_types::RunId;
 use tokio::sync::Semaphore;
 
@@ -481,15 +480,6 @@ impl Handler for ParallelHandler {
         let visit = visit_from_context(context);
         let node_dir = node_dir(run_dir, &node.id, visit);
         let _ = fs::create_dir_all(&node_dir).await;
-        let node_ref = NodeVisitRef {
-            node_id: &node.id,
-            visit: u32::try_from(visit).unwrap_or(u32::MAX),
-        };
-        services
-            .run_store
-            .put_node_parallel_results(&node_ref, &serde_json::json!(results_json))
-            .await
-            .map_err(|err| FabroError::handler(err.to_string()))?;
         if let Ok(json) = serde_json::to_string_pretty(&results_json) {
             let _ = fs::write(node_dir.join("parallel_results.json"), json).await;
         }
@@ -722,14 +712,14 @@ mod tests {
             .await
             .unwrap();
 
-        let snapshot = run_store
-            .get_node(&NodeVisitRef {
+        let state = run_store.state().await.unwrap();
+        let node_state = state
+            .node(&fabro_store::NodeVisitRef {
                 node_id: "par",
                 visit: 1,
             })
-            .await
             .unwrap();
-        let results = snapshot.parallel_results.unwrap();
+        let results = node_state.parallel_results.as_ref().unwrap();
         assert!(results.is_array());
         assert_eq!(results.as_array().unwrap().len(), 2);
     }

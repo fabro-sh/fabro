@@ -39,7 +39,7 @@ pub(crate) async fn create_run(
 
     let store = store::build_store(settings.storage_dir().as_path())?;
 
-    let created = match create(
+    let created = match Box::pin(create(
         store.as_ref(),
         CreateRunInput {
             workflow: WorkflowInput::Path(workflow_path.clone()),
@@ -51,7 +51,7 @@ pub(crate) async fn create_run(
             base_branch: None,
             host_repo_path: None,
         },
-    )
+    ))
     .await
     {
         Ok(created) => created,

@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use anyhow::{Context, Result};
 use chrono::{SecondsFormat, Utc};
-use fabro_store::{EventPayload, NodeVisitRef, RunStoreHandle, SlateRunStore};
+use fabro_store::{EventPayload, RunStoreHandle, SlateRunStore};
 use fabro_types::RunId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -1572,15 +1572,6 @@ impl StoreProgressLogger {
                         if let Err(err) = run_store.append_event(&payload).await {
                             tracing::warn!(error = %err, "Failed to append event to run store");
                         }
-                        if let Err(err) =
-                            project_provider_used_from_event_payload(run_store.as_ref(), &payload)
-                                .await
-                        {
-                            tracing::warn!(
-                                error = %err,
-                                "Failed to project provider metadata from event"
-                            );
-                        }
                     }
                     StoreProgressCommand::Flush(tx) => {
                         let _ = tx.send(());
@@ -1624,80 +1615,6 @@ impl StoreProgressLogger {
             tracing::warn!("Store progress logger flush dropped before completion");
         }
     }
-}
-
-async fn project_provider_used_from_event_payload(
-    run_store: &SlateRunStore,
-    payload: &EventPayload,
-) -> Result<()> {
-    let value = payload.as_value();
-    let Some(event_name) = value.get("event").and_then(Value::as_str) else {
-        return Ok(());
-    };
-    let Some(node_id) = value.get("node_id").and_then(Value::as_str) else {
-        return Ok(());
-    };
-    let Some(properties) = value.get("properties").and_then(Value::as_object) else {
-        return Ok(());
-    };
-    let Some(visit) = properties
-        .get("visit")
-        .and_then(Value::as_u64)
-        .and_then(|visit| u32::try_from(visit).ok())
-    else {
-        return Ok(());
-    };
-
-    let provider_used = match event_name {
-        "stage.prompt" => {
-            let mut provider_used = Map::new();
-            if let Some(mode) = properties.get("mode").and_then(Value::as_str) {
-                provider_used.insert("mode".to_string(), Value::String(mode.to_string()));
-            }
-            if let Some(provider) = properties.get("provider").and_then(Value::as_str) {
-                provider_used.insert("provider".to_string(), Value::String(provider.to_string()));
-            }
-            if let Some(model) = properties.get("model").and_then(Value::as_str) {
-                provider_used.insert("model".to_string(), Value::String(model.to_string()));
-            }
-            (!provider_used.is_empty()).then_some(Value::Object(provider_used))
-        }
-        "agent.session.started" => {
-            let mut provider_used = Map::new();
-            provider_used.insert("mode".to_string(), Value::String("agent".to_string()));
-            if let Some(provider) = properties.get("provider").and_then(Value::as_str) {
-                provider_used.insert("provider".to_string(), Value::String(provider.to_string()));
-            }
-            if let Some(model) = properties.get("model").and_then(Value::as_str) {
-                provider_used.insert("model".to_string(), Value::String(model.to_string()));
-            }
-            Some(Value::Object(provider_used))
-        }
-        "agent.cli.started" => {
-            let mut provider_used = Map::new();
-            provider_used.insert("mode".to_string(), Value::String("cli".to_string()));
-            if let Some(provider) = properties.get("provider").and_then(Value::as_str) {
-                provider_used.insert("provider".to_string(), Value::String(provider.to_string()));
-            }
-            if let Some(model) = properties.get("model").and_then(Value::as_str) {
-                provider_used.insert("model".to_string(), Value::String(model.to_string()));
-            }
-            if let Some(command) = properties.get("command").and_then(Value::as_str) {
-                provider_used.insert("command".to_string(), Value::String(command.to_string()));
-            }
-            Some(Value::Object(provider_used))
-        }
-        _ => None,
-    };
-
-    let Some(provider_used) = provider_used else {
-        return Ok(());
-    };
-
-    run_store
-        .put_node_provider_used(&NodeVisitRef { node_id, visit }, &provider_used)
-        .await
-        .map_err(anyhow::Error::from)
 }
 
 /// Current time as epoch milliseconds.
