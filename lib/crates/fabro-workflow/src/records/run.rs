@@ -10,7 +10,6 @@ pub trait RunRecordExt {
     fn file_name() -> &'static str
     where
         Self: Sized;
-    fn save(&self, run_dir: &Path) -> CrateResult<()>;
     fn load(run_dir: &Path) -> CrateResult<Self>
     where
         Self: Sized;
@@ -23,10 +22,6 @@ pub trait RunRecordExt {
 impl RunRecordExt for RunRecord {
     fn file_name() -> &'static str {
         FILE_NAME
-    }
-
-    fn save(&self, run_dir: &Path) -> CrateResult<()> {
-        crate::save_json(self, &run_dir.join(FILE_NAME), "run record")
     }
 
     fn load(run_dir: &Path) -> CrateResult<Self> {
