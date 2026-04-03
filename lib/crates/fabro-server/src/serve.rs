@@ -5,7 +5,7 @@ use std::time::Duration;
 use fabro_config::server::{load_server_settings, resolve_storage_dir};
 use fabro_util::terminal::Styles;
 use object_store::local::LocalFileSystem;
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, UnixListener};
 use tokio::time::interval;
 use tracing::{error, info, warn};
 
@@ -13,6 +13,7 @@ use clap::Args;
 
 use fabro_types::Settings;
 
+use crate::bind::{self, Bind};
 use crate::github_webhooks::WebhookManager;
 use crate::jwt_auth::{AuthMode, AuthStrategy, resolve_auth_mode};
 use crate::server::{build_router, create_app_state_with_store, spawn_scheduler};
@@ -20,15 +21,11 @@ use crate::tls::{ClientAuth, build_rustls_config, serve_tls};
 use fabro_llm::client::Client as LlmClient;
 use fabro_sandbox::SandboxProvider;
 
-#[derive(Args)]
+#[derive(Args, Clone)]
 pub struct ServeArgs {
-    /// Port to listen on
-    #[arg(long, default_value = "3000")]
-    pub port: u16,
-
-    /// Host address to bind to
-    #[arg(long, default_value = "127.0.0.1")]
-    pub host: String,
+    /// Address to bind to (host:port for TCP, or path containing / for Unix socket)
+    #[arg(long)]
+    pub bind: Option<String>,
 
     /// Override default LLM model
     #[arg(long)]
@@ -151,16 +148,18 @@ pub async fn serve_command(
     spawn_scheduler(Arc::clone(&state));
     let router = build_router(state, auth_mode);
 
-    let addr = format!("{}:{}", args.host, args.port);
-    let listener = TcpListener::bind(&addr).await?;
+    let bind_addr = match args.bind {
+        Some(ref s) => bind::parse_bind(s)?,
+        None => Bind::Tcp("127.0.0.1:3000".parse().unwrap()),
+    };
 
-    info!(host = %args.host, port = args.port, dry_run = dry_run_mode, "API server started");
+    info!(bind = %bind_addr, dry_run = dry_run_mode, "API server started");
 
     eprintln!(
         "{}",
         styles.bold.apply_to(format!(
             "Fabro server listening on {}",
-            styles.cyan.apply_to(&addr)
+            styles.cyan.apply_to(&bind_addr)
         )),
     );
     if dry_run_mode {
@@ -215,16 +214,7 @@ pub async fn serve_command(
     // Spawn config polling task
     let settings_for_poll = Arc::clone(&shared_settings);
     let config_path_for_poll = config_path.clone();
-    let args_for_poll = ServeArgs {
-        port: args.port,
-        host: args.host.clone(),
-        model: args.model.clone(),
-        provider: args.provider.clone(),
-        dry_run: args.dry_run,
-        sandbox: args.sandbox,
-        max_concurrent_runs: args.max_concurrent_runs,
-        config: config_path.clone(),
-    };
+    let args_for_poll = args.clone();
     tokio::spawn(async move {
         let mut interval = interval(Duration::from_secs(5));
         interval.tick().await; // skip first immediate tick
@@ -251,24 +241,48 @@ pub async fn serve_command(
         }
     });
 
-    // Branch: TLS or plain HTTP
+    // Branch: TLS, plain TCP, or Unix socket
     let tls_settings = shared_settings
         .read()
         .expect("config lock poisoned")
         .api
         .as_ref()
         .and_then(|a| a.tls.clone());
-    if let Some(ref tls_settings) = tls_settings {
-        let client_auth = client_auth.unwrap();
 
-        let rustls_config = build_rustls_config(tls_settings, client_auth);
-        let tls_acceptor = tokio_rustls::TlsAcceptor::from(rustls_config);
+    match bind_addr {
+        Bind::Unix(ref path) => {
+            if tls_settings.is_some() {
+                warn!("TLS is configured but not supported on Unix sockets; ignoring TLS settings");
+            }
 
-        info!("TLS enabled");
+            // Remove stale socket file before binding
+            if path.exists() {
+                std::fs::remove_file(path)?;
+            }
 
-        serve_tls(listener, tls_acceptor, router).await?;
-    } else {
-        axum::serve(listener, router).await?;
+            let listener = UnixListener::bind(path)?;
+            axum::serve(listener, router)
+                .with_graceful_shutdown(shutdown_signal())
+                .await?;
+        }
+        Bind::Tcp(addr) => {
+            let listener = TcpListener::bind(addr).await?;
+
+            if let Some(ref tls_settings) = tls_settings {
+                let client_auth = client_auth.unwrap();
+                let rustls_config = build_rustls_config(tls_settings, client_auth);
+                let tls_acceptor = tokio_rustls::TlsAcceptor::from(rustls_config);
+
+                info!("TLS enabled");
+
+                // TLS uses a manual accept loop and cannot use with_graceful_shutdown
+                serve_tls(listener, tls_acceptor, router).await?;
+            } else {
+                axum::serve(listener, router)
+                    .with_graceful_shutdown(shutdown_signal())
+                    .await?;
+            }
+        }
     }
 
     // Clean up webhook listener on shutdown
@@ -277,6 +291,34 @@ pub async fn serve_command(
     }
 
     Ok(())
+}
+
+async fn shutdown_signal() {
+    use tokio::signal;
+
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        () = ctrl_c => {},
+        () = terminate => {},
+    }
+
+    info!("Shutdown signal received, stopping server");
 }
 
 /// Derive client certificate verification mode from the resolved auth strategies.

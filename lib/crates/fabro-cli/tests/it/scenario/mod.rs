@@ -1,6 +1,7 @@
 mod exec;
 mod lifecycle;
 mod recovery;
+mod server_lifecycle;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

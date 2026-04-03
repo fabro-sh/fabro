@@ -1,7 +1,7 @@
 ---
 title: "feat: Add server daemon management with Unix socket support"
 type: feat
-status: active
+status: completed
 date: 2026-04-02
 deepened: 2026-04-02
 ---
@@ -164,7 +164,7 @@ Units 1 and 3 can run in parallel. Unit 2 depends on Unit 3 (for the `Bind` enum
 
 ## Implementation Units
 
-- [ ] **Unit 1: Add flock wrapper to fabro-proc**
+- [x] **Unit 1: Add flock wrapper to fabro-proc**
 
   **Goal:** Provide `try_flock_exclusive` in `fabro-proc` as a thin libc wrapper for advisory file locking.
 
@@ -196,7 +196,7 @@ Units 1 and 3 can run in parallel. Unit 2 depends on Unit 3 (for the `Bind` enum
   - `cargo nextest run -p fabro-proc` passes
   - `cargo clippy -p fabro-proc -- -D warnings` clean
 
-- [ ] **Unit 2: Add ServerRecord and lifecycle helpers**
+- [x] **Unit 2: Add ServerRecord and lifecycle helpers**
 
   **Goal:** Create a `ServerRecord` struct with read/write/remove/is_running helpers, mirroring `LauncherRecord`.
 
@@ -228,7 +228,7 @@ Units 1 and 3 can run in parallel. Unit 2 depends on Unit 3 (for the `Bind` enum
   **Verification:**
   - `cargo nextest run -p fabro-cli` for the new module's tests pass
 
-- [ ] **Unit 3: Add Bind enum, replace --host/--port with --bind, add Unix socket listener**
+- [x] **Unit 3: Add Bind enum, replace --host/--port with --bind, add Unix socket listener**
 
   **Goal:** Define the `Bind` enum as the shared type for bind addresses. Change `ServeArgs` to use `--bind` instead of `--host`/`--port`. Support both Unix socket and TCP binding in `serve_command`. Wire graceful shutdown.
 
@@ -273,7 +273,7 @@ Units 1 and 3 can run in parallel. Unit 2 depends on Unit 3 (for the `Bind` enum
   - `cargo nextest run -p fabro-server` passes
   - Existing server tests still pass (adapted for --bind)
 
-- [ ] **Unit 4: Add daemon spawn, __serve hidden subcommand, and foreground wrapper**
+- [x] **Unit 4: Add daemon spawn, __serve hidden subcommand, and foreground wrapper**
 
   **Goal:** Make `server start` launch a background daemon by default. `--foreground` retains current behavior. Both modes write/clean server records. Daemon mode uses flock to prevent thundering herd. `__serve` is the hidden subcommand the daemon child runs.
 
@@ -314,7 +314,7 @@ Units 1 and 3 can run in parallel. Unit 2 depends on Unit 3 (for the `Bind` enum
   - `cargo nextest run -p fabro-cli` passes
   - Manual: `fabro server start` starts daemon, `fabro server start` again says "already running"
 
-- [ ] **Unit 5: Add server stop subcommand**
+- [x] **Unit 5: Add server stop subcommand**
 
   **Goal:** `fabro server stop` sends SIGTERM, waits for graceful exit, escalates to SIGKILL, cleans up.
 
@@ -350,7 +350,7 @@ Units 1 and 3 can run in parallel. Unit 2 depends on Unit 3 (for the `Bind` enum
   - `cargo nextest run -p fabro-cli` passes
   - Manual: `fabro server start && fabro server stop` completes cleanly
 
-- [ ] **Unit 6: Add server status subcommand**
+- [x] **Unit 6: Add server status subcommand**
 
   **Goal:** `fabro server status` reports running/stopped state with metadata. Supports `--json`.
 
@@ -382,7 +382,7 @@ Units 1 and 3 can run in parallel. Unit 2 depends on Unit 3 (for the `Bind` enum
   **Verification:**
   - `cargo nextest run -p fabro-cli` passes
 
-- [ ] **Unit 7: Update main.rs dispatch and config loading for new server subcommands**
+- [x] **Unit 7: Update main.rs dispatch and config loading for new server subcommands**
 
   **Goal:** Wire all server subcommands (start, stop, status, __serve) into CLI dispatch. Fix config log level extraction to handle new ServerCommand variants.
 
