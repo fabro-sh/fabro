@@ -20,7 +20,6 @@ use std::sync::Arc;
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_llm::provider::Provider;
-use fabro_sandbox::SandboxRecordExt;
 use fabro_sandbox::daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
 use fabro_store::RuntimeState;
 use fabro_types::{RunId, Settings};
@@ -1699,7 +1698,7 @@ async fn daytona_toolbox_idle_diagnostic() {
 
 /// E2E test for `fabro cp` against a live Daytona sandbox.
 ///
-/// Creates a sandbox, saves a SandboxRecord, reconnects via `cp::reconnect`,
+/// Creates a sandbox, reconnects via `cp::reconnect`,
 /// uploads a file, downloads it back, and verifies the round-trip.
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_cp_upload_download_round_trip() {
@@ -1725,18 +1724,11 @@ async fn daytona_cp_upload_download_round_trip() {
         container_mount_point: None,
     };
 
-    // 3. Save to temp dir and reload (verify serialization round-trip)
+    // 3. Reconnect via the real cp::reconnect path
     let tmp = tempfile::tempdir().unwrap();
-    let record_path = tmp.path().join("sandbox.json");
-    record.save(&record_path).unwrap();
-    let loaded = SandboxRecord::load(&record_path).unwrap();
-    assert_eq!(loaded.provider, "daytona");
-    assert_eq!(loaded.identifier.as_deref(), Some(sandbox_name.as_str()));
+    let reconnected = reconnect(&record).await.expect("reconnect should succeed");
 
-    // 4. Reconnect via the real cp::reconnect path
-    let reconnected = reconnect(&loaded).await.expect("reconnect should succeed");
-
-    // 5. Upload: write a local file, then upload it to the sandbox
+    // 4. Upload: write a local file, then upload it to the sandbox
     let upload_content = b"hello from fabro cp e2e test\n";
     let local_upload = tmp.path().join("upload.txt");
     std::fs::write(&local_upload, upload_content).unwrap();
@@ -1746,7 +1738,7 @@ async fn daytona_cp_upload_download_round_trip() {
         .await
         .expect("upload_file_from_local should succeed");
 
-    // 6. Verify the file exists in the sandbox via the original connection
+    // 5. Verify the file exists in the sandbox via the original connection
     assert!(
         env.file_exists("cp_test_upload.txt").await.unwrap(),
         "uploaded file should exist in the sandbox"
@@ -1760,7 +1752,7 @@ async fn daytona_cp_upload_download_round_trip() {
         "expected uploaded content in sandbox, got: {remote_content}"
     );
 
-    // 7. Download: retrieve the file back to local via the reconnected sandbox
+    // 6. Download: retrieve the file back to local via the reconnected sandbox
     let local_download = tmp.path().join("download.txt");
     reconnected
         .download_file_to_local("cp_test_upload.txt", &local_download)
@@ -1770,7 +1762,7 @@ async fn daytona_cp_upload_download_round_trip() {
     let downloaded = std::fs::read(&local_download).unwrap();
     assert_eq!(downloaded, upload_content);
 
-    // 8. Upload a binary file to test non-UTF-8 content
+    // 7. Upload a binary file to test non-UTF-8 content
     let binary_content: Vec<u8> = (0..=255).collect();
     let local_binary = tmp.path().join("binary.bin");
     std::fs::write(&local_binary, &binary_content).unwrap();
