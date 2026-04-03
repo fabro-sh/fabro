@@ -185,9 +185,9 @@ pub async fn find_run_id_by_prefix_or_store(
     let current_repo_root = canonical_repo_root(repo)?;
     let mut matches = Vec::new();
     for summary in fabro_store.list_runs(&ListRunsQuery::default()).await? {
-        if summary.run_id.to_string() == prefix {
+        if summary.catalog.run_id.to_string() == prefix {
             if summary.host_repo_path.is_none() {
-                return Ok(summary.run_id);
+                return Ok(summary.catalog.run_id);
             }
 
             let Some(host_repo_path) = summary.host_repo_path.as_deref() else {
@@ -200,7 +200,7 @@ pub async fn find_run_id_by_prefix_or_store(
                 continue;
             };
             if host_repo_root == current_repo_root {
-                return Ok(summary.run_id);
+                return Ok(summary.catalog.run_id);
             }
             continue;
         }
@@ -214,8 +214,10 @@ pub async fn find_run_id_by_prefix_or_store(
         let Ok(host_repo_root) = canonical_repo_root(&host_repo) else {
             continue;
         };
-        if host_repo_root == current_repo_root && summary.run_id.to_string().starts_with(prefix) {
-            matches.push(summary.run_id);
+        if host_repo_root == current_repo_root
+            && summary.catalog.run_id.to_string().starts_with(prefix)
+        {
+            matches.push(summary.catalog.run_id);
         }
     }
 

@@ -6,13 +6,11 @@ use chrono::{DateTime, Utc};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::{
-    CatalogRecord, EventEnvelope, NodeOutcomeRecord, NodeVisitRef, Result, RunSummary, StoreError,
-};
+use crate::{CatalogRecord, EventEnvelope, NodeVisitRef, Result, RunSummary, StoreError};
 use fabro_types::{
     Checkpoint, Conclusion, FailureSignature, NodeStatusRecord, Outcome, PullRequestRecord, Retro,
-    RunId, RunRecord, RunStatus, RunStatusRecord, SandboxRecord, StageStatus, StartRecord,
-    StatusReason,
+    RunId, RunRecord, RunStatus, RunStatusRecord, SandboxRecord, StageStatus, StageUsage,
+    StartRecord, StatusReason,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -39,7 +37,7 @@ pub struct NodeState {
     pub prompt: Option<String>,
     pub response: Option<String>,
     pub status: Option<NodeStatusRecord>,
-    pub outcome: Option<NodeOutcomeRecord>,
+    pub outcome: Option<Outcome<Option<StageUsage>>>,
     pub provider_used: Option<serde_json::Value>,
     pub diff: Option<String>,
     pub script_invocation: Option<serde_json::Value>,
@@ -309,10 +307,7 @@ impl RunState {
             (!goal.is_empty()).then(|| goal.to_string())
         });
         RunSummary {
-            run_id: catalog.run_id,
-            created_at: catalog.created_at,
-            db_prefix: catalog.db_prefix.clone(),
-            run_dir: catalog.run_dir.clone(),
+            catalog: catalog.clone(),
             workflow_name,
             workflow_slug: self.run.as_ref().and_then(|run| run.workflow_slug.clone()),
             goal,
@@ -564,7 +559,7 @@ fn stage_visit(
 
 fn stage_outcome_from_properties(
     properties: &serde_json::Map<String, Value>,
-) -> Result<NodeOutcomeRecord> {
+) -> Result<Outcome<Option<StageUsage>>> {
     let status = StageStatus::from_str(&required_string(properties, "status")?)
         .map_err(|err| StoreError::InvalidEvent(format!("invalid stage status: {err}")))?;
     Ok(Outcome {
@@ -582,7 +577,7 @@ fn stage_outcome_from_properties(
 }
 
 fn node_status_from_outcome(
-    outcome: &NodeOutcomeRecord,
+    outcome: &Outcome<Option<StageUsage>>,
     timestamp: DateTime<Utc>,
 ) -> NodeStatusRecord {
     NodeStatusRecord {

@@ -22,10 +22,8 @@ pub struct CatalogRecord {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunSummary {
-    pub run_id: RunId,
-    pub created_at: DateTime<Utc>,
-    pub db_prefix: String,
-    pub run_dir: Option<String>,
+    #[serde(flatten)]
+    pub catalog: CatalogRecord,
     pub workflow_name: Option<String>,
     pub workflow_slug: Option<String>,
     pub goal: Option<String>,

@@ -124,7 +124,7 @@ pub async fn scan_runs_combined(store: &SlateStore, base: &Path) -> Result<Vec<R
             let Some(run_info) = run_info_from_summary(&summary) else {
                 continue;
             };
-            runs_by_id.insert(summary.run_id, run_info);
+            runs_by_id.insert(summary.catalog.run_id, run_info);
         }
     }
 
@@ -145,7 +145,7 @@ pub async fn scan_runs_combined(store: &SlateStore, base: &Path) -> Result<Vec<R
 }
 
 fn run_info_from_summary(summary: &fabro_store::RunSummary) -> Option<RunInfo> {
-    let run_dir = summary.run_dir.as_deref()?;
+    let run_dir = summary.catalog.run_dir.as_deref()?;
     let path = PathBuf::from(run_dir);
     if !path.exists() {
         return None;
@@ -153,7 +153,7 @@ fn run_info_from_summary(summary: &fabro_store::RunSummary) -> Option<RunInfo> {
     let dir_name = path
         .file_name()
         .map(|name| name.to_string_lossy().to_string())?;
-    let start_time_dt = summary.created_at;
+    let start_time_dt = summary.catalog.created_at;
     let start_time = summary.start_time.unwrap_or(start_time_dt);
     let end_time = if summary.status.is_some_and(RunStatus::is_terminal) {
         summary.duration_ms.and_then(|duration_ms| {
@@ -164,7 +164,7 @@ fn run_info_from_summary(summary: &fabro_store::RunSummary) -> Option<RunInfo> {
     };
 
     Some(RunInfo {
-        run_id: summary.run_id,
+        run_id: summary.catalog.run_id,
         dir_name,
         workflow_name: summary
             .workflow_name

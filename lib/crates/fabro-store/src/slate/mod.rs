@@ -284,7 +284,7 @@ impl SlateStore {
             let summary = summary?;
             summaries.push(summary);
         }
-        summaries.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        summaries.sort_by(|a, b| b.catalog.created_at.cmp(&a.catalog.created_at));
         Ok(summaries)
     }
 
@@ -656,7 +656,7 @@ mod tests {
 
         let summary = store.list_runs(&ListRunsQuery::default()).await.unwrap();
         assert_eq!(summary.len(), 1);
-        assert_eq!(summary[0].run_id, test_run_id("run-1"));
+        assert_eq!(summary[0].catalog.run_id, test_run_id("run-1"));
         assert_eq!(summary[0].workflow_name, Some("night-sky".to_string()));
         assert_eq!(summary[0].goal, Some("map the constellations".to_string()));
         assert_eq!(summary[0].status, Some(RunStatus::Succeeded));
@@ -2020,7 +2020,7 @@ mod tests {
 
         let all = store.list_runs(&ListRunsQuery::default()).await.unwrap();
         assert_eq!(all.len(), 2);
-        assert_eq!(all[0].run_id, test_run_id("run-late"));
+        assert_eq!(all[0].catalog.run_id, test_run_id("run-late"));
         assert_eq!(all[0].workflow_name, Some("night-sky".to_string()));
         assert_eq!(all[0].goal, Some("map the constellations".to_string()));
         assert_eq!(
@@ -2040,6 +2040,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].run_id, test_run_id("run-late"));
+        assert_eq!(filtered[0].catalog.run_id, test_run_id("run-late"));
     }
 }

@@ -15,9 +15,6 @@ pub use runtime::RuntimeState;
 pub use slate::{SlateRunStore, SlateStore};
 pub use types::{CatalogRecord, EventEnvelope, EventPayload, NodeVisitRef, RunSummary};
 
-use fabro_types::{Outcome, StageUsage};
-
-pub type NodeOutcomeRecord = Outcome<Option<StageUsage>>;
 pub type StoreHandle = Arc<SlateStore>;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
