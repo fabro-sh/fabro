@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::{
@@ -247,7 +248,7 @@ impl RunState {
                 };
                 let visit = required_u32(&properties, "visit")?;
                 self.node_mut(node_id, visit).provider_used =
-                    provider_used_from_agent_event(event_name, &properties);
+                    Some(provider_used_from_agent_event(event_name, &properties));
             }
             "command.started" => {
                 let Some(node_id) = value.get("node_id").and_then(Value::as_str) else {
@@ -266,6 +267,13 @@ impl RunState {
                 node.stdout = optional_string(&properties, "stdout");
                 node.stderr = optional_string(&properties, "stderr");
                 node.script_timing = Some(Value::Object(properties.clone()));
+            }
+            "parallel.completed" => {
+                let Some(node_id) = value.get("node_id").and_then(Value::as_str) else {
+                    return Ok(());
+                };
+                let visit = self.current_visit_for(node_id).unwrap_or(1);
+                self.node_mut(node_id, visit).parallel_results = properties.get("results").cloned();
             }
             _ => {}
         }
@@ -416,7 +424,7 @@ fn parse_ts(value: &Value) -> Result<DateTime<Utc>> {
         .ok_or_else(|| StoreError::InvalidEvent("event payload missing ts".into()))?;
     chrono::DateTime::parse_from_rfc3339(ts)
         .map(|ts| ts.with_timezone(&Utc))
-        .map_err(|err| StoreError::InvalidEvent(format!("invalid event ts: {err}")).into())
+        .map_err(|err| StoreError::InvalidEvent(format!("invalid event ts: {err}")))
 }
 
 fn parse_run_id(value: &Value) -> Result<RunId> {
@@ -426,7 +434,7 @@ fn parse_run_id(value: &Value) -> Result<RunId> {
         .ok_or_else(|| StoreError::InvalidEvent("event payload missing run_id".into()))?;
     run_id
         .parse()
-        .map_err(|err| StoreError::InvalidEvent(format!("invalid run_id: {err}")).into())
+        .map_err(|err| StoreError::InvalidEvent(format!("invalid run_id: {err}")))
 }
 
 fn required_string(properties: &serde_json::Map<String, Value>, key: &str) -> Result<String> {
@@ -434,9 +442,7 @@ fn required_string(properties: &serde_json::Map<String, Value>, key: &str) -> Re
         .get(key)
         .and_then(Value::as_str)
         .map(ToString::to_string)
-        .ok_or_else(|| {
-            StoreError::InvalidEvent(format!("event missing string property {key}")).into()
-        })
+        .ok_or_else(|| StoreError::InvalidEvent(format!("event missing string property {key}")))
 }
 
 fn optional_string(properties: &serde_json::Map<String, Value>, key: &str) -> Option<String> {
@@ -447,17 +453,18 @@ fn optional_string(properties: &serde_json::Map<String, Value>, key: &str) -> Op
 }
 
 fn required_u64(properties: &serde_json::Map<String, Value>, key: &str) -> Result<u64> {
-    properties.get(key).and_then(Value::as_u64).ok_or_else(|| {
-        StoreError::InvalidEvent(format!("event missing integer property {key}")).into()
-    })
+    properties
+        .get(key)
+        .and_then(Value::as_u64)
+        .ok_or_else(|| StoreError::InvalidEvent(format!("event missing integer property {key}")))
 }
 
 fn required_u32(properties: &serde_json::Map<String, Value>, key: &str) -> Result<u32> {
     u32::try_from(required_u64(properties, key)?)
-        .map_err(|_| StoreError::InvalidEvent(format!("property {key} does not fit in u32")).into())
+        .map_err(|_| StoreError::InvalidEvent(format!("property {key} does not fit in u32")))
 }
 
-fn required_json<T: serde::de::DeserializeOwned>(
+fn required_json<T: DeserializeOwned>(
     properties: &serde_json::Map<String, Value>,
     key: &str,
 ) -> Result<T> {
@@ -466,10 +473,10 @@ fn required_json<T: serde::de::DeserializeOwned>(
         .cloned()
         .ok_or_else(|| StoreError::InvalidEvent(format!("event missing property {key}")))?;
     serde_json::from_value(value)
-        .map_err(|err| StoreError::InvalidEvent(format!("invalid property {key}: {err}")).into())
+        .map_err(|err| StoreError::InvalidEvent(format!("invalid property {key}: {err}")))
 }
 
-fn optional_json<T: serde::de::DeserializeOwned>(
+fn optional_json<T: DeserializeOwned>(
     properties: &serde_json::Map<String, Value>,
     key: &str,
 ) -> Result<Option<T>> {
@@ -478,9 +485,8 @@ fn optional_json<T: serde::de::DeserializeOwned>(
         .filter(|value| !value.is_null())
         .cloned()
         .map(|value| {
-            serde_json::from_value(value).map_err(|err| {
-                StoreError::InvalidEvent(format!("invalid property {key}: {err}")).into()
-            })
+            serde_json::from_value(value)
+                .map_err(|err| StoreError::InvalidEvent(format!("invalid property {key}: {err}")))
         })
         .transpose()
 }
@@ -488,9 +494,8 @@ fn optional_json<T: serde::de::DeserializeOwned>(
 fn parse_reason(properties: &serde_json::Map<String, Value>) -> Result<Option<StatusReason>> {
     optional_string(properties, "reason")
         .map(|reason| {
-            serde_json::from_value(Value::String(reason)).map_err(|err| {
-                StoreError::InvalidEvent(format!("invalid status reason: {err}")).into()
-            })
+            serde_json::from_value(Value::String(reason))
+                .map_err(|err| StoreError::InvalidEvent(format!("invalid status reason: {err}")))
         })
         .transpose()
 }
@@ -662,7 +667,7 @@ fn provider_used_from_prompt(properties: &serde_json::Map<String, Value>) -> Opt
 fn provider_used_from_agent_event(
     event_name: &str,
     properties: &serde_json::Map<String, Value>,
-) -> Option<Value> {
+) -> Value {
     let mut provider_used = serde_json::Map::new();
     provider_used.insert(
         "mode".to_string(),
@@ -681,5 +686,5 @@ fn provider_used_from_agent_event(
     if let Some(command) = optional_string(properties, "command") {
         provider_used.insert("command".to_string(), Value::String(command));
     }
-    Some(Value::Object(provider_used))
+    Value::Object(provider_used)
 }

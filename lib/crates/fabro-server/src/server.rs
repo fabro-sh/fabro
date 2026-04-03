@@ -547,7 +547,7 @@ async fn start_run(
     info!(run_id = %run_id, "Run queued");
     let run_dir = std::env::temp_dir().join(format!("fabro-{}", uuid::Uuid::new_v4()));
     let settings = state.settings.read().unwrap().clone();
-    let created = match operations::create(
+    let created = match Box::pin(operations::create(
         state.store.as_ref(),
         CreateRunInput {
             workflow: WorkflowInput::DotSource {
@@ -562,7 +562,7 @@ async fn start_run(
             host_repo_path: None,
             base_branch: None,
         },
-    )
+    ))
     .await
     {
         Ok(created) => created,

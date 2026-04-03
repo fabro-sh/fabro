@@ -147,7 +147,6 @@ async fn follow_store_logs(
 ) -> Result<()> {
     let mut stream = run_store
         .watch_events_from(seq)
-        .await
         .context("Failed to watch store-backed run events")?;
     let stdout = io::stdout();
     let mut out = stdout.lock();

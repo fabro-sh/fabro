@@ -14,7 +14,7 @@ use fabro_core::state::RunState;
 use crate::artifact::ArtifactStore;
 use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::git::MetadataStore;
-use crate::git::scan_node_files_from_store;
+use crate::git::scan_node_files_from_state;
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::{Outcome, StageStatus, StageUsage};
@@ -149,7 +149,9 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                         })
                         .collect()
                 };
-                extra_entries.extend(scan_node_files_from_store(self.run_store.as_ref()).await);
+                if let Ok(store_state) = self.run_store.state().await {
+                    extra_entries.extend(scan_node_files_from_state(&store_state));
+                }
                 let extra_refs: Vec<(&str, &[u8])> = extra_entries
                     .iter()
                     .map(|(k, v)| (k.as_str(), v.as_slice()))

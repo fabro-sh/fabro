@@ -40,13 +40,13 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
     match cmd {
         RunCommands::Run(mut args) => {
             apply_json_defaults(&mut args, globals);
-            command::execute(args, globals).await
+            Box::pin(command::execute(args, globals)).await
         }
         RunCommands::Create(mut args) => {
             apply_json_defaults(&mut args, globals);
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             let cli = user_layer_with_globals(globals)?;
-            let (run_id, _run_dir) = create::create_run(&args, cli, styles, true).await?;
+            let (run_id, _run_dir) = Box::pin(create::create_run(&args, cli, styles, true)).await?;
             if globals.json {
                 print_json_pretty(&serde_json::json!({ "run_id": run_id }))?;
             } else {
@@ -125,7 +125,7 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
         }
         RunCommands::Rewind(args) => {
             let styles = Styles::detect_stderr();
-            rewind::run(&args, &styles, globals).await
+            Box::pin(rewind::run(&args, &styles, globals)).await
         }
         RunCommands::Fork(args) => {
             let styles = Styles::detect_stderr();

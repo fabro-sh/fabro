@@ -481,15 +481,6 @@ impl Handler for ParallelHandler {
         let visit = visit_from_context(context);
         let node_dir = node_dir(run_dir, &node.id, visit);
         let _ = fs::create_dir_all(&node_dir).await;
-        let node_ref = NodeVisitRef {
-            node_id: &node.id,
-            visit: u32::try_from(visit).unwrap_or(u32::MAX),
-        };
-        services
-            .run_store
-            .put_node_parallel_results(&node_ref, &serde_json::json!(results_json))
-            .await
-            .map_err(|err| FabroError::handler(err.to_string()))?;
         if let Ok(json) = serde_json::to_string_pretty(&results_json) {
             let _ = fs::write(node_dir.join("parallel_results.json"), json).await;
         }

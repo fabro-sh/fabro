@@ -21,7 +21,9 @@ pub(crate) async fn dispatch(ns: PrNamespace, globals: &GlobalArgs) -> Result<()
     let github_app = build_github_app_credentials(cli_settings.app_id())?;
 
     match ns.command {
-        PrCommand::Create(args) => create::create_command(args, github_app, globals).await,
+        PrCommand::Create(args) => {
+            Box::pin(create::create_command(args, github_app, globals)).await
+        }
         PrCommand::List(args) => list::list_command(args, github_app, globals).await,
         PrCommand::View(args) => view::view_command(args, github_app, globals).await,
         PrCommand::Merge(args) => merge::merge_command(args, github_app, globals).await,

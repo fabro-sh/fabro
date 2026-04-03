@@ -13,7 +13,7 @@ pub(crate) async fn execute(mut args: RunArgs, globals: &GlobalArgs) -> Result<(
 
     let quiet = args.detach;
     let prevent_idle_sleep = cli_settings.prevent_idle_sleep_enabled();
-    let (run_id, run_dir) = super::create::create_run(&args, cli, styles, quiet).await?;
+    let (run_id, run_dir) = Box::pin(super::create::create_run(&args, cli, styles, quiet)).await?;
 
     #[cfg(feature = "sleep_inhibitor")]
     let _sleep_guard = crate::sleep_inhibitor::guard(prevent_idle_sleep);

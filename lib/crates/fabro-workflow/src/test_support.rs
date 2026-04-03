@@ -11,7 +11,7 @@ use object_store::memory::InMemory;
 
 use crate::error::Result;
 use crate::event::{EventEmitter, WorkflowRunEvent, append_workflow_event};
-use crate::git::scan_node_files_from_store;
+use crate::git::scan_node_files_from_state;
 use crate::handler::HandlerRegistry;
 use crate::outcome::Outcome;
 use crate::pipeline;
@@ -199,7 +199,7 @@ async fn persist_run_artifacts_for_tests(run_store: &SlateRunStore, run_dir: &st
         let _ = std::fs::write(run_dir.join("final.patch"), final_patch);
     }
 
-    for (relative_path, contents) in scan_node_files_from_store(run_store).await {
+    for (relative_path, contents) in scan_node_files_from_state(&state) {
         let path = run_dir.join(relative_path);
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);

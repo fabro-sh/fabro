@@ -135,10 +135,6 @@ async fn reset_rewound_run_state(
     let run_store = durable_store.open_run(run_id).await.map_err(|err| {
         anyhow::anyhow!("failed to open durable store run for rewind reset: {err}")
     })?;
-    run_store
-        .reset_for_rewind()
-        .await
-        .map_err(|err| anyhow::anyhow!("failed to clear rewound run state: {err}"))?;
     append_workflow_event(
         run_store.as_ref(),
         run_id,

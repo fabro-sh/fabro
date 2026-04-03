@@ -148,7 +148,7 @@ async fn persist_created_run(
             .open_run(&record.run_id)
             .await
             .map_err(|open_err| FabroError::engine(open_err.to_string()))
-            .or_else(|_| Err(FabroError::engine(err.to_string())))?,
+            .map_err(|_| FabroError::engine(err.to_string()))?,
     };
 
     let envelope = canonicalize_event_at(

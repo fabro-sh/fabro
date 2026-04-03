@@ -137,9 +137,7 @@ async fn attach_run_store(
         emit_progress_line(&mut progress_ui, line, json_output)?;
     }
 
-    let mut stream = run_store
-        .watch_events_from(if last_seq == 0 { 1 } else { last_seq + 1 })
-        .await?;
+    let mut stream = run_store.watch_events_from(if last_seq == 0 { 1 } else { last_seq + 1 })?;
     let mut next_seq = if last_seq == 0 { 1 } else { last_seq + 1 };
     let mut cached_pid: Option<u32> = None;
     let attach_started = Instant::now();
@@ -745,29 +743,26 @@ fn determine_exit_code(conclusion_path: &Path, status_record: Option<RunStatusRe
 async fn determine_exit_code_with_store(run_store: &SlateRunStore) -> ExitCode {
     let deadline = Instant::now() + ATTACH_FINAL_STATUS_GRACE;
     loop {
-        match run_store.state().await {
-            Ok(state) => {
-                if let Some(conclusion) = state.conclusion {
-                    let success = matches!(
-                        conclusion.status,
-                        StageStatus::Success | StageStatus::PartialSuccess
-                    );
-                    return if success {
-                        ExitCode::from(0)
-                    } else {
-                        ExitCode::from(1)
-                    };
-                }
-
-                match state.status {
-                    Some(record) if matches!(record.status, RunStatus::Succeeded) => {
-                        return ExitCode::from(0);
-                    }
-                    Some(record) if record.status.is_terminal() => return ExitCode::from(1),
-                    Some(_) | None => {}
-                }
+        if let Ok(state) = run_store.state().await {
+            if let Some(conclusion) = state.conclusion {
+                let success = matches!(
+                    conclusion.status,
+                    StageStatus::Success | StageStatus::PartialSuccess
+                );
+                return if success {
+                    ExitCode::from(0)
+                } else {
+                    ExitCode::from(1)
+                };
             }
-            Err(_) => {}
+
+            match state.status {
+                Some(record) if matches!(record.status, RunStatus::Succeeded) => {
+                    return ExitCode::from(0);
+                }
+                Some(record) if record.status.is_terminal() => return ExitCode::from(1),
+                Some(_) | None => {}
+            }
         }
 
         if Instant::now() >= deadline {
