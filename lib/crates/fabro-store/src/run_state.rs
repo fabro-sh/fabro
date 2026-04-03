@@ -14,7 +14,7 @@ use fabro_types::{
 };
 
 #[derive(Debug, Clone, Default)]
-pub struct RunState {
+pub struct RunProjection {
     pub run: Option<RunRecord>,
     pub graph_source: Option<String>,
     pub start: Option<StartRecord>,
@@ -50,10 +50,10 @@ pub struct NodeState {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct EventProjectionCache {
     pub last_seq: u32,
-    pub state: RunState,
+    pub state: RunProjection,
 }
 
-impl RunState {
+impl RunProjection {
     pub(crate) fn apply_events(events: &[EventEnvelope]) -> Result<Self> {
         let mut state = Self::default();
         for event in events {
@@ -547,7 +547,7 @@ fn conclusion_from_failed(
 fn stage_visit(
     node_id: &str,
     properties: &serde_json::Map<String, Value>,
-    state: &RunState,
+    state: &RunProjection,
 ) -> Option<u32> {
     properties
         .get("node_visits")

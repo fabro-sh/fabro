@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use fabro_store::{RunState, SlateRunStore, SlateStore};
+use fabro_store::{RunProjection, SlateRunStore, SlateStore};
 use fabro_types::RunId;
 use object_store::local::LocalFileSystem;
 pub(super) fn fixture(name: &str) -> PathBuf {
@@ -47,7 +47,7 @@ fn run_store(run_dir: &Path) -> SlateRunStore {
     block_on(store.open_run_reader(&run_id)).expect("run store should exist")
 }
 
-pub(super) fn run_state(run_dir: &Path) -> RunState {
+pub(super) fn run_state(run_dir: &Path) -> RunProjection {
     let store = run_store(run_dir);
     block_on(store.state()).expect("run store state should exist")
 }

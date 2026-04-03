@@ -1,5 +1,5 @@
 use fabro_config::run::MergeStrategy;
-use fabro_store::{RunState, SlateRunStore};
+use fabro_store::{RunProjection, SlateRunStore};
 use fabro_types::PullRequestRecord;
 use tracing::{debug, info};
 
@@ -204,7 +204,7 @@ fn parse_dot_summary(dot: &str) -> (String, usize, usize) {
 /// Nodes are sorted alphabetically so `plan` is preferred over `planning`.
 /// For repeated visits, earlier visits sort first to match the prior on-disk
 /// directory scan behavior.
-fn read_plan_text(state: &RunState) -> Option<String> {
+fn read_plan_text(state: &RunProjection) -> Option<String> {
     let mut plan_nodes = state
         .nodes
         .iter()
@@ -907,7 +907,7 @@ mod tests {
 
     #[test]
     fn read_plan_text_found() {
-        let mut state = RunState::default();
+        let mut state = RunProjection::default();
         state.nodes.insert(
             ("plan".to_string(), 1),
             fabro_store::NodeState {
@@ -922,7 +922,7 @@ mod tests {
 
     #[test]
     fn read_plan_text_prefix_match() {
-        let mut state = RunState::default();
+        let mut state = RunProjection::default();
         state.nodes.insert(
             ("planning".to_string(), 1),
             fabro_store::NodeState {
@@ -937,7 +937,7 @@ mod tests {
 
     #[test]
     fn read_plan_text_prefers_alphabetically_first_plan_node() {
-        let mut state = RunState::default();
+        let mut state = RunProjection::default();
         state.nodes.insert(
             ("planning".to_string(), 1),
             fabro_store::NodeState {
@@ -959,7 +959,7 @@ mod tests {
 
     #[test]
     fn read_plan_text_not_found() {
-        let mut state = RunState::default();
+        let mut state = RunProjection::default();
         state.nodes.insert(
             ("implement".to_string(), 1),
             fabro_store::NodeState::default(),
@@ -971,7 +971,7 @@ mod tests {
 
     #[test]
     fn read_plan_text_empty_state() {
-        let state = RunState::default();
+        let state = RunProjection::default();
         let result = read_plan_text(&state);
         assert_eq!(result, None);
     }

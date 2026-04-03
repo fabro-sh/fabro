@@ -15,7 +15,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use crate::keys;
 use crate::run_state::EventProjectionCache;
 use crate::{
-    CatalogRecord, EventEnvelope, EventPayload, NodeVisitRef, Result, RunState, RunSummary,
+    CatalogRecord, EventEnvelope, EventPayload, NodeVisitRef, Result, RunProjection, RunSummary,
     StoreError,
 };
 use fabro_types::RunId;
@@ -147,11 +147,11 @@ impl SlateRunStore {
         R: DbRead + Sync,
     {
         let events = list_events_from(db, 1).await?;
-        let state = RunState::apply_events(&events)?;
+        let state = RunProjection::apply_events(&events)?;
         Ok(state.build_summary(catalog))
     }
 
-    async fn projected_state(&self) -> Result<RunState> {
+    async fn projected_state(&self) -> Result<RunProjection> {
         let next_seq = {
             let cache = self.inner.projection_cache.lock().await;
             cache.last_seq.saturating_add(1)
@@ -271,7 +271,7 @@ impl SlateRunStore {
         self.inner.db.list_all_assets().await
     }
 
-    pub async fn state(&self) -> Result<RunState> {
+    pub async fn state(&self) -> Result<RunProjection> {
         self.projected_state().await
     }
 }

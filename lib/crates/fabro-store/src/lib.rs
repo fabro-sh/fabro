@@ -10,7 +10,7 @@ mod slate;
 mod types;
 
 pub use error::{Result, StoreError};
-pub use run_state::{NodeState, RunState};
+pub use run_state::{NodeState, RunProjection};
 pub use runtime::RuntimeState;
 pub use slate::{SlateRunStore, SlateStore};
 pub use types::{CatalogRecord, EventEnvelope, EventPayload, NodeVisitRef, RunSummary};

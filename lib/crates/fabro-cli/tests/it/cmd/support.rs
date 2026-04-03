@@ -4,7 +4,7 @@ use std::process::Output;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use fabro_store::{EventEnvelope, RunState, SlateRunStore, SlateStore};
+use fabro_store::{EventEnvelope, RunProjection, SlateRunStore, SlateStore};
 use fabro_test::TestContext;
 use fabro_types::RunId;
 use object_store::local::LocalFileSystem;
@@ -492,7 +492,7 @@ fn run_store(run_dir: &Path) -> SlateRunStore {
     block_on(store.open_run_reader(&run_id)).expect("run store should exist")
 }
 
-pub(crate) fn run_state(run_dir: &Path) -> RunState {
+pub(crate) fn run_state(run_dir: &Path) -> RunProjection {
     let store = run_store(run_dir);
     block_on(store.state()).expect("run store state should exist")
 }

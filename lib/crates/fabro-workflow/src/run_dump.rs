@@ -2,7 +2,7 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use fabro_store::{NodeVisitRef, RunState, SlateRunStore};
+use fabro_store::{NodeVisitRef, RunProjection, SlateRunStore};
 
 use crate::git::MetadataStore;
 
@@ -26,7 +26,7 @@ pub enum RunDumpContents {
 
 impl RunDump {
     #[must_use]
-    pub fn metadata_init(state: &RunState) -> Self {
+    pub fn metadata_init(state: &RunProjection) -> Self {
         let mut entries = Vec::new();
         if let Some(record) = state.run.as_ref() {
             push_json_entry(&mut entries, "run.json", record);
@@ -41,7 +41,7 @@ impl RunDump {
     }
 
     #[must_use]
-    pub fn metadata_checkpoint(state: &RunState) -> Self {
+    pub fn metadata_checkpoint(state: &RunProjection) -> Self {
         let mut entries = Vec::new();
         let mut keys: Vec<_> = state.nodes.keys().collect();
         keys.sort();
@@ -106,7 +106,7 @@ impl RunDump {
     }
 
     #[must_use]
-    pub fn metadata_finalize(state: &RunState) -> Self {
+    pub fn metadata_finalize(state: &RunProjection) -> Self {
         let mut dump = Self::metadata_checkpoint(state);
         if let Some(retro) = state.retro.as_ref() {
             push_json_entry(&mut dump.entries, "retro.json", retro);
@@ -114,7 +114,7 @@ impl RunDump {
         dump
     }
 
-    pub async fn store_export(run_store: &SlateRunStore, state: &RunState) -> Result<Self> {
+    pub async fn store_export(run_store: &SlateRunStore, state: &RunProjection) -> Result<Self> {
         let mut entries = Vec::new();
 
         if let Some(record) = state.run.as_ref() {

@@ -4,7 +4,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 #[cfg(test)]
 use fabro_store::NodeVisitRef;
-use fabro_store::{RunState, SlateRunStore};
+use fabro_store::{RunProjection, SlateRunStore};
 use fabro_workflow::run_dump::RunDump;
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 #[cfg(test)]
@@ -79,7 +79,7 @@ pub(crate) async fn export_run(run_store: &SlateRunStore, output_dir: &Path) -> 
 
 async fn export_run_to_dir(
     run_store: &SlateRunStore,
-    state: &RunState,
+    state: &RunProjection,
     output_dir: &Path,
 ) -> Result<usize> {
     let dump = RunDump::store_export(run_store, state).await?;
