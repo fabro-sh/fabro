@@ -39,7 +39,7 @@ pub use local::LocalSandbox;
 #[cfg(feature = "docker")]
 pub use docker::{DockerSandbox, DockerSandboxOptions};
 
-pub use sandbox_record::{SandboxRecord, SandboxRecordExt};
+pub use sandbox_record::SandboxRecord;
 
 #[cfg(feature = "daytona")]
 pub use daytona::detect_clone_params;
