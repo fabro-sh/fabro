@@ -52,7 +52,7 @@ use fabro_workflow::operations::{self, CreateRunInput, WorkflowInput};
 use fabro_workflow::pipeline::Persisted;
 use fabro_workflow::records::Checkpoint;
 
-use fabro_api::types::AggregateUsageTotals as ApiAggregateUsageTotals;
+use fabro_api::types::AggregateUsageTotals;
 pub use fabro_api::types::{
     AggregateUsage, ApiQuestion, ApiQuestionOption, CompletionContentPart, CompletionMessage,
     CompletionMessageRole, CompletionResponse, CompletionToolChoiceMode, CompletionUsage,
@@ -116,7 +116,7 @@ struct ModelUsageTotals {
 
 /// In-memory aggregate usage counters, reset on server restart.
 #[derive(Default)]
-struct AggregateUsageTotals {
+struct UsageAccumulator {
     total_runs: i64,
     total_runtime_secs: f64,
     by_model: HashMap<String, ModelUsageTotals>,
@@ -127,7 +127,7 @@ type RegistryFactoryOverride = dyn Fn(Arc<dyn Interviewer>) -> HandlerRegistry +
 /// Shared application state for the server.
 pub struct AppState {
     runs: Mutex<HashMap<RunId, ManagedRun>>,
-    aggregate_usage: Mutex<AggregateUsageTotals>,
+    aggregate_usage: Mutex<UsageAccumulator>,
     store: StoreHandle,
     pub db: sqlx::SqlitePool,
     max_concurrent_runs: usize,
@@ -394,7 +394,7 @@ async fn get_aggregate_usage(
         })
         .collect();
     let response = AggregateUsage {
-        totals: ApiAggregateUsageTotals {
+        totals: AggregateUsageTotals {
             runs: agg.total_runs,
             input_tokens: by_model.iter().map(|m| m.usage.input_tokens).sum(),
             output_tokens: by_model.iter().map(|m| m.usage.output_tokens).sum(),
@@ -465,7 +465,7 @@ fn build_app_state(
 ) -> Arc<AppState> {
     Arc::new(AppState {
         runs: Mutex::new(HashMap::new()),
-        aggregate_usage: Mutex::new(AggregateUsageTotals::default()),
+        aggregate_usage: Mutex::new(UsageAccumulator::default()),
         store,
         db,
         max_concurrent_runs,

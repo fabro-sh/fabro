@@ -81,6 +81,7 @@ fn main() {
     let mut spec_value: serde_json::Value =
         serde_yaml::from_str(&spec_text).unwrap_or_else(|e| panic!("failed to parse YAML: {e}"));
 
+    // TODO: Remove 3.1→3.0 patch when progenitor supports OpenAPI 3.1.
     // Progenitor only supports OpenAPI 3.0.x; our spec uses 3.1.0 but doesn't
     // rely on any 3.1-only features that affect codegen.
     spec_value["openapi"] = serde_json::Value::String("3.0.3".to_string());
