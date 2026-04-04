@@ -1059,14 +1059,7 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let store = test_store();
-        let run_store = store
-            .create_run(
-                &fixtures::RUN_1,
-                Utc::now(),
-                Some(&tmp.path().display().to_string()),
-            )
-            .await
-            .unwrap();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         let conclusion = make_test_conclusion();
         let body = build_pr_body(
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
@@ -1091,18 +1084,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let store = test_store();
         let created_at = Utc::now();
-        let run_store = store
-            .create_run(
-                &fixtures::RUN_1,
-                created_at,
-                Some(&tmp.path().display().to_string()),
-            )
-            .await
-            .unwrap();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
 
         let run_record = RunRecord {
             run_id: fixtures::RUN_1,
-            created_at,
             settings: Settings::default(),
             graph: Graph::new("test"),
             workflow_slug: Some("test".to_string()),
@@ -1167,18 +1152,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let store = test_store();
         let created_at = Utc::now();
-        let run_store = store
-            .create_run(
-                &fixtures::RUN_1,
-                created_at,
-                Some(&tmp.path().display().to_string()),
-            )
-            .await
-            .unwrap();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
 
         let run_record = RunRecord {
             run_id: fixtures::RUN_1,
-            created_at,
             settings: Settings::default(),
             graph: Graph::new("test"),
             workflow_slug: Some("test".to_string()),
@@ -1369,14 +1346,7 @@ mod tests {
     async fn empty_diff_returns_none() {
         let tmp = tempfile::tempdir().unwrap();
         let store = test_store();
-        let run_store = store
-            .create_run(
-                &fixtures::RUN_1,
-                Utc::now(),
-                Some(&tmp.path().display().to_string()),
-            )
-            .await
-            .unwrap();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         let creds = GitHubAppCredentials {
             app_id: "123".to_string(),
             private_key_pem: "unused".to_string(),
@@ -1404,17 +1374,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let store = test_store();
         let created_at = Utc::now();
-        let run_store = store
-            .create_run(
-                &fixtures::RUN_1,
-                created_at,
-                Some(&tmp.path().display().to_string()),
-            )
-            .await
-            .unwrap();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         let run_record = RunRecord {
             run_id: fixtures::RUN_1,
-            created_at,
             settings: Settings::default(),
             graph: Graph::new("test"),
             workflow_slug: None,

@@ -743,7 +743,6 @@ mod tests {
             run_dir.to_path_buf(),
             RunRecord {
                 run_id: test_run_id(),
-                created_at: Utc::now(),
                 settings: Settings::default(),
                 graph,
                 workflow_slug: Some("test".to_string()),
@@ -770,14 +769,7 @@ mod tests {
                 run_id: test_run_id(),
                 run_store: {
                     let store = memory_store();
-                    let inner = store
-                        .create_run(
-                            &test_run_id(),
-                            chrono::Utc::now(),
-                            Some(run_dir.to_string_lossy().as_ref()),
-                        )
-                        .await
-                        .unwrap();
+                    let inner = store.create_run(&test_run_id()).await.unwrap();
                     inner
                 },
                 dry_run: false,
@@ -839,14 +831,7 @@ mod tests {
         let persisted = test_persisted(graph, source, &run_dir);
         let emitter = Arc::new(crate::event::EventEmitter::new(test_run_id()));
         let store = memory_store();
-        let run_store = store
-            .create_run(
-                &test_run_id(),
-                chrono::Utc::now(),
-                Some(run_dir.to_string_lossy().as_ref()),
-            )
-            .await
-            .unwrap();
+        let run_store = store.create_run(&test_run_id()).await.unwrap();
         let store_logger = StoreProgressLogger::new(run_store.clone());
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
         emitter.on_event({

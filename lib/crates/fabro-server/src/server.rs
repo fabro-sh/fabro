@@ -537,7 +537,6 @@ async fn start_run(
 ) -> Response {
     let run_id = RunId::new();
     info!(run_id = %run_id, "Run queued");
-    let run_dir = std::env::temp_dir().join(format!("fabro-{}", uuid::Uuid::new_v4()));
     let settings = state.settings.read().unwrap().clone();
     let created = match Box::pin(operations::create(
         state.store.as_ref(),
@@ -549,7 +548,6 @@ async fn start_run(
             settings,
             cwd: std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir()),
             workflow_slug: None,
-            run_dir: Some(run_dir.clone()),
             run_id: Some(run_id),
             host_repo_path: None,
             base_branch: None,
@@ -581,8 +579,8 @@ async fn start_run(
             .into_response();
         }
     };
-    let persisted = created.persisted;
-    let created_at = persisted.run_record().created_at;
+    let created_at = run_id.created_at();
+    let run_dir = created.run_dir;
 
     {
         let mut runs = state.runs.lock().expect("runs lock poisoned");

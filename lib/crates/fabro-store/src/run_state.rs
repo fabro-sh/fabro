@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::{CatalogRecord, EventEnvelope, Result, RunSummary, StageId, StoreError};
+use crate::{EventEnvelope, Result, RunSummary, StageId, StoreError};
 use fabro_types::{
     Checkpoint, Conclusion, FailureSignature, NodeStatusRecord, Outcome, PullRequestRecord, Retro,
     RunId, RunRecord, RunStatus, RunStatusRecord, SandboxRecord, StageStatus, StageUsage,
@@ -86,7 +86,6 @@ impl RunProjection {
                     .collect::<HashMap<_, _>>();
                 self.run = Some(RunRecord {
                     run_id,
-                    created_at: ts,
                     settings,
                     graph,
                     workflow_slug: optional_string(&properties, "workflow_slug"),
@@ -281,7 +280,7 @@ impl RunProjection {
         visits
     }
 
-    pub(crate) fn build_summary(&self, catalog: &CatalogRecord) -> RunSummary {
+    pub(crate) fn build_summary(&self, run_id: &RunId) -> RunSummary {
         let workflow_name = self.run.as_ref().map(|run| {
             if run.graph.name.is_empty() {
                 "unnamed".to_string()
@@ -294,7 +293,7 @@ impl RunProjection {
             (!goal.is_empty()).then(|| goal.to_string())
         });
         RunSummary {
-            catalog: catalog.clone(),
+            run_id: *run_id,
             workflow_name,
             workflow_slug: self.run.as_ref().and_then(|run| run.workflow_slug.clone()),
             goal,

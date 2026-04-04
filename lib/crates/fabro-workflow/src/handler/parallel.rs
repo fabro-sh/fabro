@@ -692,10 +692,7 @@ mod tests {
     #[tokio::test]
     async fn parallel_handler_stores_results_in_run_store() {
         let store = test_store();
-        let run_store = store
-            .create_run(&fixtures::RUN_1, chrono::Utc::now(), None)
-            .await
-            .unwrap();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         let services = EngineServices {
             emitter: Arc::new(crate::event::EventEmitter::new(fixtures::RUN_1)),
             run_store: run_store.clone(),

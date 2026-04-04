@@ -33,10 +33,9 @@ pub(crate) async fn load_from_store(
         .state()
         .await
         .map_err(|err| FabroError::engine(err.to_string()))?;
-    let mut run_record = state
+    let run_record = state
         .run
         .ok_or_else(|| FabroError::Precondition("run record missing from store".to_string()))?;
-    run_record.created_at = run_store.created_at();
     let graph = run_record.graph.clone();
     let source = state.graph_source.unwrap_or_default();
 
@@ -121,7 +120,6 @@ mod tests {
     fn sample_record(graph: Graph) -> RunRecord {
         RunRecord {
             run_id: fixtures::RUN_1,
-            created_at: Utc::now(),
             settings: Settings {
                 dry_run: Some(true),
                 verbose: Some(true),
@@ -145,14 +143,7 @@ mod tests {
         source: Option<&str>,
     ) -> SlateRunStore {
         let store = memory_store();
-        let run_store = store
-            .create_run(
-                &record.run_id,
-                record.created_at,
-                Some(run_dir.to_string_lossy().as_ref()),
-            )
-            .await
-            .unwrap();
+        let run_store = store.create_run(&record.run_id).await.unwrap();
         append_workflow_event(
             &run_store,
             &record.run_id,
@@ -246,8 +237,9 @@ mod tests {
         let loaded_record = loaded.run_record();
         assert_eq!(loaded_record.run_id, expected.run_id);
         assert!(
-            (loaded_record.created_at.timestamp_millis() - expected.created_at.timestamp_millis())
-                .abs()
+            (loaded_record.run_id.created_at().timestamp_millis()
+                - expected.run_id.created_at().timestamp_millis())
+            .abs()
                 <= 1
         );
         assert_eq!(loaded_record.settings, expected.settings);

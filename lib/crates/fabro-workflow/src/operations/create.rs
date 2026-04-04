@@ -1,4 +1,4 @@
-use chrono::{Local, Utc};
+use chrono::Local;
 use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, Provider};
 use fabro_sandbox::SandboxProvider;
@@ -27,7 +27,6 @@ pub struct CreateRunInput {
     pub settings: Settings,
     pub cwd: PathBuf,
     pub workflow_slug: Option<String>,
-    pub run_dir: Option<PathBuf>,
     pub run_id: Option<RunId>,
     pub host_repo_path: Option<String>,
     pub base_branch: Option<String>,
@@ -43,8 +42,8 @@ pub struct CreatedRun {
 
 struct PersistCreateOptions {
     settings: Settings,
-    run_dir: Option<PathBuf>,
     run_id: Option<RunId>,
+    run_dir: Option<PathBuf>,
     workflow_slug: Option<String>,
     labels: HashMap<String, String>,
     base_branch: Option<String>,
@@ -70,7 +69,6 @@ pub async fn create(store: &SlateStore, request: CreateRunInput) -> Result<Creat
         settings: _,
         cwd: _,
         workflow_slug,
-        run_dir,
         run_id,
         host_repo_path,
         base_branch,
@@ -79,13 +77,7 @@ pub async fn create(store: &SlateStore, request: CreateRunInput) -> Result<Creat
     let settings = resolved.settings.clone();
     let run_id = run_id.unwrap_or_else(RunId::new);
     let storage_dir = settings.storage_dir();
-    let run_dir = run_dir.unwrap_or_else(|| {
-        make_run_dir(
-            &storage_dir.join("runs"),
-            &run_id.to_string(),
-            settings.dry_run_enabled(),
-        )
-    });
+    let run_dir = make_run_dir(&storage_dir.join("runs"), &run_id);
     let working_directory = resolved.working_directory.clone();
     let host_repo_path =
         host_repo_path.or_else(|| Some(working_directory.to_string_lossy().to_string()));
@@ -102,8 +94,8 @@ pub async fn create(store: &SlateStore, request: CreateRunInput) -> Result<Creat
         &resolved.raw_source,
         PersistCreateOptions {
             settings,
-            run_dir: Some(run_dir.clone()),
             run_id: Some(run_id),
+            run_dir: Some(run_dir.clone()),
             workflow_slug: workflow_slug.or(resolved.workflow_slug.clone()),
             labels: resolved.settings.labels.clone(),
             base_branch,
@@ -135,11 +127,7 @@ async fn persist_created_run(
     workflow_config: Option<String>,
 ) -> Result<(), FabroError> {
     let record = persisted.run_record();
-    let run_dir_string = persisted.run_dir().to_string_lossy().to_string();
-    let run_store = match store
-        .create_run(&record.run_id, record.created_at, Some(&run_dir_string))
-        .await
-    {
+    let run_store = match store.create_run(&record.run_id).await {
         Ok(run_store) => run_store,
         Err(err) => store
             .open_run(&record.run_id)
@@ -174,7 +162,7 @@ async fn persist_created_run(
             workflow_slug: record.workflow_slug.clone(),
             db_prefix: None,
         },
-        record.created_at,
+        record.run_id.created_at(),
     );
     let payload = fabro_store::EventPayload::new(
         serde_json::to_value(&envelope).map_err(|err| FabroError::engine(err.to_string()))?,
@@ -280,8 +268,8 @@ fn persist_validated(
 ) -> Result<Persisted, FabroError> {
     let PersistCreateOptions {
         settings,
-        run_dir,
         run_id,
+        run_dir,
         workflow_slug,
         labels,
         base_branch,
@@ -292,12 +280,10 @@ fn persist_validated(
     let settings = resolve_run_settings(settings, validated.graph());
 
     let run_id = run_id.unwrap_or_else(RunId::new);
-    let run_dir =
-        run_dir.unwrap_or_else(|| default_run_dir(&run_id.to_string(), settings.dry_run_enabled()));
+    let run_dir = run_dir.unwrap_or_else(|| default_run_dir(&run_id));
 
     let run_record = RunRecord {
         run_id,
-        created_at: Utc::now(),
         settings,
         graph: validated.graph().clone(),
         workflow_slug,
@@ -361,20 +347,13 @@ pub(crate) fn resolve_run_settings(mut settings: Settings, graph: &Graph) -> Set
     settings
 }
 
-pub(crate) fn default_run_dir(run_id: &str, dry_run: bool) -> PathBuf {
-    make_run_dir(&default_runs_base(), run_id, dry_run)
+pub(crate) fn default_run_dir(run_id: &RunId) -> PathBuf {
+    make_run_dir(&default_runs_base(), run_id)
 }
 
-pub(crate) fn make_run_dir(runs_base: &Path, run_id: &str, dry_run: bool) -> PathBuf {
-    if dry_run {
-        runs_base.join(format!(
-            "{}-dry-run-{}",
-            Local::now().format("%Y%m%d"),
-            run_id
-        ))
-    } else {
-        runs_base.join(format!("{}-{}", Local::now().format("%Y%m%d"), run_id))
-    }
+pub fn make_run_dir(runs_base: &Path, run_id: &RunId) -> PathBuf {
+    let local_created_at = run_id.created_at().with_timezone(&Local);
+    runs_base.join(format!("{}-{}", local_created_at.format("%Y%m%d"), run_id))
 }
 
 #[cfg(test)]
@@ -600,7 +579,6 @@ mod tests {
                 settings: Settings::default(),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: None,
-                run_dir: Some(dir.path().join("run")),
                 run_id: None,
                 host_repo_path: None,
                 base_branch: None,
@@ -645,7 +623,6 @@ mod tests {
                 },
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: Some("slug".to_string()),
-                run_dir: Some(dir.path().join("run")),
                 run_id: Some(fixtures::RUN_1),
                 host_repo_path: Some(dir.path().display().to_string()),
                 base_branch: Some("main".to_string()),
@@ -721,7 +698,6 @@ mod tests {
                 },
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: None,
-                run_dir: Some(dir.path().join("run")),
                 run_id: Some(fixtures::RUN_2),
                 host_repo_path: None,
                 base_branch: None,
@@ -771,7 +747,6 @@ mod tests {
                 },
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: Some("slug".to_string()),
-                run_dir: Some(run_dir.clone()),
                 run_id: Some(fixtures::RUN_3),
                 host_repo_path: None,
                 base_branch: None,

@@ -183,9 +183,9 @@ pub async fn find_run_id_by_prefix_or_store(
     let current_repo_root = canonical_repo_root(repo)?;
     let mut matches = Vec::new();
     for summary in fabro_store.list_runs().await? {
-        if summary.catalog.run_id.to_string() == prefix {
+        if summary.run_id.to_string() == prefix {
             if summary.host_repo_path.is_none() {
-                return Ok(summary.catalog.run_id);
+                return Ok(summary.run_id);
             }
 
             let Some(host_repo_path) = summary.host_repo_path.as_deref() else {
@@ -198,7 +198,7 @@ pub async fn find_run_id_by_prefix_or_store(
                 continue;
             };
             if host_repo_root == current_repo_root {
-                return Ok(summary.catalog.run_id);
+                return Ok(summary.run_id);
             }
             continue;
         }
@@ -212,10 +212,8 @@ pub async fn find_run_id_by_prefix_or_store(
         let Ok(host_repo_root) = canonical_repo_root(&host_repo) else {
             continue;
         };
-        if host_repo_root == current_repo_root
-            && summary.catalog.run_id.to_string().starts_with(prefix)
-        {
-            matches.push(summary.catalog.run_id);
+        if host_repo_root == current_repo_root && summary.run_id.to_string().starts_with(prefix) {
+            matches.push(summary.run_id);
         }
     }
 
@@ -369,7 +367,6 @@ mod tests {
     fn sample_run_record(run_id: RunId, host_repo_path: Option<&str>) -> RunRecord {
         RunRecord {
             run_id,
-            created_at: created_at(),
             settings: Settings::default(),
             graph: Graph::new("test"),
             workflow_slug: None,
@@ -431,7 +428,7 @@ mod tests {
         run_id: RunId,
         host_repo_path: Option<&str>,
     ) -> DurableRunStore {
-        let run_store = store.create_run(&run_id, created_at(), None).await.unwrap();
+        let run_store = store.create_run(&run_id).await.unwrap();
         let run_record = sample_run_record(run_id, host_repo_path);
         append_workflow_event(
             &run_store,
@@ -815,10 +812,7 @@ mod tests {
     async fn rebuild_metadata_branch_errors_when_run_record_is_missing() {
         let (_dir, git_store) = temp_repo();
         let durable_store = memory_store();
-        let run_store = durable_store
-            .create_run(&test_run_id(), created_at(), None)
-            .await
-            .unwrap();
+        let run_store = durable_store.create_run(&test_run_id()).await.unwrap();
 
         let err = rebuild_metadata_branch(&git_store, &run_store, &test_run_id())
             .await

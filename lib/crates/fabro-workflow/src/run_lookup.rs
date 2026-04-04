@@ -7,6 +7,7 @@ use fabro_store::{RunSummary, SlateStore};
 use fabro_types::RunId;
 use serde::Serialize;
 
+use crate::operations::make_run_dir;
 use crate::run_status::{RunStatus, StatusReason};
 
 #[derive(Debug, Clone)]
@@ -48,7 +49,7 @@ impl RunInfo {
     pub fn run_id(&self) -> RunId {
         self.summary
             .as_ref()
-            .map(|summary| summary.catalog.run_id)
+            .map(|summary| summary.run_id)
             .or_else(|| parse_run_id(&self.dir_name))
             .expect("RunInfo must have a run id")
     }
@@ -82,7 +83,7 @@ impl RunInfo {
     pub fn start_time(&self) -> String {
         self.summary
             .as_ref()
-            .and_then(|summary| summary.start_time.or(Some(summary.catalog.created_at)))
+            .and_then(|summary| summary.start_time.or(Some(summary.run_id.created_at())))
             .or(self.start_time_dt)
             .map(|time| time.to_rfc3339())
             .unwrap_or_default()
@@ -194,7 +195,7 @@ pub async fn scan_runs_combined(store: &SlateStore, base: &Path) -> Result<Vec<R
 
     if let Ok(store_runs) = store.list_runs().await {
         for summary in store_runs {
-            let Some(run_info) = run_info_from_summary(summary) else {
+            let Some(run_info) = run_info_from_summary(summary, base) else {
                 continue;
             };
             runs_by_id.insert(run_info.run_id(), run_info);
@@ -217,16 +218,13 @@ pub async fn scan_runs_combined(store: &SlateStore, base: &Path) -> Result<Vec<R
     Ok(runs)
 }
 
-fn run_info_from_summary(summary: RunSummary) -> Option<RunInfo> {
-    let run_dir = summary.catalog.run_dir.as_deref()?;
-    let path = PathBuf::from(run_dir);
+fn run_info_from_summary(summary: RunSummary, runs_base: &Path) -> Option<RunInfo> {
+    let path = make_run_dir(runs_base, &summary.run_id);
     if !path.exists() {
         return None;
     }
-    let dir_name = path
-        .file_name()
-        .map(|name| name.to_string_lossy().to_string())?;
-    let start_time_dt = summary.catalog.created_at;
+    let dir_name = path.file_name()?.to_string_lossy().to_string();
+    let start_time_dt = summary.run_id.created_at();
     let end_time = if summary.status.is_some_and(RunStatus::is_terminal) {
         summary.duration_ms.and_then(|duration_ms| {
             Some(start_time_dt + chrono::Duration::milliseconds(i64::try_from(duration_ms).ok()?))
@@ -382,7 +380,6 @@ mod tests {
     fn sample_run_record() -> RunRecord {
         RunRecord {
             run_id: fixtures::RUN_1,
-            created_at: Utc::now(),
             settings: Settings::default(),
             graph: Graph::new("test"),
             workflow_slug: Some("test".to_string()),
@@ -403,14 +400,7 @@ mod tests {
         let store = memory_store();
         let run_dir_string = run_dir.to_string_lossy().to_string();
         let run_record = sample_run_record();
-        let run_store = store
-            .create_run(
-                &fixtures::RUN_1,
-                run_record.created_at,
-                Some(&run_dir_string),
-            )
-            .await
-            .unwrap();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         append_workflow_event(
             &run_store,
             &fixtures::RUN_1,
