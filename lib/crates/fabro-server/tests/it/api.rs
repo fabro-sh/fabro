@@ -531,7 +531,7 @@ mod server_lifecycle {
             fabro_server::jwt_auth::AuthMode::Disabled,
         );
 
-        // 1. Start run
+        // 1. Create run
         let req = Request::builder()
             .method("POST")
             .uri(api("/runs"))
@@ -545,6 +545,15 @@ mod server_lifecycle {
         assert_eq!(response.status(), StatusCode::CREATED);
         let body = body_json(response.into_body()).await;
         let run_id = body["id"].as_str().unwrap().to_string();
+
+        // 1b. Start the run
+        let req = Request::builder()
+            .method("POST")
+            .uri(api(&format!("/runs/{run_id}/start")))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
 
         // 2. Poll for question to appear (run goes start -> work -> gate, then blocks)
         let question_id = wait_for_question_id(&app, &run_id).await;
@@ -567,18 +576,7 @@ mod server_lifecycle {
         let final_status = wait_for_run_status(&app, &run_id, &["completed", "failed"]).await;
         assert_eq!(final_status, "completed");
 
-        // 5. Verify context endpoint returns an object
-        let req = Request::builder()
-            .method("GET")
-            .uri(api(&format!("/runs/{run_id}/context")))
-            .body(Body::empty())
-            .unwrap();
-        let response = app.clone().oneshot(req).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let ctx_body = body_json(response.into_body()).await;
-        assert!(ctx_body.is_object(), "context should be an object");
-
-        // 6. Verify no pending questions
+        // 5. Verify no pending questions
         let req = Request::builder()
             .method("GET")
             .uri(api(&format!("/runs/{run_id}/questions")))
@@ -601,7 +599,7 @@ mod server_lifecycle {
             fabro_server::jwt_auth::AuthMode::Disabled,
         );
 
-        // Start a run that will block at the human gate
+        // Create and start a run that will block at the human gate
         let req = Request::builder()
             .method("POST")
             .uri(api("/runs"))
@@ -613,6 +611,13 @@ mod server_lifecycle {
         let response = app.clone().oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
         let run_id = body["id"].as_str().unwrap().to_string();
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api(&format!("/runs/{run_id}/start")))
+            .body(Body::empty())
+            .unwrap();
+        app.clone().oneshot(req).await.unwrap();
 
         // Subscribe as soon as the scheduler has created the live event stream.
         // Waiting past "starting" races with stage events because `/events`
@@ -890,7 +895,7 @@ mod serve_dry_run {
     async fn dry_run_serve_starts_and_runs_workflow() {
         let app = dry_run_app().await;
 
-        // POST /runs to start a run
+        // POST /runs to create a run
         let req = Request::builder()
             .method("POST")
             .uri(api("/runs"))
@@ -906,6 +911,15 @@ mod serve_dry_run {
         let body = body_json(response.into_body()).await;
         let run_id = body["id"].as_str().unwrap().to_string();
         assert!(!run_id.is_empty());
+
+        // POST /runs/{id}/start to queue it
+        let req = Request::builder()
+            .method("POST")
+            .uri(api(&format!("/runs/{run_id}/start")))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
 
         let status = wait_for_run_status(&app, &run_id, &["completed", "failed"]).await;
         assert_eq!(status, "completed");

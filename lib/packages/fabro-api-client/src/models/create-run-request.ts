@@ -15,21 +15,12 @@
 
 
 /**
- * Lifecycle status of a run.
+ * Request body for creating a new run from a Graphviz graph source.
  */
-
-export const RunStatus = {
-    SUBMITTED: 'submitted',
-    QUEUED: 'queued',
-    STARTING: 'starting',
-    RUNNING: 'running',
-    COMPLETED: 'completed',
-    FAILED: 'failed',
-    CANCELLED: 'cancelled',
-    PAUSED: 'paused'
-} as const;
-
-export type RunStatus = typeof RunStatus[keyof typeof RunStatus];
-
-
+export interface CreateRunRequest {
+    /**
+     * Graphviz DOT language source defining the workflow graph.
+     */
+    'dot_source': string;
+}
 

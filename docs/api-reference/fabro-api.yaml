@@ -125,16 +125,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/PaginatedRunList"
     post:
-      operationId: startRun
+      operationId: createRun
       tags: [Runs]
-      summary: Start Run
-      description: Queues a new workflow run from a Graphviz graph source. The run is created in `queued` status and will be picked up by the scheduler.
+      summary: Create Run
+      description: Creates a new workflow run from a Graphviz graph source. The run is created in `submitted` status. Use `POST /api/v1/runs/{id}/start` to begin execution.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/StartRunRequest"
+              $ref: "#/components/schemas/CreateRunRequest"
       responses:
         "201":
           description: Run created
@@ -194,6 +194,34 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Run is not running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/start:
+    post:
+      operationId: startRun
+      tags: [Runs]
+      summary: Start Run
+      description: Starts a submitted run, queuing it for execution. Returns 409 if the run is not in `submitted` status.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Run started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunStatusResponse"
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Run is not in submitted status
           content:
             application/json:
               schema:
@@ -300,29 +328,6 @@ paths:
                 oneOf:
                   - $ref: "#/components/schemas/RunCheckpoint"
                   - type: "null"
-        "404":
-          description: Run not found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-
-  /api/v1/runs/{id}/context:
-    get:
-      operationId: retrieveRunContext
-      tags: [Run Internals]
-      summary: Retrieve Run Context
-      description: Returns the key-value context map accumulated during the run. Empty if the run has not started.
-      parameters:
-        - $ref: "#/components/parameters/RunId"
-      responses:
-        "200":
-          description: Context key-value map
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: true
         "404":
           description: Run not found
           content:
@@ -1915,6 +1920,7 @@ components:
       description: Lifecycle status of a run.
       type: string
       enum:
+        - submitted
         - queued
         - starting
         - running
@@ -1923,8 +1929,8 @@ components:
         - cancelled
         - paused
 
-    StartRunRequest:
-      description: Request body for starting a new run from a Graphviz graph source.
+    CreateRunRequest:
+      description: Request body for creating a new run from a Graphviz graph source.
       type: object
       required:
         - dot_source

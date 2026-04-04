@@ -46,7 +46,6 @@ use crate::sessions::{SessionStore, new_session_store};
 use crate::static_files;
 use crate::web_auth;
 use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
-use fabro_workflow::context::Context;
 use fabro_workflow::event::Emitter;
 use fabro_workflow::operations::{self, CreateRunInput, WorkflowInput};
 use fabro_workflow::pipeline::Persisted;
@@ -56,9 +55,9 @@ use fabro_api::types::AggregateUsageTotals;
 pub use fabro_api::types::{
     AggregateUsage, ApiQuestion, ApiQuestionOption, CompletionContentPart, CompletionMessage,
     CompletionMessageRole, CompletionResponse, CompletionToolChoiceMode, CompletionUsage,
-    CreateCompletionRequest, ModelReference, PaginatedRunList, PaginationMeta,
-    QuestionType as ApiQuestionType, RunError, RunStatus, RunStatusResponse, StartRunRequest,
-    SubmitAnswerRequest, TokenUsage, UsageByModel,
+    CreateCompletionRequest, CreateRunRequest, ModelReference, PaginatedRunList, PaginationMeta,
+    QuestionType as ApiQuestionType, RunError, RunStatus, RunStatusResponse, SubmitAnswerRequest,
+    TokenUsage, UsageByModel,
 };
 
 pub fn default_page_limit() -> u32 {
@@ -98,7 +97,6 @@ struct ManagedRun {
     // Populated when running:
     interviewer: Option<Arc<WebInterviewer>>,
     event_tx: Option<broadcast::Sender<RunEvent>>,
-    context: Option<Context>,
     checkpoint: Option<Checkpoint>,
     cancel_tx: Option<oneshot::Sender<()>>,
     cancel_token: Option<Arc<AtomicBool>>,
@@ -197,14 +195,14 @@ pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
 
 fn demo_routes() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/runs", get(demo::list_runs).post(demo::start_run_stub))
+        .route("/runs", get(demo::list_runs).post(demo::create_run_stub))
         .route("/runs/{id}", get(demo::get_run_status))
         .route("/runs/{id}/questions", get(demo::get_questions_stub))
         .route("/runs/{id}/questions/{qid}/answer", post(demo::answer_stub))
         .route("/runs/{id}/events", get(demo::run_events_stub))
         .route("/runs/{id}/checkpoint", get(demo::checkpoint_stub))
-        .route("/runs/{id}/context", get(demo::context_stub))
         .route("/runs/{id}/cancel", post(demo::cancel_stub))
+        .route("/runs/{id}/start", post(demo::start_run_stub))
         .route("/runs/{id}/pause", post(demo::pause_stub))
         .route("/runs/{id}/unpause", post(demo::unpause_stub))
         .route("/runs/{id}/graph", get(demo::get_run_graph))
@@ -273,14 +271,14 @@ fn demo_routes() -> Router<Arc<AppState>> {
 
 fn real_routes() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/runs", get(list_runs).post(start_run))
+        .route("/runs", get(list_runs).post(create_run))
         .route("/runs/{id}", get(get_run_status))
         .route("/runs/{id}/questions", get(get_questions))
         .route("/runs/{id}/questions/{qid}/answer", post(submit_answer))
         .route("/runs/{id}/events", get(get_events))
         .route("/runs/{id}/checkpoint", get(get_checkpoint))
-        .route("/runs/{id}/context", get(get_context))
         .route("/runs/{id}/cancel", post(cancel_run))
+        .route("/runs/{id}/start", post(start_run))
         .route("/runs/{id}/pause", post(pause_run))
         .route("/runs/{id}/unpause", post(unpause_run))
         .route("/runs/{id}/graph", get(get_graph))
@@ -530,13 +528,13 @@ fn clear_live_run_state(run: &mut ManagedRun) {
     run.cancel_token = None;
 }
 
-async fn start_run(
+async fn create_run(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
-    Json(req): Json<StartRunRequest>,
+    Json(req): Json<CreateRunRequest>,
 ) -> Response {
     let run_id = RunId::new();
-    info!(run_id = %run_id, "Run queued");
+    info!(run_id = %run_id, "Run created");
     let settings = state.settings.read().unwrap().clone();
     let created = match Box::pin(operations::create(
         state.store.as_ref(),
@@ -588,12 +586,11 @@ async fn start_run(
             run_id,
             ManagedRun {
                 dot_source: req.dot_source,
-                status: RunStatus::Queued,
+                status: RunStatus::Submitted,
                 error: None,
                 created_at,
                 interviewer: None,
                 event_tx: None,
-                context: None,
                 checkpoint: None,
                 cancel_tx: None,
                 cancel_token: None,
@@ -602,19 +599,53 @@ async fn start_run(
         );
     }
 
-    state.scheduler_notify.notify_one();
-
     (
         StatusCode::CREATED,
         Json(RunStatusResponse {
             id: run_id.to_string(),
-            status: RunStatus::Queued,
+            status: RunStatus::Submitted,
             error: None,
             queue_position: None,
             created_at,
         }),
     )
         .into_response()
+}
+
+async fn start_run(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    let mut runs = state.runs.lock().expect("runs lock poisoned");
+    match runs.get_mut(&id) {
+        Some(managed_run) => {
+            if managed_run.status != RunStatus::Submitted {
+                return ApiError::new(StatusCode::CONFLICT, "Run is not in submitted status.")
+                    .into_response();
+            }
+            managed_run.status = RunStatus::Queued;
+            let response = (
+                StatusCode::OK,
+                Json(RunStatusResponse {
+                    id: id.to_string(),
+                    status: RunStatus::Queued,
+                    error: None,
+                    queue_position: None,
+                    created_at: managed_run.created_at,
+                }),
+            )
+                .into_response();
+            drop(runs);
+            state.scheduler_notify.notify_one();
+            response
+        }
+        None => ApiError::not_found("Run not found.").into_response(),
+    }
 }
 
 /// Execute a single run: transitions queued → starting → running → completed/failed/cancelled.
@@ -649,7 +680,6 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
 
     // Create interviewer and event plumbing (this is the "provisioning" phase)
     let interviewer = Arc::new(WebInterviewer::new());
-    let context = Context::new();
     let emitter = Emitter::new(run_id);
     if let Some(tx_clone) = event_tx {
         emitter.on_event(move |event| {
@@ -662,7 +692,7 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
         .map(|factory| Arc::new(factory(Arc::clone(&interviewer) as Arc<dyn Interviewer>)));
     let emitter = Arc::new(emitter);
 
-    // Transition to Running, populate interviewer + context
+    // Transition to Running, populate interviewer
     {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         if let Some(managed_run) = runs.get_mut(&run_id) {
@@ -674,7 +704,6 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
             }
             managed_run.status = RunStatus::Running;
             managed_run.interviewer = Some(Arc::clone(&interviewer));
-            managed_run.context = Some(context);
         }
     }
 
@@ -808,11 +837,6 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
             }
         }
         managed_run.checkpoint = checkpoint;
-        if let Ok(started) = &result {
-            if let Some(ctx) = &started.final_context {
-                managed_run.context = Some(ctx.clone());
-            }
-        }
         managed_run.run_dir = Some(run_dir);
         clear_live_run_state(managed_run);
     }
@@ -1083,25 +1107,6 @@ async fn get_checkpoint(
     }
 }
 
-async fn get_context(
-    _auth: AuthenticatedService,
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Response {
-    let id = match parse_run_id_path(&id) {
-        Ok(id) => id,
-        Err(response) => return response,
-    };
-    let runs = state.runs.lock().expect("runs lock poisoned");
-    match runs.get(&id) {
-        Some(managed_run) => match &managed_run.context {
-            Some(ctx) => (StatusCode::OK, Json(ctx.snapshot())).into_response(),
-            None => (StatusCode::OK, Json(serde_json::json!({}))).into_response(),
-        },
-        None => ApiError::not_found("Run not found.").into_response(),
-    }
-}
-
 async fn cancel_run(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
@@ -1114,7 +1119,7 @@ async fn cancel_run(
     let mut runs = state.runs.lock().expect("runs lock poisoned");
     match runs.get_mut(&id) {
         Some(managed_run) => match managed_run.status {
-            RunStatus::Queued | RunStatus::Starting | RunStatus::Running => {
+            RunStatus::Submitted | RunStatus::Queued | RunStatus::Starting | RunStatus::Running => {
                 if let Some(token) = &managed_run.cancel_token {
                     token.store(true, Ordering::Relaxed);
                 }
@@ -1688,6 +1693,31 @@ mod tests {
         format!("/api/v1{path}")
     }
 
+    /// Create a run via POST /runs, then start it via POST /runs/{id}/start.
+    /// Returns the run_id string.
+    async fn create_and_start_run(app: &Router, dot_source: &str) -> String {
+        let req = Request::builder()
+            .method("POST")
+            .uri(api("/runs"))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({"dot_source": dot_source})).unwrap(),
+            ))
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        let body = body_json(response.into_body()).await;
+        let run_id = body["id"].as_str().unwrap().to_string();
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api(&format!("/runs/{run_id}/start")))
+            .body(Body::empty())
+            .unwrap();
+        app.clone().oneshot(req).await.unwrap();
+
+        run_id
+    }
+
     #[tokio::test]
     async fn test_model_unknown_returns_404() {
         let app = test_app_with();
@@ -1892,19 +1922,7 @@ mod tests {
         let state = create_app_state();
         let app = test_app_with_scheduler(state);
 
-        // Start a run
-        let req = Request::builder()
-            .method("POST")
-            .uri(api("/runs"))
-            .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-            ))
-            .unwrap();
-
-        let response = app.clone().oneshot(req).await.unwrap();
-        let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
+        let run_id = create_and_start_run(&app, MINIMAL_DOT).await;
 
         // Give run a moment to start
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -1920,7 +1938,7 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
 
         let body = body_json(response.into_body()).await;
-        assert_eq!(body["id"].as_str().unwrap(), run_id.to_string());
+        assert_eq!(body["id"].as_str().unwrap(), run_id);
         let status = body["status"].as_str().unwrap();
         assert!(
             status == "queued"
@@ -2044,11 +2062,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_context_returns_map() {
+    async fn create_run_returns_submitted() {
         let state = create_app_state();
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
-        // Start a run
         let req = Request::builder()
             .method("POST")
             .uri(api("/runs"))
@@ -2058,22 +2075,76 @@ mod tests {
             ))
             .unwrap();
 
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = body_json(response.into_body()).await;
+        assert_eq!(body["status"], "submitted");
+    }
+
+    #[tokio::test]
+    async fn start_run_transitions_to_queued() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        // Create a run
+        let req = Request::builder()
+            .method("POST")
+            .uri(api("/runs"))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
+            ))
+            .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
+        let run_id = body["id"].as_str().unwrap();
 
-        // Get context
+        // Start it
         let req = Request::builder()
-            .method("GET")
-            .uri(api(&format!("/runs/{run_id}/context")))
+            .method("POST")
+            .uri(api(&format!("/runs/{run_id}/start")))
             .body(Body::empty())
             .unwrap();
-
         let response = app.oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-
         let body = body_json(response.into_body()).await;
-        assert!(body.is_object());
+        assert_eq!(body["status"], "queued");
+    }
+
+    #[tokio::test]
+    async fn start_run_conflict_when_not_submitted() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        // Create a run
+        let req = Request::builder()
+            .method("POST")
+            .uri(api("/runs"))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
+            ))
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        let body = body_json(response.into_body()).await;
+        let run_id = body["id"].as_str().unwrap();
+
+        // Start it (transitions to queued)
+        let req = Request::builder()
+            .method("POST")
+            .uri(api(&format!("/runs/{run_id}/start")))
+            .body(Body::empty())
+            .unwrap();
+        app.clone().oneshot(req).await.unwrap();
+
+        // Start it again — should 409
+        let req = Request::builder()
+            .method("POST")
+            .uri(api(&format!("/runs/{run_id}/start")))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
     }
 
     #[tokio::test]
@@ -2131,19 +2202,8 @@ mod tests {
         let state = create_app_state();
         let app = test_app_with_scheduler(state);
 
-        // Start a run
-        let req = Request::builder()
-            .method("POST")
-            .uri(api("/runs"))
-            .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-            ))
-            .unwrap();
-
-        let response = app.clone().oneshot(req).await.unwrap();
-        let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
+        let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
+        let run_id = run_id_str.parse::<RunId>().unwrap();
 
         // Wait for scheduler to promote run (creates event_tx)
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -2182,19 +2242,8 @@ mod tests {
         let state = create_app_state_with_options(dry_run_settings(), 5);
         let app = test_app_with_scheduler(state);
 
-        // Start a run
-        let req = Request::builder()
-            .method("POST")
-            .uri(api("/runs"))
-            .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-            ))
-            .unwrap();
-
-        let response = app.clone().oneshot(req).await.unwrap();
-        let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
+        let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
+        let run_id = run_id_str.parse::<RunId>().unwrap();
 
         // Poll until run completes
         let mut status = String::new();
@@ -2360,19 +2409,8 @@ mod tests {
         let state = create_app_state_with_options(dry_run_settings(), 5);
         let app = test_app_with_scheduler(state);
 
-        // Start a run
-        let req = Request::builder()
-            .method("POST")
-            .uri(api("/runs"))
-            .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-            ))
-            .unwrap();
-
-        let response = app.clone().oneshot(req).await.unwrap();
-        let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
+        let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
+        let run_id = run_id_str.parse::<RunId>().unwrap();
 
         // Poll until run completes
         let mut status = String::new();
@@ -2407,7 +2445,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn post_runs_returns_queued_status() {
+    async fn post_runs_returns_submitted_status() {
         let state = create_app_state();
         let app = build_router(state, AuthMode::Disabled);
 
@@ -2425,7 +2463,7 @@ mod tests {
         let body = body_json(response.into_body()).await;
         let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
 
-        // Check status is queued (no scheduler running)
+        // Check status is submitted (no start, no scheduler running)
         let req = Request::builder()
             .method("GET")
             .uri(api(&format!("/runs/{run_id}")))
@@ -2434,7 +2472,7 @@ mod tests {
 
         let response = app.oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
-        assert_eq!(body["status"].as_str().unwrap(), "queued");
+        assert_eq!(body["status"].as_str().unwrap(), "submitted");
     }
 
     #[tokio::test]
@@ -2529,18 +2567,8 @@ mod tests {
         let state = create_app_state_with_options(initial_settings.clone(), 5);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
-        let req = Request::builder()
-            .method("POST")
-            .uri(api("/runs"))
-            .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({ "dot_source": dot })).unwrap(),
-            ))
-            .unwrap();
-        let response = app.clone().oneshot(req).await.unwrap();
-        assert_eq!(response.status(), StatusCode::CREATED);
-        let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
+        let run_id_str = create_and_start_run(&app, &dot).await;
+        let run_id = run_id_str.parse::<RunId>().unwrap();
 
         *state.settings.write().unwrap() = Settings::default();
 
@@ -2562,7 +2590,7 @@ mod tests {
         let state = create_app_state();
         let app = build_router(state, AuthMode::Disabled);
 
-        // Submit a run (no scheduler, stays queued)
+        // Submit a run (no start, stays submitted)
         let req = Request::builder()
             .method("POST")
             .uri(api("/runs"))
@@ -2610,18 +2638,8 @@ mod tests {
         let state = create_app_state_with_options(settings, 5);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
-        let req = Request::builder()
-            .method("POST")
-            .uri(api("/runs"))
-            .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-            ))
-            .unwrap();
-        let response = app.clone().oneshot(req).await.unwrap();
-        assert_eq!(response.status(), StatusCode::CREATED);
-        let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
+        let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
+        let run_id = run_id_str.parse::<RunId>().unwrap();
 
         let runner = tokio::spawn(execute_run(Arc::clone(&state), run_id));
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -2678,18 +2696,8 @@ mod tests {
         });
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
-        let req = Request::builder()
-            .method("POST")
-            .uri(api("/runs"))
-            .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-            ))
-            .unwrap();
-        let response = app.clone().oneshot(req).await.unwrap();
-        assert_eq!(response.status(), StatusCode::CREATED);
-        let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
+        let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
+        let run_id = run_id_str.parse::<RunId>().unwrap();
 
         let runner = tokio::spawn(execute_run(Arc::clone(&state), run_id));
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -2718,22 +2726,12 @@ mod tests {
         let state = create_app_state();
         let app = build_router(state, AuthMode::Disabled);
 
-        // Submit two runs (no scheduler, both stay queued)
+        // Create and start two runs (no scheduler, both stay queued)
         let mut run_ids = Vec::new();
-        for _ in 0..2 {
-            let req = Request::builder()
-                .method("POST")
-                .uri(api("/runs"))
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-                ))
-                .unwrap();
-
-            let response = app.clone().oneshot(req).await.unwrap();
-            let body = body_json(response.into_body()).await;
-            run_ids.push(body["id"].as_str().unwrap().to_string());
-        }
+        let id = create_and_start_run(&app, MINIMAL_DOT).await;
+        run_ids.push(id);
+        let id = create_and_start_run(&app, MINIMAL_DOT).await;
+        run_ids.push(id);
 
         // Check queue positions via individual status
         let req = Request::builder()
@@ -2760,22 +2758,12 @@ mod tests {
         let state = create_app_state_with_options(Settings::default(), 1);
         let app = test_app_with_scheduler(state);
 
-        // Submit two runs with max_concurrent_runs=1
+        // Create and start two runs with max_concurrent_runs=1
         let mut run_ids = Vec::new();
-        for _ in 0..2 {
-            let req = Request::builder()
-                .method("POST")
-                .uri(api("/runs"))
-                .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-                ))
-                .unwrap();
-
-            let response = app.clone().oneshot(req).await.unwrap();
-            let body = body_json(response.into_body()).await;
-            run_ids.push(body["id"].as_str().unwrap().to_string());
-        }
+        let id = create_and_start_run(&app, MINIMAL_DOT).await;
+        run_ids.push(id);
+        let id = create_and_start_run(&app, MINIMAL_DOT).await;
+        run_ids.push(id);
 
         // Give scheduler time to pick up the first run
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;

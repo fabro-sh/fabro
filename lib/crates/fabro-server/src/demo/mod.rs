@@ -51,13 +51,27 @@ pub(crate) async fn list_runs(
     paginated_response(runs::list_items(), &pagination)
 }
 
-pub(crate) async fn start_run_stub(
+pub(crate) async fn create_run_stub(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
 ) -> Response {
     (
         StatusCode::CREATED,
-        Json(serde_json::json!({"id": "demo-run-new", "status": "queued", "created_at": "2026-03-06T14:30:00Z"})),
+        Json(serde_json::json!({"id": "demo-run-new", "status": "submitted", "created_at": "2026-03-06T14:30:00Z"})),
+    )
+        .into_response()
+}
+
+pub(crate) async fn start_run_stub(
+    _auth: AuthenticatedService,
+    State(_state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    (
+        StatusCode::OK,
+        Json(
+            serde_json::json!({"id": id, "status": "queued", "created_at": "2026-03-06T14:30:00Z"}),
+        ),
     )
         .into_response()
 }
@@ -186,14 +200,6 @@ pub(crate) async fn checkpoint_stub(
     Path(_id): Path<String>,
 ) -> Response {
     (StatusCode::OK, Json(serde_json::json!(null))).into_response()
-}
-
-pub(crate) async fn context_stub(
-    _auth: AuthenticatedService,
-    State(_state): State<Arc<AppState>>,
-    Path(_id): Path<String>,
-) -> Response {
-    (StatusCode::OK, Json(serde_json::json!({}))).into_response()
 }
 
 pub(crate) async fn cancel_stub(
