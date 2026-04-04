@@ -1,7 +1,6 @@
 pub(crate) mod artifact;
 pub(crate) mod auto_status;
 pub(crate) mod circuit_breaker;
-pub(crate) mod disk;
 pub(crate) mod event;
 pub(crate) mod fidelity;
 pub(crate) mod git;
@@ -41,7 +40,6 @@ use fabro_sandbox::Sandbox;
 use self::artifact::ArtifactLifecycle;
 use self::auto_status::AutoStatusLifecycle;
 use self::circuit_breaker::CircuitBreakerLifecycle;
-use self::disk::DiskLifecycle;
 use self::event::EventLifecycle;
 use self::fidelity::FidelityLifecycle;
 use self::git::{GitCheckpointResult, GitLifecycle};
@@ -60,7 +58,6 @@ pub(crate) struct WorkflowLifecycle {
     fidelity: FidelityLifecycle,
     auto_status: AutoStatusLifecycle,
     circuit_breaker: Arc<CircuitBreakerLifecycle>,
-    disk: DiskLifecycle,
     git: GitLifecycle,
     artifact: ArtifactLifecycle,
     on_node: crate::OnNodeCallback,
@@ -143,13 +140,6 @@ impl WorkflowLifecycle {
 
         let fidelity = FidelityLifecycle::new(Arc::clone(&graph));
 
-        let disk = DiskLifecycle {
-            run_dir: run_dir.clone(),
-            checkpoint_git_result: Arc::clone(&checkpoint_git_result),
-            circuit_breaker: Arc::clone(&circuit_breaker),
-            checkpoint_enabled: true,
-        };
-
         let start_node_id = graph.find_start_node().map(|n| n.id.clone());
 
         let git = GitLifecycle {
@@ -181,7 +171,6 @@ impl WorkflowLifecycle {
             fidelity,
             auto_status: AutoStatusLifecycle,
             circuit_breaker,
-            disk,
             git,
             artifact,
             on_node,
@@ -311,7 +300,6 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
         self.circuit_breaker.after_node(node, result, state).await?;
         self.event.after_node(node, result, state).await?;
         self.hook.after_node(node, result, state).await?;
-        self.disk.after_node(node, result, state).await?;
         self.artifact.after_node(node, result, state).await?;
         Ok(())
     }
@@ -403,9 +391,6 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
         state: &WfRunState,
     ) -> CoreResult<()> {
         self.git
-            .on_checkpoint(node, result, next_node_id, state)
-            .await?;
-        self.disk
             .on_checkpoint(node, result, next_node_id, state)
             .await?;
         self.event
