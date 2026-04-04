@@ -6,12 +6,6 @@ use serde::{Deserialize, Serialize};
 use crate::{Result, StoreError};
 use fabro_types::{RunId, RunStatus, StatusReason};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct NodeVisitRef<'a> {
-    pub node_id: &'a str,
-    pub visit: u32,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunSummary {
     pub run_id: RunId,
