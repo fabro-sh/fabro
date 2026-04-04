@@ -168,7 +168,6 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    use chrono::Utc;
     use fabro_graphviz::graph::Graph;
     use fabro_store::SlateStore;
     use fabro_types::{RunId, Settings, fixtures};
@@ -216,7 +215,6 @@ mod tests {
         run_dir: &std::path::Path,
         checkpoint: &Checkpoint,
     ) -> fabro_store::SlateRunStore {
-        let created_at = Utc::now();
         let inner = test_store().create_run(&test_run_id()).await.unwrap();
         let run_store = inner;
         let run_record = RunRecord {

@@ -167,7 +167,7 @@ pub mod fixtures {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{DateTime, Utc};
+    use chrono::{TimeZone, Utc};
 
     use super::{RunId, fixtures};
 
@@ -186,21 +186,18 @@ mod tests {
     }
 
     #[test]
-    fn created_at_comes_from_ulid_timestamp() {
-        let expected = DateTime::parse_from_rfc3339("2026-03-27T12:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
-        let run_id = RunId::from_datetime(expected);
+    fn exposes_created_at_from_ulid_timestamp() {
+        let dt = Utc.with_ymd_and_hms(2026, 3, 27, 12, 34, 56).unwrap();
+        let run_id = RunId::from_datetime(dt);
 
-        assert_eq!(run_id.created_at(), expected);
+        assert_eq!(run_id.created_at(), dt);
     }
 
     #[test]
-    fn from_datetime_round_trips_timestamp() {
-        let expected = DateTime::parse_from_rfc3339("2026-03-27T12:00:00Z")
-            .unwrap()
-            .with_timezone(&Utc);
+    fn creates_run_id_from_datetime() {
+        let dt = Utc.with_ymd_and_hms(2026, 3, 27, 12, 34, 56).unwrap();
+        let run_id = RunId::from_datetime(dt);
 
-        assert_eq!(RunId::from_datetime(expected).created_at(), expected);
+        assert_eq!(run_id.created_at(), dt);
     }
 }

@@ -303,7 +303,7 @@ digraph Test {
     let run_dir = before_summary["run_dir"].as_str().unwrap().to_string();
     fabro_json_snapshot!(context, &before_summary, @r#"
     {
-      "run_dir": "[DRY_RUN_DIR]",
+      "run_dir": "[RUN_DIR]",
       "start_time": "[TIMESTAMP]",
       "conclusion_timestamp": "[TIMESTAMP]",
       "conclusion_status": "success"

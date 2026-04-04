@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use fabro_config::server::{ApiAuthStrategy, AuthProvider, load_server_settings};
+use fabro_config::server::{self, ApiAuthStrategy, AuthProvider};
 use fabro_config::user::{default_user_config_path, legacy_user_config_path};
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::types::{Message, Request};
@@ -938,7 +938,7 @@ pub(crate) async fn run_doctor(
 
     let daytona_configured = std::env::var("DAYTONA_API_KEY").is_ok();
 
-    let server_settings = load_server_settings(None).unwrap_or_default();
+    let server_settings = server::load_server_settings(None).unwrap_or_default();
 
     let api_status = {
         let api = server_settings.api.clone().unwrap_or_default();

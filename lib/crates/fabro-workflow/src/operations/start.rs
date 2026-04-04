@@ -1092,6 +1092,7 @@ mod tests {
     async fn resume_errors_when_run_already_finished_successfully() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
+        std::fs::create_dir_all(&run_dir).unwrap();
         let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 

@@ -53,7 +53,6 @@ mod tests {
     use std::collections::HashMap;
     use std::path::PathBuf;
 
-    use chrono::Utc;
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
     use fabro_store::{SlateRunStore, SlateStore, StoreHandle};
     use fabro_types::{Settings, fixtures};

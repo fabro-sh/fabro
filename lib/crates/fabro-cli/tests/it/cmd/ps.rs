@@ -66,25 +66,28 @@ fn ps_all_json_lists_created_and_completed_runs() {
     let mut cmd = context.ps();
     cmd.args(["-a", "--json"]);
 
-    fabro_snapshot!(filters, cmd, @r###"
+    fabro_snapshot!(filters, cmd, @r#"
     success: true
     exit_code: 0
     ----- stdout -----
     [
       {
         "run_id": "[ULID]",
-        "dir_name": "[DATE]-dry-run-[ULID]",
+        "dir_name": "20260403-[ULID]",
         "workflow_name": "Simple",
         "workflow_slug": "simple",
         "status": "submitted",
+        "status_reason": null,
         "start_time": "[TIMESTAMP]",
         "labels": {},
+        "duration_ms": null,
+        "total_cost": null,
         "host_repo_path": "[TEMP_DIR]",
         "goal": "Run tests and report results"
       },
       {
         "run_id": "[ULID]",
-        "dir_name": "[DATE]-dry-run-[ULID]",
+        "dir_name": "20260403-[ULID]",
         "workflow_name": "Simple",
         "workflow_slug": "simple",
         "status": "succeeded",
@@ -92,12 +95,13 @@ fn ps_all_json_lists_created_and_completed_runs() {
         "start_time": "[TIMESTAMP]",
         "labels": {},
         "duration_ms": [DURATION_MS],
+        "total_cost": null,
         "host_repo_path": "[TEMP_DIR]",
         "goal": "Run tests and report results"
       }
     ]
     ----- stderr -----
-    "###);
+    "#);
 }
 
 #[test]
@@ -169,14 +173,14 @@ fn ps_filters_by_workflow_and_label() {
         "suite=alpha",
     ]);
 
-    fabro_snapshot!(filters, cmd, @r###"
+    fabro_snapshot!(filters, cmd, @r#"
     success: true
     exit_code: 0
     ----- stdout -----
     [
       {
         "run_id": "[ULID]",
-        "dir_name": "[DATE]-dry-run-[ULID]",
+        "dir_name": "20260403-[ULID]",
         "workflow_name": "Simple",
         "workflow_slug": "simple",
         "status": "succeeded",
@@ -186,10 +190,11 @@ fn ps_filters_by_workflow_and_label() {
           "suite": "alpha"
         },
         "duration_ms": [DURATION_MS],
+        "total_cost": null,
         "host_repo_path": "[TEMP_DIR]",
         "goal": "Run tests and report results"
       }
     ]
     ----- stderr -----
-    "###);
+    "#);
 }

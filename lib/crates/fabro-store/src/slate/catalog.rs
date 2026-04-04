@@ -1,5 +1,7 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use futures::TryStreamExt;
 use object_store::ObjectStore;
 use object_store::path::Path;
@@ -13,13 +15,10 @@ pub(crate) async fn write_catalog(
     run_id: &RunId,
 ) -> Result<()> {
     store
-        .put(&by_id_path(base_prefix, run_id), bytes::Bytes::new().into())
+        .put(&by_id_path(base_prefix, run_id), Bytes::new().into())
         .await?;
     store
-        .put(
-            &by_start_path(base_prefix, run_id),
-            bytes::Bytes::new().into(),
-        )
+        .put(&by_start_path(base_prefix, run_id), Bytes::new().into())
         .await?;
     Ok(())
 }
@@ -44,11 +43,12 @@ pub(crate) async fn list_run_ids(
     let prefix = Path::from(format!("{base_prefix}by-start"));
     let metas = store.list(Some(&prefix)).try_collect::<Vec<_>>().await?;
     let mut run_ids = Vec::new();
+    let mut seen = HashSet::new();
     for meta in metas {
         let Some(run_id) = parse_run_id_from_path(&meta.location) else {
             continue;
         };
-        if !read_locator(store.clone(), base_prefix, &run_id).await? {
+        if !seen.insert(run_id) {
             continue;
         }
         let created_at = run_id.created_at();
@@ -65,6 +65,12 @@ pub(crate) async fn list_run_ids(
         run_ids.push(run_id);
     }
     Ok(run_ids)
+}
+
+pub(crate) fn parse_run_id_from_path(path: &Path) -> Option<RunId> {
+    let filename = path.filename()?;
+    let run_id = filename.strip_suffix(".json").unwrap_or(filename);
+    run_id.parse().ok()
 }
 
 pub(crate) fn db_prefix(base_prefix: &str, run_id: &RunId) -> String {
@@ -85,16 +91,9 @@ pub(crate) fn by_start_path(base_prefix: &str, run_id: &RunId) -> Path {
     ))
 }
 
-pub(crate) fn parse_run_id_from_path(path: &Path) -> Option<RunId> {
-    let filename = path.filename()?;
-    let run_id = filename.strip_suffix(".json").unwrap_or(filename);
-    run_id.parse().ok()
-}
-
 #[cfg(test)]
 pub(super) mod test_support {
     use super::*;
-    use std::collections::HashSet;
 
     pub(crate) async fn repair_catalog(
         store: Arc<dyn ObjectStore>,
@@ -107,17 +106,15 @@ pub(super) mod test_support {
             .list(Some(&by_id_prefix))
             .try_collect::<Vec<_>>()
             .await?;
-        let mut canonical = HashSet::new();
-        for meta in by_id_metas {
-            if let Some(run_id) = parse_run_id_from_path(&meta.location) {
-                canonical.insert(run_id);
-            }
-        }
+        let run_ids = by_id_metas
+            .iter()
+            .filter_map(|meta| parse_run_id_from_path(&meta.location))
+            .collect::<Vec<_>>();
 
-        for run_id in &canonical {
+        for run_id in &run_ids {
             let path = by_start_path(base_prefix, run_id);
             if !object_exists(store.clone(), &path).await? {
-                store.put(&path, bytes::Bytes::new().into()).await?;
+                store.put(&path, Bytes::new().into()).await?;
             }
         }
 
@@ -125,6 +122,7 @@ pub(super) mod test_support {
             .list(Some(&by_start_prefix))
             .try_collect::<Vec<_>>()
             .await?;
+        let canonical = run_ids.into_iter().collect::<HashSet<_>>();
         let mut seen = HashSet::new();
         for meta in by_start_metas {
             let location = meta.location.clone();
@@ -132,25 +130,18 @@ pub(super) mod test_support {
                 delete_if_exists(store.clone(), &location).await?;
                 continue;
             };
-            if !canonical.contains(&run_id) {
-                delete_if_exists(store.clone(), &location).await?;
+            let expected = by_start_path(base_prefix, &run_id);
+            if canonical.contains(&run_id) && expected == location {
+                seen.insert(run_id);
                 continue;
             }
-            let expected = by_start_path(base_prefix, &run_id);
-            if expected == location {
-                seen.insert(run_id);
-            } else {
-                delete_if_exists(store.clone(), &location).await?;
-            }
+            delete_if_exists(store.clone(), &location).await?;
         }
 
-        for run_id in &canonical {
-            if !seen.contains(run_id) {
+        for run_id in canonical {
+            if !seen.contains(&run_id) {
                 store
-                    .put(
-                        &by_start_path(base_prefix, run_id),
-                        bytes::Bytes::new().into(),
-                    )
+                    .put(&by_start_path(base_prefix, &run_id), Bytes::new().into())
                     .await?;
             }
         }

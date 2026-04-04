@@ -3,7 +3,7 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use bytes::Bytes;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use futures::Stream;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -16,10 +16,6 @@ use crate::keys;
 use crate::run_state::EventProjectionCache;
 use crate::{EventEnvelope, EventPayload, Result, RunProjection, RunSummary, StageId, StoreError};
 use fabro_types::RunId;
-#[derive(Clone)]
-pub struct SlateRunStore {
-    inner: Arc<SlateRunStoreInner>,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NodeAsset {
@@ -27,16 +23,23 @@ pub struct NodeAsset {
     pub filename: String,
 }
 
+#[derive(Clone)]
+pub struct SlateRunStore {
+    inner: Arc<SlateRunStoreInner>,
+}
+
 impl std::fmt::Debug for SlateRunStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SlateRunStore")
             .field("run_id", &self.inner.run_id)
+            .field("db_prefix", &self.inner.db_prefix)
             .finish_non_exhaustive()
     }
 }
 
 pub(crate) struct SlateRunStoreInner {
     run_id: RunId,
+    db_prefix: String,
     db: SlateRunDb,
     event_seq: AtomicU32,
     close_lock: Mutex<()>,
@@ -49,11 +52,16 @@ enum SlateRunDb {
 }
 
 impl SlateRunStore {
-    pub(crate) async fn open_writer(run_id: RunId, db: slatedb::Db) -> Result<Self> {
+    pub(crate) async fn open_writer(
+        run_id: RunId,
+        db_prefix: String,
+        db: slatedb::Db,
+    ) -> Result<Self> {
         let event_seq = recover_next_seq(&db, keys::EVENTS_PREFIX, keys::parse_event_seq).await?;
         Ok(Self {
             inner: Arc::new(SlateRunStoreInner {
                 run_id,
+                db_prefix,
                 db: SlateRunDb::Writer(db),
                 event_seq: AtomicU32::new(event_seq),
                 close_lock: Mutex::new(()),
@@ -62,11 +70,16 @@ impl SlateRunStore {
         })
     }
 
-    pub(crate) async fn open_reader(run_id: RunId, db: DbReader) -> Result<Self> {
+    pub(crate) async fn open_reader(
+        run_id: RunId,
+        db_prefix: String,
+        db: DbReader,
+    ) -> Result<Self> {
         let event_seq = recover_next_seq(&db, keys::EVENTS_PREFIX, keys::parse_event_seq).await?;
         Ok(Self {
             inner: Arc::new(SlateRunStoreInner {
                 run_id,
+                db_prefix,
                 db: SlateRunDb::Reader(Box::new(db)),
                 event_seq: AtomicU32::new(event_seq),
                 close_lock: Mutex::new(()),
@@ -83,12 +96,12 @@ impl SlateRunStore {
         Arc::downgrade(&self.inner)
     }
 
-    pub fn run_id(&self) -> RunId {
+    pub(crate) fn run_id(&self) -> RunId {
         self.inner.run_id
     }
 
-    pub fn created_at(&self) -> DateTime<Utc> {
-        self.inner.run_id.created_at()
+    pub(crate) fn matches_run(&self, run_id: &RunId, db_prefix: &str) -> bool {
+        self.inner.run_id == *run_id && self.inner.db_prefix == db_prefix
     }
 
     pub(crate) async fn close(&self) -> Result<()> {
@@ -114,7 +127,7 @@ impl SlateRunStore {
         match get_json::<R, RunId>(db, keys::init()).await? {
             Some(existing) if existing == *expected => Ok(true),
             Some(existing) => Err(StoreError::Other(format!(
-                "existing _init.json {existing:?} does not match requested run id {expected:?}"
+                "existing _init.json {existing:?} does not match requested run_id {expected:?}"
             ))),
             None => Ok(false),
         }
@@ -146,13 +159,7 @@ impl SlateRunStore {
 
 impl SlateRunStore {
     pub async fn append_event(&self, payload: &EventPayload) -> Result<u32> {
-        if payload.run_id() != self.inner.run_id.to_string() {
-            return Err(StoreError::InvalidEvent(format!(
-                "payload run_id {:?} does not match store run_id {:?}",
-                payload.run_id(),
-                self.inner.run_id
-            )));
-        }
+        payload.validate(&self.inner.run_id)?;
         let seq = self.inner.event_seq.fetch_add(1, Ordering::SeqCst);
         self.inner
             .db

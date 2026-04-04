@@ -352,13 +352,14 @@ pub(crate) fn default_run_dir(run_id: &RunId) -> PathBuf {
 }
 
 pub fn make_run_dir(runs_base: &Path, run_id: &RunId) -> PathBuf {
-    let local_created_at = run_id.created_at().with_timezone(&Local);
-    runs_base.join(format!("{}-{}", local_created_at.format("%Y%m%d"), run_id))
+    let local_dt = run_id.created_at().with_timezone(&Local);
+    runs_base.join(format!("{}-{run_id}", local_dt.format("%Y%m%d")))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{TimeZone, Utc};
     use fabro_graphviz::graph::AttrValue;
     use fabro_store::{SlateStore, StoreHandle};
     use fabro_types::fixtures;
@@ -424,6 +425,24 @@ mod tests {
             .and_then(AttrValue::as_str)
             .unwrap();
         assert_eq!(prompt, "Goal: Fix bugs");
+    }
+
+    #[test]
+    fn make_run_dir_uses_run_id_timestamp_in_local_time() {
+        let runs_base = Path::new("/tmp/runs");
+        let run_id = RunId::from(ulid::Ulid::from_datetime(
+            Utc.with_ymd_and_hms(2026, 3, 27, 12, 0, 0).unwrap().into(),
+        ));
+        let expected_date = run_id
+            .created_at()
+            .with_timezone(&Local)
+            .format("%Y%m%d")
+            .to_string();
+
+        assert_eq!(
+            make_run_dir(runs_base, &run_id),
+            runs_base.join(format!("{expected_date}-{run_id}"))
+        );
     }
 
     #[test]
@@ -674,6 +693,7 @@ mod tests {
             run_store.state().await.unwrap().status.unwrap().status,
             crate::run_status::RunStatus::Submitted
         );
+        assert_eq!(created.run_dir, default_run_dir(&fixtures::RUN_1));
         assert!(!created.run_dir.join("id.txt").exists());
     }
 
@@ -724,7 +744,6 @@ mod tests {
     async fn create_hydrates_run_created_event_into_store() {
         let dir = tempfile::tempdir().unwrap();
         let storage_dir = dir.path().join("storage");
-        let run_dir = dir.path().join("run");
         std::fs::create_dir_all(storage_dir.join("store")).unwrap();
         let object_store =
             Arc::new(LocalFileSystem::new_with_prefix(storage_dir.join("store")).unwrap());

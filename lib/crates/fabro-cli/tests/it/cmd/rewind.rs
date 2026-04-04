@@ -69,7 +69,8 @@ fn rewind_list_prints_timeline_for_completed_git_run() {
     ----- stdout -----
     ----- stderr -----
     @   Node      Details 
-     @1  step_one
+     @1  step_one          
+     @2  step_two
     ");
 }
 
@@ -94,8 +95,8 @@ fn rewind_target_updates_metadata_and_resume_hint() {
     exit_code: 0
     ----- stdout -----
     ----- stderr -----
-    Rewound metadata branch to @1 (start)
-    Warning: checkpoint @1 has no git_commit_sha; run branch not moved
+    Rewound metadata branch to @1 (step_one)
+    Rewound run branch fabro/run/[ULID] to [SHA]
 
     To resume: fabro resume [RUN_PREFIX]
     ");

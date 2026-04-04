@@ -182,7 +182,10 @@ pub async fn find_run_id_by_prefix_or_store(
 
     let current_repo_root = canonical_repo_root(repo)?;
     let mut matches = Vec::new();
-    for summary in fabro_store.list_runs().await? {
+    for summary in fabro_store
+        .list_runs(&fabro_store::ListRunsQuery::default())
+        .await?
+    {
         if summary.run_id.to_string() == prefix {
             if summary.host_repo_path.is_none() {
                 return Ok(summary.run_id);

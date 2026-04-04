@@ -320,7 +320,6 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use chrono::Utc;
     use fabro_graphviz::graph::Graph;
     use fabro_store::SlateStore;
     use fabro_types::{RunId, Settings, fixtures};

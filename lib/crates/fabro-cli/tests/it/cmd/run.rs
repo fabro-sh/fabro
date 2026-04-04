@@ -68,7 +68,7 @@ fn dry_run_simple() {
     Run:       [ULID]
     Status:    SUCCESS
     Duration:  [DURATION]
-    Run:       [DRY_RUN_DIR]
+    Run:       [STORAGE_DIR]/runs/20260403-[ULID]
 
     === Output ===
     [Simulated] Response for stage: report
@@ -966,11 +966,11 @@ fn detach_creates_run_dir_with_detach_log() {
             "detach_log_exists": run_dir.join("detach.log").exists(),
         }),
         @r#"
-        {
-          "run_dir": "[DRY_RUN_DIR]",
-          "launcher_log_exists": true,
-          "detach_log_exists": false
-        }
-        "#
+    {
+      "run_dir": "[RUN_DIR]",
+      "launcher_log_exists": true,
+      "detach_log_exists": false
+    }
+    "#
     );
 }

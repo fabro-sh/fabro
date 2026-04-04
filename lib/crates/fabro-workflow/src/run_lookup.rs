@@ -193,9 +193,12 @@ fn scan_orphan_runs(base: &Path) -> Result<Vec<RunInfo>> {
 pub async fn scan_runs_combined(store: &SlateStore, base: &Path) -> Result<Vec<RunInfo>> {
     let mut runs_by_id: HashMap<RunId, RunInfo> = HashMap::new();
 
-    if let Ok(store_runs) = store.list_runs().await {
+    if let Ok(store_runs) = store
+        .list_runs(&fabro_store::ListRunsQuery::default())
+        .await
+    {
         for summary in store_runs {
-            let Some(run_info) = run_info_from_summary(summary, base) else {
+            let Some(run_info) = run_info_from_summary(&summary, base) else {
                 continue;
             };
             runs_by_id.insert(run_info.run_id(), run_info);
@@ -218,7 +221,7 @@ pub async fn scan_runs_combined(store: &SlateStore, base: &Path) -> Result<Vec<R
     Ok(runs)
 }
 
-fn run_info_from_summary(summary: RunSummary, runs_base: &Path) -> Option<RunInfo> {
+fn run_info_from_summary(summary: &RunSummary, runs_base: &Path) -> Option<RunInfo> {
     let path = make_run_dir(runs_base, &summary.run_id);
     if !path.exists() {
         return None;
@@ -234,7 +237,7 @@ fn run_info_from_summary(summary: RunSummary, runs_base: &Path) -> Option<RunInf
     };
 
     Some(RunInfo::new(
-        Some(summary),
+        Some(summary.clone()),
         RunLocalState {
             dir_name,
             start_time_dt: Some(start_time_dt),
@@ -345,7 +348,15 @@ fn collapse_separators(s: &str) -> String {
 
 fn parse_run_id(value: &str) -> Option<RunId> {
     let value = value.trim();
-    (!value.is_empty()).then_some(value)?.parse().ok()
+    if value.is_empty() {
+        return None;
+    }
+    // Try direct ULID parse first, then try extracting ULID after date prefix (YYYYMMDD-ULID).
+    value.parse().ok().or_else(|| {
+        value
+            .split_once('-')
+            .and_then(|(_, ulid)| ulid.parse().ok())
+    })
 }
 
 fn run_id_matches(run_id: RunId, prefix: &str) -> bool {
@@ -359,7 +370,6 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use chrono::Utc;
     use fabro_graphviz::graph::Graph;
     use fabro_store::{SlateStore, StoreHandle};
     use fabro_types::{RunStatus, Settings, fixtures};
@@ -367,6 +377,7 @@ mod tests {
 
     use super::scan_runs_combined;
     use crate::event::{WorkflowRunEvent, append_workflow_event};
+    use crate::operations::make_run_dir;
     use crate::records::RunRecord;
 
     fn memory_store() -> StoreHandle {
@@ -393,12 +404,11 @@ mod tests {
     #[tokio::test]
     async fn scan_runs_combined_uses_store_status_without_status_json() {
         let temp = tempfile::tempdir().unwrap();
-        let run_dir = temp.path().join(fixtures::RUN_1.to_string());
+        let run_dir = make_run_dir(temp.path(), &fixtures::RUN_1);
         std::fs::create_dir_all(&run_dir).unwrap();
         std::fs::write(run_dir.join("id.txt"), format!("{}\n", fixtures::RUN_1)).unwrap();
 
         let store = memory_store();
-        let run_dir_string = run_dir.to_string_lossy().to_string();
         let run_record = sample_run_record();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         append_workflow_event(
@@ -411,7 +421,7 @@ mod tests {
                 workflow_source: None,
                 workflow_config: None,
                 labels: run_record.labels.clone().into_iter().collect(),
-                run_dir: run_dir_string.clone(),
+                run_dir: run_dir.display().to_string(),
                 working_directory: run_record.working_directory.display().to_string(),
                 host_repo_path: run_record.host_repo_path.clone(),
                 base_branch: run_record.base_branch.clone(),

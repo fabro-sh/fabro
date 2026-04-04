@@ -207,12 +207,12 @@ fn parse_dot_summary(dot: &str) -> (String, usize, usize) {
 fn read_plan_text(state: &RunProjection) -> Option<String> {
     let mut plan_nodes = state
         .iter_nodes()
-        .filter_map(|(node, node_state)| {
-            let node_id = node.node_id();
-            let visit = node.visit();
-            node_id
-                .starts_with("plan")
-                .then_some((node_id, visit, node_state.response.as_deref()))
+        .filter_map(|(stage_id, node)| {
+            stage_id.node_id().starts_with("plan").then_some((
+                stage_id.node_id(),
+                stage_id.visit(),
+                node.response.as_deref(),
+            ))
         })
         .collect::<Vec<_>>();
     plan_nodes.sort_by(|left, right| left.0.cmp(right.0).then(left.1.cmp(&right.1)));
@@ -1057,7 +1057,6 @@ mod tests {
     async fn build_pr_body_uses_in_memory_conclusion() {
         install_mock_llm();
 
-        let tmp = tempfile::tempdir().unwrap();
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         let conclusion = make_test_conclusion();
@@ -1081,9 +1080,7 @@ mod tests {
     async fn build_pr_body_uses_store_records_without_legacy_files() {
         install_mock_llm();
 
-        let tmp = tempfile::tempdir().unwrap();
         let store = test_store();
-        let created_at = Utc::now();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
 
         let run_record = RunRecord {
@@ -1106,7 +1103,7 @@ mod tests {
                 workflow_source: Some("digraph test { plan -> code }".to_string()),
                 workflow_config: None,
                 labels: run_record.labels.clone().into_iter().collect(),
-                run_dir: tmp.path().display().to_string(),
+                run_dir: run_record.working_directory.display().to_string(),
                 working_directory: run_record.working_directory.display().to_string(),
                 host_repo_path: run_record.host_repo_path.clone(),
                 base_branch: run_record.base_branch.clone(),
@@ -1149,9 +1146,7 @@ mod tests {
     async fn build_pr_body_uses_plan_text_from_store_without_response_md() {
         install_mock_llm();
 
-        let tmp = tempfile::tempdir().unwrap();
         let store = test_store();
-        let created_at = Utc::now();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
 
         let run_record = RunRecord {
@@ -1174,7 +1169,7 @@ mod tests {
                 workflow_source: Some("digraph test { plan -> code }".to_string()),
                 workflow_config: None,
                 labels: run_record.labels.clone().into_iter().collect(),
-                run_dir: tmp.path().display().to_string(),
+                run_dir: run_record.working_directory.display().to_string(),
                 working_directory: run_record.working_directory.display().to_string(),
                 host_repo_path: run_record.host_repo_path.clone(),
                 base_branch: run_record.base_branch.clone(),
@@ -1344,7 +1339,6 @@ mod tests {
 
     #[tokio::test]
     async fn empty_diff_returns_none() {
-        let tmp = tempfile::tempdir().unwrap();
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         let creds = GitHubAppCredentials {
@@ -1373,7 +1367,6 @@ mod tests {
     async fn load_pull_request_diff_uses_store_without_disk_patch() {
         let tmp = tempfile::tempdir().unwrap();
         let store = test_store();
-        let created_at = Utc::now();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         let run_record = RunRecord {
             run_id: fixtures::RUN_1,
@@ -1395,7 +1388,7 @@ mod tests {
                 workflow_source: None,
                 workflow_config: None,
                 labels: run_record.labels.clone().into_iter().collect(),
-                run_dir: tmp.path().display().to_string(),
+                run_dir: run_record.working_directory.display().to_string(),
                 working_directory: tmp.path().display().to_string(),
                 host_repo_path: None,
                 base_branch: None,

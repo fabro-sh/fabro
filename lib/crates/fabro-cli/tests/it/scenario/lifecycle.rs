@@ -175,11 +175,11 @@ fn dry_run_detach_attach_works_with_default_run_lookup() {
             "conclusion_json_exists": run_dir.join("conclusion.json").exists(),
         }),
         @r#"
-        {
-          "run_dir": "[DRY_RUN_DIR]",
-          "conclusion_json_exists": false
-        }
-        "#
+    {
+      "run_dir": "[RUN_DIR]",
+      "conclusion_json_exists": false
+    }
+    "#
     );
 }
 
