@@ -4,12 +4,12 @@ Fabro emits structured **workflow run events** during execution for observabilit
 
 Events are distinct from tracing logs. Tracing is developer diagnostics; events are product-facing state transitions and activity records that other systems consume.
 
-Detached runs rely on this distinction. If something needs to be visible after reattach, emit a `WorkflowRunEvent` rather than only logging to stderr or `detach.log`.
+Detached runs rely on this distinction. If something needs to be visible after reattach, emit a `Event` rather than only logging to stderr or `detach.log`.
 
 ## Architecture
 
 ```text
-Engine/Handler -> WorkflowRunEvent -> EventEmitter::emit()
+Engine/Handler -> Event -> EventEmitter::emit()
                                        |- trace(raw event)
                                        |- canonicalize -> RunEventEnvelope
                                        `- on_event(&RunEventEnvelope)
@@ -21,9 +21,9 @@ Engine/Handler -> WorkflowRunEvent -> EventEmitter::emit()
 
 The canonical envelope is built exactly once in `fabro-workflow/src/event.rs`.
 
-- `WorkflowRunEvent` remains the internal typed source of truth.
+- `Event` remains the internal typed source of truth.
 - `EventEmitter` owns an immutable `run_id` and converts typed events into `RunEventEnvelope`.
-- Every listener receives `&RunEventEnvelope`, not `&WorkflowRunEvent`.
+- Every listener receives `&RunEventEnvelope`, not `&Event`.
 - Bypass paths that cannot go through the emitter must call `canonicalize_event()` once and reuse the same envelope for every sink.
 
 ## Canonical Envelope
@@ -112,11 +112,11 @@ Never canonicalize the same logical event twice if multiple sinks receive it.
 
 ### 1. Add the typed event
 
-Add a variant to `WorkflowRunEvent`, `AgentEvent`, or `SandboxEvent` as appropriate.
+Add a variant to `Event`, `AgentEvent`, or `SandboxEvent` as appropriate.
 
 ### 2. Add tracing
 
-Extend `WorkflowRunEvent::trace()` so the raw event is observable in tracing output.
+Extend `Event::trace()` so the raw event is observable in tracing output.
 
 ### 3. Add an external name
 
@@ -132,7 +132,7 @@ Update `extract_envelope_fields()`:
 
 ### 5. Emit it
 
-Prefer `EventEmitter::emit(&WorkflowRunEvent::...)`.
+Prefer `EventEmitter::emit(&Event::...)`.
 
 Use `canonicalize_event()` only for true bypass paths.
 

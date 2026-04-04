@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use fabro_test::{fabro_snapshot, test_context};
 use fabro_types::RunId;
-use fabro_workflow::event::{WorkflowRunEvent, append_workflow_event};
+use fabro_workflow::event::{Event, append_event};
 use object_store::local::LocalFileSystem;
 
 use super::support::setup_completed_dry_run;
@@ -78,10 +78,10 @@ fn pr_view_reads_pull_request_from_store_without_pull_request_json() {
         runtime.block_on(async {
             let store = build_store(&context.storage_dir);
             let run_store = store.open_run(&run_id).await.unwrap();
-            append_workflow_event(
+            append_event(
                 &run_store,
                 &run_id,
-                &WorkflowRunEvent::PullRequestCreated {
+                &Event::PullRequestCreated {
                     pr_url: "https://github.com/fabro-sh/fabro/pull/123".to_string(),
                     pr_number: 123,
                     owner: "fabro-sh".to_string(),

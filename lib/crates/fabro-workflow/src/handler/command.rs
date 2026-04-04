@@ -3,7 +3,7 @@ use std::path::Path;
 use crate::context::Context;
 use crate::context::keys;
 use crate::error::FabroError;
-use crate::event::WorkflowRunEvent;
+use crate::event::Event;
 use crate::outcome::{Outcome, OutcomeExt};
 use async_trait::async_trait;
 use fabro_graphviz::graph::{Graph, Node};
@@ -90,7 +90,7 @@ impl Handler for CommandHandler {
         } else {
             script.to_string()
         };
-        services.emitter.emit(&WorkflowRunEvent::CommandStarted {
+        services.emitter.emit(&Event::CommandStarted {
             node_id: node.id.clone(),
             script: script.to_string(),
             command: command.clone(),
@@ -113,7 +113,7 @@ impl Handler for CommandHandler {
             .await
             .map_err(|e| FabroError::handler(format!("Failed to spawn script: {e}")))?;
 
-        services.emitter.emit(&WorkflowRunEvent::CommandCompleted {
+        services.emitter.emit(&Event::CommandCompleted {
             node_id: node.id.clone(),
             stdout: result.stdout.clone(),
             stderr: result.stderr.clone(),

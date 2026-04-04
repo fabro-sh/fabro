@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use crate::context::Context;
 use crate::context::keys;
 use crate::error::FabroError;
-use crate::event::{EventEmitter, WorkflowRunEvent};
+use crate::event::{Event, EventEmitter};
 use crate::millis_u64;
 use crate::outcome::{Outcome, OutcomeExt};
 use fabro_graphviz::graph::{Graph, Node};
@@ -85,7 +85,7 @@ impl HumanHandler {
         self
     }
 
-    fn emit(&self, event: &WorkflowRunEvent) {
+    fn emit(&self, event: &Event) {
         if let Some(emitter) = &self.emitter {
             emitter.emit(event);
         }
@@ -203,7 +203,7 @@ impl Handler for HumanHandler {
 
         // 3. Present to interviewer
         let question_text = node.label().to_string();
-        self.emit(&WorkflowRunEvent::InterviewStarted {
+        self.emit(&Event::InterviewStarted {
             question: question_text.clone(),
             stage: node.id.clone(),
             question_type: question.question_type.to_string(),
@@ -213,7 +213,7 @@ impl Handler for HumanHandler {
 
         // 4. Handle timeout
         if answer.value == AnswerValue::Timeout {
-            self.emit(&WorkflowRunEvent::InterviewTimeout {
+            self.emit(&Event::InterviewTimeout {
                 question: question_text,
                 stage: node.id.clone(),
                 duration_ms: millis_u64(interview_start.elapsed()),
@@ -243,7 +243,7 @@ impl Handler for HumanHandler {
         }
 
         // Emit interview completed for successful interactions
-        self.emit(&WorkflowRunEvent::InterviewCompleted {
+        self.emit(&Event::InterviewCompleted {
             question: question_text,
             answer: answer_text(&answer),
             duration_ms: millis_u64(interview_start.elapsed()),

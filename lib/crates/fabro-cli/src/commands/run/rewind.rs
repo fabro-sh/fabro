@@ -4,7 +4,7 @@ use cli_table::format::{Border, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_checkpoint::git::Store;
 use fabro_util::terminal::Styles;
-use fabro_workflow::event::{WorkflowRunEvent, append_workflow_event};
+use fabro_workflow::event::{Event, append_event};
 use fabro_workflow::git::MetadataStore;
 use fabro_workflow::operations::{
     RewindInput, RewindTarget, RunTimeline, TimelineEntry, build_timeline_or_rebuild,
@@ -133,10 +133,10 @@ async fn reset_rewound_run_state(
     let run_store = durable_store.open_run(run_id).await.map_err(|err| {
         anyhow::anyhow!("failed to open durable store run for rewind reset: {err}")
     })?;
-    append_workflow_event(
+    append_event(
         &run_store,
         run_id,
-        &WorkflowRunEvent::RunRewound {
+        &Event::RunRewound {
             target_checkpoint_ordinal: entry.ordinal,
             target_node_id: entry.node_name.clone(),
             target_visit: entry.visit,
@@ -146,20 +146,16 @@ async fn reset_rewound_run_state(
     )
     .await
     .map_err(|err| anyhow::anyhow!("failed to append run rewound event: {err}"))?;
-    append_workflow_event(&run_store, run_id, &restored_checkpoint_event(&checkpoint))
+    append_event(&run_store, run_id, &restored_checkpoint_event(&checkpoint))
         .await
         .map_err(|err| anyhow::anyhow!("failed to append restored checkpoint event: {err}"))?;
-    append_workflow_event(
-        &run_store,
-        run_id,
-        &WorkflowRunEvent::RunSubmitted { reason: None },
-    )
-    .await
-    .map_err(|err| anyhow::anyhow!("failed to append restored run status event: {err}"))?;
+    append_event(&run_store, run_id, &Event::RunSubmitted { reason: None })
+        .await
+        .map_err(|err| anyhow::anyhow!("failed to append restored run status event: {err}"))?;
     Ok(())
 }
 
-fn restored_checkpoint_event(checkpoint: &fabro_types::Checkpoint) -> WorkflowRunEvent {
+fn restored_checkpoint_event(checkpoint: &fabro_types::Checkpoint) -> Event {
     let current_status = checkpoint
         .node_outcomes
         .get(&checkpoint.current_node)
@@ -167,7 +163,7 @@ fn restored_checkpoint_event(checkpoint: &fabro_types::Checkpoint) -> WorkflowRu
             || "success".to_string(),
             |outcome| outcome.status.to_string(),
         );
-    WorkflowRunEvent::CheckpointCompleted {
+    Event::CheckpointCompleted {
         node_id: checkpoint.current_node.clone(),
         status: current_status,
         current_node: checkpoint.current_node.clone(),

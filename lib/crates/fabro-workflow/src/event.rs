@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use anyhow::{Context, Result};
 use chrono::{SecondsFormat, Utc};
 use fabro_store::{EventPayload, SlateRunStore};
-use fabro_types::{RunId, StoredEvent};
+use fabro_types::{RunEvent, RunId};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
@@ -23,7 +23,7 @@ pub use fabro_types::{EventBody, RunNoticeLevel};
 /// Events emitted during workflow run execution for observability.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
-pub enum WorkflowRunEvent {
+pub enum Event {
     RunCreated {
         run_id: RunId,
         settings: serde_json::Value,
@@ -502,7 +502,7 @@ pub enum WorkflowRunEvent {
     },
 }
 
-impl WorkflowRunEvent {
+impl Event {
     pub fn trace(&self) {
         use tracing::{debug, error, info, warn};
         match self {
@@ -1058,43 +1058,43 @@ impl WorkflowRunEvent {
     }
 }
 
-pub fn event_name(event: &WorkflowRunEvent) -> &'static str {
+pub fn event_name(event: &Event) -> &'static str {
     match event {
-        WorkflowRunEvent::RunCreated { .. } => "run.created",
-        WorkflowRunEvent::WorkflowRunStarted { .. } => "run.started",
-        WorkflowRunEvent::RunSubmitted { .. } => "run.submitted",
-        WorkflowRunEvent::RunStarting { .. } => "run.starting",
-        WorkflowRunEvent::RunRunning { .. } => "run.running",
-        WorkflowRunEvent::RunRemoving { .. } => "run.removing",
-        WorkflowRunEvent::RunRewound { .. } => "run.rewound",
-        WorkflowRunEvent::WorkflowRunCompleted { .. } => "run.completed",
-        WorkflowRunEvent::WorkflowRunFailed { .. } => "run.failed",
-        WorkflowRunEvent::RunNotice { .. } => "run.notice",
-        WorkflowRunEvent::StageStarted { .. } => "stage.started",
-        WorkflowRunEvent::StageCompleted { .. } => "stage.completed",
-        WorkflowRunEvent::StageFailed { .. } => "stage.failed",
-        WorkflowRunEvent::StageRetrying { .. } => "stage.retrying",
-        WorkflowRunEvent::ParallelStarted { .. } => "parallel.started",
-        WorkflowRunEvent::ParallelBranchStarted { .. } => "parallel.branch.started",
-        WorkflowRunEvent::ParallelBranchCompleted { .. } => "parallel.branch.completed",
-        WorkflowRunEvent::ParallelCompleted { .. } => "parallel.completed",
-        WorkflowRunEvent::InterviewStarted { .. } => "interview.started",
-        WorkflowRunEvent::InterviewCompleted { .. } => "interview.completed",
-        WorkflowRunEvent::InterviewTimeout { .. } => "interview.timeout",
-        WorkflowRunEvent::CheckpointCompleted { .. } => "checkpoint.completed",
-        WorkflowRunEvent::CheckpointFailed { .. } => "checkpoint.failed",
-        WorkflowRunEvent::GitCommit { .. } => "git.commit",
-        WorkflowRunEvent::GitPush { .. } => "git.push",
-        WorkflowRunEvent::GitBranch { .. } => "git.branch",
-        WorkflowRunEvent::GitWorktreeAdd { .. } => "git.worktree.added",
-        WorkflowRunEvent::GitWorktreeRemove { .. } => "git.worktree.removed",
-        WorkflowRunEvent::GitFetch { .. } => "git.fetch",
-        WorkflowRunEvent::GitReset { .. } => "git.reset",
-        WorkflowRunEvent::EdgeSelected { .. } => "edge.selected",
-        WorkflowRunEvent::LoopRestart { .. } => "loop.restart",
-        WorkflowRunEvent::Prompt { .. } => "stage.prompt",
-        WorkflowRunEvent::PromptCompleted { .. } => "prompt.completed",
-        WorkflowRunEvent::Agent { event, .. } => match event {
+        Event::RunCreated { .. } => "run.created",
+        Event::WorkflowRunStarted { .. } => "run.started",
+        Event::RunSubmitted { .. } => "run.submitted",
+        Event::RunStarting { .. } => "run.starting",
+        Event::RunRunning { .. } => "run.running",
+        Event::RunRemoving { .. } => "run.removing",
+        Event::RunRewound { .. } => "run.rewound",
+        Event::WorkflowRunCompleted { .. } => "run.completed",
+        Event::WorkflowRunFailed { .. } => "run.failed",
+        Event::RunNotice { .. } => "run.notice",
+        Event::StageStarted { .. } => "stage.started",
+        Event::StageCompleted { .. } => "stage.completed",
+        Event::StageFailed { .. } => "stage.failed",
+        Event::StageRetrying { .. } => "stage.retrying",
+        Event::ParallelStarted { .. } => "parallel.started",
+        Event::ParallelBranchStarted { .. } => "parallel.branch.started",
+        Event::ParallelBranchCompleted { .. } => "parallel.branch.completed",
+        Event::ParallelCompleted { .. } => "parallel.completed",
+        Event::InterviewStarted { .. } => "interview.started",
+        Event::InterviewCompleted { .. } => "interview.completed",
+        Event::InterviewTimeout { .. } => "interview.timeout",
+        Event::CheckpointCompleted { .. } => "checkpoint.completed",
+        Event::CheckpointFailed { .. } => "checkpoint.failed",
+        Event::GitCommit { .. } => "git.commit",
+        Event::GitPush { .. } => "git.push",
+        Event::GitBranch { .. } => "git.branch",
+        Event::GitWorktreeAdd { .. } => "git.worktree.added",
+        Event::GitWorktreeRemove { .. } => "git.worktree.removed",
+        Event::GitFetch { .. } => "git.fetch",
+        Event::GitReset { .. } => "git.reset",
+        Event::EdgeSelected { .. } => "edge.selected",
+        Event::LoopRestart { .. } => "loop.restart",
+        Event::Prompt { .. } => "stage.prompt",
+        Event::PromptCompleted { .. } => "prompt.completed",
+        Event::Agent { event, .. } => match event {
             AgentEvent::SessionStarted { .. } => "agent.session.started",
             AgentEvent::SessionEnded => "agent.session.ended",
             AgentEvent::ProcessingEnd => "agent.processing.end",
@@ -1123,9 +1123,9 @@ pub fn event_name(event: &WorkflowRunEvent) -> &'static str {
             AgentEvent::McpServerReady { .. } => "agent.mcp.ready",
             AgentEvent::McpServerFailed { .. } => "agent.mcp.failed",
         },
-        WorkflowRunEvent::SubgraphStarted { .. } => "subgraph.started",
-        WorkflowRunEvent::SubgraphCompleted { .. } => "subgraph.completed",
-        WorkflowRunEvent::Sandbox { event } => match event {
+        Event::SubgraphStarted { .. } => "subgraph.started",
+        Event::SubgraphCompleted { .. } => "subgraph.completed",
+        Event::Sandbox { event } => match event {
             SandboxEvent::Initializing { .. } => "sandbox.initializing",
             SandboxEvent::Ready { .. } => "sandbox.ready",
             SandboxEvent::InitializeFailed { .. } => "sandbox.failed",
@@ -1142,40 +1142,38 @@ pub fn event_name(event: &WorkflowRunEvent) -> &'static str {
             SandboxEvent::GitCloneCompleted { .. } => "sandbox.git.completed",
             SandboxEvent::GitCloneFailed { .. } => "sandbox.git.failed",
         },
-        WorkflowRunEvent::SandboxInitialized { .. } => "sandbox.initialized",
-        WorkflowRunEvent::SetupStarted { .. } => "setup.started",
-        WorkflowRunEvent::SetupCommandStarted { .. } => "setup.command.started",
-        WorkflowRunEvent::SetupCommandCompleted { .. } => "setup.command.completed",
-        WorkflowRunEvent::SetupCompleted { .. } => "setup.completed",
-        WorkflowRunEvent::SetupFailed { .. } => "setup.failed",
-        WorkflowRunEvent::StallWatchdogTimeout { .. } => "watchdog.timeout",
-        WorkflowRunEvent::ArtifactCaptured { .. } => "artifact.captured",
-        WorkflowRunEvent::SshAccessReady { .. } => "ssh.ready",
-        WorkflowRunEvent::Failover { .. } => "agent.failover",
-        WorkflowRunEvent::CliEnsureStarted { .. } => "cli.ensure.started",
-        WorkflowRunEvent::CliEnsureCompleted { .. } => "cli.ensure.completed",
-        WorkflowRunEvent::CliEnsureFailed { .. } => "cli.ensure.failed",
-        WorkflowRunEvent::CommandStarted { .. } => "command.started",
-        WorkflowRunEvent::CommandCompleted { .. } => "command.completed",
-        WorkflowRunEvent::AgentCliStarted { .. } => "agent.cli.started",
-        WorkflowRunEvent::AgentCliCompleted { .. } => "agent.cli.completed",
-        WorkflowRunEvent::PullRequestCreated { .. } => "pull_request.created",
-        WorkflowRunEvent::PullRequestFailed { .. } => "pull_request.failed",
-        WorkflowRunEvent::DevcontainerResolved { .. } => "devcontainer.resolved",
-        WorkflowRunEvent::DevcontainerLifecycleStarted { .. } => "devcontainer.lifecycle.started",
-        WorkflowRunEvent::DevcontainerLifecycleCommandStarted { .. } => {
+        Event::SandboxInitialized { .. } => "sandbox.initialized",
+        Event::SetupStarted { .. } => "setup.started",
+        Event::SetupCommandStarted { .. } => "setup.command.started",
+        Event::SetupCommandCompleted { .. } => "setup.command.completed",
+        Event::SetupCompleted { .. } => "setup.completed",
+        Event::SetupFailed { .. } => "setup.failed",
+        Event::StallWatchdogTimeout { .. } => "watchdog.timeout",
+        Event::ArtifactCaptured { .. } => "artifact.captured",
+        Event::SshAccessReady { .. } => "ssh.ready",
+        Event::Failover { .. } => "agent.failover",
+        Event::CliEnsureStarted { .. } => "cli.ensure.started",
+        Event::CliEnsureCompleted { .. } => "cli.ensure.completed",
+        Event::CliEnsureFailed { .. } => "cli.ensure.failed",
+        Event::CommandStarted { .. } => "command.started",
+        Event::CommandCompleted { .. } => "command.completed",
+        Event::AgentCliStarted { .. } => "agent.cli.started",
+        Event::AgentCliCompleted { .. } => "agent.cli.completed",
+        Event::PullRequestCreated { .. } => "pull_request.created",
+        Event::PullRequestFailed { .. } => "pull_request.failed",
+        Event::DevcontainerResolved { .. } => "devcontainer.resolved",
+        Event::DevcontainerLifecycleStarted { .. } => "devcontainer.lifecycle.started",
+        Event::DevcontainerLifecycleCommandStarted { .. } => {
             "devcontainer.lifecycle.command.started"
         }
-        WorkflowRunEvent::DevcontainerLifecycleCommandCompleted { .. } => {
+        Event::DevcontainerLifecycleCommandCompleted { .. } => {
             "devcontainer.lifecycle.command.completed"
         }
-        WorkflowRunEvent::DevcontainerLifecycleCompleted { .. } => {
-            "devcontainer.lifecycle.completed"
-        }
-        WorkflowRunEvent::DevcontainerLifecycleFailed { .. } => "devcontainer.lifecycle.failed",
-        WorkflowRunEvent::RetroStarted { .. } => "retro.started",
-        WorkflowRunEvent::RetroCompleted { .. } => "retro.completed",
-        WorkflowRunEvent::RetroFailed { .. } => "retro.failed",
+        Event::DevcontainerLifecycleCompleted { .. } => "devcontainer.lifecycle.completed",
+        Event::DevcontainerLifecycleFailed { .. } => "devcontainer.lifecycle.failed",
+        Event::RetroStarted { .. } => "retro.started",
+        Event::RetroCompleted { .. } => "retro.completed",
+        Event::RetroFailed { .. } => "retro.failed",
     }
 }
 
@@ -1226,9 +1224,9 @@ fn default_node_label(node_id: Option<&String>, node_label: Option<String>) -> O
     node_label.or_else(|| node_id.cloned())
 }
 
-fn extract_stored_event_fields(event: &WorkflowRunEvent) -> StoredEventFields {
+fn extract_run_event_fields(event: &Event) -> StoredEventFields {
     match event {
-        WorkflowRunEvent::RunCreated { .. } | WorkflowRunEvent::WorkflowRunStarted { .. } => {
+        Event::RunCreated { .. } | Event::WorkflowRunStarted { .. } => {
             let mut fields = tagged_variant_fields(event);
             fields.remove("run_id");
             StoredEventFields {
@@ -1239,7 +1237,7 @@ fn extract_stored_event_fields(event: &WorkflowRunEvent) -> StoredEventFields {
                 properties: Value::Object(fields),
             }
         }
-        WorkflowRunEvent::WorkflowRunFailed { error, .. } => {
+        Event::WorkflowRunFailed { error, .. } => {
             let mut fields = tagged_variant_fields(event);
             fields.insert("error".to_string(), Value::String(error.to_string()));
             StoredEventFields {
@@ -1250,7 +1248,7 @@ fn extract_stored_event_fields(event: &WorkflowRunEvent) -> StoredEventFields {
                 properties: Value::Object(fields),
             }
         }
-        WorkflowRunEvent::StageCompleted { .. } | WorkflowRunEvent::StageFailed { .. } => {
+        Event::StageCompleted { .. } | Event::StageFailed { .. } => {
             let mut fields = tagged_variant_fields(event);
             let node_id = remove_string(&mut fields, "node_id");
             let node_label =
@@ -1263,20 +1261,20 @@ fn extract_stored_event_fields(event: &WorkflowRunEvent) -> StoredEventFields {
                 properties: Value::Object(fields),
             }
         }
-        WorkflowRunEvent::StageStarted { .. }
-        | WorkflowRunEvent::StageRetrying { .. }
-        | WorkflowRunEvent::CheckpointCompleted { .. }
-        | WorkflowRunEvent::CheckpointFailed { .. }
-        | WorkflowRunEvent::SubgraphStarted { .. }
-        | WorkflowRunEvent::SubgraphCompleted { .. }
-        | WorkflowRunEvent::ArtifactCaptured { .. }
-        | WorkflowRunEvent::PromptCompleted { .. }
-        | WorkflowRunEvent::ParallelStarted { .. }
-        | WorkflowRunEvent::ParallelCompleted { .. }
-        | WorkflowRunEvent::CommandStarted { .. }
-        | WorkflowRunEvent::CommandCompleted { .. }
-        | WorkflowRunEvent::AgentCliStarted { .. }
-        | WorkflowRunEvent::AgentCliCompleted { .. } => {
+        Event::StageStarted { .. }
+        | Event::StageRetrying { .. }
+        | Event::CheckpointCompleted { .. }
+        | Event::CheckpointFailed { .. }
+        | Event::SubgraphStarted { .. }
+        | Event::SubgraphCompleted { .. }
+        | Event::ArtifactCaptured { .. }
+        | Event::PromptCompleted { .. }
+        | Event::ParallelStarted { .. }
+        | Event::ParallelCompleted { .. }
+        | Event::CommandStarted { .. }
+        | Event::CommandCompleted { .. }
+        | Event::AgentCliStarted { .. }
+        | Event::AgentCliCompleted { .. } => {
             let mut fields = tagged_variant_fields(event);
             let node_id = remove_string(&mut fields, "node_id");
             let node_label =
@@ -1289,7 +1287,7 @@ fn extract_stored_event_fields(event: &WorkflowRunEvent) -> StoredEventFields {
                 properties: Value::Object(fields),
             }
         }
-        WorkflowRunEvent::Agent {
+        Event::Agent {
             session_id,
             parent_session_id,
             ..
@@ -1315,7 +1313,7 @@ fn extract_stored_event_fields(event: &WorkflowRunEvent) -> StoredEventFields {
                 properties,
             }
         }
-        WorkflowRunEvent::Sandbox { .. } => {
+        Event::Sandbox { .. } => {
             let mut fields = tagged_variant_fields(event);
             let properties = fields.remove("event").map_or_else(
                 || Value::Object(Map::new()),
@@ -1329,7 +1327,7 @@ fn extract_stored_event_fields(event: &WorkflowRunEvent) -> StoredEventFields {
                 properties,
             }
         }
-        WorkflowRunEvent::GitCommit { .. } => {
+        Event::GitCommit { .. } => {
             let mut fields = tagged_variant_fields(event);
             let node_id = remove_string(&mut fields, "node_id");
             let node_label = default_node_label(node_id.as_ref(), None);
@@ -1341,8 +1339,7 @@ fn extract_stored_event_fields(event: &WorkflowRunEvent) -> StoredEventFields {
                 properties: Value::Object(fields),
             }
         }
-        WorkflowRunEvent::ParallelBranchStarted { .. }
-        | WorkflowRunEvent::ParallelBranchCompleted { .. } => {
+        Event::ParallelBranchStarted { .. } | Event::ParallelBranchCompleted { .. } => {
             let mut fields = tagged_variant_fields(event);
             let node_id = remove_string(&mut fields, "branch");
             let node_label = default_node_label(node_id.as_ref(), None);
@@ -1354,10 +1351,10 @@ fn extract_stored_event_fields(event: &WorkflowRunEvent) -> StoredEventFields {
                 properties: Value::Object(fields),
             }
         }
-        WorkflowRunEvent::Prompt { .. }
-        | WorkflowRunEvent::InterviewStarted { .. }
-        | WorkflowRunEvent::InterviewTimeout { .. }
-        | WorkflowRunEvent::Failover { .. } => {
+        Event::Prompt { .. }
+        | Event::InterviewStarted { .. }
+        | Event::InterviewTimeout { .. }
+        | Event::Failover { .. } => {
             let mut fields = tagged_variant_fields(event);
             let node_id = remove_string(&mut fields, "stage");
             let node_label = default_node_label(node_id.as_ref(), None);
@@ -1369,7 +1366,7 @@ fn extract_stored_event_fields(event: &WorkflowRunEvent) -> StoredEventFields {
                 properties: Value::Object(fields),
             }
         }
-        WorkflowRunEvent::StallWatchdogTimeout { .. } => {
+        Event::StallWatchdogTimeout { .. } => {
             let mut fields = tagged_variant_fields(event);
             let node_id = remove_string(&mut fields, "node");
             let node_label = default_node_label(node_id.as_ref(), None);
@@ -1391,17 +1388,13 @@ fn extract_stored_event_fields(event: &WorkflowRunEvent) -> StoredEventFields {
     }
 }
 
-pub fn to_stored_event(run_id: &RunId, event: &WorkflowRunEvent) -> StoredEvent {
-    to_stored_event_at(run_id, event, Utc::now())
+pub fn to_run_event(run_id: &RunId, event: &Event) -> RunEvent {
+    to_run_event_at(run_id, event, Utc::now())
 }
 
-pub fn to_stored_event_at(
-    run_id: &RunId,
-    event: &WorkflowRunEvent,
-    ts: chrono::DateTime<Utc>,
-) -> StoredEvent {
-    let fields = extract_stored_event_fields(event);
-    StoredEvent::from_value(json!({
+pub fn to_run_event_at(run_id: &RunId, event: &Event, ts: chrono::DateTime<Utc>) -> RunEvent {
+    let fields = extract_run_event_fields(event);
+    RunEvent::from_value(json!({
         "id": Uuid::now_v7().to_string(),
         "ts": ts.to_rfc3339_opts(SecondsFormat::Millis, true),
         "run_id": run_id.to_string(),
@@ -1415,17 +1408,17 @@ pub fn to_stored_event_at(
     .expect("workflow event converts to stored event")
 }
 
-pub fn build_redacted_event_payload(event: &StoredEvent, run_id: &RunId) -> Result<EventPayload> {
+pub fn build_redacted_event_payload(event: &RunEvent, run_id: &RunId) -> Result<EventPayload> {
     let line = redacted_event_json(event)?;
     event_payload_from_redacted_json(&line, run_id)
 }
 
-pub fn redacted_event_json(event: &StoredEvent) -> Result<String> {
+pub fn redacted_event_json(event: &RunEvent) -> Result<String> {
     let line = serde_json::to_string(&normalized_event_value(event)?)?;
     Ok(redact_jsonl_line(&line))
 }
 
-fn normalized_event_value(event: &StoredEvent) -> Result<Value> {
+fn normalized_event_value(event: &RunEvent) -> Result<Value> {
     let value = event.to_value()?;
     Ok(normalize_json_value(value))
 }
@@ -1453,12 +1446,8 @@ pub fn event_payload_from_redacted_json(line: &str, run_id: &RunId) -> Result<Ev
     EventPayload::new(value, run_id).map_err(anyhow::Error::from)
 }
 
-pub async fn append_workflow_event(
-    run_store: &SlateRunStore,
-    run_id: &RunId,
-    event: &WorkflowRunEvent,
-) -> Result<()> {
-    let stored = to_stored_event(run_id, event);
+pub async fn append_event(run_store: &SlateRunStore, run_id: &RunId, event: &Event) -> Result<()> {
+    let stored = to_run_event(run_id, event);
     let payload = build_redacted_event_payload(&stored, run_id)?;
     run_store
         .append_event(&payload)
@@ -1540,7 +1529,7 @@ fn epoch_millis() -> i64 {
 }
 
 /// Listener callback type for workflow run events.
-type EventListener = Arc<dyn Fn(&StoredEvent) + Send + Sync>;
+type EventListener = Arc<dyn Fn(&RunEvent) + Send + Sync>;
 
 /// Callback-based event emitter for workflow run events.
 pub struct EventEmitter {
@@ -1582,27 +1571,27 @@ impl EventEmitter {
         self.run_id
     }
 
-    pub fn on_event(&self, listener: impl Fn(&StoredEvent) + Send + Sync + 'static) {
+    pub fn on_event(&self, listener: impl Fn(&RunEvent) + Send + Sync + 'static) {
         self.listeners
             .lock()
             .expect("listeners lock poisoned")
             .push(Arc::new(listener));
     }
 
-    pub fn emit(&self, event: &WorkflowRunEvent) {
+    pub fn emit(&self, event: &Event) {
         self.last_event_at.store(epoch_millis(), Ordering::Relaxed);
         event.trace();
-        if let WorkflowRunEvent::WorkflowRunStarted { run_id, .. } = event {
+        if let Event::WorkflowRunStarted { run_id, .. } = event {
             debug_assert_eq!(
                 *run_id, self.run_id,
                 "workflow run started event must match emitter run_id"
             );
         }
-        let stored = to_stored_event(&self.run_id, event);
-        self.dispatch_stored_event(&stored);
+        let stored = to_run_event(&self.run_id, event);
+        self.dispatch_run_event(&stored);
     }
 
-    pub(crate) fn dispatch_stored_event(&self, event: &StoredEvent) {
+    pub(crate) fn dispatch_run_event(&self, event: &RunEvent) {
         self.last_event_at.store(epoch_millis(), Ordering::Relaxed);
         // Clone the listener list so we don't hold the lock during dispatch.
         // This prevents deadlocks if a listener calls emit() reentrantly.
@@ -1629,17 +1618,17 @@ impl EventEmitter {
     }
 
     /// Build a [`WorktreeEventCallback`] that forwards worktree lifecycle events as
-    /// [`WorkflowRunEvent`]s on this emitter.
+    /// [`Event`]s on this emitter.
     pub fn worktree_callback(self: Arc<Self>) -> WorktreeEventCallback {
         Arc::new(move |event| match event {
             WorktreeEvent::BranchCreated { branch, sha } => {
-                self.emit(&WorkflowRunEvent::GitBranch { branch, sha });
+                self.emit(&Event::GitBranch { branch, sha });
             }
             WorktreeEvent::WorktreeAdded { path, branch } => {
-                self.emit(&WorkflowRunEvent::GitWorktreeAdd { path, branch });
+                self.emit(&Event::GitWorktreeAdd { path, branch });
             }
             WorktreeEvent::WorktreeRemoved { path } => {
-                self.emit(&WorkflowRunEvent::GitWorktreeRemove { path });
+                self.emit(&Event::GitWorktreeRemove { path });
             }
         })
     }
@@ -1665,7 +1654,7 @@ mod tests {
         emitter.on_event(move |event| {
             received_clone.lock().unwrap().push(event.clone());
         });
-        emitter.emit(&WorkflowRunEvent::WorkflowRunStarted {
+        emitter.emit(&Event::WorkflowRunStarted {
             name: "test".to_string(),
             run_id: fixtures::RUN_1,
             base_branch: None,
@@ -1688,10 +1677,10 @@ mod tests {
     }
 
     #[test]
-    fn stored_stage_completed_places_node_fields_in_header() {
-        let stored = to_stored_event(
+    fn run_event_stage_completed_places_node_fields_in_header() {
+        let stored = to_run_event(
             &fixtures::RUN_2,
-            &WorkflowRunEvent::StageCompleted {
+            &Event::StageCompleted {
                 node_id: "plan".to_string(),
                 name: "Plan".to_string(),
                 index: 0,
@@ -1725,10 +1714,10 @@ mod tests {
     }
 
     #[test]
-    fn stored_stage_completed_keeps_response_and_signature_snapshots() {
-        let stored = to_stored_event(
+    fn run_event_stage_completed_keeps_response_and_signature_snapshots() {
+        let stored = to_run_event(
             &fixtures::RUN_2,
-            &WorkflowRunEvent::StageCompleted {
+            &Event::StageCompleted {
                 node_id: "plan".to_string(),
                 name: "Plan".to_string(),
                 index: 0,
@@ -1758,10 +1747,10 @@ mod tests {
     }
 
     #[test]
-    fn stored_stage_failure_keeps_failure_detail() {
-        let stored = to_stored_event(
+    fn run_event_stage_failure_keeps_failure_detail() {
+        let stored = to_run_event(
             &fixtures::RUN_3,
-            &WorkflowRunEvent::StageFailed {
+            &Event::StageFailed {
                 node_id: "code".to_string(),
                 name: "Code".to_string(),
                 index: 1,
@@ -1783,10 +1772,10 @@ mod tests {
     }
 
     #[test]
-    fn stored_agent_tool_started_moves_session_metadata_to_header() {
-        let stored = to_stored_event(
+    fn run_event_agent_tool_started_moves_session_metadata_to_header() {
+        let stored = to_run_event(
             &fixtures::RUN_4,
-            &WorkflowRunEvent::Agent {
+            &Event::Agent {
                 stage: "code".to_string(),
                 visit: 2,
                 event: AgentEvent::ToolCallStarted {
@@ -1810,10 +1799,10 @@ mod tests {
     }
 
     #[test]
-    fn stored_sandbox_event_keeps_properties_nested() {
-        let stored = to_stored_event(
+    fn run_event_sandbox_event_keeps_properties_nested() {
+        let stored = to_run_event(
             &fixtures::RUN_5,
-            &WorkflowRunEvent::Sandbox {
+            &Event::Sandbox {
                 event: SandboxEvent::Ready {
                     provider: "daytona".to_string(),
                     duration_ms: 2500,
@@ -1832,10 +1821,10 @@ mod tests {
     }
 
     #[test]
-    fn stored_workflow_failure_uses_display_error() {
-        let stored = to_stored_event(
+    fn run_event_workflow_failure_uses_display_error() {
+        let stored = to_run_event(
             &fixtures::RUN_6,
-            &WorkflowRunEvent::WorkflowRunFailed {
+            &Event::WorkflowRunFailed {
                 error: FabroError::handler("boom"),
                 duration_ms: 900,
                 reason: Some(StatusReason::WorkflowError),
@@ -1849,16 +1838,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn append_workflow_event_writes_store_event_shape() {
+    async fn append_event_writes_store_event_shape() {
         let store = fabro_store::SlateStore::new(
             std::sync::Arc::new(object_store::memory::InMemory::new()),
             "",
             std::time::Duration::from_millis(1),
         );
         let run_store = store.create_run(&fixtures::RUN_7).await.unwrap();
-        let stored = to_stored_event(
+        let stored = to_run_event(
             &fixtures::RUN_7,
-            &WorkflowRunEvent::RunNotice {
+            &Event::RunNotice {
                 level: RunNoticeLevel::Warn,
                 code: "example".to_string(),
                 message: "notice".to_string(),
@@ -1880,9 +1869,9 @@ mod tests {
 
     #[test]
     fn build_redacted_event_payload_requires_id() {
-        let stored = to_stored_event(
+        let stored = to_run_event(
             &fixtures::RUN_8,
-            &WorkflowRunEvent::RetroStarted {
+            &Event::RetroStarted {
                 prompt: Some("Analyze the run".to_string()),
                 provider: None,
                 model: None,
@@ -1900,7 +1889,7 @@ mod tests {
     #[test]
     fn event_name_matches_new_dot_notation() {
         assert_eq!(
-            event_name(&WorkflowRunEvent::RetroStarted {
+            event_name(&Event::RetroStarted {
                 prompt: None,
                 provider: None,
                 model: None,
@@ -1908,14 +1897,14 @@ mod tests {
             "retro.started"
         );
         assert_eq!(
-            event_name(&WorkflowRunEvent::ParallelBranchStarted {
+            event_name(&Event::ParallelBranchStarted {
                 branch: "fork".to_string(),
                 index: 0,
             }),
             "parallel.branch.started"
         );
         assert_eq!(
-            event_name(&WorkflowRunEvent::Agent {
+            event_name(&Event::Agent {
                 stage: "code".to_string(),
                 visit: 1,
                 event: AgentEvent::SubAgentSpawned {

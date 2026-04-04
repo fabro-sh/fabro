@@ -17,7 +17,7 @@ use super::circuit_breaker::CircuitBreakerLifecycle;
 use super::git::GitCheckpointResult;
 use crate::context;
 use crate::error::FabroError;
-use crate::event::{EventEmitter, WorkflowRunEvent};
+use crate::event::{Event, EventEmitter};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::{
@@ -88,7 +88,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             let mut restarted = self.restarted_from.lock().unwrap();
             if let Some((from_node, to_node)) = restarted.take() {
                 self.emitter
-                    .emit(&WorkflowRunEvent::LoopRestart { from_node, to_node });
+                    .emit(&Event::LoopRestart { from_node, to_node });
             }
         }
 
@@ -96,7 +96,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         *self.run_start.lock().unwrap() = Instant::now();
 
         // Emit WorkflowRunStarted
-        self.emitter.emit(&WorkflowRunEvent::WorkflowRunStarted {
+        self.emitter.emit(&Event::WorkflowRunStarted {
             name: self.graph_name.clone(),
             run_id: self.run_id,
             base_branch: self.base_branch.clone(),
@@ -105,8 +105,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             worktree_dir: self.worktree_dir.clone(),
             goal: self.goal.clone(),
         });
-        self.emitter
-            .emit(&WorkflowRunEvent::RunRunning { reason: None });
+        self.emitter.emit(&Event::RunRunning { reason: None });
 
         Ok(())
     }
@@ -124,7 +123,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         let stage_index = state.stage_index;
         let (loop_failure_signatures, restart_failure_signatures) =
             snapshot_failure_signatures(&self.circuit_breaker);
-        self.emitter.emit(&WorkflowRunEvent::StageStarted {
+        self.emitter.emit(&Event::StageStarted {
             node_id: gv.id.clone(),
             name: gv.label().to_string(),
             index: stage_index,
@@ -132,7 +131,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             attempt: 1,
             max_attempts: 1,
         });
-        self.emitter.emit(&WorkflowRunEvent::StageCompleted {
+        self.emitter.emit(&Event::StageCompleted {
             node_id: gv.id.clone(),
             name: gv.label().to_string(),
             index: stage_index,
@@ -165,7 +164,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         state: &WfRunState,
     ) -> CoreResult<NodeDecision<Option<StageUsage>>> {
         let gv = ctx.node.inner();
-        self.emitter.emit(&WorkflowRunEvent::StageStarted {
+        self.emitter.emit(&Event::StageStarted {
             node_id: gv.id.clone(),
             name: gv.label().to_string(),
             index: state.stage_index,
@@ -186,7 +185,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             let outcome = &ctx.result.outcome;
             let stage_index = state.stage_index;
 
-            self.emitter.emit(&WorkflowRunEvent::StageFailed {
+            self.emitter.emit(&Event::StageFailed {
                 node_id: gv.id.clone(),
                 name: gv.label().to_string(),
                 index: stage_index,
@@ -196,7 +195,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                 will_retry: true,
             });
 
-            self.emitter.emit(&WorkflowRunEvent::StageRetrying {
+            self.emitter.emit(&Event::StageRetrying {
                 node_id: gv.id.clone(),
                 name: gv.label().to_string(),
                 index: stage_index,
@@ -228,7 +227,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             snapshot_failure_signatures(&self.circuit_breaker);
 
         if outcome.status == StageStatus::Fail {
-            self.emitter.emit(&WorkflowRunEvent::StageFailed {
+            self.emitter.emit(&Event::StageFailed {
                 node_id: gv.id.clone(),
                 name: gv.label().to_string(),
                 index: stage_index,
@@ -238,7 +237,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                 will_retry: false,
             });
         } else {
-            self.emitter.emit(&WorkflowRunEvent::StageCompleted {
+            self.emitter.emit(&Event::StageCompleted {
                 node_id: gv.id.clone(),
                 name: gv.label().to_string(),
                 index: stage_index,
@@ -293,7 +292,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             .edge
             .as_ref()
             .and_then(|e| e.inner().condition().map(String::from));
-        self.emitter.emit(&WorkflowRunEvent::EdgeSelected {
+        self.emitter.emit(&Event::EdgeSelected {
             from_node: ctx.from.to_string(),
             to_node: ctx.to.to_string(),
             label,
@@ -324,7 +323,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         let (loop_failure_signatures, restart_failure_signatures) =
             snapshot_failure_signatures(&self.circuit_breaker);
 
-        self.emitter.emit(&WorkflowRunEvent::CheckpointCompleted {
+        self.emitter.emit(&Event::CheckpointCompleted {
             node_id: node.id().to_string(),
             status,
             current_node: node.id().to_string(),
@@ -363,13 +362,13 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         // Emit GitCommit + GitPush events if git produced results
         if let Some(ref result) = git_result {
             if let Some(ref sha) = result.commit_sha {
-                self.emitter.emit(&WorkflowRunEvent::GitCommit {
+                self.emitter.emit(&Event::GitCommit {
                     node_id: Some(node.id().to_string()),
                     sha: sha.clone(),
                 });
             }
             for (branch, success) in &result.push_results {
-                self.emitter.emit(&WorkflowRunEvent::GitPush {
+                self.emitter.emit(&Event::GitPush {
                     branch: branch.clone(),
                     success: *success,
                 });
@@ -403,7 +402,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             .reduce(|a, b| a + b);
 
         if outcome.status == StageStatus::Success || outcome.status == StageStatus::PartialSuccess {
-            self.emitter.emit(&WorkflowRunEvent::WorkflowRunCompleted {
+            self.emitter.emit(&Event::WorkflowRunCompleted {
                 duration_ms,
                 artifact_count,
                 status: outcome.status.to_string(),
@@ -421,7 +420,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                 .failure
                 .as_ref()
                 .map_or_else(|| "run failed".to_string(), |f| f.message.clone());
-            self.emitter.emit(&WorkflowRunEvent::WorkflowRunFailed {
+            self.emitter.emit(&Event::WorkflowRunFailed {
                 error: FabroError::engine(error_msg),
                 duration_ms,
                 reason: Some(StatusReason::WorkflowError),

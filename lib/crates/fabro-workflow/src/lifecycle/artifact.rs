@@ -12,7 +12,7 @@ use fabro_core::state::ExecutionState;
 
 use crate::artifact::{offload_large_values, sync_artifacts_to_env};
 use crate::artifact_snapshot::collect_artifacts;
-use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
+use crate::event::{Event, EventEmitter, RunNoticeLevel};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::StageUsage;
@@ -115,7 +115,7 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
             Ok(summary) if summary.files_copied > 0 => {
                 for asset in &summary.captured_assets {
                     self.captured_artifact_count.fetch_add(1, Ordering::Relaxed);
-                    self.emitter.emit(&WorkflowRunEvent::ArtifactCaptured {
+                    self.emitter.emit(&Event::ArtifactCaptured {
                         node_id: node_id.to_string(),
                         attempt: ctx.attempt,
                         node_slug: node_slug.clone(),
@@ -129,7 +129,7 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
             }
             Ok(_) => {} // no files collected
             Err(e) => {
-                self.emitter.emit(&WorkflowRunEvent::RunNotice {
+                self.emitter.emit(&Event::RunNotice {
                     level: RunNoticeLevel::Warn,
                     code: "artifact_collection_failed".to_string(),
                     message: format!("[node: {node_id}] artifact collection failed: {e}"),
@@ -156,7 +156,7 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         )
         .await
         {
-            self.emitter.emit(&WorkflowRunEvent::RunNotice {
+            self.emitter.emit(&Event::RunNotice {
                 level: RunNoticeLevel::Warn,
                 code: "artifact_offload_failed".to_string(),
                 message: format!("[node: {node_id}] artifact offload failed: {e}"),
@@ -167,7 +167,7 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         if let Err(e) =
             sync_artifacts_to_env(&mut result.outcome.context_updates, &*self.sandbox).await
         {
-            self.emitter.emit(&WorkflowRunEvent::RunNotice {
+            self.emitter.emit(&Event::RunNotice {
                 level: RunNoticeLevel::Warn,
                 code: "artifact_sync_failed".to_string(),
                 message: format!("[node: {node_id}] artifact sync failed: {e}"),

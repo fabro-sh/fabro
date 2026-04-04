@@ -13,7 +13,7 @@ use fabro_core::lifecycle::RunLifecycle;
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
 
-use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
+use crate::event::{Event, EventEmitter, RunNoticeLevel};
 use crate::git::MetadataStore;
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
@@ -165,7 +165,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                 match store.write_checkpoint(&self.run_id.to_string(), &cp_json, &extra_refs) {
                     Ok(sha) => Some(sha),
                     Err(e) => {
-                        self.emitter.emit(&WorkflowRunEvent::RunNotice {
+                        self.emitter.emit(&Event::RunNotice {
                             level: RunNoticeLevel::Warn,
                             code: "checkpoint_metadata_write_failed".to_string(),
                             message: format!(
@@ -270,7 +270,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                     }
                     Ok(_) => {}
                     Err(err) => {
-                        self.emitter.emit(&WorkflowRunEvent::RunNotice {
+                        self.emitter.emit(&Event::RunNotice {
                             level: RunNoticeLevel::Warn,
                             code: "git_diff_failed".to_string(),
                             message: format!("[node: {node_id}] git diff failed: {err}"),
@@ -284,7 +284,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
             }
             Err(e) => {
                 // Emit CheckpointFailed and return error
-                self.emitter.emit(&WorkflowRunEvent::CheckpointFailed {
+                self.emitter.emit(&Event::CheckpointFailed {
                     node_id: node_id.to_string(),
                     error: e.clone(),
                 });
@@ -312,7 +312,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                     Ok(patch) if !patch.is_empty() => {
                         *self.final_patch.lock().unwrap() = Some(patch.clone());
                         if let Err(err) = fs::write(self.run_dir.join("final.patch"), patch).await {
-                            self.emitter.emit(&WorkflowRunEvent::RunNotice {
+                            self.emitter.emit(&Event::RunNotice {
                                 level: RunNoticeLevel::Warn,
                                 code: "final_patch_write_failed".to_string(),
                                 message: format!("failed to write final.patch: {err}"),
@@ -324,7 +324,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                     }
                     Err(err) => {
                         *self.final_patch.lock().unwrap() = None;
-                        self.emitter.emit(&WorkflowRunEvent::RunNotice {
+                        self.emitter.emit(&Event::RunNotice {
                             level: RunNoticeLevel::Warn,
                             code: "git_diff_failed".to_string(),
                             message: format!("final diff failed: {err}"),

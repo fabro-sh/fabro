@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::context::Context;
 use crate::context::keys;
 use crate::error::FabroError;
-use crate::event::{EventEmitter, WorkflowRunEvent};
+use crate::event::{Event, EventEmitter};
 use crate::outcome::{Outcome, OutcomeExt};
 use crate::run_dir::visit_from_context;
 use crate::sandbox_git::git_merge_ff_only;
@@ -233,7 +233,7 @@ async fn llm_evaluate(
 
     let visit_u32 = u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX);
 
-    emitter.emit(&WorkflowRunEvent::Prompt {
+    emitter.emit(&Event::Prompt {
         stage: node_id.to_string(),
         visit: visit_u32,
         text: full_prompt.clone(),
@@ -269,7 +269,7 @@ async fn llm_evaluate(
                 .unwrap_or_else(|| "unknown".to_string());
             let response_text =
                 serde_json::to_string_pretty(&outcome).unwrap_or_else(|_| "{}".to_string());
-            emitter.emit(&WorkflowRunEvent::PromptCompleted {
+            emitter.emit(&Event::PromptCompleted {
                 node_id: node_id.to_string(),
                 response: response_text.clone(),
                 model: String::new(),
@@ -283,7 +283,7 @@ async fn llm_evaluate(
             })
         }
         Ok(CodergenResult::Text { text, .. }) => {
-            emitter.emit(&WorkflowRunEvent::PromptCompleted {
+            emitter.emit(&Event::PromptCompleted {
                 node_id: node_id.to_string(),
                 response: text.clone(),
                 model: String::new(),

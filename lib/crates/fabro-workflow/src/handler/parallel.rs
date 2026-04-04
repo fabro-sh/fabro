@@ -10,7 +10,7 @@ use tokio::sync::Semaphore;
 use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
-use crate::event::WorkflowRunEvent;
+use crate::event::Event;
 use crate::git::sanitize_ref_component;
 use crate::hook_context::set_hook_node;
 use crate::millis_u64;
@@ -150,7 +150,7 @@ impl Handler for ParallelHandler {
                 .unwrap_or("wait_all"),
         );
 
-        services.emitter.emit(&WorkflowRunEvent::ParallelStarted {
+        services.emitter.emit(&Event::ParallelStarted {
             node_id: node.id.clone(),
             visit: u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX),
             branch_count: branches.len(),
@@ -287,7 +287,7 @@ impl Handler for ParallelHandler {
                     .await
                     .map_err(|e| FabroError::handler(format!("semaphore error: {e}")))?;
 
-                emitter.emit(&WorkflowRunEvent::ParallelBranchStarted {
+                emitter.emit(&Event::ParallelBranchStarted {
                     branch: setup.target_id.clone(),
                     index: setup.branch_index,
                 });
@@ -298,7 +298,7 @@ impl Handler for ParallelHandler {
                         "branch target node not found: {}",
                         setup.target_id
                     ));
-                    emitter.emit(&WorkflowRunEvent::ParallelBranchCompleted {
+                    emitter.emit(&Event::ParallelBranchCompleted {
                         branch: setup.target_id.clone(),
                         index: setup.branch_index,
                         duration_ms: millis_u64(branch_start.elapsed()),
@@ -367,7 +367,7 @@ impl Handler for ParallelHandler {
                     match sha_result {
                         Ok(r) if r.exit_code == 0 => {
                             let sha = r.stdout.trim().to_string();
-                            emitter.emit(&WorkflowRunEvent::GitCommit {
+                            emitter.emit(&Event::GitCommit {
                                 node_id: Some(setup.target_id.clone()),
                                 sha: sha.clone(),
                             });
@@ -379,7 +379,7 @@ impl Handler for ParallelHandler {
                     None
                 };
 
-                emitter.emit(&WorkflowRunEvent::ParallelBranchCompleted {
+                emitter.emit(&Event::ParallelBranchCompleted {
                     branch: setup.target_id.clone(),
                     index: setup.branch_index,
                     duration_ms: millis_u64(branch_start.elapsed()),
@@ -432,7 +432,7 @@ impl Handler for ParallelHandler {
                     git_remove_worktree(&*services.sandbox, &wt_str).await;
                     services
                         .emitter
-                        .emit(&WorkflowRunEvent::GitWorktreeRemove { path: wt_str });
+                        .emit(&Event::GitWorktreeRemove { path: wt_str });
                 }
             }
 
@@ -478,7 +478,7 @@ impl Handler for ParallelHandler {
         context.set(keys::PARALLEL_RESULTS, serde_json::json!(results_json));
         context.set(keys::PARALLEL_BRANCH_COUNT, serde_json::json!(total));
 
-        services.emitter.emit(&WorkflowRunEvent::ParallelCompleted {
+        services.emitter.emit(&Event::ParallelCompleted {
             node_id: node.id.clone(),
             visit: u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX),
             duration_ms: millis_u64(parallel_start.elapsed()),

@@ -17,9 +17,7 @@ use crate::transforms::{Transform, expand_vars};
 use fabro_sandbox::daytona::detect_repo_info;
 
 use super::source::{ResolveWorkflowInput, WorkflowInput, resolve_workflow};
-use crate::event::{
-    WorkflowRunEvent, append_workflow_event, normalize_json_value, to_stored_event_at,
-};
+use crate::event::{Event, append_event, normalize_json_value, to_run_event_at};
 
 #[derive(Clone, Debug)]
 pub struct CreateRunInput {
@@ -136,9 +134,9 @@ async fn persist_created_run(
             .map_err(|_| FabroError::engine(err.to_string()))?,
     };
 
-    let stored = to_stored_event_at(
+    let stored = to_run_event_at(
         &record.run_id,
-        &WorkflowRunEvent::RunCreated {
+        &Event::RunCreated {
             run_id: record.run_id,
             settings: normalize_json_value(
                 serde_json::to_value(&record.settings)
@@ -174,10 +172,10 @@ async fn persist_created_run(
         .await
         .map(|_| ())
         .map_err(store_error)?;
-    append_workflow_event(
+    append_event(
         &run_store,
         &record.run_id,
-        &WorkflowRunEvent::RunSubmitted { reason: None },
+        &Event::RunSubmitted { reason: None },
     )
     .await
     .map_err(store_error)
