@@ -18,7 +18,7 @@ use fabro_sandbox::daytona::detect_repo_info;
 
 use super::source::{ResolveWorkflowInput, WorkflowInput, resolve_workflow};
 use crate::event::{
-    WorkflowRunEvent, append_workflow_event, canonicalize_event_at, normalize_json_value,
+    WorkflowRunEvent, append_workflow_event, normalize_json_value, to_stored_event_at,
 };
 
 #[derive(Clone, Debug)]
@@ -136,7 +136,7 @@ async fn persist_created_run(
             .map_err(|_| FabroError::engine(err.to_string()))?,
     };
 
-    let envelope = canonicalize_event_at(
+    let stored = to_stored_event_at(
         &record.run_id,
         &WorkflowRunEvent::RunCreated {
             run_id: record.run_id,
@@ -165,7 +165,7 @@ async fn persist_created_run(
         record.run_id.created_at(),
     );
     let payload = fabro_store::EventPayload::new(
-        serde_json::to_value(&envelope).map_err(|err| FabroError::engine(err.to_string()))?,
+        serde_json::to_value(&stored).map_err(|err| FabroError::engine(err.to_string()))?,
         &record.run_id,
     )
     .map_err(store_error)?;

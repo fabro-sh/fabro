@@ -342,7 +342,6 @@ fn json_run_implies_auto_approve_for_human_gates() {
             }
           },
           "host_repo_path": "[TEMP_DIR]",
-          "labels": {},
           "run_dir": "[RUN_DIR]",
           "settings": {
             "auto_approve": true,

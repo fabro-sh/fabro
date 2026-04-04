@@ -6,7 +6,7 @@ use chrono::{SecondsFormat, Utc};
 use fabro_store::{EventPayload, SlateRunStore};
 use fabro_types::{RunId, StoredEvent};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
@@ -19,30 +19,6 @@ use fabro_types::StatusReason;
 use fabro_util::redact::redact_jsonl_line;
 
 pub use fabro_types::{EventBody, RunNoticeLevel};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RunEventEnvelope {
-    pub id: String,
-    pub ts: String,
-    pub run_id: String,
-    pub event: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parent_session_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub node_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub node_label: Option<String>,
-    pub properties: serde_json::Value,
-}
-
-impl From<&RunEventEnvelope> for StoredEvent {
-    fn from(value: &RunEventEnvelope) -> Self {
-        StoredEvent::from_value(serde_json::to_value(value).expect("event envelope serializes"))
-            .expect("event envelope converts to stored event")
-    }
-}
 
 /// Events emitted during workflow run execution for observability.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1201,7 +1177,7 @@ pub fn event_name(event: &WorkflowRunEvent) -> &'static str {
 }
 
 #[derive(Debug)]
-struct EnvelopeFields {
+struct StoredEventFields {
     session_id: Option<String>,
     parent_session_id: Option<String>,
     node_id: Option<String>,
@@ -1243,33 +1219,16 @@ fn remove_string(fields: &mut Map<String, Value>, key: &str) -> Option<String> {
     }
 }
 
-fn flatten_failure_detail(fields: &mut Map<String, Value>) {
-    let Some(Value::Object(failure)) = fields.remove("failure") else {
-        return;
-    };
-    if let Some(message) = failure.get("message").cloned() {
-        fields.insert("error".to_string(), message);
-    }
-    if let Some(failure_class) = failure.get("failure_class").cloned() {
-        fields.insert("failure_class".to_string(), failure_class);
-    }
-    if let Some(failure_signature) = failure.get("failure_signature").cloned() {
-        if !failure_signature.is_null() {
-            fields.insert("failure_signature".to_string(), failure_signature);
-        }
-    }
-}
-
 fn default_node_label(node_id: Option<&String>, node_label: Option<String>) -> Option<String> {
     node_label.or_else(|| node_id.cloned())
 }
 
-fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
+fn extract_stored_event_fields(event: &WorkflowRunEvent) -> StoredEventFields {
     match event {
         WorkflowRunEvent::RunCreated { .. } | WorkflowRunEvent::WorkflowRunStarted { .. } => {
             let mut fields = tagged_variant_fields(event);
             fields.remove("run_id");
-            EnvelopeFields {
+            StoredEventFields {
                 session_id: None,
                 parent_session_id: None,
                 node_id: None,
@@ -1280,7 +1239,7 @@ fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
         WorkflowRunEvent::WorkflowRunFailed { error, .. } => {
             let mut fields = tagged_variant_fields(event);
             fields.insert("error".to_string(), Value::String(error.to_string()));
-            EnvelopeFields {
+            StoredEventFields {
                 session_id: None,
                 parent_session_id: None,
                 node_id: None,
@@ -1293,8 +1252,7 @@ fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
             let node_id = remove_string(&mut fields, "node_id");
             let node_label =
                 default_node_label(node_id.as_ref(), remove_string(&mut fields, "name"));
-            flatten_failure_detail(&mut fields);
-            EnvelopeFields {
+            StoredEventFields {
                 session_id: None,
                 parent_session_id: None,
                 node_id,
@@ -1320,7 +1278,7 @@ fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
             let node_id = remove_string(&mut fields, "node_id");
             let node_label =
                 default_node_label(node_id.as_ref(), remove_string(&mut fields, "name"));
-            EnvelopeFields {
+            StoredEventFields {
                 session_id: None,
                 parent_session_id: None,
                 node_id,
@@ -1346,7 +1304,7 @@ fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
             if let (Some(visit), Value::Object(map)) = (visit, &mut properties) {
                 map.insert("visit".to_string(), visit);
             }
-            EnvelopeFields {
+            StoredEventFields {
                 session_id: session_id.clone(),
                 parent_session_id: parent_session_id.clone(),
                 node_id,
@@ -1360,7 +1318,7 @@ fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
                 || Value::Object(Map::new()),
                 |value| Value::Object(tagged_variant_fields_from_value(value)),
             );
-            EnvelopeFields {
+            StoredEventFields {
                 session_id: None,
                 parent_session_id: None,
                 node_id: None,
@@ -1372,7 +1330,7 @@ fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
             let mut fields = tagged_variant_fields(event);
             let node_id = remove_string(&mut fields, "node_id");
             let node_label = default_node_label(node_id.as_ref(), None);
-            EnvelopeFields {
+            StoredEventFields {
                 session_id: None,
                 parent_session_id: None,
                 node_id,
@@ -1385,7 +1343,7 @@ fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
             let mut fields = tagged_variant_fields(event);
             let node_id = remove_string(&mut fields, "branch");
             let node_label = default_node_label(node_id.as_ref(), None);
-            EnvelopeFields {
+            StoredEventFields {
                 session_id: None,
                 parent_session_id: None,
                 node_id,
@@ -1400,7 +1358,7 @@ fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
             let mut fields = tagged_variant_fields(event);
             let node_id = remove_string(&mut fields, "stage");
             let node_label = default_node_label(node_id.as_ref(), None);
-            EnvelopeFields {
+            StoredEventFields {
                 session_id: None,
                 parent_session_id: None,
                 node_id,
@@ -1412,7 +1370,7 @@ fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
             let mut fields = tagged_variant_fields(event);
             let node_id = remove_string(&mut fields, "node");
             let node_label = default_node_label(node_id.as_ref(), None);
-            EnvelopeFields {
+            StoredEventFields {
                 session_id: None,
                 parent_session_id: None,
                 node_id,
@@ -1420,36 +1378,13 @@ fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
                 properties: Value::Object(fields),
             }
         }
-        _ => EnvelopeFields {
+        _ => StoredEventFields {
             session_id: None,
             parent_session_id: None,
             node_id: None,
             node_label: None,
             properties: Value::Object(tagged_variant_fields(event)),
         },
-    }
-}
-
-pub fn canonicalize_event(run_id: &RunId, event: &WorkflowRunEvent) -> RunEventEnvelope {
-    canonicalize_event_at(run_id, event, Utc::now())
-}
-
-pub fn canonicalize_event_at(
-    run_id: &RunId,
-    event: &WorkflowRunEvent,
-    ts: chrono::DateTime<Utc>,
-) -> RunEventEnvelope {
-    let fields = extract_envelope_fields(event);
-    RunEventEnvelope {
-        id: Uuid::now_v7().to_string(),
-        ts: ts.to_rfc3339_opts(SecondsFormat::Millis, true),
-        run_id: run_id.to_string(),
-        event: event_name(event).to_string(),
-        session_id: fields.session_id,
-        parent_session_id: fields.parent_session_id,
-        node_id: fields.node_id,
-        node_label: fields.node_label,
-        properties: fields.properties,
     }
 }
 
@@ -1462,21 +1397,19 @@ pub fn to_stored_event_at(
     event: &WorkflowRunEvent,
     ts: chrono::DateTime<Utc>,
 ) -> StoredEvent {
-    let envelope = canonicalize_event_at(run_id, event, ts);
-    let mut stored = StoredEvent::from(&envelope);
-
-    match (event, &mut stored.body) {
-        (WorkflowRunEvent::StageCompleted { failure, .. }, EventBody::StageCompleted(props)) => {
-            props.failure = failure.clone();
-        }
-        (WorkflowRunEvent::StageFailed { failure, .. }, EventBody::StageFailed(props)) => {
-            props.failure = Some(failure.clone());
-        }
-        _ => {}
-    }
-
-    stored.refresh_cache();
-    stored
+    let fields = extract_stored_event_fields(event);
+    StoredEvent::from_value(json!({
+        "id": Uuid::now_v7().to_string(),
+        "ts": ts.to_rfc3339_opts(SecondsFormat::Millis, true),
+        "run_id": run_id.to_string(),
+        "event": event_name(event),
+        "session_id": fields.session_id,
+        "parent_session_id": fields.parent_session_id,
+        "node_id": fields.node_id,
+        "node_label": fields.node_label,
+        "properties": fields.properties,
+    }))
+    .expect("workflow event converts to stored event")
 }
 
 pub fn build_redacted_event_payload(event: &StoredEvent, run_id: &RunId) -> Result<EventPayload> {
@@ -1752,8 +1685,8 @@ mod tests {
     }
 
     #[test]
-    fn canonicalize_stage_completed_places_node_fields_in_envelope() {
-        let envelope = canonicalize_event(
+    fn stored_stage_completed_places_node_fields_in_header() {
+        let stored = to_stored_event(
             &fixtures::RUN_2,
             &WorkflowRunEvent::StageCompleted {
                 node_id: "plan".to_string(),
@@ -1779,18 +1712,18 @@ mod tests {
             },
         );
 
-        assert_eq!(envelope.event, "stage.completed");
-        assert_eq!(envelope.run_id, fixtures::RUN_2.to_string());
-        assert_eq!(envelope.node_id.as_deref(), Some("plan"));
-        assert_eq!(envelope.node_label.as_deref(), Some("Plan"));
-        assert_eq!(envelope.properties["duration_ms"], 5000);
-        assert_eq!(envelope.properties["status"], "success");
-        assert!(envelope.session_id.is_none());
+        assert_eq!(stored.event_name(), "stage.completed");
+        assert_eq!(stored.run_id, fixtures::RUN_2);
+        assert_eq!(stored.node_id.as_deref(), Some("plan"));
+        assert_eq!(stored.node_label.as_deref(), Some("Plan"));
+        assert_eq!(stored.properties["duration_ms"], 5000);
+        assert_eq!(stored.properties["status"], "success");
+        assert!(stored.session_id.is_none());
     }
 
     #[test]
-    fn canonicalize_stage_completed_keeps_response_and_signature_snapshots() {
-        let envelope = canonicalize_event(
+    fn stored_stage_completed_keeps_response_and_signature_snapshots() {
+        let stored = to_stored_event(
             &fixtures::RUN_2,
             &WorkflowRunEvent::StageCompleted {
                 node_id: "plan".to_string(),
@@ -1816,17 +1749,14 @@ mod tests {
             },
         );
 
-        assert_eq!(envelope.properties["response"], "done");
-        assert_eq!(envelope.properties["loop_failure_signatures"]["sig-a"], 2);
-        assert_eq!(
-            envelope.properties["restart_failure_signatures"]["sig-b"],
-            1
-        );
+        assert_eq!(stored.properties["response"], "done");
+        assert_eq!(stored.properties["loop_failure_signatures"]["sig-a"], 2);
+        assert_eq!(stored.properties["restart_failure_signatures"]["sig-b"], 1);
     }
 
     #[test]
-    fn canonicalize_stage_failure_flattens_failure_detail() {
-        let envelope = canonicalize_event(
+    fn stored_stage_failure_keeps_failure_detail() {
+        let stored = to_stored_event(
             &fixtures::RUN_3,
             &WorkflowRunEvent::StageFailed {
                 node_id: "code".to_string(),
@@ -1840,16 +1770,18 @@ mod tests {
             },
         );
 
-        assert_eq!(envelope.event, "stage.failed");
-        assert_eq!(envelope.properties["error"], "lint failed");
-        assert_eq!(envelope.properties["failure_class"], "deterministic");
-        assert_eq!(envelope.properties["will_retry"], true);
-        assert!(envelope.properties.get("failure").is_none());
+        assert_eq!(stored.event_name(), "stage.failed");
+        assert_eq!(stored.properties["failure"]["message"], "lint failed");
+        assert_eq!(
+            stored.properties["failure"]["failure_class"],
+            "deterministic"
+        );
+        assert_eq!(stored.properties["will_retry"], true);
     }
 
     #[test]
-    fn canonicalize_agent_tool_started_moves_session_metadata_to_envelope() {
-        let envelope = canonicalize_event(
+    fn stored_agent_tool_started_moves_session_metadata_to_header() {
+        let stored = to_stored_event(
             &fixtures::RUN_4,
             &WorkflowRunEvent::Agent {
                 stage: "code".to_string(),
@@ -1864,19 +1796,19 @@ mod tests {
             },
         );
 
-        assert_eq!(envelope.event, "agent.tool.started");
-        assert_eq!(envelope.node_id.as_deref(), Some("code"));
-        assert_eq!(envelope.node_label.as_deref(), Some("code"));
-        assert_eq!(envelope.session_id.as_deref(), Some("ses_child"));
-        assert_eq!(envelope.parent_session_id.as_deref(), Some("ses_parent"));
-        assert_eq!(envelope.properties["tool_name"], "read_file");
-        assert_eq!(envelope.properties["tool_call_id"], "call_1");
-        assert_eq!(envelope.properties["visit"], 2);
+        assert_eq!(stored.event_name(), "agent.tool.started");
+        assert_eq!(stored.node_id.as_deref(), Some("code"));
+        assert_eq!(stored.node_label.as_deref(), Some("code"));
+        assert_eq!(stored.session_id.as_deref(), Some("ses_child"));
+        assert_eq!(stored.parent_session_id.as_deref(), Some("ses_parent"));
+        assert_eq!(stored.properties["tool_name"], "read_file");
+        assert_eq!(stored.properties["tool_call_id"], "call_1");
+        assert_eq!(stored.properties["visit"], 2);
     }
 
     #[test]
-    fn canonicalize_sandbox_event_keeps_properties_nested() {
-        let envelope = canonicalize_event(
+    fn stored_sandbox_event_keeps_properties_nested() {
+        let stored = to_stored_event(
             &fixtures::RUN_5,
             &WorkflowRunEvent::Sandbox {
                 event: SandboxEvent::Ready {
@@ -1890,15 +1822,15 @@ mod tests {
             },
         );
 
-        assert_eq!(envelope.event, "sandbox.ready");
-        assert!(envelope.node_id.is_none());
-        assert_eq!(envelope.properties["provider"], "daytona");
-        assert_eq!(envelope.properties["duration_ms"], 2500);
+        assert_eq!(stored.event_name(), "sandbox.ready");
+        assert!(stored.node_id.is_none());
+        assert_eq!(stored.properties["provider"], "daytona");
+        assert_eq!(stored.properties["duration_ms"], 2500);
     }
 
     #[test]
-    fn canonicalize_workflow_failure_flattens_error_display() {
-        let envelope = canonicalize_event(
+    fn stored_workflow_failure_uses_display_error() {
+        let stored = to_stored_event(
             &fixtures::RUN_6,
             &WorkflowRunEvent::WorkflowRunFailed {
                 error: FabroError::handler("boom"),
@@ -1908,9 +1840,9 @@ mod tests {
             },
         );
 
-        assert_eq!(envelope.event, "run.failed");
-        assert_eq!(envelope.properties["error"], "Handler error: boom");
-        assert_eq!(envelope.properties["duration_ms"], 900);
+        assert_eq!(stored.event_name(), "run.failed");
+        assert_eq!(stored.properties["error"], "Handler error: boom");
+        assert_eq!(stored.properties["duration_ms"], 900);
     }
 
     #[tokio::test]
@@ -1921,7 +1853,7 @@ mod tests {
             std::time::Duration::from_millis(1),
         );
         let run_store = store.create_run(&fixtures::RUN_7).await.unwrap();
-        let envelope = canonicalize_event(
+        let stored = to_stored_event(
             &fixtures::RUN_7,
             &WorkflowRunEvent::RunNotice {
                 level: RunNoticeLevel::Warn,
@@ -1929,8 +1861,6 @@ mod tests {
                 message: "notice".to_string(),
             },
         );
-
-        let stored = StoredEvent::from(&envelope);
         let payload = build_redacted_event_payload(&stored, &fixtures::RUN_7).unwrap();
         run_store.append_event(&payload).await.unwrap();
 
@@ -1947,7 +1877,7 @@ mod tests {
 
     #[test]
     fn build_redacted_event_payload_requires_id() {
-        let envelope = canonicalize_event(
+        let stored = to_stored_event(
             &fixtures::RUN_8,
             &WorkflowRunEvent::RetroStarted {
                 prompt: Some("Analyze the run".to_string()),
@@ -1955,10 +1885,8 @@ mod tests {
                 model: None,
             },
         );
-
-        let stored = StoredEvent::from(&envelope);
         let payload = build_redacted_event_payload(&stored, &fixtures::RUN_8).unwrap();
-        assert_eq!(payload.as_value()["id"], envelope.id);
+        assert_eq!(payload.as_value()["id"], stored.id);
         assert_eq!(payload.as_value()["event"], "retro.started");
         assert_eq!(
             payload.as_value()["properties"]["prompt"],

@@ -414,11 +414,12 @@ mod tests {
     use std::io::{self, Write};
     use std::sync::{Arc, Mutex};
 
+    use chrono::{DateTime, Utc};
     use fabro_agent::{AgentEvent, SandboxEvent};
     use fabro_llm::types::Usage;
     use fabro_types::fixtures;
     use fabro_workflow::event::{
-        RunNoticeLevel, WorkflowRunEvent, canonicalize_event, to_stored_event,
+        RunNoticeLevel, WorkflowRunEvent, to_stored_event, to_stored_event_at,
     };
     use fabro_workflow::outcome::StageUsage;
 
@@ -772,7 +773,7 @@ mod tests {
 
         let (mut json_ui, json_buffer) = capture_ui(true);
         for event in &events {
-            let line = serde_json::to_string(&canonicalize_event(&fixtures::RUN_1, event)).unwrap();
+            let line = serde_json::to_string(&to_stored_event(&fixtures::RUN_1, event)).unwrap();
             json_ui.handle_json_line(&line);
         }
 
@@ -1137,15 +1138,57 @@ mod tests {
     fn tty_tool_call_completion_uses_jsonl_timestamps() {
         let mut ui = ProgressUI::new(true, false);
 
-        ui.handle_json_line(
-            r#"{"ts":"2026-03-30T12:00:00.000Z","event":"stage.started","node_id":"code","node_label":"Code","properties":{"attempt":1,"max_attempts":1}}"#,
-        );
-        ui.handle_json_line(
-            r#"{"ts":"2026-03-30T12:00:00.000Z","event":"agent.tool.started","node_id":"code","properties":{"tool_name":"read_file","tool_call_id":"tc1","arguments":{"path":"src/main.rs"}}}"#,
-        );
-        ui.handle_json_line(
-            r#"{"ts":"2026-03-30T12:00:00.500Z","event":"agent.tool.completed","node_id":"code","properties":{"tool_call_id":"tc1","is_error":false}}"#,
-        );
+        let started_ts = DateTime::parse_from_rfc3339("2026-03-30T12:00:00.000Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let completed_ts = DateTime::parse_from_rfc3339("2026-03-30T12:00:00.500Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        let stage_started = serde_json::to_string(&to_stored_event_at(
+            &fixtures::RUN_1,
+            &WorkflowRunEvent::StageStarted {
+                node_id: "code".into(),
+                name: "Code".into(),
+                index: 0,
+                handler_type: "agent".into(),
+                attempt: 1,
+                max_attempts: 1,
+            },
+            started_ts,
+        ))
+        .unwrap();
+        let tool_started = serde_json::to_string(&to_stored_event_at(
+            &fixtures::RUN_1,
+            &agent_event(
+                "code",
+                AgentEvent::ToolCallStarted {
+                    tool_name: "read_file".into(),
+                    tool_call_id: "tc1".into(),
+                    arguments: serde_json::json!({"path": "src/main.rs"}),
+                },
+            ),
+            started_ts,
+        ))
+        .unwrap();
+        let tool_completed = serde_json::to_string(&to_stored_event_at(
+            &fixtures::RUN_1,
+            &agent_event(
+                "code",
+                AgentEvent::ToolCallCompleted {
+                    tool_name: "read_file".into(),
+                    tool_call_id: "tc1".into(),
+                    output: serde_json::json!({"ok": true}),
+                    is_error: false,
+                },
+            ),
+            completed_ts,
+        ))
+        .unwrap();
+
+        ui.handle_json_line(&stage_started);
+        ui.handle_json_line(&tool_started);
+        ui.handle_json_line(&tool_completed);
 
         let stage = &ui.stage.active_stages["code"];
         assert_eq!(stage.tool_calls[0].bar.prefix(), "500ms");
