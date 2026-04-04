@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 
 use fabro_devcontainer::DevcontainerSpec;
 
-use crate::event::{EventEmitter, WorkflowRunEvent};
+use crate::event::{Event, EventEmitter};
 use fabro_agent::sandbox::Sandbox;
 use fabro_sandbox::daytona::{DaytonaSnapshotConfig, DockerfileSource};
 use futures::future::try_join_all;
@@ -41,7 +41,7 @@ pub async fn run_devcontainer_lifecycle(
         return Ok(());
     }
 
-    emitter.emit(&WorkflowRunEvent::DevcontainerLifecycleStarted {
+    emitter.emit(&Event::DevcontainerLifecycleStarted {
         phase: phase.to_string(),
         command_count: commands.len(),
     });
@@ -81,7 +81,7 @@ pub async fn run_devcontainer_lifecycle(
                         let name = name.clone();
                         async move {
                             let cmd_start = Instant::now();
-                            emitter.emit(&WorkflowRunEvent::DevcontainerLifecycleCommandStarted {
+                            emitter.emit(&Event::DevcontainerLifecycleCommandStarted {
                                 phase: phase.clone(),
                                 command: name.clone(),
                                 index,
@@ -97,7 +97,7 @@ pub async fn run_devcontainer_lifecycle(
                             let cmd_duration = crate::millis_u64(cmd_start.elapsed());
                             if result.exit_code != 0 {
                                 emitter.emit(
-                                    &WorkflowRunEvent::DevcontainerLifecycleFailed {
+                                    &Event::DevcontainerLifecycleFailed {
                                         phase: phase.clone(),
                                         command: name.clone(),
                                         index,
@@ -112,7 +112,7 @@ pub async fn run_devcontainer_lifecycle(
                                 );
                             }
                             emitter.emit(
-                                &WorkflowRunEvent::DevcontainerLifecycleCommandCompleted {
+                                &Event::DevcontainerLifecycleCommandCompleted {
                                     phase: phase.clone(),
                                     command: name.clone(),
                                     index,
@@ -130,7 +130,7 @@ pub async fn run_devcontainer_lifecycle(
     }
 
     let phase_duration = crate::millis_u64(phase_start.elapsed());
-    emitter.emit(&WorkflowRunEvent::DevcontainerLifecycleCompleted {
+    emitter.emit(&Event::DevcontainerLifecycleCompleted {
         phase: phase.to_string(),
         duration_ms: phase_duration,
     });
@@ -145,7 +145,7 @@ async fn run_single_lifecycle_command(
     index: usize,
     timeout_ms: u64,
 ) -> anyhow::Result<()> {
-    emitter.emit(&WorkflowRunEvent::DevcontainerLifecycleCommandStarted {
+    emitter.emit(&Event::DevcontainerLifecycleCommandStarted {
         phase: phase.to_string(),
         command: command.to_string(),
         index,
@@ -157,7 +157,7 @@ async fn run_single_lifecycle_command(
         .map_err(|e| anyhow::anyhow!("Devcontainer {phase} command failed: {e}"))?;
     let cmd_duration = crate::millis_u64(cmd_start.elapsed());
     if result.exit_code != 0 {
-        emitter.emit(&WorkflowRunEvent::DevcontainerLifecycleFailed {
+        emitter.emit(&Event::DevcontainerLifecycleFailed {
             phase: phase.to_string(),
             command: command.to_string(),
             index,
@@ -170,7 +170,7 @@ async fn run_single_lifecycle_command(
             result.stderr,
         );
     }
-    emitter.emit(&WorkflowRunEvent::DevcontainerLifecycleCommandCompleted {
+    emitter.emit(&Event::DevcontainerLifecycleCommandCompleted {
         phase: phase.to_string(),
         command: command.to_string(),
         index,
@@ -381,7 +381,7 @@ mod tests {
     #[tokio::test]
     async fn emits_started_and_completed_events() {
         let emitter = EventEmitter::default();
-        let events = Arc::new(Mutex::new(Vec::<fabro_types::StoredEvent>::new()));
+        let events = Arc::new(Mutex::new(Vec::<fabro_types::RunEvent>::new()));
         let events_clone = Arc::clone(&events);
         emitter.on_event(move |event| {
             events_clone.lock().unwrap().push(event.clone());
@@ -418,7 +418,7 @@ mod tests {
     #[tokio::test]
     async fn failed_command_emits_failed_and_returns_error() {
         let emitter = EventEmitter::default();
-        let events = Arc::new(Mutex::new(Vec::<fabro_types::StoredEvent>::new()));
+        let events = Arc::new(Mutex::new(Vec::<fabro_types::RunEvent>::new()));
         let events_clone = Arc::clone(&events);
         emitter.on_event(move |event| {
             events_clone.lock().unwrap().push(event.clone());

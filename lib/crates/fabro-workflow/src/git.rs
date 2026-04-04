@@ -411,14 +411,14 @@ mod tests {
 
     #[tokio::test]
     async fn scan_node_files_from_state_reconstructs_allowlisted_entries() {
-        use crate::event::{WorkflowRunEvent, append_workflow_event};
+        use crate::event::{Event, append_event};
 
         let store = test_store();
         let run = store.create_run(&fixtures::RUN_1).await.unwrap();
-        append_workflow_event(
+        append_event(
             &run,
             &fixtures::RUN_1,
-            &WorkflowRunEvent::Prompt {
+            &Event::Prompt {
                 stage: "work".into(),
                 visit: 2,
                 text: "hello".into(),
@@ -429,10 +429,10 @@ mod tests {
         )
         .await
         .unwrap();
-        append_workflow_event(
+        append_event(
             &run,
             &fixtures::RUN_1,
-            &WorkflowRunEvent::PromptCompleted {
+            &Event::PromptCompleted {
                 node_id: "work".into(),
                 response: "world".into(),
                 model: "gpt-5.4".into(),
@@ -442,10 +442,10 @@ mod tests {
         )
         .await
         .unwrap();
-        append_workflow_event(
+        append_event(
             &run,
             &fixtures::RUN_1,
-            &WorkflowRunEvent::StageCompleted {
+            &Event::StageCompleted {
                 node_id: "work".into(),
                 name: "Work".into(),
                 index: 2,
@@ -470,10 +470,10 @@ mod tests {
         )
         .await
         .unwrap();
-        append_workflow_event(
+        append_event(
             &run,
             &fixtures::RUN_1,
-            &WorkflowRunEvent::CommandStarted {
+            &Event::CommandStarted {
                 node_id: "work".into(),
                 script: "echo hi".into(),
                 command: "echo hi".into(),
@@ -483,10 +483,10 @@ mod tests {
         )
         .await
         .unwrap();
-        append_workflow_event(
+        append_event(
             &run,
             &fixtures::RUN_1,
-            &WorkflowRunEvent::CommandCompleted {
+            &Event::CommandCompleted {
                 node_id: "work".into(),
                 stdout: "hi\n".into(),
                 stderr: String::new(),
@@ -497,10 +497,10 @@ mod tests {
         )
         .await
         .unwrap();
-        append_workflow_event(
+        append_event(
             &run,
             &fixtures::RUN_1,
-            &WorkflowRunEvent::ParallelCompleted {
+            &Event::ParallelCompleted {
                 node_id: "work".into(),
                 visit: 2,
                 duration_ms: 100,
@@ -511,10 +511,10 @@ mod tests {
         )
         .await
         .unwrap();
-        append_workflow_event(
+        append_event(
             &run,
             &fixtures::RUN_1,
-            &WorkflowRunEvent::CheckpointCompleted {
+            &Event::CheckpointCompleted {
                 node_id: "work".into(),
                 status: "success".into(),
                 current_node: "work".into(),

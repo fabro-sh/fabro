@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::{Result, StoreError};
-use fabro_types::{RunId, RunStatus, StatusReason, StoredEvent};
+use fabro_types::{RunEvent, RunId, RunStatus, StatusReason};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunSummary {
@@ -70,11 +70,11 @@ impl EventPayload {
     }
 }
 
-impl TryFrom<&EventPayload> for StoredEvent {
+impl TryFrom<&EventPayload> for RunEvent {
     type Error = StoreError;
 
     fn try_from(value: &EventPayload) -> Result<Self> {
-        StoredEvent::from_value(value.as_value().clone())
+        RunEvent::from_value(value.as_value().clone())
             .map_err(|err| StoreError::InvalidEvent(format!("invalid stored event: {err}")))
     }
 }

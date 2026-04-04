@@ -9,7 +9,7 @@ use fabro_llm::generate::{GenerateParams, generate};
 use fabro_util::text::strip_goal_decoration;
 
 use super::types::{Concluded, Finalized, PullRequestOptions};
-use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
+use crate::event::{Event, EventEmitter, RunNoticeLevel};
 use crate::outcome::{StageStatus, format_cost as outcome_format_cost};
 use crate::records::{Conclusion, RunRecord};
 use fabro_retro::retro::Retro;
@@ -273,7 +273,7 @@ fn emit_run_notice(
     code: impl Into<String>,
     message: impl Into<String>,
 ) {
-    emitter.emit(&WorkflowRunEvent::RunNotice {
+    emitter.emit(&Event::RunNotice {
         level,
         code: code.into(),
         message: message.into(),
@@ -535,7 +535,7 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                     .await
                     {
                         Ok(Some(record)) => {
-                            emitter.emit(&WorkflowRunEvent::PullRequestCreated {
+                            emitter.emit(&Event::PullRequestCreated {
                                 pr_url: record.html_url.clone(),
                                 pr_number: record.number,
                                 owner: record.owner.clone(),
@@ -549,7 +549,7 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                         }
                         Ok(None) => {}
                         Err(e) => {
-                            emitter.emit(&WorkflowRunEvent::PullRequestFailed { error: e.clone() });
+                            emitter.emit(&Event::PullRequestFailed { error: e.clone() });
                             emit_run_notice(
                                 &emitter,
                                 RunNoticeLevel::Warn,
@@ -579,7 +579,7 @@ mod tests {
     use std::sync::{Arc, Once};
 
     use super::*;
-    use crate::event::{WorkflowRunEvent, append_workflow_event};
+    use crate::event::{Event, append_event};
     use crate::records::StageSummary;
     use chrono::Utc;
     use fabro_graphviz::graph::Graph;
@@ -1093,10 +1093,10 @@ mod tests {
             base_branch: Some("main".to_string()),
             labels: HashMap::new(),
         };
-        append_workflow_event(
+        append_event(
             &run_store,
             &fixtures::RUN_1,
-            &WorkflowRunEvent::RunCreated {
+            &Event::RunCreated {
                 run_id: fixtures::RUN_1,
                 settings: serde_json::to_value(&run_record.settings).unwrap(),
                 graph: serde_json::to_value(&run_record.graph).unwrap(),
@@ -1113,10 +1113,10 @@ mod tests {
         )
         .await
         .unwrap();
-        append_workflow_event(
+        append_event(
             &run_store,
             &fixtures::RUN_1,
-            &WorkflowRunEvent::RetroCompleted {
+            &Event::RetroCompleted {
                 duration_ms: 1,
                 response: Some(String::new()),
                 retro: Some(serde_json::to_value(make_test_retro()).unwrap()),
@@ -1159,10 +1159,10 @@ mod tests {
             base_branch: Some("main".to_string()),
             labels: HashMap::new(),
         };
-        append_workflow_event(
+        append_event(
             &run_store,
             &fixtures::RUN_1,
-            &WorkflowRunEvent::RunCreated {
+            &Event::RunCreated {
                 run_id: fixtures::RUN_1,
                 settings: serde_json::to_value(&run_record.settings).unwrap(),
                 graph: serde_json::to_value(&run_record.graph).unwrap(),
@@ -1179,10 +1179,10 @@ mod tests {
         )
         .await
         .unwrap();
-        append_workflow_event(
+        append_event(
             &run_store,
             &fixtures::RUN_1,
-            &WorkflowRunEvent::StageCompleted {
+            &Event::StageCompleted {
                 node_id: "plan".to_string(),
                 name: "plan".to_string(),
                 index: 0,
@@ -1378,10 +1378,10 @@ mod tests {
             base_branch: None,
             labels: std::collections::HashMap::new(),
         };
-        append_workflow_event(
+        append_event(
             &run_store,
             &fixtures::RUN_1,
-            &WorkflowRunEvent::RunCreated {
+            &Event::RunCreated {
                 run_id: fixtures::RUN_1,
                 settings: serde_json::to_value(&run_record.settings).unwrap(),
                 graph: serde_json::to_value(&run_record.graph).unwrap(),
@@ -1398,10 +1398,10 @@ mod tests {
         )
         .await
         .unwrap();
-        append_workflow_event(
+        append_event(
             &run_store,
             &fixtures::RUN_1,
-            &WorkflowRunEvent::WorkflowRunCompleted {
+            &Event::WorkflowRunCompleted {
                 duration_ms: 1,
                 artifact_count: 0,
                 status: "success".to_string(),

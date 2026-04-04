@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::context::{self, Context};
 use crate::error::FabroError;
-use crate::event::WorkflowRunEvent;
+use crate::event::Event;
 use crate::graph::WorkflowGraph;
 use crate::handler::EngineServices;
 use crate::lifecycle::WorkflowLifecycle;
@@ -295,7 +295,7 @@ pub async fn execute(init: Initialized) -> Executed {
         Err(fabro_core::CoreError::StallTimeout { node_id }) => {
             let stall_timeout = graph.stall_timeout().unwrap_or_default();
             let idle_secs = stall_timeout.as_secs();
-            emitter.emit(&WorkflowRunEvent::StallWatchdogTimeout {
+            emitter.emit(&Event::StallWatchdogTimeout {
                 node: node_id.clone(),
                 idle_seconds: idle_secs,
             });

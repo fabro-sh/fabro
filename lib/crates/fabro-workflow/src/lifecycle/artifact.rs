@@ -10,7 +10,7 @@ use fabro_core::state::ExecutionState;
 
 use crate::artifact::{ArtifactStore, offload_large_values, sync_artifacts_to_env};
 use crate::asset_snapshot::collect_assets;
-use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
+use crate::event::{Event, EventEmitter, RunNoticeLevel};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::StageUsage;
@@ -104,7 +104,7 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         match collect_assets(&*self.sandbox, &asset_capture_dir, &self.asset_globs, epoch).await {
             Ok(summary) if summary.files_copied > 0 => {
                 for asset in &summary.captured_assets {
-                    self.emitter.emit(&WorkflowRunEvent::AssetCaptured {
+                    self.emitter.emit(&Event::AssetCaptured {
                         node_id: node_id.to_string(),
                         attempt: ctx.attempt,
                         node_slug: node_slug.clone(),
@@ -118,7 +118,7 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
             }
             Ok(_) => {} // no files collected
             Err(e) => {
-                self.emitter.emit(&WorkflowRunEvent::RunNotice {
+                self.emitter.emit(&Event::RunNotice {
                     level: RunNoticeLevel::Warn,
                     code: "asset_collection_failed".to_string(),
                     message: format!("[node: {node_id}] asset collection failed: {e}"),
@@ -141,7 +141,7 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         {
             let store = self.artifact_store.lock().unwrap();
             if let Err(e) = offload_large_values(&mut result.outcome.context_updates, &store) {
-                self.emitter.emit(&WorkflowRunEvent::RunNotice {
+                self.emitter.emit(&Event::RunNotice {
                     level: RunNoticeLevel::Warn,
                     code: "artifact_offload_failed".to_string(),
                     message: format!("[node: {node_id}] artifact offload failed: {e}"),
@@ -153,7 +153,7 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         if let Err(e) =
             sync_artifacts_to_env(&mut result.outcome.context_updates, &*self.sandbox).await
         {
-            self.emitter.emit(&WorkflowRunEvent::RunNotice {
+            self.emitter.emit(&Event::RunNotice {
                 level: RunNoticeLevel::Warn,
                 code: "artifact_sync_failed".to_string(),
                 message: format!("[node: {node_id}] artifact sync failed: {e}"),

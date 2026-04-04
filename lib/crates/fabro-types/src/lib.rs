@@ -11,13 +11,13 @@ pub mod pull_request;
 pub mod retro;
 pub mod run;
 pub mod run_blob_id;
+pub mod run_event;
 pub mod run_id;
 pub mod sandbox_record;
 pub mod settings;
 pub mod stage_id;
 pub mod start;
 pub mod status;
-pub mod stored_event;
 pub mod usage;
 
 pub use checkpoint::Checkpoint;
@@ -33,6 +33,7 @@ pub use retro::{
 };
 pub use run::RunRecord;
 pub use run_blob_id::RunBlobId;
+pub use run_event::{EventBody, RunEvent, RunNoticeLevel, TokenUsage};
 pub use run_id::RunId;
 pub use run_id::fixtures;
 pub use sandbox_record::SandboxRecord;
@@ -42,7 +43,6 @@ pub use start::StartRecord;
 pub use status::{
     InvalidTransition, ParseRunStatusError, RunStatus, RunStatusRecord, StatusReason,
 };
-pub use stored_event::{EventBody, RunNoticeLevel, StoredEvent, TokenUsage};
 pub use usage::StageUsage;
 
 pub use fabro_macros::Combine;

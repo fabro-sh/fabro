@@ -7,7 +7,7 @@ use fabro_retro::retro_agent::{
 };
 
 use super::types::{Executed, RetroOptions, Retroed};
-use crate::event::WorkflowRunEvent;
+use crate::event::Event;
 
 pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
     let state = match options.run_store.state().await {
@@ -15,7 +15,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
         Err(e) => {
             tracing::warn!(error = %e, "Could not load run state, skipping retro");
             if let Some(ref emitter) = options.emitter {
-                emitter.emit(&WorkflowRunEvent::RetroFailed {
+                emitter.emit(&Event::RetroFailed {
                     error: e.to_string(),
                     duration_ms: 0,
                 });
@@ -26,7 +26,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
     let Some(cp) = state.checkpoint else {
         tracing::warn!("Could not load checkpoint, skipping retro");
         if let Some(ref emitter) = options.emitter {
-            emitter.emit(&WorkflowRunEvent::RetroFailed {
+            emitter.emit(&Event::RetroFailed {
                 error: "checkpoint not found".to_string(),
                 duration_ms: 0,
             });
@@ -54,7 +54,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
     let retro_start = std::time::Instant::now();
     let retro_prompt = build_retro_prompt(RETRO_DATA_DIR);
     if let Some(ref emitter) = options.emitter {
-        emitter.emit(&WorkflowRunEvent::RetroStarted {
+        emitter.emit(&Event::RetroStarted {
             prompt: Some(retro_prompt),
             provider: Some(options.provider.as_str().to_string()),
             model: Some(options.model.clone()),
@@ -70,7 +70,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
                 Arc::new(move |event: SessionEvent| {
                     emitter.touch();
                     if !event.event.is_streaming_noise() {
-                        emitter.emit(&WorkflowRunEvent::Agent {
+                        emitter.emit(&Event::Agent {
                             stage: "retro".to_string(),
                             visit: 1,
                             event: event.event.clone(),
@@ -100,7 +100,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
         Ok((narrative, response)) => {
             retro.apply_narrative(narrative);
             if let Some(ref emitter) = options.emitter {
-                emitter.emit(&WorkflowRunEvent::RetroCompleted {
+                emitter.emit(&Event::RetroCompleted {
                     duration_ms,
                     response: Some(response),
                     retro: serde_json::to_value(&retro).ok(),
@@ -109,7 +109,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
         }
         Err(e) => {
             if let Some(ref emitter) = options.emitter {
-                emitter.emit(&WorkflowRunEvent::RetroFailed {
+                emitter.emit(&Event::RetroFailed {
                     error: e.to_string(),
                     duration_ms,
                 });
@@ -176,7 +176,7 @@ mod tests {
     use super::*;
     use crate::context::Context;
     use crate::event::EventEmitter;
-    use crate::event::{StoreProgressLogger, WorkflowRunEvent, append_workflow_event};
+    use crate::event::{Event, StoreProgressLogger, append_event};
     use crate::pipeline::types::Executed;
     use crate::records::{Checkpoint, CheckpointExt, RunRecord};
     use crate::run_options::RunOptions;
@@ -227,10 +227,10 @@ mod tests {
             base_branch: None,
             labels: std::collections::HashMap::new(),
         };
-        append_workflow_event(
+        append_event(
             &run_store,
             &test_run_id(),
-            &WorkflowRunEvent::RunCreated {
+            &Event::RunCreated {
                 run_id: test_run_id(),
                 settings: serde_json::to_value(&run_record.settings).unwrap(),
                 graph: serde_json::to_value(&run_record.graph).unwrap(),
@@ -247,10 +247,10 @@ mod tests {
         )
         .await
         .unwrap();
-        append_workflow_event(
+        append_event(
             &run_store,
             &test_run_id(),
-            &WorkflowRunEvent::CheckpointCompleted {
+            &Event::CheckpointCompleted {
                 node_id: checkpoint.current_node.clone(),
                 status: "success".to_string(),
                 current_node: checkpoint.current_node.clone(),

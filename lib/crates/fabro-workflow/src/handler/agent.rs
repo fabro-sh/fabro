@@ -10,7 +10,7 @@ use fabro_types::RunId;
 use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
-use crate::event::{EventEmitter, WorkflowRunEvent};
+use crate::event::{Event, EventEmitter};
 use crate::outcome::{
     FailureCategory, FailureDetail, Outcome, OutcomeExt, StageStatus, StageUsage,
 };
@@ -256,7 +256,7 @@ impl Handler for AgentHandler {
             .map(String::from)
             .or_else(|| Some(Provider::default_from_env().as_str().to_string()));
         let prompt_model = node.model().map(String::from);
-        services.emitter.emit(&WorkflowRunEvent::Prompt {
+        services.emitter.emit(&Event::Prompt {
             stage: node.id.clone(),
             visit,
             text: prompt.clone(),
@@ -329,7 +329,7 @@ impl Handler for AgentHandler {
             .map(String::from)
             .or_else(|| Some(Provider::default_from_env().as_str().to_string()))
             .unwrap_or_default();
-        services.emitter.emit(&WorkflowRunEvent::PromptCompleted {
+        services.emitter.emit(&Event::PromptCompleted {
             node_id: node.id.clone(),
             response: response_text.clone(),
             model: response_model,
@@ -709,7 +709,7 @@ mod tests {
                 _sandbox: &Arc<dyn fabro_agent::Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
-                emitter.emit(&crate::event::WorkflowRunEvent::Agent {
+                emitter.emit(&crate::event::Event::Agent {
                     stage: node.id.clone(),
                     visit: u32::try_from(crate::run_dir::visit_from_context(context))
                         .unwrap_or(u32::MAX),

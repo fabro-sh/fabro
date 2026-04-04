@@ -19,7 +19,7 @@ use super::super::agent::{CodergenBackend, CodergenResult};
 use crate::context::keys::Fidelity;
 use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
-use crate::event::{EventEmitter, WorkflowRunEvent};
+use crate::event::{Event, EventEmitter};
 use crate::outcome::StageUsage;
 use crate::outcome::compute_stage_cost;
 use crate::run_dir::visit_from_context;
@@ -104,7 +104,7 @@ fn spawn_event_forwarder(
             if !event.event.is_streaming_noise()
                 && !matches!(&event.event, AgentEvent::ProcessingEnd)
             {
-                emitter.emit(&WorkflowRunEvent::Agent {
+                emitter.emit(&Event::Agent {
                     stage: node_id.clone(),
                     visit,
                     event: event.event.clone(),
@@ -493,7 +493,7 @@ impl CodergenBackend for AgentApiBackend {
                 let mut succeeded = false;
 
                 for target in &self.fallback_chain {
-                    emitter.emit(&WorkflowRunEvent::Failover {
+                    emitter.emit(&Event::Failover {
                         stage: node.id.clone(),
                         from_provider: from_provider.clone(),
                         from_model: from_model.clone(),

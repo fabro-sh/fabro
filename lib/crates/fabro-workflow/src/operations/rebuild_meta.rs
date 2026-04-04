@@ -343,7 +343,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::event::{WorkflowRunEvent, append_workflow_event};
+    use crate::event::{Event, append_event};
     use crate::operations::test_support::{make_checkpoint_json, temp_repo, test_sig};
     use crate::records::Checkpoint;
 
@@ -433,10 +433,10 @@ mod tests {
     ) -> DurableRunStore {
         let run_store = store.create_run(&run_id).await.unwrap();
         let run_record = sample_run_record(run_id, host_repo_path);
-        append_workflow_event(
+        append_event(
             &run_store,
             &run_id,
-            &WorkflowRunEvent::RunCreated {
+            &Event::RunCreated {
                 run_id,
                 settings: serde_json::to_value(&run_record.settings).unwrap(),
                 graph: serde_json::to_value(&run_record.graph).unwrap(),
@@ -458,10 +458,10 @@ mod tests {
 
     async fn append_start_event(run_store: &DurableRunStore, run_id: RunId) {
         let start = sample_start_record(run_id);
-        append_workflow_event(
+        append_event(
             run_store,
             &run_id,
-            &WorkflowRunEvent::WorkflowRunStarted {
+            &Event::WorkflowRunStarted {
                 name: "test".to_string(),
                 run_id,
                 base_branch: None,
@@ -477,10 +477,10 @@ mod tests {
 
     async fn append_sandbox_event(run_store: &DurableRunStore, run_id: RunId) {
         let sandbox = sample_sandbox_record();
-        append_workflow_event(
+        append_event(
             run_store,
             &run_id,
-            &WorkflowRunEvent::SandboxInitialized {
+            &Event::SandboxInitialized {
                 provider: sandbox.provider,
                 working_directory: sandbox.working_directory,
                 identifier: sandbox.identifier,
@@ -497,10 +497,10 @@ mod tests {
         run_id: RunId,
         checkpoint: Checkpoint,
     ) {
-        append_workflow_event(
+        append_event(
             run_store,
             &run_id,
-            &WorkflowRunEvent::CheckpointCompleted {
+            &Event::CheckpointCompleted {
                 node_id: checkpoint.current_node.clone(),
                 status: "success".to_string(),
                 current_node: checkpoint.current_node.clone(),
@@ -536,10 +536,10 @@ mod tests {
         node: &StageId,
         text: &str,
     ) {
-        append_workflow_event(
+        append_event(
             run_store,
             &run_id,
-            &WorkflowRunEvent::Prompt {
+            &Event::Prompt {
                 stage: node.node_id().to_string(),
                 visit: node.visit(),
                 text: text.to_string(),

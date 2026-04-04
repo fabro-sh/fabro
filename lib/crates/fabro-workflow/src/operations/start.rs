@@ -15,8 +15,8 @@ use fabro_types::{RunId, Settings};
 use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::{
-    EventBody, EventEmitter, RunNoticeLevel, StoreProgressLogger, WorkflowRunEvent,
-    append_workflow_event, event_payload_from_redacted_json, redacted_event_json, to_stored_event,
+    Event, EventBody, EventEmitter, RunNoticeLevel, StoreProgressLogger, append_event,
+    event_payload_from_redacted_json, redacted_event_json, to_run_event,
 };
 use crate::git::MetadataStore;
 use crate::handler::HandlerRegistry;
@@ -125,10 +125,10 @@ pub(super) async fn execute_persisted_run(
         .await;
         return Err(error);
     }
-    if let Err(err) = append_workflow_event(
+    if let Err(err) = append_event(
         &run_store,
         &run_id,
-        &WorkflowRunEvent::RunStarting {
+        &Event::RunStarting {
             reason: Some(StatusReason::SandboxInitializing),
         },
     )
@@ -222,10 +222,10 @@ async fn persist_terminal_engine_failure(
         None,
     )
     .await;
-    if let Err(err) = append_workflow_event(
+    if let Err(err) = append_event(
         run_store,
         &run_id,
-        &WorkflowRunEvent::WorkflowRunFailed {
+        &Event::WorkflowRunFailed {
             error: error.clone(),
             duration_ms: u64::try_from(duration.as_millis()).unwrap(),
             reason: status_reason,
@@ -618,10 +618,10 @@ impl Drop for DetachedRunBootstrapGuard {
             let run_store = self.run_store.clone();
             if let Ok(handle) = Handle::try_current() {
                 handle.spawn(async move {
-                    let _ = append_workflow_event(
+                    let _ = append_event(
                         &run_store,
                         &run_id,
-                        &WorkflowRunEvent::WorkflowRunFailed {
+                        &Event::WorkflowRunFailed {
                             error: FabroError::engine(format!("{reason:?}")),
                             duration_ms: 0,
                             reason: Some(reason),
@@ -687,9 +687,9 @@ impl Drop for DetachedRunCompletionGuard {
         };
 
         let serialized_notice = {
-            let stored = to_stored_event(
+            let stored = to_run_event(
                 &self.run_id,
-                &WorkflowRunEvent::RunNotice {
+                &Event::RunNotice {
                     level: RunNoticeLevel::Error,
                     code: code.to_string(),
                     message: message.to_string(),
@@ -712,10 +712,10 @@ impl Drop for DetachedRunCompletionGuard {
         let run_id = self.run_id;
         if let Ok(handle) = Handle::try_current() {
             handle.spawn(async move {
-                let _ = append_workflow_event(
+                let _ = append_event(
                     &run_store,
                     &run_id,
-                    &WorkflowRunEvent::WorkflowRunFailed {
+                    &Event::WorkflowRunFailed {
                         error: FabroError::engine(message.to_string()),
                         duration_ms: 0,
                         reason: Some(reason),
@@ -724,9 +724,9 @@ impl Drop for DetachedRunCompletionGuard {
                 )
                 .await;
                 if let Some((run_id, line)) = serialized_notice.or_else(|| {
-                    let stored = to_stored_event(
+                    let stored = to_run_event(
                         &run_id,
-                        &WorkflowRunEvent::RunNotice {
+                        &Event::RunNotice {
                             level: RunNoticeLevel::Error,
                             code: code.to_string(),
                             message: message.to_string(),
@@ -761,10 +761,10 @@ async fn persist_detached_failure(
 ) -> Result<(), FabroError> {
     let message = error.to_string();
 
-    if let Err(err) = append_workflow_event(
+    if let Err(err) = append_event(
         run_store,
         &run_id,
-        &WorkflowRunEvent::WorkflowRunFailed {
+        &Event::WorkflowRunFailed {
             error: error.clone(),
             duration_ms: 0,
             reason: Some(reason),
@@ -776,12 +776,12 @@ async fn persist_detached_failure(
         tracing::warn!(error = %err, "Failed to append detached failure event");
     }
 
-    let event = WorkflowRunEvent::RunNotice {
+    let event = Event::RunNotice {
         level: RunNoticeLevel::Error,
         code: format!("{phase}_failed"),
         message: message.clone(),
     };
-    let stored = to_stored_event(&run_id, &event);
+    let stored = to_run_event(&run_id, &event);
     let line = redacted_event_json(&stored).map_err(|err| FabroError::Io(err.to_string()))?;
     match event_payload_from_redacted_json(&line, &run_id) {
         Ok(payload) => {
@@ -905,7 +905,7 @@ mod tests {
                     && event.node_id.as_deref() == Some("start")
                 {
                     injected.store(true, Ordering::SeqCst);
-                    emitter_for_injection.emit(&WorkflowRunEvent::CheckpointCompleted {
+                    emitter_for_injection.emit(&Event::CheckpointCompleted {
                         node_id: "start".to_string(),
                         status: "success".to_string(),
                         current_node: "start".to_string(),
@@ -1014,10 +1014,10 @@ mod tests {
             restart_failure_signatures: HashMap::new(),
             node_visits: HashMap::new(),
         };
-        append_workflow_event(
+        append_event(
             &services.run_store,
             &services.run_id,
-            &WorkflowRunEvent::CheckpointCompleted {
+            &Event::CheckpointCompleted {
                 node_id: checkpoint.current_node.clone(),
                 status: checkpoint
                     .node_outcomes
