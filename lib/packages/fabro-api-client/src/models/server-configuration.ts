@@ -18,7 +18,7 @@
 import type { ApiSettings } from './api-configuration';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { AssetsSettings } from './assets-configuration';
+import type { ArtifactsSettings } from './artifacts-configuration';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { CheckpointSettings } from './checkpoint-configuration';
@@ -87,7 +87,7 @@ export interface ServerSettings {
     'checkpoint'?: CheckpointSettings;
     'pull_request'?: PullRequestSettings;
     'hooks'?: Array<HookDefinition>;
-    'assets'?: AssetsSettings;
+    'artifacts'?: ArtifactsSettings;
     /**
      * Default MCP server configurations.
      */

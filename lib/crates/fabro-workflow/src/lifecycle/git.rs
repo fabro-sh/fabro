@@ -13,7 +13,6 @@ use fabro_core::lifecycle::RunLifecycle;
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
 
-use crate::artifact::ArtifactStore;
 use crate::event::{Event, EventEmitter, RunNoticeLevel};
 use crate::git::MetadataStore;
 use crate::graph::WorkflowGraph;
@@ -64,7 +63,6 @@ pub(crate) struct GitCheckpointResult {
 /// Sub-lifecycle responsible for git operations (checkpoint commits, pushes, diffs).
 pub(crate) struct GitLifecycle {
     pub sandbox: Arc<dyn fabro_sandbox::Sandbox>,
-    pub artifact_store: Arc<Mutex<ArtifactStore>>,
     pub emitter: Arc<EventEmitter>,
     pub run_dir: PathBuf,
     pub run_id: RunId,
@@ -152,20 +150,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                 None,
             );
             if let Ok(cp_json) = serde_json::to_vec_pretty(&checkpoint) {
-                let mut extra_entries: Vec<(String, Vec<u8>)> = {
-                    let artifact_store = self.artifact_store.lock().unwrap();
-                    artifact_store
-                        .list()
-                        .iter()
-                        .filter_map(|info| {
-                            info.file_path.as_ref().and_then(|path| {
-                                std::fs::read(path)
-                                    .ok()
-                                    .map(|data| (format!("artifacts/{}.json", info.id), data))
-                            })
-                        })
-                        .collect()
-                };
+                let mut extra_entries: Vec<(String, Vec<u8>)> = Vec::new();
                 if let Ok(store_state) = self.run_store.state().await {
                     if let Ok(mut dump_entries) =
                         RunDump::metadata_checkpoint(&store_state).git_entries()

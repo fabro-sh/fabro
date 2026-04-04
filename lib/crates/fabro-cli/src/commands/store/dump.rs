@@ -536,12 +536,12 @@ mod tests {
         .unwrap();
         let summary_blob = run.write_blob(br#"{"done":true}"#).await.unwrap();
         let plan_blob = run.write_blob(br#"{"steps":3}"#).await.unwrap();
-        run.put_asset(&node, "src/lib.rs", b"fn main() {}")
+        run.put_artifact(&node, "src/lib.rs", b"fn main() {}")
             .await
             .unwrap();
 
-        let asset_only_node = StageId::new("artifact-only", 7);
-        run.put_asset(&asset_only_node, "logs/output.txt", b"hello")
+        let artifact_only_node = StageId::new("artifact-only", 7);
+        run.put_artifact(&artifact_only_node, "logs/output.txt", b"hello")
             .await
             .unwrap();
 
@@ -665,14 +665,14 @@ mod tests {
         )
         .await
         .unwrap();
-        run.put_asset(&StageId::new("code", 1), "../escape.txt", b"boom")
+        run.put_artifact(&StageId::new("code", 1), "../escape.txt", b"boom")
             .await
             .unwrap();
 
         let temp = tempfile::tempdir().unwrap();
         let output = temp.path().join("dump");
         let err = export_run(&run, &output).await.unwrap_err();
-        assert!(err.to_string().contains("asset filename"));
+        assert!(err.to_string().contains("artifact filename"));
         assert!(!output.exists());
     }
 

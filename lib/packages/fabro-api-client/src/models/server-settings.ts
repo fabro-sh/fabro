@@ -18,7 +18,7 @@
 import type { ApiSettings } from './api-settings';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { AssetsSettings } from './assets-settings';
+import type { ArtifactsSettings } from './artifacts-settings';
 // May contain unused imports in some cases
 // @ts-ignore
 import type { CheckpointSettings } from './checkpoint-settings';
@@ -57,7 +57,7 @@ import type { SetupSettings } from './setup-settings';
 import type { WebSettings } from './web-settings';
 
 /**
- * Structured server settings mirroring FabroSettings.
+ * Structured server settings mirroring fabro_types::Settings.
  */
 export interface ServerSettings {
     /**
@@ -87,7 +87,7 @@ export interface ServerSettings {
     'checkpoint'?: CheckpointSettings;
     'pull_request'?: PullRequestSettings;
     'hooks'?: Array<HookDefinition>;
-    'assets'?: AssetsSettings;
+    'artifacts'?: ArtifactsSettings;
     /**
      * Default MCP server configurations.
      */

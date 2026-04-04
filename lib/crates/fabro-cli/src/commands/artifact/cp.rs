@@ -2,29 +2,29 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use fabro_store::RuntimeState;
-use fabro_workflow::assets::{AssetEntry, scan_assets};
+use fabro_workflow::artifacts::{ArtifactEntry, scan_artifacts};
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 
-use crate::args::{AssetCpArgs, GlobalArgs};
+use crate::args::{ArtifactCpArgs, GlobalArgs};
 use crate::shared::{print_json_pretty, split_run_path};
 use crate::store;
 use crate::user_config::load_user_settings_with_globals;
 
-pub(super) async fn cp_command(args: &AssetCpArgs, globals: &GlobalArgs) -> Result<()> {
+pub(super) async fn cp_command(args: &ArtifactCpArgs, globals: &GlobalArgs) -> Result<()> {
     let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
     let store = store::build_store(&cli_settings.storage_dir())?;
     let (run_id, asset_path) = parse_source(&args.source);
     let run = resolve_run_combined(store.as_ref(), &base, run_id).await?;
     let runtime_state = RuntimeState::new(&run.path);
-    let entries = scan_assets(
-        &runtime_state.assets_dir(),
+    let entries = scan_artifacts(
+        &runtime_state.artifacts_dir(),
         args.node.as_deref(),
         args.retry,
     )?;
 
     if entries.is_empty() {
-        bail!("No assets found for this run");
+        bail!("No artifacts found for this run");
     }
 
     std::fs::create_dir_all(&args.dest)
@@ -36,7 +36,7 @@ pub(super) async fn cp_command(args: &AssetCpArgs, globals: &GlobalArgs) -> Resu
             .filter(|entry| entry.relative_path == path)
             .collect();
         if matching.is_empty() {
-            bail!("No asset matching path '{path}' found in this run");
+            bail!("No artifact matching path '{path}' found in this run");
         }
         if matching.len() > 1 {
             let candidates: Vec<_> = matching
@@ -44,7 +44,7 @@ pub(super) async fn cp_command(args: &AssetCpArgs, globals: &GlobalArgs) -> Resu
                 .map(|entry| format!("{}:retry_{}", entry.node_slug, entry.retry))
                 .collect();
             bail!(
-                "Path '{path}' matches multiple assets: {}. Use --node and/or --retry to disambiguate.",
+                "Path '{path}' matches multiple artifacts: {}. Use --node and/or --retry to disambiguate.",
                 candidates.join(", ")
             );
         }
@@ -101,7 +101,7 @@ pub(super) async fn cp_command(args: &AssetCpArgs, globals: &GlobalArgs) -> Resu
             }));
         }
     } else {
-        let mut by_filename: Vec<(String, &AssetEntry)> = Vec::with_capacity(entries.len());
+        let mut by_filename: Vec<(String, &ArtifactEntry)> = Vec::with_capacity(entries.len());
         for entry in &entries {
             let filename = Path::new(&entry.relative_path)
                 .file_name()
@@ -142,7 +142,7 @@ pub(super) async fn cp_command(args: &AssetCpArgs, globals: &GlobalArgs) -> Resu
         print_json_pretty(&serde_json::json!({ "copied": copied }))?;
     } else {
         println!(
-            "Copied {} asset(s) to {}",
+            "Copied {} artifact(s) to {}",
             entries.len(),
             args.dest.display()
         );
@@ -157,7 +157,7 @@ fn parse_source(source: &str) -> (&str, Option<&str>) {
     }
 }
 
-fn format_candidate(entry: &AssetEntry) -> String {
+fn format_candidate(entry: &ArtifactEntry) -> String {
     format!("{}:retry_{}", entry.node_slug, entry.retry)
 }
 
@@ -195,7 +195,7 @@ mod tests {
 
     #[test]
     fn format_candidate_includes_retry() {
-        let entry = AssetEntry {
+        let entry = ArtifactEntry {
             node_slug: "retry_assets".to_string(),
             retry: 2,
             relative_path: "assets/retry/report.txt".to_string(),

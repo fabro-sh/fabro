@@ -308,7 +308,7 @@ fn fully_populated_server_config() -> Settings {
             auto_merge: false,
             merge_strategy: MergeStrategy::Squash,
         }),
-        assets: Some(AssetsSettings {
+        artifacts: Some(ArtifactsSettings {
             include: vec!["test-results/**".into()],
         }),
         // One hook per HookType variant so the key union covers all fields.

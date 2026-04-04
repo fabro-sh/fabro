@@ -8569,8 +8569,16 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
         "value should be an artifact pointer, got: {pointer_str}"
     );
 
+    let expected_blob_id = fabro_types::RunBlobId::new(
+        &run_options.run_id,
+        &serde_json::to_vec(&serde_json::json!("x".repeat(150 * 1024)))
+            .expect("large value should serialize"),
+    );
+
     // The artifact file should exist on disk
-    let artifact_file = RuntimeState::new(dir.path()).artifact_value_path("response.big_output");
+    let artifact_file = RuntimeState::new(dir.path())
+        .artifact_values_dir()
+        .join(format!("{expected_blob_id}.json"));
     assert!(
         artifact_file.exists(),
         "artifact file should exist at {artifact_file:?}"
@@ -8588,7 +8596,7 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
         "artifact should contain the original 150KB value"
     );
 
-    // WorkflowRunCompleted event should report artifact_count > 0
+    // WorkflowRunCompleted artifact_count now tracks captured artifacts, not offloaded values.
     let evts = events.lock().unwrap();
     let completed_event = evts
         .iter()
@@ -8597,9 +8605,9 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
     let artifact_count = completed_event.properties["artifact_count"]
         .as_u64()
         .expect("run.completed should include artifact_count");
-    assert!(
-        artifact_count > 0,
-        "artifact_count should be > 0, got {artifact_count}"
+    assert_eq!(
+        artifact_count, 0,
+        "artifact_count should ignore offloaded values"
     );
 }
 
@@ -12294,10 +12302,10 @@ async fn e2e_stall_watchdog_with_explicit_timeout_override() {
 // Daytona parallel git branching test is in daytona_integration.rs
 
 // ---------------------------------------------------------------------------
-// Asset collection e2e tests
+// Artifact collection e2e tests
 // ---------------------------------------------------------------------------
 
-/// Handler that creates asset files in the sandbox working directory via exec_command.
+/// Handler that creates artifact files in the sandbox working directory via exec_command.
 struct AssetCreatorHandler {
     should_fail: bool,
 }
@@ -12322,7 +12330,7 @@ impl Handler for AssetCreatorHandler {
         _run_dir: &Path,
         services: &fabro_workflow::handler::EngineServices,
     ) -> Result<Outcome, FabroError> {
-        // Create asset files via the sandbox's exec_command
+        // Create artifact files via the sandbox's exec_command
         let script = concat!(
             "mkdir -p test-results && ",
             "echo '<testsuites><testsuite name=\"example\"/></testsuites>' > test-results/report.xml && ",
@@ -12342,7 +12350,7 @@ impl Handler for AssetCreatorHandler {
     }
 }
 
-/// Local sandbox: asset collection discovers and downloads files created by a handler.
+/// Local sandbox: artifact collection discovers and downloads files created by a handler.
 #[tokio::test]
 async fn asset_collection_local_sandbox_success() {
     let work_dir = tempfile::tempdir().unwrap();
@@ -12365,7 +12373,7 @@ async fn asset_collection_local_sandbox_success() {
     let mut graph = Graph::new("AssetCollectionTest");
     graph.attrs.insert(
         "goal".to_string(),
-        AttrValue::String("Test asset collection".to_string()),
+        AttrValue::String("Test artifact collection".to_string()),
     );
 
     let mut start = Node::new("start");
@@ -12396,14 +12404,14 @@ async fn asset_collection_local_sandbox_success() {
 
     let run_options = RunOptions {
         settings: Settings {
-            assets: Some(fabro_config::run::AssetsSettings {
+            artifacts: Some(fabro_config::run::ArtifactsSettings {
                 include: vec!["test-results/**".to_string()],
             }),
             ..Settings::default()
         },
         run_dir: run_dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: test_run_id("asset-test-local"),
+        run_id: test_run_id("artifact-test-local"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -12418,10 +12426,10 @@ async fn asset_collection_local_sandbox_success() {
         .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    // Check that asset files were collected into the stage directory
-    let assets_dir = RuntimeState::new(run_dir.path()).asset_stage_dir("create_assets", 1);
+    // Check that artifact files were collected into the stage directory
+    let artifacts_dir = RuntimeState::new(run_dir.path()).artifact_stage_dir("create_assets", 1);
 
-    let report_path = assets_dir.join("test-results/report.xml");
+    let report_path = artifacts_dir.join("test-results/report.xml");
     assert!(
         report_path.exists(),
         "report.xml should be collected at {}",
@@ -12431,7 +12439,7 @@ async fn asset_collection_local_sandbox_success() {
     assert!(report_content.contains("testsuites"));
 
     // Check manifest.json was written
-    let manifest_path = assets_dir.join("manifest.json");
+    let manifest_path = artifacts_dir.join("manifest.json");
     assert!(
         manifest_path.exists(),
         "manifest.json should exist at {}",
@@ -12441,15 +12449,15 @@ async fn asset_collection_local_sandbox_success() {
         serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
     assert!(manifest["files_copied"].as_u64().unwrap() >= 1);
 
-    // Check that AssetCaptured events were emitted
+    // Check that ArtifactCaptured events were emitted
     let captured_events = events.lock().unwrap();
     let asset_events: Vec<&RunEvent> = captured_events
         .iter()
-        .filter(|e| e.event == "asset.captured")
+        .filter(|e| e.event == "artifact.captured")
         .collect();
     assert!(
         !asset_events.is_empty(),
-        "should emit at least one AssetCaptured event"
+        "should emit at least one ArtifactCaptured event"
     );
     let asset_event = asset_events[0];
     assert!(!asset_event.properties["path"].as_str().unwrap().is_empty());
@@ -12492,7 +12500,7 @@ async fn asset_collection_local_sandbox_on_failure() {
     let mut graph = Graph::new("AssetCollectionFailTest");
     graph.attrs.insert(
         "goal".to_string(),
-        AttrValue::String("Test asset collection on failure".to_string()),
+        AttrValue::String("Test artifact collection on failure".to_string()),
     );
 
     let mut start = Node::new("start");
@@ -12523,14 +12531,14 @@ async fn asset_collection_local_sandbox_on_failure() {
 
     let run_options = RunOptions {
         settings: Settings {
-            assets: Some(fabro_config::run::AssetsSettings {
+            artifacts: Some(fabro_config::run::ArtifactsSettings {
                 include: vec!["test-results/**".to_string()],
             }),
             ..Settings::default()
         },
         run_dir: run_dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: test_run_id("asset-test-fail"),
+        run_id: test_run_id("artifact-test-fail"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -12547,9 +12555,9 @@ async fn asset_collection_local_sandbox_on_failure() {
     // Assets should still be collected regardless of intermediate node failures.
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let assets_dir = RuntimeState::new(run_dir.path()).asset_stage_dir("create_assets", 1);
+    let artifacts_dir = RuntimeState::new(run_dir.path()).artifact_stage_dir("create_assets", 1);
 
-    let report_path = assets_dir.join("test-results/report.xml");
+    let report_path = artifacts_dir.join("test-results/report.xml");
     assert!(
         report_path.exists(),
         "report.xml should still be collected after handler failure, at {}",
@@ -12557,7 +12565,7 @@ async fn asset_collection_local_sandbox_on_failure() {
     );
 }
 
-/// Docker sandbox: asset collection works across the bind-mount boundary.
+/// Docker sandbox: artifact collection works across the bind-mount boundary.
 /// Requires Docker with `fabro-agent:latest` image available locally.
 #[tokio::test]
 #[ignore]
@@ -12583,7 +12591,7 @@ async fn asset_collection_docker_sandbox() {
     let mut graph = Graph::new("DockerAssetTest");
     graph.attrs.insert(
         "goal".to_string(),
-        AttrValue::String("Test asset collection in Docker".to_string()),
+        AttrValue::String("Test artifact collection in Docker".to_string()),
     );
 
     let mut start = Node::new("start");
@@ -12614,14 +12622,14 @@ async fn asset_collection_docker_sandbox() {
 
     let run_options = RunOptions {
         settings: Settings {
-            assets: Some(fabro_config::run::AssetsSettings {
+            artifacts: Some(fabro_config::run::ArtifactsSettings {
                 include: vec!["test-results/**".to_string()],
             }),
             ..Settings::default()
         },
         run_dir: run_dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: test_run_id("asset-test-docker"),
+        run_id: test_run_id("artifact-test-docker"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -12636,9 +12644,9 @@ async fn asset_collection_docker_sandbox() {
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let assets_dir = RuntimeState::new(run_dir.path()).asset_stage_dir("create_assets", 1);
+    let artifacts_dir = RuntimeState::new(run_dir.path()).artifact_stage_dir("create_assets", 1);
 
-    let report_path = assets_dir.join("test-results/report.xml");
+    let report_path = artifacts_dir.join("test-results/report.xml");
     assert!(
         report_path.exists(),
         "report.xml should be collected from Docker container at {}",
@@ -12647,7 +12655,7 @@ async fn asset_collection_docker_sandbox() {
     let content = std::fs::read_to_string(&report_path).unwrap();
     assert!(content.contains("testsuites"));
 
-    let manifest_path = assets_dir.join("manifest.json");
+    let manifest_path = artifacts_dir.join("manifest.json");
     assert!(manifest_path.exists(), "manifest.json should exist");
 
     sandbox.cleanup().await.unwrap();

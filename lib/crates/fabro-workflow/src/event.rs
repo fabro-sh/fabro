@@ -365,7 +365,7 @@ pub enum Event {
         node: String,
         idle_seconds: u64,
     },
-    AssetCaptured {
+    ArtifactCaptured {
         node_id: String,
         attempt: u32,
         node_slug: String,
@@ -864,7 +864,7 @@ impl Event {
             Self::StallWatchdogTimeout { node, idle_seconds } => {
                 warn!(node, idle_seconds, "Stall watchdog timeout");
             }
-            Self::AssetCaptured {
+            Self::ArtifactCaptured {
                 node_id,
                 node_slug,
                 attempt,
@@ -872,7 +872,10 @@ impl Event {
                 bytes,
                 ..
             } => {
-                debug!(node_id, node_slug, attempt, path, bytes, "Asset captured");
+                debug!(
+                    node_id,
+                    node_slug, attempt, path, bytes, "Artifact captured"
+                );
             }
             Self::SshAccessReady { ssh_command } => {
                 info!(ssh_command, "SSH access ready");
@@ -1146,7 +1149,7 @@ pub fn event_name(event: &Event) -> &'static str {
         Event::SetupCompleted { .. } => "setup.completed",
         Event::SetupFailed { .. } => "setup.failed",
         Event::StallWatchdogTimeout { .. } => "watchdog.timeout",
-        Event::AssetCaptured { .. } => "asset.captured",
+        Event::ArtifactCaptured { .. } => "artifact.captured",
         Event::SshAccessReady { .. } => "ssh.ready",
         Event::Failover { .. } => "agent.failover",
         Event::CliEnsureStarted { .. } => "cli.ensure.started",
@@ -1264,7 +1267,7 @@ fn extract_run_event_fields(event: &Event) -> StoredEventFields {
         | Event::CheckpointFailed { .. }
         | Event::SubgraphStarted { .. }
         | Event::SubgraphCompleted { .. }
-        | Event::AssetCaptured { .. }
+        | Event::ArtifactCaptured { .. }
         | Event::PromptCompleted { .. }
         | Event::ParallelStarted { .. }
         | Event::ParallelCompleted { .. }

@@ -30,7 +30,7 @@ export interface UserTurn {
 }
 
 export const UserTurnKindEnum = {
-    USER: 'user',
+    USER: 'user'
 } as const;
 
 export type UserTurnKindEnum = typeof UserTurnKindEnum[keyof typeof UserTurnKindEnum];

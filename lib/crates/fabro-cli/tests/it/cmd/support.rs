@@ -203,15 +203,15 @@ impl WorkflowGate {
     }
 }
 
-pub(crate) fn setup_asset_run(context: &TestContext) -> WorkspaceRunSetup {
-    let workspace_dir = context.temp_dir.join("asset-run");
+pub(crate) fn setup_artifact_run(context: &TestContext) -> WorkspaceRunSetup {
+    let workspace_dir = context.temp_dir.join("artifact-run");
     std::fs::create_dir_all(&workspace_dir)
         .unwrap_or_else(|err| panic!("failed to create {}: {err}", workspace_dir.display()));
 
     write_text_file(
-        &workspace_dir.join("asset_run.fabro"),
-        r#"digraph AssetRun {
-  graph [goal="Exercise asset commands", default_max_retries=0]
+        &workspace_dir.join("artifact_run.fabro"),
+        r#"digraph ArtifactRun {
+  graph [goal="Exercise artifact commands", default_max_retries=0]
   start [shape=Mdiamond]
   exit [shape=Msquare]
   create_assets [shape=parallelogram, script="mkdir -p assets/shared assets/node_a && printf one > assets/shared/report.txt && printf alpha > assets/node_a/summary.txt", max_retries=0]
@@ -224,8 +224,8 @@ pub(crate) fn setup_asset_run(context: &TestContext) -> WorkspaceRunSetup {
     write_text_file(
         &workspace_dir.join("run.toml"),
         r#"version = 1
-graph = "asset_run.fabro"
-goal = "Exercise asset commands"
+graph = "artifact_run.fabro"
+goal = "Exercise artifact commands"
 
 [sandbox]
 provider = "local"
@@ -234,7 +234,7 @@ preserve = true
 [sandbox.local]
 worktree_mode = "never"
 
-[assets]
+[artifacts]
 include = ["assets/**"]
 "#,
     );
@@ -242,9 +242,9 @@ include = ["assets/**"]
     let run = run_local_workflow(context, &workspace_dir, "run.toml");
     assert!(
         run.run_dir
-            .join("cache/artifacts/assets/retry_assets/retry_2/manifest.json")
+            .join("cache/artifacts/files/retry_assets/retry_2/manifest.json")
             .exists(),
-        "setup_asset_run should materialize retry_2 assets"
+        "setup_artifact_run should materialize retry_2 assets"
     );
 
     WorkspaceRunSetup { run, workspace_dir }

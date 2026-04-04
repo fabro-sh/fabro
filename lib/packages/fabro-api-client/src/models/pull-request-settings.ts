@@ -39,7 +39,7 @@ export interface PullRequestSettings {
 export const PullRequestSettingsMergeStrategyEnum = {
     SQUASH: 'squash',
     MERGE: 'merge',
-    REBASE: 'rebase',
+    REBASE: 'rebase'
 } as const;
 
 export type PullRequestSettingsMergeStrategyEnum = typeof PullRequestSettingsMergeStrategyEnum[keyof typeof PullRequestSettingsMergeStrategyEnum];

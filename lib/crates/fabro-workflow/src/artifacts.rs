@@ -2,11 +2,11 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use crate::asset_snapshot::AssetCollectionSummary;
+use crate::artifact_snapshot::ArtifactCollectionSummary;
 
-/// An individual asset file discovered from a run's asset manifests.
+/// An individual artifact file discovered from a run's artifact manifests.
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct AssetEntry {
+pub struct ArtifactEntry {
     pub node_slug: String,
     pub retry: u32,
     pub relative_path: String,
@@ -19,13 +19,13 @@ fn serialize_path<S: serde::Serializer>(path: &Path, serializer: S) -> Result<S:
     serializer.serialize_str(&path.display().to_string())
 }
 
-/// Walk `{assets_dir}/*/retry_*/manifest.json`, stat each file, and return entries.
-pub fn scan_assets(
-    assets_dir: &Path,
+/// Walk `{artifacts_dir}/*/retry_*/manifest.json`, stat each file, and return entries.
+pub fn scan_artifacts(
+    artifacts_dir: &Path,
     node_filter: Option<&str>,
     retry_filter: Option<u32>,
-) -> Result<Vec<AssetEntry>> {
-    let Ok(nodes) = std::fs::read_dir(assets_dir) else {
+) -> Result<Vec<ArtifactEntry>> {
+    let Ok(nodes) = std::fs::read_dir(artifacts_dir) else {
         return Ok(Vec::new());
     };
 
@@ -63,13 +63,13 @@ pub fn scan_assets(
             let Ok(contents) = std::fs::read_to_string(&manifest) else {
                 continue;
             };
-            let Ok(summary) = serde_json::from_str::<AssetCollectionSummary>(&contents) else {
+            let Ok(summary) = serde_json::from_str::<ArtifactCollectionSummary>(&contents) else {
                 continue;
             };
 
             for asset in &summary.captured_assets {
                 let absolute_path = retry_dir.join(&asset.path);
-                entries.push(AssetEntry {
+                entries.push(ArtifactEntry {
                     node_slug: node_slug.clone(),
                     retry,
                     relative_path: asset.path.clone(),
@@ -93,24 +93,24 @@ pub fn scan_assets(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::asset_snapshot::{AssetCollectionSummary, CapturedAssetInfo};
+    use crate::artifact_snapshot::{ArtifactCollectionSummary, CapturedArtifactInfo};
 
     #[test]
-    fn scan_assets_filters_by_node_and_retry() {
+    fn scan_artifacts_filters_by_node_and_retry() {
         let tmp = tempfile::tempdir().unwrap();
-        let assets_dir = tmp.path().join("cache/artifacts/assets");
+        let artifacts_dir = tmp.path().join("cache/artifacts/files");
 
-        let retry_1 = assets_dir.join("work/retry_1");
+        let retry_1 = artifacts_dir.join("work/retry_1");
         std::fs::create_dir_all(&retry_1).unwrap();
         std::fs::write(
             retry_1.join("manifest.json"),
-            serde_json::to_string(&AssetCollectionSummary {
+            serde_json::to_string(&ArtifactCollectionSummary {
                 files_copied: 1,
                 total_bytes: 5,
                 files_skipped: 0,
                 download_errors: 0,
                 hash_errors: 0,
-                captured_assets: vec![CapturedAssetInfo {
+                captured_assets: vec![CapturedArtifactInfo {
                     path: "report.txt".to_string(),
                     mime: "text/plain".to_string(),
                     content_md5: "a".repeat(32),
@@ -122,17 +122,17 @@ mod tests {
         )
         .unwrap();
 
-        let retry_2 = assets_dir.join("work/retry_2");
+        let retry_2 = artifacts_dir.join("work/retry_2");
         std::fs::create_dir_all(&retry_2).unwrap();
         std::fs::write(
             retry_2.join("manifest.json"),
-            serde_json::to_string(&AssetCollectionSummary {
+            serde_json::to_string(&ArtifactCollectionSummary {
                 files_copied: 1,
                 total_bytes: 6,
                 files_skipped: 0,
                 download_errors: 0,
                 hash_errors: 0,
-                captured_assets: vec![CapturedAssetInfo {
+                captured_assets: vec![CapturedArtifactInfo {
                     path: "report.txt".to_string(),
                     mime: "text/plain".to_string(),
                     content_md5: "c".repeat(32),
@@ -144,7 +144,7 @@ mod tests {
         )
         .unwrap();
 
-        let entries = scan_assets(&assets_dir, Some("work"), Some(2)).unwrap();
+        let entries = scan_artifacts(&artifacts_dir, Some("work"), Some(2)).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].retry, 2);
         assert_eq!(entries[0].relative_path, "report.txt");

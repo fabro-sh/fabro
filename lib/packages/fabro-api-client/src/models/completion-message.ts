@@ -44,7 +44,7 @@ export const CompletionMessageRoleEnum = {
     USER: 'user',
     ASSISTANT: 'assistant',
     TOOL: 'tool',
-    DEVELOPER: 'developer',
+    DEVELOPER: 'developer'
 } as const;
 
 export type CompletionMessageRoleEnum = typeof CompletionMessageRoleEnum[keyof typeof CompletionMessageRoleEnum];

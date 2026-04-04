@@ -4268,8 +4268,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/HookDefinition"
-        assets:
-          $ref: "#/components/schemas/AssetsSettings"
+        artifacts:
+          $ref: "#/components/schemas/ArtifactsSettings"
         mcp_servers:
           type: object
           additionalProperties:
@@ -4320,15 +4320,15 @@ components:
           type: integer
           description: Tool call timeout in seconds.
 
-    AssetsSettings:
-      description: Asset collection configuration.
+    ArtifactsSettings:
+      description: Artifact collection configuration.
       type: object
       properties:
         include:
           type: array
           items:
             type: string
-          description: Glob patterns for files to collect as run assets.
+          description: Glob patterns for files to collect as run artifacts.
 
     LogSettings:
       description: Logging configuration.

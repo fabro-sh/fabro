@@ -34,7 +34,7 @@ export interface ApiSettings {
 
 export const ApiSettingsAuthenticationStrategiesEnum = {
     JWT: 'jwt',
-    MTLS: 'mtls',
+    MTLS: 'mtls'
 } as const;
 
 export type ApiSettingsAuthenticationStrategiesEnum = typeof ApiSettingsAuthenticationStrategiesEnum[keyof typeof ApiSettingsAuthenticationStrategiesEnum];

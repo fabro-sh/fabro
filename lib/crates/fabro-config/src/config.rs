@@ -8,7 +8,7 @@ use crate::hook::{HookDefinition, HookSettings};
 use crate::mcp::McpServerEntry;
 use crate::project::{self, ProjectConfig};
 use crate::run::{
-    AssetsConfig, CheckpointConfig, GitHubConfig, LlmConfig, PullRequestConfig, SetupConfig,
+    ArtifactsConfig, CheckpointConfig, GitHubConfig, LlmConfig, PullRequestConfig, SetupConfig,
 };
 use crate::sandbox::SandboxConfig;
 use crate::server::{self, ApiConfig, FeaturesConfig, GitConfig, LogConfig, WebConfig};
@@ -65,7 +65,7 @@ pub struct ConfigLayer {
     pub pull_request: Option<PullRequestConfig>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub assets: Option<AssetsConfig>,
+    pub artifacts: Option<ArtifactsConfig>,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hooks: Vec<HookDefinition>,
@@ -157,7 +157,7 @@ impl Combine for ConfigLayer {
             vars: self.vars.combine(other.vars),
             checkpoint: self.checkpoint.combine(other.checkpoint),
             pull_request: self.pull_request.combine(other.pull_request),
-            assets: self.assets.combine(other.assets),
+            artifacts: self.artifacts.combine(other.artifacts),
             hooks,
             mcp_servers: self.mcp_servers.combine(other.mcp_servers),
             github: self.github.combine(other.github),

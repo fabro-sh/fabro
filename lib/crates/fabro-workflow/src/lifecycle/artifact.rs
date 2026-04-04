@@ -1,15 +1,17 @@
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
+use fabro_store::SlateRunStore;
 
 use fabro_core::graph::NodeSpec;
 use fabro_core::lifecycle::{AttemptContext, AttemptResultContext, RunLifecycle};
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
 
-use crate::artifact::{ArtifactStore, offload_large_values, sync_artifacts_to_env};
-use crate::asset_snapshot::collect_assets;
+use crate::artifact::{offload_large_values, sync_artifacts_to_env};
+use crate::artifact_snapshot::collect_artifacts;
 use crate::event::{Event, EventEmitter, RunNoticeLevel};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
@@ -24,33 +26,36 @@ type WfNodeDecision = NodeDecision<Option<StageUsage>>;
 /// Sub-lifecycle responsible for artifact collection, offloading, and syncing.
 pub(crate) struct ArtifactLifecycle {
     pub sandbox: Arc<dyn fabro_sandbox::Sandbox>,
-    pub artifact_store: Arc<Mutex<ArtifactStore>>,
-    pub artifact_values_dir: Option<PathBuf>,
+    pub run_store: SlateRunStore,
+    pub blob_cache_dir: PathBuf,
     pub emitter: Arc<EventEmitter>,
-    pub assets_dir: PathBuf,
-    pub asset_globs: Vec<String>,
+    pub artifacts_dir: PathBuf,
+    pub artifact_globs: Vec<String>,
+    pub captured_artifact_count: Arc<AtomicUsize>,
     /// Per-attempt state: epoch seconds when the attempt started.
-    attempt_start_epoch: Mutex<Option<f64>>,
+    attempt_start_epoch: std::sync::Mutex<Option<f64>>,
 }
 
 impl ArtifactLifecycle {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         sandbox: Arc<dyn fabro_sandbox::Sandbox>,
-        artifact_store: Arc<Mutex<ArtifactStore>>,
-        artifact_values_dir: Option<PathBuf>,
+        run_store: SlateRunStore,
+        blob_cache_dir: PathBuf,
         emitter: Arc<EventEmitter>,
-        assets_dir: PathBuf,
-        asset_globs: Vec<String>,
+        artifacts_dir: PathBuf,
+        artifact_globs: Vec<String>,
+        captured_artifact_count: Arc<AtomicUsize>,
     ) -> Self {
         Self {
             sandbox,
-            artifact_store,
-            artifact_values_dir,
+            run_store,
+            blob_cache_dir,
             emitter,
-            assets_dir,
-            asset_globs,
-            attempt_start_epoch: Mutex::new(None),
+            artifacts_dir,
+            artifact_globs,
+            captured_artifact_count,
+            attempt_start_epoch: std::sync::Mutex::new(None),
         }
     }
 }
@@ -58,9 +63,7 @@ impl ArtifactLifecycle {
 #[async_trait]
 impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
     async fn on_run_start(&self, _graph: &WorkflowGraph, _state: &WfRunState) -> CoreResult<()> {
-        // Swap in a fresh artifact store on restart (don't call clear() — preserves files on disk)
-        let mut store = self.artifact_store.lock().unwrap();
-        *store = ArtifactStore::new(self.artifact_values_dir.clone());
+        self.captured_artifact_count.store(0, Ordering::Relaxed);
         *self.attempt_start_epoch.lock().unwrap() = None;
         Ok(())
     }
@@ -84,7 +87,7 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         ctx: &AttemptResultContext<'_, WorkflowGraph>,
         state: &WfRunState,
     ) -> CoreResult<()> {
-        if self.asset_globs.is_empty() {
+        if self.artifact_globs.is_empty() {
             return Ok(());
         }
         let epoch = self.attempt_start_epoch.lock().unwrap().unwrap_or(0.0);
@@ -95,16 +98,24 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         } else {
             format!("{node_id}-visit_{visit}")
         };
-        let asset_capture_dir = self
-            .assets_dir
+        let artifact_capture_dir = self
+            .artifacts_dir
             .join(&node_slug)
             .join(format!("retry_{}", ctx.attempt));
-        let _ = std::fs::create_dir_all(&asset_capture_dir);
+        let _ = std::fs::create_dir_all(&artifact_capture_dir);
 
-        match collect_assets(&*self.sandbox, &asset_capture_dir, &self.asset_globs, epoch).await {
+        match collect_artifacts(
+            &*self.sandbox,
+            &artifact_capture_dir,
+            &self.artifact_globs,
+            epoch,
+        )
+        .await
+        {
             Ok(summary) if summary.files_copied > 0 => {
                 for asset in &summary.captured_assets {
-                    self.emitter.emit(&Event::AssetCaptured {
+                    self.captured_artifact_count.fetch_add(1, Ordering::Relaxed);
+                    self.emitter.emit(&Event::ArtifactCaptured {
                         node_id: node_id.to_string(),
                         attempt: ctx.attempt,
                         node_slug: node_slug.clone(),
@@ -120,8 +131,8 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
             Err(e) => {
                 self.emitter.emit(&Event::RunNotice {
                     level: RunNoticeLevel::Warn,
-                    code: "asset_collection_failed".to_string(),
-                    message: format!("[node: {node_id}] asset collection failed: {e}"),
+                    code: "artifact_collection_failed".to_string(),
+                    message: format!("[node: {node_id}] artifact collection failed: {e}"),
                 });
             }
         }
@@ -138,15 +149,18 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         let node_id = node.id();
 
         // Offload large context_updates values to artifact store
+        if let Err(e) = offload_large_values(
+            &mut result.outcome.context_updates,
+            &self.run_store,
+            &self.blob_cache_dir,
+        )
+        .await
         {
-            let store = self.artifact_store.lock().unwrap();
-            if let Err(e) = offload_large_values(&mut result.outcome.context_updates, &store) {
-                self.emitter.emit(&Event::RunNotice {
-                    level: RunNoticeLevel::Warn,
-                    code: "artifact_offload_failed".to_string(),
-                    message: format!("[node: {node_id}] artifact offload failed: {e}"),
-                });
-            }
+            self.emitter.emit(&Event::RunNotice {
+                level: RunNoticeLevel::Warn,
+                code: "artifact_offload_failed".to_string(),
+                message: format!("[node: {node_id}] artifact offload failed: {e}"),
+            });
         }
 
         // Sync file-backed artifacts to sandbox environment

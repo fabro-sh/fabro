@@ -7,7 +7,7 @@ use fabro_store::RuntimeState;
 use fabro_types::PullRequestRecord;
 use fabro_util::terminal::Styles;
 use fabro_util::text::strip_goal_decoration;
-use fabro_workflow::asset_snapshot::collect_asset_paths;
+use fabro_workflow::artifact_snapshot::collect_artifact_paths;
 use fabro_workflow::outcome::{StageStatus, format_cost};
 use fabro_workflow::pipeline::{Persisted, Validated};
 use fabro_workflow::records::Conclusion;
@@ -229,12 +229,12 @@ pub(crate) async fn print_final_output(
 
 pub(crate) fn print_assets(run_dir: &Path, styles: &Styles) {
     let runtime_state = RuntimeState::new(run_dir);
-    let paths = collect_asset_paths(&runtime_state.assets_dir());
+    let paths = collect_artifact_paths(&runtime_state.artifacts_dir());
     if paths.is_empty() {
         return;
     }
     let home = dirs::home_dir();
-    eprintln!("\n{}", styles.bold.apply_to("=== Assets ==="));
+    eprintln!("\n{}", styles.bold.apply_to("=== Artifacts ==="));
     for path in &paths {
         let display = match &home {
             Some(home_dir) => {

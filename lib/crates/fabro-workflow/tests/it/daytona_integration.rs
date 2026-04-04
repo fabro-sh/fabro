@@ -1243,10 +1243,10 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
 }
 
 // ---------------------------------------------------------------------------
-// Asset collection e2e — Daytona sandbox
+// Artifact collection e2e — Daytona sandbox
 // ---------------------------------------------------------------------------
 
-/// Handler that creates asset files via exec_command on the sandbox.
+/// Handler that creates artifact files via exec_command on the sandbox.
 struct AssetCreatorHandler;
 
 #[async_trait::async_trait]
@@ -1273,7 +1273,7 @@ impl Handler for AssetCreatorHandler {
     }
 }
 
-/// Daytona sandbox: asset collection discovers files on the remote sandbox and
+/// Daytona sandbox: artifact collection discovers files on the remote sandbox and
 /// downloads them to the local logs directory.
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_asset_collection() {
@@ -1292,7 +1292,7 @@ async fn daytona_asset_collection() {
     let mut graph = Graph::new("DaytonaAssetTest");
     graph.attrs.insert(
         "goal".to_string(),
-        AttrValue::String("Test asset collection on Daytona".to_string()),
+        AttrValue::String("Test artifact collection on Daytona".to_string()),
     );
 
     let mut start = Node::new("start");
@@ -1323,14 +1323,14 @@ async fn daytona_asset_collection() {
 
     let run_options = RunOptions {
         settings: Settings {
-            assets: Some(fabro_config::run::AssetsSettings {
+            artifacts: Some(fabro_config::run::ArtifactsSettings {
                 include: vec!["test-results/**".to_string()],
             }),
             ..Settings::default()
         },
         run_dir: dir.path().to_path_buf(),
         cancel_token: None,
-        run_id: test_run_id("asset-test-daytona"),
+        run_id: test_run_id("artifact-test-daytona"),
         labels: std::collections::HashMap::new(),
         workflow_slug: None,
         github_app: None,
@@ -1345,9 +1345,9 @@ async fn daytona_asset_collection() {
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let assets_dir = RuntimeState::new(dir.path()).asset_stage_dir("create_assets", 1);
+    let artifacts_dir = RuntimeState::new(dir.path()).artifact_stage_dir("create_assets", 1);
 
-    let report_path = assets_dir.join("test-results/report.xml");
+    let report_path = artifacts_dir.join("test-results/report.xml");
     assert!(
         report_path.exists(),
         "report.xml should be collected from Daytona sandbox at {}",
@@ -1356,7 +1356,7 @@ async fn daytona_asset_collection() {
     let content = std::fs::read_to_string(&report_path).unwrap();
     assert!(content.contains("testsuites"));
 
-    let manifest_path = assets_dir.join("manifest.json");
+    let manifest_path = artifacts_dir.join("manifest.json");
     assert!(manifest_path.exists(), "manifest.json should exist");
 
     env.cleanup().await.unwrap();

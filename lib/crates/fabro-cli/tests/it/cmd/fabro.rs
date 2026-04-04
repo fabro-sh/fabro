@@ -24,7 +24,7 @@ fn help() {
       preflight   Validate run configuration without executing
       validate    Validate a workflow
       graph       Render a workflow graph as SVG or PNG
-      asset       Inspect and copy run assets (screenshots, reports, traces)
+      artifact    Inspect and copy run artifacts (screenshots, reports, traces)
       store       Export store-backed run state for debugging
       rm          Remove one or more workflow runs
       inspect     Show detailed information about a workflow run

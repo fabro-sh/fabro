@@ -13,9 +13,9 @@ pub struct DiscoveredFile {
     pub mtime_epoch_secs: f64,
 }
 
-/// Metadata for a single captured asset file.
+/// Metadata for a single captured artifact file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CapturedAssetInfo {
+pub struct CapturedArtifactInfo {
     pub path: String,
     pub mime: String,
     pub content_md5: String,
@@ -23,15 +23,15 @@ pub struct CapturedAssetInfo {
     pub bytes: u64,
 }
 
-/// Summary of an asset collection run.
+/// Summary of an artifact collection run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AssetCollectionSummary {
+pub struct ArtifactCollectionSummary {
     pub files_copied: usize,
     pub total_bytes: u64,
     pub files_skipped: usize,
     pub download_errors: usize,
     pub hash_errors: usize,
-    pub captured_assets: Vec<CapturedAssetInfo>,
+    pub captured_assets: Vec<CapturedArtifactInfo>,
 }
 
 /// Directories to exclude from the find search and checkpoint commits.
@@ -61,7 +61,7 @@ const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
 /// Maximum total size for all collected files (50 MB).
 const MAX_TOTAL_SIZE: u64 = 50 * 1024 * 1024;
 
-/// Build a platform-aware find command to discover asset files matching the given globs.
+/// Build a platform-aware find command to discover artifact files matching the given globs.
 ///
 /// Globs without `/` are treated as filename patterns (`-name`).
 /// Globs with `/` are treated as directory patterns: the trailing `/**` (if any) is stripped
@@ -254,10 +254,10 @@ fn normalize_paths(discovered: Vec<DiscoveredFile>, root: &str) -> Vec<Discovere
         .collect()
 }
 
-fn compute_asset_info(
+fn compute_artifact_info(
     relative_path: &str,
     local_path: &Path,
-) -> std::result::Result<CapturedAssetInfo, String> {
+) -> std::result::Result<CapturedArtifactInfo, String> {
     let mime = mime_guess::from_path(relative_path)
         .first_or_octet_stream()
         .to_string();
@@ -266,7 +266,7 @@ fn compute_asset_info(
     let bytes = u64::try_from(data.len()).unwrap_or(u64::MAX);
     let content_md5 = format!("{:x}", md5::compute(&data));
     let content_sha256 = hex::encode(Sha256::digest(&data));
-    Ok(CapturedAssetInfo {
+    Ok(CapturedArtifactInfo {
         path: relative_path.to_string(),
         mime,
         content_md5,
@@ -275,13 +275,13 @@ fn compute_asset_info(
     })
 }
 
-fn write_asset_manifest(
-    asset_capture_dir: &Path,
-    summary: &AssetCollectionSummary,
+fn write_artifact_manifest(
+    artifact_capture_dir: &Path,
+    summary: &ArtifactCollectionSummary,
 ) -> Result<(), String> {
     let json = serde_json::to_string_pretty(summary)
         .map_err(|e| format!("failed to serialize manifest: {e}"))?;
-    let manifest_path = asset_capture_dir.join("manifest.json");
+    let manifest_path = artifact_capture_dir.join("manifest.json");
     if let Some(parent) = manifest_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
             format!(
@@ -295,26 +295,26 @@ fn write_asset_manifest(
     Ok(())
 }
 
-fn cleanup_asset_capture_dir(asset_capture_dir: &Path) -> Result<(), String> {
-    if !asset_capture_dir.exists() {
+fn cleanup_artifact_capture_dir(artifact_capture_dir: &Path) -> Result<(), String> {
+    if !artifact_capture_dir.exists() {
         return Ok(());
     }
-    std::fs::remove_dir_all(asset_capture_dir)
-        .map_err(|e| format!("failed to clean up {}: {e}", asset_capture_dir.display()))
+    std::fs::remove_dir_all(artifact_capture_dir)
+        .map_err(|e| format!("failed to clean up {}: {e}", artifact_capture_dir.display()))
 }
 
-/// Collect asset files matching the configured globs that were created during this stage.
-pub async fn collect_assets(
+/// Collect artifact files matching the configured globs that were created during this stage.
+pub async fn collect_artifacts(
     sandbox: &dyn Sandbox,
-    asset_capture_dir: &Path,
+    artifact_capture_dir: &Path,
     globs: &[String],
     command_start_epoch: f64,
-) -> Result<AssetCollectionSummary, String> {
+) -> Result<ArtifactCollectionSummary, String> {
     let root = sandbox.working_directory();
     let platform = sandbox.platform();
     let cmd = build_find_command(root, platform, globs);
 
-    debug!(cmd = cmd.as_str(), "Collecting assets");
+    debug!(cmd = cmd.as_str(), "Collecting artifacts");
     let result = sandbox
         .exec_command(&cmd, FIND_TIMEOUT_MS, None, None, None)
         .await?;
@@ -330,15 +330,15 @@ pub async fn collect_assets(
     let mut total_bytes: u64 = 0;
     let mut download_errors: usize = 0;
     let mut hash_errors: usize = 0;
-    let mut captured_assets: Vec<CapturedAssetInfo> = Vec::new();
+    let mut captured_assets: Vec<CapturedArtifactInfo> = Vec::new();
 
     for file in &to_collect {
-        let dest = asset_capture_dir.join(&file.relative_path);
+        let dest = artifact_capture_dir.join(&file.relative_path);
         match sandbox
             .download_file_to_local(&file.relative_path, &dest)
             .await
         {
-            Ok(()) => match compute_asset_info(&file.relative_path, &dest) {
+            Ok(()) => match compute_artifact_info(&file.relative_path, &dest) {
                 Ok(info) => {
                     files_copied += 1;
                     total_bytes += info.bytes;
@@ -366,7 +366,7 @@ pub async fn collect_assets(
     }
 
     // Write manifest.json
-    let summary = AssetCollectionSummary {
+    let summary = ArtifactCollectionSummary {
         files_copied,
         total_bytes,
         files_skipped,
@@ -376,8 +376,8 @@ pub async fn collect_assets(
     };
 
     if files_copied > 0 {
-        if let Err(e) = write_asset_manifest(asset_capture_dir, &summary) {
-            let cleanup_suffix = match cleanup_asset_capture_dir(asset_capture_dir) {
+        if let Err(e) = write_artifact_manifest(artifact_capture_dir, &summary) {
+            let cleanup_suffix = match cleanup_artifact_capture_dir(artifact_capture_dir) {
                 Ok(()) => String::new(),
                 Err(cleanup_err) => format!("; cleanup failed: {cleanup_err}"),
             };
@@ -388,11 +388,11 @@ pub async fn collect_assets(
     Ok(summary)
 }
 
-/// Collect all asset paths from manifest files under `{assets_dir}/*/retry_*/manifest.json`.
+/// Collect all artifact paths from manifest files under `{artifacts_dir}/*/retry_*/manifest.json`.
 ///
-/// Returns the full on-disk paths to the downloaded asset files.
-pub fn collect_asset_paths(assets_dir: &Path) -> Vec<String> {
-    let Ok(nodes) = std::fs::read_dir(assets_dir) else {
+/// Returns the full on-disk paths to the downloaded artifact files.
+pub fn collect_artifact_paths(artifacts_dir: &Path) -> Vec<String> {
+    let Ok(nodes) = std::fs::read_dir(artifacts_dir) else {
         return Vec::new();
     };
 
@@ -409,7 +409,7 @@ pub fn collect_asset_paths(assets_dir: &Path) -> Vec<String> {
             let Ok(contents) = std::fs::read_to_string(&manifest) else {
                 continue;
             };
-            let Ok(summary) = serde_json::from_str::<AssetCollectionSummary>(&contents) else {
+            let Ok(summary) = serde_json::from_str::<ArtifactCollectionSummary>(&contents) else {
                 continue;
             };
             let retry_dir = retry_entry.path();
@@ -429,7 +429,7 @@ mod tests {
     use std::collections::HashMap;
     use std::fs;
 
-    /// Minimal mock sandbox for asset_snapshot tests.
+    /// Minimal mock sandbox for artifact_snapshot tests.
     struct AssetMockSandbox {
         files: HashMap<String, String>,
         exec_result: ExecResult,
@@ -718,7 +718,7 @@ mod tests {
         let mock = AssetMockSandbox::new(files, "1024\t2000.0\ttest-results/r.xml\n", "linux");
 
         let globs = vec!["test-results/**".to_string()];
-        let summary = collect_assets(&mock, stage_dir.path(), &globs, 1000.0)
+        let summary = collect_artifacts(&mock, stage_dir.path(), &globs, 1000.0)
             .await
             .unwrap();
 
@@ -759,7 +759,7 @@ mod tests {
         let mock = AssetMockSandbox::new(files, "1024\t500.0\ttest-results/r.xml\n", "linux");
 
         let globs = vec!["test-results/**".to_string()];
-        let summary = collect_assets(&mock, stage_dir.path(), &globs, 1000.0)
+        let summary = collect_artifacts(&mock, stage_dir.path(), &globs, 1000.0)
             .await
             .unwrap();
 
@@ -778,7 +778,7 @@ mod tests {
         );
 
         let globs = vec!["test-results/**".to_string()];
-        let summary = collect_assets(&mock, stage_dir.path(), &globs, 1000.0)
+        let summary = collect_artifacts(&mock, stage_dir.path(), &globs, 1000.0)
             .await
             .unwrap();
 
@@ -789,7 +789,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn write_asset_manifest_failure_cleans_up_asset_capture_dir() {
+    fn write_artifact_manifest_failure_cleans_up_artifact_capture_dir() {
         use std::fs::Permissions;
         use std::os::unix::fs::PermissionsExt;
 
@@ -799,13 +799,13 @@ mod tests {
         fs::write(stage_dir.join("test-results/report.xml"), "<test/>").unwrap();
         fs::set_permissions(&stage_dir, Permissions::from_mode(0o555)).unwrap();
 
-        let summary = AssetCollectionSummary {
+        let summary = ArtifactCollectionSummary {
             files_copied: 1,
             total_bytes: 7,
             files_skipped: 0,
             download_errors: 0,
             hash_errors: 0,
-            captured_assets: vec![CapturedAssetInfo {
+            captured_assets: vec![CapturedArtifactInfo {
                 path: "test-results/report.xml".to_string(),
                 mime: "text/xml".to_string(),
                 content_md5: "f1430934c390c118ed2f148e1d44d36c".to_string(),
@@ -815,40 +815,40 @@ mod tests {
             }],
         };
 
-        let err = write_asset_manifest(&stage_dir, &summary).unwrap_err();
+        let err = write_artifact_manifest(&stage_dir, &summary).unwrap_err();
         assert!(err.contains("failed to write"));
 
         fs::set_permissions(&stage_dir, Permissions::from_mode(0o755)).unwrap();
-        cleanup_asset_capture_dir(&stage_dir).unwrap();
+        cleanup_artifact_capture_dir(&stage_dir).unwrap();
         assert!(!stage_dir.exists());
     }
 
     #[test]
-    fn collect_asset_paths_from_manifests() {
+    fn collect_artifact_paths_from_manifests() {
         let tmp = tempfile::tempdir().unwrap();
         let base = tmp.path();
-        let assets_dir = base.join("cache/artifacts/assets");
+        let artifacts_dir = base.join("cache/artifacts/files");
 
         // Create two node directories with manifests
-        let node_a = assets_dir.join("node_a/retry_1");
+        let node_a = artifacts_dir.join("node_a/retry_1");
         std::fs::create_dir_all(&node_a).unwrap();
         std::fs::write(
             node_a.join("manifest.json"),
-            serde_json::to_string(&AssetCollectionSummary {
+            serde_json::to_string(&ArtifactCollectionSummary {
                 files_copied: 2,
                 total_bytes: 2048,
                 files_skipped: 0,
                 download_errors: 0,
                 hash_errors: 0,
                 captured_assets: vec![
-                    CapturedAssetInfo {
+                    CapturedArtifactInfo {
                         path: "test-results/report.xml".to_string(),
                         mime: "text/xml".to_string(),
                         content_md5: "md5-report".to_string(),
                         content_sha256: "sha256-report".to_string(),
                         bytes: 1024,
                     },
-                    CapturedAssetInfo {
+                    CapturedArtifactInfo {
                         path: "test-results/screenshot.png".to_string(),
                         mime: "image/png".to_string(),
                         content_md5: "md5-screenshot".to_string(),
@@ -861,17 +861,17 @@ mod tests {
         )
         .unwrap();
 
-        let node_b = assets_dir.join("node_b/retry_1");
+        let node_b = artifacts_dir.join("node_b/retry_1");
         std::fs::create_dir_all(&node_b).unwrap();
         std::fs::write(
             node_b.join("manifest.json"),
-            serde_json::to_string(&AssetCollectionSummary {
+            serde_json::to_string(&ArtifactCollectionSummary {
                 files_copied: 1,
                 total_bytes: 512,
                 files_skipped: 0,
                 download_errors: 0,
                 hash_errors: 0,
-                captured_assets: vec![CapturedAssetInfo {
+                captured_assets: vec![CapturedArtifactInfo {
                     path: "coverage/lcov.info".to_string(),
                     mime: "application/octet-stream".to_string(),
                     content_md5: "md5-lcov".to_string(),
@@ -883,24 +883,24 @@ mod tests {
         )
         .unwrap();
 
-        let paths = collect_asset_paths(&assets_dir);
+        let paths = collect_artifact_paths(&artifacts_dir);
         assert_eq!(paths.len(), 3);
         let base_str = base.to_string_lossy();
         assert!(paths.contains(&format!(
-            "{base_str}/cache/artifacts/assets/node_a/retry_1/test-results/report.xml"
+            "{base_str}/cache/artifacts/files/node_a/retry_1/test-results/report.xml"
         )));
         assert!(paths.contains(&format!(
-            "{base_str}/cache/artifacts/assets/node_a/retry_1/test-results/screenshot.png"
+            "{base_str}/cache/artifacts/files/node_a/retry_1/test-results/screenshot.png"
         )));
         assert!(paths.contains(&format!(
-            "{base_str}/cache/artifacts/assets/node_b/retry_1/coverage/lcov.info"
+            "{base_str}/cache/artifacts/files/node_b/retry_1/coverage/lcov.info"
         )));
     }
 
     #[test]
     fn collect_asset_paths_empty_when_no_assets() {
         let tmp = tempfile::tempdir().unwrap();
-        let paths = collect_asset_paths(&tmp.path().join("cache/artifacts/assets"));
+        let paths = collect_artifact_paths(&tmp.path().join("cache/artifacts/files"));
         assert!(paths.is_empty());
     }
 

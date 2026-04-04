@@ -18,7 +18,7 @@ pub use mcp::{
 };
 pub use project::ProjectSettings;
 pub use run::{
-    AssetsSettings, CheckpointSettings, GitHubSettings, LlmSettings, MergeStrategy,
+    ArtifactsSettings, CheckpointSettings, GitHubSettings, LlmSettings, MergeStrategy,
     PullRequestSettings, SetupSettings,
 };
 pub use sandbox::{
@@ -65,7 +65,7 @@ pub struct Settings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pull_request: Option<PullRequestSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub assets: Option<AssetsSettings>,
+    pub artifacts: Option<ArtifactsSettings>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hooks: Vec<HookDefinition>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
