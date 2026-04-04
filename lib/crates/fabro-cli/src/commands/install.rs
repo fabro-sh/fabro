@@ -765,7 +765,7 @@ pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<(
 // ---------------------------------------------------------------------------
 
 mod hex {
-    pub fn encode(bytes: &[u8]) -> String {
+    pub(super) fn encode(bytes: &[u8]) -> String {
         bytes.iter().map(|b| format!("{b:02x}")).collect()
     }
 }
