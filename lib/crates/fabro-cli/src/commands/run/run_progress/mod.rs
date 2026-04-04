@@ -1,4 +1,4 @@
-use fabro_types::StoredEvent;
+use fabro_types::RunEvent;
 
 mod event;
 mod info_display;
@@ -7,7 +7,7 @@ mod setup_display;
 mod stage_display;
 mod styles;
 
-use event::{ProgressEvent, from_json_line, from_stored_event};
+use event::{ProgressEvent, from_json_line, from_run_event};
 use info_display::InfoDisplay;
 use renderer::ProgressRenderer;
 use setup_display::SetupDisplay;
@@ -66,8 +66,8 @@ impl ProgressUI {
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn handle_event(&mut self, event: &StoredEvent) {
-        if let Some(progress_event) = from_stored_event(event) {
+    pub(crate) fn handle_event(&mut self, event: &RunEvent) {
+        if let Some(progress_event) = from_run_event(event) {
             self.dispatch(progress_event);
         }
     }
@@ -418,9 +418,7 @@ mod tests {
     use fabro_agent::{AgentEvent, SandboxEvent};
     use fabro_llm::types::Usage;
     use fabro_types::fixtures;
-    use fabro_workflow::event::{
-        RunNoticeLevel, WorkflowRunEvent, to_stored_event, to_stored_event_at,
-    };
+    use fabro_workflow::event::{Event, RunNoticeLevel, to_run_event, to_run_event_at};
     use fabro_workflow::outcome::StageUsage;
 
     use super::*;
@@ -461,18 +459,18 @@ mod tests {
             .expect("valid utf-8")
     }
 
-    fn emit(ui: &mut ProgressUI, event: WorkflowRunEvent) {
-        let stored = to_stored_event(&fixtures::RUN_1, &event);
+    fn emit(ui: &mut ProgressUI, event: Event) {
+        let stored = to_run_event(&fixtures::RUN_1, &event);
         ui.handle_event(&stored);
     }
 
-    fn emit_ref(ui: &mut ProgressUI, event: &WorkflowRunEvent) {
-        let stored = to_stored_event(&fixtures::RUN_1, event);
+    fn emit_ref(ui: &mut ProgressUI, event: &Event) {
+        let stored = to_run_event(&fixtures::RUN_1, event);
         ui.handle_event(&stored);
     }
 
-    fn agent_event(stage: &str, event: AgentEvent) -> WorkflowRunEvent {
-        WorkflowRunEvent::Agent {
+    fn agent_event(stage: &str, event: AgentEvent) -> Event {
+        Event::Agent {
             stage: stage.into(),
             visit: 1,
             event,
@@ -481,8 +479,8 @@ mod tests {
         }
     }
 
-    fn stage_started(node_id: &str, name: &str) -> WorkflowRunEvent {
-        WorkflowRunEvent::StageStarted {
+    fn stage_started(node_id: &str, name: &str) -> Event {
+        Event::StageStarted {
             node_id: node_id.into(),
             name: name.into(),
             index: 0,
@@ -492,7 +490,7 @@ mod tests {
         }
     }
 
-    fn assistant_message(stage: &str, model: &str) -> WorkflowRunEvent {
+    fn assistant_message(stage: &str, model: &str) -> Event {
         agent_event(
             stage,
             AgentEvent::AssistantMessage {
@@ -504,8 +502,8 @@ mod tests {
         )
     }
 
-    fn stage_completed(node_id: &str, name: &str) -> WorkflowRunEvent {
-        WorkflowRunEvent::StageCompleted {
+    fn stage_completed(node_id: &str, name: &str) -> Event {
+        Event::StageCompleted {
             node_id: node_id.into(),
             name: name.into(),
             index: 0,
@@ -548,7 +546,7 @@ mod tests {
 
         emit(
             &mut ui,
-            WorkflowRunEvent::ParallelStarted {
+            Event::ParallelStarted {
                 node_id: "fork1".into(),
                 visit: 1,
                 branch_count: 2,
@@ -559,7 +557,7 @@ mod tests {
 
         emit(
             &mut ui,
-            WorkflowRunEvent::ParallelBranchStarted {
+            Event::ParallelBranchStarted {
                 branch: "security".into(),
                 index: 0,
             },
@@ -574,7 +572,7 @@ mod tests {
 
         emit(
             &mut ui,
-            WorkflowRunEvent::ParallelBranchCompleted {
+            Event::ParallelBranchCompleted {
                 branch: "security".into(),
                 index: 0,
                 duration_ms: 2000,
@@ -596,7 +594,7 @@ mod tests {
         emit(&mut ui, stage_started("fork1", "Fork"));
         emit(
             &mut ui,
-            WorkflowRunEvent::ParallelStarted {
+            Event::ParallelStarted {
                 node_id: "fork1".into(),
                 visit: 1,
                 branch_count: 1,
@@ -605,7 +603,7 @@ mod tests {
         );
         emit(
             &mut ui,
-            WorkflowRunEvent::ParallelBranchStarted {
+            Event::ParallelBranchStarted {
                 branch: "security".into(),
                 index: 0,
             },
@@ -666,7 +664,7 @@ mod tests {
     fn handle_json_line_matches_handle_event_for_verbose_events() {
         let events = vec![
             stage_started("code", "Code"),
-            WorkflowRunEvent::SandboxInitialized {
+            Event::SandboxInitialized {
                 working_directory: "/home/daytona/workspace".into(),
                 provider: "daytona".into(),
                 identifier: None,
@@ -684,7 +682,7 @@ mod tests {
                 },
             ),
             assistant_message("code", "gpt-5-mini"),
-            WorkflowRunEvent::EdgeSelected {
+            Event::EdgeSelected {
                 from_node: "code".into(),
                 to_node: "review".into(),
                 label: Some("ship".into()),
@@ -695,7 +693,7 @@ mod tests {
                 stage_status: "success".into(),
                 is_jump: false,
             },
-            WorkflowRunEvent::StageRetrying {
+            Event::StageRetrying {
                 node_id: "code".into(),
                 name: "Code".into(),
                 index: 0,
@@ -741,26 +739,26 @@ mod tests {
                     turns_used: 3,
                 },
             ),
-            WorkflowRunEvent::SetupStarted { command_count: 1 },
-            WorkflowRunEvent::SetupCommandCompleted {
+            Event::SetupStarted { command_count: 1 },
+            Event::SetupCommandCompleted {
                 command: "bun install".into(),
                 index: 0,
                 exit_code: 0,
                 duration_ms: 2200,
             },
-            WorkflowRunEvent::SetupCompleted { duration_ms: 2200 },
-            WorkflowRunEvent::DevcontainerLifecycleStarted {
+            Event::SetupCompleted { duration_ms: 2200 },
+            Event::DevcontainerLifecycleStarted {
                 phase: "postCreate".into(),
                 command_count: 1,
             },
-            WorkflowRunEvent::DevcontainerLifecycleCommandCompleted {
+            Event::DevcontainerLifecycleCommandCompleted {
                 phase: "postCreate".into(),
                 command: "npm run setup".into(),
                 index: 0,
                 exit_code: 0,
                 duration_ms: 1400,
             },
-            WorkflowRunEvent::DevcontainerLifecycleCompleted {
+            Event::DevcontainerLifecycleCompleted {
                 phase: "postCreate".into(),
                 duration_ms: 1400,
             },
@@ -773,7 +771,7 @@ mod tests {
 
         let (mut json_ui, json_buffer) = capture_ui(true);
         for event in &events {
-            let line = serde_json::to_string(&to_stored_event(&fixtures::RUN_1, event)).unwrap();
+            let line = serde_json::to_string(&to_run_event(&fixtures::RUN_1, event)).unwrap();
             json_ui.handle_json_line(&line);
         }
 
@@ -822,7 +820,7 @@ mod tests {
 
         emit(
             &mut ui,
-            WorkflowRunEvent::Sandbox {
+            Event::Sandbox {
                 event: SandboxEvent::Initializing {
                     provider: "daytona".into(),
                 },
@@ -830,7 +828,7 @@ mod tests {
         );
         emit(
             &mut ui,
-            WorkflowRunEvent::Sandbox {
+            Event::Sandbox {
                 event: SandboxEvent::Ready {
                     provider: "daytona".into(),
                     duration_ms: 2500,
@@ -843,18 +841,15 @@ mod tests {
         );
         emit(
             &mut ui,
-            WorkflowRunEvent::SshAccessReady {
+            Event::SshAccessReady {
                 ssh_command: "ssh daytona@example".into(),
             },
         );
-        emit(&mut ui, WorkflowRunEvent::SetupStarted { command_count: 2 });
+        emit(&mut ui, Event::SetupStarted { command_count: 2 });
+        emit(&mut ui, Event::SetupCompleted { duration_ms: 8200 });
         emit(
             &mut ui,
-            WorkflowRunEvent::SetupCompleted { duration_ms: 8200 },
-        );
-        emit(
-            &mut ui,
-            WorkflowRunEvent::CliEnsureCompleted {
+            Event::CliEnsureCompleted {
                 cli_name: "gh".into(),
                 provider: "github".into(),
                 already_installed: false,
@@ -864,7 +859,7 @@ mod tests {
         );
         emit(
             &mut ui,
-            WorkflowRunEvent::DevcontainerResolved {
+            Event::DevcontainerResolved {
                 dockerfile_lines: 24,
                 environment_count: 3,
                 lifecycle_command_count: 2,
@@ -873,14 +868,14 @@ mod tests {
         );
         emit(
             &mut ui,
-            WorkflowRunEvent::DevcontainerLifecycleStarted {
+            Event::DevcontainerLifecycleStarted {
                 phase: "postCreate".into(),
                 command_count: 2,
             },
         );
         emit(
             &mut ui,
-            WorkflowRunEvent::DevcontainerLifecycleCompleted {
+            Event::DevcontainerLifecycleCompleted {
                 phase: "postCreate".into(),
                 duration_ms: 1800,
             },
@@ -906,7 +901,7 @@ mod tests {
         emit(&mut ui, stage_started("code", "Code"));
         emit(
             &mut ui,
-            WorkflowRunEvent::SandboxInitialized {
+            Event::SandboxInitialized {
                 working_directory: "/home/daytona/workspace".into(),
                 provider: "daytona".into(),
                 identifier: None,
@@ -930,7 +925,7 @@ mod tests {
         emit(&mut ui, assistant_message("code", "gpt-5-mini"));
         emit(
             &mut ui,
-            WorkflowRunEvent::EdgeSelected {
+            Event::EdgeSelected {
                 from_node: "code".into(),
                 to_node: "review".into(),
                 label: Some("ship".into()),
@@ -944,7 +939,7 @@ mod tests {
         );
         emit(
             &mut ui,
-            WorkflowRunEvent::StageRetrying {
+            Event::StageRetrying {
                 node_id: "code".into(),
                 name: "Code".into(),
                 index: 0,
@@ -1003,30 +998,27 @@ mod tests {
                 },
             ),
         );
-        emit(&mut ui, WorkflowRunEvent::SetupStarted { command_count: 1 });
+        emit(&mut ui, Event::SetupStarted { command_count: 1 });
         emit(
             &mut ui,
-            WorkflowRunEvent::SetupCommandCompleted {
+            Event::SetupCommandCompleted {
                 command: "bun install".into(),
                 index: 0,
                 exit_code: 0,
                 duration_ms: 2200,
             },
         );
+        emit(&mut ui, Event::SetupCompleted { duration_ms: 2200 });
         emit(
             &mut ui,
-            WorkflowRunEvent::SetupCompleted { duration_ms: 2200 },
-        );
-        emit(
-            &mut ui,
-            WorkflowRunEvent::DevcontainerLifecycleStarted {
+            Event::DevcontainerLifecycleStarted {
                 phase: "postCreate".into(),
                 command_count: 1,
             },
         );
         emit(
             &mut ui,
-            WorkflowRunEvent::DevcontainerLifecycleCommandCompleted {
+            Event::DevcontainerLifecycleCommandCompleted {
                 phase: "postCreate".into(),
                 command: "npm run setup".into(),
                 index: 0,
@@ -1036,7 +1028,7 @@ mod tests {
         );
         emit(
             &mut ui,
-            WorkflowRunEvent::DevcontainerLifecycleCompleted {
+            Event::DevcontainerLifecycleCompleted {
                 phase: "postCreate".into(),
                 duration_ms: 1400,
             },
@@ -1065,7 +1057,7 @@ mod tests {
 
         emit(
             &mut ui,
-            WorkflowRunEvent::RunNotice {
+            Event::RunNotice {
                 level: RunNoticeLevel::Warn,
                 code: "sandbox_cleanup_failed".into(),
                 message: "sandbox cleanup failed".into(),
@@ -1073,7 +1065,7 @@ mod tests {
         );
         emit(
             &mut ui,
-            WorkflowRunEvent::PullRequestCreated {
+            Event::PullRequestCreated {
                 pr_url: "https://github.com/fabro-sh/fabro/pull/42".into(),
                 pr_number: 42,
                 owner: "fabro-sh".into(),
@@ -1086,7 +1078,7 @@ mod tests {
         );
         emit(
             &mut ui,
-            WorkflowRunEvent::PullRequestFailed {
+            Event::PullRequestFailed {
                 error: "auth token expired".into(),
             },
         );
@@ -1105,7 +1097,7 @@ mod tests {
         emit(&mut ui, stage_started("fork1", "Fork"));
         emit(
             &mut ui,
-            WorkflowRunEvent::ParallelStarted {
+            Event::ParallelStarted {
                 node_id: "fork1".into(),
                 visit: 1,
                 branch_count: 1,
@@ -1114,14 +1106,14 @@ mod tests {
         );
         emit(
             &mut ui,
-            WorkflowRunEvent::ParallelBranchStarted {
+            Event::ParallelBranchStarted {
                 branch: "security".into(),
                 index: 0,
             },
         );
         emit(
             &mut ui,
-            WorkflowRunEvent::ParallelBranchCompleted {
+            Event::ParallelBranchCompleted {
                 branch: "security".into(),
                 index: 0,
                 duration_ms: 500,
@@ -1145,9 +1137,9 @@ mod tests {
             .unwrap()
             .with_timezone(&Utc);
 
-        let stage_started = serde_json::to_string(&to_stored_event_at(
+        let stage_started = serde_json::to_string(&to_run_event_at(
             &fixtures::RUN_1,
-            &WorkflowRunEvent::StageStarted {
+            &Event::StageStarted {
                 node_id: "code".into(),
                 name: "Code".into(),
                 index: 0,
@@ -1158,7 +1150,7 @@ mod tests {
             started_ts,
         ))
         .unwrap();
-        let tool_started = serde_json::to_string(&to_stored_event_at(
+        let tool_started = serde_json::to_string(&to_run_event_at(
             &fixtures::RUN_1,
             &agent_event(
                 "code",
@@ -1171,7 +1163,7 @@ mod tests {
             started_ts,
         ))
         .unwrap();
-        let tool_completed = serde_json::to_string(&to_stored_event_at(
+        let tool_completed = serde_json::to_string(&to_run_event_at(
             &fixtures::RUN_1,
             &agent_event(
                 "code",

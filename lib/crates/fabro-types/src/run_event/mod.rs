@@ -43,7 +43,7 @@ pub struct TokenUsage {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct StoredEvent {
+pub struct RunEvent {
     pub id: String,
     pub ts: DateTime<Utc>,
     pub run_id: RunId,
@@ -264,7 +264,7 @@ pub enum EventBody {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct StoredEventRaw {
+struct RunEventRaw {
     id: String,
     ts: DateTime<Utc>,
     run_id: RunId,
@@ -285,9 +285,9 @@ fn default_properties() -> Value {
     Value::Object(Map::new())
 }
 
-impl StoredEvent {
+impl RunEvent {
     pub fn from_value(value: Value) -> serde_json::Result<Self> {
-        let raw: StoredEventRaw = serde_json::from_value(value)?;
+        let raw: RunEventRaw = serde_json::from_value(value)?;
         let body = serde_json::from_value(json!({
             "event": raw.event,
             "properties": raw.properties,
@@ -371,7 +371,7 @@ fn properties_from_body(body: &EventBody) -> Value {
         .unwrap_or_else(default_properties)
 }
 
-impl Serialize for StoredEvent {
+impl Serialize for RunEvent {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -382,7 +382,7 @@ impl Serialize for StoredEvent {
     }
 }
 
-impl<'de> Deserialize<'de> for StoredEvent {
+impl<'de> Deserialize<'de> for RunEvent {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -403,8 +403,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn stored_event_round_trips_json() {
-        let event = StoredEvent {
+    fn run_event_round_trips_json() {
+        let event = RunEvent {
             id: "evt_1".to_string(),
             ts: DateTime::parse_from_rfc3339("2026-04-04T12:00:00.000Z")
                 .unwrap()
@@ -448,13 +448,13 @@ mod tests {
         };
 
         let value = event.to_value().unwrap();
-        let parsed = StoredEvent::from_value(value).unwrap();
+        let parsed = RunEvent::from_value(value).unwrap();
 
         assert_eq!(parsed, event);
     }
 
     #[test]
-    fn stored_event_deserializes_adjacent_layout() {
+    fn run_event_deserializes_adjacent_layout() {
         let settings = Settings::default();
         let graph = Graph {
             name: "test".to_string(),
@@ -488,7 +488,7 @@ mod tests {
             }
         });
 
-        let parsed = StoredEvent::from_value(line).unwrap();
+        let parsed = RunEvent::from_value(line).unwrap();
         assert!(matches!(parsed.body, EventBody::RunCreated(_)));
     }
 }

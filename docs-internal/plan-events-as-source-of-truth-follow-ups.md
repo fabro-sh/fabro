@@ -149,7 +149,7 @@ This matrix is the contract for this plan. Each row must be green before `memoiz
 
 ### 1. Add semantic run lifecycle events
 
-Add new `WorkflowRunEvent` variants for:
+Add new `Event` variants for:
 
 - `RunSubmitted`
 - `RunStarting`

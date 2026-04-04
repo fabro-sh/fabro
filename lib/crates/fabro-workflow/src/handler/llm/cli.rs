@@ -10,7 +10,7 @@ use tokio::time::sleep;
 use super::super::agent::{CodergenBackend, CodergenResult};
 use crate::context::Context;
 use crate::error::FabroError;
-use crate::event::{EventEmitter, WorkflowRunEvent};
+use crate::event::{Event, EventEmitter};
 use crate::outcome::StageUsage;
 use crate::outcome::compute_stage_cost;
 use crate::run_dir::visit_from_context;
@@ -73,7 +73,7 @@ async fn ensure_cli(
     let cli_name = cli.name();
     let provider_str = provider.as_str();
 
-    emitter.emit(&WorkflowRunEvent::CliEnsureStarted {
+    emitter.emit(&Event::CliEnsureStarted {
         cli_name: cli_name.to_string(),
         provider: provider_str.to_string(),
     });
@@ -92,7 +92,7 @@ async fn ensure_cli(
 
     if version_check.exit_code == 0 {
         let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-        emitter.emit(&WorkflowRunEvent::CliEnsureCompleted {
+        emitter.emit(&Event::CliEnsureCompleted {
             cli_name: cli_name.to_string(),
             provider: provider_str.to_string(),
             already_installed: true,
@@ -135,7 +135,7 @@ async fn ensure_cli(
             "{cli_name} install exited with code {}: {detail}",
             install_result.exit_code
         );
-        emitter.emit(&WorkflowRunEvent::CliEnsureFailed {
+        emitter.emit(&Event::CliEnsureFailed {
             cli_name: cli_name.to_string(),
             provider: provider_str.to_string(),
             error: error_msg.clone(),
@@ -145,7 +145,7 @@ async fn ensure_cli(
     }
 
     let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
-    emitter.emit(&WorkflowRunEvent::CliEnsureCompleted {
+    emitter.emit(&Event::CliEnsureCompleted {
         cli_name: cli_name.to_string(),
         provider: provider_str.to_string(),
         already_installed: false,
@@ -496,7 +496,7 @@ impl CodergenBackend for AgentCliBackend {
         ensure_cli(cli, provider, sandbox, emitter).await?;
 
         let command = cli_command_for_provider(provider, model, &prompt_path);
-        emitter.emit(&WorkflowRunEvent::AgentCliStarted {
+        emitter.emit(&Event::AgentCliStarted {
             node_id: node.id.clone(),
             visit: current_visit(_context),
             mode: "cli".to_string(),
@@ -620,7 +620,7 @@ impl CodergenBackend for AgentCliBackend {
             timed_out: false,
             duration_ms,
         };
-        emitter.emit(&WorkflowRunEvent::AgentCliCompleted {
+        emitter.emit(&Event::AgentCliCompleted {
             node_id: node.id.clone(),
             stdout: result.stdout.clone(),
             stderr: result.stderr.clone(),

@@ -894,7 +894,7 @@ async fn retry_emits_stage_started_per_attempt() {
     g.edges.push(Edge::new("start", "work"));
     g.edges.push(Edge::new("work", "exit"));
 
-    let events = Arc::new(std::sync::Mutex::new(Vec::<fabro_types::StoredEvent>::new()));
+    let events = Arc::new(std::sync::Mutex::new(Vec::<fabro_types::RunEvent>::new()));
     let events_clone = Arc::clone(&events);
     let emitter = test_emitter("retry-events-test");
     emitter.on_event(move |event| {
@@ -1019,7 +1019,7 @@ async fn git_checkpoint_skips_start_node() {
     g.edges.push(Edge::new("start", "work"));
     g.edges.push(Edge::new("work", "exit"));
 
-    let events = Arc::new(std::sync::Mutex::new(Vec::<fabro_types::StoredEvent>::new()));
+    let events = Arc::new(std::sync::Mutex::new(Vec::<fabro_types::RunEvent>::new()));
     let events_clone = Arc::clone(&events);
     let emitter = test_emitter("git-cp-test");
     emitter.on_event(move |event| {

@@ -1669,7 +1669,7 @@ mod tests {
 
     #[test]
     fn e2e_llm_error_to_outcome_to_event_preserves_classification() {
-        use crate::event::WorkflowRunEvent;
+        use crate::event::Event;
 
         // 1. Create SdkError → FabroError
         let sdk_err = SdkError::Provider {
@@ -1688,7 +1688,7 @@ mod tests {
 
         // 3. Outcome → StageFailed event
         let failure = outcome.failure.clone().unwrap();
-        let event = WorkflowRunEvent::StageFailed {
+        let event = Event::StageFailed {
             node_id: "code".into(),
             name: "code".into(),
             index: 0,
@@ -1698,7 +1698,7 @@ mod tests {
 
         // 4. Verify classification survived all the way through
         match &event {
-            WorkflowRunEvent::StageFailed { failure, .. } => {
+            Event::StageFailed { failure, .. } => {
                 assert_eq!(failure.category, FailureCategory::TransientInfra);
             }
             _ => panic!("expected StageFailed"),

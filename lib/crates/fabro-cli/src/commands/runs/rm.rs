@@ -9,7 +9,7 @@ use crate::shared::print_json_pretty;
 use crate::store;
 use crate::user_config::load_user_settings_with_globals;
 use fabro_sandbox::reconnect::reconnect as reconnect_sandbox;
-use fabro_workflow::event::{WorkflowRunEvent, append_workflow_event};
+use fabro_workflow::event::{Event, append_event};
 use fabro_workflow::run_lookup::RunInfo;
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
 
@@ -126,12 +126,8 @@ async fn remove_run_dir_with_cleanup(store: &SlateStore, run: &RunInfo) -> Resul
         }
     };
     if let Some(run_store) = run_store.as_ref() {
-        if let Err(err) = append_workflow_event(
-            run_store,
-            &run_id,
-            &WorkflowRunEvent::RunRemoving { reason: None },
-        )
-        .await
+        if let Err(err) =
+            append_event(run_store, &run_id, &Event::RunRemoving { reason: None }).await
         {
             warn!(
                 run_id = %run_id,
