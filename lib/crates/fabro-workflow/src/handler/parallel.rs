@@ -5,7 +5,6 @@ use std::time::Instant;
 use async_trait::async_trait;
 use fabro_agent::{Sandbox, WorktreeOptions, WorktreeSandbox};
 use fabro_types::RunId;
-use tokio::fs;
 use tokio::sync::Semaphore;
 
 use crate::context::keys;
@@ -476,20 +475,6 @@ impl Handler for ParallelHandler {
                 entry
             })
             .collect();
-        let stage_dir = run_dir.join("nodes").join(&node.id);
-        fs::create_dir_all(&stage_dir)
-            .await
-            .map_err(|err| FabroError::handler(format!("failed to create stage dir: {err}")))?;
-        fs::write(
-            stage_dir.join("parallel_results.json"),
-            serde_json::to_vec_pretty(&results_json).map_err(|err| {
-                FabroError::handler(format!("failed to serialize parallel results: {err}"))
-            })?,
-        )
-        .await
-        .map_err(|err| {
-            FabroError::handler(format!("failed to write parallel results file: {err}"))
-        })?;
         context.set(keys::PARALLEL_RESULTS, serde_json::json!(results_json));
         context.set(keys::PARALLEL_BRANCH_COUNT, serde_json::json!(total));
 
@@ -595,7 +580,7 @@ fn find_join_node(results: &[BranchResult], graph: &Graph) -> Option<String> {
 mod tests {
     use super::*;
     use fabro_graphviz::graph::{AttrValue, Edge};
-    use fabro_store::SlateStore;
+    use fabro_store::{SlateStore, StageId};
     use fabro_types::fixtures;
     use object_store::memory::InMemory;
     use std::sync::Arc;
@@ -639,7 +624,15 @@ mod tests {
 
     #[tokio::test]
     async fn parallel_handler_with_branches() {
-        let services = make_services();
+        let store = test_store();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
+        let services = EngineServices {
+            emitter: Arc::new(crate::event::EventEmitter::new(fixtures::RUN_1)),
+            run_store: run_store.clone(),
+            ..EngineServices::test_default()
+        };
+        let logger = crate::event::StoreProgressLogger::new(run_store.clone());
+        logger.register(services.emitter.as_ref());
         let mut node = Node::new("par");
         node.attrs.insert(
             "shape".to_string(),
@@ -662,6 +655,7 @@ mod tests {
             .execute(&node, &context, &graph, tmp.path(), &services)
             .await
             .unwrap();
+        logger.flush().await;
 
         assert_eq!(outcome.status, StageStatus::Success);
         assert!(outcome.notes.as_deref().unwrap().contains("2 branches"));
@@ -670,18 +664,9 @@ mod tests {
         let results = context.get(keys::PARALLEL_RESULTS);
         assert!(results.is_some());
 
-        // Check parallel_results.json was written
-        let results_path = tmp
-            .path()
-            .join("nodes")
-            .join("par")
-            .join("parallel_results.json");
-        assert!(
-            results_path.exists(),
-            "parallel_results.json should be written"
-        );
-        let content = std::fs::read_to_string(&results_path).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let state = run_store.state().await.unwrap();
+        let node_state = state.node(&StageId::new("par", 1)).unwrap();
+        let parsed = node_state.parallel_results.as_ref().unwrap();
         assert!(
             parsed.is_array(),
             "parallel_results.json should be a JSON array"

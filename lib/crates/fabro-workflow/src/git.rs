@@ -306,52 +306,6 @@ pub fn sanitize_ref_component(s: &str) -> String {
 }
 
 /// Filenames allowed in per-node directories on the shadow branch.
-const NODE_FILE_ALLOWLIST: &[&str] = &[
-    "prompt.md",
-    "response.md",
-    "status.json",
-    "provider_used.json",
-    "diff.patch",
-    "script_invocation.json",
-    "script_timing.json",
-    "parallel_results.json",
-];
-
-/// Maximum size (bytes) for a single node file. Files larger than this are skipped.
-const MAX_NODE_FILE_SIZE: u64 = 512 * 1024;
-
-/// Scan `{run_dir}/nodes/` for allowlisted files and return them as
-/// `("nodes/{subdir}/{filename}", bytes)` entries suitable for the shadow tree.
-pub fn scan_node_files(run_dir: &Path) -> Vec<(String, Vec<u8>)> {
-    let nodes_dir = run_dir.join("nodes");
-    let Ok(entries) = std::fs::read_dir(&nodes_dir) else {
-        return Vec::new();
-    };
-
-    let mut result = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        let subdir_name = match path.file_name().and_then(|n| n.to_str()) {
-            Some(n) => n.to_string(),
-            None => continue,
-        };
-        for filename in NODE_FILE_ALLOWLIST {
-            let file_path = path.join(filename);
-            match std::fs::metadata(&file_path) {
-                Ok(meta) if meta.is_file() && meta.len() <= MAX_NODE_FILE_SIZE => {}
-                _ => continue,
-            }
-            if let Ok(data) = std::fs::read(&file_path) {
-                result.push((format!("nodes/{subdir_name}/{filename}"), data));
-            }
-        }
-    }
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -453,57 +407,6 @@ mod tests {
 
         remove_worktree(dir.path(), &wt_path).unwrap();
         assert!(!wt_path.exists());
-    }
-
-    #[test]
-    fn scan_node_files_picks_up_allowlisted() {
-        let dir = tempfile::tempdir().unwrap();
-        let run_dir = dir.path();
-        let node_dir = run_dir.join("nodes").join("work");
-        fs::create_dir_all(&node_dir).unwrap();
-        fs::write(node_dir.join("prompt.md"), "hello").unwrap();
-        fs::write(node_dir.join("response.md"), "world").unwrap();
-        fs::write(node_dir.join("not_allowed.txt"), "skip me").unwrap();
-
-        let files = scan_node_files(run_dir);
-        let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
-        assert!(paths.contains(&"nodes/work/prompt.md"));
-        assert!(paths.contains(&"nodes/work/response.md"));
-        assert!(!paths.iter().any(|p| p.contains("not_allowed")));
-    }
-
-    #[test]
-    fn scan_node_files_skips_oversized() {
-        let dir = tempfile::tempdir().unwrap();
-        let run_dir = dir.path();
-        let node_dir = run_dir.join("nodes").join("big");
-        fs::create_dir_all(&node_dir).unwrap();
-        // Write a file just over the 512KB limit
-        let big_data = vec![0u8; 512 * 1024 + 1];
-        fs::write(node_dir.join("prompt.md"), &big_data).unwrap();
-
-        let files = scan_node_files(run_dir);
-        assert!(files.is_empty());
-    }
-
-    #[test]
-    fn scan_node_files_handles_visit_suffixes() {
-        let dir = tempfile::tempdir().unwrap();
-        let run_dir = dir.path();
-        let node_dir = run_dir.join("nodes").join("work-visit_2");
-        fs::create_dir_all(&node_dir).unwrap();
-        fs::write(node_dir.join("status.json"), "{}").unwrap();
-
-        let files = scan_node_files(run_dir);
-        assert_eq!(files.len(), 1);
-        assert_eq!(files[0].0, "nodes/work-visit_2/status.json");
-    }
-
-    #[test]
-    fn scan_node_files_empty_when_no_nodes_dir() {
-        let dir = tempfile::tempdir().unwrap();
-        let files = scan_node_files(dir.path());
-        assert!(files.is_empty());
     }
 
     #[tokio::test]

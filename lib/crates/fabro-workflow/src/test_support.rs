@@ -5,11 +5,11 @@ use std::time::Duration;
 
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::Graph as GvGraph;
-use fabro_store::SlateStore;
+use fabro_store::{RunProjection, SlateStore};
 use object_store::memory::InMemory;
 
-use crate::error::Result;
-use crate::event::{EventEmitter, WorkflowRunEvent, append_workflow_event};
+use crate::error::{FabroError, Result};
+use crate::event::{EventEmitter, StoreProgressLogger, WorkflowRunEvent, append_workflow_event};
 use crate::handler::HandlerRegistry;
 use crate::outcome::Outcome;
 use crate::pipeline;
@@ -21,6 +21,11 @@ struct InitializedOptions {
     hook_runner: Option<Arc<fabro_hooks::HookRunner>>,
     env: HashMap<String, String>,
     checkpoint: Option<Checkpoint>,
+}
+
+struct InitializedState {
+    initialized: Initialized,
+    store_logger: StoreProgressLogger,
 }
 
 fn bound_emitter(run_id: fabro_types::RunId, observer: &Arc<EventEmitter>) -> Arc<EventEmitter> {
@@ -37,7 +42,7 @@ async fn initialized(
     graph: &GvGraph,
     run_options: &RunOptions,
     options: InitializedOptions,
-) -> Initialized {
+) -> InitializedState {
     std::fs::create_dir_all(&run_options.run_dir).expect("failed to create run dir");
     let store = Arc::new(SlateStore::new(
         Arc::new(InMemory::new()),
@@ -80,23 +85,28 @@ async fn initialized(
     .await
     .expect("failed to seed run.created event in run store");
     let emitter = bound_emitter(run_options.run_id, &emitter);
-    Initialized {
-        graph: graph.clone(),
-        source: String::new(),
-        run_options: run_options.clone(),
-        run_store,
-        checkpoint: options.checkpoint,
-        seed_context: None,
-        emitter,
-        sandbox,
-        registry: Arc::new(registry),
-        on_node: None,
-        hook_runner: options.hook_runner,
-        env: options.env,
-        dry_run: run_options.dry_run_enabled(),
-        llm_client: None,
-        model: String::new(),
-        provider: fabro_llm::Provider::Anthropic,
+    let store_logger = StoreProgressLogger::new(run_store.clone());
+    store_logger.register(emitter.as_ref());
+    InitializedState {
+        initialized: Initialized {
+            graph: graph.clone(),
+            source: String::new(),
+            run_options: run_options.clone(),
+            run_store,
+            checkpoint: options.checkpoint,
+            seed_context: None,
+            emitter,
+            sandbox,
+            registry: Arc::new(registry),
+            on_node: None,
+            hook_runner: options.hook_runner,
+            env: options.env,
+            dry_run: run_options.dry_run_enabled(),
+            llm_client: None,
+            model: String::new(),
+            provider: fabro_llm::Provider::Anthropic,
+        },
+        store_logger,
     }
 }
 
@@ -120,8 +130,39 @@ pub async fn run_graph(
         },
     )
     .await;
-    let executed = pipeline::execute(initialized).await;
+    let executed = pipeline::execute(initialized.initialized).await;
     executed.outcome
+}
+
+pub async fn run_graph_with_state(
+    registry: HandlerRegistry,
+    emitter: Arc<EventEmitter>,
+    sandbox: Arc<dyn Sandbox>,
+    graph: &GvGraph,
+    run_options: &RunOptions,
+) -> Result<(Outcome, RunProjection)> {
+    let initialized = initialized(
+        registry,
+        emitter,
+        sandbox,
+        graph,
+        run_options,
+        InitializedOptions {
+            hook_runner: None,
+            env: HashMap::new(),
+            checkpoint: None,
+        },
+    )
+    .await;
+    let executed = pipeline::execute(initialized.initialized).await;
+    let outcome = executed.outcome?;
+    initialized.store_logger.flush().await;
+    let state = executed
+        .run_store
+        .state()
+        .await
+        .map_err(|err| FabroError::engine(err.to_string()))?;
+    Ok((outcome, state))
 }
 
 pub async fn run_graph_with_hooks(
@@ -146,8 +187,41 @@ pub async fn run_graph_with_hooks(
         },
     )
     .await;
-    let executed = pipeline::execute(initialized).await;
+    let executed = pipeline::execute(initialized.initialized).await;
     executed.outcome
+}
+
+pub async fn run_graph_with_hooks_and_state(
+    registry: HandlerRegistry,
+    emitter: Arc<EventEmitter>,
+    sandbox: Arc<dyn Sandbox>,
+    graph: &GvGraph,
+    run_options: &RunOptions,
+    hook_runner: Arc<fabro_hooks::HookRunner>,
+    env: Option<HashMap<String, String>>,
+) -> Result<(Outcome, RunProjection)> {
+    let initialized = initialized(
+        registry,
+        emitter,
+        sandbox,
+        graph,
+        run_options,
+        InitializedOptions {
+            hook_runner: Some(hook_runner),
+            env: env.unwrap_or_default(),
+            checkpoint: None,
+        },
+    )
+    .await;
+    let executed = pipeline::execute(initialized.initialized).await;
+    let outcome = executed.outcome?;
+    initialized.store_logger.flush().await;
+    let state = executed
+        .run_store
+        .state()
+        .await
+        .map_err(|err| FabroError::engine(err.to_string()))?;
+    Ok((outcome, state))
 }
 
 pub async fn run_graph_from_checkpoint(
@@ -171,7 +245,7 @@ pub async fn run_graph_from_checkpoint(
         },
     )
     .await;
-    let executed = pipeline::execute(initialized).await;
+    let executed = pipeline::execute(initialized.initialized).await;
     executed.outcome
 }
 
@@ -209,6 +283,27 @@ impl WorkflowRunner {
             graph,
             run_options,
         )
+        .await
+    }
+
+    pub async fn run_with_state(
+        &self,
+        graph: &GvGraph,
+        run_options: &RunOptions,
+    ) -> Result<(Outcome, RunProjection)> {
+        let registry = self
+            .registry
+            .lock()
+            .unwrap()
+            .take()
+            .expect("WorkflowRunner may only be used once");
+        Box::pin(run_graph_with_state(
+            registry,
+            Arc::clone(&self.emitter),
+            Arc::clone(&self.sandbox),
+            graph,
+            run_options,
+        ))
         .await
     }
 

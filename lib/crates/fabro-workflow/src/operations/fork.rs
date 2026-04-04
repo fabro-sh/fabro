@@ -72,12 +72,10 @@ fn fork_from_entry(
         .map_err(|e| anyhow::anyhow!("failed to read source metadata: {e}"))?;
 
     let mut run_record_bytes = None;
-    let mut start_record_bytes = None;
     let mut sandbox_bytes = None;
     for (path, data) in source_entries {
         match path {
             "run.json" => run_record_bytes = Some(data),
-            "start.json" => start_record_bytes = Some(data),
             "sandbox.json" => sandbox_bytes = Some(data),
             _ => {}
         }
@@ -91,21 +89,15 @@ fn fork_from_entry(
     let new_run_record_bytes =
         serde_json::to_vec_pretty(&run_record).context("failed to serialize new run.json")?;
 
-    let new_start_record_bytes = if start_record_bytes.is_some() {
-        let now = new_run_id.created_at();
-        let start_record = StartRecord {
-            run_id: new_run_id,
-            start_time: now,
-            run_branch: Some(new_run_branch.clone()),
-            base_sha: None,
-        };
-        Some(
-            serde_json::to_vec_pretty(&start_record)
-                .context("failed to serialize new start.json")?,
-        )
-    } else {
-        None
+    let now = new_run_id.created_at();
+    let start_record = StartRecord {
+        run_id: new_run_id,
+        start_time: now,
+        run_branch: Some(new_run_branch.clone()),
+        base_sha: None,
     };
+    let new_start_record_bytes =
+        serde_json::to_vec_pretty(&start_record).context("failed to serialize new start.json")?;
 
     let checkpoint_bytes = store
         .read_blob_at(entry.metadata_commit_oid, "checkpoint.json")
@@ -123,9 +115,7 @@ fn fork_from_entry(
         serde_json::to_vec_pretty(&checkpoint).context("failed to serialize checkpoint.json")?;
 
     let mut init_entries: Vec<(&str, &[u8])> = vec![("run.json", &new_run_record_bytes)];
-    if let Some(ref start_record) = new_start_record_bytes {
-        init_entries.push(("start.json", start_record));
-    }
+    init_entries.push(("start.json", &new_start_record_bytes));
     if let Some(ref sandbox) = sandbox_bytes {
         init_entries.push(("sandbox.json", sandbox));
     }
@@ -133,8 +123,10 @@ fn fork_from_entry(
     new_bs
         .write_entries(&init_entries, "init run")
         .map_err(|e| anyhow::anyhow!("failed to write init metadata entries: {e}"))?;
+    let mut checkpoint_entries: Vec<(&str, &[u8])> = vec![("checkpoint.json", &checkpoint_bytes)];
+    checkpoint_entries.extend(init_entries.iter().copied());
     new_bs
-        .write_entry("checkpoint.json", &checkpoint_bytes, "checkpoint")
+        .write_entries(&checkpoint_entries, "checkpoint")
         .map_err(|e| anyhow::anyhow!("failed to write metadata entries: {e}"))?;
 
     if push {

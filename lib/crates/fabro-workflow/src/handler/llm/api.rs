@@ -415,7 +415,7 @@ impl CodergenBackend for AgentApiBackend {
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
     ) -> Result<CodergenResult, FabroError> {
         let actual_model = node.model().unwrap_or(&self.model).to_string();
-        let actual_provider = node
+        let _actual_provider = node
             .provider()
             .and_then(|p| p.parse::<Provider>().ok())
             .unwrap_or(self.provider);
@@ -469,16 +469,6 @@ impl CodergenBackend for AgentApiBackend {
             Arc::clone(emitter),
             Arc::clone(&file_tracking),
         );
-
-        // Emit Prompt event before processing
-        emitter.emit(&WorkflowRunEvent::Prompt {
-            stage: node.id.clone(),
-            visit: current_visit(context),
-            text: prompt.to_string(),
-            mode: Some("agent".to_string()),
-            provider: Some(actual_provider.as_str().to_string()),
-            model: Some(actual_model.clone()),
-        });
 
         // Record turn count before processing so we only aggregate new usage.
         let turns_before = session.history().turns().len();

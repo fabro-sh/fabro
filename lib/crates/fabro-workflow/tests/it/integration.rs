@@ -235,8 +235,8 @@ async fn end_to_end_linear_pipeline() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine
-        .run(&graph, &run_options)
+    let (outcome, state) = engine
+        .run_with_state(&graph, &run_options)
         .await
         .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -253,22 +253,15 @@ async fn end_to_end_linear_pipeline() {
             .contains(&"codergen_step".to_string())
     );
 
-    // Codergen handler writes prompt.md, response.md, status.json
-    let stage_dir = dir.path().join("nodes").join("codergen_step");
+    let node_state = state
+        .node(&fabro_types::StageId::new("codergen_step", 1))
+        .unwrap();
     assert!(
-        stage_dir.join("prompt.md").exists(),
-        "prompt.md should exist"
+        node_state.response.is_some(),
+        "response should be projected"
     );
-    assert!(
-        stage_dir.join("response.md").exists(),
-        "response.md should exist"
-    );
-    assert!(
-        stage_dir.join("status.json").exists(),
-        "status.json should exist"
-    );
-
-    let prompt_content = std::fs::read_to_string(stage_dir.join("prompt.md")).unwrap();
+    assert!(node_state.status.is_some(), "status should be projected");
+    let prompt_content = node_state.prompt.as_deref().unwrap();
     assert!(
         prompt_content.ends_with("Implement the feature"),
         "prompt should end with original prompt, got: {prompt_content}"
@@ -1636,8 +1629,8 @@ async fn smoke_test_with_mock_codergen_backend() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine
-        .run(&graph, &run_options)
+    let (outcome, state) = engine
+        .run_with_state(&graph, &run_options)
         .await
         .expect("smoke test should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -1658,19 +1651,20 @@ async fn smoke_test_with_mock_codergen_backend() {
         "should NOT have traversed fix path"
     );
 
-    // Verify response.md was written by the mock backend
-    let plan_response =
-        std::fs::read_to_string(dir.path().join("nodes").join("plan").join("response.md"))
-            .expect("plan response should exist");
+    let plan_state = state.node(&fabro_types::StageId::new("plan", 1)).unwrap();
+    let plan_response = plan_state
+        .response
+        .as_deref()
+        .expect("plan response should exist");
     assert!(
         plan_response.contains("Response for plan"),
         "mock backend should have written response, got: {plan_response}"
     );
 
-    // Verify prompt.md had $goal expanded by the AgentHandler
-    let plan_prompt =
-        std::fs::read_to_string(dir.path().join("nodes").join("plan").join("prompt.md"))
-            .expect("plan prompt should exist");
+    let plan_prompt = plan_state
+        .prompt
+        .as_deref()
+        .expect("plan prompt should exist");
     assert!(
         plan_prompt.ends_with("Plan to achieve: Build and validate"),
         "prompt should end with original prompt, got: {plan_prompt}"
@@ -2150,7 +2144,10 @@ async fn tool_handler_e2e() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &run_options).await.expect("run");
+    let (outcome, _state) = engine
+        .run_with_state(&graph, &run_options)
+        .await
+        .expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
     let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
@@ -2221,7 +2218,10 @@ async fn auto_approve_interviewer_e2e() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &run_options).await.expect("run");
+    let (outcome, _state) = engine
+        .run_with_state(&graph, &run_options)
+        .await
+        .expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
     let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
@@ -2358,7 +2358,10 @@ async fn branching_loop_back_on_failure() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &run_options).await.expect("run");
+    let (outcome, _state) = engine
+        .run_with_state(&graph, &run_options)
+        .await
+        .expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
     let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
@@ -2440,7 +2443,10 @@ async fn human_gate_loops_back() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &run_options).await.expect("run");
+    let (outcome, _state) = engine
+        .run_with_state(&graph, &run_options)
+        .await
+        .expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
     let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
@@ -2497,7 +2503,10 @@ async fn scenario_ship_a_feature() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &run_options).await.expect("run");
+    let (outcome, _state) = engine
+        .run_with_state(&graph, &run_options)
+        .await
+        .expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
     let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
@@ -3531,30 +3540,20 @@ async fn integration_smoke_plan_implement_review_done() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine.run(&graph, &run_options).await.expect("run");
+    let (outcome, state) = engine
+        .run_with_state(&graph, &run_options)
+        .await
+        .expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    // Verify all nodes completed
     let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
     assert!(cp.completed_nodes.contains(&"plan".to_string()));
     assert!(cp.completed_nodes.contains(&"implement".to_string()));
     assert!(cp.completed_nodes.contains(&"review".to_string()));
 
-    // Verify prompt.md and response.md exist
-    assert!(
-        dir.path()
-            .join("nodes")
-            .join("plan")
-            .join("prompt.md")
-            .exists()
-    );
-    assert!(
-        dir.path()
-            .join("nodes")
-            .join("plan")
-            .join("response.md")
-            .exists()
-    );
+    let plan_state = state.node(&fabro_types::StageId::new("plan", 1)).unwrap();
+    assert!(plan_state.prompt.is_some());
+    assert!(plan_state.response.is_some());
 
     // Verify events
     let collected = events.lock().unwrap();
@@ -6031,9 +6030,9 @@ mod real_llm {
             host_repo_path: None,
             git: None,
         };
-        let outcome = tokio::time::timeout(
+        let (outcome, state) = tokio::time::timeout(
             std::time::Duration::from_secs(120),
-            engine.run(&graph, &run_options),
+            engine.run_with_state(&graph, &run_options),
         )
         .await
         .expect("should not timeout")
@@ -6052,9 +6051,10 @@ mod real_llm {
         assert_eq!(last_stage, Some("review"));
 
         // Verify actual LLM responses were written
-        let plan_response =
-            std::fs::read_to_string(dir.path().join("nodes").join("plan").join("response.md"))
-                .unwrap();
+        let plan_response = state
+            .node(&fabro_types::StageId::new("plan", 1))
+            .and_then(|node| node.response.as_deref())
+            .unwrap();
         assert!(
             !plan_response.is_empty(),
             "LLM should have generated a response"
@@ -6370,9 +6370,9 @@ mod real_llm {
             host_repo_path: None,
             git: None,
         };
-        let outcome = tokio::time::timeout(
+        let (outcome, state) = tokio::time::timeout(
             std::time::Duration::from_secs(30),
-            engine.run(&graph, &run_options),
+            engine.run_with_state(&graph, &run_options),
         )
         .await
         .expect("should not timeout")
@@ -6380,12 +6380,10 @@ mod real_llm {
 
         assert_eq!(outcome.status, StageStatus::Success);
 
-        let response_path = dir
-            .path()
-            .join("nodes")
-            .join("classify")
-            .join("response.md");
-        let response = std::fs::read_to_string(&response_path).unwrap();
+        let response = state
+            .node(&fabro_types::StageId::new("classify", 1))
+            .and_then(|node| node.response.as_deref())
+            .unwrap();
         assert!(!response.is_empty(), "response.md should be non-empty");
     }
 }
@@ -7181,6 +7179,23 @@ impl HookTestRunner {
         )
         .await
     }
+
+    async fn run_with_state(
+        &self,
+        graph: &Graph,
+        run_options: &RunOptions,
+    ) -> Result<(Outcome, fabro_store::RunProjection), FabroError> {
+        fabro_workflow::test_support::run_graph_with_hooks_and_state(
+            make_linear_registry(),
+            Arc::clone(&self.emitter),
+            local_env(),
+            graph,
+            run_options,
+            Arc::clone(&self.hook_runner),
+            None,
+        )
+        .await
+    }
 }
 
 fn emitter_with_events() -> (
@@ -7353,17 +7368,15 @@ async fn hook_stage_start_proceed_allows_execution() {
     let dir = tempfile::tempdir().unwrap();
     let run_options = make_run_options(dir.path());
 
-    let outcome = engine.run(&graph, &run_options).await.unwrap();
+    let (outcome, state) = engine.run_with_state(&graph, &run_options).await.unwrap();
     assert_eq!(outcome.status, StageStatus::Success);
 
-    // Work node should have executed (response.md exists)
     assert!(
-        dir.path()
-            .join("nodes")
-            .join("work")
-            .join("response.md")
-            .exists(),
-        "response.md should exist when StageStart hook proceeds"
+        state
+            .node(&fabro_types::StageId::new("work", 1))
+            .and_then(|node| node.response.as_ref())
+            .is_some(),
+        "response should exist when StageStart hook proceeds"
     );
 }
 
@@ -7379,18 +7392,16 @@ async fn hook_stage_start_skip_bypasses_node() {
     let dir = tempfile::tempdir().unwrap();
     let run_options = make_run_options(dir.path());
 
-    let outcome = engine.run(&graph, &run_options).await.unwrap();
+    let (outcome, state) = engine.run_with_state(&graph, &run_options).await.unwrap();
     // Pipeline reached exit with goal gates satisfied — per spec, SUCCESS.
     assert_eq!(outcome.status, StageStatus::Success);
 
-    // response.md should NOT exist for the work node (it was skipped)
     assert!(
-        !dir.path()
-            .join("nodes")
-            .join("work")
-            .join("response.md")
-            .exists(),
-        "response.md should not exist when StageStart hook skips node"
+        state
+            .node(&fabro_types::StageId::new("work", 1))
+            .and_then(|node| node.response.as_ref())
+            .is_none(),
+        "response should not exist when StageStart hook skips node"
     );
 
     // StageStarted should NOT be emitted for hook-skipped stages (the stage never started)
@@ -7440,27 +7451,23 @@ async fn hook_stage_start_matcher_filters_by_node_id() {
     let dir = tempfile::tempdir().unwrap();
     let run_options = make_run_options(dir.path());
 
-    let outcome = engine.run(&graph, &run_options).await.unwrap();
+    let (outcome, state) = engine.run_with_state(&graph, &run_options).await.unwrap();
     // Pipeline reached exit with goal gates satisfied — per spec, SUCCESS.
     assert_eq!(outcome.status, StageStatus::Success);
 
-    // step1 should have executed (response.md exists)
     assert!(
-        dir.path()
-            .join("nodes")
-            .join("step1")
-            .join("response.md")
-            .exists(),
+        state
+            .node(&fabro_types::StageId::new("step1", 1))
+            .and_then(|node| node.response.as_ref())
+            .is_some(),
         "step1 should execute because matcher doesn't match it"
     );
 
-    // step2 should have been skipped (no response.md)
     assert!(
-        !dir.path()
-            .join("nodes")
-            .join("step2")
-            .join("response.md")
-            .exists(),
+        state
+            .node(&fabro_types::StageId::new("step2", 1))
+            .and_then(|node| node.response.as_ref())
+            .is_none(),
         "step2 should be skipped because matcher matches it"
     );
 }
@@ -7971,25 +7978,22 @@ async fn hook_matcher_regex_pattern() {
     let dir = tempfile::tempdir().unwrap();
     let run_options = make_run_options(dir.path());
 
-    let outcome = engine.run(&graph, &run_options).await.unwrap();
+    let (outcome, state) = engine.run_with_state(&graph, &run_options).await.unwrap();
     // Pipeline reached exit with goal gates satisfied — per spec, SUCCESS.
     assert_eq!(outcome.status, StageStatus::Success);
 
-    // Both step1 and step2 should be skipped
     assert!(
-        !dir.path()
-            .join("nodes")
-            .join("step1")
-            .join("response.md")
-            .exists(),
+        state
+            .node(&fabro_types::StageId::new("step1", 1))
+            .and_then(|node| node.response.as_ref())
+            .is_none(),
         "step1 should be skipped by regex ^step"
     );
     assert!(
-        !dir.path()
-            .join("nodes")
-            .join("step2")
-            .join("response.md")
-            .exists(),
+        state
+            .node(&fabro_types::StageId::new("step2", 1))
+            .and_then(|node| node.response.as_ref())
+            .is_none(),
         "step2 should be skipped by regex ^step"
     );
 }
@@ -8231,13 +8235,15 @@ async fn run_fidelity_prompt_pipeline(fidelity: &str) -> String {
         host_repo_path: None,
         git: None,
     };
-    engine
-        .run(&graph, &run_options)
+    let (_outcome, state) = engine
+        .run_with_state(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
 
-    std::fs::read_to_string(dir.path().join("nodes").join("report").join("prompt.md"))
-        .expect("report/prompt.md should exist")
+    state
+        .node(&fabro_types::StageId::new("report", 1))
+        .and_then(|node| node.prompt.clone())
+        .expect("report prompt should exist")
 }
 
 #[tokio::test]
@@ -8429,8 +8435,8 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine
-        .run(&graph, &run_options)
+    let (outcome, _state) = engine
+        .run_with_state(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -8647,8 +8653,8 @@ async fn artifact_pointers_rewritten_for_remote_sandbox() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine
-        .run(&graph, &run_options)
+    let (outcome, _state) = engine
+        .run_with_state(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -8776,43 +8782,28 @@ async fn node_dir_uses_visit_count_on_revisit() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine
-        .run(&graph, &run_options)
+    let (outcome, state) = engine
+        .run_with_state(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    // First visit: nodes/gated_work/status.json
-    let first = dir
-        .path()
-        .join("nodes")
-        .join("gated_work")
-        .join("status.json");
-    assert!(
-        first.exists(),
-        "first visit directory should exist at {}",
-        first.display()
+    let first = state
+        .node(&fabro_types::StageId::new("gated_work", 1))
+        .unwrap();
+    let second = state
+        .node(&fabro_types::StageId::new("gated_work", 2))
+        .unwrap();
+    assert_eq!(
+        first.status.as_ref().unwrap().status,
+        StageStatus::Fail,
+        "first visit should fail"
     );
-
-    // Second visit: nodes/gated_work-visit_2/status.json
-    let second = dir
-        .path()
-        .join("nodes")
-        .join("gated_work-visit_2")
-        .join("status.json");
-    assert!(
-        second.exists(),
-        "second visit directory should exist at {}",
-        second.display()
+    assert_eq!(
+        second.status.as_ref().unwrap().status,
+        StageStatus::Success,
+        "second visit should succeed"
     );
-
-    // Verify distinct content (first = fail, second = success)
-    let first_json: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&first).unwrap()).unwrap();
-    let second_json: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&second).unwrap()).unwrap();
-    assert_eq!(first_json["status"], "fail");
-    assert_eq!(second_json["status"], "success");
 }
 
 // ---------------------------------------------------------------------------
@@ -9660,49 +9651,37 @@ async fn full_pipeline_with_cli_backend_node() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine
-        .run(&graph, &run_options)
+    let (outcome, state) = engine
+        .run_with_state(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    // Verify api_work used mock (its response.md should contain "Response for")
-    let api_response = std::fs::read_to_string(
-        dir.path()
-            .join("nodes")
-            .join("api_work")
-            .join("response.md"),
-    )
-    .unwrap();
+    let api_response = state
+        .node(&fabro_types::StageId::new("api_work", 1))
+        .and_then(|node| node.response.as_deref())
+        .unwrap();
     assert!(
         api_response.starts_with("Response for api_work"),
         "API node should use mock: {api_response}"
     );
 
-    // Verify cli_work used CLI backend (its response.md should contain CLI response)
-    let cli_response = std::fs::read_to_string(
-        dir.path()
-            .join("nodes")
-            .join("cli_work")
-            .join("response.md"),
-    )
-    .unwrap();
+    let cli_response = state
+        .node(&fabro_types::StageId::new("cli_work", 1))
+        .and_then(|node| node.response.as_deref())
+        .unwrap();
     assert_eq!(
         cli_response, "CLI completed the task.",
         "CLI node should use CLI backend: {cli_response}"
     );
 
-    // Verify cli_work wrote provider_used.json with mode=cli
-    let provider_json: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(
-            dir.path()
-                .join("nodes")
-                .join("cli_work")
-                .join("provider_used.json"),
-        )
-        .unwrap(),
-    )
-    .unwrap();
+    let provider_json = state
+        .node(&fabro_types::StageId::new("cli_work", 1))
+        .unwrap()
+        .provider_used
+        .as_ref()
+        .unwrap()
+        .clone();
     assert_eq!(provider_json["mode"], "cli");
 }
 
@@ -9790,14 +9769,16 @@ async fn stylesheet_backend_property_routes_to_cli() {
         host_repo_path: None,
         git: None,
     };
-    let outcome = engine
-        .run(&graph, &run_options)
+    let (outcome, state) = engine
+        .run_with_state(&graph, &run_options)
         .await
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let response =
-        std::fs::read_to_string(dir.path().join("nodes").join("work").join("response.md")).unwrap();
+    let response = state
+        .node(&fabro_types::StageId::new("work", 1))
+        .and_then(|node| node.response.as_deref())
+        .unwrap();
     assert_eq!(
         response, "Styled CLI response.",
         "stylesheet-driven node should use CLI backend"

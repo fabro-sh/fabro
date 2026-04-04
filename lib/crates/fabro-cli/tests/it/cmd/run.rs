@@ -690,6 +690,7 @@ fn json_run_implies_auto_approve_for_human_gates() {
         "node_id": "ship",
         "node_label": "ship",
         "properties": {
+          "command": "echo shipped",
           "language": "shell",
           "script": "echo shipped"
         },

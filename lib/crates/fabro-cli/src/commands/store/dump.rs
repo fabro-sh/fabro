@@ -448,6 +448,7 @@ mod tests {
             &WorkflowRunEvent::CommandStarted {
                 node_id: "code".to_string(),
                 script: "echo hi".to_string(),
+                command: "echo hi".to_string(),
                 language: "sh".to_string(),
                 timeout_ms: None,
             },

@@ -45,6 +45,20 @@ pub struct NodeState {
     pub stderr: Option<String>,
 }
 
+#[derive(Debug, Clone, serde::Deserialize)]
+struct RunUsage {
+    input_tokens: i64,
+    output_tokens: i64,
+    #[serde(default)]
+    reasoning_tokens: Option<i64>,
+    #[serde(default)]
+    cache_read_tokens: Option<i64>,
+    #[serde(default)]
+    cache_write_tokens: Option<i64>,
+    #[serde(default)]
+    cost: Option<f64>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct EventProjectionCache {
     pub last_seq: u32,
@@ -475,7 +489,7 @@ fn conclusion_from_completed(
     properties: &serde_json::Map<String, Value>,
     timestamp: DateTime<Utc>,
 ) -> Result<Conclusion> {
-    let usage = optional_json::<fabro_types::StageUsage>(properties, "usage")?;
+    let usage = optional_json::<RunUsage>(properties, "usage")?;
     Ok(Conclusion {
         timestamp,
         status: StageStatus::from_str(&required_string(properties, "status")?).map_err(|err| {

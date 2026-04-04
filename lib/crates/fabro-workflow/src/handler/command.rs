@@ -7,7 +7,6 @@ use crate::event::WorkflowRunEvent;
 use crate::outcome::{Outcome, OutcomeExt};
 use async_trait::async_trait;
 use fabro_graphviz::graph::{Graph, Node};
-use tokio::fs;
 
 use super::{EngineServices, Handler};
 
@@ -60,7 +59,7 @@ impl Handler for CommandHandler {
         node: &Node,
         _context: &Context,
         _graph: &Graph,
-        run_dir: &Path,
+        _run_dir: &Path,
         services: &EngineServices,
     ) -> Result<Outcome, FabroError> {
         let script = node
@@ -86,34 +85,18 @@ impl Handler for CommandHandler {
             )));
         }
 
-        services.emitter.emit(&WorkflowRunEvent::CommandStarted {
-            node_id: node.id.clone(),
-            script: script.to_string(),
-            language: language.to_string(),
-            timeout_ms: timeout_ms(node),
-        });
-
         let command = if language == "python" {
             format!("python3 -c {}", shell_quote(script))
         } else {
             script.to_string()
         };
-        let stage_dir = run_dir.join("nodes").join(&node.id);
-        fs::create_dir_all(&stage_dir)
-            .await
-            .map_err(|err| FabroError::handler(format!("failed to create stage dir: {err}")))?;
-        fs::write(
-            stage_dir.join("script_invocation.json"),
-            serde_json::to_vec_pretty(&serde_json::json!({
-                "script": script,
-                "command": command,
-                "language": language,
-                "timeout_ms": timeout_ms(node),
-            }))
-            .map_err(|err| FabroError::handler(format!("failed to serialize invocation: {err}")))?,
-        )
-        .await
-        .map_err(|err| FabroError::handler(format!("failed to write invocation file: {err}")))?;
+        services.emitter.emit(&WorkflowRunEvent::CommandStarted {
+            node_id: node.id.clone(),
+            script: script.to_string(),
+            command: command.clone(),
+            language: language.to_string(),
+            timeout_ms: timeout_ms(node),
+        });
 
         let timeout_ms = node
             .timeout()
@@ -138,23 +121,6 @@ impl Handler for CommandHandler {
             duration_ms: result.duration_ms,
             timed_out: result.timed_out,
         });
-        fs::write(stage_dir.join("stdout.log"), &result.stdout)
-            .await
-            .map_err(|err| FabroError::handler(format!("failed to write stdout log: {err}")))?;
-        fs::write(stage_dir.join("stderr.log"), &result.stderr)
-            .await
-            .map_err(|err| FabroError::handler(format!("failed to write stderr log: {err}")))?;
-        fs::write(
-            stage_dir.join("script_timing.json"),
-            serde_json::to_vec_pretty(&serde_json::json!({
-                "duration_ms": result.duration_ms,
-                "exit_code": (!result.timed_out).then_some(result.exit_code),
-                "timed_out": result.timed_out,
-            }))
-            .map_err(|err| FabroError::handler(format!("failed to serialize timing: {err}")))?,
-        )
-        .await
-        .map_err(|err| FabroError::handler(format!("failed to write timing file: {err}")))?;
 
         if result.timed_out {
             return Err(FabroError::handler(format!(
@@ -391,19 +357,17 @@ mod tests {
         let context = Context::new();
         let graph = Graph::new("test");
         let run_dir = tempfile::tempdir().unwrap();
+        let (services, run_store, logger) = make_services_with_run_store().await;
 
         handler
-            .execute(&node, &context, &graph, run_dir.path(), &make_services())
+            .execute(&node, &context, &graph, run_dir.path(), &services)
             .await
             .unwrap();
+        logger.flush().await;
 
-        let invocation_path = run_dir
-            .path()
-            .join("nodes")
-            .join("script_node")
-            .join("script_invocation.json");
-        let content = std::fs::read_to_string(&invocation_path).unwrap();
-        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let snapshot = run_store.state().await.unwrap();
+        let node_state = snapshot.node(&StageId::new("script_node", 1)).unwrap();
+        let json = node_state.script_invocation.as_ref().unwrap();
         assert_eq!(json["command"], "echo hello");
         assert_eq!(json["language"], "shell");
         assert_eq!(json["timeout_ms"], serde_json::Value::Null);
@@ -424,19 +388,17 @@ mod tests {
         let context = Context::new();
         let graph = Graph::new("test");
         let run_dir = tempfile::tempdir().unwrap();
+        let (services, run_store, logger) = make_services_with_run_store().await;
 
         handler
-            .execute(&node, &context, &graph, run_dir.path(), &make_services())
+            .execute(&node, &context, &graph, run_dir.path(), &services)
             .await
             .unwrap();
+        logger.flush().await;
 
-        let invocation_path = run_dir
-            .path()
-            .join("nodes")
-            .join("script_node")
-            .join("script_invocation.json");
-        let content = std::fs::read_to_string(&invocation_path).unwrap();
-        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let snapshot = run_store.state().await.unwrap();
+        let node_state = snapshot.node(&StageId::new("script_node", 1)).unwrap();
+        let json = node_state.script_invocation.as_ref().unwrap();
         assert_eq!(json["command"], "echo hello");
         assert_eq!(json["language"], "shell");
         assert_eq!(json["timeout_ms"], 5000);
@@ -453,16 +415,19 @@ mod tests {
         let context = Context::new();
         let graph = Graph::new("test");
         let run_dir = tempfile::tempdir().unwrap();
+        let (services, run_store, logger) = make_services_with_run_store().await;
 
         handler
-            .execute(&node, &context, &graph, run_dir.path(), &make_services())
+            .execute(&node, &context, &graph, run_dir.path(), &services)
             .await
             .unwrap();
+        logger.flush().await;
 
-        let stage_dir = run_dir.path().join("nodes").join("script_node");
-        let stdout = std::fs::read_to_string(stage_dir.join("stdout.log")).unwrap();
+        let snapshot = run_store.state().await.unwrap();
+        let node_state = snapshot.node(&StageId::new("script_node", 1)).unwrap();
+        let stdout = node_state.stdout.as_deref().unwrap();
         assert_eq!(stdout.trim(), "hello");
-        let stderr = std::fs::read_to_string(stage_dir.join("stderr.log")).unwrap();
+        let stderr = node_state.stderr.as_deref().unwrap();
         assert_eq!(stderr, "");
     }
 
@@ -477,14 +442,17 @@ mod tests {
         let context = Context::new();
         let graph = Graph::new("test");
         let run_dir = tempfile::tempdir().unwrap();
+        let (services, run_store, logger) = make_services_with_run_store().await;
 
         handler
-            .execute(&node, &context, &graph, run_dir.path(), &make_services())
+            .execute(&node, &context, &graph, run_dir.path(), &services)
             .await
             .unwrap();
+        logger.flush().await;
 
-        let stage_dir = run_dir.path().join("nodes").join("script_node");
-        let stderr = std::fs::read_to_string(stage_dir.join("stderr.log")).unwrap();
+        let snapshot = run_store.state().await.unwrap();
+        let node_state = snapshot.node(&StageId::new("script_node", 1)).unwrap();
+        let stderr = node_state.stderr.as_deref().unwrap();
         assert_eq!(stderr.trim(), "oops");
     }
 
@@ -499,19 +467,17 @@ mod tests {
         let context = Context::new();
         let graph = Graph::new("test");
         let run_dir = tempfile::tempdir().unwrap();
+        let (services, run_store, logger) = make_services_with_run_store().await;
 
         handler
-            .execute(&node, &context, &graph, run_dir.path(), &make_services())
+            .execute(&node, &context, &graph, run_dir.path(), &services)
             .await
             .unwrap();
+        logger.flush().await;
 
-        let timing_path = run_dir
-            .path()
-            .join("nodes")
-            .join("script_node")
-            .join("script_timing.json");
-        let content = std::fs::read_to_string(&timing_path).unwrap();
-        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let snapshot = run_store.state().await.unwrap();
+        let node_state = snapshot.node(&StageId::new("script_node", 1)).unwrap();
+        let json = node_state.script_timing.as_ref().unwrap();
         assert!(json["duration_ms"].is_u64());
         assert_eq!(json["exit_code"], 0);
         assert_eq!(json["timed_out"], false);
@@ -526,19 +492,17 @@ mod tests {
         let context = Context::new();
         let graph = Graph::new("test");
         let run_dir = tempfile::tempdir().unwrap();
+        let (services, run_store, logger) = make_services_with_run_store().await;
 
         handler
-            .execute(&node, &context, &graph, run_dir.path(), &make_services())
+            .execute(&node, &context, &graph, run_dir.path(), &services)
             .await
             .unwrap();
+        logger.flush().await;
 
-        let timing_path = run_dir
-            .path()
-            .join("nodes")
-            .join("script_node")
-            .join("script_timing.json");
-        let content = std::fs::read_to_string(&timing_path).unwrap();
-        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let snapshot = run_store.state().await.unwrap();
+        let node_state = snapshot.node(&StageId::new("script_node", 1)).unwrap();
+        let json = node_state.script_timing.as_ref().unwrap();
         assert_eq!(json["exit_code"], 1);
         assert_eq!(json["timed_out"], false);
     }
@@ -558,19 +522,17 @@ mod tests {
         let context = Context::new();
         let graph = Graph::new("test");
         let run_dir = tempfile::tempdir().unwrap();
+        let (services, run_store, logger) = make_services_with_run_store().await;
 
         let _err = handler
-            .execute(&node, &context, &graph, run_dir.path(), &make_services())
+            .execute(&node, &context, &graph, run_dir.path(), &services)
             .await
             .unwrap_err();
+        logger.flush().await;
 
-        let timing_path = run_dir
-            .path()
-            .join("nodes")
-            .join("script_node")
-            .join("script_timing.json");
-        let content = std::fs::read_to_string(&timing_path).unwrap();
-        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let snapshot = run_store.state().await.unwrap();
+        let node_state = snapshot.node(&StageId::new("script_node", 1)).unwrap();
+        let json = node_state.script_timing.as_ref().unwrap();
         assert!(json["duration_ms"].is_u64());
         assert_eq!(json["exit_code"], serde_json::Value::Null);
         assert_eq!(json["timed_out"], true);

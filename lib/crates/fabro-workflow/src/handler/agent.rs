@@ -5,13 +5,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
 use fabro_model::Provider;
-use fabro_types::{RunId, StageId};
-use tokio::fs;
+use fabro_types::RunId;
 
 use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
-use crate::event::EventEmitter;
+use crate::event::{EventEmitter, WorkflowRunEvent};
 use crate::outcome::{
     FailureCategory, FailureDetail, Outcome, OutcomeExt, StageStatus, StageUsage,
 };
@@ -198,91 +197,6 @@ pub(crate) fn truncate(s: &str, max_chars: usize) -> &str {
     }
 }
 
-pub(crate) fn stage_dir(run_dir: &Path, node_id: &str, visit: u32) -> std::path::PathBuf {
-    let node_dir = if visit <= 1 {
-        node_id.to_string()
-    } else {
-        format!("{node_id}-visit_{visit}")
-    };
-    run_dir.join("nodes").join(node_dir)
-}
-
-pub(crate) fn status_json_value(outcome: &Outcome) -> serde_json::Value {
-    let mut status = serde_json::Map::new();
-    status.insert(
-        "status".to_string(),
-        serde_json::Value::String(outcome.status.to_string()),
-    );
-    status.insert(
-        "outcome".to_string(),
-        serde_json::Value::String(outcome.status.to_string()),
-    );
-    if let Some(label) = outcome.preferred_label.as_ref() {
-        status.insert(
-            "preferred_next_label".to_string(),
-            serde_json::Value::String(label.clone()),
-        );
-    }
-    if !outcome.suggested_next_ids.is_empty() {
-        status.insert(
-            "suggested_next_ids".to_string(),
-            serde_json::json!(outcome.suggested_next_ids),
-        );
-    }
-    if let Some(failure) = outcome.failure.as_ref() {
-        status.insert(
-            "failure_reason".to_string(),
-            serde_json::Value::String(failure.message.clone()),
-        );
-    }
-    if !outcome.context_updates.is_empty() {
-        status.insert(
-            "context_updates".to_string(),
-            serde_json::Value::Object(
-                outcome
-                    .context_updates
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.clone()))
-                    .collect(),
-            ),
-        );
-    }
-    serde_json::Value::Object(status)
-}
-
-pub(crate) async fn write_provider_used_file(
-    services: &EngineServices,
-    stage_dir: &Path,
-    node_id: &str,
-    visit: u32,
-    fallback: Option<serde_json::Value>,
-) -> Result<(), FabroError> {
-    let provider_used = services
-        .run_store
-        .state()
-        .await
-        .ok()
-        .and_then(|state| {
-            let node = StageId::new(node_id, visit);
-            state
-                .node(&node)
-                .and_then(|node_state| node_state.provider_used.clone())
-        })
-        .or(fallback);
-    let Some(provider_used) = provider_used else {
-        return Ok(());
-    };
-    fs::write(
-        stage_dir.join("provider_used.json"),
-        serde_json::to_vec_pretty(&provider_used).map_err(|err| {
-            FabroError::handler(format!("failed to serialize provider_used.json: {err}"))
-        })?,
-    )
-    .await
-    .map_err(|err| FabroError::handler(format!("failed to write provider_used.json: {err}")))?;
-    Ok(())
-}
-
 /// Shared simulate implementation for LLM-backed handlers (agent & prompt).
 /// Produces a simulated outcome with standard context updates.
 pub(crate) fn simulate_llm_handler(node: &Node) -> Outcome {
@@ -337,13 +251,19 @@ impl Handler for AgentHandler {
         };
 
         let visit = u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX);
-        let stage_dir = stage_dir(_run_dir, &node.id, visit);
-        fs::create_dir_all(&stage_dir)
-            .await
-            .map_err(|err| FabroError::handler(format!("failed to create stage dir: {err}")))?;
-        fs::write(stage_dir.join("prompt.md"), &prompt)
-            .await
-            .map_err(|err| FabroError::handler(format!("failed to write prompt file: {err}")))?;
+        let prompt_provider = node
+            .provider()
+            .map(String::from)
+            .or_else(|| Some(Provider::default_from_env().as_str().to_string()));
+        let prompt_model = node.model().map(String::from);
+        services.emitter.emit(&WorkflowRunEvent::Prompt {
+            stage: node.id.clone(),
+            visit,
+            text: prompt.clone(),
+            mode: Some("agent".to_string()),
+            provider: prompt_provider,
+            model: prompt_model,
+        });
 
         // 3. Call LLM backend (agent loop)
         let thread_id = context.thread_id();
@@ -399,6 +319,24 @@ impl Handler for AgentHandler {
                 )
             };
 
+        let response_model = stage_usage
+            .as_ref()
+            .map(|usage| usage.model.clone())
+            .or_else(|| node.model().map(String::from))
+            .unwrap_or_default();
+        let response_provider = node
+            .provider()
+            .map(String::from)
+            .or_else(|| Some(Provider::default_from_env().as_str().to_string()))
+            .unwrap_or_default();
+        services.emitter.emit(&WorkflowRunEvent::PromptCompleted {
+            node_id: node.id.clone(),
+            response: response_text.clone(),
+            model: response_model,
+            provider: response_provider,
+            usage: stage_usage.clone(),
+        });
+
         // Build and write status
         let mut outcome = Outcome::success();
         outcome.notes = Some(format!("Stage completed: {}", node.id));
@@ -447,33 +385,6 @@ impl Handler for AgentHandler {
         }
         outcome.usage = stage_usage;
         outcome.files_touched = backend_files_touched;
-        fs::write(stage_dir.join("response.md"), &response_text)
-            .await
-            .map_err(|err| FabroError::handler(format!("failed to write response file: {err}")))?;
-        fs::write(
-            stage_dir.join("status.json"),
-            serde_json::to_vec_pretty(&status_json_value(&outcome))
-                .map_err(|err| FabroError::handler(format!("failed to serialize status: {err}")))?,
-        )
-        .await
-        .map_err(|err| FabroError::handler(format!("failed to write status file: {err}")))?;
-        write_provider_used_file(
-            services,
-            &stage_dir,
-            &node.id,
-            visit,
-            Some(serde_json::json!({
-                "mode": if node.backend() == Some("cli") { "cli" } else { "agent" },
-                "provider": node
-                    .provider()
-                    .map_or_else(
-                        || Provider::default_from_env().as_str().to_string(),
-                        String::from,
-                    ),
-                "model": node.model().map(String::from).unwrap_or_default(),
-            })),
-        )
-        .await?;
 
         Ok(outcome)
     }
@@ -569,16 +480,20 @@ mod tests {
             AttrValue::String("Build a feature".to_string()),
         );
         let tmp = TempDir::new().unwrap();
+        let (services, run_store, logger) = make_services_with_run_store().await;
 
         handler
-            .execute(&node, &context, &graph, tmp.path(), &make_services())
+            .execute(&node, &context, &graph, tmp.path(), &services)
             .await
             .unwrap();
+        logger.flush().await;
 
-        let prompt_content =
-            std::fs::read_to_string(tmp.path().join("nodes").join("plan").join("prompt.md"))
-                .unwrap();
-        assert_eq!(prompt_content, "Achieve: Build a feature");
+        let state = run_store.state().await.unwrap();
+        let node_state = state.node(&StageId::new("plan", 1)).unwrap();
+        assert_eq!(
+            node_state.prompt.as_deref(),
+            Some("Achieve: Build a feature")
+        );
     }
 
     #[tokio::test]
@@ -592,16 +507,17 @@ mod tests {
         let context = test_context();
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
+        let (services, run_store, logger) = make_services_with_run_store().await;
 
         handler
-            .execute(&node, &context, &graph, tmp.path(), &make_services())
+            .execute(&node, &context, &graph, tmp.path(), &services)
             .await
             .unwrap();
+        logger.flush().await;
 
-        let prompt_content =
-            std::fs::read_to_string(tmp.path().join("nodes").join("work").join("prompt.md"))
-                .unwrap();
-        assert_eq!(prompt_content, "Do work");
+        let state = run_store.state().await.unwrap();
+        let node_state = state.node(&StageId::new("work", 1)).unwrap();
+        assert_eq!(node_state.prompt.as_deref(), Some("Do work"));
     }
 
     #[tokio::test]
@@ -1299,15 +1215,17 @@ Some text in between.
         );
         let graph = Graph::new("test");
         let tmp = TempDir::new().unwrap();
+        let (services, run_store, logger) = make_services_with_run_store().await;
 
         handler
-            .execute(&node, &context, &graph, tmp.path(), &make_services())
+            .execute(&node, &context, &graph, tmp.path(), &services)
             .await
             .unwrap();
+        logger.flush().await;
 
-        let prompt_content =
-            std::fs::read_to_string(tmp.path().join("nodes").join("report").join("prompt.md"))
-                .unwrap();
+        let state = run_store.state().await.unwrap();
+        let node_state = state.node(&StageId::new("report", 1)).unwrap();
+        let prompt_content = node_state.prompt.as_deref().unwrap();
         assert!(
             prompt_content.contains("## Script Output\nAll tests passed"),
             "prompt.md should contain preamble"

@@ -11,6 +11,7 @@ mod real_cli;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use fabro_test::TestContext;
 use serde_json::Value;
 
 pub(super) fn fixture(name: &str) -> PathBuf {
@@ -51,6 +52,22 @@ pub(super) fn has_event(run_dir: &Path, event_name: &str) -> bool {
             false
         }
     })
+}
+
+pub(super) fn store_dump_export(context: &TestContext, run_id: &str) -> PathBuf {
+    let output_dir = context.temp_dir.join(format!("store-dump-{run_id}"));
+    context
+        .command()
+        .args([
+            "store",
+            "dump",
+            "--output",
+            output_dir.to_str().unwrap(),
+            run_id,
+        ])
+        .assert()
+        .success();
+    output_dir
 }
 
 /// Find the single run directory under `storage_dir/runs/`.

@@ -202,17 +202,15 @@ fn rm_partial_failure_json_includes_removed_and_errors() {
 }
 
 #[test]
-fn rm_json_reports_removed_run_when_store_delete_fails() {
+fn rm_json_removes_run_when_store_locator_is_corrupt() {
     let context = test_context!();
     let run = setup_completed_dry_run(&context);
     let by_id_path = find_store_catalog_entry(&context.storage_dir.join("store"), &run.run_id);
     let original = std::fs::read(&by_id_path)
         .unwrap_or_else(|err| panic!("failed to read {}: {err}", by_id_path.display()));
 
-    // This intentionally mutates the backing store metadata to force a store-only
-    // delete failure. Reproducing that failure through public commands is not
-    // practical, and the command contract under test is still `fabro rm`'s JSON
-    // partial-success reporting.
+    // Corrupt the by-id locator. Deletion should still succeed via the by-start
+    // fallback path instead of surfacing a false partial failure.
     std::fs::write(&by_id_path, b"{not valid json")
         .unwrap_or_else(|err| panic!("failed to corrupt {}: {err}", by_id_path.display()));
     scopeguard::defer! {
@@ -226,20 +224,15 @@ fn rm_json_reports_removed_run_when_store_delete_fails() {
         .expect("command should run");
 
     assert!(
-        !output.status.success(),
-        "rm should report the store failure"
+        output.status.success(),
+        "rm should still succeed when the locator is corrupt"
     );
     let value: Value = serde_json::from_slice(&output.stdout).expect("rm JSON should parse");
     assert_eq!(
         value["removed"],
         Value::Array(vec![Value::String(run.run_id.clone())])
     );
-    assert_eq!(value["errors"][0]["identifier"], run.run_id);
-    assert!(
-        value["errors"][0]["error"]
-            .as_str()
-            .is_some_and(|error| error.contains("failed to delete store state"))
-    );
+    assert_eq!(value["errors"], Value::Array(Vec::new()));
     assert!(
         !run.run_dir.exists(),
         "run directory should still be deleted"

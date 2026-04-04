@@ -429,6 +429,7 @@ pub enum WorkflowRunEvent {
     CommandStarted {
         node_id: String,
         script: String,
+        command: String,
         language: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout_ms: Option<u64>,

@@ -80,6 +80,7 @@ pub struct Started {
 
 /// Start a fresh workflow run. Errors if a checkpoint already exists (use `resume()` instead).
 pub async fn start(run_dir: &Path, services: StartServices) -> Result<Started, FabroError> {
+    std::fs::create_dir_all(run_dir).map_err(|err| FabroError::Io(err.to_string()))?;
     let state = services
         .run_store
         .state()
