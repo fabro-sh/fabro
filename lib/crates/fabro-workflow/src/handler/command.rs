@@ -7,6 +7,7 @@ use crate::event::WorkflowRunEvent;
 use crate::outcome::{Outcome, OutcomeExt};
 use async_trait::async_trait;
 use fabro_graphviz::graph::{Graph, Node};
+use tokio::fs;
 
 use super::{EngineServices, Handler};
 
@@ -59,7 +60,7 @@ impl Handler for CommandHandler {
         node: &Node,
         _context: &Context,
         _graph: &Graph,
-        _run_dir: &Path,
+        run_dir: &Path,
         services: &EngineServices,
     ) -> Result<Outcome, FabroError> {
         let script = node
@@ -97,6 +98,22 @@ impl Handler for CommandHandler {
         } else {
             script.to_string()
         };
+        let stage_dir = run_dir.join("nodes").join(&node.id);
+        fs::create_dir_all(&stage_dir)
+            .await
+            .map_err(|err| FabroError::handler(format!("failed to create stage dir: {err}")))?;
+        fs::write(
+            stage_dir.join("script_invocation.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "script": script,
+                "command": command,
+                "language": language,
+                "timeout_ms": timeout_ms(node),
+            }))
+            .map_err(|err| FabroError::handler(format!("failed to serialize invocation: {err}")))?,
+        )
+        .await
+        .map_err(|err| FabroError::handler(format!("failed to write invocation file: {err}")))?;
 
         let timeout_ms = node
             .timeout()
@@ -121,6 +138,23 @@ impl Handler for CommandHandler {
             duration_ms: result.duration_ms,
             timed_out: result.timed_out,
         });
+        fs::write(stage_dir.join("stdout.log"), &result.stdout)
+            .await
+            .map_err(|err| FabroError::handler(format!("failed to write stdout log: {err}")))?;
+        fs::write(stage_dir.join("stderr.log"), &result.stderr)
+            .await
+            .map_err(|err| FabroError::handler(format!("failed to write stderr log: {err}")))?;
+        fs::write(
+            stage_dir.join("script_timing.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "duration_ms": result.duration_ms,
+                "exit_code": (!result.timed_out).then_some(result.exit_code),
+                "timed_out": result.timed_out,
+            }))
+            .map_err(|err| FabroError::handler(format!("failed to serialize timing: {err}")))?,
+        )
+        .await
+        .map_err(|err| FabroError::handler(format!("failed to write timing file: {err}")))?;
 
         if result.timed_out {
             return Err(FabroError::handler(format!(

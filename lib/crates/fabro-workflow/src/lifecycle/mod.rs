@@ -150,6 +150,7 @@ impl WorkflowLifecycle {
             graph: Arc::clone(&graph),
             run_options: Arc::clone(run_options),
             emitter: Arc::clone(emitter),
+            checkpoint_git_result: Arc::clone(&checkpoint_git_result),
             circuit_breaker: Arc::clone(&circuit_breaker),
             checkpoint_enabled: true,
         };
@@ -407,10 +408,10 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
         next_node_id: Option<&str>,
         state: &WfRunState,
     ) -> CoreResult<()> {
-        self.disk
+        self.git
             .on_checkpoint(node, result, next_node_id, state)
             .await?;
-        self.git
+        self.disk
             .on_checkpoint(node, result, next_node_id, state)
             .await?;
         self.event

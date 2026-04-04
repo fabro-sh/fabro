@@ -4,7 +4,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
+use fabro_model::Provider;
+use fabro_store::NodeVisitRef;
 use fabro_types::RunId;
+use tokio::fs;
 
 use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
@@ -13,6 +16,7 @@ use crate::event::EventEmitter;
 use crate::outcome::{
     FailureCategory, FailureDetail, Outcome, OutcomeExt, StageStatus, StageUsage,
 };
+use crate::run_dir::visit_from_context;
 use crate::transforms::variable_expansion::expand_vars;
 use fabro_graphviz::graph::{Graph, Node};
 
@@ -195,6 +199,91 @@ pub(crate) fn truncate(s: &str, max_chars: usize) -> &str {
     }
 }
 
+pub(crate) fn stage_dir(run_dir: &Path, node_id: &str, visit: u32) -> std::path::PathBuf {
+    let node_dir = if visit <= 1 {
+        node_id.to_string()
+    } else {
+        format!("{node_id}-visit_{visit}")
+    };
+    run_dir.join("nodes").join(node_dir)
+}
+
+pub(crate) fn status_json_value(outcome: &Outcome) -> serde_json::Value {
+    let mut status = serde_json::Map::new();
+    status.insert(
+        "status".to_string(),
+        serde_json::Value::String(outcome.status.to_string()),
+    );
+    status.insert(
+        "outcome".to_string(),
+        serde_json::Value::String(outcome.status.to_string()),
+    );
+    if let Some(label) = outcome.preferred_label.as_ref() {
+        status.insert(
+            "preferred_next_label".to_string(),
+            serde_json::Value::String(label.clone()),
+        );
+    }
+    if !outcome.suggested_next_ids.is_empty() {
+        status.insert(
+            "suggested_next_ids".to_string(),
+            serde_json::json!(outcome.suggested_next_ids),
+        );
+    }
+    if let Some(failure) = outcome.failure.as_ref() {
+        status.insert(
+            "failure_reason".to_string(),
+            serde_json::Value::String(failure.message.clone()),
+        );
+    }
+    if !outcome.context_updates.is_empty() {
+        status.insert(
+            "context_updates".to_string(),
+            serde_json::Value::Object(
+                outcome
+                    .context_updates
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone()))
+                    .collect(),
+            ),
+        );
+    }
+    serde_json::Value::Object(status)
+}
+
+pub(crate) async fn write_provider_used_file(
+    services: &EngineServices,
+    stage_dir: &Path,
+    node_id: &str,
+    visit: u32,
+    fallback: Option<serde_json::Value>,
+) -> Result<(), FabroError> {
+    let provider_used = services
+        .run_store
+        .state()
+        .await
+        .ok()
+        .and_then(|state| {
+            let node = NodeVisitRef { node_id, visit };
+            state
+                .node(&node)
+                .and_then(|node_state| node_state.provider_used.clone())
+        })
+        .or(fallback);
+    let Some(provider_used) = provider_used else {
+        return Ok(());
+    };
+    fs::write(
+        stage_dir.join("provider_used.json"),
+        serde_json::to_vec_pretty(&provider_used).map_err(|err| {
+            FabroError::handler(format!("failed to serialize provider_used.json: {err}"))
+        })?,
+    )
+    .await
+    .map_err(|err| FabroError::handler(format!("failed to write provider_used.json: {err}")))?;
+    Ok(())
+}
+
 /// Shared simulate implementation for LLM-backed handlers (agent & prompt).
 /// Produces a simulated outcome with standard context updates.
 pub(crate) fn simulate_llm_handler(node: &Node) -> Outcome {
@@ -247,6 +336,15 @@ impl Handler for AgentHandler {
         } else {
             format!("{preamble}\n\n{expanded}")
         };
+
+        let visit = u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX);
+        let stage_dir = stage_dir(_run_dir, &node.id, visit);
+        fs::create_dir_all(&stage_dir)
+            .await
+            .map_err(|err| FabroError::handler(format!("failed to create stage dir: {err}")))?;
+        fs::write(stage_dir.join("prompt.md"), &prompt)
+            .await
+            .map_err(|err| FabroError::handler(format!("failed to write prompt file: {err}")))?;
 
         // 3. Call LLM backend (agent loop)
         let thread_id = context.thread_id();
@@ -350,6 +448,31 @@ impl Handler for AgentHandler {
         }
         outcome.usage = stage_usage;
         outcome.files_touched = backend_files_touched;
+        fs::write(stage_dir.join("response.md"), &response_text)
+            .await
+            .map_err(|err| FabroError::handler(format!("failed to write response file: {err}")))?;
+        fs::write(
+            stage_dir.join("status.json"),
+            serde_json::to_vec_pretty(&status_json_value(&outcome))
+                .map_err(|err| FabroError::handler(format!("failed to serialize status: {err}")))?,
+        )
+        .await
+        .map_err(|err| FabroError::handler(format!("failed to write status file: {err}")))?;
+        write_provider_used_file(
+            services,
+            &stage_dir,
+            &node.id,
+            visit,
+            Some(serde_json::json!({
+                "mode": if node.backend() == Some("cli") { "cli" } else { "agent" },
+                "provider": node
+                    .provider()
+                    .map(String::from)
+                    .unwrap_or_else(|| Provider::default_from_env().as_str().to_string()),
+                "model": node.model().map(String::from).unwrap_or_default(),
+            })),
+        )
+        .await?;
 
         Ok(outcome)
     }
@@ -390,6 +513,7 @@ mod tests {
             .await
             .unwrap();
         let services = EngineServices {
+            emitter: Arc::new(crate::event::EventEmitter::new(fixtures::RUN_1)),
             run_store: run_store.clone(),
             ..EngineServices::test_default()
         };
