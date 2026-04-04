@@ -1,9 +1,11 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use fabro_store::SlateRunStore;
 use fabro_types::RunId;
+use tokio::fs;
 
 use fabro_core::error::{CoreError, Result as CoreResult};
 use fabro_core::graph::NodeSpec;
@@ -16,6 +18,7 @@ use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::git::MetadataStore;
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
+use crate::lifecycle::disk::build_checkpoint;
 use crate::outcome::{Outcome, StageStatus, StageUsage};
 use crate::run_dump::RunDump;
 use crate::run_options::RunOptions;
@@ -92,7 +95,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
         &self,
         node: &WorkflowNode,
         result: &WfNodeResult,
-        _next_node_id: Option<&str>,
+        next_node_id: Option<&str>,
         state: &WfRunState,
     ) -> CoreResult<()> {
         let node_id = node.id();
@@ -113,15 +116,16 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
         ) {
             let git_author = self.run_options.git_author();
             let store = MetadataStore::new(repo_path, &git_author);
-            // Build checkpoint JSON for shadow branch
-            if let Some(cp_json) = self
-                .run_store
-                .state()
-                .await
-                .ok()
-                .and_then(|state| state.checkpoint)
-                .and_then(|checkpoint| serde_json::to_vec_pretty(&checkpoint).ok())
-            {
+            let checkpoint = build_checkpoint(
+                node,
+                result,
+                next_node_id,
+                state,
+                HashMap::new(),
+                HashMap::new(),
+                None,
+            );
+            if let Ok(cp_json) = serde_json::to_vec_pretty(&checkpoint) {
                 let mut extra_entries: Vec<(String, Vec<u8>)> = {
                     let artifact_store = self.artifact_store.lock().unwrap();
                     artifact_store
@@ -296,6 +300,13 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                 match git_diff(&*self.sandbox, &base_sha).await {
                     Ok(patch) if !patch.is_empty() => {
                         *self.final_patch.lock().unwrap() = Some(patch.clone());
+                        if let Err(err) = fs::write(self.run_dir.join("final.patch"), patch).await {
+                            self.emitter.emit(&WorkflowRunEvent::RunNotice {
+                                level: RunNoticeLevel::Warn,
+                                code: "final_patch_write_failed".to_string(),
+                                message: format!("failed to write final.patch: {err}"),
+                            });
+                        }
                     }
                     Ok(_) => {
                         *self.final_patch.lock().unwrap() = None;

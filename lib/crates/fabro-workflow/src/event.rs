@@ -189,6 +189,8 @@ pub enum WorkflowRunEvent {
         delay_ms: u64,
     },
     ParallelStarted {
+        node_id: String,
+        visit: u32,
         branch_count: usize,
         join_policy: String,
     },
@@ -205,6 +207,8 @@ pub enum WorkflowRunEvent {
         head_sha: Option<String>,
     },
     ParallelCompleted {
+        node_id: String,
+        visit: u32,
         duration_ms: u64,
         success_count: usize,
         failure_count: usize,
@@ -680,6 +684,7 @@ impl WorkflowRunEvent {
             Self::ParallelStarted {
                 branch_count,
                 join_policy,
+                ..
             } => {
                 debug!(branch_count, join_policy, "Parallel execution started");
             }
@@ -703,6 +708,7 @@ impl WorkflowRunEvent {
                 success_count,
                 failure_count,
                 results,
+                ..
             } => {
                 debug!(
                     duration_ms,
@@ -1302,6 +1308,8 @@ fn extract_envelope_fields(event: &WorkflowRunEvent) -> EnvelopeFields {
         | WorkflowRunEvent::SubgraphCompleted { .. }
         | WorkflowRunEvent::AssetCaptured { .. }
         | WorkflowRunEvent::PromptCompleted { .. }
+        | WorkflowRunEvent::ParallelStarted { .. }
+        | WorkflowRunEvent::ParallelCompleted { .. }
         | WorkflowRunEvent::CommandStarted { .. }
         | WorkflowRunEvent::CommandCompleted { .. }
         | WorkflowRunEvent::AgentCliStarted { .. }

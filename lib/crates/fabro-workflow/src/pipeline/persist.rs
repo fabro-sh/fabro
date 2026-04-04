@@ -33,9 +33,10 @@ pub(crate) async fn load_from_store(
         .state()
         .await
         .map_err(|err| FabroError::engine(err.to_string()))?;
-    let run_record = state
+    let mut run_record = state
         .run
         .ok_or_else(|| FabroError::Precondition("run record missing from store".to_string()))?;
+    run_record.created_at = run_store.created_at();
     let graph = run_record.graph.clone();
     let source = state.graph_source.unwrap_or_default();
 

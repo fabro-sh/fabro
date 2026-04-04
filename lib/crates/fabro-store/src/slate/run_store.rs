@@ -89,7 +89,7 @@ impl SlateRunStore {
         self.inner.record.clone()
     }
 
-    pub(crate) fn created_at(&self) -> DateTime<Utc> {
+    pub fn created_at(&self) -> DateTime<Utc> {
         self.inner.record.created_at
     }
 

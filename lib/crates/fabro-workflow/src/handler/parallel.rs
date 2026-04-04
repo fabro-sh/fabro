@@ -5,6 +5,7 @@ use std::time::Instant;
 use async_trait::async_trait;
 use fabro_agent::{Sandbox, WorktreeOptions, WorktreeSandbox};
 use fabro_types::RunId;
+use tokio::fs;
 use tokio::sync::Semaphore;
 
 use crate::context::keys;
@@ -151,6 +152,8 @@ impl Handler for ParallelHandler {
         );
 
         services.emitter.emit(&WorkflowRunEvent::ParallelStarted {
+            node_id: node.id.clone(),
+            visit: u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX),
             branch_count: branches.len(),
             join_policy: join_policy.to_string(),
         });
@@ -473,10 +476,26 @@ impl Handler for ParallelHandler {
                 entry
             })
             .collect();
+        let stage_dir = run_dir.join("nodes").join(&node.id);
+        fs::create_dir_all(&stage_dir)
+            .await
+            .map_err(|err| FabroError::handler(format!("failed to create stage dir: {err}")))?;
+        fs::write(
+            stage_dir.join("parallel_results.json"),
+            serde_json::to_vec_pretty(&results_json).map_err(|err| {
+                FabroError::handler(format!("failed to serialize parallel results: {err}"))
+            })?,
+        )
+        .await
+        .map_err(|err| {
+            FabroError::handler(format!("failed to write parallel results file: {err}"))
+        })?;
         context.set(keys::PARALLEL_RESULTS, serde_json::json!(results_json));
         context.set(keys::PARALLEL_BRANCH_COUNT, serde_json::json!(total));
 
         services.emitter.emit(&WorkflowRunEvent::ParallelCompleted {
+            node_id: node.id.clone(),
+            visit: u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX),
             duration_ms: millis_u64(parallel_start.elapsed()),
             success_count,
             failure_count: fail_count,
@@ -678,9 +697,12 @@ mod tests {
             .await
             .unwrap();
         let services = EngineServices {
+            emitter: Arc::new(crate::event::EventEmitter::new(fixtures::RUN_1)),
             run_store: run_store.clone(),
             ..EngineServices::test_default()
         };
+        let logger = crate::event::StoreProgressLogger::new(run_store.clone());
+        logger.register(services.emitter.as_ref());
         let mut node = Node::new("par");
         node.attrs.insert(
             "shape".to_string(),
@@ -703,6 +725,7 @@ mod tests {
             .execute(&node, &context, &graph, tmp.path(), &services)
             .await
             .unwrap();
+        logger.flush().await;
 
         let state = run_store.state().await.unwrap();
         let node_state = state

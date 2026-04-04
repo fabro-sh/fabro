@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use async_trait::async_trait;
+use tokio::fs;
 
 use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
@@ -12,7 +13,8 @@ use fabro_graphviz::graph::{Graph, Node};
 use fabro_model::Provider;
 
 use super::agent::{
-    CodergenBackend, CodergenResult, expand_variables, extract_status_fields, truncate,
+    CodergenBackend, CodergenResult, expand_variables, extract_status_fields, stage_dir,
+    status_json_value, truncate, write_provider_used_file,
 };
 use super::{EngineServices, Handler};
 
@@ -46,7 +48,7 @@ impl Handler for PromptHandler {
         node: &Node,
         context: &Context,
         graph: &Graph,
-        _run_dir: &Path,
+        run_dir: &Path,
         services: &EngineServices,
     ) -> Result<Outcome, FabroError> {
         // 1. Build prompt (prepend fidelity preamble if present)
@@ -61,6 +63,14 @@ impl Handler for PromptHandler {
         } else {
             format!("{preamble}\n\n{expanded}")
         };
+        let visit = u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX);
+        let stage_dir = stage_dir(run_dir, &node.id, visit);
+        fs::create_dir_all(&stage_dir)
+            .await
+            .map_err(|err| FabroError::handler(format!("failed to create stage dir: {err}")))?;
+        fs::write(stage_dir.join("prompt.md"), &prompt)
+            .await
+            .map_err(|err| FabroError::handler(format!("failed to write prompt file: {err}")))?;
 
         // 1b. Discover project docs for system prompt when project_memory is enabled
         let system_prompt = if node.project_memory() {
@@ -166,6 +176,28 @@ impl Handler for PromptHandler {
         extract_status_fields(&response_text, &mut outcome);
         outcome.usage = stage_usage;
         outcome.files_touched = backend_files_touched;
+        fs::write(stage_dir.join("response.md"), &response_text)
+            .await
+            .map_err(|err| FabroError::handler(format!("failed to write response file: {err}")))?;
+        fs::write(
+            stage_dir.join("status.json"),
+            serde_json::to_vec_pretty(&status_json_value(&outcome))
+                .map_err(|err| FabroError::handler(format!("failed to serialize status: {err}")))?,
+        )
+        .await
+        .map_err(|err| FabroError::handler(format!("failed to write status file: {err}")))?;
+        write_provider_used_file(
+            services,
+            &stage_dir,
+            &node.id,
+            visit,
+            Some(serde_json::json!({
+                "mode": "prompt",
+                "provider": prompt_provider.unwrap_or_default(),
+                "model": prompt_model.unwrap_or_default(),
+            })),
+        )
+        .await?;
 
         Ok(outcome)
     }
@@ -205,6 +237,7 @@ mod tests {
             .await
             .unwrap();
         let services = EngineServices {
+            emitter: Arc::new(crate::event::EventEmitter::new(fixtures::RUN_1)),
             run_store: run_store.clone(),
             ..EngineServices::test_default()
         };

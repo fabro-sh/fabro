@@ -86,12 +86,22 @@ impl EngineServices {
             sandbox: Arc::new(fabro_agent::LocalSandbox::new(
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             )),
-            run_store: futures::executor::block_on(async {
-                store
-                    .create_run(&fabro_types::RunId::new(), chrono::Utc::now(), None)
-                    .await
-                    .expect("slate-backed test run store should initialize")
-            }),
+            // Build the test run store on a dedicated runtime so this helper
+            // remains safe to call from both sync tests and #[tokio::test].
+            run_store: std::thread::spawn(move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("test runtime should initialize")
+                    .block_on(async {
+                        store
+                            .create_run(&fabro_types::RunId::new(), chrono::Utc::now(), None)
+                            .await
+                            .expect("slate-backed test run store should initialize")
+                    })
+            })
+            .join()
+            .expect("test run store thread should join"),
             git_state: std::sync::RwLock::new(None),
             hook_runner: None,
             env: HashMap::new(),
