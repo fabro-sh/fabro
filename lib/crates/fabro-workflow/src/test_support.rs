@@ -31,7 +31,7 @@ struct InitializedState {
 fn bound_emitter(run_id: fabro_types::RunId, observer: &Arc<EventEmitter>) -> Arc<EventEmitter> {
     let emitter = Arc::new(EventEmitter::new(run_id));
     let observer_clone = Arc::clone(observer);
-    emitter.on_event(move |event| observer_clone.dispatch_envelope(event));
+    emitter.on_event(move |event| observer_clone.dispatch_stored_event(event));
     emitter
 }
 

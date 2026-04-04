@@ -1,6 +1,7 @@
 use std::convert::TryFrom;
 
 use chrono::{DateTime, Utc};
+use fabro_types::StoredEvent;
 use fabro_workflow::event::RunNoticeLevel;
 use fabro_workflow::outcome::{StageUsage, compute_stage_cost};
 use serde_json::{Map, Value};
@@ -240,10 +241,7 @@ pub(super) enum ProgressEvent {
 }
 
 #[allow(clippy::needless_pass_by_value)]
-pub(super) fn from_envelope_fields(
-    event_name: &str,
-    fields: &Map<String, Value>,
-) -> Option<ProgressEvent> {
+fn from_envelope_fields(event_name: &str, fields: &Map<String, Value>) -> Option<ProgressEvent> {
     match event_name {
         "run.started" => Some(ProgressEvent::WorkflowStarted {
             worktree_dir: prop_string_field(fields, "worktree_dir"),
@@ -455,6 +453,26 @@ pub(super) fn from_envelope_fields(
         }),
         _ => None,
     }
+}
+
+pub(super) fn from_stored_event(stored: &StoredEvent) -> Option<ProgressEvent> {
+    let Value::Object(fields) = stored.to_value().ok()? else {
+        return None;
+    };
+    let event_name = fields.get("event")?.as_str()?;
+    from_envelope_fields(event_name, &fields)
+}
+
+pub(super) fn from_json_line(line: &str) -> Option<ProgressEvent> {
+    if let Ok(stored) = StoredEvent::from_json_str(line) {
+        return from_stored_event(&stored);
+    }
+
+    let Value::Object(fields) = serde_json::from_str(line).ok()? else {
+        return None;
+    };
+    let event_name = fields.get("event")?.as_str()?;
+    from_envelope_fields(event_name, &fields)
 }
 
 fn parse_run_notice_level(level: Option<&str>) -> RunNoticeLevel {

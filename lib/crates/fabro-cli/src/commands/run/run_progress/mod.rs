@@ -1,6 +1,4 @@
-use serde_json::Value;
-
-use fabro_workflow::event::RunEventEnvelope;
+use fabro_types::StoredEvent;
 
 mod event;
 mod info_display;
@@ -9,7 +7,7 @@ mod setup_display;
 mod stage_display;
 mod styles;
 
-use event::{ProgressEvent, from_envelope_fields};
+use event::{ProgressEvent, from_json_line, from_stored_event};
 use info_display::InfoDisplay;
 use renderer::ProgressRenderer;
 use setup_display::SetupDisplay;
@@ -68,23 +66,14 @@ impl ProgressUI {
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn handle_event(&mut self, event: &RunEventEnvelope) {
-        let Ok(Value::Object(envelope)) = serde_json::to_value(event) else {
-            return;
-        };
-        if let Some(progress_event) = from_envelope_fields(&event.event, &envelope) {
+    pub(crate) fn handle_event(&mut self, event: &StoredEvent) {
+        if let Some(progress_event) = from_stored_event(event) {
             self.dispatch(progress_event);
         }
     }
 
     pub(crate) fn handle_json_line(&mut self, line: &str) {
-        let Ok(Value::Object(envelope)) = serde_json::from_str(line) else {
-            return;
-        };
-        let Some(event_name) = envelope.get("event").and_then(|value| value.as_str()) else {
-            return;
-        };
-        if let Some(progress_event) = from_envelope_fields(event_name, &envelope) {
+        if let Some(progress_event) = from_json_line(line) {
             self.dispatch(progress_event);
         }
     }
@@ -428,7 +417,9 @@ mod tests {
     use fabro_agent::{AgentEvent, SandboxEvent};
     use fabro_llm::types::Usage;
     use fabro_types::fixtures;
-    use fabro_workflow::event::{RunNoticeLevel, WorkflowRunEvent, canonicalize_event};
+    use fabro_workflow::event::{
+        RunNoticeLevel, WorkflowRunEvent, canonicalize_event, to_stored_event,
+    };
     use fabro_workflow::outcome::StageUsage;
 
     use super::*;
@@ -470,13 +461,13 @@ mod tests {
     }
 
     fn emit(ui: &mut ProgressUI, event: WorkflowRunEvent) {
-        let envelope = canonicalize_event(&fixtures::RUN_1, &event);
-        ui.handle_event(&envelope);
+        let stored = to_stored_event(&fixtures::RUN_1, &event);
+        ui.handle_event(&stored);
     }
 
     fn emit_ref(ui: &mut ProgressUI, event: &WorkflowRunEvent) {
-        let envelope = canonicalize_event(&fixtures::RUN_1, event);
-        ui.handle_event(&envelope);
+        let stored = to_stored_event(&fixtures::RUN_1, event);
+        ui.handle_event(&stored);
     }
 
     fn agent_event(stage: &str, event: AgentEvent) -> WorkflowRunEvent {

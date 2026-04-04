@@ -20,7 +20,7 @@ use fabro_llm::types::{
     Response as LlmResponse, Role, StreamEvent, ToolChoice, ToolDefinition, Usage,
 };
 use fabro_store::StoreHandle;
-use fabro_types::{RunId, Settings};
+use fabro_types::{RunId, Settings, StoredEvent};
 use fabro_util::redact::redact_jsonl_line;
 use fabro_workflow::error::FabroError;
 use fabro_workflow::handler::HandlerRegistry;
@@ -47,7 +47,7 @@ use crate::static_files;
 use crate::web_auth;
 use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
 use fabro_workflow::context::Context;
-use fabro_workflow::event::{EventEmitter, RunEventEnvelope};
+use fabro_workflow::event::EventEmitter;
 use fabro_workflow::operations::{self, CreateRunInput, WorkflowInput};
 use fabro_workflow::pipeline::Persisted;
 use fabro_workflow::records::Checkpoint;
@@ -97,7 +97,7 @@ struct ManagedRun {
     created_at: chrono::DateTime<chrono::Utc>,
     // Populated when running:
     interviewer: Option<Arc<WebInterviewer>>,
-    event_tx: Option<broadcast::Sender<RunEventEnvelope>>,
+    event_tx: Option<broadcast::Sender<StoredEvent>>,
     context: Option<Context>,
     checkpoint: Option<Checkpoint>,
     cancel_tx: Option<oneshot::Sender<()>>,

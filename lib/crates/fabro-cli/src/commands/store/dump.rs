@@ -513,7 +513,20 @@ mod tests {
                     "id": format!("evt-{run_id}-stage-completed"),
                     "ts": "2026-03-27T12:00:01.000Z",
                     "run_id": run_id.to_string(),
-                    "event": "stage.completed"
+                    "event": "stage.completed",
+                    "node_id": "code",
+                    "node_label": "Code",
+                    "properties": {
+                        "index": 1,
+                        "duration_ms": 1,
+                        "status": "success",
+                        "response": "Implemented",
+                        "notes": "all good",
+                        "files_touched": ["src/lib.rs"],
+                        "node_visits": {"code": 2},
+                        "attempt": 1,
+                        "max_attempts": 1
+                    }
                 }),
                 &run_id,
             )
@@ -562,7 +575,7 @@ mod tests {
         );
         let node_status: NodeStatusRecord =
             read_json(&output.path().join("nodes/code/visit-2/status.json"));
-        assert_eq!(node_status.status, StageStatus::PartialSuccess);
+        assert_eq!(node_status.status, StageStatus::Success);
         assert_eq!(
             std::fs::read_to_string(output.path().join("nodes/code/visit-2/stdout.log")).unwrap(),
             "stdout line"

@@ -453,12 +453,8 @@ fn attach_json_errors_without_prompting_for_human_input() {
         "event": "sandbox.ready",
         "id": "[EVENT_ID]",
         "properties": {
-          "cpu": null,
           "duration_ms": "[DURATION_MS]",
-          "memory": null,
-          "name": null,
-          "provider": "local",
-          "url": null
+          "provider": "local"
         },
         "run_id": "[ULID]",
         "ts": "[TIMESTAMP]"
@@ -521,17 +517,12 @@ fn attach_json_errors_without_prompting_for_human_input() {
             "internal.thread_id": null
           },
           "duration_ms": "[DURATION_MS]",
-          "files_touched": [],
           "index": 0,
           "max_attempts": 1,
           "node_visits": {
             "start": 1
           },
-          "notes": null,
-          "preferred_label": null,
-          "status": "success",
-          "suggested_next_ids": [],
-          "usage": null
+          "status": "success"
         },
         "run_id": "[ULID]",
         "ts": "[TIMESTAMP]"
@@ -540,10 +531,8 @@ fn attach_json_errors_without_prompting_for_human_input() {
         "event": "edge.selected",
         "id": "[EVENT_ID]",
         "properties": {
-          "condition": null,
           "from_node": "start",
           "is_jump": false,
-          "label": null,
           "reason": "unconditional",
           "stage_status": "success",
           "to_node": "approve"

@@ -73,7 +73,7 @@ fn ps_all_json_lists_created_and_completed_runs() {
     [
       {
         "run_id": "[ULID]",
-        "dir_name": "20260403-[ULID]",
+        "dir_name": "20260404-[ULID]",
         "workflow_name": "Simple",
         "workflow_slug": "simple",
         "status": "submitted",
@@ -87,7 +87,7 @@ fn ps_all_json_lists_created_and_completed_runs() {
       },
       {
         "run_id": "[ULID]",
-        "dir_name": "20260403-[ULID]",
+        "dir_name": "20260404-[ULID]",
         "workflow_name": "Simple",
         "workflow_slug": "simple",
         "status": "succeeded",
@@ -180,7 +180,7 @@ fn ps_filters_by_workflow_and_label() {
     [
       {
         "run_id": "[ULID]",
-        "dir_name": "20260403-[ULID]",
+        "dir_name": "20260404-[ULID]",
         "workflow_name": "Simple",
         "workflow_slug": "simple",
         "status": "succeeded",
