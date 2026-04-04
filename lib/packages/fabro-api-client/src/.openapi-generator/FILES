@@ -42,6 +42,7 @@ models/control-info.ts
 models/control-performance.ts
 models/control-reference.ts
 models/create-completion-request.ts
+models/create-run-request.ts
 models/create-session-request.ts
 models/create-session-response.ts
 models/create-signoff-request.ts
@@ -143,7 +144,6 @@ models/smoothness-rating.ts
 models/stage-retro.ts
 models/stage-status.ts
 models/stage-turn.ts
-models/start-run-request.ts
 models/steer-request.ts
 models/submit-answer-request.ts
 models/system-stage-turn.ts

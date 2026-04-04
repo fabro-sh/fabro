@@ -22,13 +22,13 @@ import { DUMMY_BASE_URL, assertParamExists, setApiKeyToObject, setBasicAuthToObj
 // @ts-ignore
 import { BASE_PATH, COLLECTION_FORMATS, type RequestArgs, BaseAPI, RequiredError, operationServerMap } from '../base';
 // @ts-ignore
+import type { CreateRunRequest } from '../models';
+// @ts-ignore
 import type { ErrorResponse } from '../models';
 // @ts-ignore
 import type { PaginatedRunList } from '../models';
 // @ts-ignore
 import type { RunStatusResponse } from '../models';
-// @ts-ignore
-import type { StartRunRequest } from '../models';
 /**
  * RunsApi - axios parameter creator
  */
@@ -69,6 +69,48 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Creates a new workflow run from a Graphviz graph source. The run is created in `submitted` status. Use `POST /api/v1/runs/{id}/start` to begin execution.
+         * @summary Create Run
+         * @param {CreateRunRequest} createRunRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        createRun: async (createRunRequest: CreateRunRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'createRunRequest' is not null or undefined
+            assertParamExists('createRun', 'createRunRequest', createRunRequest)
+            const localVarPath = `/api/v1/runs`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(createRunRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -246,16 +288,17 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Queues a new workflow run from a Graphviz graph source. The run is created in `queued` status and will be picked up by the scheduler.
+         * Starts a submitted run, queuing it for execution. Returns 409 if the run is not in `submitted` status.
          * @summary Start Run
-         * @param {StartRunRequest} startRunRequest 
+         * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        startRun: async (startRunRequest: StartRunRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'startRunRequest' is not null or undefined
-            assertParamExists('startRun', 'startRunRequest', startRunRequest)
-            const localVarPath = `/api/v1/runs`;
+        startRun: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('startRun', 'id', id)
+            const localVarPath = `/api/v1/runs/{id}/start`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -274,13 +317,11 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             // http bearer authentication required
             await setBearerAuthToObject(localVarHeaderParameter, configuration)
 
-            localVarHeaderParameter['Content-Type'] = 'application/json';
             localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(startRunRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -392,6 +433,19 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
+         * Creates a new workflow run from a Graphviz graph source. The run is created in `submitted` status. Use `POST /api/v1/runs/{id}/start` to begin execution.
+         * @summary Create Run
+         * @param {CreateRunRequest} createRunRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async createRun(createRunRequest: CreateRunRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunStatusResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.createRun(createRunRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunsApi.createRun']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          * Returns a paginated list of runs for the board view, ordered by recency.
          * @summary List Runs
          * @param {number} [pageLimit] Maximum number of items to return per page.
@@ -445,14 +499,14 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Queues a new workflow run from a Graphviz graph source. The run is created in `queued` status and will be picked up by the scheduler.
+         * Starts a submitted run, queuing it for execution. Returns 409 if the run is not in `submitted` status.
          * @summary Start Run
-         * @param {StartRunRequest} startRunRequest 
+         * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async startRun(startRunRequest: StartRunRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunStatusResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.startRun(startRunRequest, options);
+        async startRun(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunStatusResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.startRun(id, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunsApi.startRun']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -503,6 +557,16 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.cancelRun(id, options).then((request) => request(axios, basePath));
         },
         /**
+         * Creates a new workflow run from a Graphviz graph source. The run is created in `submitted` status. Use `POST /api/v1/runs/{id}/start` to begin execution.
+         * @summary Create Run
+         * @param {CreateRunRequest} createRunRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        createRun(createRunRequest: CreateRunRequest, options?: RawAxiosRequestConfig): AxiosPromise<RunStatusResponse> {
+            return localVarFp.createRun(createRunRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
          * Returns a paginated list of runs for the board view, ordered by recency.
          * @summary List Runs
          * @param {number} [pageLimit] Maximum number of items to return per page.
@@ -544,14 +608,14 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.retrieveRunGraph(id, options).then((request) => request(axios, basePath));
         },
         /**
-         * Queues a new workflow run from a Graphviz graph source. The run is created in `queued` status and will be picked up by the scheduler.
+         * Starts a submitted run, queuing it for execution. Returns 409 if the run is not in `submitted` status.
          * @summary Start Run
-         * @param {StartRunRequest} startRunRequest 
+         * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        startRun(startRunRequest: StartRunRequest, options?: RawAxiosRequestConfig): AxiosPromise<RunStatusResponse> {
-            return localVarFp.startRun(startRunRequest, options).then((request) => request(axios, basePath));
+        startRun(id: string, options?: RawAxiosRequestConfig): AxiosPromise<RunStatusResponse> {
+            return localVarFp.startRun(id, options).then((request) => request(axios, basePath));
         },
         /**
          * Opens a server-sent event (SSE) stream for real-time run updates. Returns 410 if the stream has been closed.
@@ -589,6 +653,17 @@ export class RunsApi extends BaseAPI {
      */
     public cancelRun(id: string, options?: RawAxiosRequestConfig) {
         return RunsApiFp(this.configuration).cancelRun(id, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Creates a new workflow run from a Graphviz graph source. The run is created in `submitted` status. Use `POST /api/v1/runs/{id}/start` to begin execution.
+     * @summary Create Run
+     * @param {CreateRunRequest} createRunRequest 
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public createRun(createRunRequest: CreateRunRequest, options?: RawAxiosRequestConfig) {
+        return RunsApiFp(this.configuration).createRun(createRunRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -637,14 +712,14 @@ export class RunsApi extends BaseAPI {
     }
 
     /**
-     * Queues a new workflow run from a Graphviz graph source. The run is created in `queued` status and will be picked up by the scheduler.
+     * Starts a submitted run, queuing it for execution. Returns 409 if the run is not in `submitted` status.
      * @summary Start Run
-     * @param {StartRunRequest} startRunRequest 
+     * @param {string} id Unique run identifier (ULID).
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public startRun(startRunRequest: StartRunRequest, options?: RawAxiosRequestConfig) {
-        return RunsApiFp(this.configuration).startRun(startRunRequest, options).then((request) => request(this.axios, this.basePath));
+    public startRun(id: string, options?: RawAxiosRequestConfig) {
+        return RunsApiFp(this.configuration).startRun(id, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

@@ -184,47 +184,6 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             };
         },
         /**
-         * Returns the key-value context map accumulated during the run. Empty if the run has not started.
-         * @summary Retrieve Run Context
-         * @param {string} id Unique run identifier (ULID).
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        retrieveRunContext: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'id' is not null or undefined
-            assertParamExists('retrieveRunContext', 'id', id)
-            const localVarPath = `/api/v1/runs/{id}/context`
-                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            // authentication mTLS required
-            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
-
-            // authentication BearerAuth required
-            // http bearer authentication required
-            await setBearerAuthToObject(localVarHeaderParameter, configuration)
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
          * Returns the structured settings used to launch this run.
          * @summary Retrieve Run Settings
          * @param {string} id Unique run identifier (ULID).
@@ -319,19 +278,6 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Returns the key-value context map accumulated during the run. Empty if the run has not started.
-         * @summary Retrieve Run Context
-         * @param {string} id Unique run identifier (ULID).
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async retrieveRunContext(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.retrieveRunContext(id, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.retrieveRunContext']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
          * Returns the structured settings used to launch this run.
          * @summary Retrieve Run Settings
          * @param {string} id Unique run identifier (ULID).
@@ -389,16 +335,6 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
             return localVarFp.retrieveRunCheckpoint(id, options).then((request) => request(axios, basePath));
         },
         /**
-         * Returns the key-value context map accumulated during the run. Empty if the run has not started.
-         * @summary Retrieve Run Context
-         * @param {string} id Unique run identifier (ULID).
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        retrieveRunContext(id: string, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
-            return localVarFp.retrieveRunContext(id, options).then((request) => request(axios, basePath));
-        },
-        /**
          * Returns the structured settings used to launch this run.
          * @summary Retrieve Run Settings
          * @param {string} id Unique run identifier (ULID).
@@ -451,17 +387,6 @@ export class RunInternalsApi extends BaseAPI {
      */
     public retrieveRunCheckpoint(id: string, options?: RawAxiosRequestConfig) {
         return RunInternalsApiFp(this.configuration).retrieveRunCheckpoint(id, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * Returns the key-value context map accumulated during the run. Empty if the run has not started.
-     * @summary Retrieve Run Context
-     * @param {string} id Unique run identifier (ULID).
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public retrieveRunContext(id: string, options?: RawAxiosRequestConfig) {
-        return RunInternalsApiFp(this.configuration).retrieveRunContext(id, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
