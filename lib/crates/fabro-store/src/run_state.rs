@@ -6,7 +6,10 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 
 use crate::{EventEnvelope, Result, RunSummary, StageId, StoreError};
-use fabro_types::run_event::{RunCompletedProps, RunFailedProps, StageCompletedProps};
+use fabro_types::run_event::{
+    AgentCliStartedProps, AgentSessionStartedProps, CheckpointCompletedProps, RunCompletedProps,
+    RunFailedProps, StageCompletedProps, StagePromptProps,
+};
 use fabro_types::{
     Checkpoint, Conclusion, EventBody, FailureSignature, NodeStatusRecord, Outcome,
     PullRequestRecord, Retro, RunEvent, RunId, RunRecord, RunStatus, RunStatusRecord,
@@ -94,7 +97,7 @@ impl RunProjection {
                     base_branch: props.base_branch.clone(),
                     labels,
                 });
-                self.graph_source = props.workflow_source.clone();
+                self.graph_source.clone_from(&props.workflow_source);
             }
             EventBody::RunStarted(props) => {
                 self.start = Some(StartRecord {
@@ -105,48 +108,24 @@ impl RunProjection {
                 });
             }
             EventBody::RunSubmitted(props) => {
-                self.status = Some(run_status_record(
-                    RunStatus::Submitted,
-                    props.reason.clone(),
-                    ts,
-                ));
+                self.status = Some(run_status_record(RunStatus::Submitted, props.reason, ts));
             }
             EventBody::RunStarting(props) => {
-                self.status = Some(run_status_record(
-                    RunStatus::Starting,
-                    props.reason.clone(),
-                    ts,
-                ));
+                self.status = Some(run_status_record(RunStatus::Starting, props.reason, ts));
             }
             EventBody::RunRunning(props) => {
-                self.status = Some(run_status_record(
-                    RunStatus::Running,
-                    props.reason.clone(),
-                    ts,
-                ));
+                self.status = Some(run_status_record(RunStatus::Running, props.reason, ts));
             }
             EventBody::RunRemoving(props) => {
-                self.status = Some(run_status_record(
-                    RunStatus::Removing,
-                    props.reason.clone(),
-                    ts,
-                ));
+                self.status = Some(run_status_record(RunStatus::Removing, props.reason, ts));
             }
             EventBody::RunCompleted(props) => {
-                self.status = Some(run_status_record(
-                    RunStatus::Succeeded,
-                    props.reason.clone(),
-                    ts,
-                ));
+                self.status = Some(run_status_record(RunStatus::Succeeded, props.reason, ts));
                 self.conclusion = Some(conclusion_from_completed(props, ts)?);
-                self.final_patch = props.final_patch.clone();
+                self.final_patch.clone_from(&props.final_patch);
             }
             EventBody::RunFailed(props) => {
-                self.status = Some(run_status_record(
-                    RunStatus::Failed,
-                    props.reason.clone(),
-                    ts,
-                ));
+                self.status = Some(run_status_record(RunStatus::Failed, props.reason, ts));
                 self.conclusion = Some(conclusion_from_failed(props, ts));
             }
             EventBody::RunRewound(_) => {
@@ -177,10 +156,10 @@ impl RunProjection {
                 });
             }
             EventBody::RetroStarted(props) => {
-                self.retro_prompt = props.prompt.clone();
+                self.retro_prompt.clone_from(&props.prompt);
             }
             EventBody::RetroCompleted(props) => {
-                self.retro_response = props.response.clone();
+                self.retro_response.clone_from(&props.response);
                 self.retro = props
                     .retro
                     .clone()
@@ -400,10 +379,7 @@ fn run_status_record(
     }
 }
 
-fn checkpoint_from_props(
-    props: &fabro_types::run_event::CheckpointCompletedProps,
-    timestamp: DateTime<Utc>,
-) -> Checkpoint {
+fn checkpoint_from_props(props: &CheckpointCompletedProps, timestamp: DateTime<Utc>) -> Checkpoint {
     let loop_failure_signatures = props
         .loop_failure_signatures
         .clone()
@@ -531,7 +507,7 @@ fn node_status_from_outcome(
     }
 }
 
-fn provider_used_from_prompt(props: &fabro_types::run_event::StagePromptProps) -> Option<Value> {
+fn provider_used_from_prompt(props: &StagePromptProps) -> Option<Value> {
     let mut provider_used = serde_json::Map::new();
     if let Some(mode) = props.mode.clone() {
         provider_used.insert("mode".to_string(), Value::String(mode));
@@ -545,9 +521,7 @@ fn provider_used_from_prompt(props: &fabro_types::run_event::StagePromptProps) -
     (!provider_used.is_empty()).then_some(Value::Object(provider_used))
 }
 
-fn provider_used_from_agent_session_started(
-    props: &fabro_types::run_event::AgentSessionStartedProps,
-) -> Value {
+fn provider_used_from_agent_session_started(props: &AgentSessionStartedProps) -> Value {
     let mut provider_used = serde_json::Map::new();
     provider_used.insert("mode".to_string(), Value::String("agent".to_string()));
     if let Some(provider) = props.provider.clone() {
@@ -559,9 +533,7 @@ fn provider_used_from_agent_session_started(
     Value::Object(provider_used)
 }
 
-fn provider_used_from_agent_cli_started(
-    props: &fabro_types::run_event::AgentCliStartedProps,
-) -> Value {
+fn provider_used_from_agent_cli_started(props: &AgentCliStartedProps) -> Value {
     let mut provider_used = serde_json::Map::new();
     provider_used.insert("mode".to_string(), Value::String("cli".to_string()));
     provider_used.insert(

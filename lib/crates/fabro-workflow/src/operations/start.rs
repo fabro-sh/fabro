@@ -469,7 +469,7 @@ impl RunSession {
                 }
                 event if matches!(&event.body, EventBody::GitCommit(_)) => {
                     if let EventBody::GitCommit(props) = &event.body {
-                        *sha_clone.lock().unwrap() = Some(props.sha.to_string());
+                        *sha_clone.lock().unwrap() = Some(props.sha.clone());
                     }
                 }
                 _ => {}

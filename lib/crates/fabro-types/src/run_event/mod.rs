@@ -413,109 +413,109 @@ impl EventBody {
 }
 
 fn is_known_event_name(event: &str) -> bool {
-    match event {
+    matches!(
+        event,
         "run.created"
-        | "run.started"
-        | "run.submitted"
-        | "run.starting"
-        | "run.running"
-        | "run.removing"
-        | "run.rewound"
-        | "run.completed"
-        | "run.failed"
-        | "run.notice"
-        | "stage.started"
-        | "stage.completed"
-        | "stage.failed"
-        | "stage.retrying"
-        | "parallel.started"
-        | "parallel.branch.started"
-        | "parallel.branch.completed"
-        | "parallel.completed"
-        | "interview.started"
-        | "interview.completed"
-        | "interview.timeout"
-        | "checkpoint.completed"
-        | "checkpoint.failed"
-        | "git.commit"
-        | "git.push"
-        | "git.branch"
-        | "git.worktree.added"
-        | "git.worktree.removed"
-        | "git.fetch"
-        | "git.reset"
-        | "edge.selected"
-        | "loop.restart"
-        | "stage.prompt"
-        | "prompt.completed"
-        | "agent.session.started"
-        | "agent.session.ended"
-        | "agent.processing.end"
-        | "agent.input"
-        | "agent.message"
-        | "agent.tool.started"
-        | "agent.tool.completed"
-        | "agent.error"
-        | "agent.warning"
-        | "agent.loop.detected"
-        | "agent.turn.limit"
-        | "agent.steering.injected"
-        | "agent.compaction.started"
-        | "agent.compaction.completed"
-        | "agent.llm.retry"
-        | "agent.sub.spawned"
-        | "agent.sub.completed"
-        | "agent.sub.failed"
-        | "agent.sub.closed"
-        | "agent.mcp.ready"
-        | "agent.mcp.failed"
-        | "subgraph.started"
-        | "subgraph.completed"
-        | "sandbox.initializing"
-        | "sandbox.ready"
-        | "sandbox.failed"
-        | "sandbox.cleanup.started"
-        | "sandbox.cleanup.completed"
-        | "sandbox.cleanup.failed"
-        | "sandbox.snapshot.pulling"
-        | "sandbox.snapshot.pulled"
-        | "sandbox.snapshot.ensuring"
-        | "sandbox.snapshot.creating"
-        | "sandbox.snapshot.ready"
-        | "sandbox.snapshot.failed"
-        | "sandbox.git.started"
-        | "sandbox.git.completed"
-        | "sandbox.git.failed"
-        | "sandbox.initialized"
-        | "setup.started"
-        | "setup.command.started"
-        | "setup.command.completed"
-        | "setup.completed"
-        | "setup.failed"
-        | "watchdog.timeout"
-        | "artifact.captured"
-        | "ssh.ready"
-        | "agent.failover"
-        | "cli.ensure.started"
-        | "cli.ensure.completed"
-        | "cli.ensure.failed"
-        | "command.started"
-        | "command.completed"
-        | "agent.cli.started"
-        | "agent.cli.completed"
-        | "pull_request.created"
-        | "pull_request.failed"
-        | "devcontainer.resolved"
-        | "devcontainer.lifecycle.started"
-        | "devcontainer.lifecycle.command.started"
-        | "devcontainer.lifecycle.command.completed"
-        | "devcontainer.lifecycle.completed"
-        | "devcontainer.lifecycle.failed"
-        | "retro.started"
-        | "retro.completed"
-        | "retro.failed" => true,
-        _ => false,
-    }
+            | "run.started"
+            | "run.submitted"
+            | "run.starting"
+            | "run.running"
+            | "run.removing"
+            | "run.rewound"
+            | "run.completed"
+            | "run.failed"
+            | "run.notice"
+            | "stage.started"
+            | "stage.completed"
+            | "stage.failed"
+            | "stage.retrying"
+            | "parallel.started"
+            | "parallel.branch.started"
+            | "parallel.branch.completed"
+            | "parallel.completed"
+            | "interview.started"
+            | "interview.completed"
+            | "interview.timeout"
+            | "checkpoint.completed"
+            | "checkpoint.failed"
+            | "git.commit"
+            | "git.push"
+            | "git.branch"
+            | "git.worktree.added"
+            | "git.worktree.removed"
+            | "git.fetch"
+            | "git.reset"
+            | "edge.selected"
+            | "loop.restart"
+            | "stage.prompt"
+            | "prompt.completed"
+            | "agent.session.started"
+            | "agent.session.ended"
+            | "agent.processing.end"
+            | "agent.input"
+            | "agent.message"
+            | "agent.tool.started"
+            | "agent.tool.completed"
+            | "agent.error"
+            | "agent.warning"
+            | "agent.loop.detected"
+            | "agent.turn.limit"
+            | "agent.steering.injected"
+            | "agent.compaction.started"
+            | "agent.compaction.completed"
+            | "agent.llm.retry"
+            | "agent.sub.spawned"
+            | "agent.sub.completed"
+            | "agent.sub.failed"
+            | "agent.sub.closed"
+            | "agent.mcp.ready"
+            | "agent.mcp.failed"
+            | "subgraph.started"
+            | "subgraph.completed"
+            | "sandbox.initializing"
+            | "sandbox.ready"
+            | "sandbox.failed"
+            | "sandbox.cleanup.started"
+            | "sandbox.cleanup.completed"
+            | "sandbox.cleanup.failed"
+            | "sandbox.snapshot.pulling"
+            | "sandbox.snapshot.pulled"
+            | "sandbox.snapshot.ensuring"
+            | "sandbox.snapshot.creating"
+            | "sandbox.snapshot.ready"
+            | "sandbox.snapshot.failed"
+            | "sandbox.git.started"
+            | "sandbox.git.completed"
+            | "sandbox.git.failed"
+            | "sandbox.initialized"
+            | "setup.started"
+            | "setup.command.started"
+            | "setup.command.completed"
+            | "setup.completed"
+            | "setup.failed"
+            | "watchdog.timeout"
+            | "artifact.captured"
+            | "ssh.ready"
+            | "agent.failover"
+            | "cli.ensure.started"
+            | "cli.ensure.completed"
+            | "cli.ensure.failed"
+            | "command.started"
+            | "command.completed"
+            | "agent.cli.started"
+            | "agent.cli.completed"
+            | "pull_request.created"
+            | "pull_request.failed"
+            | "devcontainer.resolved"
+            | "devcontainer.lifecycle.started"
+            | "devcontainer.lifecycle.command.started"
+            | "devcontainer.lifecycle.command.completed"
+            | "devcontainer.lifecycle.completed"
+            | "devcontainer.lifecycle.failed"
+            | "retro.started"
+            | "retro.completed"
+            | "retro.failed"
+    )
 }
 
 impl RunEvent {
@@ -529,8 +529,8 @@ impl RunEvent {
             raw.node_label,
             raw.session_id,
             raw.parent_session_id,
-            raw.event,
-            raw.properties,
+            &raw.event,
+            &raw.properties,
         )
     }
 
@@ -572,8 +572,8 @@ impl RunEvent {
             obj.get("parent_session_id")
                 .and_then(Value::as_str)
                 .map(str::to_string),
-            event.to_string(),
-            properties,
+            event,
+            &properties,
         )
     }
 
@@ -585,8 +585,8 @@ impl RunEvent {
         node_label: Option<String>,
         session_id: Option<String>,
         parent_session_id: Option<String>,
-        event: String,
-        properties: Value,
+        event: &str,
+        properties: &Value,
     ) -> serde_json::Result<Self> {
         let body_payload = json!({
             "event": event,
@@ -594,9 +594,9 @@ impl RunEvent {
         });
         let body: EventBody = match serde_json::from_value(body_payload) {
             Ok(body) => body,
-            Err(err) if is_known_event_name(&event) => return Err(err),
+            Err(err) if is_known_event_name(event) => return Err(err),
             Err(_) => EventBody::Unknown {
-                name: event.clone(),
+                name: event.to_string(),
                 properties: properties.clone(),
             },
         };

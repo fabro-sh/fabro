@@ -1209,17 +1209,10 @@ fn stage_status_from_string(status: &str) -> StageStatus {
 
 fn stored_event_fields(event: &Event) -> StoredEventFields {
     match event {
-        Event::StageCompleted { node_id, name, .. } | Event::StageFailed { node_id, name, .. } => {
-            let node_id = Some(node_id.clone());
-            let node_label = default_node_label(node_id.as_ref(), Some(name.clone()));
-            StoredEventFields {
-                session_id: None,
-                parent_session_id: None,
-                node_id,
-                node_label,
-            }
-        }
-        Event::StageStarted { node_id, name, .. } | Event::StageRetrying { node_id, name, .. } => {
+        Event::StageCompleted { node_id, name, .. }
+        | Event::StageFailed { node_id, name, .. }
+        | Event::StageStarted { node_id, name, .. }
+        | Event::StageRetrying { node_id, name, .. } => {
             let node_id = Some(node_id.clone());
             let node_label = default_node_label(node_id.as_ref(), Some(name.clone()));
             StoredEventFields {
@@ -1362,24 +1355,16 @@ fn event_body_from_event(event: &Event) -> EventBody {
             goal: goal.clone(),
         }),
         Event::RunSubmitted { reason } => {
-            EventBody::RunSubmitted(fabro_types::RunStatusTransitionProps {
-                reason: reason.clone(),
-            })
+            EventBody::RunSubmitted(fabro_types::RunStatusTransitionProps { reason: *reason })
         }
         Event::RunStarting { reason } => {
-            EventBody::RunStarting(fabro_types::RunStatusTransitionProps {
-                reason: reason.clone(),
-            })
+            EventBody::RunStarting(fabro_types::RunStatusTransitionProps { reason: *reason })
         }
         Event::RunRunning { reason } => {
-            EventBody::RunRunning(fabro_types::RunStatusTransitionProps {
-                reason: reason.clone(),
-            })
+            EventBody::RunRunning(fabro_types::RunStatusTransitionProps { reason: *reason })
         }
         Event::RunRemoving { reason } => {
-            EventBody::RunRemoving(fabro_types::RunStatusTransitionProps {
-                reason: reason.clone(),
-            })
+            EventBody::RunRemoving(fabro_types::RunStatusTransitionProps { reason: *reason })
         }
         Event::RunRewound {
             target_checkpoint_ordinal,
@@ -1407,7 +1392,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             duration_ms: *duration_ms,
             artifact_count: *artifact_count,
             status: status.clone(),
-            reason: reason.clone(),
+            reason: *reason,
             total_cost: *total_cost,
             final_git_commit_sha: final_git_commit_sha.clone(),
             final_patch: final_patch.clone(),
@@ -1421,7 +1406,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
         } => EventBody::RunFailed(fabro_types::RunFailedProps {
             error: error.to_string(),
             duration_ms: *duration_ms,
-            reason: reason.clone(),
+            reason: *reason,
             git_commit_sha: git_commit_sha.clone(),
         }),
         Event::RunNotice {

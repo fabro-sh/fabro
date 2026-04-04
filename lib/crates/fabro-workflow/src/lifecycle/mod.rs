@@ -81,7 +81,7 @@ impl WorkflowLifecycle {
         sandbox: &Arc<dyn Sandbox>,
         graph: Arc<GvGraph>,
         run_dir: &PathBuf,
-        run_store: SlateRunStore,
+        run_store: &SlateRunStore,
         run_options: &Arc<RunOptions>,
         is_resume: bool,
         on_node: crate::OnNodeCallback,

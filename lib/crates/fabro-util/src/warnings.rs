@@ -34,24 +34,32 @@ mod tests {
 
     #[test]
     fn warn_user_once_deduplicates() {
-        let before = WARNINGS.lock().unwrap().len();
-        warn_user_once!("dup-test-{}", "alpha");
-        let after_first = WARNINGS.lock().unwrap().len();
-        warn_user_once!("dup-test-{}", "alpha");
-        let after_second = WARNINGS.lock().unwrap().len();
-        assert_eq!(after_first, before + 1);
-        assert_eq!(
-            after_second, after_first,
-            "duplicate should not grow the set"
+        let message = "dup-test-alpha";
+        WARNINGS.lock().unwrap().remove(message);
+
+        warn_user_once!("{message}");
+        warn_user_once!("{message}");
+
+        assert!(
+            WARNINGS.lock().unwrap().contains(message),
+            "warning should be recorded once in the set"
         );
     }
 
     #[test]
     fn warn_user_once_different_messages() {
-        let before = WARNINGS.lock().unwrap().len();
-        warn_user_once!("unique-msg-beta-1");
-        warn_user_once!("unique-msg-beta-2");
-        let after = WARNINGS.lock().unwrap().len();
-        assert_eq!(after, before + 2);
+        let first = "unique-msg-beta-1";
+        let second = "unique-msg-beta-2";
+        let mut warnings = WARNINGS.lock().unwrap();
+        warnings.remove(first);
+        warnings.remove(second);
+        drop(warnings);
+
+        warn_user_once!("{first}");
+        warn_user_once!("{second}");
+
+        let warnings = WARNINGS.lock().unwrap();
+        assert!(warnings.contains(first));
+        assert!(warnings.contains(second));
     }
 }

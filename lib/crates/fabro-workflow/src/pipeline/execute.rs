@@ -93,7 +93,7 @@ pub async fn execute(init: Initialized) -> Executed {
         &sandbox,
         graph_arc,
         &run_options.run_dir,
-        run_store.clone(),
+        &run_store,
         &settings_arc,
         checkpoint.is_some(),
         on_node,

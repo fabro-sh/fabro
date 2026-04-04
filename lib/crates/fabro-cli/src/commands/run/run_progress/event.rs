@@ -338,11 +338,10 @@ pub(super) fn from_run_event(stored: &RunEvent) -> Option<ProgressEvent> {
         EventBody::StageFailed(props) => Some(ProgressEvent::StageFailed {
             node_id,
             name: node_label,
-            error: props
-                .failure
-                .as_ref()
-                .map(|failure| failure.message.clone())
-                .unwrap_or_else(|| "unknown error".to_string()),
+            error: props.failure.as_ref().map_or_else(
+                || "unknown error".to_string(),
+                |failure| failure.message.clone(),
+            ),
         }),
         EventBody::StageRetrying(props) => Some(ProgressEvent::StageRetrying {
             name: node_label,
