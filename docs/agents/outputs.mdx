@@ -136,7 +136,7 @@ When a stage produces a large context value -- an LLM response, command output, 
 
 ### How offloading works
 
-After each node completes, Fabro checks every context update. If the serialized JSON of a value exceeds **100KB**, it is written to the artifact store on disk and replaced in the context with a `file://` pointer:
+After each node completes, Fabro checks every context update. If the serialized JSON of a value exceeds **100KB**, it is written to a file-backed artifact on disk and replaced in the context with a `file://` pointer:
 
 ```
 response.plan  -->  file:///path/to/logs/cache/artifacts/values/response.plan.json
@@ -145,7 +145,7 @@ command.output -->  file:///path/to/logs/cache/artifacts/values/command.output.j
 
 Values under 100KB remain in the context as-is.
 
-### Artifact storage layout
+### File-backed artifact layout
 
 Offloaded artifacts are written to the run's directory:
 
@@ -192,7 +192,7 @@ fabro/meta/{run_id}
     command.output.json
 ```
 
-This means artifact data survives process restarts and can be recovered when resuming a run from a Git branch.
+This means file-backed artifact data survives process restarts and can be recovered when resuming a run from a Git branch.
 
 ## Remote sandbox syncing
 

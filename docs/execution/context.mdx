@@ -196,7 +196,7 @@ Internal keys (prefixed with `internal.`, `current`, `graph.`, `thread.`, `respo
 
 ## Artifact offloading
 
-When a stage produces a large output (over 100KB of serialized JSON), Fabro automatically offloads it to the **artifact store** on disk rather than keeping it in the in-memory context. The context value is replaced with a `file://` pointer:
+When a stage produces a large output (over 100KB of serialized JSON), Fabro automatically offloads it to a file-backed artifact on disk rather than keeping it in the in-memory context. The context value is replaced with a `file://` pointer:
 
 ```
 response.plan → file:///tmp/logs/cache/artifacts/values/response.plan.json
