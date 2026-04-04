@@ -365,7 +365,7 @@ pub enum WorkflowRunEvent {
         node: String,
         idle_seconds: u64,
     },
-    AssetCaptured {
+    ArtifactCaptured {
         node_id: String,
         attempt: u32,
         node_slug: String,
@@ -864,7 +864,7 @@ impl WorkflowRunEvent {
             Self::StallWatchdogTimeout { node, idle_seconds } => {
                 warn!(node, idle_seconds, "Stall watchdog timeout");
             }
-            Self::AssetCaptured {
+            Self::ArtifactCaptured {
                 node_id,
                 node_slug,
                 attempt,
@@ -872,7 +872,10 @@ impl WorkflowRunEvent {
                 bytes,
                 ..
             } => {
-                debug!(node_id, node_slug, attempt, path, bytes, "Asset captured");
+                debug!(
+                    node_id,
+                    node_slug, attempt, path, bytes, "Artifact captured"
+                );
             }
             Self::SshAccessReady { ssh_command } => {
                 info!(ssh_command, "SSH access ready");
@@ -1146,7 +1149,7 @@ pub fn event_name(event: &WorkflowRunEvent) -> &'static str {
         WorkflowRunEvent::SetupCompleted { .. } => "setup.completed",
         WorkflowRunEvent::SetupFailed { .. } => "setup.failed",
         WorkflowRunEvent::StallWatchdogTimeout { .. } => "watchdog.timeout",
-        WorkflowRunEvent::AssetCaptured { .. } => "asset.captured",
+        WorkflowRunEvent::ArtifactCaptured { .. } => "artifact.captured",
         WorkflowRunEvent::SshAccessReady { .. } => "ssh.ready",
         WorkflowRunEvent::Failover { .. } => "agent.failover",
         WorkflowRunEvent::CliEnsureStarted { .. } => "cli.ensure.started",
@@ -1266,7 +1269,7 @@ fn extract_stored_event_fields(event: &WorkflowRunEvent) -> StoredEventFields {
         | WorkflowRunEvent::CheckpointFailed { .. }
         | WorkflowRunEvent::SubgraphStarted { .. }
         | WorkflowRunEvent::SubgraphCompleted { .. }
-        | WorkflowRunEvent::AssetCaptured { .. }
+        | WorkflowRunEvent::ArtifactCaptured { .. }
         | WorkflowRunEvent::PromptCompleted { .. }
         | WorkflowRunEvent::ParallelStarted { .. }
         | WorkflowRunEvent::ParallelCompleted { .. }

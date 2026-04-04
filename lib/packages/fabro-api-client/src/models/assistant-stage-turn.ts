@@ -26,7 +26,7 @@ export interface AssistantStageTurn {
 }
 
 export const AssistantStageTurnKindEnum = {
-    ASSISTANT: 'assistant',
+    ASSISTANT: 'assistant'
 } as const;
 
 export type AssistantStageTurnKindEnum = typeof AssistantStageTurnKindEnum[keyof typeof AssistantStageTurnKindEnum];

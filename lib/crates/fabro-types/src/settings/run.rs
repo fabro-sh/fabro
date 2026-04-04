@@ -34,7 +34,7 @@ pub enum MergeStrategy {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-pub struct AssetsSettings {
+pub struct ArtifactsSettings {
     #[serde(default)]
     pub include: Vec<String>,
 }

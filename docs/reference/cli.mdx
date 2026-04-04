@@ -748,14 +748,14 @@ fabro upgrade --version 0.6.0
 
 Fabro refuses to downgrade unless you specify an explicit `--version`. A daily background check notifies you when a new version is available — disable it with `upgrade_check = false` in [`user.toml`](/reference/user-configuration#upgrade_check) or the `--no-upgrade-check` global flag.
 
-## `fabro asset list`
+## `fabro artifact list`
 
-List assets (screenshots, test reports, traces) collected from a workflow run.
+List artifacts (screenshots, test reports, traces) collected from a workflow run.
 
 ```bash
-fabro asset list <RUN_ID>
-fabro asset list <RUN_ID> --node verify --json
-fabro asset list <RUN_ID> --node verify --retry 2
+fabro artifact list <RUN_ID>
+fabro artifact list <RUN_ID> --node verify --json
+fabro artifact list <RUN_ID> --node verify --retry 2
 ```
 
 | Argument / Flag | Description |
@@ -765,15 +765,15 @@ fabro asset list <RUN_ID> --node verify --retry 2
 | `--retry <N>` | Filter to assets from a specific retry attempt |
 | `--json` | Output as JSON |
 
-## `fabro asset cp`
+## `fabro artifact cp`
 
-Copy assets from a workflow run to the local filesystem.
+Copy artifacts from a workflow run to the local filesystem.
 
 ```bash
-fabro asset cp <RUN_ID> ./output               # all assets, flat
-fabro asset cp <RUN_ID> ./output --tree         # preserve directory structure
-fabro asset cp <RUN_ID>:report.html ./output    # specific file
-fabro asset cp <RUN_ID>:report.html ./output --node verify --retry 2
+fabro artifact cp <RUN_ID> ./output               # all assets, flat
+fabro artifact cp <RUN_ID> ./output --tree         # preserve directory structure
+fabro artifact cp <RUN_ID>:report.html ./output    # specific file
+fabro artifact cp <RUN_ID>:report.html ./output --node verify --retry 2
 ```
 
 | Argument / Flag | Description |

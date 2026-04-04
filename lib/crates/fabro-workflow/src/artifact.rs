@@ -1,225 +1,50 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::RwLock;
+use std::path::Path;
 
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use fabro_agent::Sandbox;
+use fabro_store::SlateRunStore;
 
 use crate::error::{FabroError, Result};
 
-/// Threshold above which artifacts are stored on disk instead of in memory (100KB).
-const FILE_BACKING_THRESHOLD: usize = 100 * 1024;
-
-/// Metadata about a stored artifact.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArtifactInfo {
-    pub id: String,
-    pub name: String,
-    pub size_bytes: usize,
-    pub stored_at: DateTime<Utc>,
-    pub is_file_backed: bool,
-    pub file_path: Option<PathBuf>,
-}
-
-/// Storage for artifacts, either held in memory or backed by files on disk.
-enum StoredData {
-    InMemory(Value),
-    FileBacked(PathBuf),
-}
-
-/// Named, typed storage for large stage outputs.
-pub struct ArtifactStore {
-    values_dir: Option<PathBuf>,
-    artifacts: RwLock<HashMap<String, (ArtifactInfo, StoredData)>>,
-}
-
-impl std::fmt::Debug for ArtifactStore {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ArtifactStore")
-            .field("values_dir", &self.values_dir)
-            .finish_non_exhaustive()
-    }
-}
-
-impl ArtifactStore {
-    #[must_use]
-    pub fn new(values_dir: Option<PathBuf>) -> Self {
-        Self {
-            values_dir,
-            artifacts: RwLock::new(HashMap::new()),
-        }
-    }
-
-    /// Store an artifact. Large artifacts with a configured `values_dir` are written to disk.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if serialization fails or the file cannot be written.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the internal lock is poisoned.
-    pub fn store(
-        &self,
-        id: impl Into<String>,
-        name: impl Into<String>,
-        data: Value,
-    ) -> Result<ArtifactInfo> {
-        let id = id.into();
-        let name = name.into();
-        let serialized = serde_json::to_string(&data)
-            .map_err(|e| FabroError::engine(format!("artifact serialize failed: {e}")))?;
-        let size_bytes = serialized.len();
-
-        let is_file_backed = size_bytes > FILE_BACKING_THRESHOLD && self.values_dir.is_some();
-
-        let (stored, file_path) = if is_file_backed {
-            let values_dir = self.values_dir.as_ref().expect("values_dir checked above");
-            std::fs::create_dir_all(values_dir)?;
-            let path = values_dir.join(format!("{id}.json"));
-            std::fs::write(&path, &serialized)?;
-            (StoredData::FileBacked(path.clone()), Some(path))
-        } else {
-            (StoredData::InMemory(data), None)
-        };
-
-        let info = ArtifactInfo {
-            id: id.clone(),
-            name,
-            size_bytes,
-            stored_at: Utc::now(),
-            is_file_backed,
-            file_path,
-        };
-
-        self.artifacts
-            .write()
-            .expect("artifact lock poisoned")
-            .insert(id, (info.clone(), stored));
-
-        Ok(info)
-    }
-
-    /// Retrieve an artifact's data by ID.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the artifact is not found or cannot be read from disk.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the internal lock is poisoned.
-    pub fn retrieve(&self, id: &str) -> Result<Value> {
-        let guard = self.artifacts.read().expect("artifact lock poisoned");
-        let (_, stored) = guard
-            .get(id)
-            .ok_or_else(|| FabroError::engine(format!("artifact not found: {id}")))?;
-
-        match stored {
-            StoredData::InMemory(v) => Ok(v.clone()),
-            StoredData::FileBacked(path) => {
-                let path = path.clone();
-                drop(guard);
-                let data = std::fs::read_to_string(&path).map_err(|e| {
-                    FabroError::engine(format!("failed to read file-backed artifact {id}: {e}"))
-                })?;
-                serde_json::from_str(&data).map_err(|e| {
-                    FabroError::engine(format!(
-                        "failed to deserialize file-backed artifact {id}: {e}"
-                    ))
-                })
-            }
-        }
-    }
-
-    /// Check if an artifact exists.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the internal lock is poisoned.
-    pub fn has(&self, id: &str) -> bool {
-        self.artifacts
-            .read()
-            .expect("artifact lock poisoned")
-            .contains_key(id)
-    }
-
-    /// List all artifact metadata.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the internal lock is poisoned.
-    #[must_use]
-    pub fn list(&self) -> Vec<ArtifactInfo> {
-        self.artifacts
-            .read()
-            .expect("artifact lock poisoned")
-            .values()
-            .map(|(info, _)| info.clone())
-            .collect()
-    }
-
-    /// Remove an artifact by ID. Also deletes file-backed data from disk.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the internal lock is poisoned.
-    pub fn remove(&self, id: &str) {
-        let mut guard = self.artifacts.write().expect("artifact lock poisoned");
-        if let Some((_, StoredData::FileBacked(path))) = guard.remove(id) {
-            let _ = std::fs::remove_file(path);
-        }
-    }
-
-    /// Returns the configured values directory.
-    /// Returns `None` if no file-backed storage is configured.
-    #[must_use]
-    pub fn values_dir(&self) -> Option<PathBuf> {
-        self.values_dir.clone()
-    }
-
-    /// Remove all artifacts. Also deletes file-backed data from disk.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the internal lock is poisoned.
-    pub fn clear(&self) {
-        let mut guard = self.artifacts.write().expect("artifact lock poisoned");
-        for (_, stored) in guard.values() {
-            if let StoredData::FileBacked(path) = stored {
-                let _ = std::fs::remove_file(path);
-            }
-        }
-        guard.clear();
-    }
-}
+/// Threshold above which values are persisted as blobs and materialized to disk (100KB).
+const BLOB_OFFLOAD_THRESHOLD: usize = 100 * 1024;
 
 /// Prefix used to identify artifact pointer strings in context values.
 const ARTIFACT_POINTER_PREFIX: &str = "file://";
 
-/// Offload context values exceeding the file-backing threshold into the artifact store.
+/// Offload context values exceeding the blob threshold into SlateDB and materialize cache files.
 ///
-/// For each entry in `updates` whose serialized JSON exceeds `FILE_BACKING_THRESHOLD`,
-/// the value is stored in `store` and replaced with a `"file://{path}"` pointer.
+/// For each entry in `updates` whose serialized JSON exceeds `BLOB_OFFLOAD_THRESHOLD`,
+/// the value is persisted as a blob in `run_store`, materialized in `cache_dir`, and
+/// replaced with a `"file://{path}"` pointer.
 /// Small values are left untouched.
 ///
 /// # Errors
 ///
-/// Returns an error if storing an artifact fails.
-pub fn offload_large_values(
+/// Returns an error if blob persistence or cache materialization fails.
+pub async fn offload_large_values(
     updates: &mut HashMap<String, Value>,
-    store: &ArtifactStore,
+    run_store: &SlateRunStore,
+    cache_dir: &Path,
 ) -> Result<()> {
-    for (key, value) in updates.iter_mut() {
-        let serialized_len = serde_json::to_string(&*value).map(|s| s.len()).unwrap_or(0);
-        if serialized_len > FILE_BACKING_THRESHOLD {
-            let info = store.store(key, key, value.clone())?;
-            if let Some(path) = info.file_path {
-                *value = Value::String(format!("{ARTIFACT_POINTER_PREFIX}{}", path.display()));
+    std::fs::create_dir_all(cache_dir)?;
+
+    for value in updates.values_mut() {
+        let bytes = serde_json::to_vec(&*value)
+            .map_err(|e| FabroError::engine(format!("artifact serialize failed: {e}")))?;
+
+        if bytes.len() > BLOB_OFFLOAD_THRESHOLD {
+            let blob_id = run_store
+                .write_blob(&bytes)
+                .await
+                .map_err(|e| FabroError::engine(format!("artifact blob write failed: {e}")))?;
+            let cache_path = cache_dir.join(format!("{blob_id}.json"));
+            if !cache_path.exists() {
+                std::fs::write(&cache_path, &bytes)?;
             }
+            *value = Value::String(format!("{ARTIFACT_POINTER_PREFIX}{}", cache_path.display()));
         }
     }
     Ok(())
@@ -303,160 +128,81 @@ pub async fn sync_artifacts_to_env(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
     use super::*;
+    use fabro_store::SlateStore;
+    use object_store::memory::InMemory;
+    use ulid::Ulid;
 
-    #[test]
-    fn store_and_retrieve_small_artifact() {
-        let store = ArtifactStore::new(None);
-        let data = serde_json::json!({"result": "ok"});
-        let info = store.store("art1", "test artifact", data.clone()).unwrap();
-
-        assert_eq!(info.id, "art1");
-        assert_eq!(info.name, "test artifact");
-        assert!(!info.is_file_backed);
-        assert!(info.size_bytes > 0);
-        assert!(info.file_path.is_none());
-
-        let retrieved = store.retrieve("art1").unwrap();
-        assert_eq!(retrieved, data);
+    fn test_run_id(label: &str) -> fabro_types::RunId {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        use std::hash::{Hash, Hasher};
+        label.hash(&mut hasher);
+        fabro_types::RunId::from(Ulid(u128::from(hasher.finish())))
     }
 
-    #[test]
-    fn retrieve_nonexistent() {
-        let store = ArtifactStore::new(None);
-        assert!(store.retrieve("missing").is_err());
+    async fn make_run_store(label: &str) -> fabro_store::SlateRunStore {
+        let object_store = Arc::new(InMemory::new());
+        let store = SlateStore::new(object_store, "runs/", Duration::from_millis(1));
+        store.create_run(&test_run_id(label)).await.unwrap()
     }
 
-    #[test]
-    fn has_artifact() {
-        let store = ArtifactStore::new(None);
-        assert!(!store.has("x"));
-        store.store("x", "x", serde_json::json!(1)).unwrap();
-        assert!(store.has("x"));
-    }
-
-    #[test]
-    fn list_artifacts() {
-        let store = ArtifactStore::new(None);
-        store.store("a", "alpha", serde_json::json!(1)).unwrap();
-        store.store("b", "beta", serde_json::json!(2)).unwrap();
-        let list = store.list();
-        assert_eq!(list.len(), 2);
-    }
-
-    #[test]
-    fn remove_artifact() {
-        let store = ArtifactStore::new(None);
-        store.store("r", "remove me", serde_json::json!(1)).unwrap();
-        assert!(store.has("r"));
-        store.remove("r");
-        assert!(!store.has("r"));
-    }
-
-    #[test]
-    fn clear_artifacts() {
-        let store = ArtifactStore::new(None);
-        store.store("a", "a", serde_json::json!(1)).unwrap();
-        store.store("b", "b", serde_json::json!(2)).unwrap();
-        assert_eq!(store.list().len(), 2);
-        store.clear();
-        assert!(store.list().is_empty());
-    }
-
-    #[test]
-    fn file_backed_storage() {
+    #[tokio::test]
+    async fn offload_replaces_large_values_with_blob_backed_pointer() {
         let dir = tempfile::tempdir().unwrap();
-        let store = ArtifactStore::new(Some(dir.path().to_path_buf()));
+        let run_store = make_run_store("artifact-offload").await;
 
-        // Create data larger than the 100KB threshold
-        let large_string = "x".repeat(FILE_BACKING_THRESHOLD + 1);
-        let data = serde_json::json!(large_string);
+        let large_string = "x".repeat(BLOB_OFFLOAD_THRESHOLD + 1);
+        let serialized = serde_json::to_vec(&serde_json::json!(large_string.clone())).unwrap();
+        let expected_blob_id =
+            fabro_types::RunBlobId::new(&test_run_id("artifact-offload"), &serialized);
 
-        let info = store.store("big", "large artifact", data.clone()).unwrap();
-        assert!(info.is_file_backed);
-        assert!(info.size_bytes > FILE_BACKING_THRESHOLD);
-        assert_eq!(info.file_path, Some(dir.path().join("big.json")));
-
-        let retrieved = store.retrieve("big").unwrap();
-        assert_eq!(retrieved, data);
-    }
-
-    #[test]
-    fn file_backed_remove_deletes_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = ArtifactStore::new(Some(dir.path().to_path_buf()));
-
-        let large_string = "x".repeat(FILE_BACKING_THRESHOLD + 1);
-        let data = serde_json::json!(large_string);
-        store.store("big", "large", data).unwrap();
-
-        let file_path = dir.path().join("big.json");
-        assert!(file_path.exists());
-
-        store.remove("big");
-        assert!(!file_path.exists());
-    }
-
-    #[test]
-    fn small_artifact_stays_in_memory_even_with_values_dir() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = ArtifactStore::new(Some(dir.path().to_path_buf()));
-
-        let data = serde_json::json!({"small": true});
-        let info = store.store("small", "tiny", data).unwrap();
-        assert!(!info.is_file_backed);
-    }
-
-    #[test]
-    fn no_file_backing_without_base_dir() {
-        let store = ArtifactStore::new(None);
-
-        let large_string = "x".repeat(FILE_BACKING_THRESHOLD + 1);
-        let data = serde_json::json!(large_string);
-        let info = store.store("big", "large", data).unwrap();
-        assert!(!info.is_file_backed);
-    }
-
-    #[test]
-    fn offload_replaces_large_values_with_pointer() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = ArtifactStore::new(Some(dir.path().to_path_buf()));
-
-        let large_string = "x".repeat(FILE_BACKING_THRESHOLD + 1);
         let mut updates = HashMap::new();
         updates.insert("response.plan".to_string(), serde_json::json!(large_string));
 
-        offload_large_values(&mut updates, &store).unwrap();
+        offload_large_values(&mut updates, &run_store, dir.path())
+            .await
+            .unwrap();
 
-        // Value should now be a pointer string
         let pointer = updates.get("response.plan").unwrap();
         let path = artifact_path(pointer).expect("should be an artifact pointer");
         assert_eq!(
             path,
-            dir.path().join("response.plan.json").to_str().unwrap()
+            dir.path()
+                .join(format!("{expected_blob_id}.json"))
+                .to_str()
+                .unwrap()
         );
 
-        // The artifact store should contain the original value
-        let retrieved = store.retrieve("response.plan").unwrap();
-        assert_eq!(retrieved, serde_json::json!(large_string));
-
-        // File should exist on disk
-        assert!(dir.path().join("response.plan.json").exists());
+        let blob = run_store
+            .read_blob(&expected_blob_id)
+            .await
+            .unwrap()
+            .expect("blob should exist");
+        let blob_value: serde_json::Value = serde_json::from_slice(&blob).unwrap();
+        assert_eq!(blob_value, serde_json::json!(large_string));
+        assert!(
+            dir.path().join(format!("{expected_blob_id}.json")).exists(),
+            "materialized cache file should exist"
+        );
     }
 
-    #[test]
-    fn offload_leaves_small_values_untouched() {
+    #[tokio::test]
+    async fn offload_leaves_small_values_untouched() {
         let dir = tempfile::tempdir().unwrap();
-        let store = ArtifactStore::new(Some(dir.path().to_path_buf()));
-
+        let run_store = make_run_store("artifact-small").await;
         let small_value = serde_json::json!("hello world");
         let mut updates = HashMap::new();
         updates.insert("small_key".to_string(), small_value.clone());
 
-        offload_large_values(&mut updates, &store).unwrap();
+        offload_large_values(&mut updates, &run_store, dir.path())
+            .await
+            .unwrap();
 
         assert_eq!(updates.get("small_key").unwrap(), &small_value);
-        assert!(!store.has("small_key"));
+        assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
     }
 
     #[test]
@@ -466,14 +212,6 @@ mod tests {
             artifact_path(&value),
             Some("/tmp/logs/cache/artifacts/values/response.plan.json")
         );
-    }
-
-    #[test]
-    fn values_dir_returns_configured_directory() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = ArtifactStore::new(Some(dir.path().to_path_buf()));
-
-        assert_eq!(store.values_dir(), Some(dir.path().to_path_buf()));
     }
 
     #[test]

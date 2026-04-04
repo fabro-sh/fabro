@@ -22,7 +22,7 @@ export const LearningCategory = {
     REPO: 'repo',
     CODE: 'code',
     WORKFLOW: 'workflow',
-    TOOL: 'tool',
+    TOOL: 'tool'
 } as const;
 
 export type LearningCategory = typeof LearningCategory[keyof typeof LearningCategory];

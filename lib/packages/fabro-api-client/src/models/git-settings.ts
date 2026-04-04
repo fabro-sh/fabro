@@ -45,7 +45,7 @@ export interface GitSettings {
 }
 
 export const GitSettingsProviderEnum = {
-    GITHUB: 'github',
+    GITHUB: 'github'
 } as const;
 
 export type GitSettingsProviderEnum = typeof GitSettingsProviderEnum[keyof typeof GitSettingsProviderEnum];

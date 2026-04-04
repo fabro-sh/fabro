@@ -6,6 +6,7 @@ pub mod stage;
 
 use chrono::{DateTime, Utc};
 use serde::de::Error as DeError;
+use serde::ser::Error as SerError;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value, json};
 
@@ -56,6 +57,7 @@ pub struct StoredEvent {
     pub body: EventBody,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "event", content = "properties")]
 pub enum EventBody {
@@ -217,8 +219,8 @@ pub enum EventBody {
     SetupFailed(SetupFailedProps),
     #[serde(rename = "watchdog.timeout")]
     StallWatchdogTimeout(StallWatchdogTimeoutProps),
-    #[serde(rename = "asset.captured")]
-    AssetCaptured(AssetCapturedProps),
+    #[serde(rename = "artifact.captured")]
+    ArtifactCaptured(ArtifactCapturedProps),
     #[serde(rename = "ssh.ready")]
     SshAccessReady(SshAccessReadyProps),
     #[serde(rename = "agent.failover")]
@@ -377,7 +379,7 @@ impl Serialize for StoredEvent {
         S: Serializer,
     {
         self.to_value()
-            .map_err(serde::ser::Error::custom)?
+            .map_err(S::Error::custom)?
             .serialize(serializer)
     }
 }

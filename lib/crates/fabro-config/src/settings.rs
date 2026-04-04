@@ -19,7 +19,7 @@ impl TryFrom<ConfigLayer> for Settings {
             vars: value.vars,
             checkpoint: value.checkpoint.into(),
             pull_request: value.pull_request.map(Into::into),
-            assets: value.assets.map(Into::into),
+            artifacts: value.artifacts.map(Into::into),
             hooks: value.hooks,
             mcp_servers: value.mcp_servers,
             github: value.github.map(Into::into),

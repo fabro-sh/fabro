@@ -18,7 +18,7 @@ pub(crate) fn blob_key(id: &RunBlobId) -> String {
     format!("{BLOBS_PREFIX}{id}")
 }
 
-pub(crate) fn node_asset_prefix(node: &StageId) -> String {
+pub(crate) fn node_artifact_prefix(node: &StageId) -> String {
     format!(
         "{ARTIFACT_NODES_PREFIX}{}#visit-{}",
         node.node_id(),
@@ -26,8 +26,8 @@ pub(crate) fn node_asset_prefix(node: &StageId) -> String {
     )
 }
 
-pub(crate) fn node_asset(node: &StageId, filename: &str) -> String {
-    format!("{}#{filename}", node_asset_prefix(node))
+pub(crate) fn node_artifact(node: &StageId, filename: &str) -> String {
+    format!("{}#{filename}", node_artifact_prefix(node))
 }
 
 pub(crate) fn parse_event_seq(key: &str) -> Option<u32> {
@@ -38,7 +38,7 @@ pub(crate) fn parse_blob_id(key: &str) -> Option<RunBlobId> {
     key.strip_prefix(BLOBS_PREFIX)?.parse().ok()
 }
 
-pub(crate) fn parse_node_asset_key(key: &str) -> Option<(StageId, String)> {
+pub(crate) fn parse_node_artifact_key(key: &str) -> Option<(StageId, String)> {
     parse_visit_scoped_key(key, ARTIFACT_NODES_PREFIX)
 }
 
@@ -74,7 +74,7 @@ mod tests {
         let blob_id = RunBlobId::new(&"01JT56VE4Z5NZ814GZN2JZD65A".parse().unwrap(), b"summary");
         assert_eq!(blob_key(&blob_id), format!("blobs#{blob_id}"));
         assert_eq!(
-            node_asset(&node, "src/main.rs"),
+            node_artifact(&node, "src/main.rs"),
             "artifacts#nodes#code#visit-2#src/main.rs"
         );
     }
@@ -85,7 +85,7 @@ mod tests {
         let blob_id = RunBlobId::new(&"01JT56VE4Z5NZ814GZN2JZD65A".parse().unwrap(), b"summary");
         assert_eq!(parse_blob_id(&format!("blobs#{blob_id}")), Some(blob_id));
         assert_eq!(
-            parse_node_asset_key("artifacts#nodes#code#visit-2#src/main.rs"),
+            parse_node_artifact_key("artifacts#nodes#code#visit-2#src/main.rs"),
             Some((StageId::new("code", 2), "src/main.rs".to_string()))
         );
     }
@@ -95,7 +95,7 @@ mod tests {
         assert_eq!(parse_event_seq("events#not-a-seq.json"), None);
         assert_eq!(parse_blob_id("blobs#not-a-uuid"), None);
         assert_eq!(
-            parse_node_asset_key("artifacts#nodes#code#status.json"),
+            parse_node_artifact_key("artifacts#nodes#code#status.json"),
             None
         );
     }
@@ -103,7 +103,7 @@ mod tests {
     #[test]
     fn asset_filename_with_slashes_parses_correctly() {
         assert_eq!(
-            parse_node_asset_key("artifacts#nodes#build#visit-1#deep/nested/path/file.rs"),
+            parse_node_artifact_key("artifacts#nodes#build#visit-1#deep/nested/path/file.rs"),
             Some((
                 StageId::new("build", 1),
                 "deep/nested/path/file.rs".to_string()

@@ -30,7 +30,7 @@ export interface AuthSettings {
 
 export const AuthSettingsProviderEnum = {
     GITHUB: 'github',
-    INSECURE_DISABLED: 'insecure_disabled',
+    INSECURE_DISABLED: 'insecure_disabled'
 } as const;
 
 export type AuthSettingsProviderEnum = typeof AuthSettingsProviderEnum[keyof typeof AuthSettingsProviderEnum];

@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -14,7 +15,6 @@ use fabro_core::state::ExecutionState;
 
 use super::circuit_breaker::CircuitBreakerLifecycle;
 use super::git::GitCheckpointResult;
-use crate::artifact::ArtifactStore;
 use crate::context;
 use crate::error::FabroError;
 use crate::event::{EventEmitter, WorkflowRunEvent};
@@ -46,8 +46,7 @@ pub(crate) struct EventLifecycle {
     pub run_branch: Option<String>,
     pub worktree_dir: Option<String>,
     pub goal: Option<String>,
-    // Shared swappable handle (same instance as orchestrator)
-    pub artifact_store: Arc<Mutex<ArtifactStore>>,
+    pub captured_artifact_count: Arc<AtomicUsize>,
     // Cross-lifecycle data
     pub checkpoint_git_result: Arc<Mutex<Option<GitCheckpointResult>>>,
     pub last_git_sha: Arc<Mutex<Option<String>>>,
@@ -386,7 +385,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         }
         let duration_ms =
             u64::try_from(self.run_start.lock().unwrap().elapsed().as_millis()).unwrap();
-        let artifact_count = self.artifact_store.lock().unwrap().list().len();
+        let artifact_count = self.captured_artifact_count.load(Ordering::Relaxed);
         let last_sha = self.last_git_sha.lock().unwrap().clone();
         let final_patch = self.final_patch.lock().unwrap().clone();
         let total_cost = {

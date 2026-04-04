@@ -16,7 +16,7 @@ use crate::keys;
 use crate::{ListRunsQuery, Result, RunSummary, StoreError};
 use fabro_types::RunId;
 use run_store::SlateRunStoreInner;
-pub use run_store::{NodeAsset, SlateRunStore};
+pub use run_store::{NodeArtifact, SlateRunStore};
 
 #[derive(Clone)]
 pub struct SlateStore {
@@ -1181,7 +1181,7 @@ mod tests {
         ))
         .await
         .unwrap();
-        run.put_asset(&node, "src/lib.rs", b"fn main() {}")
+        run.put_artifact(&node, "src/lib.rs", b"fn main() {}")
             .await
             .unwrap();
 
@@ -1189,7 +1189,7 @@ mod tests {
         let node_state = state.node(&node).unwrap();
         assert_eq!(node_state.prompt, Some("Plan".to_string()));
         assert_eq!(
-            run.get_asset(&node, "src/lib.rs").await.unwrap(),
+            run.get_artifact(&node, "src/lib.rs").await.unwrap(),
             Some(Bytes::from_static(b"fn main() {}"))
         );
     }
@@ -1203,12 +1203,12 @@ mod tests {
         let plan_blob = run.write_blob(br#"{"steps":3}"#).await.unwrap();
 
         let snapshot_node = StageId::new("code", 2);
-        run.put_asset(&snapshot_node, "src/lib.rs", b"fn main() {}")
+        run.put_artifact(&snapshot_node, "src/lib.rs", b"fn main() {}")
             .await
             .unwrap();
 
-        let asset_only_node = StageId::new("artifact-only", 7);
-        run.put_asset(&asset_only_node, "logs/output.txt", b"hello")
+        let artifact_only_node = StageId::new("artifact-only", 7);
+        run.put_artifact(&artifact_only_node, "logs/output.txt", b"hello")
             .await
             .unwrap();
 
@@ -1217,13 +1217,13 @@ mod tests {
             vec![plan_blob, summary_blob]
         );
         assert_eq!(
-            run.list_all_assets().await.unwrap(),
+            run.list_all_artifacts().await.unwrap(),
             vec![
-                crate::slate::NodeAsset {
+                crate::slate::NodeArtifact {
                     node: crate::StageId::new("artifact-only", 7),
                     filename: "logs/output.txt".to_string(),
                 },
-                crate::slate::NodeAsset {
+                crate::slate::NodeArtifact {
                     node: crate::StageId::new("code", 2),
                     filename: "src/lib.rs".to_string(),
                 }
@@ -1470,7 +1470,7 @@ mod tests {
         .await
         .unwrap();
         let summary_blob = run.write_blob(br#"{"done":true}"#).await.unwrap();
-        run.put_asset(&node, "src/lib.rs", b"fn main() {}")
+        run.put_artifact(&node, "src/lib.rs", b"fn main() {}")
             .await
             .unwrap();
 
@@ -1515,7 +1515,7 @@ mod tests {
             Some(Bytes::from_static(br#"{"done":true}"#))
         );
         assert_eq!(
-            run.get_asset(&node, "src/lib.rs").await.unwrap(),
+            run.get_artifact(&node, "src/lib.rs").await.unwrap(),
             Some(Bytes::from_static(b"fn main() {}"))
         );
         assert_eq!(

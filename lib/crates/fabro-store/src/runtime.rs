@@ -34,24 +34,28 @@ impl RuntimeState {
     }
 
     #[must_use]
-    pub fn artifact_values_dir(&self) -> PathBuf {
+    pub fn blob_cache_dir(&self) -> PathBuf {
         self.root.join("cache").join("artifacts").join("values")
     }
 
     #[must_use]
+    pub fn artifact_values_dir(&self) -> PathBuf {
+        self.blob_cache_dir()
+    }
+
+    #[must_use]
     pub fn artifact_value_path(&self, artifact_id: &str) -> PathBuf {
-        self.artifact_values_dir()
-            .join(format!("{artifact_id}.json"))
+        self.blob_cache_dir().join(format!("{artifact_id}.json"))
     }
 
     #[must_use]
-    pub fn assets_dir(&self) -> PathBuf {
-        self.root.join("cache").join("artifacts").join("assets")
+    pub fn artifacts_dir(&self) -> PathBuf {
+        self.root.join("cache").join("artifacts").join("files")
     }
 
     #[must_use]
-    pub fn asset_stage_dir(&self, node_slug: &str, attempt: u32) -> PathBuf {
-        self.assets_dir()
+    pub fn artifact_stage_dir(&self, node_slug: &str, attempt: u32) -> PathBuf {
+        self.artifacts_dir()
             .join(node_slug)
             .join(format!("retry_{attempt}"))
     }
@@ -80,7 +84,7 @@ mod tests {
             dir.path().join("runtime").join("interview_request.claim")
         );
         assert_eq!(
-            state.artifact_values_dir(),
+            state.blob_cache_dir(),
             dir.path().join("cache").join("artifacts").join("values")
         );
         assert_eq!(
@@ -92,15 +96,15 @@ mod tests {
                 .join("response.plan.json")
         );
         assert_eq!(
-            state.assets_dir(),
-            dir.path().join("cache").join("artifacts").join("assets")
+            state.artifacts_dir(),
+            dir.path().join("cache").join("artifacts").join("files")
         );
         assert_eq!(
-            state.asset_stage_dir("plan", 2),
+            state.artifact_stage_dir("plan", 2),
             dir.path()
                 .join("cache")
                 .join("artifacts")
-                .join("assets")
+                .join("files")
                 .join("plan")
                 .join("retry_2")
         );

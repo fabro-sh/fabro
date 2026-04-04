@@ -23,7 +23,7 @@ export const CheckRunStatus = {
     FAILURE: 'failure',
     SKIPPED: 'skipped',
     PENDING: 'pending',
-    QUEUED: 'queued',
+    QUEUED: 'queued'
 } as const;
 
 export type CheckRunStatus = typeof CheckRunStatus[keyof typeof CheckRunStatus];

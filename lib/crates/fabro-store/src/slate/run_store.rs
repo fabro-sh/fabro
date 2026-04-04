@@ -18,7 +18,7 @@ use crate::{EventEnvelope, EventPayload, Result, RunProjection, RunSummary, Stag
 use fabro_types::{RunBlobId, RunId};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct NodeAsset {
+pub struct NodeArtifact {
     pub node: StageId,
     pub filename: String,
 }
@@ -227,22 +227,22 @@ impl SlateRunStore {
         self.inner.db.list_blobs().await
     }
 
-    pub async fn put_asset(&self, node: &StageId, filename: &str, data: &[u8]) -> Result<()> {
+    pub async fn put_artifact(&self, node: &StageId, filename: &str, data: &[u8]) -> Result<()> {
         self.inner
             .db
-            .put_bytes(&keys::node_asset(node, filename), data)
+            .put_bytes(&keys::node_artifact(node, filename), data)
             .await
     }
 
-    pub async fn get_asset(&self, node: &StageId, filename: &str) -> Result<Option<Bytes>> {
+    pub async fn get_artifact(&self, node: &StageId, filename: &str) -> Result<Option<Bytes>> {
         self.inner
             .db
-            .get_bytes(&keys::node_asset(node, filename))
+            .get_bytes(&keys::node_artifact(node, filename))
             .await
     }
 
-    pub async fn list_all_assets(&self) -> Result<Vec<NodeAsset>> {
-        self.inner.db.list_all_assets().await
+    pub async fn list_all_artifacts(&self) -> Result<Vec<NodeArtifact>> {
+        self.inner.db.list_all_artifacts().await
     }
 
     pub async fn state(&self) -> Result<RunProjection> {
@@ -294,10 +294,10 @@ impl SlateRunDb {
         }
     }
 
-    async fn list_all_assets(&self) -> Result<Vec<NodeAsset>> {
+    async fn list_all_artifacts(&self) -> Result<Vec<NodeArtifact>> {
         match self {
-            Self::Writer(db) => list_all_assets(db).await,
-            Self::Reader(db) => list_all_assets(db.as_ref()).await,
+            Self::Writer(db) => list_all_artifacts(db).await,
+            Self::Reader(db) => list_all_artifacts(db.as_ref()).await,
         }
     }
 }
@@ -383,7 +383,7 @@ where
     Ok(blob_ids)
 }
 
-async fn list_all_assets<R>(db: &R) -> Result<Vec<NodeAsset>>
+async fn list_all_artifacts<R>(db: &R) -> Result<Vec<NodeArtifact>>
 where
     R: DbRead + Sync,
 {
@@ -393,10 +393,10 @@ where
     let mut assets = Vec::new();
     while let Some(entry) = iter.next().await? {
         let key = key_to_string(&entry.key)?;
-        let Some((node, filename)) = keys::parse_node_asset_key(&key) else {
+        let Some((node, filename)) = keys::parse_node_artifact_key(&key) else {
             continue;
         };
-        assets.push(NodeAsset { node, filename });
+        assets.push(NodeArtifact { node, filename });
     }
     assets.sort();
     Ok(assets)

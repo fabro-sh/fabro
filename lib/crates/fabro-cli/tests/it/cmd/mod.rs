@@ -1,6 +1,6 @@
-mod asset;
-mod asset_cp;
-mod asset_list;
+mod artifact;
+mod artifact_cp;
+mod artifact_list;
 mod attach;
 mod completion;
 mod config;

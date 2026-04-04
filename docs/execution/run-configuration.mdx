@@ -75,7 +75,7 @@ exclude_globs = ["**/node_modules/**", "**/.cache/**"]
 repo_name = "fabro"
 repo_url = "https://github.com/fabro-sh/fabro"
 
-[assets]
+[artifacts]
 include = ["test-results/**", "playwright-report/**"]
 
 [mcp_servers.playwright]
@@ -258,12 +258,12 @@ digraph CI {
 
 If a `$variable` in the Graphviz file has no matching entry in `[vars]`, Fabro raises an error immediately. A bare `$` not followed by an identifier (e.g. `costs $5`) is left as-is.
 
-### `[assets]`
+### `[artifacts]`
 
 Configure automatic collection of test artifacts (Playwright reports, JUnit XML, screenshots, etc.) from the execution environment after each stage.
 
 ```toml title="run.toml"
-[assets]
+[artifacts]
 include = ["test-results/**", "playwright-report/**", "*.trace.zip"]
 ```
 
@@ -271,7 +271,7 @@ include = ["test-results/**", "playwright-report/**", "*.trace.zip"]
 |---|---|
 | `include` | Glob patterns for files to collect as assets. Matched against the working directory after each stage completes. |
 
-Asset collection is opt-in — when no `[assets]` section is present, no file scanning occurs. This avoids the overhead of scanning large working directories when assets aren't needed.
+Artifact collection is opt-in — when no `[artifacts]` section is present, no file scanning occurs. This avoids the overhead of scanning large working directories when assets aren't needed.
 
 ### `[mcp_servers]`
 
@@ -401,7 +401,7 @@ For model and provider specifically, the precedence is: CLI flags > TOML config 
 
 ### Project defaults (`fabro.toml`)
 
-The `fabro.toml` project config can set default values for `[llm]`, `[setup]`, `[sandbox]`, `[vars]`, `[checkpoint]`, `[pull_request]`, `[github]`, `[assets]`, `[[hooks]]`, and `[mcp_servers]`. These defaults apply to all runs in the project unless the run config overrides them:
+The `fabro.toml` project config can set default values for `[llm]`, `[setup]`, `[sandbox]`, `[vars]`, `[checkpoint]`, `[pull_request]`, `[github]`, `[artifacts]`, `[[hooks]]`, and `[mcp_servers]`. These defaults apply to all runs in the project unless the run config overrides them:
 
 ```toml title="fabro.toml"
 version = 1

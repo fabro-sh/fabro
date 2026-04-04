@@ -5,7 +5,7 @@ use fabro_checkpoint::trailer as trailerlink;
 use fabro_checkpoint::trailer::Trailer;
 use fabro_types::RunId;
 
-use crate::asset_snapshot;
+use crate::artifact_snapshot;
 use crate::git::{GitAuthor, blocking_push_with_timeout, push_ref};
 use fabro_sandbox::daytona::detect_repo_info;
 
@@ -42,7 +42,7 @@ pub async fn git_checkpoint(
     exclude_globs: &[String],
     author: &GitAuthor,
 ) -> std::result::Result<String, String> {
-    let mut all_excludes: Vec<String> = asset_snapshot::EXCLUDE_DIRS
+    let mut all_excludes: Vec<String> = artifact_snapshot::EXCLUDE_DIRS
         .iter()
         .map(|d| format!("**/{d}/**"))
         .collect();

@@ -71,10 +71,10 @@ Manager nodes that run sub-workflows write a nested `child/` directory containin
 
 **`runtime/`** — Local-only runtime files, including interview IPC files used by detached runs and `fabro attach`.
 
-**`cache/`** — Local filesystem cache for file-backed artifacts and captured test assets:
+**`cache/`** — Local filesystem cache for file-backed artifacts and captured test artifacts:
 
 - `cache/artifacts/values/` — large context values offloaded to file-backed artifacts
-- `cache/artifacts/assets/` — captured test artifacts organized by node and retry
+- `cache/artifacts/files/` — captured test artifacts organized by node and retry
 
 ## Browsing runs
 

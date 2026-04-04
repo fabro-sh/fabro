@@ -308,33 +308,33 @@ pub(crate) struct ParseArgs {
 }
 
 #[derive(Args)]
-pub(crate) struct AssetListArgs {
+pub(crate) struct ArtifactListArgs {
     /// Run ID (or prefix)
     pub(crate) run_id: String,
 
-    /// Filter to assets from a specific node
+    /// Filter to artifacts from a specific node
     #[arg(long)]
     pub(crate) node: Option<String>,
 
-    /// Filter to assets from a specific retry attempt
+    /// Filter to artifacts from a specific retry attempt
     #[arg(long)]
     pub(crate) retry: Option<u32>,
 }
 
 #[derive(Args)]
-pub(crate) struct AssetCpArgs {
-    /// Source: RUN_ID (all assets) or RUN_ID:path (specific asset)
+pub(crate) struct ArtifactCpArgs {
+    /// Source: RUN_ID (all artifacts) or RUN_ID:path (specific artifact)
     pub(crate) source: String,
 
     /// Destination directory (defaults to current directory)
     #[arg(default_value = ".")]
     pub(crate) dest: PathBuf,
 
-    /// Filter to assets from a specific node
+    /// Filter to artifacts from a specific node
     #[arg(long)]
     pub(crate) node: Option<String>,
 
-    /// Filter to assets from a specific retry attempt
+    /// Filter to artifacts from a specific retry attempt
     #[arg(long)]
     pub(crate) retry: Option<u32>,
 
@@ -754,8 +754,8 @@ pub(crate) enum Commands {
     /// Parse a DOT file and print its AST
     #[command(hide = true)]
     Parse(ParseArgs),
-    /// Inspect and copy run assets (screenshots, reports, traces)
-    Asset(AssetNamespace),
+    /// Inspect and copy run artifacts (screenshots, reports, traces)
+    Artifact(ArtifactNamespace),
     /// Export store-backed run state for debugging
     Store(StoreNamespace),
     #[command(flatten)]
@@ -834,9 +834,9 @@ impl Commands {
                 LlmCommand::Prompt(_) => "llm prompt",
                 LlmCommand::Chat(_) => "llm chat",
             },
-            Self::Asset(ns) => match &ns.command {
-                AssetCommand::List(_) => "asset list",
-                AssetCommand::Cp(_) => "asset cp",
+            Self::Artifact(ns) => match &ns.command {
+                ArtifactCommand::List(_) => "artifact list",
+                ArtifactCommand::Cp(_) => "artifact cp",
             },
             Self::Store(ns) => match &ns.command {
                 StoreCommand::Dump(_) => "store dump",
@@ -925,17 +925,17 @@ pub(crate) enum PrCommand {
 }
 
 #[derive(Args)]
-pub(crate) struct AssetNamespace {
+pub(crate) struct ArtifactNamespace {
     #[command(subcommand)]
-    pub(crate) command: AssetCommand,
+    pub(crate) command: ArtifactCommand,
 }
 
 #[derive(Subcommand)]
-pub(crate) enum AssetCommand {
-    /// List assets for a workflow run
-    List(AssetListArgs),
-    /// Copy assets from a workflow run
-    Cp(AssetCpArgs),
+pub(crate) enum ArtifactCommand {
+    /// List artifacts for a workflow run
+    List(ArtifactListArgs),
+    /// Copy artifacts from a workflow run
+    Cp(ArtifactCpArgs),
 }
 
 #[derive(Args)]

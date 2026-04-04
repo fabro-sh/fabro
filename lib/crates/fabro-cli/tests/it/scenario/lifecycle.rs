@@ -69,12 +69,13 @@ fn local_run_lifecycle() {
         "first log line should have an event field"
     );
 
-    // 5. asset list — no assets yet, should succeed with empty message
-    let asset_list_out = cmd(&["asset", "list", &run_id]).success();
-    let asset_list_stdout = String::from_utf8(asset_list_out.get_output().stdout.clone()).unwrap();
+    // 5. artifact list — no assets yet, should succeed with empty message
+    let artifact_list_out = cmd(&["artifact", "list", &run_id]).success();
+    let artifact_list_stdout =
+        String::from_utf8(artifact_list_out.get_output().stdout.clone()).unwrap();
     assert!(
-        asset_list_stdout.contains("No assets found"),
-        "asset list should report no assets: {asset_list_stdout}"
+        artifact_list_stdout.contains("No artifacts found"),
+        "artifact list should report no artifacts: {artifact_list_stdout}"
     );
 
     // 6. system df — mentions "Runs"
