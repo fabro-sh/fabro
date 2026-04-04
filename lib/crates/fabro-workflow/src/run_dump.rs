@@ -43,18 +43,15 @@ impl RunDump {
     #[must_use]
     pub fn metadata_checkpoint(state: &RunProjection) -> Self {
         let mut entries = Vec::new();
-        let mut keys: Vec<_> = state
-            .iter_nodes()
-            .map(|(node, _)| node.into_owned())
-            .collect();
+        let mut keys: Vec<_> = state.iter_nodes().map(|(node, _)| node.clone()).collect();
         keys.sort();
 
         for node_key in keys {
-            let Some(node) = state.node(&node_key.as_ref()) else {
+            let Some(node) = state.node(&node_key) else {
                 continue;
             };
-            let node_id = node_key.node_id.as_str();
-            let visit = node_key.visit;
+            let node_id = node_key.node_id();
+            let visit = node_key.visit();
 
             if let Some(prompt) = node.prompt.as_ref() {
                 entries.push(RunDumpEntry::text(
@@ -147,19 +144,16 @@ impl RunDump {
             push_json_entry(&mut entries, "sandbox.json", record);
         }
 
-        let mut node_keys: Vec<_> = state
-            .iter_nodes()
-            .map(|(node, _)| node.into_owned())
-            .collect();
+        let mut node_keys: Vec<_> = state.iter_nodes().map(|(node, _)| node.clone()).collect();
         node_keys.sort();
         for node_key in &node_keys {
             let node = state
-                .node(&node_key.as_ref())
-                .with_context(|| format!("missing node {:?} in projection", node_key))?;
-            let node_id_segment = validate_single_path_segment("node id", &node_key.node_id)?;
+                .node(node_key)
+                .with_context(|| format!("missing node {node_key:?} in projection"))?;
+            let node_id_segment = validate_single_path_segment("node id", node_key.node_id())?;
             let base = PathBuf::from("nodes")
                 .join(node_id_segment)
-                .join(format!("visit-{}", node_key.visit));
+                .join(format!("visit-{}", node_key.visit()));
 
             if let Some(prompt) = node.prompt.as_ref() {
                 entries.push(RunDumpEntry::text_path(
@@ -229,22 +223,24 @@ impl RunDump {
         }
 
         for asset in run_store.list_all_assets().await? {
-            let node_id_segment = validate_single_path_segment("node id", &asset.node.node_id)?;
+            let node_id_segment = validate_single_path_segment("node id", asset.node.node_id())?;
             let filename_path = validate_relative_path("asset filename", &asset.filename)?;
             let data = run_store
-                .get_asset(&asset.node.as_ref(), &asset.filename)
+                .get_asset(&asset.node, &asset.filename)
                 .await?
                 .with_context(|| {
                     format!(
                         "asset {:?} for node {:?} visit {} is missing from the store",
-                        asset.filename, asset.node.node_id, asset.node.visit
+                        asset.filename,
+                        asset.node.node_id(),
+                        asset.node.visit()
                     )
                 })?;
             entries.push(RunDumpEntry::bytes_path(
                 &PathBuf::from("artifacts")
                     .join("nodes")
                     .join(node_id_segment)
-                    .join(format!("visit-{}", asset.node.visit))
+                    .join(format!("visit-{}", asset.node.visit()))
                     .join(filename_path),
                 data.to_vec(),
             ));

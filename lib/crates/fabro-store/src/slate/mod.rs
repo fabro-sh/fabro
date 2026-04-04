@@ -419,7 +419,7 @@ mod tests {
     use slatedb::{CloseReason, ErrorKind};
     use tokio::time::timeout;
 
-    use crate::{EventPayload, NodeVisitRef};
+    use crate::{EventPayload, StageId};
 
     fn dt(rfc3339: &str) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(rfc3339)
@@ -1209,10 +1209,7 @@ mod tests {
             .create_run(&test_run_id("run-1"), created_at, None)
             .await
             .unwrap();
-        let node = NodeVisitRef {
-            node_id: "code",
-            visit: 2,
-        };
+        let node = StageId::new("code", 2);
         run.append_event(&event_payload(
             "run-1",
             "2026-03-27T12:01:00Z",
@@ -1250,18 +1247,12 @@ mod tests {
             .await
             .unwrap();
 
-        let snapshot_node = NodeVisitRef {
-            node_id: "code",
-            visit: 2,
-        };
+        let snapshot_node = StageId::new("code", 2);
         run.put_asset(&snapshot_node, "src/lib.rs", b"fn main() {}")
             .await
             .unwrap();
 
-        let asset_only_node = NodeVisitRef {
-            node_id: "artifact-only",
-            visit: 7,
-        };
+        let asset_only_node = StageId::new("artifact-only", 7);
         run.put_asset(&asset_only_node, "logs/output.txt", b"hello")
             .await
             .unwrap();
@@ -1274,17 +1265,11 @@ mod tests {
             run.list_all_assets().await.unwrap(),
             vec![
                 crate::slate::NodeAsset {
-                    node: crate::NodeVisit {
-                        node_id: "artifact-only".to_string(),
-                        visit: 7,
-                    },
+                    node: crate::StageId::new("artifact-only", 7),
                     filename: "logs/output.txt".to_string(),
                 },
                 crate::slate::NodeAsset {
-                    node: crate::NodeVisit {
-                        node_id: "code".to_string(),
-                        visit: 2,
-                    },
+                    node: crate::StageId::new("code", 2),
                     filename: "src/lib.rs".to_string(),
                 }
             ]
@@ -1308,10 +1293,7 @@ mod tests {
         let conclusion = sample_conclusion();
         let retro = sample_retro("run-1");
         let sandbox = sample_sandbox();
-        let node = NodeVisitRef {
-            node_id: "code",
-            visit: 2,
-        };
+        let node = StageId::new("code", 2);
         let pull_request = sample_pull_request();
 
         run.append_event(&event_payload(
@@ -1588,7 +1570,7 @@ mod tests {
             Some("diff --git a/src/lib.rs b/src/lib.rs\n")
         );
         assert_eq!(state.pull_request, Some(pull_request.clone()));
-        assert!(state.iter_nodes().any(|(node, _)| node.node_id == "code"));
+        assert!(state.iter_nodes().any(|(node, _)| node.node_id() == "code"));
         let node_state = state
             .node(&node)
             .expect("node state should exist for code:2");
@@ -1820,12 +1802,7 @@ mod tests {
             Some("local")
         );
         assert_eq!(state.list_node_visits("code"), vec![2]);
-        let node = state
-            .node(&NodeVisitRef {
-                node_id: "code",
-                visit: 2,
-            })
-            .unwrap();
+        let node = state.node(&StageId::new("code", 2)).unwrap();
         assert_eq!(node.prompt.as_deref(), Some("Plan the fix"));
         assert_eq!(node.response.as_deref(), Some("Implemented"));
         assert_eq!(

@@ -1,42 +1,11 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
+use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{Result, StoreError};
 use fabro_types::{RunId, RunStatus, StatusReason};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct NodeVisitRef<'a> {
-    pub node_id: &'a str,
-    pub visit: u32,
-}
-
-impl<'a> NodeVisitRef<'a> {
-    #[must_use]
-    pub fn into_owned(self) -> NodeVisit {
-        NodeVisit {
-            node_id: self.node_id.to_string(),
-            visit: self.visit,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct NodeVisit {
-    pub node_id: String,
-    pub visit: u32,
-}
-
-impl NodeVisit {
-    #[must_use]
-    pub fn as_ref(&self) -> NodeVisitRef<'_> {
-        NodeVisitRef {
-            node_id: &self.node_id,
-            visit: self.visit,
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CatalogRecord {
@@ -120,7 +89,7 @@ impl<'de> Deserialize<'de> for EventPayload {
         D: Deserializer<'de>,
     {
         let payload = Self(serde_json::Value::deserialize(deserializer)?);
-        payload.validate_shape().map_err(serde::de::Error::custom)?;
+        payload.validate_shape().map_err(D::Error::custom)?;
         Ok(payload)
     }
 }

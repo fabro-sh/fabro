@@ -6,9 +6,7 @@ use chrono::{DateTime, Utc};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::{
-    CatalogRecord, EventEnvelope, NodeVisit, NodeVisitRef, Result, RunSummary, StoreError,
-};
+use crate::{CatalogRecord, EventEnvelope, Result, RunSummary, StageId, StoreError};
 use fabro_types::{
     Checkpoint, Conclusion, FailureSignature, NodeStatusRecord, Outcome, PullRequestRecord, Retro,
     RunId, RunRecord, RunStatus, RunStatusRecord, SandboxRecord, StageStatus, StageUsage,
@@ -30,7 +28,7 @@ pub struct RunProjection {
     pub sandbox: Option<SandboxRecord>,
     pub final_patch: Option<String>,
     pub pull_request: Option<PullRequestRecord>,
-    nodes: HashMap<NodeVisit, NodeState>,
+    nodes: HashMap<StageId, NodeState>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -255,30 +253,28 @@ impl RunProjection {
         Ok(())
     }
 
-    pub fn node(&self, node: &NodeVisitRef<'_>) -> Option<&NodeState> {
-        self.nodes.get(&node.into_owned())
+    pub fn node(&self, node: &StageId) -> Option<&NodeState> {
+        self.nodes.get(node)
     }
 
-    pub fn iter_nodes(&self) -> impl Iterator<Item = (NodeVisitRef<'_>, &NodeState)> {
-        self.nodes
-            .iter()
-            .map(|(node, state)| (node.as_ref(), state))
+    pub fn iter_nodes(&self) -> impl Iterator<Item = (&StageId, &NodeState)> {
+        self.nodes.iter()
     }
 
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
 
-    pub fn set_node(&mut self, node: NodeVisitRef<'_>, state: NodeState) {
-        self.nodes.insert(node.into_owned(), state);
+    pub fn set_node(&mut self, node: StageId, state: NodeState) {
+        self.nodes.insert(node, state);
     }
 
     pub fn list_node_visits(&self, node_id: &str) -> Vec<u32> {
         let mut visits = self
             .nodes
             .keys()
-            .filter(|node| node.node_id == node_id)
-            .map(|node| node.visit)
+            .filter(|node| node.node_id() == node_id)
+            .map(StageId::visit)
             .collect::<Vec<_>>();
         visits.sort_unstable();
         visits.dedup();
@@ -323,19 +319,14 @@ impl RunProjection {
     }
 
     fn node_mut(&mut self, node_id: &str, visit: u32) -> &mut NodeState {
-        self.nodes
-            .entry(NodeVisit {
-                node_id: node_id.to_string(),
-                visit,
-            })
-            .or_default()
+        self.nodes.entry(StageId::new(node_id, visit)).or_default()
     }
 
     fn current_visit_for(&self, node_id: &str) -> Option<u32> {
         self.nodes
             .keys()
-            .filter(|node| node.node_id == node_id)
-            .map(|node| node.visit)
+            .filter(|node| node.node_id() == node_id)
+            .map(StageId::visit)
             .max()
     }
 

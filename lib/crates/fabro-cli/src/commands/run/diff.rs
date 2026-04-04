@@ -59,7 +59,7 @@ async fn resolve_diff(
     let state = run_store.state().await?;
     if let Some(ref node_id) = args.node {
         if let Some(visit) = state.list_node_visits(node_id).into_iter().max() {
-            if let Some(node) = state.node(&fabro_store::NodeVisitRef { node_id, visit }) {
+            if let Some(node) = state.node(&fabro_store::StageId::new(node_id, visit)) {
                 if let Some(patch) = node.diff.clone() {
                     debug!(node_id, visit, "Reading per-node diff from projected state");
                     return Ok(patch);

@@ -203,7 +203,7 @@ mod tests {
     use super::*;
     use crate::outcome::StageStatus;
     use fabro_graphviz::graph::AttrValue;
-    use fabro_store::{NodeVisitRef, SlateRunStore, SlateStore};
+    use fabro_store::{SlateRunStore, SlateStore, StageId};
     use fabro_types::fixtures;
     use object_store::memory::InMemory;
     use std::sync::Arc;
@@ -600,10 +600,7 @@ mod tests {
 
         let snapshot = run_store.state().await.unwrap();
         let node = snapshot
-            .node(&NodeVisitRef {
-                node_id: "script_node",
-                visit: 1,
-            })
+            .node(&StageId::new("script_node", 1))
             .cloned()
             .unwrap();
 

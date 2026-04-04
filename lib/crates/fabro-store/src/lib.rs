@@ -10,10 +10,11 @@ mod slate;
 mod types;
 
 pub use error::{Result, StoreError};
+pub use fabro_types::StageId;
 pub use run_state::{NodeState, RunProjection};
 pub use runtime::RuntimeState;
 pub use slate::{NodeAsset, SlateRunStore, SlateStore};
-pub use types::{CatalogRecord, EventEnvelope, EventPayload, NodeVisit, NodeVisitRef, RunSummary};
+pub use types::{CatalogRecord, EventEnvelope, EventPayload, RunSummary};
 
 pub type StoreHandle = Arc<SlateStore>;
 

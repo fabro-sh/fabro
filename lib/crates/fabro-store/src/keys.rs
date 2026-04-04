@@ -1,4 +1,4 @@
-use crate::NodeVisitRef;
+use crate::StageId;
 
 pub(crate) const INIT_KEY: &str = "_init.json";
 pub(crate) const EVENTS_PREFIX: &str = "events#";
@@ -17,14 +17,15 @@ pub(crate) fn artifact_value(artifact_id: &str) -> String {
     format!("{ARTIFACT_VALUES_PREFIX}{artifact_id}.json")
 }
 
-pub(crate) fn node_asset_prefix(node: &NodeVisitRef<'_>) -> String {
+pub(crate) fn node_asset_prefix(node: &StageId) -> String {
     format!(
         "{ARTIFACT_NODES_PREFIX}{}#visit-{}",
-        node.node_id, node.visit
+        node.node_id(),
+        node.visit()
     )
 }
 
-pub(crate) fn node_asset(node: &NodeVisitRef<'_>, filename: &str) -> String {
+pub(crate) fn node_asset(node: &StageId, filename: &str) -> String {
     format!("{}#{filename}", node_asset_prefix(node))
 }
 
@@ -38,7 +39,7 @@ pub(crate) fn parse_artifact_value_id(key: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
-pub(crate) fn parse_node_asset_key(key: &str) -> Option<(String, u32, String)> {
+pub(crate) fn parse_node_asset_key(key: &str) -> Option<(StageId, String)> {
     parse_visit_scoped_key(key, ARTIFACT_NODES_PREFIX)
 }
 
@@ -46,11 +47,11 @@ fn parse_seq(key: &str, prefix: &str) -> Option<u32> {
     key.strip_prefix(prefix)?.split_once('-')?.0.parse().ok()
 }
 
-fn parse_visit_scoped_key(key: &str, prefix: &str) -> Option<(String, u32, String)> {
+fn parse_visit_scoped_key(key: &str, prefix: &str) -> Option<(StageId, String)> {
     let rest = key.strip_prefix(prefix)?;
     let (node_id, rest) = rest.split_once("#visit-")?;
     let (visit, file) = rest.split_once('#')?;
-    Some((node_id.to_string(), visit.parse().ok()?, file.to_string()))
+    Some((StageId::new(node_id, visit.parse().ok()?), file.to_string()))
 }
 
 #[cfg(test)]
@@ -70,10 +71,7 @@ mod tests {
 
     #[test]
     fn artifact_keys_match_spec() {
-        let node = NodeVisitRef {
-            node_id: "code",
-            visit: 2,
-        };
+        let node = StageId::new("code", 2);
         assert_eq!(artifact_value("summary"), "artifacts#values#summary.json");
         assert_eq!(
             node_asset(&node, "src/main.rs"),
@@ -90,7 +88,7 @@ mod tests {
         );
         assert_eq!(
             parse_node_asset_key("artifacts#nodes#code#visit-2#src/main.rs"),
-            Some(("code".to_string(), 2, "src/main.rs".to_string()))
+            Some((StageId::new("code", 2), "src/main.rs".to_string()))
         );
     }
 
@@ -112,8 +110,7 @@ mod tests {
         assert_eq!(
             parse_node_asset_key("artifacts#nodes#build#visit-1#deep/nested/path/file.rs"),
             Some((
-                "build".to_string(),
-                1,
+                StageId::new("build", 1),
                 "deep/nested/path/file.rs".to_string()
             ))
         );

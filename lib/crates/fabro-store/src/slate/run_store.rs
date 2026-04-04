@@ -15,8 +15,8 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use crate::keys;
 use crate::run_state::EventProjectionCache;
 use crate::{
-    CatalogRecord, EventEnvelope, EventPayload, NodeVisit, NodeVisitRef, Result, RunProjection,
-    RunSummary, StoreError,
+    CatalogRecord, EventEnvelope, EventPayload, Result, RunProjection, RunSummary, StageId,
+    StoreError,
 };
 #[derive(Clone)]
 pub struct SlateRunStore {
@@ -25,7 +25,7 @@ pub struct SlateRunStore {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NodeAsset {
-    pub node: NodeVisit,
+    pub node: StageId,
     pub filename: String,
 }
 
@@ -230,23 +230,14 @@ impl SlateRunStore {
         self.inner.db.list_artifact_values().await
     }
 
-    pub async fn put_asset(
-        &self,
-        node: &NodeVisitRef<'_>,
-        filename: &str,
-        data: &[u8],
-    ) -> Result<()> {
+    pub async fn put_asset(&self, node: &StageId, filename: &str, data: &[u8]) -> Result<()> {
         self.inner
             .db
             .put_bytes(&keys::node_asset(node, filename), data)
             .await
     }
 
-    pub async fn get_asset(
-        &self,
-        node: &NodeVisitRef<'_>,
-        filename: &str,
-    ) -> Result<Option<Bytes>> {
+    pub async fn get_asset(&self, node: &StageId, filename: &str) -> Result<Option<Bytes>> {
         self.inner
             .db
             .get_bytes(&keys::node_asset(node, filename))
@@ -414,13 +405,10 @@ where
     let mut assets = Vec::new();
     while let Some(entry) = iter.next().await? {
         let key = key_to_string(&entry.key)?;
-        let Some((node_id, visit, filename)) = keys::parse_node_asset_key(&key) else {
+        let Some((node, filename)) = keys::parse_node_asset_key(&key) else {
             continue;
         };
-        assets.push(NodeAsset {
-            node: NodeVisit { node_id, visit },
-            filename,
-        });
+        assets.push(NodeAsset { node, filename });
     }
     assets.sort();
     Ok(assets)

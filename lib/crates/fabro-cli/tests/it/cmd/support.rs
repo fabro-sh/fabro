@@ -785,12 +785,12 @@ fn setup_git_backed_run(context: &TestContext, workflow: GitWorkflowKind) -> Git
             assert!(
                 state
                     .iter_nodes()
-                    .any(|(node, state)| node.node_id == "step_one" && state.diff.is_some())
+                    .any(|(node, state)| node.node_id() == "step_one" && state.diff.is_some())
             );
             assert!(
                 state
                     .iter_nodes()
-                    .any(|(node, state)| node.node_id == "step_two" && state.diff.is_some())
+                    .any(|(node, state)| node.node_id() == "step_two" && state.diff.is_some())
             );
         }
         GitWorkflowKind::Noop => {

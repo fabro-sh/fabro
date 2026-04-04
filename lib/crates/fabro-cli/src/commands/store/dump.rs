@@ -3,7 +3,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 #[cfg(test)]
-use fabro_store::NodeVisitRef;
+use fabro_store::StageId;
 use fabro_store::{RunProjection, SlateRunStore};
 use fabro_workflow::run_dump::RunDump;
 use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
@@ -294,10 +294,7 @@ mod tests {
         let retro = sample_retro(run_id);
         let sandbox = sample_sandbox();
 
-        let node = NodeVisitRef {
-            node_id: "code",
-            visit: 2,
-        };
+        let node = StageId::new("code", 2);
         append_workflow_event(
             &run,
             &run_id,
@@ -534,10 +531,7 @@ mod tests {
             .await
             .unwrap();
 
-        let asset_only_node = NodeVisitRef {
-            node_id: "artifact-only",
-            visit: 7,
-        };
+        let asset_only_node = StageId::new("artifact-only", 7);
         run.put_asset(&asset_only_node, "logs/output.txt", b"hello")
             .await
             .unwrap();
@@ -660,16 +654,9 @@ mod tests {
         )
         .await
         .unwrap();
-        run.put_asset(
-            &NodeVisitRef {
-                node_id: "code",
-                visit: 1,
-            },
-            "../escape.txt",
-            b"boom",
-        )
-        .await
-        .unwrap();
+        run.put_asset(&StageId::new("code", 1), "../escape.txt", b"boom")
+            .await
+            .unwrap();
 
         let temp = tempfile::tempdir().unwrap();
         let output = temp.path().join("dump");

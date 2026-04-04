@@ -207,7 +207,7 @@ impl Handler for PromptHandler {
 mod tests {
     use super::*;
     use fabro_graphviz::graph::AttrValue;
-    use fabro_store::{NodeVisitRef, SlateRunStore, SlateStore};
+    use fabro_store::{SlateRunStore, SlateStore, StageId};
     use fabro_types::fixtures;
     use object_store::memory::InMemory;
     use std::sync::Arc;
@@ -395,12 +395,7 @@ mod tests {
         logger.flush().await;
 
         let state = run_store.state().await.unwrap();
-        let node_state = state
-            .node(&NodeVisitRef {
-                node_id: "classify",
-                visit: 1,
-            })
-            .unwrap();
+        let node_state = state.node(&StageId::new("classify", 1)).unwrap();
         assert_eq!(node_state.provider_used.as_ref().unwrap()["mode"], "prompt");
     }
 

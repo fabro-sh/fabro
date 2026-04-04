@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 use fabro_checkpoint::branch::BranchStore;
 use fabro_checkpoint::git::Store as GitStore;
-use fabro_store::{NodeVisitRef, SlateRunStore as DurableRunStore, SlateStore as DurableStore};
-use fabro_types::RunId;
+use fabro_store::{SlateRunStore as DurableRunStore, SlateStore as DurableStore};
+use fabro_types::{RunId, StageId};
 use git2::{Repository, Signature};
 use ulid::Ulid;
 
@@ -68,7 +68,7 @@ pub async fn rebuild_metadata_branch(
                 for visit in 1..=max_visit {
                     let visit = u32::try_from(visit)
                         .with_context(|| format!("visit {visit} for node {node_id} exceeds u32"))?;
-                    let Some(node) = state.node(&NodeVisitRef { node_id, visit }).cloned() else {
+                    let Some(node) = state.node(&StageId::new(node_id, visit)).cloned() else {
                         continue;
                     };
 
@@ -333,7 +333,7 @@ fn resolve_prefix_matches(prefix: &str, matches: Vec<RunId>) -> Result<RunId> {
 mod tests {
     use chrono::{TimeZone, Utc};
     use fabro_graphviz::graph::Graph;
-    use fabro_store::{NodeVisitRef, SlateStore, StoreHandle};
+    use fabro_store::{SlateStore, StageId, StoreHandle};
     use fabro_types::{RunId, RunRecord, SandboxRecord, Settings, StartRecord, fixtures};
     use object_store::memory::InMemory;
     use std::collections::HashMap;
@@ -533,15 +533,15 @@ mod tests {
     async fn append_prompt_event(
         run_store: &DurableRunStore,
         run_id: RunId,
-        node: &NodeVisitRef<'_>,
+        node: &StageId,
         text: &str,
     ) {
         append_workflow_event(
             run_store,
             &run_id,
             &WorkflowRunEvent::Prompt {
-                stage: node.node_id.to_string(),
-                visit: node.visit,
+                stage: node.node_id().to_string(),
+                visit: node.visit(),
                 text: text.to_string(),
                 mode: None,
                 provider: None,
@@ -637,16 +637,10 @@ mod tests {
         let durable_store = memory_store();
         let run_store = create_run_store(&durable_store, test_run_id(), None).await;
 
-        let build_v1 = NodeVisitRef {
-            node_id: "build",
-            visit: 1,
-        };
+        let build_v1 = StageId::new("build", 1);
         append_prompt_event(&run_store, test_run_id(), &build_v1, "visit one").await;
 
-        let build_v2 = NodeVisitRef {
-            node_id: "build",
-            visit: 2,
-        };
+        let build_v2 = StageId::new("build", 2);
         append_prompt_event(&run_store, test_run_id(), &build_v2, "visit two").await;
 
         append_checkpoint_event(
@@ -1007,10 +1001,7 @@ mod tests {
         let run_store = create_run_store(&durable_store, test_run_id(), None).await;
 
         let bad_node = "bad\0node";
-        let bad_visit = NodeVisitRef {
-            node_id: bad_node,
-            visit: 1,
-        };
+        let bad_visit = StageId::new(bad_node, 1);
         append_prompt_event(&run_store, test_run_id(), &bad_visit, "prompt").await;
         append_checkpoint_event(
             &run_store,

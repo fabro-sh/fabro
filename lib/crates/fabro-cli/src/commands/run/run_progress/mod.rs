@@ -557,6 +557,8 @@ mod tests {
         emit(
             &mut ui,
             WorkflowRunEvent::ParallelStarted {
+                node_id: "fork1".into(),
+                visit: 1,
                 branch_count: 2,
                 join_policy: "wait_all".into(),
             },
@@ -603,6 +605,8 @@ mod tests {
         emit(
             &mut ui,
             WorkflowRunEvent::ParallelStarted {
+                node_id: "fork1".into(),
+                visit: 1,
                 branch_count: 1,
                 join_policy: "wait_all".into(),
             },
@@ -1110,6 +1114,8 @@ mod tests {
         emit(
             &mut ui,
             WorkflowRunEvent::ParallelStarted {
+                node_id: "fork1".into(),
+                visit: 1,
                 branch_count: 1,
                 join_policy: "wait_all".into(),
             },

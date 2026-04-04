@@ -5,8 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
 use fabro_model::Provider;
-use fabro_store::NodeVisitRef;
-use fabro_types::RunId;
+use fabro_types::{RunId, StageId};
 use tokio::fs;
 
 use crate::context::keys;
@@ -264,7 +263,7 @@ pub(crate) async fn write_provider_used_file(
         .await
         .ok()
         .and_then(|state| {
-            let node = NodeVisitRef { node_id, visit };
+            let node = StageId::new(node_id, visit);
             state
                 .node(&node)
                 .and_then(|node_state| node_state.provider_used.clone())
@@ -467,8 +466,10 @@ impl Handler for AgentHandler {
                 "mode": if node.backend() == Some("cli") { "cli" } else { "agent" },
                 "provider": node
                     .provider()
-                    .map(String::from)
-                    .unwrap_or_else(|| Provider::default_from_env().as_str().to_string()),
+                    .map_or_else(
+                        || Provider::default_from_env().as_str().to_string(),
+                        String::from,
+                    ),
                 "model": node.model().map(String::from).unwrap_or_default(),
             })),
         )
@@ -483,7 +484,7 @@ mod tests {
     use super::*;
     use crate::event::EventEmitter;
     use fabro_graphviz::graph::AttrValue;
-    use fabro_store::{NodeVisitRef, SlateRunStore, SlateStore};
+    use fabro_store::{SlateRunStore, SlateStore, StageId};
     use fabro_types::fixtures;
     use object_store::memory::InMemory;
     use std::sync::Arc;
@@ -829,12 +830,7 @@ mod tests {
         logger.flush().await;
 
         let state = run_store.state().await.unwrap();
-        let node_state = state
-            .node(&NodeVisitRef {
-                node_id: "step",
-                visit: 1,
-            })
-            .unwrap();
+        let node_state = state.node(&StageId::new("step", 1)).unwrap();
         assert_eq!(
             node_state.provider_used.as_ref().unwrap()["provider"],
             "openai"

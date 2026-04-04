@@ -13,6 +13,7 @@ pub mod run;
 pub mod run_id;
 pub mod sandbox_record;
 pub mod settings;
+pub mod stage_id;
 pub mod start;
 pub mod status;
 pub mod usage;
@@ -33,6 +34,7 @@ pub use run_id::RunId;
 pub use run_id::fixtures;
 pub use sandbox_record::SandboxRecord;
 pub use settings::Settings;
+pub use stage_id::StageId;
 pub use start::StartRecord;
 pub use status::{
     InvalidTransition, ParseRunStatusError, RunStatus, RunStatusRecord, StatusReason,

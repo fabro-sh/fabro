@@ -728,12 +728,7 @@ mod tests {
         logger.flush().await;
 
         let state = run_store.state().await.unwrap();
-        let node_state = state
-            .node(&fabro_store::NodeVisitRef {
-                node_id: "par",
-                visit: 1,
-            })
-            .unwrap();
+        let node_state = state.node(&fabro_store::StageId::new("par", 1)).unwrap();
         let results = node_state.parallel_results.as_ref().unwrap();
         assert!(results.is_array());
         assert_eq!(results.as_array().unwrap().len(), 2);
