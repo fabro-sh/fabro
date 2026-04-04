@@ -1,7 +1,11 @@
 use anyhow::Result;
 use fabro_agent::cli::{AgentArgs, OutputFormat, run_with_args, run_with_args_and_client};
 use fabro_config::mcp::McpServerEntry;
+use fabro_llm::client::Client;
+use fabro_llm::providers::FabroServerAdapter;
 use fabro_mcp::config::McpServerSettings;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::args::GlobalArgs;
 use crate::user_config;
@@ -38,22 +42,21 @@ pub(crate) async fn execute(mut args: AgentArgs, globals: &GlobalArgs) -> Result
                 .provider
                 .clone()
                 .unwrap_or_else(|| "anthropic".to_string());
-            let adapter = std::sync::Arc::new(fabro_llm::providers::FabroServerAdapter::new(
+            let adapter = Arc::new(FabroServerAdapter::new(
                 http_client,
                 &resolved.server_base_url,
                 &provider_name,
             ));
-            let mut client =
-                fabro_llm::client::Client::new(std::collections::HashMap::new(), None, vec![]);
+            let mut client = Client::new(HashMap::new(), None, vec![]);
             client
                 .register_provider(adapter)
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to register fabro server adapter: {e}"))?;
-            run_with_args_and_client(args, Some(client), mcp_servers).await?
+            run_with_args_and_client(args, Some(client), mcp_servers).await?;
         }
         user_config::ExecutionMode::Standalone => {
             tracing::info!(mode = "standalone", "Agent session starting");
-            run_with_args(args, mcp_servers).await?
+            run_with_args(args, mcp_servers).await?;
         }
     }
 

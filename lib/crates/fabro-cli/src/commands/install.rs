@@ -765,8 +765,14 @@ pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<(
 // ---------------------------------------------------------------------------
 
 mod hex {
-    pub fn encode(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    use std::fmt::Write as _;
+
+    pub(super) fn encode(bytes: &[u8]) -> String {
+        let mut encoded = String::with_capacity(bytes.len() * 2);
+        for byte in bytes {
+            write!(&mut encoded, "{byte:02x}").expect("writing to String should not fail");
+        }
+        encoded
     }
 }
 

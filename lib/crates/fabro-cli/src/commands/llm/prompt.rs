@@ -3,6 +3,7 @@ use fabro_llm::cli::{PromptArgs, ServerConnection, run_prompt, run_prompt_via_se
 use fabro_types::Settings;
 
 use crate::args::GlobalArgs;
+use crate::user_config::{ExecutionMode, build_server_client, resolve_mode};
 
 pub(super) async fn execute(
     mut args: PromptArgs,
@@ -14,21 +15,21 @@ pub(super) async fn execute(
         args.model = llm_defaults.and_then(|l| l.model.clone());
     }
 
-    let resolved = crate::user_config::resolve_mode(
+    let resolved = resolve_mode(
         globals.storage_dir.as_deref(),
         globals.server_url.as_deref(),
         cli_settings,
     );
     match resolved.mode {
-        crate::user_config::ExecutionMode::Server => {
-            let client = crate::user_config::build_server_client(resolved.tls.as_ref())?;
+        ExecutionMode::Server => {
+            let client = build_server_client(resolved.tls.as_ref())?;
             let server = ServerConnection {
                 client,
                 base_url: resolved.server_base_url,
             };
             run_prompt_via_server(args, &server, globals.json).await?;
         }
-        crate::user_config::ExecutionMode::Standalone => {
+        ExecutionMode::Standalone => {
             run_prompt(args, globals.json).await?;
         }
     }
