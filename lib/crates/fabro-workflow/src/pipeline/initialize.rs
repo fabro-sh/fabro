@@ -829,7 +829,7 @@ mod tests {
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
         emitter.on_event({
             let seen = Arc::clone(&seen);
-            move |event| seen.lock().unwrap().push(event.event_name())
+            move |event| seen.lock().unwrap().push(event.event_name().to_string())
         });
         store_logger.register(&emitter);
 

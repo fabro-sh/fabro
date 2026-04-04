@@ -938,7 +938,7 @@ async fn run_with_lifecycle_emits_initialize_and_setup_events() {
     let events_clone = Arc::clone(&events);
     let emitter = test_emitter("order-test");
     emitter.on_event(move |event| {
-        let name = match event.event_name().as_str() {
+        let name = match event.event_name() {
             "sandbox.initialized" => "SandboxInitialized",
             "setup.started" => "SetupStarted",
             "setup.completed" => "SetupCompleted",

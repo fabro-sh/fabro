@@ -338,12 +338,12 @@ impl RunEvent {
         Ok(Value::Object(map))
     }
 
-    pub fn event_name(&self) -> String {
-        self.event.clone()
+    pub fn event_name(&self) -> &str {
+        &self.event
     }
 
-    pub fn properties(&self) -> Value {
-        self.properties.clone()
+    pub fn properties(&self) -> &Value {
+        &self.properties
     }
 
     pub fn refresh_cache(&mut self) {
