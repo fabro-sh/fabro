@@ -46,7 +46,6 @@ pub(crate) async fn create_run(
             settings,
             cwd,
             workflow_slug: None,
-            run_dir: None,
             run_id,
             base_branch: None,
             host_repo_path: None,

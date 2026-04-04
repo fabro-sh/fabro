@@ -369,7 +369,6 @@ mod tests {
     fn sample_run_record(run_id: RunId, host_repo_path: Option<&str>) -> RunRecord {
         RunRecord {
             run_id,
-            created_at: created_at(),
             settings: Settings::default(),
             graph: Graph::new("test"),
             workflow_slug: None,
@@ -431,7 +430,7 @@ mod tests {
         run_id: RunId,
         host_repo_path: Option<&str>,
     ) -> DurableRunStore {
-        let run_store = store.create_run(&run_id, created_at(), None).await.unwrap();
+        let run_store = store.create_run(&run_id).await.unwrap();
         let run_record = sample_run_record(run_id, host_repo_path);
         append_workflow_event(
             &run_store,
@@ -821,10 +820,7 @@ mod tests {
     async fn rebuild_metadata_branch_errors_when_run_record_is_missing() {
         let (_dir, git_store) = temp_repo();
         let durable_store = memory_store();
-        let run_store = durable_store
-            .create_run(&test_run_id(), created_at(), None)
-            .await
-            .unwrap();
+        let run_store = durable_store.create_run(&test_run_id()).await.unwrap();
 
         let err = rebuild_metadata_branch(&git_store, &run_store, &test_run_id())
             .await

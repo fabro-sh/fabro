@@ -53,7 +53,6 @@ mod tests {
     use std::collections::HashMap;
     use std::path::PathBuf;
 
-    use chrono::Utc;
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
     use fabro_store::{SlateRunStore, SlateStore, StoreHandle};
     use fabro_types::{Settings, fixtures};
@@ -120,7 +119,6 @@ mod tests {
     fn sample_record(graph: Graph) -> RunRecord {
         RunRecord {
             run_id: fixtures::RUN_1,
-            created_at: Utc::now(),
             settings: Settings {
                 dry_run: Some(true),
                 verbose: Some(true),
@@ -144,14 +142,7 @@ mod tests {
         source: Option<&str>,
     ) -> SlateRunStore {
         let store = memory_store();
-        let run_store = store
-            .create_run(
-                &record.run_id,
-                record.created_at,
-                Some(run_dir.to_string_lossy().as_ref()),
-            )
-            .await
-            .unwrap();
+        let run_store = store.create_run(&record.run_id).await.unwrap();
         append_workflow_event(
             &run_store,
             &record.run_id,
@@ -245,8 +236,9 @@ mod tests {
         let loaded_record = loaded.run_record();
         assert_eq!(loaded_record.run_id, expected.run_id);
         assert!(
-            (loaded_record.created_at.timestamp_millis() - expected.created_at.timestamp_millis())
-                .abs()
+            (loaded_record.run_id.created_at().timestamp_millis()
+                - expected.run_id.created_at().timestamp_millis())
+            .abs()
                 <= 1
         );
         assert_eq!(loaded_record.settings, expected.settings);

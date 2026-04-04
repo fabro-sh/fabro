@@ -7,6 +7,7 @@ use fabro_store::{ListRunsQuery, SlateStore};
 use fabro_types::RunId;
 use serde::Serialize;
 
+use crate::operations::make_run_dir;
 use crate::run_status::{RunStatus, StatusReason};
 
 #[derive(Debug, Clone, Serialize)]
@@ -121,7 +122,7 @@ pub async fn scan_runs_combined(store: &SlateStore, base: &Path) -> Result<Vec<R
 
     if let Ok(store_runs) = store.list_runs(&ListRunsQuery::default()).await {
         for summary in store_runs {
-            let Some(run_info) = run_info_from_summary(&summary) else {
+            let Some(run_info) = run_info_from_summary(base, &summary) else {
                 continue;
             };
             runs_by_id.insert(summary.run_id, run_info);
@@ -144,16 +145,15 @@ pub async fn scan_runs_combined(store: &SlateStore, base: &Path) -> Result<Vec<R
     Ok(runs)
 }
 
-fn run_info_from_summary(summary: &fabro_store::RunSummary) -> Option<RunInfo> {
-    let run_dir = summary.run_dir.as_deref()?;
-    let path = PathBuf::from(run_dir);
+fn run_info_from_summary(runs_base: &Path, summary: &fabro_store::RunSummary) -> Option<RunInfo> {
+    let path = make_run_dir(runs_base, &summary.run_id);
     if !path.exists() {
         return None;
     }
     let dir_name = path
         .file_name()
-        .map(|name| name.to_string_lossy().to_string())?;
-    let start_time_dt = summary.created_at;
+        .map(|name: &std::ffi::OsStr| name.to_string_lossy().to_string())?;
+    let start_time_dt = summary.run_id.created_at();
     let start_time = summary.start_time.unwrap_or(start_time_dt);
     let end_time = if summary.status.is_some_and(RunStatus::is_terminal) {
         summary.duration_ms.and_then(|duration_ms| {
@@ -319,7 +319,6 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use chrono::Utc;
     use fabro_graphviz::graph::Graph;
     use fabro_store::{SlateStore, StoreHandle};
     use fabro_types::{RunStatus, Settings, fixtures};
@@ -327,6 +326,7 @@ mod tests {
 
     use super::scan_runs_combined;
     use crate::event::{WorkflowRunEvent, append_workflow_event};
+    use crate::operations::make_run_dir;
     use crate::records::RunRecord;
 
     fn memory_store() -> StoreHandle {
@@ -340,7 +340,6 @@ mod tests {
     fn sample_run_record() -> RunRecord {
         RunRecord {
             run_id: fixtures::RUN_1,
-            created_at: Utc::now(),
             settings: Settings::default(),
             graph: Graph::new("test"),
             workflow_slug: Some("test".to_string()),
@@ -354,21 +353,13 @@ mod tests {
     #[tokio::test]
     async fn scan_runs_combined_uses_store_status_without_status_json() {
         let temp = tempfile::tempdir().unwrap();
-        let run_dir = temp.path().join(fixtures::RUN_1.to_string());
+        let run_dir = make_run_dir(temp.path(), &fixtures::RUN_1);
         std::fs::create_dir_all(&run_dir).unwrap();
         std::fs::write(run_dir.join("id.txt"), format!("{}\n", fixtures::RUN_1)).unwrap();
 
         let store = memory_store();
-        let run_dir_string = run_dir.to_string_lossy().to_string();
         let run_record = sample_run_record();
-        let run_store = store
-            .create_run(
-                &fixtures::RUN_1,
-                run_record.created_at,
-                Some(&run_dir_string),
-            )
-            .await
-            .unwrap();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         append_workflow_event(
             &run_store,
             &fixtures::RUN_1,
@@ -379,7 +370,7 @@ mod tests {
                 workflow_source: None,
                 workflow_config: None,
                 labels: run_record.labels.clone().into_iter().collect(),
-                run_dir: run_dir_string.clone(),
+                run_dir: run_dir.display().to_string(),
                 working_directory: run_record.working_directory.display().to_string(),
                 host_repo_path: run_record.host_repo_path.clone(),
                 base_branch: run_record.base_branch.clone(),

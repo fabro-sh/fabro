@@ -94,7 +94,6 @@ struct ManagedRun {
     dot_source: String,
     status: RunStatus,
     error: Option<String>,
-    created_at: chrono::DateTime<chrono::Utc>,
     // Populated when running:
     interviewer: Option<Arc<WebInterviewer>>,
     event_tx: Option<broadcast::Sender<RunEventEnvelope>>,
@@ -496,7 +495,7 @@ async fn list_runs(
                 message: msg.clone(),
             }),
             queue_position: queue_positions.get(id).copied(),
-            created_at: managed_run.created_at,
+            created_at: id.created_at(),
         })
         .collect();
     let page: Vec<_> = all_items.into_iter().skip(offset).take(limit + 1).collect();
@@ -517,7 +516,7 @@ fn compute_queue_positions(runs: &HashMap<RunId, ManagedRun>) -> HashMap<RunId, 
         .iter()
         .filter(|(_, r)| r.status == RunStatus::Queued)
         .collect();
-    queued.sort_by_key(|(_, r)| r.created_at);
+    queued.sort_by_key(|(run_id, _)| run_id.created_at());
     queued
         .into_iter()
         .enumerate()
@@ -545,7 +544,6 @@ async fn start_run(
 ) -> Response {
     let run_id = RunId::new();
     info!(run_id = %run_id, "Run queued");
-    let run_dir = std::env::temp_dir().join(format!("fabro-{}", uuid::Uuid::new_v4()));
     let settings = state.settings.read().unwrap().clone();
     let created = match Box::pin(operations::create(
         state.store.as_ref(),
@@ -557,7 +555,6 @@ async fn start_run(
             settings,
             cwd: std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir()),
             workflow_slug: None,
-            run_dir: Some(run_dir.clone()),
             run_id: Some(run_id),
             host_repo_path: None,
             base_branch: None,
@@ -589,8 +586,7 @@ async fn start_run(
             .into_response();
         }
     };
-    let persisted = created.persisted;
-    let created_at = persisted.run_record().created_at;
+    let created_at = run_id.created_at();
 
     {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
@@ -600,14 +596,13 @@ async fn start_run(
                 dot_source: req.dot_source,
                 status: RunStatus::Queued,
                 error: None,
-                created_at,
                 interviewer: None,
                 event_tx: None,
                 context: None,
                 checkpoint: None,
                 cancel_tx: None,
                 cancel_token: None,
-                run_dir: Some(run_dir),
+                run_dir: Some(created.run_dir),
             },
         );
     }
@@ -853,7 +848,7 @@ pub fn spawn_scheduler(state: Arc<AppState>) {
                     }
                     runs.iter()
                         .filter(|(_, r)| r.status == RunStatus::Queued)
-                        .min_by_key(|(_, r)| r.created_at)
+                        .min_by_key(|(run_id, _)| run_id.created_at())
                         .map(|(id, _)| *id)
                 };
                 match run_to_start {
@@ -894,7 +889,7 @@ async fn get_run_status(
                     error: managed_run.error.as_ref().map(|msg| RunError {
                         message: msg.clone(),
                     }),
-                    created_at: managed_run.created_at,
+                    created_at: id.created_at(),
                     queue_position,
                 }),
             )
@@ -1132,7 +1127,6 @@ async fn cancel_run(
                     let _ = cancel_tx.send(());
                 }
                 managed_run.status = RunStatus::Cancelled;
-                let created_at = managed_run.created_at;
                 (
                     StatusCode::OK,
                     Json(RunStatusResponse {
@@ -1140,7 +1134,7 @@ async fn cancel_run(
                         status: RunStatus::Cancelled,
                         error: None,
                         queue_position: None,
-                        created_at,
+                        created_at: id.created_at(),
                     }),
                 )
                     .into_response()
@@ -1165,7 +1159,6 @@ async fn pause_run(
         Some(managed_run) => match managed_run.status {
             RunStatus::Running => {
                 managed_run.status = RunStatus::Paused;
-                let created_at = managed_run.created_at;
                 (
                     StatusCode::OK,
                     Json(RunStatusResponse {
@@ -1173,7 +1166,7 @@ async fn pause_run(
                         status: RunStatus::Paused,
                         error: None,
                         queue_position: None,
-                        created_at,
+                        created_at: id.created_at(),
                     }),
                 )
                     .into_response()
@@ -1198,7 +1191,6 @@ async fn unpause_run(
         Some(managed_run) => match managed_run.status {
             RunStatus::Paused => {
                 managed_run.status = RunStatus::Running;
-                let created_at = managed_run.created_at;
                 (
                     StatusCode::OK,
                     Json(RunStatusResponse {
@@ -1206,7 +1198,7 @@ async fn unpause_run(
                         status: RunStatus::Running,
                         error: None,
                         queue_position: None,
-                        created_at,
+                        created_at: id.created_at(),
                     }),
                 )
                     .into_response()

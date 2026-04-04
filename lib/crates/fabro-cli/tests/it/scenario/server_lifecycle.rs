@@ -1,4 +1,3 @@
-#[cfg(feature = "server")]
 use fabro_test::{fabro_snapshot, test_context};
 
 #[test]

@@ -511,10 +511,7 @@ mod tests {
         use fabro_store::EventPayload;
 
         let store = test_store();
-        let run = store
-            .create_run(&fixtures::RUN_1, chrono::Utc::now(), None)
-            .await
-            .unwrap();
+        let run = store.create_run(&fixtures::RUN_1).await.unwrap();
         let run_id_str = fixtures::RUN_1.to_string();
 
         let event = |event_name: &str, props: serde_json::Value| -> EventPayload {

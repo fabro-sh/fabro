@@ -13,7 +13,7 @@ pub use error::{Result, StoreError};
 pub use run_state::{NodeState, RunState};
 pub use runtime::RuntimeState;
 pub use slate::{SlateRunStore, SlateStore};
-pub use types::{CatalogRecord, EventEnvelope, EventPayload, NodeVisitRef, RunSummary};
+pub use types::{EventEnvelope, EventPayload, NodeVisitRef, RunSummary};
 
 use fabro_types::{Outcome, StageUsage};
 

@@ -1058,16 +1058,8 @@ mod tests {
     async fn build_pr_body_uses_in_memory_conclusion() {
         install_mock_llm();
 
-        let tmp = tempfile::tempdir().unwrap();
         let store = test_store();
-        let run_store = store
-            .create_run(
-                &fixtures::RUN_1,
-                Utc::now(),
-                Some(&tmp.path().display().to_string()),
-            )
-            .await
-            .unwrap();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         let conclusion = make_test_conclusion();
         let body = build_pr_body(
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
@@ -1089,21 +1081,11 @@ mod tests {
     async fn build_pr_body_uses_store_records_without_legacy_files() {
         install_mock_llm();
 
-        let tmp = tempfile::tempdir().unwrap();
         let store = test_store();
-        let created_at = Utc::now();
-        let run_store = store
-            .create_run(
-                &fixtures::RUN_1,
-                created_at,
-                Some(&tmp.path().display().to_string()),
-            )
-            .await
-            .unwrap();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
 
         let run_record = RunRecord {
             run_id: fixtures::RUN_1,
-            created_at,
             settings: Settings::default(),
             graph: Graph::new("test"),
             workflow_slug: Some("test".to_string()),
@@ -1122,7 +1104,7 @@ mod tests {
                 workflow_source: Some("digraph test { plan -> code }".to_string()),
                 workflow_config: None,
                 labels: run_record.labels.clone().into_iter().collect(),
-                run_dir: tmp.path().display().to_string(),
+                run_dir: run_record.working_directory.display().to_string(),
                 working_directory: run_record.working_directory.display().to_string(),
                 host_repo_path: run_record.host_repo_path.clone(),
                 base_branch: run_record.base_branch.clone(),
@@ -1165,21 +1147,11 @@ mod tests {
     async fn build_pr_body_uses_plan_text_from_store_without_response_md() {
         install_mock_llm();
 
-        let tmp = tempfile::tempdir().unwrap();
         let store = test_store();
-        let created_at = Utc::now();
-        let run_store = store
-            .create_run(
-                &fixtures::RUN_1,
-                created_at,
-                Some(&tmp.path().display().to_string()),
-            )
-            .await
-            .unwrap();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
 
         let run_record = RunRecord {
             run_id: fixtures::RUN_1,
-            created_at,
             settings: Settings::default(),
             graph: Graph::new("test"),
             workflow_slug: Some("test".to_string()),
@@ -1198,7 +1170,7 @@ mod tests {
                 workflow_source: Some("digraph test { plan -> code }".to_string()),
                 workflow_config: None,
                 labels: run_record.labels.clone().into_iter().collect(),
-                run_dir: tmp.path().display().to_string(),
+                run_dir: run_record.working_directory.display().to_string(),
                 working_directory: run_record.working_directory.display().to_string(),
                 host_repo_path: run_record.host_repo_path.clone(),
                 base_branch: run_record.base_branch.clone(),
@@ -1368,16 +1340,8 @@ mod tests {
 
     #[tokio::test]
     async fn empty_diff_returns_none() {
-        let tmp = tempfile::tempdir().unwrap();
         let store = test_store();
-        let run_store = store
-            .create_run(
-                &fixtures::RUN_1,
-                Utc::now(),
-                Some(&tmp.path().display().to_string()),
-            )
-            .await
-            .unwrap();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         let creds = GitHubAppCredentials {
             app_id: "123".to_string(),
             private_key_pem: "unused".to_string(),
@@ -1404,18 +1368,9 @@ mod tests {
     async fn load_pull_request_diff_uses_store_without_disk_patch() {
         let tmp = tempfile::tempdir().unwrap();
         let store = test_store();
-        let created_at = Utc::now();
-        let run_store = store
-            .create_run(
-                &fixtures::RUN_1,
-                created_at,
-                Some(&tmp.path().display().to_string()),
-            )
-            .await
-            .unwrap();
+        let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         let run_record = RunRecord {
             run_id: fixtures::RUN_1,
-            created_at,
             settings: Settings::default(),
             graph: Graph::new("test"),
             workflow_slug: None,
@@ -1434,7 +1389,7 @@ mod tests {
                 workflow_source: None,
                 workflow_config: None,
                 labels: run_record.labels.clone().into_iter().collect(),
-                run_dir: tmp.path().display().to_string(),
+                run_dir: run_record.working_directory.display().to_string(),
                 working_directory: tmp.path().display().to_string(),
                 host_repo_path: None,
                 base_branch: None,

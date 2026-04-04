@@ -1891,10 +1891,7 @@ mod tests {
             "",
             std::time::Duration::from_millis(1),
         );
-        let run_store = store
-            .create_run(&fixtures::RUN_7, Utc::now(), None)
-            .await
-            .unwrap();
+        let run_store = store.create_run(&fixtures::RUN_7).await.unwrap();
         let envelope = canonicalize_event(
             &fixtures::RUN_7,
             &WorkflowRunEvent::RunNotice {

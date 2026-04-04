@@ -15,7 +15,6 @@ use crate::pipeline::types::Initialized;
 use crate::run_dir::visit_from_context;
 use crate::run_options::RunOptions;
 use async_trait::async_trait;
-use chrono::Utc;
 use fabro_graphviz::graph::{AttrValue, Graph, Node};
 use fabro_store::SlateStore;
 use fabro_types::Settings;
@@ -199,11 +198,7 @@ impl Handler for SubWorkflowHandler {
             Duration::from_millis(1),
         ));
         let run_store = store
-            .create_run(
-                &child_run_options.run_id,
-                Utc::now(),
-                Some(child_run_options.run_dir.to_string_lossy().as_ref()),
-            )
+            .create_run(&child_run_options.run_id)
             .await
             .map_err(|err| FabroError::engine(err.to_string()))?;
 

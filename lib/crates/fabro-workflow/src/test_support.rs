@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::Utc;
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::Graph as GvGraph;
 use fabro_store::SlateStore;
@@ -40,18 +39,13 @@ async fn initialized(
     options: InitializedOptions,
 ) -> Initialized {
     std::fs::create_dir_all(&run_options.run_dir).expect("failed to create run dir");
-    let created_at = Utc::now();
     let store = Arc::new(SlateStore::new(
         Arc::new(InMemory::new()),
         "",
         Duration::from_millis(1),
     ));
     let inner_store = store
-        .create_run(
-            &run_options.run_id,
-            created_at,
-            Some(run_options.run_dir.to_string_lossy().as_ref()),
-        )
+        .create_run(&run_options.run_id)
         .await
         .expect("failed to create slate-backed test run store");
     let run_store = inner_store;

@@ -206,7 +206,6 @@ mod tests {
     fn test_run_record(run_id: fabro_types::RunId) -> RunRecord {
         RunRecord {
             run_id,
-            created_at: Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).single().unwrap(),
             settings: Settings::default(),
             graph: Graph::new("test"),
             workflow_slug: None,

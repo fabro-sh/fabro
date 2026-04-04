@@ -10,6 +10,7 @@ mod test_support;
 mod validate;
 
 pub use crate::pipeline::{DevcontainerSpec, LlmSpec, SandboxEnvSpec};
+pub(crate) use create::make_run_dir;
 pub use create::{CreateRunInput, CreatedRun, create};
 pub use fork::{ForkRunInput, fork};
 pub use rebuild_meta::{

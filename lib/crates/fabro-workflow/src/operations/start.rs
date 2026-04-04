@@ -860,7 +860,6 @@ mod tests {
                     .unwrap_or_else(|| Path::new("."))
                     .to_path_buf(),
                 workflow_slug: Some("test".to_string()),
-                run_dir: Some(run_dir.to_path_buf()),
                 run_id: Some(fixtures::RUN_1),
                 host_repo_path: None,
                 base_branch: None,

@@ -3,7 +3,7 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use bytes::Bytes;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use futures::Stream;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -14,10 +14,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::keys;
 use crate::run_state::EventProjectionCache;
-use crate::{
-    CatalogRecord, EventEnvelope, EventPayload, NodeVisitRef, Result, RunState, RunSummary,
-    StoreError,
-};
+use crate::{EventEnvelope, EventPayload, NodeVisitRef, Result, RunState, RunSummary, StoreError};
 use fabro_types::RunId;
 
 #[derive(Clone)]
@@ -29,18 +26,14 @@ impl std::fmt::Debug for SlateRunStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SlateRunStore")
             .field("run_id", &self.inner.run_id)
-            .field("created_at", &self.inner.created_at)
             .field("db_prefix", &self.inner.db_prefix)
-            .field("run_dir", &self.inner.run_dir)
             .finish_non_exhaustive()
     }
 }
 
 pub(crate) struct SlateRunStoreInner {
     run_id: RunId,
-    created_at: DateTime<Utc>,
     db_prefix: String,
-    run_dir: Option<String>,
     db: SlateRunDb,
     event_seq: AtomicU32,
     close_lock: Mutex<()>,
@@ -53,14 +46,16 @@ enum SlateRunDb {
 }
 
 impl SlateRunStore {
-    pub(crate) async fn open_writer(record: CatalogRecord, db: slatedb::Db) -> Result<Self> {
+    pub(crate) async fn open_writer(
+        run_id: RunId,
+        db_prefix: String,
+        db: slatedb::Db,
+    ) -> Result<Self> {
         let event_seq = recover_next_seq(&db, keys::EVENTS_PREFIX, keys::parse_event_seq).await?;
         Ok(Self {
             inner: Arc::new(SlateRunStoreInner {
-                run_id: record.run_id,
-                created_at: record.created_at,
-                db_prefix: record.db_prefix,
-                run_dir: record.run_dir,
+                run_id,
+                db_prefix,
                 db: SlateRunDb::Writer(db),
                 event_seq: AtomicU32::new(event_seq),
                 close_lock: Mutex::new(()),
@@ -69,14 +64,16 @@ impl SlateRunStore {
         })
     }
 
-    pub(crate) async fn open_reader(record: CatalogRecord, db: DbReader) -> Result<Self> {
+    pub(crate) async fn open_reader(
+        run_id: RunId,
+        db_prefix: String,
+        db: DbReader,
+    ) -> Result<Self> {
         let event_seq = recover_next_seq(&db, keys::EVENTS_PREFIX, keys::parse_event_seq).await?;
         Ok(Self {
             inner: Arc::new(SlateRunStoreInner {
-                run_id: record.run_id,
-                created_at: record.created_at,
-                db_prefix: record.db_prefix,
-                run_dir: record.run_dir,
+                run_id,
+                db_prefix,
                 db: SlateRunDb::Reader(Box::new(db)),
                 event_seq: AtomicU32::new(event_seq),
                 close_lock: Mutex::new(()),
@@ -93,24 +90,12 @@ impl SlateRunStore {
         Arc::downgrade(&self.inner)
     }
 
-    pub(crate) fn record(&self) -> CatalogRecord {
-        CatalogRecord {
-            run_id: self.inner.run_id,
-            created_at: self.inner.created_at,
-            db_prefix: self.inner.db_prefix.clone(),
-            run_dir: self.inner.run_dir.clone(),
-        }
+    pub(crate) fn run_id(&self) -> RunId {
+        self.inner.run_id
     }
 
-    pub(crate) fn matches_record(&self, record: &CatalogRecord) -> bool {
-        self.inner.run_id == record.run_id
-            && self.inner.created_at == record.created_at
-            && self.inner.db_prefix == record.db_prefix
-            && self.inner.run_dir == record.run_dir
-    }
-
-    pub(crate) fn created_at(&self) -> DateTime<Utc> {
-        self.inner.created_at
+    pub(crate) fn matches_run(&self, run_id: &RunId, db_prefix: &str) -> bool {
+        self.inner.run_id == *run_id && self.inner.db_prefix == db_prefix
     }
 
     pub(crate) async fn close(&self) -> Result<()> {
@@ -129,26 +114,26 @@ impl SlateRunStore {
         }
     }
 
-    pub(crate) async fn validate_init<R>(db: &R, expected: &CatalogRecord) -> Result<bool>
+    pub(crate) async fn validate_init<R>(db: &R, expected: &RunId) -> Result<bool>
     where
         R: DbRead + Sync,
     {
-        match get_json::<R, CatalogRecord>(db, keys::init()).await? {
+        match get_json::<R, RunId>(db, keys::init()).await? {
             Some(existing) if existing == *expected => Ok(true),
             Some(existing) => Err(StoreError::Other(format!(
-                "existing _init.json {existing:?} does not match requested catalog {expected:?}"
+                "existing _init.json {existing:?} does not match requested run_id {expected:?}"
             ))),
             None => Ok(false),
         }
     }
 
-    pub(crate) async fn build_summary<R>(db: &R, catalog: &CatalogRecord) -> Result<RunSummary>
+    pub(crate) async fn build_summary<R>(db: &R, run_id: &RunId) -> Result<RunSummary>
     where
         R: DbRead + Sync,
     {
         let events = list_events_from(db, 1).await?;
         let state = RunState::apply_events(&events)?;
-        Ok(state.build_summary(catalog))
+        Ok(state.build_summary(run_id))
     }
 
     async fn projected_state(&self) -> Result<RunState> {
