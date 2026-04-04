@@ -421,6 +421,7 @@ mod tests {
         node_id: Option<&str>,
         properties: serde_json::Value,
     ) -> EventPayload {
+        let properties = normalize_test_event_properties(run_id, event, properties);
         let mut value = serde_json::json!({
             "id": format!("evt-{run_id}-{event}"),
             "ts": ts,
@@ -432,6 +433,118 @@ mod tests {
             value["node_id"] = serde_json::Value::String(node_id.to_string());
         }
         EventPayload::new(value, &test_run_id(run_id)).unwrap()
+    }
+
+    fn normalize_test_event_properties(
+        run_id: &str,
+        event: &str,
+        properties: serde_json::Value,
+    ) -> serde_json::Value {
+        let serde_json::Value::Object(mut props) = properties else {
+            return properties;
+        };
+
+        match event {
+            "run.created" => {
+                props
+                    .entry("run_dir")
+                    .or_insert_with(|| serde_json::Value::String(format!("/tmp/{run_id}")));
+            }
+            "run.started" => {
+                props
+                    .entry("name")
+                    .or_insert_with(|| serde_json::Value::String("night-sky".to_string()));
+            }
+            "sandbox.initialized" => {
+                props
+                    .entry("provider")
+                    .or_insert_with(|| serde_json::Value::String("local".to_string()));
+            }
+            "checkpoint.completed" => {
+                props
+                    .entry("completed_nodes")
+                    .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+                props
+                    .entry("node_retries")
+                    .or_insert_with(|| serde_json::json!({}));
+                props
+                    .entry("context_values")
+                    .or_insert_with(|| serde_json::json!({}));
+                props
+                    .entry("node_outcomes")
+                    .or_insert_with(|| serde_json::json!({}));
+                props
+                    .entry("node_visits")
+                    .or_insert_with(|| serde_json::json!({}));
+            }
+            "parallel.completed" => {
+                props
+                    .entry("visit")
+                    .or_insert_with(|| serde_json::Value::from(1));
+                props
+                    .entry("duration_ms")
+                    .or_insert_with(|| serde_json::Value::from(0));
+                props
+                    .entry("success_count")
+                    .or_insert_with(|| serde_json::Value::from(0));
+                props
+                    .entry("failure_count")
+                    .or_insert_with(|| serde_json::Value::from(0));
+            }
+            "stage.completed" => {
+                if let Some(visit) = props.get("visit").cloned() {
+                    props.entry("index").or_insert(visit);
+                }
+                props
+                    .entry("index")
+                    .or_insert_with(|| serde_json::Value::from(0));
+                props
+                    .entry("duration_ms")
+                    .or_insert_with(|| serde_json::Value::from(0));
+                props
+                    .entry("attempt")
+                    .or_insert_with(|| serde_json::Value::from(1));
+                props
+                    .entry("max_attempts")
+                    .or_insert_with(|| serde_json::Value::from(1));
+            }
+            "command.started" => {
+                let default_script = props
+                    .get("command")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::Value::String(String::new()));
+                props.entry("script").or_insert(default_script);
+                props
+                    .entry("language")
+                    .or_insert_with(|| serde_json::Value::String("shell".to_string()));
+            }
+            "command.completed" => {
+                props
+                    .entry("duration_ms")
+                    .or_insert_with(|| serde_json::Value::from(0));
+                props
+                    .entry("timed_out")
+                    .or_insert_with(|| serde_json::Value::Bool(false));
+            }
+            "run.completed" => {
+                props
+                    .entry("artifact_count")
+                    .or_insert_with(|| serde_json::Value::from(0));
+            }
+            "pull_request.created" => {
+                props
+                    .entry("draft")
+                    .or_insert_with(|| serde_json::Value::Bool(false));
+            }
+            "retro.completed" => {
+                props
+                    .entry("duration_ms")
+                    .or_insert_with(|| serde_json::Value::from(0));
+            }
+            _ => {}
+        }
+
+        serde_json::Value::Object(props)
     }
 
     fn sample_start_record(run_id: &str, created_at: DateTime<Utc>) -> StartRecord {

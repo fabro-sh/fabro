@@ -19,7 +19,7 @@ use object_store::memory::InMemory;
 use super::*;
 use crate::context::{self, Context};
 use crate::error::FabroError;
-use crate::event::{EventEmitter, RunEventEnvelope, StoreProgressLogger};
+use crate::event::{EventEmitter, StoreProgressLogger};
 use crate::handler::start::StartHandler;
 use crate::handler::{Handler as HandlerTrait, HandlerRegistry};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
@@ -894,7 +894,7 @@ async fn retry_emits_stage_started_per_attempt() {
     g.edges.push(Edge::new("start", "work"));
     g.edges.push(Edge::new("work", "exit"));
 
-    let events = Arc::new(std::sync::Mutex::new(Vec::<RunEventEnvelope>::new()));
+    let events = Arc::new(std::sync::Mutex::new(Vec::<fabro_types::StoredEvent>::new()));
     let events_clone = Arc::clone(&events);
     let emitter = test_emitter("retry-events-test");
     emitter.on_event(move |event| {
@@ -923,8 +923,10 @@ async fn retry_emits_stage_started_per_attempt() {
     let collected = events.lock().unwrap();
     let work_started: Vec<_> = collected
         .iter()
-        .filter(|event| event.event == "stage.started" && event.node_id.as_deref() == Some("work"))
-        .map(|event| event.properties["attempt"].as_u64().unwrap())
+        .filter(|event| {
+            event.event_name() == "stage.started" && event.node_id.as_deref() == Some("work")
+        })
+        .map(|event| event.properties()["attempt"].as_u64().unwrap())
         .collect();
     assert_eq!(work_started, vec![1, 2]);
 }
@@ -936,7 +938,7 @@ async fn run_with_lifecycle_emits_initialize_and_setup_events() {
     let events_clone = Arc::clone(&events);
     let emitter = test_emitter("order-test");
     emitter.on_event(move |event| {
-        let name = match event.event.as_str() {
+        let name = match event.event_name().as_str() {
             "sandbox.initialized" => "SandboxInitialized",
             "setup.started" => "SetupStarted",
             "setup.completed" => "SetupCompleted",
@@ -1017,7 +1019,7 @@ async fn git_checkpoint_skips_start_node() {
     g.edges.push(Edge::new("start", "work"));
     g.edges.push(Edge::new("work", "exit"));
 
-    let events = Arc::new(std::sync::Mutex::new(Vec::<RunEventEnvelope>::new()));
+    let events = Arc::new(std::sync::Mutex::new(Vec::<fabro_types::StoredEvent>::new()));
     let events_clone = Arc::clone(&events);
     let emitter = test_emitter("git-cp-test");
     emitter.on_event(move |event| {
@@ -1049,9 +1051,9 @@ async fn git_checkpoint_skips_start_node() {
     let checkpoint_node_ids: Vec<&str> = collected
         .iter()
         .filter(|event| {
-            event.event == "checkpoint.completed"
+            event.event_name() == "checkpoint.completed"
                 && event
-                    .properties
+                    .properties()
                     .get("git_commit_sha")
                     .and_then(|value| value.as_str())
                     .is_some()

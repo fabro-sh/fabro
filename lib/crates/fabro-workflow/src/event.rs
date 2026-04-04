@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use anyhow::{Context, Result};
 use chrono::{SecondsFormat, Utc};
 use fabro_store::{EventPayload, SlateRunStore};
-use fabro_types::RunId;
+use fabro_types::{RunId, StoredEvent};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
@@ -18,13 +18,7 @@ use fabro_llm::types::Usage as LlmUsage;
 use fabro_types::StatusReason;
 use fabro_util::redact::redact_jsonl_line;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum RunNoticeLevel {
-    Info,
-    Warn,
-    Error,
-}
+pub use fabro_types::{EventBody, RunNoticeLevel};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunEventEnvelope {
@@ -41,6 +35,13 @@ pub struct RunEventEnvelope {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub node_label: Option<String>,
     pub properties: serde_json::Value,
+}
+
+impl From<&RunEventEnvelope> for StoredEvent {
+    fn from(value: &RunEventEnvelope) -> Self {
+        StoredEvent::from_value(serde_json::to_value(value).expect("event envelope serializes"))
+            .expect("event envelope converts to stored event")
+    }
 }
 
 /// Events emitted during workflow run execution for observability.
@@ -1452,21 +1453,44 @@ pub fn canonicalize_event_at(
     }
 }
 
-pub fn build_redacted_event_payload(
-    envelope: &RunEventEnvelope,
+pub fn to_stored_event(run_id: &RunId, event: &WorkflowRunEvent) -> StoredEvent {
+    to_stored_event_at(run_id, event, Utc::now())
+}
+
+pub fn to_stored_event_at(
     run_id: &RunId,
-) -> Result<EventPayload> {
-    let line = redacted_event_json(envelope)?;
+    event: &WorkflowRunEvent,
+    ts: chrono::DateTime<Utc>,
+) -> StoredEvent {
+    let envelope = canonicalize_event_at(run_id, event, ts);
+    let mut stored = StoredEvent::from(&envelope);
+
+    match (event, &mut stored.body) {
+        (WorkflowRunEvent::StageCompleted { failure, .. }, EventBody::StageCompleted(props)) => {
+            props.failure = failure.clone();
+        }
+        (WorkflowRunEvent::StageFailed { failure, .. }, EventBody::StageFailed(props)) => {
+            props.failure = Some(failure.clone());
+        }
+        _ => {}
+    }
+
+    stored.refresh_cache();
+    stored
+}
+
+pub fn build_redacted_event_payload(event: &StoredEvent, run_id: &RunId) -> Result<EventPayload> {
+    let line = redacted_event_json(event)?;
     event_payload_from_redacted_json(&line, run_id)
 }
 
-pub fn redacted_event_json(envelope: &RunEventEnvelope) -> Result<String> {
-    let line = serde_json::to_string(&normalized_envelope_value(envelope)?)?;
+pub fn redacted_event_json(event: &StoredEvent) -> Result<String> {
+    let line = serde_json::to_string(&normalized_event_value(event)?)?;
     Ok(redact_jsonl_line(&line))
 }
 
-fn normalized_envelope_value(envelope: &RunEventEnvelope) -> Result<Value> {
-    let value = serde_json::to_value(envelope)?;
+fn normalized_event_value(event: &StoredEvent) -> Result<Value> {
+    let value = event.to_value()?;
     Ok(normalize_json_value(value))
 }
 
@@ -1498,8 +1522,8 @@ pub async fn append_workflow_event(
     run_id: &RunId,
     event: &WorkflowRunEvent,
 ) -> Result<()> {
-    let envelope = canonicalize_event(run_id, event);
-    let payload = build_redacted_event_payload(&envelope, run_id)?;
+    let stored = to_stored_event(run_id, event);
+    let payload = build_redacted_event_payload(&stored, run_id)?;
     run_store
         .append_event(&payload)
         .await
@@ -1542,12 +1566,8 @@ impl StoreProgressLogger {
 
     pub fn register(&self, emitter: &EventEmitter) {
         let tx = self.tx.clone();
-        emitter.on_event(move |event| {
-            let Ok(run_id) = event.run_id.parse::<RunId>() else {
-                tracing::warn!(run_id = %event.run_id, "Invalid run id on event envelope");
-                return;
-            };
-            match build_redacted_event_payload(event, &run_id) {
+        emitter.on_event(
+            move |event| match build_redacted_event_payload(event, &event.run_id) {
                 Ok(payload) => {
                     if tx.send(StoreProgressCommand::Event(payload)).is_err() {
                         tracing::warn!(
@@ -1558,8 +1578,8 @@ impl StoreProgressLogger {
                 Err(err) => {
                     tracing::warn!(error = %err, "Failed to build store event payload");
                 }
-            }
-        });
+            },
+        );
     }
 
     pub async fn flush(&self) {
@@ -1584,7 +1604,7 @@ fn epoch_millis() -> i64 {
 }
 
 /// Listener callback type for workflow run events.
-type EventListener = Arc<dyn Fn(&RunEventEnvelope) + Send + Sync>;
+type EventListener = Arc<dyn Fn(&StoredEvent) + Send + Sync>;
 
 /// Callback-based event emitter for workflow run events.
 pub struct EventEmitter {
@@ -1626,7 +1646,7 @@ impl EventEmitter {
         self.run_id
     }
 
-    pub fn on_event(&self, listener: impl Fn(&RunEventEnvelope) + Send + Sync + 'static) {
+    pub fn on_event(&self, listener: impl Fn(&StoredEvent) + Send + Sync + 'static) {
         self.listeners
             .lock()
             .expect("listeners lock poisoned")
@@ -1642,11 +1662,11 @@ impl EventEmitter {
                 "workflow run started event must match emitter run_id"
             );
         }
-        let envelope = canonicalize_event(&self.run_id, event);
-        self.dispatch_envelope(&envelope);
+        let stored = to_stored_event(&self.run_id, event);
+        self.dispatch_stored_event(&stored);
     }
 
-    pub(crate) fn dispatch_envelope(&self, envelope: &RunEventEnvelope) {
+    pub(crate) fn dispatch_stored_event(&self, event: &StoredEvent) {
         self.last_event_at.store(epoch_millis(), Ordering::Relaxed);
         // Clone the listener list so we don't hold the lock during dispatch.
         // This prevents deadlocks if a listener calls emit() reentrantly.
@@ -1657,7 +1677,7 @@ impl EventEmitter {
             .expect("listeners lock poisoned")
             .clone();
         for listener in &snapshot {
-            listener(envelope);
+            listener(event);
         }
     }
 
@@ -1720,8 +1740,8 @@ mod tests {
         });
         let events = received.lock().unwrap();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].event, "run.started");
-        assert_eq!(events[0].run_id, fixtures::RUN_1.to_string());
+        assert_eq!(events[0].event_name(), "run.started");
+        assert_eq!(events[0].run_id, fixtures::RUN_1);
         assert!(events[0].id.len() >= 32);
     }
 
@@ -1910,7 +1930,8 @@ mod tests {
             },
         );
 
-        let payload = build_redacted_event_payload(&envelope, &fixtures::RUN_7).unwrap();
+        let stored = StoredEvent::from(&envelope);
+        let payload = build_redacted_event_payload(&stored, &fixtures::RUN_7).unwrap();
         run_store.append_event(&payload).await.unwrap();
 
         let events = run_store.list_events().await.unwrap();
@@ -1935,7 +1956,8 @@ mod tests {
             },
         );
 
-        let payload = build_redacted_event_payload(&envelope, &fixtures::RUN_8).unwrap();
+        let stored = StoredEvent::from(&envelope);
+        let payload = build_redacted_event_payload(&stored, &fixtures::RUN_8).unwrap();
         assert_eq!(payload.as_value()["id"], envelope.id);
         assert_eq!(payload.as_value()["event"], "retro.started");
         assert_eq!(

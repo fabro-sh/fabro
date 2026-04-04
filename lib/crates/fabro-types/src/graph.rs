@@ -96,7 +96,7 @@ pub fn shape_to_handler_type(shape: &str) -> Option<&'static str> {
 }
 
 /// A node in the workflow graph.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Node {
     pub id: String,
     pub attrs: HashMap<String, AttrValue>,
@@ -256,7 +256,7 @@ impl Node {
 }
 
 /// An edge connecting two nodes in the workflow graph.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Edge {
     pub from: String,
     pub to: String,
@@ -321,7 +321,7 @@ impl Edge {
 }
 
 /// The parsed workflow graph containing nodes, edges, and graph-level attributes.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct Graph {
     pub name: String,
     pub nodes: HashMap<String, Node>,

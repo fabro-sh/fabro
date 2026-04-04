@@ -381,7 +381,7 @@ mod tests {
     #[tokio::test]
     async fn emits_started_and_completed_events() {
         let emitter = EventEmitter::default();
-        let events = Arc::new(Mutex::new(Vec::<crate::event::RunEventEnvelope>::new()));
+        let events = Arc::new(Mutex::new(Vec::<fabro_types::StoredEvent>::new()));
         let events_clone = Arc::clone(&events);
         emitter.on_event(move |event| {
             events_clone.lock().unwrap().push(event.clone());
@@ -392,27 +392,33 @@ mod tests {
             .await
             .unwrap();
         let events = events.lock().unwrap();
-        assert_eq!(events[0].event, "devcontainer.lifecycle.started");
-        assert_eq!(events[0].properties["phase"], "on_create");
-        assert_eq!(events[0].properties["command_count"], 1);
+        assert_eq!(events[0].event_name(), "devcontainer.lifecycle.started");
+        assert_eq!(events[0].properties()["phase"], "on_create");
+        assert_eq!(events[0].properties()["command_count"], 1);
 
-        assert_eq!(events[1].event, "devcontainer.lifecycle.command.started");
-        assert_eq!(events[1].properties["phase"], "on_create");
-        assert_eq!(events[1].properties["index"], 0);
+        assert_eq!(
+            events[1].event_name(),
+            "devcontainer.lifecycle.command.started"
+        );
+        assert_eq!(events[1].properties()["phase"], "on_create");
+        assert_eq!(events[1].properties()["index"], 0);
 
-        assert_eq!(events[2].event, "devcontainer.lifecycle.command.completed");
-        assert_eq!(events[2].properties["phase"], "on_create");
-        assert_eq!(events[2].properties["index"], 0);
-        assert_eq!(events[2].properties["exit_code"], 0);
+        assert_eq!(
+            events[2].event_name(),
+            "devcontainer.lifecycle.command.completed"
+        );
+        assert_eq!(events[2].properties()["phase"], "on_create");
+        assert_eq!(events[2].properties()["index"], 0);
+        assert_eq!(events[2].properties()["exit_code"], 0);
 
-        assert_eq!(events[3].event, "devcontainer.lifecycle.completed");
-        assert_eq!(events[3].properties["phase"], "on_create");
+        assert_eq!(events[3].event_name(), "devcontainer.lifecycle.completed");
+        assert_eq!(events[3].properties()["phase"], "on_create");
     }
 
     #[tokio::test]
     async fn failed_command_emits_failed_and_returns_error() {
         let emitter = EventEmitter::default();
-        let events = Arc::new(Mutex::new(Vec::<crate::event::RunEventEnvelope>::new()));
+        let events = Arc::new(Mutex::new(Vec::<fabro_types::StoredEvent>::new()));
         let events_clone = Arc::clone(&events);
         emitter.on_event(move |event| {
             events_clone.lock().unwrap().push(event.clone());
@@ -424,9 +430,9 @@ mod tests {
         assert!(result.is_err());
         let events = events.lock().unwrap();
         assert!(events.iter().any(|event| {
-            event.event == "devcontainer.lifecycle.failed"
-                && event.properties["phase"] == "on_create"
-                && event.properties["exit_code"] == 1
+            event.event_name() == "devcontainer.lifecycle.failed"
+                && event.properties()["phase"] == "on_create"
+                && event.properties()["exit_code"] == 1
         }));
     }
 

@@ -117,7 +117,7 @@ impl FailureCategory {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FailureDetail {
     pub message: String,
     #[serde(rename = "failure_class")]
@@ -140,7 +140,7 @@ impl FailureDetail {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(bound = "M: OutcomeMeta")]
 pub struct Outcome<M: OutcomeMeta = ()> {
     pub status: StageStatus,

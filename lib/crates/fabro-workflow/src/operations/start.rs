@@ -15,8 +15,8 @@ use fabro_types::{RunId, Settings};
 use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::{
-    EventEmitter, RunNoticeLevel, StoreProgressLogger, WorkflowRunEvent, append_workflow_event,
-    canonicalize_event, event_payload_from_redacted_json, redacted_event_json,
+    EventBody, EventEmitter, RunNoticeLevel, StoreProgressLogger, WorkflowRunEvent,
+    append_workflow_event, event_payload_from_redacted_json, redacted_event_json, to_stored_event,
 };
 use crate::git::MetadataStore;
 use crate::handler::HandlerRegistry;
@@ -453,31 +453,23 @@ impl RunSession {
         {
             let sha_clone = Arc::clone(&last_git_sha);
             self.emitter.on_event(move |event| match event {
-                envelope if envelope.event == "checkpoint.completed" => {
-                    if let Some(sha) = envelope
-                        .properties
-                        .get("git_commit_sha")
-                        .and_then(serde_json::Value::as_str)
-                    {
-                        *sha_clone.lock().unwrap() = Some(sha.to_string());
+                event if matches!(&event.body, EventBody::CheckpointCompleted(_)) => {
+                    if let EventBody::CheckpointCompleted(props) = &event.body {
+                        if let Some(sha) = props.git_commit_sha.as_ref() {
+                            *sha_clone.lock().unwrap() = Some(sha.clone());
+                        }
                     }
                 }
-                envelope if envelope.event == "run.completed" => {
-                    if let Some(sha) = envelope
-                        .properties
-                        .get("final_git_commit_sha")
-                        .and_then(serde_json::Value::as_str)
-                    {
-                        *sha_clone.lock().unwrap() = Some(sha.to_string());
+                event if matches!(&event.body, EventBody::RunCompleted(_)) => {
+                    if let EventBody::RunCompleted(props) = &event.body {
+                        if let Some(sha) = props.final_git_commit_sha.as_ref() {
+                            *sha_clone.lock().unwrap() = Some(sha.clone());
+                        }
                     }
                 }
-                envelope if envelope.event == "git.commit" => {
-                    if let Some(sha) = envelope
-                        .properties
-                        .get("sha")
-                        .and_then(serde_json::Value::as_str)
-                    {
-                        *sha_clone.lock().unwrap() = Some(sha.to_string());
+                event if matches!(&event.body, EventBody::GitCommit(_)) => {
+                    if let EventBody::GitCommit(props) = &event.body {
+                        *sha_clone.lock().unwrap() = Some(props.sha.to_string());
                     }
                 }
                 _ => {}
@@ -695,7 +687,7 @@ impl Drop for DetachedRunCompletionGuard {
         };
 
         let serialized_notice = {
-            let envelope = canonicalize_event(
+            let stored = to_stored_event(
                 &self.run_id,
                 &WorkflowRunEvent::RunNotice {
                     level: RunNoticeLevel::Error,
@@ -703,7 +695,7 @@ impl Drop for DetachedRunCompletionGuard {
                     message: message.to_string(),
                 },
             );
-            let line = match redacted_event_json(&envelope) {
+            let line = match redacted_event_json(&stored) {
                 Ok(line) => line,
                 Err(err) => {
                     tracing::warn!(error = %err, "Failed to serialize post-run abort event");
@@ -732,7 +724,7 @@ impl Drop for DetachedRunCompletionGuard {
                 )
                 .await;
                 if let Some((run_id, line)) = serialized_notice.or_else(|| {
-                    let envelope = canonicalize_event(
+                    let stored = to_stored_event(
                         &run_id,
                         &WorkflowRunEvent::RunNotice {
                             level: RunNoticeLevel::Error,
@@ -740,9 +732,7 @@ impl Drop for DetachedRunCompletionGuard {
                             message: message.to_string(),
                         },
                     );
-                    redacted_event_json(&envelope)
-                        .ok()
-                        .map(|line| (run_id, line))
+                    redacted_event_json(&stored).ok().map(|line| (run_id, line))
                 }) {
                     match event_payload_from_redacted_json(&line, &run_id) {
                         Ok(payload) => {
@@ -791,8 +781,8 @@ async fn persist_detached_failure(
         code: format!("{phase}_failed"),
         message: message.clone(),
     };
-    let envelope = canonicalize_event(&run_id, &event);
-    let line = redacted_event_json(&envelope).map_err(|err| FabroError::Io(err.to_string()))?;
+    let stored = to_stored_event(&run_id, &event);
+    let line = redacted_event_json(&stored).map_err(|err| FabroError::Io(err.to_string()))?;
     match event_payload_from_redacted_json(&line, &run_id) {
         Ok(payload) => {
             if let Err(err) = run_store.append_event(&payload).await {
@@ -911,7 +901,9 @@ mod tests {
                 if injected.load(Ordering::SeqCst) {
                     return;
                 }
-                if event.event == "stage.started" && event.node_id.as_deref() == Some("start") {
+                if matches!(&event.body, EventBody::StageStarted(_))
+                    && event.node_id.as_deref() == Some("start")
+                {
                     injected.store(true, Ordering::SeqCst);
                     emitter_for_injection.emit(&WorkflowRunEvent::CheckpointCompleted {
                         node_id: "start".to_string(),

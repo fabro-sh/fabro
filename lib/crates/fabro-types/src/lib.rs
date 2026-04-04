@@ -17,6 +17,7 @@ pub mod settings;
 pub mod stage_id;
 pub mod start;
 pub mod status;
+pub mod stored_event;
 pub mod usage;
 
 pub use checkpoint::Checkpoint;
@@ -41,6 +42,7 @@ pub use start::StartRecord;
 pub use status::{
     InvalidTransition, ParseRunStatusError, RunStatus, RunStatusRecord, StatusReason,
 };
+pub use stored_event::{EventBody, RunNoticeLevel, StoredEvent, TokenUsage};
 pub use usage::StageUsage;
 
 pub use fabro_macros::Combine;

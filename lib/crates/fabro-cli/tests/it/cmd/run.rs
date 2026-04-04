@@ -68,7 +68,7 @@ fn dry_run_simple() {
     Run:       [ULID]
     Status:    SUCCESS
     Duration:  [DURATION]
-    Run:       [STORAGE_DIR]/runs/20260403-[ULID]
+    Run:       [STORAGE_DIR]/runs/20260404-[ULID]
 
     === Output ===
     [Simulated] Response for stage: report
@@ -400,12 +400,8 @@ fn json_run_implies_auto_approve_for_human_gates() {
         "event": "sandbox.ready",
         "id": "[EVENT_ID]",
         "properties": {
-          "cpu": null,
           "duration_ms": "[DURATION_MS]",
-          "memory": null,
-          "name": null,
-          "provider": "local",
-          "url": null
+          "provider": "local"
         },
         "run_id": "[ULID]",
         "ts": "[TIMESTAMP]"
@@ -468,17 +464,12 @@ fn json_run_implies_auto_approve_for_human_gates() {
             "internal.thread_id": null
           },
           "duration_ms": "[DURATION_MS]",
-          "files_touched": [],
           "index": 0,
           "max_attempts": 1,
           "node_visits": {
             "start": 1
           },
-          "notes": null,
-          "preferred_label": null,
-          "status": "success",
-          "suggested_next_ids": [],
-          "usage": null
+          "status": "success"
         },
         "run_id": "[ULID]",
         "ts": "[TIMESTAMP]"
@@ -487,10 +478,8 @@ fn json_run_implies_auto_approve_for_human_gates() {
         "event": "edge.selected",
         "id": "[EVENT_ID]",
         "properties": {
-          "condition": null,
           "from_node": "start",
           "is_jump": false,
-          "label": null,
           "reason": "unconditional",
           "stage_status": "success",
           "to_node": "approve"
@@ -576,20 +565,17 @@ fn json_run_implies_auto_approve_for_human_gates() {
             "thread.start.current_node": "approve"
           },
           "duration_ms": "[DURATION_MS]",
-          "files_touched": [],
           "index": 1,
           "max_attempts": 1,
           "node_visits": {
             "approve": 1,
             "start": 1
           },
-          "notes": null,
           "preferred_label": "[A] Approve",
           "status": "success",
           "suggested_next_ids": [
             "ship"
-          ],
-          "usage": null
+          ]
         },
         "run_id": "[ULID]",
         "ts": "[TIMESTAMP]"
@@ -598,7 +584,6 @@ fn json_run_implies_auto_approve_for_human_gates() {
         "event": "edge.selected",
         "id": "[EVENT_ID]",
         "properties": {
-          "condition": null,
           "from_node": "approve",
           "is_jump": false,
           "label": "[A] Approve",
@@ -743,7 +728,6 @@ fn json_run_implies_auto_approve_for_human_gates() {
             "thread.start.current_node": "approve"
           },
           "duration_ms": "[DURATION_MS]",
-          "files_touched": [],
           "index": 2,
           "max_attempts": 1,
           "node_visits": {
@@ -752,10 +736,7 @@ fn json_run_implies_auto_approve_for_human_gates() {
             "start": 1
           },
           "notes": "Script completed: echo shipped",
-          "preferred_label": null,
-          "status": "success",
-          "suggested_next_ids": [],
-          "usage": null
+          "status": "success"
         },
         "run_id": "[ULID]",
         "ts": "[TIMESTAMP]"
@@ -764,10 +745,8 @@ fn json_run_implies_auto_approve_for_human_gates() {
         "event": "edge.selected",
         "id": "[EVENT_ID]",
         "properties": {
-          "condition": null,
           "from_node": "ship",
           "is_jump": false,
-          "label": null,
           "reason": "unconditional",
           "stage_status": "success",
           "to_node": "exit"
@@ -869,14 +848,9 @@ fn json_run_implies_auto_approve_for_human_gates() {
         "properties": {
           "attempt": 1,
           "duration_ms": "[DURATION_MS]",
-          "files_touched": [],
           "index": 3,
           "max_attempts": 1,
-          "notes": null,
-          "preferred_label": null,
-          "status": "success",
-          "suggested_next_ids": [],
-          "usage": null
+          "status": "success"
         },
         "run_id": "[ULID]",
         "ts": "[TIMESTAMP]"

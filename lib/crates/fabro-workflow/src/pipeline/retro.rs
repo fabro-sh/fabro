@@ -390,22 +390,25 @@ mod tests {
         let seen = seen.lock().unwrap();
         let retro_started = seen
             .iter()
-            .find(|event| event.event == "retro.started")
+            .find(|event| event.event_name() == "retro.started")
             .unwrap();
-        assert_eq!(retro_started.properties["provider"], "anthropic");
-        assert_eq!(retro_started.properties["model"], "test-model");
+        assert_eq!(retro_started.properties()["provider"], "anthropic");
+        assert_eq!(retro_started.properties()["model"], "test-model");
         assert!(
-            retro_started.properties["prompt"]
+            retro_started.properties()["prompt"]
                 .as_str()
                 .is_some_and(|prompt| prompt.contains("/tmp/retro_data/progress.jsonl"))
         );
 
         let retro_completed = seen
             .iter()
-            .find(|event| event.event == "retro.completed")
+            .find(|event| event.event_name() == "retro.completed")
             .unwrap();
-        assert_eq!(retro_completed.properties["response"], "");
-        assert!(retro_completed.properties.get("retro").is_some());
-        assert_eq!(retro_completed.properties["retro"]["smoothness"], "smooth");
+        assert_eq!(retro_completed.properties()["response"], "");
+        assert!(retro_completed.properties().get("retro").is_some());
+        assert_eq!(
+            retro_completed.properties()["retro"]["smoothness"],
+            "smooth"
+        );
     }
 }

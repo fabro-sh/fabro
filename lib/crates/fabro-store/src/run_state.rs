@@ -3,14 +3,14 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
-use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::{EventEnvelope, Result, RunSummary, StageId, StoreError};
+use fabro_types::stored_event::{RunCompletedProps, RunFailedProps, StageCompletedProps};
 use fabro_types::{
-    Checkpoint, Conclusion, FailureSignature, NodeStatusRecord, Outcome, PullRequestRecord, Retro,
-    RunId, RunRecord, RunStatus, RunStatusRecord, SandboxRecord, StageStatus, StageUsage,
-    StartRecord, StatusReason,
+    Checkpoint, Conclusion, EventBody, FailureSignature, NodeStatusRecord, Outcome,
+    PullRequestRecord, Retro, RunId, RunRecord, RunStatus, RunStatusRecord, SandboxRecord,
+    StageStatus, StageUsage, StartRecord, StatusReason, StoredEvent, TokenUsage,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -75,190 +75,220 @@ impl RunProjection {
     }
 
     pub(crate) fn apply_event(&mut self, event: &EventEnvelope) -> Result<()> {
-        let value = event.payload.as_value();
-        let ts = parse_ts(value)?;
-        let event_name = value
-            .get("event")
-            .and_then(Value::as_str)
-            .ok_or_else(|| StoreError::InvalidEvent("event payload missing event name".into()))?;
-        let run_id = parse_run_id(value)?;
-        let properties = value
-            .get("properties")
-            .and_then(Value::as_object)
-            .cloned()
-            .unwrap_or_default();
+        let stored = StoredEvent::from_value(event.payload.as_value().clone())
+            .map_err(|err| StoreError::InvalidEvent(format!("invalid stored event: {err}")))?;
+        let ts = stored.ts;
+        let run_id = stored.run_id;
 
-        match event_name {
-            "run.created" => {
-                let settings = required_json::<fabro_types::Settings>(&properties, "settings")?;
-                let graph = required_json::<fabro_types::Graph>(&properties, "graph")?;
-                let working_directory =
-                    required_string(&properties, "working_directory").map(PathBuf::from)?;
-                let labels = optional_json::<BTreeMap<String, String>>(&properties, "labels")?
-                    .unwrap_or_default()
-                    .into_iter()
-                    .collect::<HashMap<_, _>>();
+        match &stored.body {
+            EventBody::RunCreated(props) => {
+                let working_directory = PathBuf::from(&props.working_directory);
+                let labels = props.labels.clone().into_iter().collect::<HashMap<_, _>>();
                 self.run = Some(RunRecord {
                     run_id,
-                    settings,
-                    graph,
-                    workflow_slug: optional_string(&properties, "workflow_slug"),
+                    settings: props.settings.clone(),
+                    graph: props.graph.clone(),
+                    workflow_slug: props.workflow_slug.clone(),
                     working_directory,
-                    host_repo_path: optional_string(&properties, "host_repo_path"),
-                    base_branch: optional_string(&properties, "base_branch"),
+                    host_repo_path: props.host_repo_path.clone(),
+                    base_branch: props.base_branch.clone(),
                     labels,
                 });
-                self.graph_source = optional_string(&properties, "workflow_source");
+                self.graph_source = props.workflow_source.clone();
             }
-            "run.started" => {
+            EventBody::RunStarted(props) => {
                 self.start = Some(StartRecord {
                     run_id,
                     start_time: ts,
-                    run_branch: optional_string(&properties, "run_branch"),
-                    base_sha: optional_string(&properties, "base_sha"),
+                    run_branch: props.run_branch.clone(),
+                    base_sha: props.base_sha.clone(),
                 });
             }
-            "run.submitted" => {
-                self.status = Some(run_status_record(RunStatus::Submitted, &properties, ts)?);
+            EventBody::RunSubmitted(props) => {
+                self.status = Some(run_status_record(
+                    RunStatus::Submitted,
+                    props.reason.clone(),
+                    ts,
+                ));
             }
-            "run.starting" => {
-                self.status = Some(run_status_record(RunStatus::Starting, &properties, ts)?);
+            EventBody::RunStarting(props) => {
+                self.status = Some(run_status_record(
+                    RunStatus::Starting,
+                    props.reason.clone(),
+                    ts,
+                ));
             }
-            "run.running" => {
-                self.status = Some(run_status_record(RunStatus::Running, &properties, ts)?);
+            EventBody::RunRunning(props) => {
+                self.status = Some(run_status_record(
+                    RunStatus::Running,
+                    props.reason.clone(),
+                    ts,
+                ));
             }
-            "run.removing" => {
-                self.status = Some(run_status_record(RunStatus::Removing, &properties, ts)?);
+            EventBody::RunRemoving(props) => {
+                self.status = Some(run_status_record(
+                    RunStatus::Removing,
+                    props.reason.clone(),
+                    ts,
+                ));
             }
-            "run.completed" => {
-                self.status = Some(run_status_record(RunStatus::Succeeded, &properties, ts)?);
-                self.conclusion = Some(conclusion_from_completed(&properties, ts)?);
-                self.final_patch = optional_string(&properties, "final_patch");
+            EventBody::RunCompleted(props) => {
+                self.status = Some(run_status_record(
+                    RunStatus::Succeeded,
+                    props.reason.clone(),
+                    ts,
+                ));
+                self.conclusion = Some(conclusion_from_completed(props, ts)?);
+                self.final_patch = props.final_patch.clone();
             }
-            "run.failed" => {
-                self.status = Some(run_status_record(RunStatus::Failed, &properties, ts)?);
-                self.conclusion = Some(conclusion_from_failed(&properties, ts));
+            EventBody::RunFailed(props) => {
+                self.status = Some(run_status_record(
+                    RunStatus::Failed,
+                    props.reason.clone(),
+                    ts,
+                ));
+                self.conclusion = Some(conclusion_from_failed(props, ts));
             }
-            "run.rewound" => {
+            EventBody::RunRewound(_) => {
                 self.reset_for_rewind();
             }
-            "checkpoint.completed" => {
-                let checkpoint = checkpoint_from_properties(&properties, ts)?;
-                if let Some(node_id) = value.get("node_id").and_then(Value::as_str) {
+            EventBody::CheckpointCompleted(props) => {
+                let checkpoint = checkpoint_from_props(props, ts);
+                if let Some(node_id) = stored.node_id.as_deref() {
                     let visit = checkpoint
                         .node_visits
                         .get(node_id)
                         .and_then(|visit| u32::try_from(*visit).ok())
                         .unwrap_or(1);
-                    if let Some(diff) = optional_string(&properties, "diff") {
+                    if let Some(diff) = props.diff.clone() {
                         self.node_mut(node_id, visit).diff = Some(diff);
                     }
                 }
                 self.checkpoint = Some(checkpoint.clone());
                 self.checkpoints.push((event.seq, checkpoint));
             }
-            "sandbox.initialized" => {
+            EventBody::SandboxInitialized(props) => {
                 self.sandbox = Some(SandboxRecord {
-                    provider: required_string(&properties, "provider")?,
-                    working_directory: required_string(&properties, "working_directory")?,
-                    identifier: optional_string(&properties, "identifier"),
-                    host_working_directory: optional_string(&properties, "host_working_directory"),
-                    container_mount_point: optional_string(&properties, "container_mount_point"),
+                    provider: props.provider.clone(),
+                    working_directory: props.working_directory.clone(),
+                    identifier: props.identifier.clone(),
+                    host_working_directory: props.host_working_directory.clone(),
+                    container_mount_point: props.container_mount_point.clone(),
                 });
             }
-            "retro.started" => {
-                self.retro_prompt = optional_string(&properties, "prompt");
+            EventBody::RetroStarted(props) => {
+                self.retro_prompt = props.prompt.clone();
             }
-            "retro.completed" => {
-                self.retro_response = optional_string(&properties, "response");
-                self.retro = optional_json::<Retro>(&properties, "retro")?;
+            EventBody::RetroCompleted(props) => {
+                self.retro_response = props.response.clone();
+                self.retro = props
+                    .retro
+                    .clone()
+                    .map(serde_json::from_value)
+                    .transpose()
+                    .map_err(|err| {
+                        StoreError::InvalidEvent(format!("invalid retro payload: {err}"))
+                    })?;
             }
-            "pull_request.created" => {
+            EventBody::PullRequestCreated(props) => {
                 self.pull_request = Some(PullRequestRecord {
-                    html_url: required_string(&properties, "pr_url")?,
-                    number: required_u64(&properties, "pr_number")?,
-                    owner: required_string(&properties, "owner")?,
-                    repo: required_string(&properties, "repo")?,
-                    base_branch: required_string(&properties, "base_branch")?,
-                    head_branch: required_string(&properties, "head_branch")?,
-                    title: required_string(&properties, "title")?,
+                    html_url: props.pr_url.clone(),
+                    number: props.pr_number,
+                    owner: props.owner.clone(),
+                    repo: props.repo.clone(),
+                    base_branch: props.base_branch.clone(),
+                    head_branch: props.head_branch.clone(),
+                    title: props.title.clone(),
                 });
             }
-            "stage.prompt" => {
-                let Some(node_id) = value.get("node_id").and_then(Value::as_str) else {
+            EventBody::StagePrompt(props) => {
+                let Some(node_id) = stored.node_id.as_deref() else {
                     return Ok(());
                 };
-                let visit = required_u32(&properties, "visit")?;
-                self.node_mut(node_id, visit).prompt = optional_string(&properties, "text");
-                self.node_mut(node_id, visit).provider_used =
-                    provider_used_from_prompt(&properties);
+                let visit = props.visit;
+                self.node_mut(node_id, visit).prompt = Some(props.text.clone());
+                self.node_mut(node_id, visit).provider_used = provider_used_from_prompt(props);
             }
-            "prompt.completed" => {
-                let Some(node_id) = value.get("node_id").and_then(Value::as_str) else {
+            EventBody::PromptCompleted(props) => {
+                let Some(node_id) = stored.node_id.as_deref() else {
                     return Ok(());
                 };
                 let visit = self.current_visit_for(node_id).unwrap_or(1);
-                self.node_mut(node_id, visit).response = optional_string(&properties, "response");
+                self.node_mut(node_id, visit).response = Some(props.response.clone());
             }
-            "stage.completed" => {
-                let Some(node_id) = value.get("node_id").and_then(Value::as_str) else {
+            EventBody::StageCompleted(props) => {
+                let Some(node_id) = stored.node_id.as_deref() else {
                     return Ok(());
                 };
-                let visit = stage_visit(node_id, &properties, self).unwrap_or(1);
-                let response = optional_string(&properties, "response");
-                let outcome = stage_outcome_from_properties(&properties)?;
+                let visit = stage_visit(node_id, props.node_visits.as_ref(), self).unwrap_or(1);
+                let response = props.response.clone();
+                let outcome = stage_outcome_from_props(props);
                 let status = node_status_from_outcome(&outcome, ts);
                 let node = self.node_mut(node_id, visit);
                 node.response = response;
                 node.status = Some(status);
             }
-            "stage.failed" => {
-                let Some(node_id) = value.get("node_id").and_then(Value::as_str) else {
+            EventBody::StageFailed(props) => {
+                let Some(node_id) = stored.node_id.as_deref() else {
                     return Ok(());
                 };
                 let visit = self.current_visit_for(node_id).unwrap_or(1);
-                let failure = optional_json::<fabro_types::FailureDetail>(&properties, "failure")?;
-                let failure_reason = failure.as_ref().map(|detail| detail.message.clone());
+                let failure_reason = props.failure.as_ref().map(|detail| detail.message.clone());
                 let node = self.node_mut(node_id, visit);
                 node.status = Some(NodeStatusRecord {
                     status: StageStatus::Fail,
                     notes: None,
-                    failure_reason: failure_reason.clone(),
+                    failure_reason,
                     timestamp: ts,
                 });
             }
-            "agent.session.started" | "agent.cli.started" => {
-                let Some(node_id) = value.get("node_id").and_then(Value::as_str) else {
+            EventBody::AgentSessionStarted(props) => {
+                let Some(node_id) = stored.node_id.as_deref() else {
                     return Ok(());
                 };
-                let visit = required_u32(&properties, "visit")?;
-                self.node_mut(node_id, visit).provider_used =
-                    Some(provider_used_from_agent_event(event_name, &properties));
+                self.node_mut(node_id, props.visit).provider_used =
+                    Some(provider_used_from_agent_session_started(props));
             }
-            "command.started" => {
-                let Some(node_id) = value.get("node_id").and_then(Value::as_str) else {
+            EventBody::AgentCliStarted(props) => {
+                let Some(node_id) = stored.node_id.as_deref() else {
+                    return Ok(());
+                };
+                self.node_mut(node_id, props.visit).provider_used =
+                    Some(provider_used_from_agent_cli_started(props));
+            }
+            EventBody::CommandStarted(props) => {
+                let Some(node_id) = stored.node_id.as_deref() else {
                     return Ok(());
                 };
                 let visit = self.current_visit_for(node_id).unwrap_or(1);
                 self.node_mut(node_id, visit).script_invocation =
-                    Some(Value::Object(properties.clone()));
+                    Some(serde_json::to_value(props).map_err(|err| {
+                        StoreError::InvalidEvent(format!("invalid command.started payload: {err}"))
+                    })?);
             }
-            "command.completed" => {
-                let Some(node_id) = value.get("node_id").and_then(Value::as_str) else {
+            EventBody::CommandCompleted(props) => {
+                let Some(node_id) = stored.node_id.as_deref() else {
                     return Ok(());
                 };
                 let visit = self.current_visit_for(node_id).unwrap_or(1);
                 let node = self.node_mut(node_id, visit);
-                node.stdout = optional_string(&properties, "stdout");
-                node.stderr = optional_string(&properties, "stderr");
-                node.script_timing = Some(Value::Object(properties.clone()));
+                node.stdout = Some(props.stdout.clone());
+                node.stderr = Some(props.stderr.clone());
+                node.script_timing = Some(serde_json::to_value(props).map_err(|err| {
+                    StoreError::InvalidEvent(format!("invalid command.completed payload: {err}"))
+                })?);
             }
-            "parallel.completed" => {
-                let Some(node_id) = value.get("node_id").and_then(Value::as_str) else {
+            EventBody::ParallelCompleted(props) => {
+                let Some(node_id) = stored.node_id.as_deref() else {
                     return Ok(());
                 };
                 let visit = self.current_visit_for(node_id).unwrap_or(1);
-                self.node_mut(node_id, visit).parallel_results = properties.get("results").cloned();
+                self.node_mut(node_id, visit).parallel_results =
+                    Some(serde_json::to_value(&props.results).map_err(|err| {
+                        StoreError::InvalidEvent(format!(
+                            "invalid parallel.completed payload: {err}"
+                        ))
+                    })?);
             }
             _ => {}
         }
@@ -358,148 +388,65 @@ impl RunProjection {
     }
 }
 
-fn parse_ts(value: &Value) -> Result<DateTime<Utc>> {
-    let ts = value
-        .get("ts")
-        .and_then(Value::as_str)
-        .ok_or_else(|| StoreError::InvalidEvent("event payload missing ts".into()))?;
-    chrono::DateTime::parse_from_rfc3339(ts)
-        .map(|ts| ts.with_timezone(&Utc))
-        .map_err(|err| StoreError::InvalidEvent(format!("invalid event ts: {err}")))
-}
-
-fn parse_run_id(value: &Value) -> Result<RunId> {
-    let run_id = value
-        .get("run_id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| StoreError::InvalidEvent("event payload missing run_id".into()))?;
-    run_id
-        .parse()
-        .map_err(|err| StoreError::InvalidEvent(format!("invalid run_id: {err}")))
-}
-
-fn required_string(properties: &serde_json::Map<String, Value>, key: &str) -> Result<String> {
-    properties
-        .get(key)
-        .and_then(Value::as_str)
-        .map(ToString::to_string)
-        .ok_or_else(|| StoreError::InvalidEvent(format!("event missing string property {key}")))
-}
-
-fn optional_string(properties: &serde_json::Map<String, Value>, key: &str) -> Option<String> {
-    properties
-        .get(key)
-        .and_then(Value::as_str)
-        .map(ToString::to_string)
-}
-
-fn required_u64(properties: &serde_json::Map<String, Value>, key: &str) -> Result<u64> {
-    properties
-        .get(key)
-        .and_then(Value::as_u64)
-        .ok_or_else(|| StoreError::InvalidEvent(format!("event missing integer property {key}")))
-}
-
-fn required_u32(properties: &serde_json::Map<String, Value>, key: &str) -> Result<u32> {
-    u32::try_from(required_u64(properties, key)?)
-        .map_err(|_| StoreError::InvalidEvent(format!("property {key} does not fit in u32")))
-}
-
-fn required_json<T: DeserializeOwned>(
-    properties: &serde_json::Map<String, Value>,
-    key: &str,
-) -> Result<T> {
-    let value = properties
-        .get(key)
-        .cloned()
-        .ok_or_else(|| StoreError::InvalidEvent(format!("event missing property {key}")))?;
-    serde_json::from_value(value)
-        .map_err(|err| StoreError::InvalidEvent(format!("invalid property {key}: {err}")))
-}
-
-fn optional_json<T: DeserializeOwned>(
-    properties: &serde_json::Map<String, Value>,
-    key: &str,
-) -> Result<Option<T>> {
-    properties
-        .get(key)
-        .filter(|value| !value.is_null())
-        .cloned()
-        .map(|value| {
-            serde_json::from_value(value)
-                .map_err(|err| StoreError::InvalidEvent(format!("invalid property {key}: {err}")))
-        })
-        .transpose()
-}
-
-fn parse_reason(properties: &serde_json::Map<String, Value>) -> Result<Option<StatusReason>> {
-    optional_string(properties, "reason")
-        .map(|reason| {
-            serde_json::from_value(Value::String(reason))
-                .map_err(|err| StoreError::InvalidEvent(format!("invalid status reason: {err}")))
-        })
-        .transpose()
-}
-
 fn run_status_record(
     status: RunStatus,
-    properties: &serde_json::Map<String, Value>,
+    reason: Option<StatusReason>,
     updated_at: DateTime<Utc>,
-) -> Result<RunStatusRecord> {
-    Ok(RunStatusRecord {
+) -> RunStatusRecord {
+    RunStatusRecord {
         status,
-        reason: parse_reason(properties)?,
+        reason,
         updated_at,
-    })
+    }
 }
 
-fn checkpoint_from_properties(
-    properties: &serde_json::Map<String, Value>,
+fn checkpoint_from_props(
+    props: &fabro_types::stored_event::CheckpointCompletedProps,
     timestamp: DateTime<Utc>,
-) -> Result<Checkpoint> {
-    let loop_failure_signatures =
-        optional_json::<HashMap<String, usize>>(properties, "loop_failure_signatures")?
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(key, value)| (FailureSignature(key), value))
-            .collect();
-    let restart_failure_signatures =
-        optional_json::<HashMap<String, usize>>(properties, "restart_failure_signatures")?
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(key, value)| (FailureSignature(key), value))
-            .collect();
+) -> Checkpoint {
+    let loop_failure_signatures = props
+        .loop_failure_signatures
+        .clone()
+        .into_iter()
+        .map(|(key, value)| (FailureSignature(key), value))
+        .collect();
+    let restart_failure_signatures = props
+        .restart_failure_signatures
+        .clone()
+        .into_iter()
+        .map(|(key, value)| (FailureSignature(key), value))
+        .collect();
 
-    Ok(Checkpoint {
+    Checkpoint {
         timestamp,
-        current_node: required_string(properties, "current_node")?,
-        completed_nodes: optional_json(properties, "completed_nodes")?.unwrap_or_default(),
-        node_retries: optional_json(properties, "node_retries")?.unwrap_or_default(),
-        context_values: optional_json(properties, "context_values")?.unwrap_or_default(),
-        node_outcomes: optional_json(properties, "node_outcomes")?.unwrap_or_default(),
-        next_node_id: optional_string(properties, "next_node_id"),
-        git_commit_sha: optional_string(properties, "git_commit_sha"),
+        current_node: props.current_node.clone(),
+        completed_nodes: props.completed_nodes.clone(),
+        node_retries: props.node_retries.clone().into_iter().collect(),
+        context_values: props.context_values.clone().into_iter().collect(),
+        node_outcomes: props.node_outcomes.clone().into_iter().collect(),
+        next_node_id: props.next_node_id.clone(),
+        git_commit_sha: props.git_commit_sha.clone(),
         loop_failure_signatures,
         restart_failure_signatures,
-        node_visits: optional_json(properties, "node_visits")?.unwrap_or_default(),
-    })
+        node_visits: props.node_visits.clone().into_iter().collect(),
+    }
 }
 
 fn conclusion_from_completed(
-    properties: &serde_json::Map<String, Value>,
+    props: &RunCompletedProps,
     timestamp: DateTime<Utc>,
 ) -> Result<Conclusion> {
-    let usage = optional_json::<RunUsage>(properties, "usage")?;
+    let usage = props.usage.as_ref().map(run_usage_from_token_usage);
     Ok(Conclusion {
         timestamp,
-        status: StageStatus::from_str(&required_string(properties, "status")?).map_err(|err| {
+        status: StageStatus::from_str(&props.status).map_err(|err| {
             StoreError::InvalidEvent(format!("invalid completed stage status: {err}"))
         })?,
-        duration_ms: required_u64(properties, "duration_ms")?,
+        duration_ms: props.duration_ms,
         failure_reason: None,
-        final_git_commit_sha: optional_string(properties, "final_git_commit_sha"),
+        final_git_commit_sha: props.final_git_commit_sha.clone(),
         stages: Vec::new(),
-        total_cost: properties.get("total_cost").and_then(Value::as_f64),
+        total_cost: props.total_cost,
         total_retries: 0,
         total_input_tokens: usage.as_ref().map_or(0, |usage| usage.input_tokens),
         total_output_tokens: usage.as_ref().map_or(0, |usage| usage.output_tokens),
@@ -519,19 +466,13 @@ fn conclusion_from_completed(
     })
 }
 
-fn conclusion_from_failed(
-    properties: &serde_json::Map<String, Value>,
-    timestamp: DateTime<Utc>,
-) -> Conclusion {
+fn conclusion_from_failed(props: &RunFailedProps, timestamp: DateTime<Utc>) -> Conclusion {
     Conclusion {
         timestamp,
         status: StageStatus::Fail,
-        duration_ms: properties
-            .get("duration_ms")
-            .and_then(Value::as_u64)
-            .unwrap_or_default(),
-        failure_reason: optional_string(properties, "error"),
-        final_git_commit_sha: optional_string(properties, "git_commit_sha"),
+        duration_ms: props.duration_ms,
+        failure_reason: Some(props.error.clone()),
+        final_git_commit_sha: props.git_commit_sha.clone(),
         stages: Vec::new(),
         total_cost: None,
         total_retries: 0,
@@ -546,34 +487,33 @@ fn conclusion_from_failed(
 
 fn stage_visit(
     node_id: &str,
-    properties: &serde_json::Map<String, Value>,
+    node_visits: Option<&BTreeMap<String, usize>>,
     state: &RunProjection,
 ) -> Option<u32> {
-    properties
-        .get("node_visits")
-        .and_then(|value| serde_json::from_value::<HashMap<String, usize>>(value.clone()).ok())
+    node_visits
         .and_then(|visits| visits.get(node_id).copied())
         .and_then(|visit| u32::try_from(visit).ok())
         .or_else(|| state.current_visit_for(node_id))
 }
 
-fn stage_outcome_from_properties(
-    properties: &serde_json::Map<String, Value>,
-) -> Result<Outcome<Option<StageUsage>>> {
-    let status = StageStatus::from_str(&required_string(properties, "status")?)
-        .map_err(|err| StoreError::InvalidEvent(format!("invalid stage status: {err}")))?;
-    Ok(Outcome {
-        status,
-        preferred_label: optional_string(properties, "preferred_label"),
-        suggested_next_ids: optional_json(properties, "suggested_next_ids")?.unwrap_or_default(),
-        context_updates: optional_json(properties, "context_updates")?.unwrap_or_default(),
-        jump_to_node: optional_string(properties, "jump_to_node"),
-        notes: optional_string(properties, "notes"),
-        failure: optional_json(properties, "failure")?,
-        usage: optional_json(properties, "usage")?,
-        files_touched: optional_json(properties, "files_touched")?.unwrap_or_default(),
-        duration_ms: properties.get("duration_ms").and_then(Value::as_u64),
-    })
+fn stage_outcome_from_props(props: &StageCompletedProps) -> Outcome<Option<StageUsage>> {
+    Outcome {
+        status: props.status.clone(),
+        preferred_label: props.preferred_label.clone(),
+        suggested_next_ids: props.suggested_next_ids.clone(),
+        context_updates: props
+            .context_updates
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .collect(),
+        jump_to_node: props.jump_to_node.clone(),
+        notes: props.notes.clone(),
+        failure: props.failure.clone(),
+        usage: props.usage.clone(),
+        files_touched: props.files_touched.clone(),
+        duration_ms: Some(props.duration_ms),
+    }
 }
 
 fn node_status_from_outcome(
@@ -591,41 +531,55 @@ fn node_status_from_outcome(
     }
 }
 
-fn provider_used_from_prompt(properties: &serde_json::Map<String, Value>) -> Option<Value> {
+fn provider_used_from_prompt(props: &fabro_types::stored_event::StagePromptProps) -> Option<Value> {
     let mut provider_used = serde_json::Map::new();
-    if let Some(mode) = optional_string(properties, "mode") {
+    if let Some(mode) = props.mode.clone() {
         provider_used.insert("mode".to_string(), Value::String(mode));
     }
-    if let Some(provider) = optional_string(properties, "provider") {
+    if let Some(provider) = props.provider.clone() {
         provider_used.insert("provider".to_string(), Value::String(provider));
     }
-    if let Some(model) = optional_string(properties, "model") {
+    if let Some(model) = props.model.clone() {
         provider_used.insert("model".to_string(), Value::String(model));
     }
     (!provider_used.is_empty()).then_some(Value::Object(provider_used))
 }
 
-fn provider_used_from_agent_event(
-    event_name: &str,
-    properties: &serde_json::Map<String, Value>,
+fn provider_used_from_agent_session_started(
+    props: &fabro_types::stored_event::AgentSessionStartedProps,
 ) -> Value {
     let mut provider_used = serde_json::Map::new();
-    provider_used.insert(
-        "mode".to_string(),
-        Value::String(if event_name == "agent.cli.started" {
-            "cli".to_string()
-        } else {
-            "agent".to_string()
-        }),
-    );
-    if let Some(provider) = optional_string(properties, "provider") {
+    provider_used.insert("mode".to_string(), Value::String("agent".to_string()));
+    if let Some(provider) = props.provider.clone() {
         provider_used.insert("provider".to_string(), Value::String(provider));
     }
-    if let Some(model) = optional_string(properties, "model") {
+    if let Some(model) = props.model.clone() {
         provider_used.insert("model".to_string(), Value::String(model));
     }
-    if let Some(command) = optional_string(properties, "command") {
-        provider_used.insert("command".to_string(), Value::String(command));
-    }
     Value::Object(provider_used)
+}
+
+fn provider_used_from_agent_cli_started(
+    props: &fabro_types::stored_event::AgentCliStartedProps,
+) -> Value {
+    let mut provider_used = serde_json::Map::new();
+    provider_used.insert("mode".to_string(), Value::String("cli".to_string()));
+    provider_used.insert(
+        "provider".to_string(),
+        Value::String(props.provider.clone()),
+    );
+    provider_used.insert("model".to_string(), Value::String(props.model.clone()));
+    provider_used.insert("command".to_string(), Value::String(props.command.clone()));
+    Value::Object(provider_used)
+}
+
+fn run_usage_from_token_usage(usage: &TokenUsage) -> RunUsage {
+    RunUsage {
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        reasoning_tokens: usage.reasoning_tokens,
+        cache_read_tokens: usage.cache_read_tokens,
+        cache_write_tokens: usage.cache_write_tokens,
+        cost: None,
+    }
 }
