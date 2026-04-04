@@ -9,7 +9,7 @@ use fabro_store::{RunProjection, SlateStore};
 use object_store::local::LocalFileSystem;
 
 use crate::error::{FabroError, Result};
-use crate::event::{EventEmitter, StoreProgressLogger, WorkflowRunEvent, append_workflow_event};
+use crate::event::{Event, EventEmitter, StoreProgressLogger, append_event};
 use crate::handler::HandlerRegistry;
 use crate::outcome::Outcome;
 use crate::pipeline;
@@ -31,7 +31,7 @@ struct InitializedState {
 fn bound_emitter(run_id: fabro_types::RunId, observer: &Arc<EventEmitter>) -> Arc<EventEmitter> {
     let emitter = Arc::new(EventEmitter::new(run_id));
     let observer_clone = Arc::clone(observer);
-    emitter.on_event(move |event| observer_clone.dispatch_stored_event(event));
+    emitter.on_event(move |event| observer_clone.dispatch_run_event(event));
     emitter
 }
 
@@ -64,10 +64,10 @@ async fn initialized(
         .await
         .expect("failed to create slate-backed test run store");
     let run_store = inner_store;
-    append_workflow_event(
+    append_event(
         &run_store,
         &run_options.run_id,
-        &WorkflowRunEvent::RunCreated {
+        &Event::RunCreated {
             run_id: run_options.run_id,
             settings: serde_json::to_value(&run_options.settings)
                 .expect("failed to serialize settings"),

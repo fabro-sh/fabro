@@ -3,7 +3,7 @@ use std::path::Path;
 use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
-use crate::event::WorkflowRunEvent;
+use crate::event::Event;
 use crate::outcome::Outcome;
 use crate::run_dir::visit_from_context;
 use async_trait::async_trait;
@@ -91,7 +91,7 @@ impl Handler for PromptHandler {
             .map(String::from)
             .or_else(|| Some(Provider::default_from_env().as_str().to_string()));
         let prompt_model = node.model().map(String::from);
-        services.emitter.emit(&WorkflowRunEvent::Prompt {
+        services.emitter.emit(&Event::Prompt {
             stage: node.id.clone(),
             visit: u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX),
             text: prompt.clone(),
@@ -140,7 +140,7 @@ impl Handler for PromptHandler {
             .or_else(|| Some(Provider::default_from_env().as_str().to_string()))
             .unwrap_or_default();
 
-        services.emitter.emit(&WorkflowRunEvent::PromptCompleted {
+        services.emitter.emit(&Event::PromptCompleted {
             node_id: node.id.clone(),
             response: response_text.clone(),
             model: response_model,

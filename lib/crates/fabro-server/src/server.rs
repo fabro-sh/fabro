@@ -20,7 +20,7 @@ use fabro_llm::types::{
     Response as LlmResponse, Role, StreamEvent, ToolChoice, ToolDefinition, Usage,
 };
 use fabro_store::StoreHandle;
-use fabro_types::{RunId, Settings, StoredEvent};
+use fabro_types::{RunEvent, RunId, Settings};
 use fabro_util::redact::redact_jsonl_line;
 use fabro_workflow::error::FabroError;
 use fabro_workflow::handler::HandlerRegistry;
@@ -97,7 +97,7 @@ struct ManagedRun {
     created_at: chrono::DateTime<chrono::Utc>,
     // Populated when running:
     interviewer: Option<Arc<WebInterviewer>>,
-    event_tx: Option<broadcast::Sender<StoredEvent>>,
+    event_tx: Option<broadcast::Sender<RunEvent>>,
     context: Option<Context>,
     checkpoint: Option<Checkpoint>,
     cancel_tx: Option<oneshot::Sender<()>>,

@@ -95,7 +95,7 @@ pub struct RunNoticeProps {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct StoredEventHeader {
+pub struct RunEventHeader {
     pub id: String,
     pub ts: chrono::DateTime<chrono::Utc>,
     pub run_id: RunId,

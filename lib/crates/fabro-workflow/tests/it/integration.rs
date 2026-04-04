@@ -25,11 +25,11 @@ use fabro_interview::{
 };
 use fabro_llm::provider::Provider;
 use fabro_store::{RuntimeState, SlateStore};
-use fabro_types::{RunId, Settings, StoredEvent};
+use fabro_types::{RunEvent, RunId, Settings};
 use fabro_validate::{Severity, validate, validate_or_raise};
 use fabro_workflow::context::Context;
 use fabro_workflow::error::{FabroError, FailureSignatureExt};
-use fabro_workflow::event::{EventEmitter, WorkflowRunEvent};
+use fabro_workflow::event::{Event, EventEmitter};
 use fabro_workflow::handler::agent::{AgentHandler, CodergenBackend, CodergenResult};
 use fabro_workflow::handler::command::CommandHandler;
 use fabro_workflow::handler::conditional::ConditionalHandler;
@@ -1545,7 +1545,7 @@ impl Handler for ContextSetterHandler {
     }
 }
 
-fn collect_events(emitter: &EventEmitter) -> Arc<std::sync::Mutex<Vec<StoredEvent>>> {
+fn collect_events(emitter: &EventEmitter) -> Arc<std::sync::Mutex<Vec<RunEvent>>> {
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     let events_clone = Arc::clone(&events);
     emitter.on_event(move |event| {
@@ -7316,7 +7316,7 @@ impl HookTestRunner {
     }
 }
 
-fn emitter_with_events() -> (Arc<EventEmitter>, Arc<std::sync::Mutex<Vec<StoredEvent>>>) {
+fn emitter_with_events() -> (Arc<EventEmitter>, Arc<std::sync::Mutex<Vec<RunEvent>>>) {
     let emitter = EventEmitter::default();
     let events = collect_events(&emitter);
     (Arc::new(emitter), events)
@@ -7331,7 +7331,7 @@ fn engine_with_hooks(hooks: Vec<fabro_hooks::HookDefinition>) -> HookTestRunner 
 
 fn engine_with_hooks_and_events(
     hooks: Vec<fabro_hooks::HookDefinition>,
-) -> (HookTestRunner, Arc<std::sync::Mutex<Vec<StoredEvent>>>) {
+) -> (HookTestRunner, Arc<std::sync::Mutex<Vec<RunEvent>>>) {
     let (emitter, events) = emitter_with_events();
     (
         HookTestRunner {
@@ -12055,7 +12055,7 @@ impl Handler for KeepaliveHandler {
         let start = std::time::Instant::now();
         while start.elapsed() < std::time::Duration::from_millis(self.total_ms) {
             tokio::time::sleep(std::time::Duration::from_millis(self.interval_ms)).await;
-            services.emitter.emit(&WorkflowRunEvent::Prompt {
+            services.emitter.emit(&Event::Prompt {
                 stage: node.id.clone(),
                 visit: 1,
                 text: "keepalive".to_string(),
@@ -12443,7 +12443,7 @@ async fn asset_collection_local_sandbox_success() {
 
     // Check that AssetCaptured events were emitted
     let captured_events = events.lock().unwrap();
-    let asset_events: Vec<&StoredEvent> = captured_events
+    let asset_events: Vec<&RunEvent> = captured_events
         .iter()
         .filter(|e| e.event == "asset.captured")
         .collect();

@@ -3,7 +3,7 @@ use std::path::Path;
 use fabro_store::RuntimeState;
 
 use crate::error::FabroError;
-use crate::event::{WorkflowRunEvent, append_workflow_event};
+use crate::event::{Event, append_event};
 use crate::outcome::StageStatus;
 use crate::run_status::RunStatus;
 
@@ -40,10 +40,10 @@ pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, 
         .ok_or_else(|| FabroError::Precondition("no checkpoint to resume from".to_string()))?;
 
     cleanup_resume_artifacts(run_dir);
-    append_workflow_event(
+    append_event(
         &services.run_store,
         &services.run_id,
-        &WorkflowRunEvent::RunSubmitted { reason: None },
+        &Event::RunSubmitted { reason: None },
     )
     .await
     .map_err(|err| FabroError::engine(err.to_string()))?;

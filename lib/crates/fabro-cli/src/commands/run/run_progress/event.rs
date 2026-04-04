@@ -1,7 +1,7 @@
 use std::convert::TryFrom;
 
 use chrono::{DateTime, Utc};
-use fabro_types::{EventBody, StageUsage, StoredEvent};
+use fabro_types::{EventBody, RunEvent, StageUsage};
 use fabro_workflow::event::RunNoticeLevel;
 use fabro_workflow::outcome::compute_stage_cost;
 use serde_json::Value;
@@ -236,7 +236,7 @@ pub(super) enum ProgressEvent {
     },
 }
 
-pub(super) fn from_stored_event(stored: &StoredEvent) -> Option<ProgressEvent> {
+pub(super) fn from_run_event(stored: &RunEvent) -> Option<ProgressEvent> {
     let node_id = stored.node_id.clone().unwrap_or_else(|| "?".to_string());
     let node_label = stored.node_label.clone().unwrap_or_else(|| node_id.clone());
 
@@ -459,8 +459,8 @@ pub(super) fn from_stored_event(stored: &StoredEvent) -> Option<ProgressEvent> {
 }
 
 pub(super) fn from_json_line(line: &str) -> Option<ProgressEvent> {
-    let stored = StoredEvent::from_json_str(line).ok()?;
-    from_stored_event(&stored)
+    let stored = RunEvent::from_json_str(line).ok()?;
+    from_run_event(&stored)
 }
 
 fn display_value(value: &Value) -> Option<String> {
@@ -495,15 +495,15 @@ fn display_value(value: &Value) -> Option<String> {
 mod tests {
     use fabro_agent::AgentEvent;
     use fabro_types::fixtures;
-    use fabro_workflow::event::{WorkflowRunEvent, to_stored_event};
+    use fabro_workflow::event::{Event, to_run_event};
 
     use super::*;
 
     #[test]
     fn parse_edge_selected() {
-        let stored = to_stored_event(
+        let stored = to_run_event(
             &fixtures::RUN_1,
-            &WorkflowRunEvent::EdgeSelected {
+            &Event::EdgeSelected {
                 from_node: "a".into(),
                 to_node: "b".into(),
                 label: Some("yes".into()),
@@ -516,7 +516,7 @@ mod tests {
             },
         );
 
-        let event = from_stored_event(&stored).unwrap();
+        let event = from_run_event(&stored).unwrap();
         assert!(matches!(
             event,
             ProgressEvent::EdgeSelected {
@@ -530,7 +530,7 @@ mod tests {
 
     #[test]
     fn round_trip_stage_completed() {
-        let event = WorkflowRunEvent::StageCompleted {
+        let event = Event::StageCompleted {
             node_id: "plan".into(),
             name: "Plan".into(),
             index: 0,
@@ -553,8 +553,8 @@ mod tests {
             max_attempts: 1,
         };
 
-        let stored = to_stored_event(&fixtures::RUN_1, &event);
-        let parsed = from_stored_event(&stored).unwrap();
+        let stored = to_run_event(&fixtures::RUN_1, &event);
+        let parsed = from_run_event(&stored).unwrap();
         assert!(matches!(
             parsed,
             ProgressEvent::StageCompleted {
@@ -568,7 +568,7 @@ mod tests {
 
     #[test]
     fn round_trip_agent_tool_call() {
-        let event = WorkflowRunEvent::Agent {
+        let event = Event::Agent {
             stage: "code".into(),
             visit: 1,
             event: AgentEvent::ToolCallStarted {
@@ -580,8 +580,8 @@ mod tests {
             parent_session_id: None,
         };
 
-        let stored = to_stored_event(&fixtures::RUN_1, &event);
-        let parsed = from_stored_event(&stored).unwrap();
+        let stored = to_run_event(&fixtures::RUN_1, &event);
+        let parsed = from_run_event(&stored).unwrap();
         assert!(matches!(
             parsed,
             ProgressEvent::ToolCallStarted {
@@ -656,7 +656,7 @@ mod tests {
 
     #[test]
     fn round_trip_sandbox_ready() {
-        let event = WorkflowRunEvent::Sandbox {
+        let event = Event::Sandbox {
             event: fabro_agent::SandboxEvent::Ready {
                 provider: "daytona".into(),
                 duration_ms: 2500,
@@ -667,8 +667,8 @@ mod tests {
             },
         };
 
-        let stored = to_stored_event(&fixtures::RUN_1, &event);
-        let parsed = from_stored_event(&stored).unwrap();
+        let stored = to_run_event(&fixtures::RUN_1, &event);
+        let parsed = from_run_event(&stored).unwrap();
         assert!(matches!(
             parsed,
             ProgressEvent::SandboxReady {
@@ -682,14 +682,14 @@ mod tests {
 
     #[test]
     fn round_trip_run_notice() {
-        let event = WorkflowRunEvent::RunNotice {
+        let event = Event::RunNotice {
             level: RunNoticeLevel::Warn,
             code: "sandbox_cleanup_failed".into(),
             message: "sandbox cleanup failed".into(),
         };
 
-        let stored = to_stored_event(&fixtures::RUN_1, &event);
-        let parsed = from_stored_event(&stored).unwrap();
+        let stored = to_run_event(&fixtures::RUN_1, &event);
+        let parsed = from_run_event(&stored).unwrap();
         assert!(matches!(
             parsed,
             ProgressEvent::RunNotice {

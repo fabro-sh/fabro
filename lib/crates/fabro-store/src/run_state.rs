@@ -6,11 +6,11 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 
 use crate::{EventEnvelope, Result, RunSummary, StageId, StoreError};
-use fabro_types::stored_event::{RunCompletedProps, RunFailedProps, StageCompletedProps};
+use fabro_types::run_event::{RunCompletedProps, RunFailedProps, StageCompletedProps};
 use fabro_types::{
     Checkpoint, Conclusion, EventBody, FailureSignature, NodeStatusRecord, Outcome,
-    PullRequestRecord, Retro, RunId, RunRecord, RunStatus, RunStatusRecord, SandboxRecord,
-    StageStatus, StageUsage, StartRecord, StatusReason, StoredEvent, TokenUsage,
+    PullRequestRecord, Retro, RunEvent, RunId, RunRecord, RunStatus, RunStatusRecord,
+    SandboxRecord, StageStatus, StageUsage, StartRecord, StatusReason, TokenUsage,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -75,7 +75,7 @@ impl RunProjection {
     }
 
     pub(crate) fn apply_event(&mut self, event: &EventEnvelope) -> Result<()> {
-        let stored = StoredEvent::from_value(event.payload.as_value().clone())
+        let stored = RunEvent::from_value(event.payload.as_value().clone())
             .map_err(|err| StoreError::InvalidEvent(format!("invalid stored event: {err}")))?;
         let ts = stored.ts;
         let run_id = stored.run_id;
@@ -401,7 +401,7 @@ fn run_status_record(
 }
 
 fn checkpoint_from_props(
-    props: &fabro_types::stored_event::CheckpointCompletedProps,
+    props: &fabro_types::run_event::CheckpointCompletedProps,
     timestamp: DateTime<Utc>,
 ) -> Checkpoint {
     let loop_failure_signatures = props
@@ -531,7 +531,7 @@ fn node_status_from_outcome(
     }
 }
 
-fn provider_used_from_prompt(props: &fabro_types::stored_event::StagePromptProps) -> Option<Value> {
+fn provider_used_from_prompt(props: &fabro_types::run_event::StagePromptProps) -> Option<Value> {
     let mut provider_used = serde_json::Map::new();
     if let Some(mode) = props.mode.clone() {
         provider_used.insert("mode".to_string(), Value::String(mode));
@@ -546,7 +546,7 @@ fn provider_used_from_prompt(props: &fabro_types::stored_event::StagePromptProps
 }
 
 fn provider_used_from_agent_session_started(
-    props: &fabro_types::stored_event::AgentSessionStartedProps,
+    props: &fabro_types::run_event::AgentSessionStartedProps,
 ) -> Value {
     let mut provider_used = serde_json::Map::new();
     provider_used.insert("mode".to_string(), Value::String("agent".to_string()));
@@ -560,7 +560,7 @@ fn provider_used_from_agent_session_started(
 }
 
 fn provider_used_from_agent_cli_started(
-    props: &fabro_types::stored_event::AgentCliStartedProps,
+    props: &fabro_types::run_event::AgentCliStartedProps,
 ) -> Value {
     let mut provider_used = serde_json::Map::new();
     provider_used.insert("mode".to_string(), Value::String("cli".to_string()));

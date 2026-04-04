@@ -384,7 +384,7 @@ mod tests {
     use object_store::memory::InMemory;
 
     use super::scan_runs_combined;
-    use crate::event::{WorkflowRunEvent, append_workflow_event};
+    use crate::event::{Event, append_event};
     use crate::operations::make_run_dir;
     use crate::records::RunRecord;
 
@@ -419,10 +419,10 @@ mod tests {
         let store = memory_store();
         let run_record = sample_run_record();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
-        append_workflow_event(
+        append_event(
             &run_store,
             &fixtures::RUN_1,
-            &WorkflowRunEvent::RunCreated {
+            &Event::RunCreated {
                 run_id: fixtures::RUN_1,
                 settings: serde_json::to_value(&run_record.settings).unwrap(),
                 graph: serde_json::to_value(&run_record.graph).unwrap(),
@@ -439,10 +439,10 @@ mod tests {
         )
         .await
         .unwrap();
-        append_workflow_event(
+        append_event(
             &run_store,
             &fixtures::RUN_1,
-            &WorkflowRunEvent::RunSubmitted { reason: None },
+            &Event::RunSubmitted { reason: None },
         )
         .await
         .unwrap();

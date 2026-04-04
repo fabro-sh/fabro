@@ -15,7 +15,7 @@ use shlex::try_quote;
 
 use crate::devcontainer_bridge::{devcontainer_to_snapshot_config, run_devcontainer_lifecycle};
 use crate::error::FabroError;
-use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
+use crate::event::{Event, EventEmitter, RunNoticeLevel};
 use crate::git::{self, GitSyncStatus, MetadataStore};
 use crate::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
 use crate::handler::{HandlerRegistry, default_registry};
@@ -52,7 +52,7 @@ fn emit_run_notice(
     code: impl Into<String>,
     message: impl Into<String>,
 ) {
-    emitter.emit(&WorkflowRunEvent::RunNotice {
+    emitter.emit(&Event::RunNotice {
         level,
         code: code.into(),
         message: message.into(),
@@ -323,14 +323,12 @@ async fn resolve_devcontainer(options: &mut InitOptions) -> Result<(), FabroErro
     let lifecycle_command_count = config.on_create_commands.len()
         + config.post_create_commands.len()
         + config.post_start_commands.len();
-    options
-        .emitter
-        .emit(&WorkflowRunEvent::DevcontainerResolved {
-            dockerfile_lines: config.dockerfile.lines().count(),
-            environment_count: config.environment.len(),
-            lifecycle_command_count,
-            workspace_folder: config.workspace_folder.clone(),
-        });
+    options.emitter.emit(&Event::DevcontainerResolved {
+        dockerfile_lines: config.dockerfile.lines().count(),
+        environment_count: config.environment.len(),
+        lifecycle_command_count,
+        workspace_folder: config.workspace_folder.clone(),
+    });
 
     options
         .sandbox
@@ -429,7 +427,7 @@ pub async fn initialize(
     let sandbox_event_callback: SandboxEventCallback = {
         let emitter = Arc::clone(&options.emitter);
         Arc::new(move |event| {
-            emitter.emit(&WorkflowRunEvent::Sandbox { event });
+            emitter.emit(&Event::Sandbox { event });
         })
     };
     let mut worktree_created = false;
@@ -513,7 +511,7 @@ pub async fn initialize(
     }
 
     let sandbox_record = options.sandbox.to_sandbox_record(&*sandbox);
-    options.emitter.emit(&WorkflowRunEvent::SandboxInitialized {
+    options.emitter.emit(&Event::SandboxInitialized {
         working_directory: sandbox_record.working_directory.clone(),
         provider: sandbox_record.provider.clone(),
         identifier: sandbox_record.identifier.clone(),
@@ -580,17 +578,15 @@ pub async fn initialize(
     }
 
     if !options.lifecycle.setup_commands.is_empty() {
-        options.emitter.emit(&WorkflowRunEvent::SetupStarted {
+        options.emitter.emit(&Event::SetupStarted {
             command_count: options.lifecycle.setup_commands.len(),
         });
         let setup_start = Instant::now();
         for (index, command) in options.lifecycle.setup_commands.iter().enumerate() {
-            options
-                .emitter
-                .emit(&WorkflowRunEvent::SetupCommandStarted {
-                    command: command.clone(),
-                    index,
-                });
+            options.emitter.emit(&Event::SetupCommandStarted {
+                command: command.clone(),
+                index,
+            });
             let cmd_start = Instant::now();
             let result = sandbox
                 .exec_command(
@@ -604,7 +600,7 @@ pub async fn initialize(
                 .map_err(|e| FabroError::engine(format!("Setup command failed: {e}")))?;
             let duration_ms = crate::millis_u64(cmd_start.elapsed());
             if result.exit_code != 0 {
-                options.emitter.emit(&WorkflowRunEvent::SetupFailed {
+                options.emitter.emit(&Event::SetupFailed {
                     command: command.clone(),
                     index,
                     exit_code: result.exit_code,
@@ -615,16 +611,14 @@ pub async fn initialize(
                     result.exit_code, result.stderr,
                 )));
             }
-            options
-                .emitter
-                .emit(&WorkflowRunEvent::SetupCommandCompleted {
-                    command: command.clone(),
-                    index,
-                    exit_code: result.exit_code,
-                    duration_ms,
-                });
+            options.emitter.emit(&Event::SetupCommandCompleted {
+                command: command.clone(),
+                index,
+                exit_code: result.exit_code,
+                duration_ms,
+            });
         }
-        options.emitter.emit(&WorkflowRunEvent::SetupCompleted {
+        options.emitter.emit(&Event::SetupCompleted {
             duration_ms: crate::millis_u64(setup_start.elapsed()),
         });
     }

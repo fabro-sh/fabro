@@ -143,7 +143,7 @@ mod tests {
         RunRecord, RunStatus, RunStatusRecord, SandboxRecord, Settings, StageStatus, StartRecord,
         StatusReason, fixtures,
     };
-    use fabro_workflow::event::{WorkflowRunEvent, append_workflow_event};
+    use fabro_workflow::event::{Event, append_event};
     use object_store::memory::InMemory;
 
     fn dt(rfc3339: &str) -> DateTime<Utc> {
@@ -294,10 +294,10 @@ mod tests {
         let sandbox = sample_sandbox();
 
         let node = StageId::new("code", 2);
-        append_workflow_event(
+        append_event(
             &run,
             &run_id,
-            &WorkflowRunEvent::RunCreated {
+            &Event::RunCreated {
                 run_id,
                 settings: serde_json::to_value(&run_record.settings).unwrap(),
                 graph: serde_json::to_value(&run_record.graph).unwrap(),
@@ -314,10 +314,10 @@ mod tests {
         )
         .await
         .unwrap();
-        append_workflow_event(
+        append_event(
             &run,
             &run_id,
-            &WorkflowRunEvent::WorkflowRunStarted {
+            &Event::WorkflowRunStarted {
                 name: "night-sky".to_string(),
                 run_id,
                 base_branch: run_record.base_branch.clone(),
@@ -329,20 +329,20 @@ mod tests {
         )
         .await
         .unwrap();
-        append_workflow_event(
+        append_event(
             &run,
             &run_id,
-            &WorkflowRunEvent::RunRunning {
+            &Event::RunRunning {
                 reason: status_record.reason,
             },
         )
         .await
         .unwrap();
         for checkpoint in [&first_checkpoint, &second_checkpoint] {
-            append_workflow_event(
+            append_event(
                 &run,
                 &run_id,
-                &WorkflowRunEvent::CheckpointCompleted {
+                &Event::CheckpointCompleted {
                     node_id: checkpoint.current_node.clone(),
                     status: "success".to_string(),
                     current_node: checkpoint.current_node.clone(),
@@ -371,10 +371,10 @@ mod tests {
             .await
             .unwrap();
         }
-        append_workflow_event(
+        append_event(
             &run,
             &run_id,
-            &WorkflowRunEvent::SandboxInitialized {
+            &Event::SandboxInitialized {
                 working_directory: sandbox.working_directory.clone(),
                 provider: sandbox.provider.clone(),
                 identifier: sandbox.identifier.clone(),
@@ -384,10 +384,10 @@ mod tests {
         )
         .await
         .unwrap();
-        append_workflow_event(
+        append_event(
             &run,
             &run_id,
-            &WorkflowRunEvent::Prompt {
+            &Event::Prompt {
                 stage: "code".to_string(),
                 visit: 2,
                 text: "Plan the fix".to_string(),
@@ -398,10 +398,10 @@ mod tests {
         )
         .await
         .unwrap();
-        append_workflow_event(
+        append_event(
             &run,
             &run_id,
-            &WorkflowRunEvent::PromptCompleted {
+            &Event::PromptCompleted {
                 node_id: "code".to_string(),
                 response: "Implemented".to_string(),
                 model: "gpt-5".to_string(),
@@ -411,10 +411,10 @@ mod tests {
         )
         .await
         .unwrap();
-        append_workflow_event(
+        append_event(
             &run,
             &run_id,
-            &WorkflowRunEvent::StageCompleted {
+            &Event::StageCompleted {
                 node_id: "code".to_string(),
                 name: "Code".to_string(),
                 index: 1,
@@ -442,10 +442,10 @@ mod tests {
         )
         .await
         .unwrap();
-        append_workflow_event(
+        append_event(
             &run,
             &run_id,
-            &WorkflowRunEvent::CommandStarted {
+            &Event::CommandStarted {
                 node_id: "code".to_string(),
                 script: "echo hi".to_string(),
                 command: "echo hi".to_string(),
@@ -455,10 +455,10 @@ mod tests {
         )
         .await
         .unwrap();
-        append_workflow_event(
+        append_event(
             &run,
             &run_id,
-            &WorkflowRunEvent::CommandCompleted {
+            &Event::CommandCompleted {
                 node_id: "code".to_string(),
                 stdout: "stdout line".to_string(),
                 stderr: String::new(),
@@ -469,10 +469,10 @@ mod tests {
         )
         .await
         .unwrap();
-        append_workflow_event(
+        append_event(
             &run,
             &run_id,
-            &WorkflowRunEvent::RetroStarted {
+            &Event::RetroStarted {
                 prompt: Some("How did it go?".to_string()),
                 provider: None,
                 model: None,
@@ -480,10 +480,10 @@ mod tests {
         )
         .await
         .unwrap();
-        append_workflow_event(
+        append_event(
             &run,
             &run_id,
-            &WorkflowRunEvent::RetroCompleted {
+            &Event::RetroCompleted {
                 duration_ms: 50,
                 response: Some("Smooth enough".to_string()),
                 retro: Some(serde_json::to_value(&retro).unwrap()),
@@ -491,10 +491,10 @@ mod tests {
         )
         .await
         .unwrap();
-        append_workflow_event(
+        append_event(
             &run,
             &run_id,
-            &WorkflowRunEvent::WorkflowRunCompleted {
+            &Event::WorkflowRunCompleted {
                 duration_ms: conclusion.duration_ms,
                 artifact_count: 0,
                 status: "success".to_string(),
@@ -645,10 +645,10 @@ mod tests {
         let run_id = test_run_id();
         let run = store.create_run(&run_id).await.unwrap();
         let run_record = sample_run_record(run_id, created_at);
-        append_workflow_event(
+        append_event(
             &run,
             &run_id,
-            &WorkflowRunEvent::RunCreated {
+            &Event::RunCreated {
                 run_id,
                 settings: serde_json::to_value(&run_record.settings).unwrap(),
                 graph: serde_json::to_value(&run_record.graph).unwrap(),

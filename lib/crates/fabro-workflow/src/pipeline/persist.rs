@@ -61,7 +61,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::event::{WorkflowRunEvent, append_workflow_event};
+    use crate::event::{Event, append_event};
     use crate::records::RunRecord;
 
     fn memory_store() -> StoreHandle {
@@ -143,10 +143,10 @@ mod tests {
     ) -> SlateRunStore {
         let store = memory_store();
         let run_store = store.create_run(&record.run_id).await.unwrap();
-        append_workflow_event(
+        append_event(
             &run_store,
             &record.run_id,
-            &WorkflowRunEvent::RunCreated {
+            &Event::RunCreated {
                 run_id: record.run_id,
                 settings: serde_json::to_value(&record.settings).unwrap(),
                 graph: serde_json::to_value(&record.graph).unwrap(),

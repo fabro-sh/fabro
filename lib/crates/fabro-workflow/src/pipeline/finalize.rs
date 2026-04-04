@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::error::FabroError;
-use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
+use crate::event::{Event, EventEmitter, RunNoticeLevel};
 use crate::git::MetadataStore;
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::records::{Checkpoint, Conclusion, StageSummary};
@@ -20,7 +20,7 @@ fn emit_run_notice(
     code: impl Into<String>,
     message: impl Into<String>,
 ) {
-    emitter.emit(&WorkflowRunEvent::RunNotice {
+    emitter.emit(&Event::RunNotice {
         level,
         code: code.into(),
         message: message.into(),
