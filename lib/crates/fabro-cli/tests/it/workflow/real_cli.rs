@@ -32,7 +32,6 @@ async fn run_real_cli_test(provider: Provider, model: &str) {
             &context,
             None,
             &emitter,
-            workspace.path(),
             &env,
             None,
         )

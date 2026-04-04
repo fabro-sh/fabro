@@ -4,9 +4,15 @@ use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
 use object_store::ObjectStore;
 use object_store::path::Path;
+use serde::{Deserialize, Serialize};
 
 use crate::{CatalogRecord, ListRunsQuery, Result};
 use fabro_types::RunId;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct StartIndexRecord {
+    run_id: RunId,
+}
 
 pub(crate) async fn write_catalog(
     store: Arc<dyn ObjectStore>,
@@ -29,7 +35,7 @@ pub(crate) async fn write_catalog(
     store
         .put(
             &by_start_path(base_prefix, created_at, run_id),
-            bytes.into(),
+            serde_json::to_vec(&StartIndexRecord { run_id: *run_id })?.into(),
         )
         .await?;
     Ok(record)
@@ -52,7 +58,10 @@ pub(crate) async fn list_catalogs(
     let metas = store.list(Some(&prefix)).try_collect::<Vec<_>>().await?;
     let mut records = Vec::new();
     for meta in metas {
-        let Some(record) = read_catalog_path(store.clone(), meta.location).await? else {
+        let Some(index) = read_start_index_path(store.clone(), meta.location).await? else {
+            continue;
+        };
+        let Some(record) = read_locator(store.clone(), base_prefix, &index.run_id).await? else {
             continue;
         };
         if let Some(start) = query.start {
@@ -100,6 +109,22 @@ pub(crate) async fn read_catalog_path(
 }
 
 #[cfg(test)]
+fn by_start_record(run_id: &RunId) -> StartIndexRecord {
+    StartIndexRecord { run_id: *run_id }
+}
+
+async fn read_start_index_path(
+    store: Arc<dyn ObjectStore>,
+    path: Path,
+) -> Result<Option<StartIndexRecord>> {
+    match store.get(&path).await {
+        Ok(result) => Ok(Some(serde_json::from_slice(&result.bytes().await?)?)),
+        Err(object_store::Error::NotFound { .. }) => Ok(None),
+        Err(err) => Err(err.into()),
+    }
+}
+
+#[cfg(test)]
 pub(super) mod test_support {
     use super::*;
     use std::collections::{HashMap, HashSet};
@@ -125,7 +150,12 @@ pub(super) mod test_support {
         for record in canonical.values() {
             let path = by_start_path(base_prefix, record.created_at, &record.run_id);
             if !object_exists(store.clone(), &path).await? {
-                store.put(&path, serde_json::to_vec(record)?.into()).await?;
+                store
+                    .put(
+                        &path,
+                        serde_json::to_vec(&by_start_record(&record.run_id))?.into(),
+                    )
+                    .await?;
             }
         }
 
@@ -136,16 +166,16 @@ pub(super) mod test_support {
         let mut seen = HashSet::new();
         for meta in by_start_metas {
             let location = meta.location.clone();
-            let Some(record) = read_catalog_path(store.clone(), location.clone()).await? else {
+            let Some(index) = read_start_index_path(store.clone(), location.clone()).await? else {
                 delete_if_exists(store.clone(), &location).await?;
                 continue;
             };
-            let expected = canonical.get(&record.run_id).map(|canonical_record| {
-                by_start_path(base_prefix, canonical_record.created_at, &record.run_id)
+            let expected = canonical.get(&index.run_id).map(|canonical_record| {
+                by_start_path(base_prefix, canonical_record.created_at, &index.run_id)
             });
             match expected {
                 Some(expected) if expected == location => {
-                    seen.insert(record.run_id);
+                    seen.insert(index.run_id);
                 }
                 _ => {
                     delete_if_exists(store.clone(), &location).await?;
@@ -158,7 +188,7 @@ pub(super) mod test_support {
                 store
                     .put(
                         &by_start_path(base_prefix, record.created_at, &record.run_id),
-                        serde_json::to_vec(record)?.into(),
+                        serde_json::to_vec(&by_start_record(&record.run_id))?.into(),
                     )
                     .await?;
             }

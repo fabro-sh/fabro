@@ -48,12 +48,12 @@ async fn remove_from(
             }
         };
 
-        if run.status.is_active() && !args.force {
-            let run_id = run.run_id.to_string();
+        if run.status().is_active() && !args.force {
+            let run_id = run.run_id().to_string();
             let error = format!(
                 "cannot remove active run {} (status: {}, use -f to force)",
                 short_run_id(&run_id),
-                run.status
+                run.status()
             );
             if !globals.json {
                 eprintln!("{error}");
@@ -66,7 +66,7 @@ async fn remove_from(
             continue;
         }
 
-        let run_id = run.run_id.to_string();
+        let run_id = run.run_id().to_string();
         if let Err(err) = remove_run_dir_with_cleanup(store, &run).await {
             if !globals.json {
                 eprintln!("error: {identifier}: {err}");
@@ -113,11 +113,12 @@ pub(crate) async fn remove_run_with_cleanup(store: &SlateStore, run: &RunInfo) -
 }
 
 async fn remove_run_dir_with_cleanup(store: &SlateStore, run: &RunInfo) -> Result<()> {
-    let run_store = match store.open_run_reader(&run.run_id).await {
+    let run_id = run.run_id();
+    let run_store = match store.open_run_reader(&run_id).await {
         Ok(run_store) => Some(run_store),
         Err(err) => {
             warn!(
-                run_id = %run.run_id,
+                run_id = %run_id,
                 error = %err,
                 "failed to open run store during removal"
             );
@@ -127,13 +128,13 @@ async fn remove_run_dir_with_cleanup(store: &SlateStore, run: &RunInfo) -> Resul
     if let Some(run_store) = run_store.as_ref() {
         if let Err(err) = append_workflow_event(
             run_store,
-            &run.run_id,
+            &run_id,
             &WorkflowRunEvent::RunRemoving { reason: None },
         )
         .await
         {
             warn!(
-                run_id = %run.run_id,
+                run_id = %run_id,
                 error = %err,
                 "failed to append removing status event"
             );
@@ -145,11 +146,11 @@ async fn remove_run_dir_with_cleanup(store: &SlateStore, run: &RunInfo) -> Resul
             match reconnect_sandbox(&record).await {
                 Ok(sandbox) => {
                     if let Err(err) = sandbox.cleanup().await {
-                        warn!(run_id = %run.run_id, error = %err, "sandbox cleanup failed");
+                        warn!(run_id = %run_id, error = %err, "sandbox cleanup failed");
                     }
                 }
                 Err(err) => {
-                    warn!(run_id = %run.run_id, error = %err, "sandbox reconnect failed");
+                    warn!(run_id = %run_id, error = %err, "sandbox reconnect failed");
                 }
             }
         }
@@ -161,9 +162,9 @@ async fn remove_run_dir_with_cleanup(store: &SlateStore, run: &RunInfo) -> Resul
 
 async fn delete_run_store_state(store: &SlateStore, run: &RunInfo) -> Result<()> {
     store
-        .delete_run(&run.run_id)
+        .delete_run(&run.run_id())
         .await
-        .with_context(|| format!("failed to delete store state for {}", run.run_id))
+        .with_context(|| format!("failed to delete store state for {}", run.run_id()))
 }
 
 async fn load_sandbox_record(

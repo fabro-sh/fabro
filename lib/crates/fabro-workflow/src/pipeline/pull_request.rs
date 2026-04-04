@@ -206,14 +206,13 @@ fn parse_dot_summary(dot: &str) -> (String, usize, usize) {
 /// directory scan behavior.
 fn read_plan_text(state: &RunProjection) -> Option<String> {
     let mut plan_nodes = state
-        .nodes
-        .iter()
-        .filter_map(|((node_id, visit), node)| {
-            node_id.starts_with("plan").then_some((
-                node_id.as_str(),
-                *visit,
-                node.response.as_deref(),
-            ))
+        .iter_nodes()
+        .filter_map(|(node, node_state)| {
+            let node_id = node.node_id;
+            let visit = node.visit;
+            node_id
+                .starts_with("plan")
+                .then_some((node_id, visit, node_state.response.as_deref()))
         })
         .collect::<Vec<_>>();
     plan_nodes.sort_by(|left, right| left.0.cmp(right.0).then(left.1.cmp(&right.1)));
@@ -908,8 +907,11 @@ mod tests {
     #[test]
     fn read_plan_text_found() {
         let mut state = RunProjection::default();
-        state.nodes.insert(
-            ("plan".to_string(), 1),
+        state.set_node(
+            fabro_store::NodeVisitRef {
+                node_id: "plan",
+                visit: 1,
+            },
             fabro_store::NodeState {
                 response: Some("This is the plan".to_string()),
                 ..Default::default()
@@ -923,8 +925,11 @@ mod tests {
     #[test]
     fn read_plan_text_prefix_match() {
         let mut state = RunProjection::default();
-        state.nodes.insert(
-            ("planning".to_string(), 1),
+        state.set_node(
+            fabro_store::NodeVisitRef {
+                node_id: "planning",
+                visit: 1,
+            },
             fabro_store::NodeState {
                 response: Some("Planning content".to_string()),
                 ..Default::default()
@@ -938,15 +943,21 @@ mod tests {
     #[test]
     fn read_plan_text_prefers_alphabetically_first_plan_node() {
         let mut state = RunProjection::default();
-        state.nodes.insert(
-            ("planning".to_string(), 1),
+        state.set_node(
+            fabro_store::NodeVisitRef {
+                node_id: "planning",
+                visit: 1,
+            },
             fabro_store::NodeState {
                 response: Some("Planning content".to_string()),
                 ..Default::default()
             },
         );
-        state.nodes.insert(
-            ("plan".to_string(), 1),
+        state.set_node(
+            fabro_store::NodeVisitRef {
+                node_id: "plan",
+                visit: 1,
+            },
             fabro_store::NodeState {
                 response: Some("Plan content".to_string()),
                 ..Default::default()
@@ -960,8 +971,11 @@ mod tests {
     #[test]
     fn read_plan_text_not_found() {
         let mut state = RunProjection::default();
-        state.nodes.insert(
-            ("implement".to_string(), 1),
+        state.set_node(
+            fabro_store::NodeVisitRef {
+                node_id: "implement",
+                visit: 1,
+            },
             fabro_store::NodeState::default(),
         );
 

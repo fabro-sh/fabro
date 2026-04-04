@@ -20,19 +20,20 @@ pub(crate) async fn dump_command(args: &StoreDumpArgs, globals: &GlobalArgs) -> 
     let base = runs_base(&cli_settings.storage_dir());
     let store = store::build_store(&cli_settings.storage_dir())?;
     let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
-    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await?;
+    let run_id = run.run_id();
+    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run_id).await?;
 
     let file_count = export_run(&run_store, &args.output).await?;
     if globals.json {
         print_json_pretty(&serde_json::json!({
-            "run_id": run.run_id,
+            "run_id": run_id,
             "output_dir": absolute_or_current(&args.output),
             "file_count": file_count,
         }))?;
     } else {
         println!(
             "Exported {file_count} files for run {} to {}",
-            run.run_id,
+            run_id,
             args.output.display()
         );
     }
@@ -298,7 +299,7 @@ mod tests {
             visit: 2,
         };
         append_workflow_event(
-            run.as_ref(),
+            &run,
             &run_id,
             &WorkflowRunEvent::RunCreated {
                 run_id,
@@ -318,7 +319,7 @@ mod tests {
         .await
         .unwrap();
         append_workflow_event(
-            run.as_ref(),
+            &run,
             &run_id,
             &WorkflowRunEvent::WorkflowRunStarted {
                 name: "night-sky".to_string(),
@@ -333,7 +334,7 @@ mod tests {
         .await
         .unwrap();
         append_workflow_event(
-            run.as_ref(),
+            &run,
             &run_id,
             &WorkflowRunEvent::RunRunning {
                 reason: status_record.reason,
@@ -343,7 +344,7 @@ mod tests {
         .unwrap();
         for checkpoint in [&first_checkpoint, &second_checkpoint] {
             append_workflow_event(
-                run.as_ref(),
+                &run,
                 &run_id,
                 &WorkflowRunEvent::CheckpointCompleted {
                     node_id: checkpoint.current_node.clone(),
@@ -375,7 +376,7 @@ mod tests {
             .unwrap();
         }
         append_workflow_event(
-            run.as_ref(),
+            &run,
             &run_id,
             &WorkflowRunEvent::SandboxInitialized {
                 working_directory: sandbox.working_directory.clone(),
@@ -388,7 +389,7 @@ mod tests {
         .await
         .unwrap();
         append_workflow_event(
-            run.as_ref(),
+            &run,
             &run_id,
             &WorkflowRunEvent::Prompt {
                 stage: "code".to_string(),
@@ -402,7 +403,7 @@ mod tests {
         .await
         .unwrap();
         append_workflow_event(
-            run.as_ref(),
+            &run,
             &run_id,
             &WorkflowRunEvent::PromptCompleted {
                 node_id: "code".to_string(),
@@ -415,7 +416,7 @@ mod tests {
         .await
         .unwrap();
         append_workflow_event(
-            run.as_ref(),
+            &run,
             &run_id,
             &WorkflowRunEvent::StageCompleted {
                 node_id: "code".to_string(),
@@ -446,7 +447,7 @@ mod tests {
         .await
         .unwrap();
         append_workflow_event(
-            run.as_ref(),
+            &run,
             &run_id,
             &WorkflowRunEvent::CommandStarted {
                 node_id: "code".to_string(),
@@ -458,7 +459,7 @@ mod tests {
         .await
         .unwrap();
         append_workflow_event(
-            run.as_ref(),
+            &run,
             &run_id,
             &WorkflowRunEvent::CommandCompleted {
                 node_id: "code".to_string(),
@@ -472,7 +473,7 @@ mod tests {
         .await
         .unwrap();
         append_workflow_event(
-            run.as_ref(),
+            &run,
             &run_id,
             &WorkflowRunEvent::RetroStarted {
                 prompt: Some("How did it go?".to_string()),
@@ -483,7 +484,7 @@ mod tests {
         .await
         .unwrap();
         append_workflow_event(
-            run.as_ref(),
+            &run,
             &run_id,
             &WorkflowRunEvent::RetroCompleted {
                 duration_ms: 50,
@@ -494,7 +495,7 @@ mod tests {
         .await
         .unwrap();
         append_workflow_event(
-            run.as_ref(),
+            &run,
             &run_id,
             &WorkflowRunEvent::WorkflowRunCompleted {
                 duration_ms: conclusion.duration_ms,
@@ -542,7 +543,7 @@ mod tests {
             .unwrap();
 
         let output = tempfile::tempdir().unwrap();
-        let file_count = export_run(run.as_ref(), output.path()).await.unwrap();
+        let file_count = export_run(&run, output.path()).await.unwrap();
         assert_eq!(file_count, 22);
 
         let exported_run: RunRecord = read_json(&output.path().join("run.json"));
@@ -640,7 +641,7 @@ mod tests {
         let run = store.create_run(&run_id, created_at, None).await.unwrap();
         let run_record = sample_run_record(run_id, created_at);
         append_workflow_event(
-            run.as_ref(),
+            &run,
             &run_id,
             &WorkflowRunEvent::RunCreated {
                 run_id,
@@ -672,7 +673,7 @@ mod tests {
 
         let temp = tempfile::tempdir().unwrap();
         let output = temp.path().join("dump");
-        let err = export_run(run.as_ref(), &output).await.unwrap_err();
+        let err = export_run(&run, &output).await.unwrap_err();
         assert!(err.to_string().contains("asset filename"));
         assert!(!output.exists());
     }

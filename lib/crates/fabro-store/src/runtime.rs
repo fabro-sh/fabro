@@ -14,11 +14,6 @@ impl RuntimeState {
     }
 
     #[must_use]
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-
-    #[must_use]
     pub fn runtime_dir(&self) -> PathBuf {
         self.root.join("runtime")
     }
@@ -71,7 +66,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let state = RuntimeState::new(dir.path());
 
-        assert_eq!(state.root(), dir.path());
         assert_eq!(state.runtime_dir(), dir.path().join("runtime"));
         assert_eq!(
             state.interview_request_path(),

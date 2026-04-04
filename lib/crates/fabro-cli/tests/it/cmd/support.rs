@@ -784,15 +784,13 @@ fn setup_git_backed_run(context: &TestContext, workflow: GitWorkflowKind) -> Git
             let state = run_state(&run.run_dir);
             assert!(
                 state
-                    .nodes
-                    .iter()
-                    .any(|((node_id, _), node)| node_id == "step_one" && node.diff.is_some())
+                    .iter_nodes()
+                    .any(|(node, state)| node.node_id == "step_one" && state.diff.is_some())
             );
             assert!(
                 state
-                    .nodes
-                    .iter()
-                    .any(|((node_id, _), node)| node_id == "step_two" && node.diff.is_some())
+                    .iter_nodes()
+                    .any(|(node, state)| node.node_id == "step_two" && state.diff.is_some())
             );
         }
         GitWorkflowKind::Noop => {

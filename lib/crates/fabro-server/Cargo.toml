@@ -26,7 +26,6 @@ fabro-model = { path = "../fabro-model" }
 fabro-retro = { path = "../fabro-retro" }
 fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
-fabro-db = { path = "../fabro-db" }
 fabro-api = { path = "../fabro-api" }
 fabro-store = { path = "../fabro-store" }
 chrono.workspace = true
@@ -35,7 +34,6 @@ axum.workspace = true
 axum-extra.workspace = true
 cookie.workspace = true
 dirs.workspace = true
-sqlx.workspace = true
 tower = "0.5"
 tokio-stream = { workspace = true, features = ["sync"] }
 base64.workspace = true

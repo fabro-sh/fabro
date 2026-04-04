@@ -191,7 +191,7 @@ fn rewind_preserves_event_history_and_clears_terminal_snapshot_state() {
         "rewind should clear pull request"
     );
     assert!(
-        state.nodes.is_empty(),
+        state.is_empty(),
         "rewind should clear node state that belonged to the prior execution"
     );
 }

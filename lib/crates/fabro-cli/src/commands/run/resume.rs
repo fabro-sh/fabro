@@ -21,9 +21,8 @@ pub(crate) async fn resume_command(
     let base = runs_base(&cli_settings.storage_dir());
     let store = store::build_store(&cli_settings.storage_dir())?;
     let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
+    let run_id = run.run_id();
     let run_dir = run.path;
-
-    let run_id = run.run_id;
 
     if launcher_pid_alive(&run_dir) {
         bail!("an engine process is still running for this run — cannot resume");

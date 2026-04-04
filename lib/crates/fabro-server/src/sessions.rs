@@ -432,16 +432,8 @@ mod tests {
     use crate::jwt_auth::AuthMode;
     use crate::server::{build_router, create_app_state_with_options};
 
-    async fn test_db() -> sqlx::SqlitePool {
-        let pool = fabro_db::connect_memory().await.unwrap();
-        fabro_db::initialize_db(&pool).await.unwrap();
-        pool
-    }
-
     async fn dry_run_app() -> axum::Router {
-        let db = test_db().await;
         let state = create_app_state_with_options(
-            db,
             fabro_types::Settings {
                 dry_run: Some(true),
                 ..Default::default()

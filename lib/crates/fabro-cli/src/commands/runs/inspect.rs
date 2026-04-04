@@ -28,8 +28,9 @@ pub(crate) async fn run(args: &InspectArgs, globals: &GlobalArgs) -> Result<()> 
     let base = runs_base(&cli_settings.storage_dir());
     let store = store::build_store(&cli_settings.storage_dir())?;
     let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
-    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await?;
-    let output = inspect_run_store(&run.run_id, &run.path, run.status, &run_store).await;
+    let run_id = run.run_id();
+    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run_id).await?;
+    let output = inspect_run_store(&run_id, &run.path, run.status(), &run_store).await;
     let json = serde_json::to_string_pretty(&[output])?;
     println!("{json}");
     Ok(())

@@ -15,32 +15,30 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use crate::keys;
 use crate::run_state::EventProjectionCache;
 use crate::{
-    CatalogRecord, EventEnvelope, EventPayload, NodeVisitRef, Result, RunProjection, RunSummary,
-    StoreError,
+    CatalogRecord, EventEnvelope, EventPayload, NodeVisit, NodeVisitRef, Result, RunProjection,
+    RunSummary, StoreError,
 };
-use fabro_types::RunId;
-
 #[derive(Clone)]
 pub struct SlateRunStore {
     inner: Arc<SlateRunStoreInner>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct NodeAsset {
+    pub node: NodeVisit,
+    pub filename: String,
+}
+
 impl std::fmt::Debug for SlateRunStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SlateRunStore")
-            .field("run_id", &self.inner.run_id)
-            .field("created_at", &self.inner.created_at)
-            .field("db_prefix", &self.inner.db_prefix)
-            .field("run_dir", &self.inner.run_dir)
+            .field("record", &self.inner.record)
             .finish_non_exhaustive()
     }
 }
 
 pub(crate) struct SlateRunStoreInner {
-    run_id: RunId,
-    created_at: DateTime<Utc>,
-    db_prefix: String,
-    run_dir: Option<String>,
+    record: CatalogRecord,
     db: SlateRunDb,
     event_seq: AtomicU32,
     close_lock: Mutex<()>,
@@ -57,10 +55,7 @@ impl SlateRunStore {
         let event_seq = recover_next_seq(&db, keys::EVENTS_PREFIX, keys::parse_event_seq).await?;
         Ok(Self {
             inner: Arc::new(SlateRunStoreInner {
-                run_id: record.run_id,
-                created_at: record.created_at,
-                db_prefix: record.db_prefix,
-                run_dir: record.run_dir,
+                record,
                 db: SlateRunDb::Writer(db),
                 event_seq: AtomicU32::new(event_seq),
                 close_lock: Mutex::new(()),
@@ -73,10 +68,7 @@ impl SlateRunStore {
         let event_seq = recover_next_seq(&db, keys::EVENTS_PREFIX, keys::parse_event_seq).await?;
         Ok(Self {
             inner: Arc::new(SlateRunStoreInner {
-                run_id: record.run_id,
-                created_at: record.created_at,
-                db_prefix: record.db_prefix,
-                run_dir: record.run_dir,
+                record,
                 db: SlateRunDb::Reader(Box::new(db)),
                 event_seq: AtomicU32::new(event_seq),
                 close_lock: Mutex::new(()),
@@ -94,23 +86,11 @@ impl SlateRunStore {
     }
 
     pub(crate) fn record(&self) -> CatalogRecord {
-        CatalogRecord {
-            run_id: self.inner.run_id,
-            created_at: self.inner.created_at,
-            db_prefix: self.inner.db_prefix.clone(),
-            run_dir: self.inner.run_dir.clone(),
-        }
-    }
-
-    pub(crate) fn matches_record(&self, record: &CatalogRecord) -> bool {
-        self.inner.run_id == record.run_id
-            && self.inner.created_at == record.created_at
-            && self.inner.db_prefix == record.db_prefix
-            && self.inner.run_dir == record.run_dir
+        self.inner.record.clone()
     }
 
     pub(crate) fn created_at(&self) -> DateTime<Utc> {
-        self.inner.created_at
+        self.inner.record.created_at
     }
 
     pub(crate) async fn close(&self) -> Result<()> {
@@ -168,7 +148,13 @@ impl SlateRunStore {
 
 impl SlateRunStore {
     pub async fn append_event(&self, payload: &EventPayload) -> Result<u32> {
-        payload.validate(&self.inner.run_id)?;
+        if payload.run_id() != self.inner.record.run_id.to_string() {
+            return Err(StoreError::InvalidEvent(format!(
+                "payload run_id {:?} does not match store run_id {:?}",
+                payload.run_id(),
+                self.inner.record.run_id
+            )));
+        }
         let seq = self.inner.event_seq.fetch_add(1, Ordering::SeqCst);
         self.inner
             .db
@@ -267,7 +253,7 @@ impl SlateRunStore {
             .await
     }
 
-    pub async fn list_all_assets(&self) -> Result<Vec<(String, u32, String)>> {
+    pub async fn list_all_assets(&self) -> Result<Vec<NodeAsset>> {
         self.inner.db.list_all_assets().await
     }
 
@@ -327,7 +313,7 @@ impl SlateRunDb {
         }
     }
 
-    async fn list_all_assets(&self) -> Result<Vec<(String, u32, String)>> {
+    async fn list_all_assets(&self) -> Result<Vec<NodeAsset>> {
         match self {
             Self::Writer(db) => list_all_assets(db).await,
             Self::Reader(db) => list_all_assets(db.as_ref()).await,
@@ -418,7 +404,7 @@ where
     Ok(artifact_ids)
 }
 
-async fn list_all_assets<R>(db: &R) -> Result<Vec<(String, u32, String)>>
+async fn list_all_assets<R>(db: &R) -> Result<Vec<NodeAsset>>
 where
     R: DbRead + Sync,
 {
@@ -428,10 +414,13 @@ where
     let mut assets = Vec::new();
     while let Some(entry) = iter.next().await? {
         let key = key_to_string(&entry.key)?;
-        let Some(asset) = keys::parse_node_asset_key(&key) else {
+        let Some((node_id, visit, filename)) = keys::parse_node_asset_key(&key) else {
             continue;
         };
-        assets.push(asset);
+        assets.push(NodeAsset {
+            node: NodeVisit { node_id, visit },
+            filename,
+        });
     }
     assets.sort();
     Ok(assets)

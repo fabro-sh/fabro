@@ -103,7 +103,7 @@ pub async fn serve_command(
         }
     };
 
-    // Initialize data directory and SQLite database
+    // Initialize data directory and storage
     let config_path = args.config.clone();
     let disk_settings = load_server_settings(config_path.as_deref())?;
     let data_dir = storage_dir_override.unwrap_or_else(|| resolve_storage_dir(&disk_settings));
@@ -115,9 +115,6 @@ pub async fn serve_command(
         dry_run_mode,
     )));
     std::fs::create_dir_all(&data_dir)?;
-    let db = fabro_db::connect(&data_dir.join("fabro.db")).await?;
-    fabro_db::initialize_db(&db).await?;
-
     let (auth_mode, client_auth, max_concurrent_runs) = {
         let cfg = shared_settings.read().expect("config lock poisoned");
         let api = cfg.api.clone().unwrap_or_default();
@@ -144,7 +141,7 @@ pub async fn serve_command(
         Duration::from_millis(1),
     ));
     let state =
-        create_app_state_with_store(db, Arc::clone(&shared_settings), max_concurrent_runs, store);
+        create_app_state_with_store(Arc::clone(&shared_settings), max_concurrent_runs, store);
     spawn_scheduler(Arc::clone(&state));
     let router = build_router(state, auth_mode);
 

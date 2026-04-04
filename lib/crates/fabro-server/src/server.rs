@@ -129,7 +129,6 @@ pub struct AppState {
     runs: Mutex<HashMap<RunId, ManagedRun>>,
     aggregate_usage: Mutex<UsageAccumulator>,
     store: StoreHandle,
-    pub db: sqlx::SqlitePool,
     max_concurrent_runs: usize,
     scheduler_notify: Notify,
     pub sessions: SessionStore,
@@ -406,18 +405,16 @@ async fn get_aggregate_usage(
     (StatusCode::OK, Json(response)).into_response()
 }
 
-/// Create an `AppState` with the given LLM spec factory and database pool.
-pub fn create_app_state(db: sqlx::SqlitePool) -> Arc<AppState> {
-    create_app_state_with_options(db, Settings::default(), 5)
+/// Create an `AppState` with default settings.
+pub fn create_app_state() -> Arc<AppState> {
+    create_app_state_with_options(Settings::default(), 5)
 }
 
 #[doc(hidden)]
 pub fn create_app_state_with_registry_factory(
-    db: sqlx::SqlitePool,
     registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
     build_app_state(
-        db,
         Arc::new(RwLock::new(Settings::default())),
         Some(Box::new(registry_factory_override)),
         5,
@@ -425,14 +422,12 @@ pub fn create_app_state_with_registry_factory(
     )
 }
 
-/// Create an `AppState` with the given database pool, settings, and concurrency limit.
+/// Create an `AppState` with the given settings and concurrency limit.
 pub fn create_app_state_with_options(
-    db: sqlx::SqlitePool,
     settings: Settings,
     max_concurrent_runs: usize,
 ) -> Arc<AppState> {
     create_app_state_with_store(
-        db,
         Arc::new(RwLock::new(settings)),
         max_concurrent_runs,
         test_store(),
@@ -448,16 +443,14 @@ fn test_store() -> StoreHandle {
 }
 
 pub fn create_app_state_with_store(
-    db: sqlx::SqlitePool,
     settings: Arc<RwLock<Settings>>,
     max_concurrent_runs: usize,
     store: StoreHandle,
 ) -> Arc<AppState> {
-    build_app_state(db, settings, None, max_concurrent_runs, store)
+    build_app_state(settings, None, max_concurrent_runs, store)
 }
 
 fn build_app_state(
-    db: sqlx::SqlitePool,
     settings: Arc<RwLock<Settings>>,
     registry_factory_override: Option<Box<RegistryFactoryOverride>>,
     max_concurrent_runs: usize,
@@ -467,7 +460,6 @@ fn build_app_state(
         runs: Mutex::new(HashMap::new()),
         aggregate_usage: Mutex::new(UsageAccumulator::default()),
         store,
-        db,
         max_concurrent_runs,
         scheduler_notify: Notify::new(),
         sessions: new_session_store(),
@@ -1679,14 +1671,8 @@ mod tests {
         )
     }
 
-    async fn test_db() -> sqlx::SqlitePool {
-        let pool = fabro_db::connect_memory().await.unwrap();
-        fabro_db::initialize_db(&pool).await.unwrap();
-        pool
-    }
-
-    fn test_app_with(db: sqlx::SqlitePool) -> Router {
-        let state = create_app_state(db);
+    fn test_app_with() -> Router {
+        let state = create_app_state();
         build_router(state, AuthMode::Disabled)
     }
 
@@ -1706,7 +1692,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_model_unknown_returns_404() {
-        let app = test_app_with(test_db().await);
+        let app = test_app_with();
 
         let req = Request::builder()
             .method("POST")
@@ -1721,7 +1707,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_model_known_returns_200_with_status() {
-        let app = test_app_with(test_db().await);
+        let app = test_app_with();
 
         let req = Request::builder()
             .method("POST")
@@ -1757,7 +1743,7 @@ mod tests {
             webhooks: None,
         });
         let app = build_router(
-            create_app_state_with_options(test_db().await, settings, 5),
+            create_app_state_with_options(settings, 5),
             AuthMode::Disabled,
         );
 
@@ -1782,7 +1768,7 @@ mod tests {
 
     #[tokio::test]
     async fn logout_redirects_to_login_page() {
-        let app = test_app_with(test_db().await);
+        let app = test_app_with();
 
         let response = app
             .oneshot(
@@ -1807,7 +1793,7 @@ mod tests {
 
     #[tokio::test]
     async fn static_favicon_is_served() {
-        let app = test_app_with(test_db().await);
+        let app = test_app_with();
 
         let response = app
             .oneshot(
@@ -1831,7 +1817,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_model_dry_run_returns_ok() {
-        let state = create_app_state_with_options(test_db().await, dry_run_settings(), 5);
+        let state = create_app_state_with_options(dry_run_settings(), 5);
         let app = build_router(state, AuthMode::Disabled);
 
         let req = Request::builder()
@@ -1851,7 +1837,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_model_dry_run_unknown_returns_404() {
-        let state = create_app_state_with_options(test_db().await, dry_run_settings(), 5);
+        let state = create_app_state_with_options(dry_run_settings(), 5);
         let app = build_router(state, AuthMode::Disabled);
 
         let req = Request::builder()
@@ -1867,7 +1853,7 @@ mod tests {
 
     #[tokio::test]
     async fn post_runs_starts_run_and_returns_id() {
-        let app = test_app_with(test_db().await);
+        let app = test_app_with();
 
         let req = Request::builder()
             .method("POST")
@@ -1888,7 +1874,7 @@ mod tests {
 
     #[tokio::test]
     async fn post_runs_invalid_dot_returns_bad_request() {
-        let app = test_app_with(test_db().await);
+        let app = test_app_with();
 
         let req = Request::builder()
             .method("POST")
@@ -1905,7 +1891,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn get_run_status_returns_status() {
-        let state = create_app_state(test_db().await);
+        let state = create_app_state();
         let app = test_app_with_scheduler(state);
 
         // Start a run
@@ -1949,7 +1935,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_run_status_not_found() {
-        let app = test_app_with(test_db().await);
+        let app = test_app_with();
         let missing_run_id = fixtures::RUN_64;
 
         let req = Request::builder()
@@ -1964,7 +1950,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_questions_returns_empty_list() {
-        let state = create_app_state(test_db().await);
+        let state = create_app_state();
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a run
@@ -1998,7 +1984,7 @@ mod tests {
 
     #[tokio::test]
     async fn submit_answer_not_found_run() {
-        let app = test_app_with(test_db().await);
+        let app = test_app_with();
         let missing_run_id = fixtures::RUN_64;
 
         let req = Request::builder()
@@ -2016,7 +2002,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_events_not_found() {
-        let app = test_app_with(test_db().await);
+        let app = test_app_with();
         let missing_run_id = fixtures::RUN_64;
 
         let req = Request::builder()
@@ -2031,7 +2017,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_checkpoint_returns_null_initially() {
-        let state = create_app_state(test_db().await);
+        let state = create_app_state();
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a run
@@ -2061,7 +2047,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_context_returns_map() {
-        let state = create_app_state(test_db().await);
+        let state = create_app_state();
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a run
@@ -2094,7 +2080,7 @@ mod tests {
 
     #[tokio::test]
     async fn cancel_run_succeeds() {
-        let state = create_app_state(test_db().await);
+        let state = create_app_state();
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a run
@@ -2129,7 +2115,7 @@ mod tests {
 
     #[tokio::test]
     async fn cancel_nonexistent_run_returns_not_found() {
-        let app = test_app_with(test_db().await);
+        let app = test_app_with();
         let missing_run_id = fixtures::RUN_64;
 
         let req = Request::builder()
@@ -2144,7 +2130,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn get_events_returns_sse_stream() {
-        let state = create_app_state(test_db().await);
+        let state = create_app_state();
         let app = test_app_with_scheduler(state);
 
         // Start a run
@@ -2195,7 +2181,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn run_completes_and_status_is_completed() {
-        let state = create_app_state_with_options(test_db().await, dry_run_settings(), 5);
+        let state = create_app_state_with_options(dry_run_settings(), 5);
         let app = test_app_with_scheduler(state);
 
         // Start a run
@@ -2234,7 +2220,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_graph_returns_svg() {
-        let state = create_app_state(test_db().await);
+        let state = create_app_state();
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Start a run
@@ -2286,7 +2272,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_graph_not_found() {
-        let app = test_app_with(test_db().await);
+        let app = test_app_with();
         let missing_run_id = fixtures::RUN_64;
 
         let req = Request::builder()
@@ -2301,7 +2287,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_runs_returns_started_run() {
-        let state = create_app_state(test_db().await);
+        let state = create_app_state();
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // List should be empty initially
@@ -2350,7 +2336,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_aggregate_usage_returns_zeros_initially() {
-        let state = create_app_state(test_db().await);
+        let state = create_app_state();
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         let req = Request::builder()
@@ -2373,7 +2359,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn aggregate_usage_increments_after_run_completes() {
-        let state = create_app_state_with_options(test_db().await, dry_run_settings(), 5);
+        let state = create_app_state_with_options(dry_run_settings(), 5);
         let app = test_app_with_scheduler(state);
 
         // Start a run
@@ -2424,7 +2410,7 @@ mod tests {
 
     #[tokio::test]
     async fn post_runs_returns_queued_status() {
-        let state = create_app_state(test_db().await);
+        let state = create_app_state();
         let app = build_router(state, AuthMode::Disabled);
 
         let req = Request::builder()
@@ -2497,7 +2483,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let state = create_app_state_with_options(test_db().await, settings.clone(), 5);
+        let state = create_app_state_with_options(settings.clone(), 5);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         let req = Request::builder()
@@ -2542,7 +2528,7 @@ mod tests {
         let output_path = output_dir.path().join("executed.txt");
         let dot = command_dot(&format!("printf snapshot > {}", output_path.display()));
         let initial_settings = dry_run_settings();
-        let state = create_app_state_with_options(test_db().await, initial_settings.clone(), 5);
+        let state = create_app_state_with_options(initial_settings.clone(), 5);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         let req = Request::builder()
@@ -2575,7 +2561,7 @@ mod tests {
 
     #[tokio::test]
     async fn cancel_queued_run_succeeds() {
-        let state = create_app_state(test_db().await);
+        let state = create_app_state();
         let app = build_router(state, AuthMode::Disabled);
 
         // Submit a run (no scheduler, stays queued)
@@ -2623,7 +2609,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let state = create_app_state_with_options(test_db().await, settings, 5);
+        let state = create_app_state_with_options(settings, 5);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         let req = Request::builder()
@@ -2688,7 +2674,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cancel_before_run_transitions_to_running_closes_event_stream() {
-        let state = create_app_state_with_registry_factory(test_db().await, |interviewer| {
+        let state = create_app_state_with_registry_factory(|interviewer| {
             std::thread::sleep(std::time::Duration::from_millis(200));
             fabro_workflow::handler::default_registry(interviewer, || None)
         });
@@ -2731,7 +2717,7 @@ mod tests {
 
     #[tokio::test]
     async fn queue_position_reported_for_queued_runs() {
-        let state = create_app_state(test_db().await);
+        let state = create_app_state();
         let app = build_router(state, AuthMode::Disabled);
 
         // Submit two runs (no scheduler, both stay queued)
@@ -2773,7 +2759,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrency_limit_respected() {
-        let state = create_app_state_with_options(test_db().await, Settings::default(), 1);
+        let state = create_app_state_with_options(Settings::default(), 1);
         let app = test_app_with_scheduler(state);
 
         // Submit two runs with max_concurrent_runs=1
@@ -2822,7 +2808,7 @@ mod tests {
 
     #[tokio::test]
     async fn submit_answer_to_queued_run_returns_conflict() {
-        let state = create_app_state(test_db().await);
+        let state = create_app_state();
         let app = build_router(state, AuthMode::Disabled);
 
         let req = Request::builder()
@@ -2854,7 +2840,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_completion_non_streaming_returns_json() {
-        let state = create_app_state_with_options(test_db().await, dry_run_settings(), 5);
+        let state = create_app_state_with_options(dry_run_settings(), 5);
         let app = build_router(state, AuthMode::Disabled);
 
         let req = Request::builder()
@@ -2884,7 +2870,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_completion_streaming_returns_sse() {
-        let state = create_app_state_with_options(test_db().await, dry_run_settings(), 5);
+        let state = create_app_state_with_options(dry_run_settings(), 5);
         let app = build_router(state, AuthMode::Disabled);
 
         let req = Request::builder()
@@ -2915,7 +2901,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_completion_missing_messages_returns_422() {
-        let app = test_app_with(test_db().await);
+        let app = test_app_with();
 
         let req = Request::builder()
             .method("POST")

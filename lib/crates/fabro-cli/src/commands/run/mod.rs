@@ -59,15 +59,12 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             let base = runs_base(&cli_settings.storage_dir());
             let store = store::build_store(&cli_settings.storage_dir())?;
             let run_info = resolve_run_combined(store.as_ref(), &base, &run).await?;
-            let child = start::start_run(
-                &run_info.path,
-                &run_info.run_id,
-                &cli_settings.storage_dir(),
-                false,
-            )
-            .await?;
+            let run_id = run_info.run_id();
+            let child =
+                start::start_run(&run_info.path, &run_id, &cli_settings.storage_dir(), false)
+                    .await?;
             if globals.json {
-                print_json_pretty(&serde_json::json!({ "run_id": run_info.run_id }))?;
+                print_json_pretty(&serde_json::json!({ "run_id": run_id }))?;
             } else {
                 eprintln!("Started engine process (PID {})", child.id());
             }
@@ -79,10 +76,11 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             let base = runs_base(&cli_settings.storage_dir());
             let store = store::build_store(&cli_settings.storage_dir())?;
             let run_info = resolve_run_combined(store.as_ref(), &base, &run).await?;
+            let run_id = run_info.run_id();
             let exit_code = attach::attach_run(
                 &run_info.path,
                 Some(cli_settings.storage_dir().as_path()),
-                Some(&run_info.run_id),
+                Some(&run_id),
                 false,
                 styles,
                 None,

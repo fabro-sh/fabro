@@ -88,17 +88,17 @@ async fn df_from(
     for run in &runs {
         let size = dir_size(&run.path);
         total_run_size += size;
-        if run.status.is_active() {
+        if run.status().is_active() {
             active_count += 1;
         } else {
             reclaimable_run_size += size;
         }
         if args.verbose {
             run_details.push(RunSizeInfo {
-                run_id: run.run_id.to_string(),
-                workflow_name: run.workflow_name.clone(),
-                status: run.status,
-                start_time: run.start_time.clone(),
+                run_id: run.run_id().to_string(),
+                workflow_name: run.workflow_name(),
+                status: run.status(),
+                start_time: run.start_time(),
                 start_time_dt: run.start_time_dt,
                 size,
             });
@@ -117,29 +117,6 @@ async fn df_from(
                 if let Ok(meta) = path.metadata() {
                     log_count += 1;
                     total_log_size += meta.len();
-                }
-            }
-        }
-    }
-
-    let mut db_count = 0u64;
-    let mut total_db_size = 0u64;
-    if let Ok(entries) = std::fs::read_dir(data_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_file() {
-                continue;
-            }
-            let name = entry.file_name().to_string_lossy().to_string();
-            if std::path::Path::new(&name)
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("db"))
-                || name.ends_with(".db-wal")
-                || name.ends_with(".db-shm")
-            {
-                if let Ok(meta) = path.metadata() {
-                    db_count += 1;
-                    total_db_size += meta.len();
                 }
             }
         }
@@ -172,13 +149,6 @@ async fn df_from(
                 size_bytes: total_log_size,
                 reclaimable_bytes: Some(total_log_size),
             },
-            SummaryRow {
-                r#type: "databases".to_string(),
-                count: db_count,
-                active: None,
-                size_bytes: total_db_size,
-                reclaimable_bytes: Some(0),
-            },
         ];
         let runs = args.verbose.then(|| {
             run_details
@@ -195,7 +165,7 @@ async fn df_from(
         });
         print_json_pretty(&DfOutput {
             summary,
-            total_size_bytes: total_run_size + total_log_size + total_db_size,
+            total_size_bytes: total_run_size + total_log_size,
             total_reclaimable_bytes: reclaimable_run_size + total_log_size,
             runs,
         })?;
@@ -232,15 +202,6 @@ async fn df_from(
             "-".cell().justify(Justify::Right),
             format_size(total_log_size).cell().justify(Justify::Right),
             format!("{} ({log_reclaim_pct}%)", format_size(total_log_size))
-                .cell()
-                .justify(Justify::Right),
-        ],
-        vec![
-            "Databases".cell(),
-            db_count.cell().justify(Justify::Right),
-            "-".cell().justify(Justify::Right),
-            format_size(total_db_size).cell().justify(Justify::Right),
-            format!("{} (0%)", format_size(0))
                 .cell()
                 .justify(Justify::Right),
         ],
