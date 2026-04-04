@@ -6,8 +6,9 @@ use ::fabro_types::{RunEvent, RunId, StageStatus, StatusReason};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use fabro_store::{EventPayload, SlateRunStore};
+use fabro_util::json::normalize_json_value;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::collections::BTreeMap;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
@@ -16,7 +17,7 @@ use crate::error::FabroError;
 use crate::outcome::{FailureDetail, Outcome, StageUsage};
 use fabro_agent::{AgentEvent, SandboxEvent, WorktreeEvent, WorktreeEventCallback};
 use fabro_llm::types::Usage as LlmUsage;
-use fabro_util::redact::redact_jsonl_line;
+use fabro_util::redact::redact_json_value;
 
 pub use fabro_types::{EventBody, RunNoticeLevel};
 
@@ -1185,40 +1186,6 @@ struct StoredEventFields {
     node_label: Option<String>,
 }
 
-fn tagged_variant_fields<T: Serialize>(value: &T) -> Map<String, Value> {
-    tagged_variant_fields_from_value(serde_json::to_value(value).expect("serializable event"))
-}
-
-fn tagged_variant_fields_from_value(value: Value) -> Map<String, Value> {
-    match value {
-        Value::Object(map) => {
-            let (_, inner) = map.into_iter().next().expect("enum must have one variant");
-            match inner {
-                Value::Object(fields) => fields,
-                Value::String(_) | Value::Null => Map::new(),
-                other => {
-                    let mut fields = Map::new();
-                    fields.insert("value".to_string(), other);
-                    fields
-                }
-            }
-        }
-        Value::String(_) | Value::Null => Map::new(),
-        other => {
-            let mut fields = Map::new();
-            fields.insert("value".to_string(), other);
-            fields
-        }
-    }
-}
-
-fn remove_string(fields: &mut Map<String, Value>, key: &str) -> Option<String> {
-    match fields.remove(key) {
-        Some(Value::String(value)) => Some(value),
-        _ => None,
-    }
-}
-
 fn default_node_label(node_id: Option<&String>, node_label: Option<String>) -> Option<String> {
     node_label.or_else(|| node_id.cloned())
 }
@@ -1238,6 +1205,116 @@ fn token_usage_from_llm(usage: &LlmUsage) -> fabro_types::TokenUsage {
 
 fn stage_status_from_string(status: &str) -> StageStatus {
     serde_json::from_value(Value::String(status.to_string())).expect("valid stage status")
+}
+
+fn stored_event_fields(event: &Event) -> StoredEventFields {
+    match event {
+        Event::StageCompleted { node_id, name, .. } | Event::StageFailed { node_id, name, .. } => {
+            let node_id = Some(node_id.clone());
+            let node_label = default_node_label(node_id.as_ref(), Some(name.clone()));
+            StoredEventFields {
+                session_id: None,
+                parent_session_id: None,
+                node_id,
+                node_label,
+            }
+        }
+        Event::StageStarted { node_id, name, .. } | Event::StageRetrying { node_id, name, .. } => {
+            let node_id = Some(node_id.clone());
+            let node_label = default_node_label(node_id.as_ref(), Some(name.clone()));
+            StoredEventFields {
+                session_id: None,
+                parent_session_id: None,
+                node_id,
+                node_label,
+            }
+        }
+        Event::CheckpointCompleted { node_id, .. }
+        | Event::CheckpointFailed { node_id, .. }
+        | Event::SubgraphStarted { node_id, .. }
+        | Event::SubgraphCompleted { node_id, .. }
+        | Event::ArtifactCaptured { node_id, .. }
+        | Event::PromptCompleted { node_id, .. }
+        | Event::ParallelStarted { node_id, .. }
+        | Event::ParallelCompleted { node_id, .. }
+        | Event::CommandStarted { node_id, .. }
+        | Event::CommandCompleted { node_id, .. }
+        | Event::AgentCliStarted { node_id, .. }
+        | Event::AgentCliCompleted { node_id, .. } => {
+            let node_id = Some(node_id.clone());
+            let node_label = default_node_label(node_id.as_ref(), None);
+            StoredEventFields {
+                session_id: None,
+                parent_session_id: None,
+                node_id,
+                node_label,
+            }
+        }
+        Event::Agent {
+            stage,
+            session_id,
+            parent_session_id,
+            ..
+        } => {
+            let node_id = Some(stage.clone());
+            let node_label = default_node_label(node_id.as_ref(), None);
+            StoredEventFields {
+                session_id: session_id.clone(),
+                parent_session_id: parent_session_id.clone(),
+                node_id,
+                node_label,
+            }
+        }
+        Event::GitCommit { node_id, .. } => {
+            let node_label = default_node_label(node_id.as_ref(), None);
+            StoredEventFields {
+                session_id: None,
+                parent_session_id: None,
+                node_id: node_id.clone(),
+                node_label,
+            }
+        }
+        Event::ParallelBranchStarted { branch, .. }
+        | Event::ParallelBranchCompleted { branch, .. } => {
+            let node_id = Some(branch.clone());
+            let node_label = default_node_label(node_id.as_ref(), None);
+            StoredEventFields {
+                session_id: None,
+                parent_session_id: None,
+                node_id,
+                node_label,
+            }
+        }
+        Event::Prompt { stage, .. }
+        | Event::InterviewStarted { stage, .. }
+        | Event::InterviewTimeout { stage, .. }
+        | Event::Failover { stage, .. } => {
+            let node_id = Some(stage.clone());
+            let node_label = default_node_label(node_id.as_ref(), None);
+            StoredEventFields {
+                session_id: None,
+                parent_session_id: None,
+                node_id,
+                node_label,
+            }
+        }
+        Event::StallWatchdogTimeout { node, .. } => {
+            let node_id = Some(node.clone());
+            let node_label = default_node_label(node_id.as_ref(), None);
+            StoredEventFields {
+                session_id: None,
+                parent_session_id: None,
+                node_id,
+                node_label,
+            }
+        }
+        _ => StoredEventFields {
+            session_id: None,
+            parent_session_id: None,
+            node_id: None,
+            node_label: None,
+        },
+    }
 }
 
 fn event_body_from_event(event: &Event) -> EventBody {
@@ -2193,156 +2270,12 @@ fn event_body_from_event(event: &Event) -> EventBody {
     }
 }
 
-fn extract_run_event_fields(event: &Event) -> StoredEventFields {
-    match event {
-        Event::RunCreated { .. } | Event::WorkflowRunStarted { .. } => {
-            let mut fields = tagged_variant_fields(event);
-            fields.remove("run_id");
-            StoredEventFields {
-                session_id: None,
-                parent_session_id: None,
-                node_id: None,
-                node_label: None,
-            }
-        }
-        Event::WorkflowRunFailed { error, .. } => {
-            let mut fields = tagged_variant_fields(event);
-            fields.insert("error".to_string(), Value::String(error.to_string()));
-            StoredEventFields {
-                session_id: None,
-                parent_session_id: None,
-                node_id: None,
-                node_label: None,
-            }
-        }
-        Event::StageCompleted { .. } | Event::StageFailed { .. } => {
-            let mut fields = tagged_variant_fields(event);
-            let node_id = remove_string(&mut fields, "node_id");
-            let node_label =
-                default_node_label(node_id.as_ref(), remove_string(&mut fields, "name"));
-            StoredEventFields {
-                session_id: None,
-                parent_session_id: None,
-                node_id,
-                node_label,
-            }
-        }
-        Event::StageStarted { .. }
-        | Event::StageRetrying { .. }
-        | Event::CheckpointCompleted { .. }
-        | Event::CheckpointFailed { .. }
-        | Event::SubgraphStarted { .. }
-        | Event::SubgraphCompleted { .. }
-        | Event::ArtifactCaptured { .. }
-        | Event::PromptCompleted { .. }
-        | Event::ParallelStarted { .. }
-        | Event::ParallelCompleted { .. }
-        | Event::CommandStarted { .. }
-        | Event::CommandCompleted { .. }
-        | Event::AgentCliStarted { .. }
-        | Event::AgentCliCompleted { .. } => {
-            let mut fields = tagged_variant_fields(event);
-            let node_id = remove_string(&mut fields, "node_id");
-            let node_label =
-                default_node_label(node_id.as_ref(), remove_string(&mut fields, "name"));
-            StoredEventFields {
-                session_id: None,
-                parent_session_id: None,
-                node_id,
-                node_label,
-            }
-        }
-        Event::Agent {
-            session_id,
-            parent_session_id,
-            ..
-        } => {
-            let mut fields = tagged_variant_fields(event);
-            let node_id = remove_string(&mut fields, "stage");
-            let node_label = default_node_label(node_id.as_ref(), None);
-            fields.remove("visit");
-            fields.remove("session_id");
-            fields.remove("parent_session_id");
-            fields.remove("event");
-            StoredEventFields {
-                session_id: session_id.clone(),
-                parent_session_id: parent_session_id.clone(),
-                node_id,
-                node_label,
-            }
-        }
-        Event::Sandbox { .. } => {
-            let mut fields = tagged_variant_fields(event);
-            fields.remove("event");
-            StoredEventFields {
-                session_id: None,
-                parent_session_id: None,
-                node_id: None,
-                node_label: None,
-            }
-        }
-        Event::GitCommit { .. } => {
-            let mut fields = tagged_variant_fields(event);
-            let node_id = remove_string(&mut fields, "node_id");
-            let node_label = default_node_label(node_id.as_ref(), None);
-            StoredEventFields {
-                session_id: None,
-                parent_session_id: None,
-                node_id,
-                node_label,
-            }
-        }
-        Event::ParallelBranchStarted { .. } | Event::ParallelBranchCompleted { .. } => {
-            let mut fields = tagged_variant_fields(event);
-            let node_id = remove_string(&mut fields, "branch");
-            let node_label = default_node_label(node_id.as_ref(), None);
-            StoredEventFields {
-                session_id: None,
-                parent_session_id: None,
-                node_id,
-                node_label,
-            }
-        }
-        Event::Prompt { .. }
-        | Event::InterviewStarted { .. }
-        | Event::InterviewTimeout { .. }
-        | Event::Failover { .. } => {
-            let mut fields = tagged_variant_fields(event);
-            let node_id = remove_string(&mut fields, "stage");
-            let node_label = default_node_label(node_id.as_ref(), None);
-            StoredEventFields {
-                session_id: None,
-                parent_session_id: None,
-                node_id,
-                node_label,
-            }
-        }
-        Event::StallWatchdogTimeout { .. } => {
-            let mut fields = tagged_variant_fields(event);
-            let node_id = remove_string(&mut fields, "node");
-            let node_label = default_node_label(node_id.as_ref(), None);
-            StoredEventFields {
-                session_id: None,
-                parent_session_id: None,
-                node_id,
-                node_label,
-            }
-        }
-        _ => StoredEventFields {
-            session_id: None,
-            parent_session_id: None,
-            node_id: None,
-            node_label: None,
-        },
-    }
-}
-
 pub fn to_run_event(run_id: &RunId, event: &Event) -> RunEvent {
     to_run_event_at(run_id, event, Utc::now())
 }
 
 pub fn to_run_event_at(run_id: &RunId, event: &Event, ts: chrono::DateTime<Utc>) -> RunEvent {
-    let fields = extract_run_event_fields(event);
+    let fields = stored_event_fields(event);
     let body = event_body_from_event(event);
     RunEvent {
         id: Uuid::now_v7().to_string(),
@@ -2357,13 +2290,12 @@ pub fn to_run_event_at(run_id: &RunId, event: &Event, ts: chrono::DateTime<Utc>)
 }
 
 pub fn build_redacted_event_payload(event: &RunEvent, run_id: &RunId) -> Result<EventPayload> {
-    let line = redacted_event_json(event)?;
-    event_payload_from_redacted_json(&line, run_id)
+    let value = redacted_event_value(event)?;
+    EventPayload::new(value, run_id).map_err(anyhow::Error::from)
 }
 
 pub fn redacted_event_json(event: &RunEvent) -> Result<String> {
-    let line = serde_json::to_string(&normalized_event_value(event)?)?;
-    Ok(redact_jsonl_line(&line))
+    serde_json::to_string(&redacted_event_value(event)?).map_err(anyhow::Error::from)
 }
 
 fn normalized_event_value(event: &RunEvent) -> Result<Value> {
@@ -2371,26 +2303,12 @@ fn normalized_event_value(event: &RunEvent) -> Result<Value> {
     Ok(normalize_json_value(value))
 }
 
-pub(crate) fn normalize_json_value(value: Value) -> Value {
-    match value {
-        Value::Object(map) => Value::Object(
-            map.into_iter()
-                .map(|(key, value)| (key, normalize_json_value(value)))
-                .collect::<BTreeMap<_, _>>()
-                .into_iter()
-                .collect::<Map<_, _>>(),
-        ),
-        Value::Array(values) => {
-            Value::Array(values.into_iter().map(normalize_json_value).collect())
-        }
-        other => other,
-    }
+fn redacted_event_value(event: &RunEvent) -> Result<Value> {
+    Ok(redact_json_value(normalized_event_value(event)?))
 }
 
 pub fn event_payload_from_redacted_json(line: &str, run_id: &RunId) -> Result<EventPayload> {
-    let value = normalize_json_value(
-        serde_json::from_str(line).context("Failed to parse redacted event payload")?,
-    );
+    let value = serde_json::from_str(line).context("Failed to parse redacted event payload")?;
     EventPayload::new(value, run_id).map_err(anyhow::Error::from)
 }
 

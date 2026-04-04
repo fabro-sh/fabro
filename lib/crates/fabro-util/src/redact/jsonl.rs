@@ -70,6 +70,36 @@ fn collect_replacements(v: &Value) -> Vec<(String, String)> {
     repls
 }
 
+fn redact_value_in_place(value: &mut Value, skip_field: bool) {
+    match value {
+        Value::Object(obj) => {
+            if should_skip_object(obj) {
+                return;
+            }
+            for (key, child) in obj {
+                redact_value_in_place(child, should_skip_field(key));
+            }
+        }
+        Value::Array(arr) => {
+            for child in arr {
+                redact_value_in_place(child, false);
+            }
+        }
+        Value::String(text) if !skip_field => {
+            let redacted = super::redact_string(text);
+            if redacted != *text {
+                *text = redacted;
+            }
+        }
+        _ => {}
+    }
+}
+
+pub fn redact_json_value(mut value: Value) -> Value {
+    redact_value_in_place(&mut value, false);
+    value
+}
+
 /// JSON-encode a string value (with quotes), without HTML escaping.
 fn json_encode_string(s: &str) -> String {
     serde_json::to_string(s).unwrap_or_else(|_| format!("\"{s}\""))
@@ -203,6 +233,19 @@ mod tests {
     fn redact_jsonl_line_no_secrets() {
         let input = r#"{"type":"text","content":"hello"}"#;
         assert_eq!(redact_jsonl_line(input), input);
+    }
+
+    #[test]
+    fn redact_json_value_matches_jsonl_behavior() {
+        let input = serde_json::json!({
+            "content": format!("key={HIGH_ENTROPY_SECRET}"),
+            "session_id": HIGH_ENTROPY_SECRET,
+        });
+
+        let redacted = redact_json_value(input);
+
+        assert_eq!(redacted["content"], "REDACTED");
+        assert_eq!(redacted["session_id"], HIGH_ENTROPY_SECRET);
     }
 
     #[test]

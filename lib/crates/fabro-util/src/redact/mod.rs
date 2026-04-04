@@ -2,6 +2,7 @@ mod entropy;
 mod gitleaks;
 mod jsonl;
 
+pub use jsonl::redact_json_value;
 pub use jsonl::redact_jsonl_line;
 
 /// A byte range within a string that should be redacted.

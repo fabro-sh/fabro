@@ -521,26 +521,93 @@ fn is_known_event_name(event: &str) -> bool {
 impl RunEvent {
     pub fn from_value(value: Value) -> serde_json::Result<Self> {
         let raw: RunEventRaw = serde_json::from_value(value)?;
+        Self::from_parts(
+            raw.id,
+            raw.ts,
+            raw.run_id,
+            raw.node_id,
+            raw.node_label,
+            raw.session_id,
+            raw.parent_session_id,
+            raw.event,
+            raw.properties,
+        )
+    }
+
+    pub fn from_ref(value: &Value) -> serde_json::Result<Self> {
+        let obj = value.as_object().ok_or_else(|| {
+            <serde_json::Error as DeError>::custom("run event must be a JSON object")
+        })?;
+        let id = obj.get("id").and_then(Value::as_str).ok_or_else(|| {
+            <serde_json::Error as DeError>::custom("missing or non-string field: id")
+        })?;
+        let ts = obj
+            .get("ts")
+            .ok_or_else(|| <serde_json::Error as DeError>::custom("missing field: ts"))
+            .and_then(DateTime::<Utc>::deserialize)?;
+        let run_id = obj
+            .get("run_id")
+            .ok_or_else(|| <serde_json::Error as DeError>::custom("missing field: run_id"))
+            .and_then(RunId::deserialize)?;
+        let event = obj.get("event").and_then(Value::as_str).ok_or_else(|| {
+            <serde_json::Error as DeError>::custom("missing or non-string field: event")
+        })?;
+        let properties = obj
+            .get("properties")
+            .cloned()
+            .unwrap_or_else(default_properties);
+        Self::from_parts(
+            id.to_string(),
+            ts,
+            run_id,
+            obj.get("node_id")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            obj.get("node_label")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            obj.get("session_id")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            obj.get("parent_session_id")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            event.to_string(),
+            properties,
+        )
+    }
+
+    fn from_parts(
+        id: String,
+        ts: DateTime<Utc>,
+        run_id: RunId,
+        node_id: Option<String>,
+        node_label: Option<String>,
+        session_id: Option<String>,
+        parent_session_id: Option<String>,
+        event: String,
+        properties: Value,
+    ) -> serde_json::Result<Self> {
         let body_payload = json!({
-            "event": raw.event,
-            "properties": raw.properties,
+            "event": event,
+            "properties": properties,
         });
         let body: EventBody = match serde_json::from_value(body_payload) {
             Ok(body) => body,
-            Err(err) if is_known_event_name(&raw.event) => return Err(err),
+            Err(err) if is_known_event_name(&event) => return Err(err),
             Err(_) => EventBody::Unknown {
-                name: raw.event.clone(),
-                properties: raw.properties.clone(),
+                name: event.clone(),
+                properties: properties.clone(),
             },
         };
         Ok(Self {
-            id: raw.id,
-            ts: raw.ts,
-            run_id: raw.run_id,
-            node_id: raw.node_id,
-            node_label: raw.node_label,
-            session_id: raw.session_id,
-            parent_session_id: raw.parent_session_id,
+            id,
+            ts,
+            run_id,
+            node_id,
+            node_label,
+            session_id,
+            parent_session_id,
             body,
         })
     }

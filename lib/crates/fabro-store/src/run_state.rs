@@ -75,7 +75,7 @@ impl RunProjection {
     }
 
     pub(crate) fn apply_event(&mut self, event: &EventEnvelope) -> Result<()> {
-        let stored = RunEvent::from_value(event.payload.as_value().clone())
+        let stored = RunEvent::from_ref(event.payload.as_value())
             .map_err(|err| StoreError::InvalidEvent(format!("invalid stored event: {err}")))?;
         let ts = stored.ts;
         let run_id = stored.run_id;

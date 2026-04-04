@@ -1,6 +1,7 @@
 pub mod backoff;
 pub mod check_report;
 pub mod env;
+pub mod json;
 pub mod path;
 pub mod printer;
 pub mod redact;

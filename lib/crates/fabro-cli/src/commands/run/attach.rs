@@ -11,10 +11,10 @@ use futures::StreamExt;
 
 use fabro_interview::{AnswerValue, ConsoleInterviewer};
 use fabro_store::{EventEnvelope, RuntimeState, SlateRunStore};
+use fabro_util::json::normalize_json_value;
 use fabro_util::terminal::Styles;
 use fabro_workflow::outcome::StageStatus;
 use fabro_workflow::run_status::RunStatus;
-use serde_json::{Map, Value};
 use tokio::signal::ctrl_c;
 use tokio::time::{self, sleep};
 
@@ -341,22 +341,6 @@ fn show_progress(progress_ui: &mut run_progress::ProgressUI, json_output: bool) 
 fn event_payload_line(event: &EventEnvelope) -> Result<String> {
     serde_json::to_string(&normalize_json_value(event.payload.as_value().clone()))
         .map_err(Into::into)
-}
-
-fn normalize_json_value(value: Value) -> Value {
-    match value {
-        Value::Object(map) => Value::Object(
-            map.into_iter()
-                .map(|(key, value)| (key, normalize_json_value(value)))
-                .collect::<std::collections::BTreeMap<_, _>>()
-                .into_iter()
-                .collect::<Map<_, _>>(),
-        ),
-        Value::Array(values) => {
-            Value::Array(values.into_iter().map(normalize_json_value).collect())
-        }
-        other => other,
-    }
 }
 
 fn read_launcher_pid(run_dir: &Path) -> Option<u32> {

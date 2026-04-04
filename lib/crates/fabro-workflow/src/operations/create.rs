@@ -15,9 +15,10 @@ use crate::records::RunRecord;
 use crate::run_lookup::default_runs_base;
 use crate::transforms::{Transform, expand_vars};
 use fabro_sandbox::daytona::detect_repo_info;
+use fabro_util::json::normalize_json_value;
 
 use super::source::{ResolveWorkflowInput, WorkflowInput, resolve_workflow};
-use crate::event::{Event, append_event, normalize_json_value, to_run_event_at};
+use crate::event::{Event, append_event, to_run_event_at};
 
 #[derive(Clone, Debug)]
 pub struct CreateRunInput {
