@@ -397,13 +397,6 @@ fn json_run_implies_auto_approve_for_human_gates() {
         "ts": "[TIMESTAMP]"
       },
       {
-        "event": "run.running",
-        "id": "[EVENT_ID]",
-        "properties": {},
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
         "event": "sandbox.ready",
         "id": "[EVENT_ID]",
         "properties": {
@@ -434,6 +427,13 @@ fn json_run_implies_auto_approve_for_human_gates() {
           "goal": "Route through the default approval path",
           "name": "HumanGate"
         },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
+      },
+      {
+        "event": "run.running",
+        "id": "[EVENT_ID]",
+        "properties": {},
         "run_id": "[ULID]",
         "ts": "[TIMESTAMP]"
       },

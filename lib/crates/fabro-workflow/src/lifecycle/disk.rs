@@ -2,8 +2,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use fabro_store::SlateRunStore;
-use fabro_types::RunId;
 use tokio::fs;
 
 use fabro_core::error::CoreError;
@@ -15,12 +13,9 @@ use fabro_core::state::ExecutionState;
 
 use super::circuit_breaker::CircuitBreakerLifecycle;
 use super::git::GitCheckpointResult;
-use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent, append_workflow_event};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::{OutcomeExt, StageUsage};
-use crate::run_options::RunOptions;
-use fabro_graphviz::graph::types::Graph as GvGraph;
 
 type WfRunState = ExecutionState<Option<StageUsage>>;
 type WfNodeResult = NodeResult<Option<StageUsage>>;
@@ -28,11 +23,6 @@ type WfNodeResult = NodeResult<Option<StageUsage>>;
 /// Sub-lifecycle responsible for emitting store-backed run lifecycle events.
 pub(crate) struct DiskLifecycle {
     pub run_dir: PathBuf,
-    pub run_id: RunId,
-    pub run_store: SlateRunStore,
-    pub graph: Arc<GvGraph>,
-    pub run_options: Arc<RunOptions>,
-    pub emitter: Arc<EventEmitter>,
     pub checkpoint_git_result: Arc<Mutex<Option<GitCheckpointResult>>>,
     pub circuit_breaker: Arc<CircuitBreakerLifecycle>,
     pub checkpoint_enabled: bool,
@@ -67,23 +57,6 @@ pub(super) fn build_checkpoint(
 
 #[async_trait]
 impl RunLifecycle<WorkflowGraph> for DiskLifecycle {
-    async fn on_run_start(&self, _graph: &WorkflowGraph, _state: &WfRunState) -> CoreResult<()> {
-        if let Err(err) = append_workflow_event(
-            &self.run_store,
-            &self.run_id,
-            &WorkflowRunEvent::RunRunning { reason: None },
-        )
-        .await
-        {
-            self.emitter.emit(&WorkflowRunEvent::RunNotice {
-                level: RunNoticeLevel::Warn,
-                code: "status_event_append_failed".to_string(),
-                message: format!("failed to append running status event: {err}"),
-            });
-        }
-        Ok(())
-    }
-
     async fn after_node(
         &self,
         node: &WorkflowNode,

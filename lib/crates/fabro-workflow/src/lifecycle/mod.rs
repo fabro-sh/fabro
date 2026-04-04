@@ -145,11 +145,6 @@ impl WorkflowLifecycle {
 
         let disk = DiskLifecycle {
             run_dir: run_dir.clone(),
-            run_id: run_options.run_id,
-            run_store: run_store.clone(),
-            graph: Arc::clone(&graph),
-            run_options: Arc::clone(run_options),
-            emitter: Arc::clone(emitter),
             checkpoint_git_result: Arc::clone(&checkpoint_git_result),
             circuit_breaker: Arc::clone(&circuit_breaker),
             checkpoint_enabled: true,
@@ -253,7 +248,6 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
         // Observable callbacks
         self.event.on_run_start(graph, state).await?;
         self.hook.on_run_start(graph, state).await?;
-        self.disk.on_run_start(graph, state).await?;
         self.git.on_run_start(graph, state).await?;
         Ok(())
     }
