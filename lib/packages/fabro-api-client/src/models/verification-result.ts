@@ -22,7 +22,7 @@ export const VerificationResult = {
     PASS: 'pass',
     FAIL: 'fail',
     SKIP: 'skip',
-    NA: 'na',
+    NA: 'na'
 } as const;
 
 export type VerificationResult = typeof VerificationResult[keyof typeof VerificationResult];

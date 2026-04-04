@@ -21,7 +21,7 @@
 export const SignoffStatus = {
     PASS: 'pass',
     FAIL: 'fail',
-    PENDING: 'pending',
+    PENDING: 'pending'
 } as const;
 
 export type SignoffStatus = typeof SignoffStatus[keyof typeof SignoffStatus];

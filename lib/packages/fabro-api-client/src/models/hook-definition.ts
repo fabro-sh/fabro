@@ -84,7 +84,7 @@ export const HookDefinitionEventEnum = {
     RUN_START: 'run_start',
     RUN_COMPLETE: 'run_complete',
     STAGE_START: 'stage_start',
-    STAGE_COMPLETE: 'stage_complete',
+    STAGE_COMPLETE: 'stage_complete'
 } as const;
 
 export type HookDefinitionEventEnum = typeof HookDefinitionEventEnum[keyof typeof HookDefinitionEventEnum];
@@ -92,14 +92,14 @@ export const HookDefinitionTypeEnum = {
     COMMAND: 'command',
     HTTP: 'http',
     PROMPT: 'prompt',
-    AGENT: 'agent',
+    AGENT: 'agent'
 } as const;
 
 export type HookDefinitionTypeEnum = typeof HookDefinitionTypeEnum[keyof typeof HookDefinitionTypeEnum];
 export const HookDefinitionTlsEnum = {
     VERIFY: 'verify',
     NO_VERIFY: 'no_verify',
-    OFF: 'off',
+    OFF: 'off'
 } as const;
 
 export type HookDefinitionTlsEnum = typeof HookDefinitionTlsEnum[keyof typeof HookDefinitionTlsEnum];

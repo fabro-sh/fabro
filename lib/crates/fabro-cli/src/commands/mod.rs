@@ -1,4 +1,4 @@
-pub(crate) mod asset;
+pub(crate) mod artifact;
 pub(crate) mod config;
 pub(crate) mod doctor;
 pub(crate) mod exec;

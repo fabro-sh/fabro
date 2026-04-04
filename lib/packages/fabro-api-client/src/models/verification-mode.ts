@@ -21,7 +21,7 @@
 export const VerificationMode = {
     ACTIVE: 'active',
     EVALUATE: 'evaluate',
-    DISABLED: 'disabled',
+    DISABLED: 'disabled'
 } as const;
 
 export type VerificationMode = typeof VerificationMode[keyof typeof VerificationMode];

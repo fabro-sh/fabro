@@ -28,7 +28,7 @@ export const LocalSandboxSettingsWorktreeModeEnum = {
     ALWAYS: 'always',
     CLEAN: 'clean',
     DIRTY: 'dirty',
-    NEVER: 'never',
+    NEVER: 'never'
 } as const;
 
 export type LocalSandboxSettingsWorktreeModeEnum = typeof LocalSandboxSettingsWorktreeModeEnum[keyof typeof LocalSandboxSettingsWorktreeModeEnum];

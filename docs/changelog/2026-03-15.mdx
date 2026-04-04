@@ -42,7 +42,7 @@ fabro ps -a     # all runs including completed
 ## More
 
 <Accordion title="CLI">
-- Added `fabro asset list` to view run artifacts and `fabro asset cp` to copy them locally with optional `--tree` directory structure
+- Added `fabro artifact list` to view run artifacts and `fabro artifact cp` to copy them locally with optional `--tree` directory structure
 - Added `fabro rm` command to remove runs by ID with sandbox cleanup
 - Added `--direction` (`-d`) flag to `fabro graph` for overriding layout direction (`lr` or `tb`)
 - Added `-p` short alias for `--pretty` in `fabro logs`
@@ -63,7 +63,7 @@ fabro ps -a     # all runs including completed
 
 <Accordion title="Improvements">
 - Command output in stage preambles now truncated to the last 25-50 lines, reducing token waste from verbose build logs
-- Asset collection now enforces a 100-file limit and excludes `.venv`, `venv`, `.cache`, `.tox`, `.pytest_cache`, `.mypy_cache`, and `dist` directories
+- Artifact collection now enforces a 100-file limit and excludes `.venv`, `venv`, `.cache`, `.tox`, `.pytest_cache`, `.mypy_cache`, and `dist` directories
 - Unified dry-run behavior across all handler types — wait and human-in-the-loop nodes now properly simulate without side effects
 </Accordion>
 

@@ -133,7 +133,7 @@ pub struct StallWatchdogTimeoutProps {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AssetCapturedProps {
+pub struct ArtifactCapturedProps {
     pub attempt: u32,
     pub node_slug: String,
     pub path: String,

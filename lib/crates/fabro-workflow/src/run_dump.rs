@@ -218,11 +218,11 @@ impl RunDump {
             ));
         }
 
-        for asset in run_store.list_all_assets().await? {
+        for asset in run_store.list_all_artifacts().await? {
             let node_id_segment = validate_single_path_segment("node id", asset.node.node_id())?;
-            let filename_path = validate_relative_path("asset filename", &asset.filename)?;
+            let filename_path = validate_relative_path("artifact filename", &asset.filename)?;
             let data = run_store
-                .get_asset(&asset.node, &asset.filename)
+                .get_artifact(&asset.node, &asset.filename)
                 .await?
                 .with_context(|| {
                     format!(

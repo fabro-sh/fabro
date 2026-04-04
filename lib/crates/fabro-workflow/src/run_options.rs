@@ -58,9 +58,9 @@ impl RunOptions {
         self.settings.pull_request.as_ref()
     }
 
-    pub fn asset_globs(&self) -> &[String] {
+    pub fn artifact_globs(&self) -> &[String] {
         self.settings
-            .assets
+            .artifacts
             .as_ref()
             .map_or(&[], |a| a.include.as_slice())
     }

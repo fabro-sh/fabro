@@ -22,7 +22,7 @@ models/aggregate-usage.ts
 models/api-question-option.ts
 models/api-question.ts
 models/api-settings.ts
-models/assets-settings.ts
+models/artifacts-settings.ts
 models/assistant-stage-turn.ts
 models/assistant-turn.ts
 models/auth-settings.ts
@@ -54,7 +54,6 @@ models/diff-file.ts
 models/diff-stats.ts
 models/error-response-entry.ts
 models/error-response.ts
-models/exe-settings.ts
 models/execute-query-request.ts
 models/execute-query-response-rows-inner-inner.ts
 models/execute-query-response.ts
@@ -141,7 +140,6 @@ models/sibling-control.ts
 models/signoff-status.ts
 models/signoff.ts
 models/smoothness-rating.ts
-models/ssh-settings.ts
 models/stage-retro.ts
 models/stage-status.ts
 models/stage-turn.ts

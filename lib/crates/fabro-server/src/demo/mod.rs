@@ -1327,7 +1327,7 @@ mod runs {
             hooks: vec![],
             checkpoint: Default::default(),
             pull_request: None,
-            assets: None,
+            artifacts: None,
             mcp_servers: Default::default(),
             github: None,
             ..Default::default()
@@ -1496,7 +1496,7 @@ mod workflows {
                     hooks: vec![],
                     checkpoint: Default::default(),
                     pull_request: None,
-                    assets: None,
+                    artifacts: None,
                     mcp_servers: Default::default(),
                     github: None,
                     ..Default::default()
@@ -1569,7 +1569,7 @@ mod workflows {
                     hooks: vec![],
                     checkpoint: Default::default(),
                     pull_request: None,
-                    assets: None,
+                    artifacts: None,
                     mcp_servers: Default::default(),
                     github: None,
                     ..Default::default()
@@ -1654,7 +1654,7 @@ mod workflows {
                     hooks: vec![],
                     checkpoint: Default::default(),
                     pull_request: None,
-                    assets: None,
+                    artifacts: None,
                     mcp_servers: Default::default(),
                     github: None,
                     ..Default::default()
@@ -1728,7 +1728,7 @@ mod workflows {
                     hooks: vec![],
                     checkpoint: Default::default(),
                     pull_request: None,
-                    assets: None,
+                    artifacts: None,
                     mcp_servers: Default::default(),
                     github: None,
                     ..Default::default()
@@ -3505,7 +3505,7 @@ mod settings {
             vars: None,
             checkpoint: Default::default(),
             pull_request: None,
-            assets: None,
+            artifacts: None,
             hooks: vec![],
             mcp_servers: Default::default(),
             github: None,

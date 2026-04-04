@@ -25,7 +25,7 @@ export interface WebhookSettings {
 }
 
 export const WebhookSettingsStrategyEnum = {
-    TAILSCALE_FUNNEL: 'tailscale_funnel',
+    TAILSCALE_FUNNEL: 'tailscale_funnel'
 } as const;
 
 export type WebhookSettingsStrategyEnum = typeof WebhookSettingsStrategyEnum[keyof typeof WebhookSettingsStrategyEnum];

@@ -225,9 +225,9 @@ After each node executes a command, Fabro automatically scans the sandbox for te
 
 ### How asset capture works
 
-1. **Before** the command runs, Fabro takes a baseline snapshot of known asset paths in the sandbox
+1. **Before** the command runs, Fabro takes a baseline snapshot of known artifact paths in the sandbox
 2. **After** the command completes, Fabro re-scans and diffs against the baseline
-3. Files that are new or modified since the command started are downloaded to the stage's asset directory
+3. Files that are new or modified since the command started are downloaded to the stage's artifact directory
 
 Only files modified after the command started are collected. Files that match the baseline fingerprint (same size and mtime) are skipped. Individual files over 10 MB and total collections over 50 MB are also skipped.
 

@@ -9,7 +9,7 @@ use crate::combine::Combine;
 use crate::config::ConfigLayer;
 use crate::sandbox::DockerfileSource;
 pub use fabro_types::settings::run::{
-    AssetsSettings, CheckpointSettings, GitHubSettings, LlmSettings, MergeStrategy,
+    ArtifactsSettings, CheckpointSettings, GitHubSettings, LlmSettings, MergeStrategy,
     PullRequestSettings, SetupSettings,
 };
 
@@ -59,13 +59,13 @@ impl From<PullRequestConfig> for PullRequestSettings {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
-pub struct AssetsConfig {
+pub struct ArtifactsConfig {
     #[serde(default)]
     pub include: Vec<String>,
 }
 
-impl From<AssetsConfig> for AssetsSettings {
-    fn from(value: AssetsConfig) -> Self {
+impl From<ArtifactsConfig> for ArtifactsSettings {
+    fn from(value: ArtifactsConfig) -> Self {
         Self {
             include: value.include,
         }

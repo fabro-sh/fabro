@@ -4,18 +4,18 @@ use fabro_test::{fabro_snapshot, test_context};
 fn help() {
     let context = test_context!();
     let mut cmd = context.command();
-    cmd.args(["asset", "--help"]);
+    cmd.args(["artifact", "--help"]);
     fabro_snapshot!(context.filters(), cmd, @"
     success: true
     exit_code: 0
     ----- stdout -----
-    Inspect and copy run assets (screenshots, reports, traces)
+    Inspect and copy run artifacts (screenshots, reports, traces)
 
-    Usage: fabro asset [OPTIONS] <COMMAND>
+    Usage: fabro artifact [OPTIONS] <COMMAND>
 
     Commands:
-      list  List assets for a workflow run
-      cp    Copy assets from a workflow run
+      list  List artifacts for a workflow run
+      cp    Copy artifacts from a workflow run
       help  Print this message or the help of the given subcommand(s)
 
     Options:

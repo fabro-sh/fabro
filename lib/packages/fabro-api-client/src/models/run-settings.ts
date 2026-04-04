@@ -27,7 +27,7 @@ import type { SandboxSettings } from './sandbox-settings';
 import type { SetupSettings } from './setup-settings';
 
 /**
- * Structured run settings mirroring FabroSettings.
+ * Structured run settings mirroring fabro_types::Settings.
  */
 export interface RunSettings {
     /**

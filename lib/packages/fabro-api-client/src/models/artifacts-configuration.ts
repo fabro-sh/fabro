@@ -15,11 +15,11 @@
 
 
 /**
- * Asset collection configuration.
+ * Artifact collection configuration.
  */
-export interface AssetsSettings {
+export interface ArtifactsSettings {
     /**
-     * Glob patterns for files to collect as run assets.
+     * Glob patterns for files to collect as run artifacts.
      */
     'include'?: Array<string>;
 }

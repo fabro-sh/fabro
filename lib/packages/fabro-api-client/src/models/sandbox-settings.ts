@@ -18,13 +18,7 @@
 import type { DaytonaSettings } from './daytona-settings';
 // May contain unused imports in some cases
 // @ts-ignore
-import type { ExeSettings } from './exe-settings';
-// May contain unused imports in some cases
-// @ts-ignore
 import type { LocalSandboxSettings } from './local-sandbox-settings';
-// May contain unused imports in some cases
-// @ts-ignore
-import type { SshSettings } from './ssh-settings';
 
 /**
  * Sandbox execution environment settings.
@@ -43,8 +37,6 @@ export interface SandboxSettings {
      */
     'devcontainer'?: boolean;
     'daytona'?: DaytonaSettings;
-    'exe'?: ExeSettings;
-    'ssh'?: SshSettings;
     'local'?: LocalSandboxSettings;
     /**
      * Environment variables injected into the sandbox.

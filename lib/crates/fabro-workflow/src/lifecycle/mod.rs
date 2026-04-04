@@ -8,7 +8,7 @@ pub(crate) mod hook;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -25,7 +25,6 @@ use fabro_core::lifecycle::{
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
 
-use crate::artifact::ArtifactStore;
 use crate::context;
 use crate::error::{FailureSignature, FailureSignatureExt};
 use crate::event::EventEmitter;
@@ -94,9 +93,7 @@ impl WorkflowLifecycle {
             Arc::new(Mutex::new(None));
         let last_git_sha: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
         let final_patch: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-        let artifact_store = Arc::new(Mutex::new(ArtifactStore::new(Some(
-            runtime_state.artifact_values_dir(),
-        ))));
+        let captured_artifact_count = Arc::new(AtomicUsize::new(0));
 
         let circuit_breaker = Arc::new(CircuitBreakerLifecycle::new(loop_restart_signature_limit));
 
@@ -123,7 +120,7 @@ impl WorkflowLifecycle {
             run_branch: run_options.git.as_ref().and_then(|g| g.run_branch.clone()),
             worktree_dir: working_directory.clone(),
             goal: (!graph.goal().is_empty()).then(|| graph.goal().to_string()),
-            artifact_store: Arc::clone(&artifact_store),
+            captured_artifact_count: Arc::clone(&captured_artifact_count),
             last_git_sha: Arc::clone(&last_git_sha),
             final_patch: Arc::clone(&final_patch),
             checkpoint_git_result: Arc::clone(&checkpoint_git_result),
@@ -144,11 +141,10 @@ impl WorkflowLifecycle {
 
         let git = GitLifecycle {
             sandbox: Arc::clone(sandbox),
-            artifact_store: Arc::clone(&artifact_store),
             emitter: Arc::clone(emitter),
             run_dir: run_dir.clone(),
             run_id: run_options.run_id,
-            run_store,
+            run_store: run_store.clone(),
             run_options: Arc::clone(run_options),
             start_node_id,
             checkpoint_git_result: Arc::clone(&checkpoint_git_result),
@@ -158,11 +154,12 @@ impl WorkflowLifecycle {
 
         let artifact = ArtifactLifecycle::new(
             Arc::clone(sandbox),
-            Arc::clone(&artifact_store),
-            Some(runtime_state.artifact_values_dir()),
+            run_store.clone(),
+            runtime_state.blob_cache_dir(),
             Arc::clone(emitter),
-            runtime_state.assets_dir(),
-            run_options.asset_globs().to_vec(),
+            runtime_state.artifacts_dir(),
+            run_options.artifact_globs().to_vec(),
+            captured_artifact_count,
         );
 
         Self {
