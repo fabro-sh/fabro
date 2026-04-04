@@ -942,6 +942,7 @@ async fn run_with_lifecycle_emits_initialize_and_setup_events() {
             "setup.started" => "SetupStarted",
             "setup.completed" => "SetupCompleted",
             "run.started" => "WorkflowRunStarted",
+            "run.running" => "RunRunning",
             _ => return,
         };
         events_clone.lock().unwrap().push(name.to_string());
@@ -969,8 +970,10 @@ async fn run_with_lifecycle_emits_initialize_and_setup_events() {
         .iter()
         .position(|n| n == "WorkflowRunStarted")
         .unwrap();
+    let run_running_idx = names.iter().position(|n| n == "RunRunning").unwrap();
     assert!(sandbox_idx < setup_idx);
     assert!(setup_idx < run_started_idx);
+    assert!(run_started_idx < run_running_idx);
 }
 
 #[tokio::test]

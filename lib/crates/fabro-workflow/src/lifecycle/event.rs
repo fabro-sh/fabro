@@ -106,6 +106,8 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             worktree_dir: self.worktree_dir.clone(),
             goal: self.goal.clone(),
         });
+        self.emitter
+            .emit(&WorkflowRunEvent::RunRunning { reason: None });
 
         Ok(())
     }
