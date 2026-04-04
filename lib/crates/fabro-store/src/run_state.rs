@@ -16,7 +16,7 @@ use fabro_types::{
     SandboxRecord, StageStatus, StageUsage, StartRecord, StatusReason, TokenUsage,
 };
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct RunProjection {
     pub run: Option<RunRecord>,
     pub graph_source: Option<String>,
@@ -34,7 +34,7 @@ pub struct RunProjection {
     nodes: HashMap<StageId, NodeState>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct NodeState {
     pub prompt: Option<String>,
     pub response: Option<String>,

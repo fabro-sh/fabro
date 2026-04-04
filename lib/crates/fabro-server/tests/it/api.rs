@@ -757,7 +757,7 @@ mod sse_events {
         // Get SSE stream
         let req = Request::builder()
             .method("GET")
-            .uri(api(&format!("/runs/{run_id}/events")))
+            .uri(api(&format!("/runs/{run_id}/attach")))
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
@@ -796,7 +796,7 @@ mod sse_events {
             if let Some(json_str) = line.strip_prefix("data:") {
                 let json_str = json_str.trim();
                 if let Ok(event) = serde_json::from_str::<serde_json::Value>(json_str) {
-                    if let Some(event_name) = event["event"].as_str() {
+                    if let Some(event_name) = event["payload"]["event"].as_str() {
                         event_types.push(event_name.to_string());
                     }
                 }

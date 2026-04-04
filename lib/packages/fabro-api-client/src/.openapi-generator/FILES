@@ -22,6 +22,9 @@ models/aggregate-usage.ts
 models/api-question-option.ts
 models/api-question.ts
 models/api-settings.ts
+models/append-event-response.ts
+models/artifact-entry.ts
+models/artifact-list-response.ts
 models/artifacts-settings.ts
 models/assistant-stage-turn.ts
 models/assistant-turn.ts
@@ -55,6 +58,7 @@ models/diff-file.ts
 models/diff-stats.ts
 models/error-response-entry.ts
 models/error-response.ts
+models/event-envelope.ts
 models/execute-query-request.ts
 models/execute-query-response-rows-inner-inner.ts
 models/execute-query-response.ts
@@ -70,6 +74,8 @@ models/health-response.ts
 models/history-entry.ts
 models/hook-definition.ts
 models/index.ts
+models/internal-run-status.ts
+models/internal-stage-status.ts
 models/learning-category.ts
 models/learning.ts
 models/llm-settings.ts
@@ -82,9 +88,12 @@ models/model-limits.ts
 models/model-reference.ts
 models/model-test-result.ts
 models/model.ts
+models/node-state.ts
+models/node-status-record.ts
 models/open-item-kind.ts
 models/open-item.ts
 models/paginated-api-question-list.ts
+models/paginated-event-list.ts
 models/paginated-history-entry-list.ts
 models/paginated-model-list.ts
 models/paginated-retro-list.ts
@@ -113,13 +122,17 @@ models/root-response-urls.ts
 models/root-response.ts
 models/run-checkpoint.ts
 models/run-error.ts
+models/run-event.ts
 models/run-list-item.ts
+models/run-projection-checkpoints-inner-inner.ts
+models/run-projection.ts
 models/run-pull-request.ts
 models/run-question.ts
 models/run-reference.ts
 models/run-sandbox.ts
 models/run-settings.ts
 models/run-stage.ts
+models/run-status-record.ts
 models/run-status-response.ts
 models/run-status.ts
 models/run-timings.ts
@@ -144,6 +157,7 @@ models/smoothness-rating.ts
 models/stage-retro.ts
 models/stage-status.ts
 models/stage-turn.ts
+models/status-reason.ts
 models/steer-request.ts
 models/submit-answer-request.ts
 models/system-stage-turn.ts
@@ -173,3 +187,4 @@ models/workflow-last-run.ts
 models/workflow-list-item.ts
 models/workflow-reference.ts
 models/workflow-schedule.ts
+models/write-blob-response.ts

@@ -335,14 +335,93 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /api/v1/runs/{id}/events:
+  /api/v1/runs/{id}/state:
     get:
-      operationId: streamRunEvents
-      tags: [Runs]
-      summary: Stream Run Events
-      description: Opens a server-sent event (SSE) stream for real-time run updates. Returns 410 if the stream has been closed.
+      operationId: getRunState
+      tags: [Run Internals]
+      summary: Get Run State
+      description: Returns the internal event-sourced run projection. This is not a stable public contract.
       parameters:
         - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Current run projection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunProjection"
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/events:
+    get:
+      operationId: listRunEvents
+      tags: [Run Internals]
+      summary: List Run Events
+      description: Returns a paginated JSON list of stored run events.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/SinceSeq"
+        - $ref: "#/components/parameters/EventLimit"
+      responses:
+        "200":
+          description: Paginated list of run events
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedEventList"
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: appendRunEvent
+      tags: [Run Internals]
+      summary: Append Run Event
+      description: Appends a validated event to the run event log. Intended for trusted internal callers.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunEvent"
+      responses:
+        "200":
+          description: Event appended
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppendEventResponse"
+        "400":
+          description: Invalid event payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/attach:
+    get:
+      operationId: attachRunEvents
+      tags: [Run Internals]
+      summary: Attach Run Events
+      description: Opens a server-sent event stream for a live run. Optionally replays stored events from `since_seq` before switching to live updates.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/SinceSeq"
       responses:
         "200":
           description: Server-sent event stream
@@ -357,7 +436,60 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "410":
-          description: Event stream closed
+          description: Run is not live on this server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/blobs:
+    post:
+      operationId: writeRunBlob
+      tags: [Run Internals]
+      summary: Write Run Blob
+      description: Writes an opaque binary blob and returns its content-addressed blob identifier.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Blob written
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WriteBlobResponse"
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/blobs/{blobId}:
+    get:
+      operationId: readRunBlob
+      tags: [Run Internals]
+      summary: Read Run Blob
+      description: Reads a previously stored blob by identifier.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/BlobId"
+      responses:
+        "200":
+          description: Blob contents
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Run or blob not found
           content:
             application/json:
               schema:
@@ -492,6 +624,91 @@ paths:
                 $ref: "#/components/schemas/PaginatedStageTurnList"
         "404":
           description: Run or stage not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/stages/{stageId}/artifacts:
+    get:
+      operationId: listStageArtifacts
+      tags: [Run Internals]
+      summary: List Stage Artifacts
+      description: Lists artifact filenames stored for a stage.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/StageId"
+      responses:
+        "200":
+          description: Artifact filenames for the stage
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArtifactListResponse"
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: putStageArtifact
+      tags: [Run Internals]
+      summary: Put Stage Artifact
+      description: Uploads an artifact for a stage. Intended for trusted internal callers.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/StageId"
+        - $ref: "#/components/parameters/ArtifactFilename"
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "204":
+          description: Artifact written
+        "400":
+          description: Missing filename
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/stages/{stageId}/artifacts/download:
+    get:
+      operationId: getStageArtifact
+      tags: [Run Internals]
+      summary: Get Stage Artifact
+      description: Downloads an artifact by filename.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - $ref: "#/components/parameters/StageId"
+        - $ref: "#/components/parameters/ArtifactFilename"
+      responses:
+        "200":
+          description: Artifact contents
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Missing filename
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Run, stage, or artifact not found
           content:
             application/json:
               schema:
@@ -1318,10 +1535,52 @@ components:
       name: stageId
       in: path
       required: true
-      description: Identifier of a stage within a run's workflow graph.
+      description: Identifier of a stage within a run's workflow graph, serialized as `node_id@visit`.
       schema:
         type: string
-      example: propose-changes
+      example: code@2
+
+    BlobId:
+      name: blobId
+      in: path
+      required: true
+      description: Content-addressed blob identifier.
+      schema:
+        type: string
+        format: uuid
+      example: 550e8400-e29b-41d4-a716-446655440000
+
+    ArtifactFilename:
+      name: filename
+      in: query
+      required: true
+      description: Artifact filename. May contain path separators.
+      schema:
+        type: string
+      example: src/lib.rs
+
+    SinceSeq:
+      name: since_seq
+      in: query
+      required: false
+      description: First event sequence number to include.
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+      example: 42
+
+    EventLimit:
+      name: limit
+      in: query
+      required: false
+      description: Maximum number of events to return.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 100
+      example: 100
 
     QuestionId:
       name: qid
@@ -2075,6 +2334,291 @@ components:
           description: List of error entries.
           items:
             $ref: "#/components/schemas/ErrorResponseEntry"
+
+    RunEvent:
+      description: >
+        Internal RunEvent-compatible JSON payload. The server validates this
+        body by deserializing into the typed RunEvent struct.
+      type: object
+      required:
+        - id
+        - ts
+        - run_id
+        - event
+      properties:
+        id:
+          type: string
+        ts:
+          type: string
+          format: date-time
+        run_id:
+          type: string
+        node_id:
+          type: string
+          nullable: true
+        node_label:
+          type: string
+          nullable: true
+        session_id:
+          type: string
+          nullable: true
+        parent_session_id:
+          type: string
+          nullable: true
+        event:
+          type: string
+          description: Event type discriminator.
+          example: stage.started
+        properties:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+
+    EventEnvelope:
+      description: Stored event envelope with assigned sequence number.
+      type: object
+      required:
+        - seq
+        - payload
+      properties:
+        seq:
+          type: integer
+          description: Assigned event sequence number.
+          example: 42
+        payload:
+          $ref: "#/components/schemas/RunEvent"
+
+    PaginatedEventList:
+      description: Paginated list of stored run events.
+      type: object
+      required:
+        - data
+        - meta
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/EventEnvelope"
+        meta:
+          $ref: "#/components/schemas/PaginationMeta"
+
+    AppendEventResponse:
+      description: Assigned sequence number for an appended event.
+      type: object
+      required:
+        - seq
+      properties:
+        seq:
+          type: integer
+          description: Assigned event sequence number.
+          example: 42
+
+    WriteBlobResponse:
+      description: Content-addressed identifier for a stored blob.
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+          description: Blob identifier.
+          example: 550e8400-e29b-41d4-a716-446655440000
+
+    ArtifactEntry:
+      description: A single artifact filename.
+      type: object
+      required:
+        - filename
+      properties:
+        filename:
+          type: string
+          description: Artifact filename.
+          example: src/lib.rs
+
+    ArtifactListResponse:
+      description: List of artifact filenames for a stage.
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArtifactEntry"
+
+    InternalRunStatus:
+      description: Internal event-sourced run status.
+      type: string
+      enum:
+        - submitted
+        - starting
+        - running
+        - paused
+        - removing
+        - succeeded
+        - failed
+        - dead
+
+    StatusReason:
+      description: Optional reason attached to a run status transition.
+      type: string
+      enum:
+        - completed
+        - partial_success
+        - workflow_error
+        - cancelled
+        - terminated
+        - transient_infra
+        - budget_exhausted
+        - launch_failed
+        - bootstrap_failed
+        - sandbox_init_failed
+        - sandbox_initializing
+
+    RunStatusRecord:
+      description: Internal run status record from the event projection.
+      type: object
+      required:
+        - status
+        - updated_at
+      properties:
+        status:
+          $ref: "#/components/schemas/InternalRunStatus"
+        reason:
+          oneOf:
+            - $ref: "#/components/schemas/StatusReason"
+            - type: "null"
+        updated_at:
+          type: string
+          format: date-time
+
+    InternalStageStatus:
+      description: Internal stage status from outcomes and node status records.
+      type: string
+      enum:
+        - success
+        - fail
+        - skipped
+        - partial_success
+        - retry
+
+    NodeStatusRecord:
+      description: Internal node status record.
+      type: object
+      required:
+        - status
+        - timestamp
+      properties:
+        status:
+          $ref: "#/components/schemas/InternalStageStatus"
+        notes:
+          type: string
+          nullable: true
+        failure_reason:
+          type: string
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+
+    NodeState:
+      description: Internal node projection state.
+      type: object
+      properties:
+        prompt:
+          type: string
+          nullable: true
+        response:
+          type: string
+          nullable: true
+        status:
+          oneOf:
+            - $ref: "#/components/schemas/NodeStatusRecord"
+            - type: "null"
+        provider_used:
+          nullable: true
+        diff:
+          type: string
+          nullable: true
+        script_invocation:
+          nullable: true
+        script_timing:
+          nullable: true
+        parallel_results:
+          nullable: true
+        stdout:
+          type: string
+          nullable: true
+        stderr:
+          type: string
+          nullable: true
+
+    RunProjection:
+      description: Raw internal run projection derived from the event log.
+      type: object
+      required:
+        - nodes
+      properties:
+        run:
+          type: object
+          additionalProperties: true
+          nullable: true
+        graph_source:
+          type: string
+          nullable: true
+        start:
+          type: object
+          additionalProperties: true
+          nullable: true
+        status:
+          oneOf:
+            - $ref: "#/components/schemas/RunStatusRecord"
+            - type: "null"
+        checkpoint:
+          oneOf:
+            - $ref: "#/components/schemas/RunCheckpoint"
+            - type: "null"
+        checkpoints:
+          type: array
+          description: Sequence-tagged checkpoint history entries as `[seq, checkpoint]`.
+          items:
+            type: array
+            minItems: 2
+            maxItems: 2
+            items:
+              oneOf:
+                - type: integer
+                - $ref: "#/components/schemas/RunCheckpoint"
+        conclusion:
+          type: object
+          additionalProperties: true
+          nullable: true
+        retro:
+          type: object
+          additionalProperties: true
+          nullable: true
+        retro_prompt:
+          type: string
+          nullable: true
+        retro_response:
+          type: string
+          nullable: true
+        sandbox:
+          type: object
+          additionalProperties: true
+          nullable: true
+        final_patch:
+          type: string
+          nullable: true
+        pull_request:
+          type: object
+          additionalProperties: true
+          nullable: true
+        nodes:
+          type: object
+          description: Map from StageId (`node_id@visit`) to NodeState.
+          additionalProperties:
+            $ref: "#/components/schemas/NodeState"
 
     # ── Run Board Schemas ────────────────────────────────────────────────
 

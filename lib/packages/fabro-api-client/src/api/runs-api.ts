@@ -329,47 +329,6 @@ export const RunsApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Opens a server-sent event (SSE) stream for real-time run updates. Returns 410 if the stream has been closed.
-         * @summary Stream Run Events
-         * @param {string} id Unique run identifier (ULID).
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        streamRunEvents: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'id' is not null or undefined
-            assertParamExists('streamRunEvents', 'id', id)
-            const localVarPath = `/api/v1/runs/{id}/events`
-                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            // authentication mTLS required
-            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
-
-            // authentication BearerAuth required
-            // http bearer authentication required
-            await setBearerAuthToObject(localVarHeaderParameter, configuration)
-
-            localVarHeaderParameter['Accept'] = 'text/event-stream,application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
          * Resumes a paused run. Returns 409 if the run is not paused.
          * @summary Unpause Run
          * @param {string} id Unique run identifier (ULID).
@@ -512,19 +471,6 @@ export const RunsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Opens a server-sent event (SSE) stream for real-time run updates. Returns 410 if the stream has been closed.
-         * @summary Stream Run Events
-         * @param {string} id Unique run identifier (ULID).
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async streamRunEvents(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<string>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.streamRunEvents(id, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RunsApi.streamRunEvents']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
          * Resumes a paused run. Returns 409 if the run is not paused.
          * @summary Unpause Run
          * @param {string} id Unique run identifier (ULID).
@@ -616,16 +562,6 @@ export const RunsApiFactory = function (configuration?: Configuration, basePath?
          */
         startRun(id: string, options?: RawAxiosRequestConfig): AxiosPromise<RunStatusResponse> {
             return localVarFp.startRun(id, options).then((request) => request(axios, basePath));
-        },
-        /**
-         * Opens a server-sent event (SSE) stream for real-time run updates. Returns 410 if the stream has been closed.
-         * @summary Stream Run Events
-         * @param {string} id Unique run identifier (ULID).
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        streamRunEvents(id: string, options?: RawAxiosRequestConfig): AxiosPromise<string> {
-            return localVarFp.streamRunEvents(id, options).then((request) => request(axios, basePath));
         },
         /**
          * Resumes a paused run. Returns 409 if the run is not paused.
@@ -720,17 +656,6 @@ export class RunsApi extends BaseAPI {
      */
     public startRun(id: string, options?: RawAxiosRequestConfig) {
         return RunsApiFp(this.configuration).startRun(id, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * Opens a server-sent event (SSE) stream for real-time run updates. Returns 410 if the stream has been closed.
-     * @summary Stream Run Events
-     * @param {string} id Unique run identifier (ULID).
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public streamRunEvents(id: string, options?: RawAxiosRequestConfig) {
-        return RunsApiFp(this.configuration).streamRunEvents(id, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

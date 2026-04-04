@@ -1232,6 +1232,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn slate_run_store_lists_events_with_limit() {
+        let (_object_store, store) = make_store();
+        let run = store.create_run(&test_run_id("run-1")).await.unwrap();
+
+        for (idx, ts) in [
+            "2026-03-27T12:00:00Z",
+            "2026-03-27T12:00:01Z",
+            "2026-03-27T12:00:02Z",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            run.append_event(&event_payload(
+                "run-1",
+                ts,
+                "run.submitted",
+                None,
+                serde_json::json!({"index": idx}),
+            ))
+            .await
+            .unwrap();
+        }
+
+        let events = run.list_events_from_with_limit(2, 1).await.unwrap();
+        assert_eq!(events.iter().map(|event| event.seq).collect::<Vec<_>>(), vec![2, 3]);
+    }
+
+    #[tokio::test]
+    async fn slate_run_store_lists_artifacts_for_stage_only() {
+        let (_object_store, store) = make_store();
+        let run = store.create_run(&test_run_id("run-1")).await.unwrap();
+        let code_stage = StageId::new("code", 2);
+        let build_stage = StageId::new("build", 1);
+
+        run.put_artifact(&code_stage, "src/lib.rs", b"fn main() {}")
+            .await
+            .unwrap();
+        run.put_artifact(&code_stage, "src/main.rs", b"fn main() {}")
+            .await
+            .unwrap();
+        run.put_artifact(&build_stage, "target/output.txt", b"ok")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            run.list_artifacts_for_stage(&code_stage).await.unwrap(),
+            vec!["src/lib.rs".to_string(), "src/main.rs".to_string()]
+        );
+    }
+
+    #[tokio::test]
     async fn create_run_state_and_node_storage_round_trip() {
         let (_object_store, store) = make_store();
         let created_at = dt("2026-03-27T12:00:00Z");

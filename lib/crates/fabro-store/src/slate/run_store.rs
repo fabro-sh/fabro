@@ -175,6 +175,17 @@ impl SlateRunStore {
         self.inner.db.list_events_from(1).await
     }
 
+    pub async fn list_events_from_with_limit(
+        &self,
+        start_seq: u32,
+        limit: usize,
+    ) -> Result<Vec<EventEnvelope>> {
+        self.inner
+            .db
+            .list_events_from_with_limit(start_seq, limit)
+            .await
+    }
+
     pub fn watch_events_from(
         &self,
         seq: u32,
@@ -245,6 +256,10 @@ impl SlateRunStore {
         self.inner.db.list_all_artifacts().await
     }
 
+    pub async fn list_artifacts_for_stage(&self, stage_id: &StageId) -> Result<Vec<String>> {
+        self.inner.db.list_artifacts_for_stage(stage_id).await
+    }
+
     pub async fn state(&self) -> Result<RunProjection> {
         self.projected_state().await
     }
@@ -287,6 +302,17 @@ impl SlateRunDb {
         }
     }
 
+    async fn list_events_from_with_limit(
+        &self,
+        start_seq: u32,
+        limit: usize,
+    ) -> Result<Vec<EventEnvelope>> {
+        match self {
+            Self::Writer(db) => list_events_from_with_limit(db, start_seq, limit).await,
+            Self::Reader(db) => list_events_from_with_limit(db.as_ref(), start_seq, limit).await,
+        }
+    }
+
     async fn list_blobs(&self) -> Result<Vec<RunBlobId>> {
         match self {
             Self::Writer(db) => list_blobs(db).await,
@@ -298,6 +324,13 @@ impl SlateRunDb {
         match self {
             Self::Writer(db) => list_all_artifacts(db).await,
             Self::Reader(db) => list_all_artifacts(db.as_ref()).await,
+        }
+    }
+
+    async fn list_artifacts_for_stage(&self, stage_id: &StageId) -> Result<Vec<String>> {
+        match self {
+            Self::Writer(db) => list_artifacts_for_stage(db, stage_id).await,
+            Self::Reader(db) => list_artifacts_for_stage(db.as_ref(), stage_id).await,
         }
     }
 }
@@ -366,6 +399,19 @@ where
     Ok(events)
 }
 
+async fn list_events_from_with_limit<R>(
+    db: &R,
+    start_seq: u32,
+    limit: usize,
+) -> Result<Vec<EventEnvelope>>
+where
+    R: DbRead + Sync,
+{
+    let mut events = list_events_from(db, start_seq).await?;
+    events.truncate(limit.saturating_add(1));
+    Ok(events)
+}
+
 async fn list_blobs<R>(db: &R) -> Result<Vec<RunBlobId>>
 where
     R: DbRead + Sync,
@@ -400,6 +446,26 @@ where
     }
     assets.sort();
     Ok(assets)
+}
+
+async fn list_artifacts_for_stage<R>(db: &R, stage_id: &StageId) -> Result<Vec<String>>
+where
+    R: DbRead + Sync,
+{
+    let prefix = keys::node_artifact_prefix(stage_id);
+    let mut iter = db.scan_prefix(prefix.as_bytes()).await?;
+    let mut filenames = Vec::new();
+    while let Some(entry) = iter.next().await? {
+        let key = key_to_string(&entry.key)?;
+        let Some((node, filename)) = keys::parse_node_artifact_key(&key) else {
+            continue;
+        };
+        if &node == stage_id {
+            filenames.push(filename);
+        }
+    }
+    filenames.sort();
+    Ok(filenames)
 }
 
 fn key_to_string(key: &Bytes) -> Result<String> {

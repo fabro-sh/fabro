@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
@@ -13,14 +14,15 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_extra::extract::cookie::Key;
+use bytes::Bytes;
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate, generate_object};
 use fabro_llm::types::{
     ContentPart, FinishReason, Message as LlmMessage, Request as LlmRequest,
     Response as LlmResponse, Role, StreamEvent, ToolChoice, ToolDefinition, Usage,
 };
-use fabro_store::StoreHandle;
-use fabro_types::{RunEvent, RunId, Settings};
+use fabro_store::{EventEnvelope, EventPayload, StageId, StoreHandle};
+use fabro_types::{RunBlobId, RunEvent, RunId, Settings};
 use fabro_util::redact::redact_jsonl_line;
 use fabro_workflow::error::FabroError;
 use fabro_workflow::handler::HandlerRegistry;
@@ -32,7 +34,6 @@ use tokio::sync::{Notify, OnceCell};
 use tokio::task::spawn_blocking;
 use tokio::time::{sleep, timeout};
 use tokio_stream::StreamExt;
-use tokio_stream::wrappers::BroadcastStream;
 use tower::{ServiceExt, service_fn};
 use ulid::Ulid;
 
@@ -53,11 +54,13 @@ use fabro_workflow::records::Checkpoint;
 
 use fabro_api::types::AggregateUsageTotals;
 pub use fabro_api::types::{
-    AggregateUsage, ApiQuestion, ApiQuestionOption, CompletionContentPart, CompletionMessage,
-    CompletionMessageRole, CompletionResponse, CompletionToolChoiceMode, CompletionUsage,
-    CreateCompletionRequest, CreateRunRequest, ModelReference, PaginatedRunList, PaginationMeta,
-    QuestionType as ApiQuestionType, RunError, RunStatus, RunStatusResponse, SubmitAnswerRequest,
-    TokenUsage, UsageByModel,
+    AggregateUsage, ApiQuestion, ApiQuestionOption, AppendEventResponse, ArtifactEntry,
+    ArtifactListResponse, CompletionContentPart, CompletionMessage, CompletionMessageRole,
+    CompletionResponse, CompletionToolChoiceMode, CompletionUsage, CreateCompletionRequest,
+    CreateRunRequest, EventEnvelope as ApiEventEnvelope, ModelReference, PaginatedEventList,
+    PaginatedRunList, PaginationMeta, QuestionType as ApiQuestionType, RunError, RunEvent as ApiRunEvent,
+    RunStatus, RunStatusResponse, SubmitAnswerRequest, TokenUsage, UsageByModel,
+    WriteBlobResponse,
 };
 
 pub fn default_page_limit() -> u32 {
@@ -70,6 +73,36 @@ pub struct PaginationParams {
     pub limit: u32,
     #[serde(rename = "page[offset]", default)]
     pub offset: u32,
+}
+
+#[derive(serde::Deserialize)]
+struct EventListParams {
+    #[serde(default)]
+    since_seq: Option<u32>,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+impl EventListParams {
+    fn since_seq(&self) -> u32 {
+        self.since_seq.unwrap_or(1).max(1)
+    }
+
+    fn limit(&self) -> usize {
+        self.limit.unwrap_or(100).clamp(1, 1000)
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct AttachParams {
+    #[serde(default)]
+    since_seq: Option<u32>,
+}
+
+#[derive(serde::Deserialize)]
+struct ArtifactFilenameParams {
+    #[serde(default)]
+    filename: Option<String>,
 }
 
 /// Non-paginated list response wrapper with `has_more: false`.
@@ -199,7 +232,11 @@ fn demo_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}", get(demo::get_run_status))
         .route("/runs/{id}/questions", get(demo::get_questions_stub))
         .route("/runs/{id}/questions/{qid}/answer", post(demo::answer_stub))
-        .route("/runs/{id}/events", get(demo::run_events_stub))
+        .route("/runs/{id}/state", get(not_implemented))
+        .route("/runs/{id}/events", get(not_implemented).post(not_implemented))
+        .route("/runs/{id}/attach", get(demo::run_events_stub))
+        .route("/runs/{id}/blobs", post(not_implemented))
+        .route("/runs/{id}/blobs/{blobId}", get(not_implemented))
         .route("/runs/{id}/checkpoint", get(demo::checkpoint_stub))
         .route("/runs/{id}/cancel", post(demo::cancel_stub))
         .route("/runs/{id}/start", post(demo::start_run_stub))
@@ -211,6 +248,14 @@ fn demo_routes() -> Router<Arc<AppState>> {
         .route(
             "/runs/{id}/stages/{stageId}/turns",
             get(demo::get_stage_turns),
+        )
+        .route(
+            "/runs/{id}/stages/{stageId}/artifacts",
+            get(not_implemented).post(not_implemented),
+        )
+        .route(
+            "/runs/{id}/stages/{stageId}/artifacts/download",
+            get(not_implemented),
         )
         .route("/runs/{id}/files", get(demo::get_run_files))
         .route("/runs/{id}/usage", get(demo::get_run_usage))
@@ -275,7 +320,11 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}", get(get_run_status))
         .route("/runs/{id}/questions", get(get_questions))
         .route("/runs/{id}/questions/{qid}/answer", post(submit_answer))
-        .route("/runs/{id}/events", get(get_events))
+        .route("/runs/{id}/state", get(get_run_state))
+        .route("/runs/{id}/events", get(list_run_events).post(append_run_event))
+        .route("/runs/{id}/attach", get(attach_run_events))
+        .route("/runs/{id}/blobs", post(write_run_blob))
+        .route("/runs/{id}/blobs/{blobId}", get(read_run_blob))
         .route("/runs/{id}/checkpoint", get(get_checkpoint))
         .route("/runs/{id}/cancel", post(cancel_run))
         .route("/runs/{id}/start", post(start_run))
@@ -285,6 +334,14 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/retro", get(get_retro))
         .route("/runs/{id}/stages", get(not_implemented))
         .route("/runs/{id}/stages/{stageId}/turns", get(not_implemented))
+        .route(
+            "/runs/{id}/stages/{stageId}/artifacts",
+            get(list_stage_artifacts).post(put_stage_artifact),
+        )
+        .route(
+            "/runs/{id}/stages/{stageId}/artifacts/download",
+            get(get_stage_artifact),
+        )
         .route("/runs/{id}/files", get(not_implemented))
         .route("/runs/{id}/usage", get(not_implemented))
         .route("/runs/{id}/verification", get(not_implemented))
@@ -519,6 +576,54 @@ fn compute_queue_positions(runs: &HashMap<RunId, ManagedRun>) -> HashMap<RunId, 
 fn parse_run_id_path(id: &str) -> Result<RunId, Response> {
     id.parse::<RunId>()
         .map_err(|_| ApiError::bad_request("Invalid run ID.").into_response())
+}
+
+#[allow(clippy::result_large_err)]
+fn parse_stage_id_path(stage_id: &str) -> Result<StageId, Response> {
+    StageId::from_str(stage_id)
+        .map_err(|_| ApiError::bad_request("Invalid stage ID.").into_response())
+}
+
+#[allow(clippy::result_large_err)]
+fn parse_blob_id_path(blob_id: &str) -> Result<RunBlobId, Response> {
+    RunBlobId::from_str(blob_id)
+        .map_err(|_| ApiError::bad_request("Invalid blob ID.").into_response())
+}
+
+#[allow(clippy::result_large_err)]
+fn required_filename(params: ArtifactFilenameParams) -> Result<String, Response> {
+    match params.filename {
+        Some(filename) if !filename.is_empty() => Ok(filename),
+        _ => Err(ApiError::bad_request("Missing filename query parameter.").into_response()),
+    }
+}
+
+fn octet_stream_response(bytes: Bytes) -> Response {
+    (
+        StatusCode::OK,
+        [("content-type", "application/octet-stream")],
+        bytes,
+    )
+        .into_response()
+}
+
+#[allow(clippy::result_large_err)]
+fn api_run_event_from_store(payload: &EventPayload) -> Result<ApiRunEvent, Response> {
+    serde_json::from_value(payload.as_value().clone()).map_err(|err| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to serialize stored event: {err}"),
+        )
+        .into_response()
+    })
+}
+
+#[allow(clippy::result_large_err)]
+fn api_event_envelope_from_store(event: &EventEnvelope) -> Result<ApiEventEnvelope, Response> {
+    Ok(ApiEventEnvelope {
+        payload: api_run_event_from_store(&event.payload)?,
+        seq: i64::from(event.seq),
+    })
 }
 
 fn clear_live_run_state(run: &mut ManagedRun) {
@@ -1033,7 +1138,7 @@ async fn submit_answer(
     }
 }
 
-async fn get_events(
+async fn get_run_state(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -1042,28 +1147,144 @@ async fn get_events(
         Ok(id) => id,
         Err(response) => return response,
     };
-    let rx = {
-        let runs = state.runs.lock().expect("runs lock poisoned");
-        match runs.get(&id) {
-            Some(managed_run) => match &managed_run.event_tx {
-                Some(tx) => tx.subscribe(),
-                None => {
-                    return ApiError::new(StatusCode::GONE, "Event stream closed.").into_response();
-                }
-            },
-            None => return ApiError::not_found("Run not found.").into_response(),
-        }
+    match state.store.open_run_reader(&id).await {
+        Ok(run_store) => match run_store.state().await {
+            Ok(run_state) => Json(run_state).into_response(),
+            Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response(),
+        },
+        Err(_) => ApiError::not_found("Run not found.").into_response(),
+    }
+}
+
+async fn append_run_event(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(value): Json<serde_json::Value>,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    let event = match RunEvent::from_value(value.clone()) {
+        Ok(event) => event,
+        Err(err) => return ApiError::bad_request(format!("Invalid run event: {err}")).into_response(),
+    };
+    if event.run_id != id {
+        return ApiError::bad_request("Event run_id does not match path run ID.").into_response();
+    }
+    let payload = match EventPayload::new(value, &id) {
+        Ok(payload) => payload,
+        Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
 
-    let stream = BroadcastStream::new(rx).filter_map(|result| match result {
-        Ok(event) => {
-            let data = serde_json::to_string(&event).unwrap_or_default();
-            let data = redact_jsonl_line(&data);
-            Some(Ok::<Event, std::convert::Infallible>(
-                Event::default().data(data),
-            ))
+    match state.store.open_run(&id).await {
+        Ok(run_store) => match run_store.append_event(&payload).await {
+            Ok(seq) => Json(AppendEventResponse { seq: i64::from(seq) }).into_response(),
+            Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response(),
+        },
+        Err(_) => ApiError::not_found("Run not found.").into_response(),
+    }
+}
+
+async fn list_run_events(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(params): Query<EventListParams>,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    let since_seq = params.since_seq();
+    let limit = params.limit();
+
+    match state.store.open_run_reader(&id).await {
+        Ok(run_store) => match run_store.list_events_from_with_limit(since_seq, limit).await {
+            Ok(mut events) => {
+                let has_more = events.len() > limit;
+                events.truncate(limit);
+                let mut data = Vec::with_capacity(events.len());
+                for event in events {
+                    let event = match api_event_envelope_from_store(&event) {
+                        Ok(event) => event,
+                        Err(response) => return response,
+                    };
+                    data.push(event);
+                }
+                Json(PaginatedEventList {
+                    data,
+                    meta: PaginationMeta { has_more },
+                })
+                .into_response()
+            }
+            Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response(),
+        },
+        Err(_) => ApiError::not_found("Run not found.").into_response(),
+    }
+}
+
+async fn attach_run_events(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(params): Query<AttachParams>,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    {
+        let runs = state.runs.lock().expect("runs lock poisoned");
+        let Some(managed_run) = runs.get(&id) else {
+            return ApiError::not_found("Run not found.").into_response();
+        };
+        if !matches!(
+            managed_run.status,
+            RunStatus::Queued | RunStatus::Starting | RunStatus::Running | RunStatus::Paused
+        ) {
+            return ApiError::new(StatusCode::GONE, "Run is not live on this server.")
+                .into_response();
         }
-        Err(_) => None,
+    }
+
+    let Ok(run_store) = state.store.open_run_reader(&id).await else {
+        return ApiError::not_found("Run not found.").into_response();
+    };
+    let start_seq = match params.since_seq {
+        Some(seq) if seq >= 1 => seq,
+        Some(_) => 1,
+        None => match run_store.list_events().await {
+            Ok(events) => events.last().map_or(1, |event| event.seq.saturating_add(1)),
+            Err(err) => {
+                return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                    .into_response();
+            }
+        },
+    };
+    let stream = match run_store.watch_events_from(start_seq) {
+        Ok(stream) => stream,
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+    let stream = stream.filter_map(|result| {
+        match result {
+            Ok(event) => {
+                let event = api_event_envelope_from_store(&event).ok()?;
+                let data = serde_json::to_string(&event).ok()?;
+                let data = redact_jsonl_line(&data);
+                Some(Ok::<Event, std::convert::Infallible>(
+                    Event::default().data(data),
+                ))
+            }
+            Err(_) => None,
+        }
     });
 
     Sse::new(stream).into_response()
@@ -1104,6 +1325,140 @@ async fn get_checkpoint(
             tracing::warn!(run_id = %id, error = %err, "Failed to open run store reader");
             ApiError::not_found("Run not found.").into_response()
         }
+    }
+}
+
+async fn write_run_blob(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    body: Bytes,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match state.store.open_run(&id).await {
+        Ok(run_store) => match run_store.write_blob(&body).await {
+            Ok(blob_id) => Json(WriteBlobResponse {
+                id: blob_id.to_string(),
+            })
+            .into_response(),
+            Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response(),
+        },
+        Err(_) => ApiError::not_found("Run not found.").into_response(),
+    }
+}
+
+async fn read_run_blob(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path((id, blob_id)): Path<(String, String)>,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    let blob_id = match parse_blob_id_path(&blob_id) {
+        Ok(blob_id) => blob_id,
+        Err(response) => return response,
+    };
+    match state.store.open_run_reader(&id).await {
+        Ok(run_store) => match run_store.read_blob(&blob_id).await {
+            Ok(Some(bytes)) => octet_stream_response(bytes),
+            Ok(None) => ApiError::not_found("Blob not found.").into_response(),
+            Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response(),
+        },
+        Err(_) => ApiError::not_found("Run not found.").into_response(),
+    }
+}
+
+async fn list_stage_artifacts(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path((id, stage_id)): Path<(String, String)>,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    let stage_id = match parse_stage_id_path(&stage_id) {
+        Ok(stage_id) => stage_id,
+        Err(response) => return response,
+    };
+    match state.store.open_run_reader(&id).await {
+        Ok(run_store) => match run_store.list_artifacts_for_stage(&stage_id).await {
+            Ok(filenames) => Json(ArtifactListResponse {
+                data: filenames
+                    .into_iter()
+                    .map(|filename| ArtifactEntry { filename })
+                    .collect(),
+            })
+            .into_response(),
+            Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response(),
+        },
+        Err(_) => ApiError::not_found("Run not found.").into_response(),
+    }
+}
+
+async fn put_stage_artifact(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path((id, stage_id)): Path<(String, String)>,
+    Query(params): Query<ArtifactFilenameParams>,
+    body: Bytes,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    let stage_id = match parse_stage_id_path(&stage_id) {
+        Ok(stage_id) => stage_id,
+        Err(response) => return response,
+    };
+    let filename = match required_filename(params) {
+        Ok(filename) => filename,
+        Err(response) => return response,
+    };
+    match state.store.open_run(&id).await {
+        Ok(run_store) => match run_store.put_artifact(&stage_id, &filename, &body).await {
+            Ok(()) => StatusCode::NO_CONTENT.into_response(),
+            Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response(),
+        },
+        Err(_) => ApiError::not_found("Run not found.").into_response(),
+    }
+}
+
+async fn get_stage_artifact(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path((id, stage_id)): Path<(String, String)>,
+    Query(params): Query<ArtifactFilenameParams>,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    let stage_id = match parse_stage_id_path(&stage_id) {
+        Ok(stage_id) => stage_id,
+        Err(response) => return response,
+    };
+    let filename = match required_filename(params) {
+        Ok(filename) => filename,
+        Err(response) => return response,
+    };
+    match state.store.open_run_reader(&id).await {
+        Ok(run_store) => match run_store.get_artifact(&stage_id, &filename).await {
+            Ok(Some(bytes)) => octet_stream_response(bytes),
+            Ok(None) => ApiError::not_found("Artifact not found.").into_response(),
+            Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response(),
+        },
+        Err(_) => ApiError::not_found("Run not found.").into_response(),
     }
 }
 
@@ -2032,6 +2387,105 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn get_run_state_returns_projection() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api("/runs"))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
+            ))
+            .unwrap();
+
+        let response = app.clone().oneshot(req).await.unwrap();
+        let body = body_json(response.into_body()).await;
+        let run_id = body["id"].as_str().unwrap();
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{run_id}/state")))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        assert!(body["nodes"].is_object());
+    }
+
+    #[tokio::test]
+    async fn list_run_events_returns_paginated_json() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api("/runs"))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
+            ))
+            .unwrap();
+
+        let response = app.clone().oneshot(req).await.unwrap();
+        let body = body_json(response.into_body()).await;
+        let run_id = body["id"].as_str().unwrap();
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{run_id}/events?since_seq=1&limit=5")))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        assert!(body["data"].is_array());
+        assert!(body["meta"]["has_more"].is_boolean());
+    }
+
+    #[tokio::test]
+    async fn append_run_event_rejects_run_id_mismatch() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api("/runs"))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
+            ))
+            .unwrap();
+
+        let response = app.clone().oneshot(req).await.unwrap();
+        let body = body_json(response.into_body()).await;
+        let run_id = body["id"].as_str().unwrap();
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api(&format!("/runs/{run_id}/events")))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::json!({
+                    "id": "evt-test",
+                    "ts": "2026-03-27T12:00:00Z",
+                    "run_id": fixtures::RUN_64.to_string(),
+                    "event": "run.submitted",
+                    "properties": {}
+                })
+                .to_string(),
+            ))
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
     async fn get_checkpoint_returns_null_initially() {
         let state = create_app_state();
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
@@ -2059,6 +2513,99 @@ mod tests {
 
         let response = app.oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn write_and_read_run_blob_round_trip() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api("/runs"))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
+            ))
+            .unwrap();
+
+        let response = app.clone().oneshot(req).await.unwrap();
+        let body = body_json(response.into_body()).await;
+        let run_id = body["id"].as_str().unwrap();
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api(&format!("/runs/{run_id}/blobs")))
+            .header("content-type", "application/octet-stream")
+            .body(Body::from("hello blob"))
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        let blob_id = body["id"].as_str().unwrap();
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{run_id}/blobs/{blob_id}")))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(&bytes[..], b"hello blob");
+    }
+
+    #[tokio::test]
+    async fn stage_artifacts_round_trip() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api("/runs"))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
+            ))
+            .unwrap();
+
+        let response = app.clone().oneshot(req).await.unwrap();
+        let body = body_json(response.into_body()).await;
+        let run_id = body["id"].as_str().unwrap();
+        let stage_id = "code@2";
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api(&format!(
+                "/runs/{run_id}/stages/{stage_id}/artifacts?filename=src/lib.rs"
+            )))
+            .header("content-type", "application/octet-stream")
+            .body(Body::from("fn main() {}"))
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{run_id}/stages/{stage_id}/artifacts")))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        assert_eq!(body["data"][0]["filename"], "src/lib.rs");
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!(
+                "/runs/{run_id}/stages/{stage_id}/artifacts/download?filename=src/lib.rs"
+            )))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(&bytes[..], b"fn main() {}");
     }
 
     #[tokio::test]
@@ -2198,25 +2745,23 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn get_events_returns_sse_stream() {
+    async fn attach_run_events_returns_sse_stream() {
         let state = create_app_state();
         let app = test_app_with_scheduler(state);
 
         let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
         let run_id = run_id_str.parse::<RunId>().unwrap();
 
-        // Wait for scheduler to promote run (creates event_tx)
+        // Wait for scheduler to promote run.
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-        // Request the SSE stream
         let req = Request::builder()
             .method("GET")
-            .uri(api(&format!("/runs/{run_id}/events")))
+            .uri(api(&format!("/runs/{run_id}/attach")))
             .body(Body::empty())
             .unwrap();
 
         let response = app.oneshot(req).await.unwrap();
-        // May be 200 (stream open) or 410 (run completed before we connect)
         let status = response.status();
         assert!(
             status == StatusCode::OK || status == StatusCode::GONE,
@@ -2714,7 +3259,7 @@ mod tests {
 
         let req = Request::builder()
             .method("GET")
-            .uri(api(&format!("/runs/{run_id}/events")))
+            .uri(api(&format!("/runs/{run_id}/attach")))
             .body(Body::empty())
             .unwrap();
         let response = app.oneshot(req).await.unwrap();
