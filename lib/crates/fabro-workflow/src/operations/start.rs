@@ -88,7 +88,7 @@ pub async fn start(run_dir: &Path, services: StartServices) -> Result<Started, F
         .map_err(|err| FabroError::engine(err.to_string()))?;
     if state.checkpoint.is_some() {
         return Err(FabroError::Precondition(
-            "checkpoint.json exists in run directory — did you mean to resume?".to_string(),
+            "checkpoint already exists in the run store — did you mean to resume?".to_string(),
         ));
     }
 

@@ -186,7 +186,11 @@ fn scan_orphan_runs(base: &Path) -> Result<Vec<RunInfo>> {
         ));
     }
 
-    runs.sort_by(|a, b| b.start_time_dt.cmp(&a.start_time_dt));
+    runs.sort_by(|a, b| {
+        b.start_time_dt
+            .cmp(&a.start_time_dt)
+            .then_with(|| b.run_id().cmp(&a.run_id()))
+    });
     Ok(runs)
 }
 
@@ -217,7 +221,11 @@ pub async fn scan_runs_combined(store: &SlateStore, base: &Path) -> Result<Vec<R
     }
 
     let mut runs: Vec<_> = runs_by_id.into_values().collect();
-    runs.sort_by(|a, b| b.start_time_dt.cmp(&a.start_time_dt));
+    runs.sort_by(|a, b| {
+        b.start_time_dt
+            .cmp(&a.start_time_dt)
+            .then_with(|| b.run_id().cmp(&a.run_id()))
+    });
     Ok(runs)
 }
 

@@ -18,7 +18,6 @@ use crate::event::{EventEmitter, RunNoticeLevel, WorkflowRunEvent};
 use crate::git::MetadataStore;
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
-use crate::lifecycle::disk::build_checkpoint;
 use crate::outcome::{Outcome, StageStatus, StageUsage};
 use crate::run_dump::RunDump;
 use crate::run_options::RunOptions;
@@ -26,6 +25,33 @@ use crate::sandbox_git::{git_checkpoint, git_diff, git_push_host};
 
 type WfRunState = ExecutionState<Option<StageUsage>>;
 type WfNodeResult = NodeResult<Option<StageUsage>>;
+
+fn build_checkpoint(
+    node: &WorkflowNode,
+    result: &WfNodeResult,
+    next_node_id: Option<&str>,
+    state: &WfRunState,
+    loop_failure_signatures: std::collections::HashMap<fabro_types::FailureSignature, usize>,
+    restart_failure_signatures: std::collections::HashMap<fabro_types::FailureSignature, usize>,
+    git_commit_sha: Option<String>,
+) -> fabro_types::Checkpoint {
+    let mut node_outcomes = state.node_outcomes.clone();
+    node_outcomes.insert(node.id().to_string(), result.outcome.clone());
+
+    fabro_types::Checkpoint {
+        timestamp: chrono::Utc::now(),
+        current_node: node.id().to_string(),
+        completed_nodes: state.completed_nodes.clone(),
+        node_outcomes,
+        node_retries: state.node_retries.clone(),
+        context_values: state.context.snapshot(),
+        next_node_id: next_node_id.map(String::from),
+        git_commit_sha,
+        node_visits: state.node_visits.clone(),
+        loop_failure_signatures,
+        restart_failure_signatures,
+    }
+}
 
 /// Result of a git checkpoint operation, shared with EventLifecycle.
 #[derive(Debug, Clone)]

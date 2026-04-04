@@ -9,9 +9,13 @@ mod human_gate;
 mod real_cli;
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
+use fabro_store::{SlateRunStore, SlateStore};
 use fabro_test::TestContext;
+use fabro_types::RunId;
+use object_store::local::LocalFileSystem;
 use serde_json::Value;
 
 pub(super) fn fixture(name: &str) -> PathBuf {
@@ -32,13 +36,10 @@ pub(super) fn read_conclusion(run_dir: &Path) -> Value {
 }
 
 pub(super) fn completed_nodes(run_dir: &Path) -> Vec<String> {
-    let cp = read_json(&run_dir.join("checkpoint.json"));
-    cp["completed_nodes"]
-        .as_array()
-        .expect("completed_nodes should be an array")
-        .iter()
-        .map(|v| v.as_str().unwrap().to_string())
-        .collect()
+    let cp = run_state(run_dir)
+        .checkpoint
+        .expect("run store checkpoint should exist");
+    cp.completed_nodes
 }
 
 pub(super) fn has_event(run_dir: &Path, event_name: &str) -> bool {
@@ -85,6 +86,43 @@ pub(super) fn find_run_dir(storage_dir: &Path) -> PathBuf {
         runs_base.display()
     );
     entries[0].path()
+}
+
+fn infer_run_id(run_dir: &Path) -> RunId {
+    if let Ok(id) = std::fs::read_to_string(run_dir.join("id.txt")) {
+        return id.trim().parse().expect("run id should parse");
+    }
+    run_dir
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .and_then(|name| name.rsplit('-').next().map(ToOwned::to_owned))
+        .filter(|value| !value.is_empty())
+        .expect("run directory name should contain run id suffix")
+        .parse()
+        .expect("run id should parse")
+}
+
+fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(future)
+}
+
+fn run_store(run_dir: &Path) -> SlateRunStore {
+    let runs_dir = run_dir.parent().expect("run dir should have parent");
+    let storage_dir = runs_dir.parent().expect("runs dir should have parent");
+    let object_store = Arc::new(
+        LocalFileSystem::new_with_prefix(storage_dir.join("store"))
+            .expect("test store path should be accessible"),
+    );
+    let store = Arc::new(SlateStore::new(object_store, "", Duration::from_millis(1)));
+    block_on(store.open_run_reader(&infer_run_id(run_dir))).expect("run store should exist")
+}
+
+fn run_state(run_dir: &Path) -> fabro_store::RunProjection {
+    block_on(run_store(run_dir).state()).expect("run store state should exist")
 }
 
 macro_rules! sandbox_tests {

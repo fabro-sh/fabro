@@ -6,7 +6,7 @@ use std::time::Duration;
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::Graph as GvGraph;
 use fabro_store::{RunProjection, SlateStore};
-use object_store::memory::InMemory;
+use object_store::local::LocalFileSystem;
 
 use crate::error::{FabroError, Result};
 use crate::event::{EventEmitter, StoreProgressLogger, WorkflowRunEvent, append_workflow_event};
@@ -44,8 +44,18 @@ async fn initialized(
     options: InitializedOptions,
 ) -> InitializedState {
     std::fs::create_dir_all(&run_options.run_dir).expect("failed to create run dir");
+    std::fs::create_dir_all(run_options.run_dir.join("store"))
+        .expect("failed to create local test run store dir");
+    std::fs::write(
+        run_options.run_dir.join("id.txt"),
+        run_options.run_id.to_string(),
+    )
+    .expect("failed to write run id marker");
     let store = Arc::new(SlateStore::new(
-        Arc::new(InMemory::new()),
+        Arc::new(
+            LocalFileSystem::new_with_prefix(run_options.run_dir.join("store"))
+                .expect("failed to create local test run store"),
+        ),
         "",
         Duration::from_millis(1),
     ));
@@ -249,6 +259,38 @@ pub async fn run_graph_from_checkpoint(
     executed.outcome
 }
 
+pub async fn run_graph_from_checkpoint_with_state(
+    registry: HandlerRegistry,
+    emitter: Arc<EventEmitter>,
+    sandbox: Arc<dyn Sandbox>,
+    graph: &GvGraph,
+    run_options: &RunOptions,
+    checkpoint: &Checkpoint,
+) -> Result<(Outcome, RunProjection)> {
+    let initialized = initialized(
+        registry,
+        emitter,
+        sandbox,
+        graph,
+        run_options,
+        InitializedOptions {
+            hook_runner: None,
+            env: HashMap::new(),
+            checkpoint: Some(checkpoint.clone()),
+        },
+    )
+    .await;
+    let executed = pipeline::execute(initialized.initialized).await;
+    let outcome = executed.outcome?;
+    initialized.store_logger.flush().await;
+    let state = executed
+        .run_store
+        .state()
+        .await
+        .map_err(|err| FabroError::engine(err.to_string()))?;
+    Ok((outcome, state))
+}
+
 pub struct WorkflowRunner {
     registry: std::sync::Mutex<Option<HandlerRegistry>>,
     emitter: Arc<EventEmitter>,
@@ -327,6 +369,29 @@ impl WorkflowRunner {
             run_options,
             checkpoint,
         )
+        .await
+    }
+
+    pub async fn run_from_checkpoint_with_state(
+        &self,
+        graph: &GvGraph,
+        run_options: &RunOptions,
+        checkpoint: &Checkpoint,
+    ) -> Result<(Outcome, RunProjection)> {
+        let registry = self
+            .registry
+            .lock()
+            .unwrap()
+            .take()
+            .expect("WorkflowRunner may only be used once");
+        Box::pin(run_graph_from_checkpoint_with_state(
+            registry,
+            Arc::clone(&self.emitter),
+            Arc::clone(&self.sandbox),
+            graph,
+            run_options,
+            checkpoint,
+        ))
         .await
     }
 }
