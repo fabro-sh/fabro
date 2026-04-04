@@ -3,31 +3,26 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
-use fabro_store::{ListRunsQuery, SlateStore};
+use fabro_store::{RunSummary, SlateStore};
 use fabro_types::RunId;
 use serde::Serialize;
 
 use crate::run_status::{RunStatus, StatusReason};
 
+#[derive(Debug, Clone)]
+struct RunLocalState {
+    dir_name: String,
+    start_time_dt: Option<DateTime<Utc>>,
+    end_time: Option<DateTime<Utc>>,
+    path: PathBuf,
+    is_orphan: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct RunInfo {
-    pub run_id: RunId,
+    #[serde(skip)]
+    summary: Option<RunSummary>,
     pub dir_name: String,
-    pub workflow_name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workflow_slug: Option<String>,
-    pub status: RunStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub status_reason: Option<StatusReason>,
-    pub start_time: String,
-    pub labels: HashMap<String, String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub duration_ms: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub total_cost: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub host_repo_path: Option<String>,
-    pub goal: String,
     #[serde(skip)]
     pub start_time_dt: Option<DateTime<Utc>>,
     #[serde(skip)]
@@ -38,6 +33,98 @@ pub struct RunInfo {
     pub is_orphan: bool,
 }
 
+impl RunInfo {
+    fn new(summary: Option<RunSummary>, local: RunLocalState) -> Self {
+        Self {
+            summary,
+            dir_name: local.dir_name,
+            start_time_dt: local.start_time_dt,
+            end_time: local.end_time,
+            path: local.path,
+            is_orphan: local.is_orphan,
+        }
+    }
+
+    pub fn run_id(&self) -> RunId {
+        self.summary
+            .as_ref()
+            .map(|summary| summary.catalog.run_id)
+            .or_else(|| parse_run_id(&self.dir_name))
+            .expect("RunInfo must have a run id")
+    }
+
+    pub fn workflow_name(&self) -> String {
+        self.summary
+            .as_ref()
+            .and_then(|summary| summary.workflow_name.clone())
+            .unwrap_or_else(|| "[no run record]".to_string())
+    }
+
+    pub fn workflow_slug(&self) -> Option<&str> {
+        self.summary
+            .as_ref()
+            .and_then(|summary| summary.workflow_slug.as_deref())
+    }
+
+    pub fn status(&self) -> RunStatus {
+        self.summary
+            .as_ref()
+            .and_then(|summary| summary.status)
+            .unwrap_or(RunStatus::Dead)
+    }
+
+    pub fn status_reason(&self) -> Option<StatusReason> {
+        self.summary
+            .as_ref()
+            .and_then(|summary| summary.status_reason)
+    }
+
+    pub fn start_time(&self) -> String {
+        self.summary
+            .as_ref()
+            .and_then(|summary| summary.start_time.or(Some(summary.catalog.created_at)))
+            .or(self.start_time_dt)
+            .map(|time| time.to_rfc3339())
+            .unwrap_or_default()
+    }
+
+    pub fn labels(&self) -> &HashMap<String, String> {
+        if let Some(summary) = self.summary.as_ref() {
+            &summary.labels
+        } else {
+            empty_labels()
+        }
+    }
+
+    pub fn duration_ms(&self) -> Option<u64> {
+        self.summary
+            .as_ref()
+            .and_then(|summary| summary.duration_ms)
+    }
+
+    pub fn total_cost(&self) -> Option<f64> {
+        self.summary.as_ref().and_then(|summary| summary.total_cost)
+    }
+
+    pub fn host_repo_path(&self) -> Option<&str> {
+        self.summary
+            .as_ref()
+            .and_then(|summary| summary.host_repo_path.as_deref())
+    }
+
+    pub fn goal(&self) -> String {
+        self.summary
+            .as_ref()
+            .and_then(|summary| summary.goal.clone())
+            .unwrap_or_default()
+    }
+}
+
+fn empty_labels() -> &'static HashMap<String, String> {
+    static EMPTY: std::sync::OnceLock<HashMap<String, String>> = std::sync::OnceLock::new();
+    EMPTY.get_or_init(HashMap::new)
+}
+
 pub fn default_storage_dir() -> PathBuf {
     dirs::home_dir()
         .expect("could not determine home directory")
@@ -46,10 +133,6 @@ pub fn default_storage_dir() -> PathBuf {
 
 pub fn logs_base(storage_dir: &Path) -> PathBuf {
     storage_dir.join("logs")
-}
-
-pub fn default_logs_base() -> PathBuf {
-    logs_base(&default_storage_dir())
 }
 
 pub fn runs_base(storage_dir: &Path) -> PathBuf {
@@ -81,35 +164,25 @@ fn scan_orphan_runs(base: &Path) -> Result<Vec<RunInfo>> {
             .ok()
             .and_then(|m| m.modified().ok())
             .map(|time| -> DateTime<Utc> { time.into() });
-        let mtime = mtime_dt.map(|dt| dt.to_rfc3339()).unwrap_or_default();
 
         let run_id = std::fs::read_to_string(path.join("id.txt"))
             .ok()
             .and_then(|s| parse_run_id(&s))
             .or_else(|| parse_run_id(&dir_name));
-        let Some(run_id) = run_id else {
+        if run_id.is_none() {
             continue;
-        };
+        }
 
-        let status_info = StatusInfo::simple(RunStatus::Dead);
-        runs.push(RunInfo {
-            run_id,
-            dir_name,
-            workflow_name: "[no run record]".to_string(),
-            workflow_slug: None,
-            status: status_info.status,
-            status_reason: status_info.reason,
-            start_time: mtime,
-            labels: HashMap::new(),
-            duration_ms: status_info.duration_ms,
-            total_cost: status_info.total_cost,
-            host_repo_path: None,
-            start_time_dt: mtime_dt,
-            end_time: status_info.end_time,
-            path,
-            goal: String::new(),
-            is_orphan: true,
-        });
+        runs.push(RunInfo::new(
+            None,
+            RunLocalState {
+                dir_name,
+                start_time_dt: mtime_dt,
+                end_time: None,
+                path,
+                is_orphan: true,
+            },
+        ));
     }
 
     runs.sort_by(|a, b| b.start_time_dt.cmp(&a.start_time_dt));
@@ -119,12 +192,12 @@ fn scan_orphan_runs(base: &Path) -> Result<Vec<RunInfo>> {
 pub async fn scan_runs_combined(store: &SlateStore, base: &Path) -> Result<Vec<RunInfo>> {
     let mut runs_by_id: HashMap<RunId, RunInfo> = HashMap::new();
 
-    if let Ok(store_runs) = store.list_runs(&ListRunsQuery::default()).await {
+    if let Ok(store_runs) = store.list_runs().await {
         for summary in store_runs {
-            let Some(run_info) = run_info_from_summary(&summary) else {
+            let Some(run_info) = run_info_from_summary(summary) else {
                 continue;
             };
-            runs_by_id.insert(summary.catalog.run_id, run_info);
+            runs_by_id.insert(run_info.run_id(), run_info);
         }
     }
 
@@ -134,9 +207,9 @@ pub async fn scan_runs_combined(store: &SlateStore, base: &Path) -> Result<Vec<R
         .collect::<std::collections::HashSet<_>>();
     for run in scan_orphan_runs(base)?
         .into_iter()
-        .filter(|run| run.is_orphan && !store_run_ids.contains(&run.run_id))
+        .filter(|run| run.is_orphan && !store_run_ids.contains(&run.run_id()))
     {
-        runs_by_id.insert(run.run_id, run);
+        runs_by_id.insert(run.run_id(), run);
     }
 
     let mut runs: Vec<_> = runs_by_id.into_values().collect();
@@ -144,7 +217,7 @@ pub async fn scan_runs_combined(store: &SlateStore, base: &Path) -> Result<Vec<R
     Ok(runs)
 }
 
-fn run_info_from_summary(summary: &fabro_store::RunSummary) -> Option<RunInfo> {
+fn run_info_from_summary(summary: RunSummary) -> Option<RunInfo> {
     let run_dir = summary.catalog.run_dir.as_deref()?;
     let path = PathBuf::from(run_dir);
     if !path.exists() {
@@ -154,7 +227,6 @@ fn run_info_from_summary(summary: &fabro_store::RunSummary) -> Option<RunInfo> {
         .file_name()
         .map(|name| name.to_string_lossy().to_string())?;
     let start_time_dt = summary.catalog.created_at;
-    let start_time = summary.start_time.unwrap_or(start_time_dt);
     let end_time = if summary.status.is_some_and(RunStatus::is_terminal) {
         summary.duration_ms.and_then(|duration_ms| {
             Some(start_time_dt + chrono::Duration::milliseconds(i64::try_from(duration_ms).ok()?))
@@ -163,47 +235,16 @@ fn run_info_from_summary(summary: &fabro_store::RunSummary) -> Option<RunInfo> {
         None
     };
 
-    Some(RunInfo {
-        run_id: summary.catalog.run_id,
-        dir_name,
-        workflow_name: summary
-            .workflow_name
-            .clone()
-            .unwrap_or_else(|| "[starting]".to_string()),
-        workflow_slug: summary.workflow_slug.clone(),
-        status: summary.status.unwrap_or(RunStatus::Dead),
-        status_reason: summary.status_reason,
-        start_time: start_time.to_rfc3339(),
-        labels: summary.labels.clone(),
-        duration_ms: summary.duration_ms,
-        total_cost: summary.total_cost,
-        host_repo_path: summary.host_repo_path.clone(),
-        goal: summary.goal.clone().unwrap_or_default(),
-        start_time_dt: Some(start_time_dt),
-        end_time,
-        path,
-        is_orphan: false,
-    })
-}
-
-struct StatusInfo {
-    status: RunStatus,
-    reason: Option<StatusReason>,
-    end_time: Option<DateTime<Utc>>,
-    duration_ms: Option<u64>,
-    total_cost: Option<f64>,
-}
-
-impl StatusInfo {
-    fn simple(status: RunStatus) -> Self {
-        Self {
-            status,
-            reason: None,
-            end_time: None,
-            duration_ms: None,
-            total_cost: None,
-        }
-    }
+    Some(RunInfo::new(
+        Some(summary),
+        RunLocalState {
+            dir_name,
+            start_time_dt: Some(start_time_dt),
+            end_time,
+            path,
+            is_orphan: false,
+        },
+    ))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -222,24 +263,25 @@ pub fn filter_runs(
 ) -> Vec<RunInfo> {
     runs.iter()
         .filter(|run| {
-            if status_filter == StatusFilter::RunningOnly && !run.status.is_active() {
+            if status_filter == StatusFilter::RunningOnly && !run.status().is_active() {
                 return false;
             }
             if run.is_orphan && !include_orphans {
                 return false;
             }
             if let Some(before) = before {
-                if !run.start_time.is_empty() && run.start_time.as_str() >= before {
+                let start_time = run.start_time();
+                if !start_time.is_empty() && start_time.as_str() >= before {
                     return false;
                 }
             }
             if let Some(pattern) = workflow {
-                if !run.workflow_name.contains(pattern) {
+                if !run.workflow_name().contains(pattern) {
                     return false;
                 }
             }
             for (key, value) in labels {
-                match run.labels.get(key) {
+                match run.labels().get(key) {
                     Some(current) if current == value => {}
                     _ => return false,
                 }
@@ -261,7 +303,7 @@ pub async fn resolve_run_combined(
 
     let id_matches: Vec<_> = runs
         .iter()
-        .filter(|run| run_id_matches(run.run_id, identifier))
+        .filter(|run| run_id_matches(run.run_id(), identifier))
         .collect();
 
     match id_matches.len() {
@@ -269,7 +311,7 @@ pub async fn resolve_run_combined(
         count if count > 1 => {
             let ids: Vec<String> = id_matches
                 .iter()
-                .map(|run| run.run_id.to_string())
+                .map(|run| run.run_id().to_string())
                 .collect();
             bail!(
                 "Ambiguous prefix '{identifier}': {count} runs match: {}",
@@ -282,12 +324,12 @@ pub async fn resolve_run_combined(
     let id_lower = identifier.to_lowercase();
     let id_collapsed = collapse_separators(&id_lower);
     let workflow_match = runs.iter().filter(|run| !run.is_orphan).find(|run| {
-        if let Some(slug) = &run.workflow_slug {
+        if let Some(slug) = run.workflow_slug() {
             if slug.to_lowercase() == id_lower {
                 return true;
             }
         }
-        let name_lower = run.workflow_name.to_lowercase();
+        let name_lower = run.workflow_name().to_lowercase();
         name_lower.contains(&id_lower) || collapse_separators(&name_lower).contains(&id_collapsed)
     });
 
@@ -400,10 +442,10 @@ mod tests {
         let runs = scan_runs_combined(&store, temp.path()).await.unwrap();
         let run = runs
             .iter()
-            .find(|run| run.run_id == fixtures::RUN_1)
+            .find(|run| run.run_id() == fixtures::RUN_1)
             .expect("run should be listed");
 
-        assert_eq!(run.status, RunStatus::Submitted);
+        assert_eq!(run.status(), RunStatus::Submitted);
         assert!(!run.is_orphan);
     }
 }

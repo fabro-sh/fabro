@@ -30,13 +30,11 @@ fn help() {
 }
 
 #[test]
-fn system_df_summarizes_runs_logs_and_databases() {
+fn system_df_summarizes_runs_and_logs() {
     let context = test_context!();
     setup_completed_dry_run(&context);
     std::fs::create_dir_all(context.storage_dir.join("logs")).unwrap();
     std::fs::write(context.storage_dir.join("logs/cli.log"), b"log line\n").unwrap();
-    std::fs::write(context.storage_dir.join("fabro.db"), b"db").unwrap();
-    std::fs::write(context.storage_dir.join("fabro.db-wal"), b"wal").unwrap();
 
     let mut filters = context.filters();
     filters.push((
@@ -50,10 +48,9 @@ fn system_df_summarizes_runs_logs_and_databases() {
     success: true
     exit_code: 0
     ----- stdout -----
-    TYPE       COUNT  ACTIVE  SIZE  RECLAIMABLE 
-     Runs           1       0   [SIZE]     [SIZE] (0%) 
-     Logs           1       -   [SIZE]   [SIZE] (100%) 
-     Databases      2       -   [SIZE]     [SIZE] (0%)
+    TYPE  COUNT  ACTIVE  SIZE  RECLAIMABLE 
+     Runs      1       0   [SIZE]     [SIZE] (0%) 
+     Logs      1       -   [SIZE]   [SIZE] (100%)
 
     Data directory: [STORAGE_DIR]
     ----- stderr -----
@@ -82,10 +79,9 @@ fn system_df_verbose_lists_runs_with_reclaimable_marker() {
     success: true
     exit_code: 0
     ----- stdout -----
-    TYPE       COUNT  ACTIVE  SIZE  RECLAIMABLE 
-     Runs           1       0   [SIZE]     [SIZE] (0%) 
-     Logs           0       -   [SIZE]     [SIZE] (0%) 
-     Databases      0       -   [SIZE]     [SIZE] (0%)
+    TYPE  COUNT  ACTIVE  SIZE  RECLAIMABLE 
+     Runs      1       0   [SIZE]     [SIZE] (0%) 
+     Logs      0       -   [SIZE]     [SIZE] (0%)
 
     Data directory: [STORAGE_DIR]
 

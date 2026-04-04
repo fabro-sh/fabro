@@ -18,13 +18,14 @@ pub(crate) async fn run(args: DiffArgs, globals: &GlobalArgs) -> Result<()> {
     let base = runs_base(&cli_settings.storage_dir());
     let store = store::build_store(&cli_settings.storage_dir())?;
     let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
-    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await?;
+    let run_id = run.run_id();
+    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run_id).await?;
 
     let patch = resolve_diff(&run.path, &run_store, &args).await?;
 
     if globals.json {
         let mut value = serde_json::json!({
-            "run_id": run.run_id,
+            "run_id": run_id,
             "node": args.node,
         });
         if args.shortstat {

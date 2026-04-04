@@ -57,7 +57,6 @@ Fabro is an AI-powered workflow orchestration platform. Workflows are defined as
 - **fabro-llm** — Unified LLM client with providers: Anthropic, OpenAI, Gemini, OpenAI-compatible, plus retry/middleware/streaming
 - **fabro-api** — Auto-generated Rust types and reqwest HTTP client from OpenAPI spec (build.rs + progenitor)
 - **fabro-github** — GitHub App auth (JWT signing, installation tokens, PR creation)
-- **fabro-db** — SQLite with WAL mode, schema migrations
 - **fabro-mcp** — Model Context Protocol client/server
 - **fabro-slack** — Slack integration (socket mode, blocks API)
 - **fabro-devcontainer** — Parses `.devcontainer/devcontainer.json` for container setup

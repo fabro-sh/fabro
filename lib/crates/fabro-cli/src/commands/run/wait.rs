@@ -24,7 +24,8 @@ pub(crate) async fn run(args: &WaitArgs, styles: &Styles, globals: &GlobalArgs) 
     let store = store::build_store(&cli_settings.storage_dir())?;
     let run_info = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
 
-    info!(run_id = %run_info.run_id, "Waiting for run to complete");
+    let run_id = run_info.run_id();
+    info!(run_id = %run_id, "Waiting for run to complete");
 
     let deadline = args
         .timeout
@@ -33,8 +34,7 @@ pub(crate) async fn run(args: &WaitArgs, styles: &Styles, globals: &GlobalArgs) 
     let started_waiting_at = std::time::Instant::now();
 
     let final_status = loop {
-        let run_store =
-            store::open_run_reader(&cli_settings.storage_dir(), &run_info.run_id).await?;
+        let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run_id).await?;
         let status = run_store.state().await?.status.map(|record| record.status);
         let status = status.unwrap_or_else(|| {
             if started_waiting_at.elapsed() < WAIT_STARTUP_GRACE {
@@ -54,7 +54,7 @@ pub(crate) async fn run(args: &WaitArgs, styles: &Styles, globals: &GlobalArgs) 
                 bail!(
                     "Timed out after {}s waiting for run '{}'",
                     args.timeout.unwrap(),
-                    run_info.run_id
+                    run_id
                 );
             }
             std::thread::sleep(interval.min(dl - now));
@@ -63,16 +63,16 @@ pub(crate) async fn run(args: &WaitArgs, styles: &Styles, globals: &GlobalArgs) 
         }
     };
 
-    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run_info.run_id).await?;
+    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run_id).await?;
     let conclusion = run_store.state().await?.conclusion;
 
     if globals.json {
-        let json_value = build_json_output(final_status, &run_info.run_id, conclusion.as_ref());
+        let json_value = build_json_output(final_status, &run_id, conclusion.as_ref());
         let mut out = std::io::stdout().lock();
         serde_json::to_writer_pretty(&mut out, &json_value)?;
         writeln!(out)?;
     } else {
-        print_human_output(final_status, &run_info.run_id, conclusion.as_ref(), styles);
+        print_human_output(final_status, &run_id, conclusion.as_ref(), styles);
     }
 
     if final_status == RunStatus::Succeeded {

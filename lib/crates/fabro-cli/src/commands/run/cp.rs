@@ -130,7 +130,7 @@ async fn load_sandbox(
 ) -> Result<Box<dyn Sandbox>> {
     let store = store::build_store(storage_dir)?;
     let run = resolve_run_combined(store.as_ref(), base, run_prefix).await?;
-    let run_store = store::open_run_reader(storage_dir, &run.run_id).await?;
+    let run_store = store::open_run_reader(storage_dir, &run.run_id()).await?;
     let record = run_store
         .state()
         .await?

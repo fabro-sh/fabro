@@ -42,13 +42,32 @@ pub(crate) async fn list_command(
     );
 
     if globals.json {
-        println!("{}", serde_json::to_string_pretty(&filtered)?);
+        let json_rows: Vec<_> = filtered
+            .iter()
+            .map(|run| {
+                serde_json::json!({
+                    "run_id": run.run_id(),
+                    "dir_name": run.dir_name,
+                    "workflow_name": run.workflow_name(),
+                    "workflow_slug": run.workflow_slug(),
+                    "status": run.status(),
+                    "status_reason": run.status_reason(),
+                    "start_time": run.start_time(),
+                    "labels": run.labels(),
+                    "duration_ms": run.duration_ms(),
+                    "total_cost": run.total_cost(),
+                    "host_repo_path": run.host_repo_path(),
+                    "goal": run.goal(),
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&json_rows)?);
         return Ok(());
     }
 
     if args.quiet {
         for run in &filtered {
-            println!("{}", run.run_id);
+            println!("{}", run.run_id());
         }
         return Ok(());
     }
@@ -79,7 +98,7 @@ pub(crate) async fn list_command(
     let rows: Vec<Vec<CellStruct>> = display_runs
         .iter()
         .map(|run| {
-            let duration_display = match run.duration_ms {
+            let duration_display = match run.duration_ms() {
                 Some(ms) => format_duration_ms(ms),
                 None => match run.start_time_dt {
                     Some(start) => {
@@ -92,20 +111,19 @@ pub(crate) async fn list_command(
                 },
             };
             let dir_display = run
-                .host_repo_path
-                .as_deref()
+                .host_repo_path()
                 .map_or_else(|| "-".to_string(), |p| tilde_path(Path::new(p)));
-            let run_id = run.run_id.to_string();
+            let run_id = run.run_id().to_string();
 
             vec![
                 short_run_id(&run_id)
                     .cell()
                     .foreground_color(color_if(use_color, Color::Ansi256(8))),
-                run.workflow_name.clone().cell(),
-                status_cell(run.status, use_color),
+                run.workflow_name().cell(),
+                status_cell(run.status(), use_color),
                 dir_display.cell(),
                 duration_display.cell(),
-                truncate_goal(&run.goal, 50)
+                truncate_goal(&run.goal(), 50)
                     .cell()
                     .foreground_color(color_if(use_color, Color::Ansi256(8))),
             ]

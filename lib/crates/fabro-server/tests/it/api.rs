@@ -22,12 +22,6 @@ mod mtls_e2e {
     use fabro_server::tls::{ClientAuth, build_rustls_config};
     use tokio::net::TcpListener;
 
-    async fn test_db() -> sqlx::SqlitePool {
-        let pool = fabro_db::connect_memory().await.unwrap();
-        fabro_db::initialize_db(&pool).await.unwrap();
-        pool
-    }
-
     /// Generate a complete CA + server cert + client cert PKI in `dir`.
     /// Returns paths: (ca_cert, server_cert, server_key, client_cert_pem, client_key_pem)
     fn generate_pki(dir: &Path, ca_cn: &str, server_cn: &str, client_cn: &str) -> PkiPaths {
@@ -188,7 +182,7 @@ mod mtls_e2e {
         let rustls_config = build_rustls_config(tls_settings, client_auth);
         let tls_acceptor = tokio_rustls::TlsAcceptor::from(rustls_config);
 
-        let state = create_app_state(test_db().await);
+        let state = create_app_state();
         let router = build_router(state, auth_mode);
 
         tokio::spawn(async move {
@@ -419,7 +413,6 @@ mod mtls_e2e {
 // ===========================================================================
 
 mod server_lifecycle {
-    use super::super::helpers::test_db;
     use super::api;
     use std::sync::Arc;
     use std::time::Duration;
@@ -531,7 +524,7 @@ mod server_lifecycle {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn full_http_lifecycle_approve_and_complete() {
-        let state = create_app_state_with_registry_factory(test_db().await, gate_registry);
+        let state = create_app_state_with_registry_factory(gate_registry);
         fabro_server::server::spawn_scheduler(Arc::clone(&state));
         let app = build_router(
             Arc::clone(&state),
@@ -601,7 +594,7 @@ mod server_lifecycle {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn full_http_lifecycle_cancel() {
-        let state = create_app_state_with_registry_factory(test_db().await, gate_registry);
+        let state = create_app_state_with_registry_factory(gate_registry);
         fabro_server::server::spawn_scheduler(Arc::clone(&state));
         let app = build_router(
             Arc::clone(&state),
@@ -654,7 +647,6 @@ mod server_lifecycle {
 // ===========================================================================
 
 mod sse_events {
-    use super::super::helpers::test_db;
     use super::api;
     use std::sync::Arc;
     use std::time::Duration;
@@ -734,7 +726,7 @@ mod sse_events {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn sse_stream_contains_expected_event_types() {
-        let state = create_app_state_with_options(test_db().await, dry_run_settings(), 5);
+        let state = create_app_state_with_options(dry_run_settings(), 5);
         fabro_server::server::spawn_scheduler(Arc::clone(&state));
         let app = build_router(
             Arc::clone(&state),
@@ -837,7 +829,6 @@ mod sse_events {
 // ===========================================================================
 
 mod serve_dry_run {
-    use super::super::helpers::test_db;
     use super::api;
     use std::sync::Arc;
     use std::time::Duration;
@@ -857,7 +848,6 @@ mod serve_dry_run {
     /// Build the router exactly as `serve_command` does in dry-run mode.
     async fn dry_run_app() -> axum::Router {
         let state = create_app_state_with_options(
-            test_db().await,
             fabro_types::Settings {
                 dry_run: Some(true),
                 ..Default::default()
@@ -975,7 +965,6 @@ mod serve_dry_run {
 }
 
 mod route_prefixes {
-    use super::super::helpers::test_db;
     use axum::body::Body;
     use axum::http::{Method, Request, StatusCode};
     use fabro_server::server::{build_router, create_app_state};
@@ -989,7 +978,7 @@ mod route_prefixes {
     #[tokio::test]
     async fn old_unversioned_routes_return_404() {
         let app = build_router(
-            create_app_state(test_db().await),
+            create_app_state(),
             fabro_server::jwt_auth::AuthMode::Disabled,
         );
 
@@ -1009,7 +998,7 @@ mod route_prefixes {
     #[tokio::test]
     async fn root_and_health_stay_at_root() {
         let app = build_router(
-            create_app_state(test_db().await),
+            create_app_state(),
             fabro_server::jwt_auth::AuthMode::Disabled,
         );
 
@@ -1040,7 +1029,7 @@ mod route_prefixes {
     #[tokio::test]
     async fn moved_routes_not_at_root_of_api_prefix() {
         let app = build_router(
-            create_app_state(test_db().await),
+            create_app_state(),
             fabro_server::jwt_auth::AuthMode::Disabled,
         );
 

@@ -2,7 +2,7 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use fabro_store::{NodeVisitRef, RunProjection, SlateRunStore};
+use fabro_store::{RunProjection, SlateRunStore};
 
 use crate::git::MetadataStore;
 
@@ -43,60 +43,65 @@ impl RunDump {
     #[must_use]
     pub fn metadata_checkpoint(state: &RunProjection) -> Self {
         let mut entries = Vec::new();
-        let mut keys: Vec<_> = state.nodes.keys().collect();
+        let mut keys: Vec<_> = state
+            .iter_nodes()
+            .map(|(node, _)| node.into_owned())
+            .collect();
         keys.sort();
 
-        for (node_id, visit) in keys {
-            let Some(node) = state.nodes.get(&(node_id.clone(), *visit)) else {
+        for node_key in keys {
+            let Some(node) = state.node(&node_key.as_ref()) else {
                 continue;
             };
+            let node_id = node_key.node_id.as_str();
+            let visit = node_key.visit;
 
             if let Some(prompt) = node.prompt.as_ref() {
                 entries.push(RunDumpEntry::text(
-                    metadata_node_file_path(node_id, *visit, "prompt.md"),
+                    metadata_node_file_path(node_id, visit, "prompt.md"),
                     prompt.clone(),
                 ));
             }
             if let Some(response) = node.response.as_ref() {
                 entries.push(RunDumpEntry::text(
-                    metadata_node_file_path(node_id, *visit, "response.md"),
+                    metadata_node_file_path(node_id, visit, "response.md"),
                     response.clone(),
                 ));
             }
             if let Some(status) = node.status.as_ref() {
                 push_json_entry_path(
                     &mut entries,
-                    &PathBuf::from(metadata_node_file_path(node_id, *visit, "status.json")),
+                    &PathBuf::from(metadata_node_file_path(node_id, visit, "status.json")),
                     status,
                 );
             }
             if let Some(provider_used) = node.provider_used.as_ref() {
                 entries.push(RunDumpEntry::json(
-                    metadata_node_file_path(node_id, *visit, "provider_used.json"),
+                    metadata_node_file_path(node_id, visit, "provider_used.json"),
                     provider_used.clone(),
                 ));
             }
             if let Some(diff) = node.diff.as_ref() {
                 entries.push(RunDumpEntry::text(
-                    metadata_node_file_path(node_id, *visit, "diff.patch"),
+                    metadata_node_file_path(node_id, visit, "diff.patch"),
                     diff.clone(),
                 ));
             }
             if let Some(script_invocation) = node.script_invocation.as_ref() {
                 entries.push(RunDumpEntry::json(
-                    metadata_node_file_path(node_id, *visit, "script_invocation.json"),
+                    metadata_node_file_path(node_id, visit, "script_invocation.json"),
                     script_invocation.clone(),
                 ));
             }
             if let Some(script_timing) = node.script_timing.as_ref() {
                 entries.push(RunDumpEntry::json(
-                    metadata_node_file_path(node_id, *visit, "script_timing.json"),
+                    metadata_node_file_path(node_id, visit, "script_timing.json"),
                     script_timing.clone(),
                 ));
             }
             if let Some(parallel_results) = node.parallel_results.as_ref() {
                 entries.push(RunDumpEntry::json(
-                    metadata_node_file_path(node_id, *visit, "parallel_results.json"),
+                    metadata_node_file_path(node_id, visit, "parallel_results.json"),
                     parallel_results.clone(),
                 ));
             }
@@ -142,14 +147,19 @@ impl RunDump {
             push_json_entry(&mut entries, "sandbox.json", record);
         }
 
-        let mut node_keys: Vec<_> = state.nodes.keys().cloned().collect();
+        let mut node_keys: Vec<_> = state
+            .iter_nodes()
+            .map(|(node, _)| node.into_owned())
+            .collect();
         node_keys.sort();
-        for (node_id, visit) in &node_keys {
-            let node = &state.nodes[&(node_id.clone(), *visit)];
-            let node_id_segment = validate_single_path_segment("node id", node_id)?;
+        for node_key in &node_keys {
+            let node = state
+                .node(&node_key.as_ref())
+                .with_context(|| format!("missing node {:?} in projection", node_key))?;
+            let node_id_segment = validate_single_path_segment("node id", &node_key.node_id)?;
             let base = PathBuf::from("nodes")
                 .join(node_id_segment)
-                .join(format!("visit-{visit}"));
+                .join(format!("visit-{}", node_key.visit));
 
             if let Some(prompt) = node.prompt.as_ref() {
                 entries.push(RunDumpEntry::text_path(
@@ -218,26 +228,23 @@ impl RunDump {
             ));
         }
 
-        for (node_id, visit, filename) in run_store.list_all_assets().await? {
-            let node_id_segment = validate_single_path_segment("node id", &node_id)?;
-            let filename_path = validate_relative_path("asset filename", &filename)?;
-            let node = NodeVisitRef {
-                node_id: &node_id,
-                visit,
-            };
+        for asset in run_store.list_all_assets().await? {
+            let node_id_segment = validate_single_path_segment("node id", &asset.node.node_id)?;
+            let filename_path = validate_relative_path("asset filename", &asset.filename)?;
             let data = run_store
-                .get_asset(&node, &filename)
+                .get_asset(&asset.node.as_ref(), &asset.filename)
                 .await?
                 .with_context(|| {
                     format!(
-                        "asset {filename:?} for node {node_id:?} visit {visit} is missing from the store"
+                        "asset {:?} for node {:?} visit {} is missing from the store",
+                        asset.filename, asset.node.node_id, asset.node.visit
                     )
                 })?;
             entries.push(RunDumpEntry::bytes_path(
                 &PathBuf::from("artifacts")
                     .join("nodes")
                     .join(node_id_segment)
-                    .join(format!("visit-{visit}"))
+                    .join(format!("visit-{}", asset.node.visit))
                     .join(filename_path),
                 data.to_vec(),
             ));

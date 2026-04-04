@@ -7,7 +7,7 @@
     clippy::manual_let_else
 )]
 
-use super::helpers::test_db;
+use super::helpers::test_app_state;
 use std::collections::BTreeSet;
 
 use axum::body::Body;
@@ -17,7 +17,7 @@ use fabro_config::sandbox::SandboxSettings;
 use fabro_hooks::*;
 use fabro_sandbox::daytona::*;
 use fabro_server::jwt_auth::AuthMode;
-use fabro_server::server::{build_router, create_app_state};
+use fabro_server::server::build_router;
 use fabro_server::server_config::*;
 use tower::ServiceExt;
 
@@ -65,7 +65,7 @@ fn methods_for_path_item(item: &openapiv3::PathItem) -> Vec<Method> {
 #[tokio::test]
 async fn all_spec_routes_are_routable() {
     let spec = load_spec();
-    let state = create_app_state(test_db().await);
+    let state = test_app_state();
     let app = build_router(state, AuthMode::Disabled);
 
     let mut checked = 0;

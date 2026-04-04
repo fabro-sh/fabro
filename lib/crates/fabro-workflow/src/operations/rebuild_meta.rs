@@ -5,9 +5,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 use fabro_checkpoint::branch::BranchStore;
 use fabro_checkpoint::git::Store as GitStore;
-use fabro_store::{
-    ListRunsQuery, NodeVisitRef, SlateRunStore as DurableRunStore, SlateStore as DurableStore,
-};
+use fabro_store::{NodeVisitRef, SlateRunStore as DurableRunStore, SlateStore as DurableStore};
 use fabro_types::RunId;
 use git2::{Repository, Signature};
 use ulid::Ulid;
@@ -184,7 +182,7 @@ pub async fn find_run_id_by_prefix_or_store(
 
     let current_repo_root = canonical_repo_root(repo)?;
     let mut matches = Vec::new();
-    for summary in fabro_store.list_runs(&ListRunsQuery::default()).await? {
+    for summary in fabro_store.list_runs().await? {
         if summary.catalog.run_id.to_string() == prefix {
             if summary.host_repo_path.is_none() {
                 return Ok(summary.catalog.run_id);

@@ -32,7 +32,7 @@ async fn create_from(
     let storage_dir = base.parent().unwrap_or(base);
     let store = store::build_store(storage_dir)?;
     let run = resolve_run_combined(store.as_ref(), base, &args.run_id).await?;
-    let run_store = store::open_run_reader(storage_dir, &run.run_id).await?;
+    let run_store = store::open_run_reader(storage_dir, &run.run_id()).await?;
     let state = run_store.state().await?;
 
     let record = state.run.context("Failed to load run record from store")?;

@@ -6,7 +6,9 @@ use chrono::{DateTime, Utc};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::{CatalogRecord, EventEnvelope, NodeVisitRef, Result, RunSummary, StoreError};
+use crate::{
+    CatalogRecord, EventEnvelope, NodeVisit, NodeVisitRef, Result, RunSummary, StoreError,
+};
 use fabro_types::{
     Checkpoint, Conclusion, FailureSignature, NodeStatusRecord, Outcome, PullRequestRecord, Retro,
     RunId, RunRecord, RunStatus, RunStatusRecord, SandboxRecord, StageStatus, StageUsage,
@@ -28,8 +30,7 @@ pub struct RunProjection {
     pub sandbox: Option<SandboxRecord>,
     pub final_patch: Option<String>,
     pub pull_request: Option<PullRequestRecord>,
-    pub nodes: HashMap<(String, u32), NodeState>,
-    pub last_git_sha: Option<String>,
+    nodes: HashMap<NodeVisit, NodeState>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -37,7 +38,6 @@ pub struct NodeState {
     pub prompt: Option<String>,
     pub response: Option<String>,
     pub status: Option<NodeStatusRecord>,
-    pub outcome: Option<Outcome<Option<StageUsage>>>,
     pub provider_used: Option<serde_json::Value>,
     pub diff: Option<String>,
     pub script_invocation: Option<serde_json::Value>,
@@ -123,26 +123,16 @@ impl RunProjection {
                 self.status = Some(run_status_record(RunStatus::Succeeded, &properties, ts)?);
                 self.conclusion = Some(conclusion_from_completed(&properties, ts)?);
                 self.final_patch = optional_string(&properties, "final_patch");
-                self.last_git_sha = optional_string(&properties, "final_git_commit_sha")
-                    .or_else(|| self.last_git_sha.clone());
             }
             "run.failed" => {
                 self.status = Some(run_status_record(RunStatus::Failed, &properties, ts)?);
                 self.conclusion = Some(conclusion_from_failed(&properties, ts));
-                self.last_git_sha = optional_string(&properties, "git_commit_sha")
-                    .or_else(|| self.last_git_sha.clone());
             }
             "run.rewound" => {
                 self.reset_for_rewind();
-                self.last_git_sha = optional_string(&properties, "run_commit_sha")
-                    .or_else(|| self.last_git_sha.clone());
             }
             "checkpoint.completed" => {
                 let checkpoint = checkpoint_from_properties(&properties, ts)?;
-                self.last_git_sha = checkpoint
-                    .git_commit_sha
-                    .clone()
-                    .or_else(|| self.last_git_sha.clone());
                 if let Some(node_id) = value.get("node_id").and_then(Value::as_str) {
                     let visit = checkpoint
                         .node_visits
@@ -210,7 +200,6 @@ impl RunProjection {
                 let node = self.node_mut(node_id, visit);
                 node.response = response;
                 node.status = Some(status);
-                node.outcome = Some(outcome);
             }
             "stage.failed" => {
                 let Some(node_id) = value.get("node_id").and_then(Value::as_str) else {
@@ -225,18 +214,6 @@ impl RunProjection {
                     notes: None,
                     failure_reason: failure_reason.clone(),
                     timestamp: ts,
-                });
-                node.outcome = Some(Outcome {
-                    status: StageStatus::Fail,
-                    preferred_label: None,
-                    suggested_next_ids: Vec::new(),
-                    context_updates: HashMap::new(),
-                    jump_to_node: None,
-                    notes: None,
-                    failure,
-                    usage: None,
-                    files_touched: Vec::new(),
-                    duration_ms: None,
                 });
             }
             "agent.session.started" | "agent.cli.started" => {
@@ -279,15 +256,29 @@ impl RunProjection {
     }
 
     pub fn node(&self, node: &NodeVisitRef<'_>) -> Option<&NodeState> {
-        self.nodes.get(&(node.node_id.to_string(), node.visit))
+        self.nodes.get(&node.into_owned())
+    }
+
+    pub fn iter_nodes(&self) -> impl Iterator<Item = (NodeVisitRef<'_>, &NodeState)> {
+        self.nodes
+            .iter()
+            .map(|(node, state)| (node.as_ref(), state))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+
+    pub fn set_node(&mut self, node: NodeVisitRef<'_>, state: NodeState) {
+        self.nodes.insert(node.into_owned(), state);
     }
 
     pub fn list_node_visits(&self, node_id: &str) -> Vec<u32> {
         let mut visits = self
             .nodes
             .keys()
-            .filter(|(current_node_id, _)| current_node_id == node_id)
-            .map(|(_, visit)| *visit)
+            .filter(|node| node.node_id == node_id)
+            .map(|node| node.visit)
             .collect::<Vec<_>>();
         visits.sort_unstable();
         visits.dedup();
@@ -332,14 +323,19 @@ impl RunProjection {
     }
 
     fn node_mut(&mut self, node_id: &str, visit: u32) -> &mut NodeState {
-        self.nodes.entry((node_id.to_string(), visit)).or_default()
+        self.nodes
+            .entry(NodeVisit {
+                node_id: node_id.to_string(),
+                visit,
+            })
+            .or_default()
     }
 
     fn current_visit_for(&self, node_id: &str) -> Option<u32> {
         self.nodes
             .keys()
-            .filter(|(current_node_id, _)| current_node_id == node_id)
-            .map(|(_, visit)| *visit)
+            .filter(|node| node.node_id == node_id)
+            .map(|node| node.visit)
             .max()
     }
 

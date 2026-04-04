@@ -81,7 +81,7 @@ async fn prune_from(
         });
     }
 
-    filtered.retain(|run| !run.status.is_active());
+    filtered.retain(|run| !run.status().is_active());
 
     if filtered.is_empty() {
         if globals.json {
@@ -108,9 +108,9 @@ async fn prune_from(
     let rows: Vec<PruneRunRow> = filtered
         .iter()
         .map(|run| PruneRunRow {
-            run_id: run.run_id.to_string(),
+            run_id: run.run_id().to_string(),
             dir_name: run.dir_name.clone(),
-            workflow_name: run.workflow_name.clone(),
+            workflow_name: run.workflow_name(),
             size_bytes: dir_size(&run.path),
         })
         .collect();
@@ -119,7 +119,7 @@ async fn prune_from(
 
     if args.yes {
         for run in &filtered {
-            info!(run_id = %run.run_id, path = %run.path.display(), "deleting run");
+            info!(run_id = %run.run_id(), path = %run.path.display(), "deleting run");
             remove_run_with_cleanup(store, run).await?;
         }
         if globals.json {
@@ -149,8 +149,8 @@ async fn prune_from(
     }
 
     for run in &filtered {
-        debug!(run_id = %run.run_id, "would delete run (dry-run)");
-        println!("would delete: {} ({})", run.dir_name, run.workflow_name);
+        debug!(run_id = %run.run_id(), "would delete run (dry-run)");
+        println!("would delete: {} ({})", run.dir_name, run.workflow_name());
     }
     eprintln!(
         "\n{} run(s) would be deleted ({} freed). Pass --yes to confirm.",

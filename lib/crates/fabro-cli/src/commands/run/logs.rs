@@ -24,14 +24,15 @@ pub(crate) async fn run(args: &LogsArgs, styles: &Styles, globals: &GlobalArgs) 
     let store = store::build_store(&cli_settings.storage_dir())?;
     let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
 
-    info!(run_id = %run.run_id, "Showing logs");
+    let run_id = run.run_id();
+    info!(run_id = %run_id, "Showing logs");
 
     let since_cutoff = match &args.since {
         Some(value) => Some(parse_since(value)?),
         None => None,
     };
 
-    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id).await?;
+    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run_id).await?;
     let (all_lines, last_seq) = match run_store.list_events().await {
         Ok(events) => {
             let last_seq = events.last().map_or(0, |event| event.seq);
