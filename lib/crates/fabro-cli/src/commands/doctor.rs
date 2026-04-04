@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use fabro_config::server::{ApiAuthStrategy, AuthProvider};
+use fabro_config::server::{ApiAuthStrategy, AuthProvider, load_server_settings};
 use fabro_config::user::{default_user_config_path, legacy_user_config_path};
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::types::{Message, Request};
@@ -25,7 +25,7 @@ use crate::user_config::load_user_settings;
 // System dependency types and parsers (server mode only)
 // ---------------------------------------------------------------------------
 
-pub struct DepSpec {
+pub(crate) struct DepSpec {
     pub name: &'static str,
     command: &'static [&'static str],
     pub required: bool,
@@ -34,7 +34,7 @@ pub struct DepSpec {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum ProbeOutcome {
+pub(crate) enum ProbeOutcome {
     NotFound,
     Failed,
     Ok { version: Option<Version> },
@@ -55,7 +55,7 @@ fn parse_version(re: &Regex, output: &str) -> Option<Version> {
     ))
 }
 
-pub const DEP_SPECS: &[DepSpec] = &[
+pub(crate) const DEP_SPECS: &[DepSpec] = &[
     DepSpec {
         name: "openssl",
         command: &["openssl", "version"],
@@ -79,7 +79,7 @@ pub const DEP_SPECS: &[DepSpec] = &[
     },
 ];
 
-pub fn probe_system_deps() -> Vec<ProbeOutcome> {
+pub(crate) fn probe_system_deps() -> Vec<ProbeOutcome> {
     DEP_SPECS
         .iter()
         .map(|spec| {
@@ -113,7 +113,7 @@ fn dep_issue(name: &str, issue: &str, required: bool) -> (CheckStatus, String) {
     (status, format!("{name}: {issue} ({severity})"))
 }
 
-pub fn check_system_deps(specs: &[DepSpec], outcomes: &[ProbeOutcome]) -> CheckResult {
+pub(crate) fn check_system_deps(specs: &[DepSpec], outcomes: &[ProbeOutcome]) -> CheckResult {
     let mut details = Vec::new();
     let mut worst_status = CheckStatus::Pass;
 
@@ -526,7 +526,7 @@ pub(crate) fn check_github_app(status: &GithubAppStatus) -> CheckResult {
     }
 }
 
-pub struct ApiStatus {
+pub(crate) struct ApiStatus {
     pub base_url: String,
     pub authentication_strategies: Vec<ApiAuthStrategy>,
 }
@@ -542,7 +542,10 @@ fn format_auth_strategies(strategies: &[ApiAuthStrategy]) -> String {
         .join(", ")
 }
 
-pub fn check_api(status: &ApiStatus, live_result: Option<&Result<(), String>>) -> CheckResult {
+pub(crate) fn check_api(
+    status: &ApiStatus,
+    live_result: Option<&Result<(), String>>,
+) -> CheckResult {
     let mut details = vec![
         CheckDetail::new(format!("Base URL: {}", status.base_url)),
         CheckDetail::new(format!(
@@ -566,7 +569,7 @@ pub fn check_api(status: &ApiStatus, live_result: Option<&Result<(), String>>) -
     }
 }
 
-pub struct WebStatus {
+pub(crate) struct WebStatus {
     pub url: String,
     pub auth_provider: AuthProvider,
     pub allowed_usernames_count: usize,
@@ -579,7 +582,10 @@ fn format_auth_provider(provider: &AuthProvider) -> &'static str {
     }
 }
 
-pub fn check_web(status: &WebStatus, live_result: Option<&Result<(), String>>) -> CheckResult {
+pub(crate) fn check_web(
+    status: &WebStatus,
+    live_result: Option<&Result<(), String>>,
+) -> CheckResult {
     let mut details = vec![
         CheckDetail::new(format!("URL: {}", status.url)),
         CheckDetail::new(format!(
@@ -611,13 +617,14 @@ pub fn check_web(status: &WebStatus, live_result: Option<&Result<(), String>>) -
 // Cryptographic key validation
 // ---------------------------------------------------------------------------
 
-pub struct TlsCheckInput {
+#[allow(clippy::struct_field_names)]
+pub(crate) struct TlsCheckInput {
     pub cert_pem: String,
     pub key_pem: String,
     pub ca_pem: String,
 }
 
-pub struct CryptoInput {
+pub(crate) struct CryptoInput {
     pub auth_strategies: Vec<ApiAuthStrategy>,
     pub tls_files: Option<Result<TlsCheckInput, String>>,
     pub jwt_public_key: Option<String>,
@@ -630,7 +637,7 @@ fn decode_pem_value(name: &str, value: &str) -> Result<String, String> {
     if value.starts_with("-----") {
         return Ok(value.to_string());
     }
-    let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, value)
+    let bytes = base64::Engine::decode(&BASE64_STANDARD, value)
         .map_err(|e| format!("{name} is not valid PEM or base64: {e}"))?;
     String::from_utf8(bytes).map_err(|e| format!("{name} base64 decoded to invalid UTF-8: {e}"))
 }
@@ -732,7 +739,7 @@ impl CryptoCheckState {
     }
 }
 
-pub fn check_crypto(input: &CryptoInput) -> CheckResult {
+pub(crate) fn check_crypto(input: &CryptoInput) -> CheckResult {
     let has_jwt = input.auth_strategies.contains(&ApiAuthStrategy::Jwt);
     let has_mtls = input.auth_strategies.contains(&ApiAuthStrategy::Mtls);
 
@@ -931,7 +938,7 @@ pub(crate) async fn run_doctor(
 
     let daytona_configured = std::env::var("DAYTONA_API_KEY").is_ok();
 
-    let server_settings = fabro_config::server::load_server_settings(None).unwrap_or_default();
+    let server_settings = load_server_settings(None).unwrap_or_default();
 
     let api_status = {
         let api = server_settings.api.clone().unwrap_or_default();

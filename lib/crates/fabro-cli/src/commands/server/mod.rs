@@ -44,14 +44,13 @@ pub(crate) async fn dispatch(command: ServerCommand, globals: &GlobalArgs) -> Re
             record_path,
             serve_args,
         } => {
-            let bind_addr = match serve_args.bind.as_deref() {
-                Some(s) => bind::parse_bind(s)?,
-                None => {
-                    // __serve should always receive an explicit --bind from the parent,
-                    // but fall back to the storage dir default if missing.
-                    let settings = user_config::load_user_settings_with_globals(globals)?;
-                    Bind::Unix(settings.storage_dir().join("fabro.sock"))
-                }
+            let bind_addr = if let Some(s) = serve_args.bind.as_deref() {
+                bind::parse_bind(s)?
+            } else {
+                // __serve should always receive an explicit --bind from the parent,
+                // but fall back to the storage dir default if missing.
+                let settings = user_config::load_user_settings_with_globals(globals)?;
+                Bind::Unix(settings.storage_dir().join("fabro.sock"))
             };
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             foreground::execute(

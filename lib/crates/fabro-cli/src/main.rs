@@ -12,6 +12,7 @@ mod user_config;
 use anyhow::Result;
 use args::{Commands, GlobalArgs, LONG_VERSION, RunCommands, ServerCommand, ServerNamespace};
 use clap::{CommandFactory, Parser};
+use fabro_config::server::load_server_settings;
 use fabro_telemetry::{git, panic as tel_panic, sanitize, sender};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
@@ -114,7 +115,7 @@ async fn main_inner() -> (String, Result<()>) {
                 },
         }) = command.as_ref()
         {
-            match fabro_config::server::load_server_settings(args.config.as_deref()) {
+            match load_server_settings(args.config.as_deref()) {
                 Ok(server_settings) => (
                     server_settings.log.as_ref().and_then(|l| l.level.clone()),
                     false,
