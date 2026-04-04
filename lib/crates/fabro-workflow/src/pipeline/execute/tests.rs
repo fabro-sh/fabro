@@ -926,7 +926,7 @@ async fn retry_emits_stage_started_per_attempt() {
         .filter(|event| {
             event.event_name() == "stage.started" && event.node_id.as_deref() == Some("work")
         })
-        .map(|event| event.properties()["attempt"].as_u64().unwrap())
+        .map(|event| event.properties().unwrap()["attempt"].as_u64().unwrap())
         .collect();
     assert_eq!(work_started, vec![1, 2]);
 }
@@ -1052,11 +1052,12 @@ async fn git_checkpoint_skips_start_node() {
         .iter()
         .filter(|event| {
             event.event_name() == "checkpoint.completed"
-                && event
-                    .properties()
-                    .get("git_commit_sha")
-                    .and_then(|value| value.as_str())
-                    .is_some()
+                && event.properties().is_ok_and(|properties| {
+                    properties
+                        .get("git_commit_sha")
+                        .and_then(|value| value.as_str())
+                        .is_some()
+                })
         })
         .filter_map(|event| event.node_id.as_deref())
         .collect();

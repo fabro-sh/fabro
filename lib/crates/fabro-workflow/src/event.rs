@@ -1,12 +1,13 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
+use ::fabro_types::run_event as fabro_types;
+use ::fabro_types::{RunEvent, RunId, StageStatus, StatusReason};
 use anyhow::{Context, Result};
-use chrono::{SecondsFormat, Utc};
+use chrono::Utc;
 use fabro_store::{EventPayload, SlateRunStore};
-use fabro_types::{RunEvent, RunId};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
@@ -15,7 +16,6 @@ use crate::error::FabroError;
 use crate::outcome::{FailureDetail, Outcome, StageUsage};
 use fabro_agent::{AgentEvent, SandboxEvent, WorktreeEvent, WorktreeEventCallback};
 use fabro_llm::types::Usage as LlmUsage;
-use fabro_types::StatusReason;
 use fabro_util::redact::redact_jsonl_line;
 
 pub use fabro_types::{EventBody, RunNoticeLevel};
@@ -1183,7 +1183,6 @@ struct StoredEventFields {
     parent_session_id: Option<String>,
     node_id: Option<String>,
     node_label: Option<String>,
-    properties: Value,
 }
 
 fn tagged_variant_fields<T: Serialize>(value: &T) -> Map<String, Value> {
@@ -1224,6 +1223,976 @@ fn default_node_label(node_id: Option<&String>, node_label: Option<String>) -> O
     node_label.or_else(|| node_id.cloned())
 }
 
+fn token_usage_from_llm(usage: &LlmUsage) -> fabro_types::TokenUsage {
+    fabro_types::TokenUsage {
+        input_tokens: usage.input_tokens,
+        output_tokens: usage.output_tokens,
+        total_tokens: usage.total_tokens,
+        reasoning_tokens: usage.reasoning_tokens,
+        cache_read_tokens: usage.cache_read_tokens,
+        cache_write_tokens: usage.cache_write_tokens,
+        speed: usage.speed.clone(),
+        raw: usage.raw.clone(),
+    }
+}
+
+fn stage_status_from_string(status: &str) -> StageStatus {
+    serde_json::from_value(Value::String(status.to_string())).expect("valid stage status")
+}
+
+fn event_body_from_event(event: &Event) -> EventBody {
+    match event {
+        Event::RunCreated {
+            settings,
+            graph,
+            workflow_source,
+            workflow_config,
+            labels,
+            run_dir,
+            working_directory,
+            host_repo_path,
+            base_branch,
+            workflow_slug,
+            db_prefix,
+            ..
+        } => EventBody::RunCreated(fabro_types::RunCreatedProps {
+            settings: serde_json::from_value(settings.clone()).expect("run.created settings"),
+            graph: serde_json::from_value(graph.clone()).expect("run.created graph"),
+            workflow_source: workflow_source.clone(),
+            workflow_config: workflow_config.clone(),
+            labels: labels.clone(),
+            run_dir: run_dir.clone(),
+            working_directory: working_directory.clone(),
+            host_repo_path: host_repo_path.clone(),
+            base_branch: base_branch.clone(),
+            workflow_slug: workflow_slug.clone(),
+            db_prefix: db_prefix.clone(),
+        }),
+        Event::WorkflowRunStarted {
+            name,
+            base_branch,
+            base_sha,
+            run_branch,
+            worktree_dir,
+            goal,
+            ..
+        } => EventBody::RunStarted(fabro_types::RunStartedProps {
+            name: name.clone(),
+            base_branch: base_branch.clone(),
+            base_sha: base_sha.clone(),
+            run_branch: run_branch.clone(),
+            worktree_dir: worktree_dir.clone(),
+            goal: goal.clone(),
+        }),
+        Event::RunSubmitted { reason } => {
+            EventBody::RunSubmitted(fabro_types::RunStatusTransitionProps {
+                reason: reason.clone(),
+            })
+        }
+        Event::RunStarting { reason } => {
+            EventBody::RunStarting(fabro_types::RunStatusTransitionProps {
+                reason: reason.clone(),
+            })
+        }
+        Event::RunRunning { reason } => {
+            EventBody::RunRunning(fabro_types::RunStatusTransitionProps {
+                reason: reason.clone(),
+            })
+        }
+        Event::RunRemoving { reason } => {
+            EventBody::RunRemoving(fabro_types::RunStatusTransitionProps {
+                reason: reason.clone(),
+            })
+        }
+        Event::RunRewound {
+            target_checkpoint_ordinal,
+            target_node_id,
+            target_visit,
+            previous_status,
+            run_commit_sha,
+        } => EventBody::RunRewound(fabro_types::RunRewoundProps {
+            target_checkpoint_ordinal: *target_checkpoint_ordinal,
+            target_node_id: target_node_id.clone(),
+            target_visit: *target_visit,
+            previous_status: previous_status.clone(),
+            run_commit_sha: run_commit_sha.clone(),
+        }),
+        Event::WorkflowRunCompleted {
+            duration_ms,
+            artifact_count,
+            status,
+            reason,
+            total_cost,
+            final_git_commit_sha,
+            final_patch,
+            usage,
+        } => EventBody::RunCompleted(fabro_types::RunCompletedProps {
+            duration_ms: *duration_ms,
+            artifact_count: *artifact_count,
+            status: status.clone(),
+            reason: reason.clone(),
+            total_cost: *total_cost,
+            final_git_commit_sha: final_git_commit_sha.clone(),
+            final_patch: final_patch.clone(),
+            usage: usage.as_ref().map(token_usage_from_llm),
+        }),
+        Event::WorkflowRunFailed {
+            error,
+            duration_ms,
+            reason,
+            git_commit_sha,
+        } => EventBody::RunFailed(fabro_types::RunFailedProps {
+            error: error.to_string(),
+            duration_ms: *duration_ms,
+            reason: reason.clone(),
+            git_commit_sha: git_commit_sha.clone(),
+        }),
+        Event::RunNotice {
+            level,
+            code,
+            message,
+        } => EventBody::RunNotice(fabro_types::RunNoticeProps {
+            level: *level,
+            code: code.clone(),
+            message: message.clone(),
+        }),
+        Event::StageStarted {
+            index,
+            handler_type,
+            attempt,
+            max_attempts,
+            ..
+        } => EventBody::StageStarted(fabro_types::StageStartedProps {
+            index: *index,
+            handler_type: handler_type.clone(),
+            attempt: *attempt,
+            max_attempts: *max_attempts,
+        }),
+        Event::StageCompleted {
+            index,
+            duration_ms,
+            status,
+            preferred_label,
+            suggested_next_ids,
+            usage,
+            failure,
+            notes,
+            files_touched,
+            context_updates,
+            jump_to_node,
+            context_values,
+            node_visits,
+            loop_failure_signatures,
+            restart_failure_signatures,
+            response,
+            attempt,
+            max_attempts,
+            ..
+        } => EventBody::StageCompleted(fabro_types::StageCompletedProps {
+            index: *index,
+            duration_ms: *duration_ms,
+            status: stage_status_from_string(status),
+            preferred_label: preferred_label.clone(),
+            suggested_next_ids: suggested_next_ids.clone(),
+            usage: usage.clone(),
+            failure: failure.clone(),
+            notes: notes.clone(),
+            files_touched: files_touched.clone(),
+            context_updates: context_updates.clone(),
+            jump_to_node: jump_to_node.clone(),
+            context_values: context_values.clone(),
+            node_visits: node_visits.clone(),
+            loop_failure_signatures: loop_failure_signatures.clone(),
+            restart_failure_signatures: restart_failure_signatures.clone(),
+            response: response.clone(),
+            attempt: *attempt,
+            max_attempts: *max_attempts,
+        }),
+        Event::StageFailed {
+            index,
+            failure,
+            will_retry,
+            ..
+        } => EventBody::StageFailed(fabro_types::StageFailedProps {
+            index: *index,
+            failure: Some(failure.clone()),
+            will_retry: *will_retry,
+        }),
+        Event::StageRetrying {
+            index,
+            attempt,
+            max_attempts,
+            delay_ms,
+            ..
+        } => EventBody::StageRetrying(fabro_types::StageRetryingProps {
+            index: *index,
+            attempt: *attempt,
+            max_attempts: *max_attempts,
+            delay_ms: *delay_ms,
+        }),
+        Event::ParallelStarted {
+            visit,
+            branch_count,
+            join_policy,
+            ..
+        } => EventBody::ParallelStarted(fabro_types::ParallelStartedProps {
+            visit: *visit,
+            branch_count: *branch_count,
+            join_policy: join_policy.clone(),
+        }),
+        Event::ParallelBranchStarted { index, .. } => {
+            EventBody::ParallelBranchStarted(fabro_types::ParallelBranchStartedProps {
+                index: *index,
+            })
+        }
+        Event::ParallelBranchCompleted {
+            index,
+            duration_ms,
+            status,
+            head_sha,
+            ..
+        } => EventBody::ParallelBranchCompleted(fabro_types::ParallelBranchCompletedProps {
+            index: *index,
+            duration_ms: *duration_ms,
+            status: status.clone(),
+            head_sha: head_sha.clone(),
+        }),
+        Event::ParallelCompleted {
+            visit,
+            duration_ms,
+            success_count,
+            failure_count,
+            results,
+            ..
+        } => EventBody::ParallelCompleted(fabro_types::ParallelCompletedProps {
+            visit: *visit,
+            duration_ms: *duration_ms,
+            success_count: *success_count,
+            failure_count: *failure_count,
+            results: results.clone(),
+        }),
+        Event::InterviewStarted {
+            question,
+            question_type,
+            ..
+        } => EventBody::InterviewStarted(fabro_types::InterviewStartedProps {
+            question: question.clone(),
+            question_type: question_type.clone(),
+        }),
+        Event::InterviewCompleted {
+            question,
+            answer,
+            duration_ms,
+        } => EventBody::InterviewCompleted(fabro_types::InterviewCompletedProps {
+            question: question.clone(),
+            answer: answer.clone(),
+            duration_ms: *duration_ms,
+        }),
+        Event::InterviewTimeout {
+            question,
+            duration_ms,
+            ..
+        } => EventBody::InterviewTimeout(fabro_types::InterviewTimeoutProps {
+            question: question.clone(),
+            duration_ms: *duration_ms,
+        }),
+        Event::CheckpointCompleted {
+            status,
+            current_node,
+            completed_nodes,
+            node_retries,
+            context_values,
+            node_outcomes,
+            next_node_id,
+            git_commit_sha,
+            loop_failure_signatures,
+            restart_failure_signatures,
+            node_visits,
+            diff,
+            ..
+        } => EventBody::CheckpointCompleted(fabro_types::CheckpointCompletedProps {
+            status: status.clone(),
+            current_node: current_node.clone(),
+            completed_nodes: completed_nodes.clone(),
+            node_retries: node_retries.clone(),
+            context_values: context_values.clone(),
+            node_outcomes: node_outcomes.clone(),
+            next_node_id: next_node_id.clone(),
+            git_commit_sha: git_commit_sha.clone(),
+            loop_failure_signatures: loop_failure_signatures.clone(),
+            restart_failure_signatures: restart_failure_signatures.clone(),
+            node_visits: node_visits.clone(),
+            diff: diff.clone(),
+        }),
+        Event::CheckpointFailed { error, .. } => {
+            EventBody::CheckpointFailed(fabro_types::CheckpointFailedProps {
+                error: error.clone(),
+            })
+        }
+        Event::GitCommit { sha, .. } => {
+            EventBody::GitCommit(fabro_types::GitCommitProps { sha: sha.clone() })
+        }
+        Event::GitPush { branch, success } => EventBody::GitPush(fabro_types::GitPushProps {
+            branch: branch.clone(),
+            success: *success,
+        }),
+        Event::GitBranch { branch, sha } => EventBody::GitBranch(fabro_types::GitBranchProps {
+            branch: branch.clone(),
+            sha: sha.clone(),
+        }),
+        Event::GitWorktreeAdd { path, branch } => {
+            EventBody::GitWorktreeAdd(fabro_types::GitWorktreeAddProps {
+                path: path.clone(),
+                branch: branch.clone(),
+            })
+        }
+        Event::GitWorktreeRemove { path } => {
+            EventBody::GitWorktreeRemove(fabro_types::GitWorktreeRemoveProps { path: path.clone() })
+        }
+        Event::GitFetch { branch, success } => EventBody::GitFetch(fabro_types::GitFetchProps {
+            branch: branch.clone(),
+            success: *success,
+        }),
+        Event::GitReset { sha } => {
+            EventBody::GitReset(fabro_types::GitResetProps { sha: sha.clone() })
+        }
+        Event::EdgeSelected {
+            from_node,
+            to_node,
+            label,
+            condition,
+            reason,
+            preferred_label,
+            suggested_next_ids,
+            stage_status,
+            is_jump,
+        } => EventBody::EdgeSelected(fabro_types::EdgeSelectedProps {
+            from_node: from_node.clone(),
+            to_node: to_node.clone(),
+            label: label.clone(),
+            condition: condition.clone(),
+            reason: reason.clone(),
+            preferred_label: preferred_label.clone(),
+            suggested_next_ids: suggested_next_ids.clone(),
+            stage_status: stage_status.clone(),
+            is_jump: *is_jump,
+        }),
+        Event::LoopRestart { from_node, to_node } => {
+            EventBody::LoopRestart(fabro_types::LoopRestartProps {
+                from_node: from_node.clone(),
+                to_node: to_node.clone(),
+            })
+        }
+        Event::Prompt {
+            visit,
+            text,
+            mode,
+            provider,
+            model,
+            ..
+        } => EventBody::StagePrompt(fabro_types::StagePromptProps {
+            visit: *visit,
+            text: text.clone(),
+            mode: mode.clone(),
+            provider: provider.clone(),
+            model: model.clone(),
+        }),
+        Event::PromptCompleted {
+            response,
+            model,
+            provider,
+            usage,
+            ..
+        } => EventBody::PromptCompleted(fabro_types::PromptCompletedProps {
+            response: response.clone(),
+            model: model.clone(),
+            provider: provider.clone(),
+            usage: usage.clone(),
+        }),
+        Event::Agent { visit, event, .. } => match event {
+            AgentEvent::SessionStarted { provider, model } => {
+                EventBody::AgentSessionStarted(fabro_types::AgentSessionStartedProps {
+                    provider: provider.clone(),
+                    model: model.clone(),
+                    visit: *visit,
+                })
+            }
+            AgentEvent::SessionEnded => {
+                EventBody::AgentSessionEnded(fabro_types::AgentSessionEndedProps { visit: *visit })
+            }
+            AgentEvent::ProcessingEnd => {
+                EventBody::AgentProcessingEnd(fabro_types::AgentProcessingEndProps {
+                    visit: *visit,
+                })
+            }
+            AgentEvent::UserInput { text } => EventBody::AgentInput(fabro_types::AgentInputProps {
+                text: text.clone(),
+                visit: *visit,
+            }),
+            AgentEvent::AssistantMessage {
+                text,
+                model,
+                usage,
+                tool_call_count,
+            } => EventBody::AgentMessage(fabro_types::AgentMessageProps {
+                text: text.clone(),
+                model: model.clone(),
+                usage: token_usage_from_llm(usage),
+                tool_call_count: *tool_call_count,
+                visit: *visit,
+            }),
+            AgentEvent::ToolCallStarted {
+                tool_name,
+                tool_call_id,
+                arguments,
+            } => EventBody::AgentToolStarted(fabro_types::AgentToolStartedProps {
+                tool_name: tool_name.clone(),
+                tool_call_id: tool_call_id.clone(),
+                arguments: arguments.clone(),
+                visit: *visit,
+            }),
+            AgentEvent::ToolCallCompleted {
+                tool_name,
+                tool_call_id,
+                output,
+                is_error,
+            } => EventBody::AgentToolCompleted(fabro_types::AgentToolCompletedProps {
+                tool_name: tool_name.clone(),
+                tool_call_id: tool_call_id.clone(),
+                output: output.clone(),
+                is_error: *is_error,
+                visit: *visit,
+            }),
+            AgentEvent::Error { error } => EventBody::AgentError(fabro_types::AgentErrorProps {
+                error: serde_json::to_value(error).expect("serializable agent error"),
+                visit: *visit,
+            }),
+            AgentEvent::Warning {
+                kind,
+                message,
+                details,
+            } => EventBody::AgentWarning(fabro_types::AgentWarningProps {
+                kind: kind.clone(),
+                message: message.clone(),
+                details: details.clone(),
+                visit: *visit,
+            }),
+            AgentEvent::LoopDetected => {
+                EventBody::AgentLoopDetected(fabro_types::AgentLoopDetectedProps { visit: *visit })
+            }
+            AgentEvent::TurnLimitReached { max_turns } => {
+                EventBody::AgentTurnLimitReached(fabro_types::AgentTurnLimitReachedProps {
+                    max_turns: *max_turns,
+                    visit: *visit,
+                })
+            }
+            AgentEvent::SteeringInjected { text } => {
+                EventBody::AgentSteeringInjected(fabro_types::AgentSteeringInjectedProps {
+                    text: text.clone(),
+                    visit: *visit,
+                })
+            }
+            AgentEvent::CompactionStarted {
+                estimated_tokens,
+                context_window_size,
+            } => EventBody::AgentCompactionStarted(fabro_types::AgentCompactionStartedProps {
+                estimated_tokens: *estimated_tokens,
+                context_window_size: *context_window_size,
+                visit: *visit,
+            }),
+            AgentEvent::CompactionCompleted {
+                original_turn_count,
+                preserved_turn_count,
+                summary_token_estimate,
+                tracked_file_count,
+            } => EventBody::AgentCompactionCompleted(fabro_types::AgentCompactionCompletedProps {
+                original_turn_count: *original_turn_count,
+                preserved_turn_count: *preserved_turn_count,
+                summary_token_estimate: *summary_token_estimate,
+                tracked_file_count: *tracked_file_count,
+                visit: *visit,
+            }),
+            AgentEvent::LlmRetry {
+                provider,
+                model,
+                attempt,
+                delay_secs,
+                error,
+            } => EventBody::AgentLlmRetry(fabro_types::AgentLlmRetryProps {
+                provider: provider.clone(),
+                model: model.clone(),
+                attempt: *attempt,
+                delay_secs: *delay_secs,
+                error: serde_json::to_value(error).expect("serializable sdk error"),
+                visit: *visit,
+            }),
+            AgentEvent::SubAgentSpawned {
+                agent_id,
+                depth,
+                task,
+            } => EventBody::AgentSubSpawned(fabro_types::AgentSubSpawnedProps {
+                agent_id: agent_id.clone(),
+                depth: *depth,
+                task: task.clone(),
+                visit: *visit,
+            }),
+            AgentEvent::SubAgentCompleted {
+                agent_id,
+                depth,
+                success,
+                turns_used,
+            } => EventBody::AgentSubCompleted(fabro_types::AgentSubCompletedProps {
+                agent_id: agent_id.clone(),
+                depth: *depth,
+                success: *success,
+                turns_used: *turns_used,
+                visit: *visit,
+            }),
+            AgentEvent::SubAgentFailed {
+                agent_id,
+                depth,
+                error,
+            } => EventBody::AgentSubFailed(fabro_types::AgentSubFailedProps {
+                agent_id: agent_id.clone(),
+                depth: *depth,
+                error: serde_json::to_value(error).expect("serializable agent error"),
+                visit: *visit,
+            }),
+            AgentEvent::SubAgentClosed { agent_id, depth } => {
+                EventBody::AgentSubClosed(fabro_types::AgentSubClosedProps {
+                    agent_id: agent_id.clone(),
+                    depth: *depth,
+                    visit: *visit,
+                })
+            }
+            AgentEvent::McpServerReady {
+                server_name,
+                tool_count,
+            } => EventBody::AgentMcpReady(fabro_types::AgentMcpReadyProps {
+                server_name: server_name.clone(),
+                tool_count: *tool_count,
+                visit: *visit,
+            }),
+            AgentEvent::McpServerFailed { server_name, error } => {
+                EventBody::AgentMcpFailed(fabro_types::AgentMcpFailedProps {
+                    server_name: server_name.clone(),
+                    error: error.clone(),
+                    visit: *visit,
+                })
+            }
+            AgentEvent::AssistantTextStart
+            | AgentEvent::AssistantOutputReplace { .. }
+            | AgentEvent::TextDelta { .. }
+            | AgentEvent::ReasoningDelta { .. }
+            | AgentEvent::ToolCallOutputDelta { .. }
+            | AgentEvent::SkillExpanded { .. } => {
+                panic!("streaming-noise agent event should not be converted to RunEvent")
+            }
+        },
+        Event::SubgraphStarted { start_node, .. } => {
+            EventBody::SubgraphStarted(fabro_types::SubgraphStartedProps {
+                start_node: start_node.clone(),
+            })
+        }
+        Event::SubgraphCompleted {
+            steps_executed,
+            status,
+            duration_ms,
+            ..
+        } => EventBody::SubgraphCompleted(fabro_types::SubgraphCompletedProps {
+            steps_executed: *steps_executed,
+            status: status.clone(),
+            duration_ms: *duration_ms,
+        }),
+        Event::Sandbox { event } => match event {
+            SandboxEvent::Initializing { provider } => {
+                EventBody::SandboxInitializing(fabro_types::SandboxInitializingProps {
+                    provider: provider.clone(),
+                })
+            }
+            SandboxEvent::Ready {
+                provider,
+                duration_ms,
+                name,
+                cpu,
+                memory,
+                url,
+            } => EventBody::SandboxReady(fabro_types::SandboxReadyProps {
+                provider: provider.clone(),
+                duration_ms: *duration_ms,
+                name: name.clone(),
+                cpu: *cpu,
+                memory: *memory,
+                url: url.clone(),
+            }),
+            SandboxEvent::InitializeFailed {
+                provider,
+                error,
+                duration_ms,
+            } => EventBody::SandboxFailed(fabro_types::SandboxFailedProps {
+                provider: provider.clone(),
+                error: error.clone(),
+                duration_ms: *duration_ms,
+            }),
+            SandboxEvent::CleanupStarted { provider } => {
+                EventBody::SandboxCleanupStarted(fabro_types::SandboxCleanupStartedProps {
+                    provider: provider.clone(),
+                })
+            }
+            SandboxEvent::CleanupCompleted {
+                provider,
+                duration_ms,
+            } => EventBody::SandboxCleanupCompleted(fabro_types::SandboxCleanupCompletedProps {
+                provider: provider.clone(),
+                duration_ms: *duration_ms,
+            }),
+            SandboxEvent::CleanupFailed { provider, error } => {
+                EventBody::SandboxCleanupFailed(fabro_types::SandboxCleanupFailedProps {
+                    provider: provider.clone(),
+                    error: error.clone(),
+                })
+            }
+            SandboxEvent::SnapshotPulling { name } => {
+                EventBody::SnapshotPulling(fabro_types::SnapshotNameProps { name: name.clone() })
+            }
+            SandboxEvent::SnapshotPulled { name, duration_ms } => {
+                EventBody::SnapshotPulled(fabro_types::SnapshotCompletedProps {
+                    name: name.clone(),
+                    duration_ms: *duration_ms,
+                })
+            }
+            SandboxEvent::SnapshotEnsuring { name } => {
+                EventBody::SnapshotEnsuring(fabro_types::SnapshotNameProps { name: name.clone() })
+            }
+            SandboxEvent::SnapshotCreating { name } => {
+                EventBody::SnapshotCreating(fabro_types::SnapshotNameProps { name: name.clone() })
+            }
+            SandboxEvent::SnapshotReady { name, duration_ms } => {
+                EventBody::SnapshotReady(fabro_types::SnapshotCompletedProps {
+                    name: name.clone(),
+                    duration_ms: *duration_ms,
+                })
+            }
+            SandboxEvent::SnapshotFailed { name, error } => {
+                EventBody::SnapshotFailed(fabro_types::SnapshotFailedProps {
+                    name: name.clone(),
+                    error: error.clone(),
+                })
+            }
+            SandboxEvent::GitCloneStarted { url, branch } => {
+                EventBody::GitCloneStarted(fabro_types::GitCloneStartedProps {
+                    url: url.clone(),
+                    branch: branch.clone(),
+                })
+            }
+            SandboxEvent::GitCloneCompleted { url, duration_ms } => {
+                EventBody::GitCloneCompleted(fabro_types::GitCloneCompletedProps {
+                    url: url.clone(),
+                    duration_ms: *duration_ms,
+                })
+            }
+            SandboxEvent::GitCloneFailed { url, error } => {
+                EventBody::GitCloneFailed(fabro_types::GitCloneFailedProps {
+                    url: url.clone(),
+                    error: error.clone(),
+                })
+            }
+        },
+        Event::SandboxInitialized {
+            working_directory,
+            provider,
+            identifier,
+            host_working_directory,
+            container_mount_point,
+        } => EventBody::SandboxInitialized(fabro_types::SandboxInitializedProps {
+            working_directory: working_directory.clone(),
+            provider: provider.clone(),
+            identifier: identifier.clone(),
+            host_working_directory: host_working_directory.clone(),
+            container_mount_point: container_mount_point.clone(),
+        }),
+        Event::SetupStarted { command_count } => {
+            EventBody::SetupStarted(fabro_types::SetupStartedProps {
+                command_count: *command_count,
+            })
+        }
+        Event::SetupCommandStarted { command, index } => {
+            EventBody::SetupCommandStarted(fabro_types::SetupCommandStartedProps {
+                command: command.clone(),
+                index: *index,
+            })
+        }
+        Event::SetupCommandCompleted {
+            command,
+            index,
+            exit_code,
+            duration_ms,
+        } => EventBody::SetupCommandCompleted(fabro_types::SetupCommandCompletedProps {
+            command: command.clone(),
+            index: *index,
+            exit_code: *exit_code,
+            duration_ms: *duration_ms,
+        }),
+        Event::SetupCompleted { duration_ms } => {
+            EventBody::SetupCompleted(fabro_types::SetupCompletedProps {
+                duration_ms: *duration_ms,
+            })
+        }
+        Event::SetupFailed {
+            command,
+            index,
+            exit_code,
+            stderr,
+        } => EventBody::SetupFailed(fabro_types::SetupFailedProps {
+            command: command.clone(),
+            index: *index,
+            exit_code: *exit_code,
+            stderr: stderr.clone(),
+        }),
+        Event::StallWatchdogTimeout { idle_seconds, .. } => {
+            EventBody::StallWatchdogTimeout(fabro_types::StallWatchdogTimeoutProps {
+                idle_seconds: *idle_seconds,
+            })
+        }
+        Event::ArtifactCaptured {
+            attempt,
+            node_slug,
+            path,
+            mime,
+            content_md5,
+            content_sha256,
+            bytes,
+            ..
+        } => EventBody::ArtifactCaptured(fabro_types::ArtifactCapturedProps {
+            attempt: *attempt,
+            node_slug: node_slug.clone(),
+            path: path.clone(),
+            mime: mime.clone(),
+            content_md5: content_md5.clone(),
+            content_sha256: content_sha256.clone(),
+            bytes: *bytes,
+        }),
+        Event::SshAccessReady { ssh_command } => {
+            EventBody::SshAccessReady(fabro_types::SshAccessReadyProps {
+                ssh_command: ssh_command.clone(),
+            })
+        }
+        Event::Failover {
+            from_provider,
+            from_model,
+            to_provider,
+            to_model,
+            error,
+            ..
+        } => EventBody::Failover(fabro_types::FailoverProps {
+            from_provider: from_provider.clone(),
+            from_model: from_model.clone(),
+            to_provider: to_provider.clone(),
+            to_model: to_model.clone(),
+            error: error.clone(),
+        }),
+        Event::CliEnsureStarted { cli_name, provider } => {
+            EventBody::CliEnsureStarted(fabro_types::CliEnsureStartedProps {
+                cli_name: cli_name.clone(),
+                provider: provider.clone(),
+            })
+        }
+        Event::CliEnsureCompleted {
+            cli_name,
+            provider,
+            already_installed,
+            node_installed,
+            duration_ms,
+        } => EventBody::CliEnsureCompleted(fabro_types::CliEnsureCompletedProps {
+            cli_name: cli_name.clone(),
+            provider: provider.clone(),
+            already_installed: *already_installed,
+            node_installed: *node_installed,
+            duration_ms: *duration_ms,
+        }),
+        Event::CliEnsureFailed {
+            cli_name,
+            provider,
+            error,
+            duration_ms,
+        } => EventBody::CliEnsureFailed(fabro_types::CliEnsureFailedProps {
+            cli_name: cli_name.clone(),
+            provider: provider.clone(),
+            error: error.clone(),
+            duration_ms: *duration_ms,
+        }),
+        Event::CommandStarted {
+            script,
+            command,
+            language,
+            timeout_ms,
+            ..
+        } => EventBody::CommandStarted(fabro_types::CommandStartedProps {
+            script: script.clone(),
+            command: command.clone(),
+            language: language.clone(),
+            timeout_ms: *timeout_ms,
+        }),
+        Event::CommandCompleted {
+            stdout,
+            stderr,
+            exit_code,
+            duration_ms,
+            timed_out,
+            ..
+        } => EventBody::CommandCompleted(fabro_types::CommandCompletedProps {
+            stdout: stdout.clone(),
+            stderr: stderr.clone(),
+            exit_code: *exit_code,
+            duration_ms: *duration_ms,
+            timed_out: *timed_out,
+        }),
+        Event::AgentCliStarted {
+            visit,
+            mode,
+            provider,
+            model,
+            command,
+            ..
+        } => EventBody::AgentCliStarted(fabro_types::AgentCliStartedProps {
+            visit: *visit,
+            mode: mode.clone(),
+            provider: provider.clone(),
+            model: model.clone(),
+            command: command.clone(),
+        }),
+        Event::AgentCliCompleted {
+            stdout,
+            stderr,
+            exit_code,
+            duration_ms,
+            ..
+        } => EventBody::AgentCliCompleted(fabro_types::AgentCliCompletedProps {
+            stdout: stdout.clone(),
+            stderr: stderr.clone(),
+            exit_code: *exit_code,
+            duration_ms: *duration_ms,
+        }),
+        Event::PullRequestCreated {
+            pr_url,
+            pr_number,
+            owner,
+            repo,
+            base_branch,
+            head_branch,
+            title,
+            draft,
+        } => EventBody::PullRequestCreated(fabro_types::PullRequestCreatedProps {
+            pr_url: pr_url.clone(),
+            pr_number: *pr_number,
+            owner: owner.clone(),
+            repo: repo.clone(),
+            base_branch: base_branch.clone(),
+            head_branch: head_branch.clone(),
+            title: title.clone(),
+            draft: *draft,
+        }),
+        Event::PullRequestFailed { error } => {
+            EventBody::PullRequestFailed(fabro_types::PullRequestFailedProps {
+                error: error.clone(),
+            })
+        }
+        Event::DevcontainerResolved {
+            dockerfile_lines,
+            environment_count,
+            lifecycle_command_count,
+            workspace_folder,
+        } => EventBody::DevcontainerResolved(fabro_types::DevcontainerResolvedProps {
+            dockerfile_lines: *dockerfile_lines,
+            environment_count: *environment_count,
+            lifecycle_command_count: *lifecycle_command_count,
+            workspace_folder: workspace_folder.clone(),
+        }),
+        Event::DevcontainerLifecycleStarted {
+            phase,
+            command_count,
+        } => EventBody::DevcontainerLifecycleStarted(
+            fabro_types::DevcontainerLifecycleStartedProps {
+                phase: phase.clone(),
+                command_count: *command_count,
+            },
+        ),
+        Event::DevcontainerLifecycleCommandStarted {
+            phase,
+            command,
+            index,
+        } => EventBody::DevcontainerLifecycleCommandStarted(
+            fabro_types::DevcontainerLifecycleCommandStartedProps {
+                phase: phase.clone(),
+                command: command.clone(),
+                index: *index,
+            },
+        ),
+        Event::DevcontainerLifecycleCommandCompleted {
+            phase,
+            command,
+            index,
+            exit_code,
+            duration_ms,
+        } => EventBody::DevcontainerLifecycleCommandCompleted(
+            fabro_types::DevcontainerLifecycleCommandCompletedProps {
+                phase: phase.clone(),
+                command: command.clone(),
+                index: *index,
+                exit_code: *exit_code,
+                duration_ms: *duration_ms,
+            },
+        ),
+        Event::DevcontainerLifecycleCompleted { phase, duration_ms } => {
+            EventBody::DevcontainerLifecycleCompleted(
+                fabro_types::DevcontainerLifecycleCompletedProps {
+                    phase: phase.clone(),
+                    duration_ms: *duration_ms,
+                },
+            )
+        }
+        Event::DevcontainerLifecycleFailed {
+            phase,
+            command,
+            index,
+            exit_code,
+            stderr,
+        } => {
+            EventBody::DevcontainerLifecycleFailed(fabro_types::DevcontainerLifecycleFailedProps {
+                phase: phase.clone(),
+                command: command.clone(),
+                index: *index,
+                exit_code: *exit_code,
+                stderr: stderr.clone(),
+            })
+        }
+        Event::RetroStarted {
+            prompt,
+            provider,
+            model,
+        } => EventBody::RetroStarted(fabro_types::RetroStartedProps {
+            prompt: prompt.clone(),
+            provider: provider.clone(),
+            model: model.clone(),
+        }),
+        Event::RetroCompleted {
+            duration_ms,
+            response,
+            retro,
+        } => EventBody::RetroCompleted(fabro_types::RetroCompletedProps {
+            duration_ms: *duration_ms,
+            response: response.clone(),
+            retro: retro.clone(),
+        }),
+        Event::RetroFailed { error, duration_ms } => {
+            EventBody::RetroFailed(fabro_types::RetroFailedProps {
+                error: error.clone(),
+                duration_ms: *duration_ms,
+            })
+        }
+    }
+}
+
 fn extract_run_event_fields(event: &Event) -> StoredEventFields {
     match event {
         Event::RunCreated { .. } | Event::WorkflowRunStarted { .. } => {
@@ -1234,7 +2203,6 @@ fn extract_run_event_fields(event: &Event) -> StoredEventFields {
                 parent_session_id: None,
                 node_id: None,
                 node_label: None,
-                properties: Value::Object(fields),
             }
         }
         Event::WorkflowRunFailed { error, .. } => {
@@ -1245,7 +2213,6 @@ fn extract_run_event_fields(event: &Event) -> StoredEventFields {
                 parent_session_id: None,
                 node_id: None,
                 node_label: None,
-                properties: Value::Object(fields),
             }
         }
         Event::StageCompleted { .. } | Event::StageFailed { .. } => {
@@ -1258,7 +2225,6 @@ fn extract_run_event_fields(event: &Event) -> StoredEventFields {
                 parent_session_id: None,
                 node_id,
                 node_label,
-                properties: Value::Object(fields),
             }
         }
         Event::StageStarted { .. }
@@ -1284,7 +2250,6 @@ fn extract_run_event_fields(event: &Event) -> StoredEventFields {
                 parent_session_id: None,
                 node_id,
                 node_label,
-                properties: Value::Object(fields),
             }
         }
         Event::Agent {
@@ -1295,36 +2260,25 @@ fn extract_run_event_fields(event: &Event) -> StoredEventFields {
             let mut fields = tagged_variant_fields(event);
             let node_id = remove_string(&mut fields, "stage");
             let node_label = default_node_label(node_id.as_ref(), None);
-            let visit = fields.remove("visit");
+            fields.remove("visit");
             fields.remove("session_id");
             fields.remove("parent_session_id");
-            let mut properties = fields.remove("event").map_or_else(
-                || Value::Object(Map::new()),
-                |value| Value::Object(tagged_variant_fields_from_value(value)),
-            );
-            if let (Some(visit), Value::Object(map)) = (visit, &mut properties) {
-                map.insert("visit".to_string(), visit);
-            }
+            fields.remove("event");
             StoredEventFields {
                 session_id: session_id.clone(),
                 parent_session_id: parent_session_id.clone(),
                 node_id,
                 node_label,
-                properties,
             }
         }
         Event::Sandbox { .. } => {
             let mut fields = tagged_variant_fields(event);
-            let properties = fields.remove("event").map_or_else(
-                || Value::Object(Map::new()),
-                |value| Value::Object(tagged_variant_fields_from_value(value)),
-            );
+            fields.remove("event");
             StoredEventFields {
                 session_id: None,
                 parent_session_id: None,
                 node_id: None,
                 node_label: None,
-                properties,
             }
         }
         Event::GitCommit { .. } => {
@@ -1336,7 +2290,6 @@ fn extract_run_event_fields(event: &Event) -> StoredEventFields {
                 parent_session_id: None,
                 node_id,
                 node_label,
-                properties: Value::Object(fields),
             }
         }
         Event::ParallelBranchStarted { .. } | Event::ParallelBranchCompleted { .. } => {
@@ -1348,7 +2301,6 @@ fn extract_run_event_fields(event: &Event) -> StoredEventFields {
                 parent_session_id: None,
                 node_id,
                 node_label,
-                properties: Value::Object(fields),
             }
         }
         Event::Prompt { .. }
@@ -1363,7 +2315,6 @@ fn extract_run_event_fields(event: &Event) -> StoredEventFields {
                 parent_session_id: None,
                 node_id,
                 node_label,
-                properties: Value::Object(fields),
             }
         }
         Event::StallWatchdogTimeout { .. } => {
@@ -1375,7 +2326,6 @@ fn extract_run_event_fields(event: &Event) -> StoredEventFields {
                 parent_session_id: None,
                 node_id,
                 node_label,
-                properties: Value::Object(fields),
             }
         }
         _ => StoredEventFields {
@@ -1383,7 +2333,6 @@ fn extract_run_event_fields(event: &Event) -> StoredEventFields {
             parent_session_id: None,
             node_id: None,
             node_label: None,
-            properties: Value::Object(tagged_variant_fields(event)),
         },
     }
 }
@@ -1394,18 +2343,17 @@ pub fn to_run_event(run_id: &RunId, event: &Event) -> RunEvent {
 
 pub fn to_run_event_at(run_id: &RunId, event: &Event, ts: chrono::DateTime<Utc>) -> RunEvent {
     let fields = extract_run_event_fields(event);
-    RunEvent::from_value(json!({
-        "id": Uuid::now_v7().to_string(),
-        "ts": ts.to_rfc3339_opts(SecondsFormat::Millis, true),
-        "run_id": run_id.to_string(),
-        "event": event_name(event),
-        "session_id": fields.session_id,
-        "parent_session_id": fields.parent_session_id,
-        "node_id": fields.node_id,
-        "node_label": fields.node_label,
-        "properties": fields.properties,
-    }))
-    .expect("workflow event converts to stored event")
+    let body = event_body_from_event(event);
+    RunEvent {
+        id: Uuid::now_v7().to_string(),
+        ts,
+        run_id: *run_id,
+        node_id: fields.node_id,
+        node_label: fields.node_label,
+        session_id: fields.session_id,
+        parent_session_id: fields.parent_session_id,
+        body,
+    }
 }
 
 pub fn build_redacted_event_payload(event: &RunEvent, run_id: &RunId) -> Result<EventPayload> {
@@ -1637,7 +2585,7 @@ impl Emitter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fabro_types::fixtures;
+    use ::fabro_types::fixtures;
     use std::sync::{Arc, Mutex};
 
     #[test]
@@ -1708,8 +2656,9 @@ mod tests {
         assert_eq!(stored.run_id, fixtures::RUN_2);
         assert_eq!(stored.node_id.as_deref(), Some("plan"));
         assert_eq!(stored.node_label.as_deref(), Some("Plan"));
-        assert_eq!(stored.properties["duration_ms"], 5000);
-        assert_eq!(stored.properties["status"], "success");
+        let properties = stored.properties().unwrap();
+        assert_eq!(properties["duration_ms"], 5000);
+        assert_eq!(properties["status"], "success");
         assert!(stored.session_id.is_none());
     }
 
@@ -1741,9 +2690,10 @@ mod tests {
             },
         );
 
-        assert_eq!(stored.properties["response"], "done");
-        assert_eq!(stored.properties["loop_failure_signatures"]["sig-a"], 2);
-        assert_eq!(stored.properties["restart_failure_signatures"]["sig-b"], 1);
+        let properties = stored.properties().unwrap();
+        assert_eq!(properties["response"], "done");
+        assert_eq!(properties["loop_failure_signatures"]["sig-a"], 2);
+        assert_eq!(properties["restart_failure_signatures"]["sig-b"], 1);
     }
 
     #[test]
@@ -1763,12 +2713,10 @@ mod tests {
         );
 
         assert_eq!(stored.event_name(), "stage.failed");
-        assert_eq!(stored.properties["failure"]["message"], "lint failed");
-        assert_eq!(
-            stored.properties["failure"]["failure_class"],
-            "deterministic"
-        );
-        assert_eq!(stored.properties["will_retry"], true);
+        let properties = stored.properties().unwrap();
+        assert_eq!(properties["failure"]["message"], "lint failed");
+        assert_eq!(properties["failure"]["failure_class"], "deterministic");
+        assert_eq!(properties["will_retry"], true);
     }
 
     #[test]
@@ -1793,9 +2741,10 @@ mod tests {
         assert_eq!(stored.node_label.as_deref(), Some("code"));
         assert_eq!(stored.session_id.as_deref(), Some("ses_child"));
         assert_eq!(stored.parent_session_id.as_deref(), Some("ses_parent"));
-        assert_eq!(stored.properties["tool_name"], "read_file");
-        assert_eq!(stored.properties["tool_call_id"], "call_1");
-        assert_eq!(stored.properties["visit"], 2);
+        let properties = stored.properties().unwrap();
+        assert_eq!(properties["tool_name"], "read_file");
+        assert_eq!(properties["tool_call_id"], "call_1");
+        assert_eq!(properties["visit"], 2);
     }
 
     #[test]
@@ -1816,8 +2765,9 @@ mod tests {
 
         assert_eq!(stored.event_name(), "sandbox.ready");
         assert!(stored.node_id.is_none());
-        assert_eq!(stored.properties["provider"], "daytona");
-        assert_eq!(stored.properties["duration_ms"], 2500);
+        let properties = stored.properties().unwrap();
+        assert_eq!(properties["provider"], "daytona");
+        assert_eq!(properties["duration_ms"], 2500);
     }
 
     #[test]
@@ -1833,8 +2783,9 @@ mod tests {
         );
 
         assert_eq!(stored.event_name(), "run.failed");
-        assert_eq!(stored.properties["error"], "Handler error: boom");
-        assert_eq!(stored.properties["duration_ms"], 900);
+        let properties = stored.properties().unwrap();
+        assert_eq!(properties["error"], "Handler error: boom");
+        assert_eq!(properties["duration_ms"], 900);
     }
 
     #[tokio::test]

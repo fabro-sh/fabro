@@ -687,12 +687,13 @@ async fn daytona_git_checkpoint_remote_emits_events() {
         let git_events: Vec<_> = events
             .iter()
             .filter_map(|e| {
-                if e.event != "checkpoint.completed" {
+                if e.event_name() != "checkpoint.completed" {
                     return None;
                 }
+                let properties = e.properties().ok()?;
                 Some((
                     e.node_id.clone()?,
-                    e.properties.get("git_commit_sha")?.as_str()?.to_string(),
+                    properties.get("git_commit_sha")?.as_str()?.to_string(),
                 ))
             })
             .collect();
@@ -931,7 +932,7 @@ async fn daytona_parallel_git_branching_e2e() {
         let events = events.lock().unwrap();
         let parallel_started: Vec<_> = events
             .iter()
-            .filter(|e| e.event == "parallel.started")
+            .filter(|e| e.event_name() == "parallel.started")
             .collect();
         assert_eq!(
             parallel_started.len(),
@@ -940,7 +941,7 @@ async fn daytona_parallel_git_branching_e2e() {
         );
         let parallel_completed: Vec<_> = events
             .iter()
-            .filter(|e| e.event == "parallel.completed")
+            .filter(|e| e.event_name() == "parallel.completed")
             .collect();
         assert_eq!(
             parallel_completed.len(),

@@ -2091,32 +2091,36 @@ async fn event_streaming_lifecycle() {
     engine.run(&graph, &run_options).await.expect("run");
 
     let collected = events.lock().unwrap();
-    assert!(collected.iter().any(|e| e.event == "run.started"));
+    assert!(collected.iter().any(|e| e.event_name() == "run.started"));
     assert!(
         collected
             .iter()
-            .any(|e| e.event == "stage.started" && e.node_id.as_deref() == Some("start"))
+            .any(|e| e.event_name() == "stage.started" && e.node_id.as_deref() == Some("start"))
     );
     assert!(
         collected
             .iter()
-            .any(|e| e.event == "stage.completed" && e.node_id.as_deref() == Some("start"))
+            .any(|e| e.event_name() == "stage.completed" && e.node_id.as_deref() == Some("start"))
     );
     assert!(
         collected
             .iter()
-            .any(|e| e.event == "stage.started" && e.node_id.as_deref() == Some("task"))
+            .any(|e| e.event_name() == "stage.started" && e.node_id.as_deref() == Some("task"))
     );
     assert!(
         collected
             .iter()
-            .any(|e| e.event == "stage.completed" && e.node_id.as_deref() == Some("task"))
+            .any(|e| e.event_name() == "stage.completed" && e.node_id.as_deref() == Some("task"))
     );
-    assert!(collected.iter().any(|e| e.event == "checkpoint.completed"));
-    assert!(collected.iter().any(|e| e.event == "run.completed"));
+    assert!(
+        collected
+            .iter()
+            .any(|e| e.event_name() == "checkpoint.completed")
+    );
+    assert!(collected.iter().any(|e| e.event_name() == "run.completed"));
     // WorkflowRunStarted first, WorkflowRunCompleted last
-    assert_eq!(collected.first().unwrap().event, "run.started");
-    assert_eq!(collected.last().unwrap().event, "run.completed");
+    assert_eq!(collected.first().unwrap().event_name(), "run.started");
+    assert_eq!(collected.last().unwrap().event_name(), "run.completed");
 }
 
 #[tokio::test]
@@ -2598,8 +2602,8 @@ async fn scenario_ship_a_feature() {
     assert!(cp.completed_nodes.contains(&"review".to_string()));
 
     let collected = events.lock().unwrap();
-    assert!(collected.iter().any(|e| e.event == "run.started"));
-    assert!(collected.iter().any(|e| e.event == "run.completed"));
+    assert!(collected.iter().any(|e| e.event_name() == "run.started"));
+    assert!(collected.iter().any(|e| e.event_name() == "run.completed"));
 }
 
 #[tokio::test]
@@ -3667,8 +3671,8 @@ async fn integration_smoke_plan_implement_review_done() {
 
     // Verify events
     let collected = events.lock().unwrap();
-    assert!(collected.iter().any(|e| e.event == "run.started"));
-    assert!(collected.iter().any(|e| e.event == "run.completed"));
+    assert!(collected.iter().any(|e| e.event_name() == "run.started"));
+    assert!(collected.iter().any(|e| e.event_name() == "run.completed"));
 }
 
 // ===========================================================================
@@ -7439,13 +7443,13 @@ async fn hook_run_start_block_prevents_run() {
     // WorkflowRunStarted should still have been emitted (it fires before the hook)
     let captured = events.lock().unwrap();
     assert!(
-        captured.iter().any(|e| e.event == "run.started"),
+        captured.iter().any(|e| e.event_name() == "run.started"),
         "WorkflowRunStarted should be emitted before hook blocks"
     );
 
     // But no StageStarted — the run never reached node execution
     assert!(
-        !captured.iter().any(|e| e.event == "stage.started"),
+        !captured.iter().any(|e| e.event_name() == "stage.started"),
         "No stage should start when RunStart hook blocks"
     );
 }
@@ -7522,13 +7526,15 @@ async fn hook_stage_start_skip_bypasses_node() {
     let stage_starts: Vec<_> = captured
         .iter()
         .filter(|e| {
-            e.event == "stage.started"
-                && !matches!(
-                    e.properties
-                        .get("handler_type")
-                        .and_then(|value| value.as_str()),
-                    Some("start" | "exit")
-                )
+            e.event_name() == "stage.started"
+                && e.properties().is_ok_and(|properties| {
+                    !matches!(
+                        properties
+                            .get("handler_type")
+                            .and_then(|value| value.as_str()),
+                        Some("start" | "exit")
+                    )
+                })
         })
         .collect();
     assert!(
@@ -7847,7 +7853,7 @@ async fn hook_edge_selected_override_redirects_routing() {
     let completed_nodes: Vec<String> = captured
         .iter()
         .filter_map(|e| {
-            (e.event == "stage.completed")
+            (e.event_name() == "stage.completed")
                 .then(|| e.node_id.clone())
                 .flatten()
         })
@@ -8247,13 +8253,16 @@ async fn hooks_do_not_duplicate_workflow_events() {
     let captured = events.lock().unwrap();
 
     // Count WorkflowRunStarted — should be exactly 1
-    let run_started = captured.iter().filter(|e| e.event == "run.started").count();
+    let run_started = captured
+        .iter()
+        .filter(|e| e.event_name() == "run.started")
+        .count();
     assert_eq!(run_started, 1, "Should have exactly 1 WorkflowRunStarted");
 
     // Count WorkflowRunCompleted — should be exactly 1
     let run_completed = captured
         .iter()
-        .filter(|e| e.event == "run.completed")
+        .filter(|e| e.event_name() == "run.completed")
         .count();
     assert_eq!(
         run_completed, 1,
@@ -8261,7 +8270,10 @@ async fn hooks_do_not_duplicate_workflow_events() {
     );
 
     // No WorkflowRunFailed
-    let run_failed = captured.iter().filter(|e| e.event == "run.failed").count();
+    let run_failed = captured
+        .iter()
+        .filter(|e| e.event_name() == "run.failed")
+        .count();
     assert_eq!(run_failed, 0, "Should have 0 WorkflowRunFailed");
 }
 
@@ -8598,9 +8610,9 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
     let evts = events.lock().unwrap();
     let completed_event = evts
         .iter()
-        .find(|e| e.event == "run.completed")
+        .find(|e| e.event_name() == "run.completed")
         .expect("should have WorkflowRunCompleted event");
-    let artifact_count = completed_event.properties["artifact_count"]
+    let artifact_count = completed_event.properties().unwrap()["artifact_count"]
         .as_u64()
         .expect("run.completed should include artifact_count");
     assert_eq!(
@@ -10092,12 +10104,13 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
     let git_events: Vec<_> = events
         .iter()
         .filter_map(|e| {
-            if e.event != "checkpoint.completed" {
+            if e.event_name() != "checkpoint.completed" {
                 return None;
             }
+            let properties = e.properties().ok()?;
             Some((
                 e.node_id.clone()?,
-                e.properties.get("git_commit_sha")?.as_str()?.to_string(),
+                properties.get("git_commit_sha")?.as_str()?.to_string(),
             ))
         })
         .collect();
@@ -10588,7 +10601,7 @@ async fn parallel_git_branching_host_e2e() {
     let events = events.lock().unwrap();
     let parallel_started: Vec<_> = events
         .iter()
-        .filter(|e| e.event == "parallel.started")
+        .filter(|e| e.event_name() == "parallel.started")
         .collect();
     assert_eq!(
         parallel_started.len(),
@@ -10598,7 +10611,7 @@ async fn parallel_git_branching_host_e2e() {
 
     let parallel_completed: Vec<_> = events
         .iter()
-        .filter(|e| e.event == "parallel.completed")
+        .filter(|e| e.event_name() == "parallel.completed")
         .collect();
     assert_eq!(
         parallel_completed.len(),
@@ -11565,7 +11578,7 @@ async fn e2e_circuit_breaker_emits_events_before_abort() {
 
     let events = events.lock().unwrap();
     // Should have at least WorkflowRunStarted and some StageFailed/StageCompleted events
-    let has_pipeline_started = events.iter().any(|e| e.event == "run.started");
+    let has_pipeline_started = events.iter().any(|e| e.event_name() == "run.started");
     assert!(
         has_pipeline_started,
         "WorkflowRunStarted event should be emitted"
@@ -11576,11 +11589,11 @@ async fn e2e_circuit_breaker_emits_events_before_abort() {
     // the stage event for that iteration is emitted, so we see limit-1 events.
     let stage_failed_count = events
         .iter()
-        .filter(|e| e.event == "stage.failed" && e.node_id.as_deref() == Some("work"))
+        .filter(|e| e.event_name() == "stage.failed" && e.node_id.as_deref() == Some("work"))
         .count();
     let stage_completed_count = events
         .iter()
-        .filter(|e| e.event == "stage.completed" && e.node_id.as_deref() == Some("work"))
+        .filter(|e| e.event_name() == "stage.completed" && e.node_id.as_deref() == Some("work"))
         .count();
     let total_work_events = stage_completed_count + stage_failed_count;
     // With limit=3, the breaker fires on the 3rd failure before its event is emitted.
@@ -12447,31 +12460,23 @@ async fn asset_collection_local_sandbox_success() {
     let captured_events = events.lock().unwrap();
     let asset_events: Vec<&RunEvent> = captured_events
         .iter()
-        .filter(|e| e.event == "artifact.captured")
+        .filter(|e| e.event_name() == "artifact.captured")
         .collect();
     assert!(
         !asset_events.is_empty(),
         "should emit at least one ArtifactCaptured event"
     );
     let asset_event = asset_events[0];
-    assert!(!asset_event.properties["path"].as_str().unwrap().is_empty());
-    assert!(!asset_event.properties["mime"].as_str().unwrap().is_empty());
+    let asset_properties = asset_event.properties().unwrap();
+    assert!(!asset_properties["path"].as_str().unwrap().is_empty());
+    assert!(!asset_properties["mime"].as_str().unwrap().is_empty());
+    assert_eq!(asset_properties["content_md5"].as_str().unwrap().len(), 32);
     assert_eq!(
-        asset_event.properties["content_md5"]
-            .as_str()
-            .unwrap()
-            .len(),
-        32
-    );
-    assert_eq!(
-        asset_event.properties["content_sha256"]
-            .as_str()
-            .unwrap()
-            .len(),
+        asset_properties["content_sha256"].as_str().unwrap().len(),
         64
     );
-    assert!(asset_event.properties["bytes"].as_u64().unwrap() > 0);
-    assert_eq!(asset_event.properties["attempt"].as_u64().unwrap(), 1);
+    assert!(asset_properties["bytes"].as_u64().unwrap() > 0);
+    assert_eq!(asset_properties["attempt"].as_u64().unwrap(), 1);
 }
 
 /// Local sandbox: assets are still collected even when the handler fails.

@@ -392,27 +392,30 @@ mod tests {
             .await
             .unwrap();
         let events = events.lock().unwrap();
+        let started = events[0].properties().unwrap();
         assert_eq!(events[0].event_name(), "devcontainer.lifecycle.started");
-        assert_eq!(events[0].properties()["phase"], "on_create");
-        assert_eq!(events[0].properties()["command_count"], 1);
+        assert_eq!(started["phase"], "on_create");
+        assert_eq!(started["command_count"], 1);
 
         assert_eq!(
             events[1].event_name(),
             "devcontainer.lifecycle.command.started"
         );
-        assert_eq!(events[1].properties()["phase"], "on_create");
-        assert_eq!(events[1].properties()["index"], 0);
+        let command_started = events[1].properties().unwrap();
+        assert_eq!(command_started["phase"], "on_create");
+        assert_eq!(command_started["index"], 0);
 
         assert_eq!(
             events[2].event_name(),
             "devcontainer.lifecycle.command.completed"
         );
-        assert_eq!(events[2].properties()["phase"], "on_create");
-        assert_eq!(events[2].properties()["index"], 0);
-        assert_eq!(events[2].properties()["exit_code"], 0);
+        let command_completed = events[2].properties().unwrap();
+        assert_eq!(command_completed["phase"], "on_create");
+        assert_eq!(command_completed["index"], 0);
+        assert_eq!(command_completed["exit_code"], 0);
 
         assert_eq!(events[3].event_name(), "devcontainer.lifecycle.completed");
-        assert_eq!(events[3].properties()["phase"], "on_create");
+        assert_eq!(events[3].properties().unwrap()["phase"], "on_create");
     }
 
     #[tokio::test]
@@ -431,8 +434,9 @@ mod tests {
         let events = events.lock().unwrap();
         assert!(events.iter().any(|event| {
             event.event_name() == "devcontainer.lifecycle.failed"
-                && event.properties()["phase"] == "on_create"
-                && event.properties()["exit_code"] == 1
+                && event.properties().is_ok_and(|properties| {
+                    properties["phase"] == "on_create" && properties["exit_code"] == 1
+                })
         }));
     }
 
