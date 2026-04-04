@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Graph, RunId, Settings, StatusReason};
+use crate::{Graph, Settings, StatusReason};
 
 use super::{RunNoticeLevel, TokenUsage};
 
@@ -92,19 +92,4 @@ pub struct RunNoticeProps {
     pub level: RunNoticeLevel,
     pub code: String,
     pub message: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct RunEventHeader {
-    pub id: String,
-    pub ts: chrono::DateTime<chrono::Utc>,
-    pub run_id: RunId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub node_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub node_label: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_session_id: Option<String>,
 }

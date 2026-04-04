@@ -439,11 +439,7 @@ pub(super) fn from_run_event(stored: &RunEvent) -> Option<ProgressEvent> {
             duration_ms: props.duration_ms,
         }),
         EventBody::RunNotice(props) => Some(ProgressEvent::RunNotice {
-            level: match props.level {
-                fabro_types::RunNoticeLevel::Info => RunNoticeLevel::Info,
-                fabro_types::RunNoticeLevel::Warn => RunNoticeLevel::Warn,
-                fabro_types::RunNoticeLevel::Error => RunNoticeLevel::Error,
-            },
+            level: props.level,
             code: props.code.clone(),
             message: props.message.clone(),
         }),

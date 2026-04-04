@@ -95,7 +95,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         // Reset run_start for duration measurement
         *self.run_start.lock().unwrap() = Instant::now();
 
-        // Emit WorkflowRunStarted
+        // Emit RunStarted
         self.emitter.emit(&Event::WorkflowRunStarted {
             name: self.graph_name.clone(),
             run_id: self.run_id,

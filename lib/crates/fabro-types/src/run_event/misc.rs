@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::TokenUsage;
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParallelStartedProps {
     pub visit: u32,
@@ -233,27 +231,4 @@ pub struct RetroCompletedProps {
 pub struct RetroFailedProps {
     pub error: String,
     pub duration_ms: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AssistantUsageProps {
-    pub model: String,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub speed: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cost: Option<f64>,
-}
-
-impl From<TokenUsage> for AssistantUsageProps {
-    fn from(value: TokenUsage) -> Self {
-        Self {
-            model: String::new(),
-            input_tokens: u64::try_from(value.input_tokens).unwrap_or_default(),
-            output_tokens: u64::try_from(value.output_tokens).unwrap_or_default(),
-            speed: value.speed,
-            cost: None,
-        }
-    }
 }
