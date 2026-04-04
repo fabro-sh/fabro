@@ -464,6 +464,13 @@ fn attach_json_errors_without_prompting_for_human_input() {
         "ts": "[TIMESTAMP]"
       },
       {
+        "event": "run.running",
+        "id": "[EVENT_ID]",
+        "properties": {},
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
+      },
+      {
         "event": "sandbox.initialized",
         "id": "[EVENT_ID]",
         "properties": {
@@ -480,13 +487,6 @@ fn attach_json_errors_without_prompting_for_human_input() {
           "goal": "Wait for approval",
           "name": "HumanGate"
         },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "run.running",
-        "id": "[EVENT_ID]",
-        "properties": {},
         "run_id": "[ULID]",
         "ts": "[TIMESTAMP]"
       },

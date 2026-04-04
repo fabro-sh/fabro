@@ -164,7 +164,7 @@ mod tests {
         ))
     }
 
-    fn sample_run_record(run_id: RunId, created_at: DateTime<Utc>) -> RunRecord {
+    fn sample_run_record(run_id: RunId, _created_at: DateTime<Utc>) -> RunRecord {
         let mut graph = Graph::new("night-sky");
         graph.attrs.insert(
             "goal".to_string(),
@@ -172,7 +172,6 @@ mod tests {
         );
         RunRecord {
             run_id,
-            created_at,
             settings: Settings::default(),
             graph,
             workflow_slug: Some("night-sky".to_string()),
@@ -284,7 +283,7 @@ mod tests {
         let store = test_store();
         let created_at = dt("2026-03-27T12:00:00Z");
         let run_id = test_run_id();
-        let run = store.create_run(&run_id, created_at, None).await.unwrap();
+        let run = store.create_run(&run_id).await.unwrap();
         let run_record = sample_run_record(run_id, created_at);
         let start_record = sample_start_record(run_id, created_at);
         let status_record = sample_status();
@@ -632,7 +631,7 @@ mod tests {
         let store = test_store();
         let created_at = dt("2026-03-27T12:00:00Z");
         let run_id = test_run_id();
-        let run = store.create_run(&run_id, created_at, None).await.unwrap();
+        let run = store.create_run(&run_id).await.unwrap();
         let run_record = sample_run_record(run_id, created_at);
         append_workflow_event(
             &run,

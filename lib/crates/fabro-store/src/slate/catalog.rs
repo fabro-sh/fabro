@@ -1,88 +1,76 @@
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
 use object_store::ObjectStore;
 use object_store::path::Path;
-use serde::{Deserialize, Serialize};
 
-use crate::{CatalogRecord, ListRunsQuery, Result};
+use crate::{ListRunsQuery, Result};
 use fabro_types::RunId;
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct StartIndexRecord {
-    run_id: RunId,
-}
 
 pub(crate) async fn write_catalog(
     store: Arc<dyn ObjectStore>,
     base_prefix: &str,
     run_id: &RunId,
-    created_at: DateTime<Utc>,
-    db_prefix: &str,
-    run_dir: Option<&str>,
-) -> Result<CatalogRecord> {
-    let record = CatalogRecord {
-        run_id: *run_id,
-        created_at,
-        db_prefix: db_prefix.to_string(),
-        run_dir: run_dir.map(ToOwned::to_owned),
-    };
-    let bytes = serde_json::to_vec(&record)?;
+) -> Result<()> {
     store
-        .put(&by_id_path(base_prefix, run_id), bytes.clone().into())
+        .put(&by_id_path(base_prefix, run_id), bytes::Bytes::new().into())
         .await?;
     store
         .put(
-            &by_start_path(base_prefix, created_at, run_id),
-            serde_json::to_vec(&StartIndexRecord { run_id: *run_id })?.into(),
+            &by_start_path(base_prefix, run_id),
+            bytes::Bytes::new().into(),
         )
         .await?;
-    Ok(record)
+    Ok(())
 }
 
 pub(crate) async fn read_locator(
     store: Arc<dyn ObjectStore>,
     base_prefix: &str,
     run_id: &RunId,
-) -> Result<Option<CatalogRecord>> {
-    read_catalog_path(store, by_id_path(base_prefix, run_id)).await
+) -> Result<bool> {
+    match store.head(&by_id_path(base_prefix, run_id)).await {
+        Ok(_) => Ok(true),
+        Err(object_store::Error::NotFound { .. }) => Ok(false),
+        Err(err) => Err(err.into()),
+    }
 }
 
-pub(crate) async fn list_catalogs(
+pub(crate) async fn list_run_ids(
     store: Arc<dyn ObjectStore>,
     base_prefix: &str,
     query: &ListRunsQuery,
-) -> Result<Vec<CatalogRecord>> {
+) -> Result<Vec<RunId>> {
     let prefix = Path::from(format!("{base_prefix}by-start"));
     let metas = store.list(Some(&prefix)).try_collect::<Vec<_>>().await?;
-    let mut records = Vec::new();
+    let mut run_ids = Vec::new();
     for meta in metas {
-        let Some(index) = read_start_index_path(store.clone(), meta.location).await? else {
+        let Some(run_id) = parse_run_id_from_path(&meta.location) else {
             continue;
         };
-        let Some(record) = read_locator(store.clone(), base_prefix, &index.run_id).await? else {
+        if !read_locator(store.clone(), base_prefix, &run_id).await? {
             continue;
-        };
+        }
+        let created_at = run_id.created_at();
         if let Some(start) = query.start {
-            if record.created_at < start {
+            if created_at < start {
                 continue;
             }
         }
         if let Some(end) = query.end {
-            if record.created_at > end {
+            if created_at > end {
                 continue;
             }
         }
-        records.push(record);
+        run_ids.push(run_id);
     }
-    Ok(records)
+    Ok(run_ids)
 }
 
-pub(crate) fn db_prefix(base_prefix: &str, created_at: DateTime<Utc>, run_id: &RunId) -> String {
+pub(crate) fn db_prefix(base_prefix: &str, run_id: &RunId) -> String {
     format!(
         "{base_prefix}db/{}/{run_id}/",
-        created_at.format("%Y-%m-%d-%H-%M-%S-%3f")
+        run_id.created_at().format("%Y-%m-%d-%H-%M-%S-%3f")
     )
 }
 
@@ -90,44 +78,23 @@ pub(crate) fn by_id_path(base_prefix: &str, run_id: &RunId) -> Path {
     Path::from(format!("{base_prefix}by-id/{run_id}.json"))
 }
 
-pub(crate) fn by_start_path(base_prefix: &str, created_at: DateTime<Utc>, run_id: &RunId) -> Path {
+pub(crate) fn by_start_path(base_prefix: &str, run_id: &RunId) -> Path {
     Path::from(format!(
         "{base_prefix}by-start/{}/{run_id}.json",
-        created_at.format("%Y-%m-%d-%H-%M")
+        run_id.created_at().format("%Y-%m-%d-%H-%M")
     ))
 }
 
-pub(crate) async fn read_catalog_path(
-    store: Arc<dyn ObjectStore>,
-    path: Path,
-) -> Result<Option<CatalogRecord>> {
-    match store.get(&path).await {
-        Ok(result) => Ok(Some(serde_json::from_slice(&result.bytes().await?)?)),
-        Err(object_store::Error::NotFound { .. }) => Ok(None),
-        Err(err) => Err(err.into()),
-    }
-}
-
-#[cfg(test)]
-fn by_start_record(run_id: &RunId) -> StartIndexRecord {
-    StartIndexRecord { run_id: *run_id }
-}
-
-async fn read_start_index_path(
-    store: Arc<dyn ObjectStore>,
-    path: Path,
-) -> Result<Option<StartIndexRecord>> {
-    match store.get(&path).await {
-        Ok(result) => Ok(Some(serde_json::from_slice(&result.bytes().await?)?)),
-        Err(object_store::Error::NotFound { .. }) => Ok(None),
-        Err(err) => Err(err.into()),
-    }
+pub(crate) fn parse_run_id_from_path(path: &Path) -> Option<RunId> {
+    let filename = path.filename()?;
+    let run_id = filename.strip_suffix(".json").unwrap_or(filename);
+    run_id.parse().ok()
 }
 
 #[cfg(test)]
 pub(super) mod test_support {
     use super::*;
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashSet;
 
     pub(crate) async fn repair_catalog(
         store: Arc<dyn ObjectStore>,
@@ -140,22 +107,17 @@ pub(super) mod test_support {
             .list(Some(&by_id_prefix))
             .try_collect::<Vec<_>>()
             .await?;
-        let mut canonical = HashMap::new();
+        let mut canonical = HashSet::new();
         for meta in by_id_metas {
-            if let Some(record) = read_catalog_path(store.clone(), meta.location).await? {
-                canonical.insert(record.run_id, record);
+            if let Some(run_id) = parse_run_id_from_path(&meta.location) {
+                canonical.insert(run_id);
             }
         }
 
-        for record in canonical.values() {
-            let path = by_start_path(base_prefix, record.created_at, &record.run_id);
+        for run_id in &canonical {
+            let path = by_start_path(base_prefix, run_id);
             if !object_exists(store.clone(), &path).await? {
-                store
-                    .put(
-                        &path,
-                        serde_json::to_vec(&by_start_record(&record.run_id))?.into(),
-                    )
-                    .await?;
+                store.put(&path, bytes::Bytes::new().into()).await?;
             }
         }
 
@@ -166,29 +128,28 @@ pub(super) mod test_support {
         let mut seen = HashSet::new();
         for meta in by_start_metas {
             let location = meta.location.clone();
-            let Some(index) = read_start_index_path(store.clone(), location.clone()).await? else {
+            let Some(run_id) = parse_run_id_from_path(&location) else {
                 delete_if_exists(store.clone(), &location).await?;
                 continue;
             };
-            let expected = canonical.get(&index.run_id).map(|canonical_record| {
-                by_start_path(base_prefix, canonical_record.created_at, &index.run_id)
-            });
-            match expected {
-                Some(expected) if expected == location => {
-                    seen.insert(index.run_id);
-                }
-                _ => {
-                    delete_if_exists(store.clone(), &location).await?;
-                }
+            if !canonical.contains(&run_id) {
+                delete_if_exists(store.clone(), &location).await?;
+                continue;
+            }
+            let expected = by_start_path(base_prefix, &run_id);
+            if expected == location {
+                seen.insert(run_id);
+            } else {
+                delete_if_exists(store.clone(), &location).await?;
             }
         }
 
-        for record in canonical.values() {
-            if !seen.contains(&record.run_id) {
+        for run_id in &canonical {
+            if !seen.contains(run_id) {
                 store
                     .put(
-                        &by_start_path(base_prefix, record.created_at, &record.run_id),
-                        serde_json::to_vec(&by_start_record(&record.run_id))?.into(),
+                        &by_start_path(base_prefix, run_id),
+                        bytes::Bytes::new().into(),
                     )
                     .await?;
             }

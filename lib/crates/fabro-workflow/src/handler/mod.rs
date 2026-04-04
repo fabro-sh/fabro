@@ -95,7 +95,7 @@ impl EngineServices {
                     .expect("test runtime should initialize")
                     .block_on(async {
                         store
-                            .create_run(&fabro_types::RunId::new(), chrono::Utc::now(), None)
+                            .create_run(&fabro_types::RunId::new())
                             .await
                             .expect("slate-backed test run store should initialize")
                     })

@@ -364,14 +364,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
         std::fs::create_dir_all(&run_dir).unwrap();
-        let inner_store = test_store()
-            .create_run(
-                &test_run_id(),
-                Utc::now(),
-                Some(run_dir.to_string_lossy().as_ref()),
-            )
-            .await
-            .unwrap();
+        let inner_store = test_store().create_run(&test_run_id()).await.unwrap();
         let run_store = inner_store;
         let emitter = Arc::new(EventEmitter::new(test_run_id()));
         let store_logger = StoreProgressLogger::new(run_store.clone());

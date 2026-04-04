@@ -117,7 +117,7 @@ fn asset_cp_tree_preserves_structure() {
     success: true
     exit_code: 0
     ----- stdout -----
-    Copied 8 asset(s) to [TEMP_DIR]/asset-tree
+    Copied 6 asset(s) to [TEMP_DIR]/asset-tree
     ----- stderr -----
     ");
     insta::assert_snapshot!(

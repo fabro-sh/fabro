@@ -132,7 +132,6 @@ fn persisted_workflow(graph: Graph, source: String, run_dir: &Path, run_id: RunI
         run_dir.to_path_buf(),
         RunRecord {
             run_id,
-            created_at: Utc::now(),
             settings: Settings::default(),
             graph,
             workflow_slug: Some("test".to_string()),
@@ -163,10 +162,7 @@ async fn test_run_store(run_id: &RunId) -> fabro_store::SlateRunStore {
         "",
         Duration::from_millis(1),
     ));
-    store
-        .create_run(run_id, chrono::Utc::now(), None)
-        .await
-        .unwrap()
+    store.create_run(run_id).await.unwrap()
 }
 
 async fn execute_test_run(run_dir: &Path, graph: Graph, run_id: &str) -> Executed {

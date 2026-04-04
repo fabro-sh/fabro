@@ -85,16 +85,14 @@ fn fork_from_entry(
     let run_record_bytes =
         run_record_bytes.ok_or_else(|| anyhow::anyhow!("source run has no run.json"))?;
 
-    let now = chrono::Utc::now();
-
     let mut run_record: RunRecord =
         serde_json::from_slice(&run_record_bytes).context("failed to parse source run.json")?;
     run_record.run_id = new_run_id;
-    run_record.created_at = now;
     let new_run_record_bytes =
         serde_json::to_vec_pretty(&run_record).context("failed to serialize new run.json")?;
 
     let new_start_record_bytes = if start_record_bytes.is_some() {
+        let now = new_run_id.created_at();
         let start_record = StartRecord {
             run_id: new_run_id,
             start_time: now,

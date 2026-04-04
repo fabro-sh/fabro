@@ -217,18 +217,10 @@ mod tests {
         checkpoint: &Checkpoint,
     ) -> fabro_store::SlateRunStore {
         let created_at = Utc::now();
-        let inner = test_store()
-            .create_run(
-                &test_run_id(),
-                created_at,
-                Some(run_dir.to_string_lossy().as_ref()),
-            )
-            .await
-            .unwrap();
+        let inner = test_store().create_run(&test_run_id()).await.unwrap();
         let run_store = inner;
         let run_record = RunRecord {
             run_id: test_run_id(),
-            created_at,
             settings: Settings::default(),
             graph: Graph::new("test"),
             workflow_slug: None,
