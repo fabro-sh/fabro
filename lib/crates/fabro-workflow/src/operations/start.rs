@@ -15,7 +15,7 @@ use fabro_types::{RunId, Settings};
 use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::{
-    Event, EventBody, EventEmitter, RunNoticeLevel, StoreProgressLogger, append_event,
+    Emitter, Event, EventBody, RunNoticeLevel, StoreProgressLogger, append_event,
     event_payload_from_redacted_json, redacted_event_json, to_run_event,
 };
 use crate::git::MetadataStore;
@@ -37,7 +37,7 @@ use tokio::runtime::Handle;
 
 struct RunSession {
     cancel_token: Option<Arc<AtomicBool>>,
-    emitter: Arc<EventEmitter>,
+    emitter: Arc<Emitter>,
     sandbox: SandboxSpec,
     llm: LlmSpec,
     interviewer: Arc<dyn Interviewer>,
@@ -63,7 +63,7 @@ struct RunSession {
 pub struct StartServices {
     pub run_id: RunId,
     pub cancel_token: Option<Arc<AtomicBool>>,
-    pub emitter: Arc<EventEmitter>,
+    pub emitter: Arc<Emitter>,
     pub interviewer: Arc<dyn Interviewer>,
     pub run_store: SlateRunStore,
     pub github_app: Option<fabro_github::GitHubAppCredentials>,
@@ -811,7 +811,7 @@ mod tests {
 
     use super::*;
     use crate::context::Context;
-    use crate::event::EventEmitter;
+    use crate::event::Emitter;
     use crate::handler::HandlerRegistry;
     use crate::handler::exit::ExitHandler;
     use crate::handler::start::StartHandler;
@@ -871,7 +871,7 @@ mod tests {
     async fn test_start_services(
         store: &SlateStore,
         _run_dir: &Path,
-        emitter: Arc<EventEmitter>,
+        emitter: Arc<Emitter>,
         registry: Arc<HandlerRegistry>,
     ) -> StartServices {
         StartServices {
@@ -890,7 +890,7 @@ mod tests {
     async fn start_captures_checkpoint_git_sha_in_conclusion() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
-        let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
+        let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
         let injected = Arc::new(AtomicBool::new(false));
 
@@ -944,7 +944,7 @@ mod tests {
     async fn start_loads_persisted_from_run_dir() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
-        let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
+        let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
         let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &run_dir).await;
@@ -965,7 +965,7 @@ mod tests {
     async fn start_invokes_on_node_callback_before_execution() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
-        let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
+        let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
         let visited = Arc::new(Mutex::new(Vec::new()));
 
@@ -994,7 +994,7 @@ mod tests {
     async fn start_errors_when_checkpoint_exists() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
-        let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
+        let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
         let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &run_dir).await;
@@ -1063,7 +1063,7 @@ mod tests {
     async fn resume_errors_when_checkpoint_missing() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
-        let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
+        let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
         let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &run_dir).await;
@@ -1086,7 +1086,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = temp.path().join("run");
         std::fs::create_dir_all(&run_dir).unwrap();
-        let emitter = Arc::new(EventEmitter::new(fixtures::RUN_1));
+        let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
         let registry = Arc::new(test_registry());
 
         let (_persisted, store) = persisted_workflow(MINIMAL_DOT, &run_dir).await;

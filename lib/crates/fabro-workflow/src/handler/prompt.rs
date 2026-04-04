@@ -202,7 +202,7 @@ mod tests {
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         let services = EngineServices {
-            emitter: Arc::new(crate::event::EventEmitter::new(fixtures::RUN_1)),
+            emitter: Arc::new(crate::event::Emitter::new(fixtures::RUN_1)),
             run_store: run_store.clone(),
             ..EngineServices::test_default()
         };
@@ -260,7 +260,7 @@ mod tests {
                 _prompt: &str,
                 _context: &Context,
                 _thread_id: Option<&str>,
-                _emitter: &Arc<crate::event::EventEmitter>,
+                _emitter: &Arc<crate::event::Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
@@ -320,7 +320,7 @@ mod tests {
                 _prompt: &str,
                 _context: &Context,
                 _thread_id: Option<&str>,
-                _emitter: &Arc<crate::event::EventEmitter>,
+                _emitter: &Arc<crate::event::Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
@@ -377,7 +377,7 @@ mod tests {
             _prompt: &str,
             _context: &Context,
             _thread_id: Option<&str>,
-            _emitter: &Arc<crate::event::EventEmitter>,
+            _emitter: &Arc<crate::event::Emitter>,
             _sandbox: &Arc<dyn fabro_agent::Sandbox>,
             _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
         ) -> Result<CodergenResult, FabroError> {

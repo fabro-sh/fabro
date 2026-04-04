@@ -1,5 +1,5 @@
 use crate::config::{SessionOptions, ToolHookCallback, ToolHookDecision};
-use crate::event::EventEmitter;
+use crate::event::Emitter;
 use crate::sandbox::Sandbox;
 use crate::tool_registry::{RegisteredTool, ToolContext, ToolRegistry};
 use crate::truncation::truncate_tool_output;
@@ -21,7 +21,7 @@ pub async fn execute_tool_calls(
     tool_hooks: Option<&Arc<dyn ToolHookCallback>>,
     cancel_token: &CancellationToken,
     config: &SessionOptions,
-    emitter: &EventEmitter,
+    emitter: &Emitter,
     session_id: &str,
     tool_env: Option<&HashMap<String, String>>,
 ) -> Vec<ToolResult> {
@@ -62,7 +62,7 @@ async fn execute_tool_calls_sequential(
     tool_hooks: Option<&Arc<dyn ToolHookCallback>>,
     cancel_token: &CancellationToken,
     config: &SessionOptions,
-    emitter: &EventEmitter,
+    emitter: &Emitter,
     session_id: &str,
     tool_env: Option<&HashMap<String, String>>,
 ) -> Vec<ToolResult> {
@@ -98,7 +98,7 @@ async fn execute_tool_calls_parallel(
     tool_hooks: Option<&Arc<dyn ToolHookCallback>>,
     cancel_token: &CancellationToken,
     config: &SessionOptions,
-    emitter: &EventEmitter,
+    emitter: &Emitter,
     session_id: &str,
     tool_env: Option<&HashMap<String, String>>,
 ) -> Vec<ToolResult> {
@@ -145,7 +145,7 @@ pub async fn execute_and_emit_one_tool(
     tool_hooks: Option<&Arc<dyn ToolHookCallback>>,
     cancel_token: CancellationToken,
     config: &SessionOptions,
-    emitter: &EventEmitter,
+    emitter: &Emitter,
     session_id: &str,
     tool_env: Option<&HashMap<String, String>>,
 ) -> ToolResult {
@@ -172,7 +172,7 @@ async fn execute_and_emit_one_tool_with_lookup(
     tool_hooks: Option<&Arc<dyn ToolHookCallback>>,
     cancel_token: CancellationToken,
     config: &SessionOptions,
-    emitter: &EventEmitter,
+    emitter: &Emitter,
     session_id: &str,
     tool_env: Option<&HashMap<String, String>>,
 ) -> ToolResult {
@@ -345,7 +345,7 @@ pub fn validate_tool_args(
 mod tests {
     use super::*;
     use crate::config::{ToolHookCallback, ToolHookDecision};
-    use crate::event::EventEmitter;
+    use crate::event::Emitter;
     use crate::local_sandbox::LocalSandbox;
     use crate::read_before_write_sandbox::ReadBeforeWriteSandbox;
     use crate::test_support::MutableMockSandbox;
@@ -460,7 +460,7 @@ mod tests {
             }));
 
         let tc = make_tool_call("echo", "call_1", serde_json::json!({"text": "hello"}));
-        let emitter = EventEmitter::new();
+        let emitter = Emitter::new();
         let config = SessionOptions::default();
 
         let result = execute_and_emit_one_tool(
@@ -490,7 +490,7 @@ mod tests {
             Arc::new(MockHookCallback::new(ToolHookDecision::Proceed));
 
         let tc = make_tool_call("echo", "call_1", serde_json::json!({"text": "hello"}));
-        let emitter = EventEmitter::new();
+        let emitter = Emitter::new();
         let config = SessionOptions::default();
 
         let result = execute_and_emit_one_tool(
@@ -520,7 +520,7 @@ mod tests {
         let hooks: Arc<dyn ToolHookCallback> = mock.clone();
 
         let tc = make_tool_call("echo", "call_1", serde_json::json!({"text": "hello"}));
-        let emitter = EventEmitter::new();
+        let emitter = Emitter::new();
         let config = SessionOptions::default();
 
         execute_and_emit_one_tool(
@@ -555,7 +555,7 @@ mod tests {
         let hooks: Arc<dyn ToolHookCallback> = mock.clone();
 
         let tc = make_tool_call("fail_tool", "call_1", serde_json::json!({}));
-        let emitter = EventEmitter::new();
+        let emitter = Emitter::new();
         let config = SessionOptions::default();
 
         execute_and_emit_one_tool(
@@ -587,7 +587,7 @@ mod tests {
         registry.register(make_echo_tool());
 
         let tc = make_tool_call("echo", "call_1", serde_json::json!({"text": "hello"}));
-        let emitter = EventEmitter::new();
+        let emitter = Emitter::new();
         let config = SessionOptions::default();
 
         let result = execute_and_emit_one_tool(
@@ -627,7 +627,7 @@ mod tests {
             "call_1",
             serde_json::json!({"file_path": "a.ts", "content": "new"}),
         );
-        let emitter = EventEmitter::new();
+        let emitter = Emitter::new();
         let config = SessionOptions::default();
 
         let result = execute_and_emit_one_tool(
@@ -654,7 +654,7 @@ mod tests {
         registry.register(make_write_file_tool());
 
         let sandbox = make_guarded_sandbox(HashMap::from([("a.ts".into(), "content".into())]));
-        let emitter = EventEmitter::new();
+        let emitter = Emitter::new();
         let config = SessionOptions::default();
 
         // First read the file
@@ -706,7 +706,7 @@ mod tests {
         registry.register(make_write_file_tool());
 
         let sandbox = make_guarded_sandbox(HashMap::from([("a.ts".into(), "content".into())]));
-        let emitter = EventEmitter::new();
+        let emitter = Emitter::new();
         let config = SessionOptions::default();
 
         // Grep matching a.ts
@@ -758,7 +758,7 @@ mod tests {
             "call_1",
             serde_json::json!({"file_path": "a.ts", "old_string": "content", "new_string": "updated"}),
         );
-        let emitter = EventEmitter::new();
+        let emitter = Emitter::new();
         let config = SessionOptions::default();
 
         let result = execute_and_emit_one_tool(
@@ -789,7 +789,7 @@ mod tests {
             "call_1",
             serde_json::json!({"file_path": "new.ts", "content": "hello"}),
         );
-        let emitter = EventEmitter::new();
+        let emitter = Emitter::new();
         let config = SessionOptions::default();
 
         let result = execute_and_emit_one_tool(

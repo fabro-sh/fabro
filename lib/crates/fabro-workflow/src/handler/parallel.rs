@@ -627,7 +627,7 @@ mod tests {
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         let services = EngineServices {
-            emitter: Arc::new(crate::event::EventEmitter::new(fixtures::RUN_1)),
+            emitter: Arc::new(crate::event::Emitter::new(fixtures::RUN_1)),
             run_store: run_store.clone(),
             ..EngineServices::test_default()
         };
@@ -679,7 +679,7 @@ mod tests {
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         let services = EngineServices {
-            emitter: Arc::new(crate::event::EventEmitter::new(fixtures::RUN_1)),
+            emitter: Arc::new(crate::event::Emitter::new(fixtures::RUN_1)),
             run_store: run_store.clone(),
             ..EngineServices::test_default()
         };

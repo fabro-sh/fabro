@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 
 use fabro_devcontainer::DevcontainerSpec;
 
-use crate::event::{Event, EventEmitter};
+use crate::event::{Emitter, Event};
 use fabro_agent::sandbox::Sandbox;
 use fabro_sandbox::daytona::{DaytonaSnapshotConfig, DockerfileSource};
 use futures::future::try_join_all;
@@ -32,7 +32,7 @@ pub fn devcontainer_to_snapshot_config(dc: &DevcontainerSpec) -> DaytonaSnapshot
 /// Follows the same pattern as setup commands in `run.rs`.
 pub async fn run_devcontainer_lifecycle(
     sandbox: &dyn Sandbox,
-    emitter: &EventEmitter,
+    emitter: &Emitter,
     phase: &str,
     commands: &[fabro_devcontainer::Command],
     timeout_ms: u64,
@@ -139,7 +139,7 @@ pub async fn run_devcontainer_lifecycle(
 
 async fn run_single_lifecycle_command(
     sandbox: &dyn Sandbox,
-    emitter: &EventEmitter,
+    emitter: &Emitter,
     phase: &str,
     command: &str,
     index: usize,
@@ -348,7 +348,7 @@ mod tests {
     #[tokio::test]
     async fn shell_command_executed() {
         let sandbox = TestSandbox::new();
-        let emitter = EventEmitter::default();
+        let emitter = Emitter::default();
         let commands = vec![fabro_devcontainer::Command::Shell("echo hi".to_string())];
         run_devcontainer_lifecycle(&sandbox, &emitter, "on_create", &commands, 300_000)
             .await
@@ -361,7 +361,7 @@ mod tests {
     #[tokio::test]
     async fn args_command_joins() {
         let sandbox = TestSandbox::new();
-        let emitter = EventEmitter::default();
+        let emitter = Emitter::default();
         let commands = vec![fabro_devcontainer::Command::Args(vec![
             "echo".to_string(),
             "hi".to_string(),
@@ -380,7 +380,7 @@ mod tests {
 
     #[tokio::test]
     async fn emits_started_and_completed_events() {
-        let emitter = EventEmitter::default();
+        let emitter = Emitter::default();
         let events = Arc::new(Mutex::new(Vec::<fabro_types::RunEvent>::new()));
         let events_clone = Arc::clone(&events);
         emitter.on_event(move |event| {
@@ -417,7 +417,7 @@ mod tests {
 
     #[tokio::test]
     async fn failed_command_emits_failed_and_returns_error() {
-        let emitter = EventEmitter::default();
+        let emitter = Emitter::default();
         let events = Arc::new(Mutex::new(Vec::<fabro_types::RunEvent>::new()));
         let events_clone = Arc::clone(&events);
         emitter.on_event(move |event| {
@@ -438,7 +438,7 @@ mod tests {
 
     #[tokio::test]
     async fn empty_commands_is_noop() {
-        let emitter = EventEmitter::default();
+        let emitter = Emitter::default();
         let events = Arc::new(Mutex::new(Vec::new()));
         let events_clone = Arc::clone(&events);
         emitter.on_event(move |event| {
@@ -454,7 +454,7 @@ mod tests {
     #[tokio::test]
     async fn parallel_commands_run() {
         let sandbox = TestSandbox::new();
-        let emitter = EventEmitter::default();
+        let emitter = Emitter::default();
         let mut map = HashMap::new();
         map.insert("install".to_string(), "npm install".to_string());
         map.insert("build".to_string(), "npm run build".to_string());

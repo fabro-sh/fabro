@@ -10,7 +10,7 @@ use tokio::time::sleep;
 use super::super::agent::{CodergenBackend, CodergenResult};
 use crate::context::Context;
 use crate::error::FabroError;
-use crate::event::{Event, EventEmitter};
+use crate::event::{Emitter, Event};
 use crate::outcome::StageUsage;
 use crate::outcome::compute_stage_cost;
 use crate::run_dir::visit_from_context;
@@ -67,7 +67,7 @@ async fn ensure_cli(
     cli: AgentCli,
     provider: Provider,
     sandbox: &Arc<dyn Sandbox>,
-    emitter: &Arc<EventEmitter>,
+    emitter: &Arc<Emitter>,
 ) -> Result<(), FabroError> {
     let start = std::time::Instant::now();
     let cli_name = cli.name();
@@ -463,7 +463,7 @@ impl CodergenBackend for AgentCliBackend {
         prompt: &str,
         _context: &Context,
         _thread_id: Option<&str>,
-        emitter: &Arc<EventEmitter>,
+        emitter: &Arc<Emitter>,
         sandbox: &Arc<dyn Sandbox>,
         _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
     ) -> Result<CodergenResult, FabroError> {
@@ -752,7 +752,7 @@ impl CodergenBackend for BackendRouter {
         prompt: &str,
         context: &Context,
         thread_id: Option<&str>,
-        emitter: &Arc<EventEmitter>,
+        emitter: &Arc<Emitter>,
         sandbox: &Arc<dyn Sandbox>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
     ) -> Result<CodergenResult, FabroError> {
@@ -944,7 +944,7 @@ mod tests {
             vec![ok_result()],
             Arc::clone(&commands),
         ));
-        let emitter = Arc::new(EventEmitter::default());
+        let emitter = Arc::new(Emitter::default());
 
         let result = ensure_cli(AgentCli::Claude, Provider::Anthropic, &sandbox, &emitter).await;
         assert!(result.is_ok());
@@ -965,7 +965,7 @@ mod tests {
             ],
             Arc::clone(&commands),
         ));
-        let emitter = Arc::new(EventEmitter::default());
+        let emitter = Arc::new(Emitter::default());
 
         let result = ensure_cli(AgentCli::Claude, Provider::Anthropic, &sandbox, &emitter).await;
         assert!(result.is_ok());
@@ -985,7 +985,7 @@ mod tests {
             ],
             Arc::clone(&commands),
         ));
-        let emitter = Arc::new(EventEmitter::default());
+        let emitter = Arc::new(Emitter::default());
 
         let result = ensure_cli(AgentCli::Claude, Provider::Anthropic, &sandbox, &emitter).await;
         assert!(result.is_err());
@@ -1190,7 +1190,7 @@ mod tests {
             _prompt: &str,
             _context: &Context,
             _thread_id: Option<&str>,
-            _emitter: &Arc<EventEmitter>,
+            _emitter: &Arc<Emitter>,
             _sandbox: &Arc<dyn Sandbox>,
             _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
         ) -> Result<CodergenResult, FabroError> {

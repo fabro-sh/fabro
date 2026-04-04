@@ -19,7 +19,7 @@ use object_store::memory::InMemory;
 use super::*;
 use crate::context::{self, Context};
 use crate::error::FabroError;
-use crate::event::{EventEmitter, StoreProgressLogger};
+use crate::event::{Emitter, StoreProgressLogger};
 use crate::handler::start::StartHandler;
 use crate::handler::{Handler as HandlerTrait, HandlerRegistry};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
@@ -76,11 +76,11 @@ fn test_run_id(label: &str) -> RunId {
     }
 }
 
-fn test_emitter(label: &str) -> EventEmitter {
-    EventEmitter::new(test_run_id(label))
+fn test_emitter(label: &str) -> Emitter {
+    Emitter::new(test_run_id(label))
 }
 
-fn test_emitter_arc(label: &str) -> Arc<EventEmitter> {
+fn test_emitter_arc(label: &str) -> Arc<Emitter> {
     Arc::new(test_emitter(label))
 }
 
@@ -290,7 +290,7 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
 
 async fn run_with_lifecycle(
     registry: HandlerRegistry,
-    emitter: Arc<EventEmitter>,
+    emitter: Arc<Emitter>,
     sandbox: Arc<dyn Sandbox>,
     graph: &Graph,
     run_options: RunOptions,

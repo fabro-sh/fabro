@@ -13,7 +13,7 @@ use fabro_core::lifecycle::RunLifecycle;
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
 
-use crate::event::{Event, EventEmitter, RunNoticeLevel};
+use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::git::MetadataStore;
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
@@ -63,7 +63,7 @@ pub(crate) struct GitCheckpointResult {
 /// Sub-lifecycle responsible for git operations (checkpoint commits, pushes, diffs).
 pub(crate) struct GitLifecycle {
     pub sandbox: Arc<dyn fabro_sandbox::Sandbox>,
-    pub emitter: Arc<EventEmitter>,
+    pub emitter: Arc<Emitter>,
     pub run_dir: PathBuf,
     pub run_id: RunId,
     pub run_store: SlateRunStore,

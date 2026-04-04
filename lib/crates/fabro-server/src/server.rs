@@ -47,7 +47,7 @@ use crate::static_files;
 use crate::web_auth;
 use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
 use fabro_workflow::context::Context;
-use fabro_workflow::event::EventEmitter;
+use fabro_workflow::event::Emitter;
 use fabro_workflow::operations::{self, CreateRunInput, WorkflowInput};
 use fabro_workflow::pipeline::Persisted;
 use fabro_workflow::records::Checkpoint;
@@ -650,7 +650,7 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
     // Create interviewer and event plumbing (this is the "provisioning" phase)
     let interviewer = Arc::new(WebInterviewer::new());
     let context = Context::new();
-    let emitter = EventEmitter::new(run_id);
+    let emitter = Emitter::new(run_id);
     if let Some(tx_clone) = event_tx {
         emitter.on_event(move |event| {
             let _ = tx_clone.send(event.clone());

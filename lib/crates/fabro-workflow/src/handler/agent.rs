@@ -10,7 +10,7 @@ use fabro_types::RunId;
 use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
-use crate::event::{Event, EventEmitter};
+use crate::event::{Emitter, Event};
 use crate::outcome::{
     FailureCategory, FailureDetail, Outcome, OutcomeExt, StageStatus, StageUsage,
 };
@@ -42,7 +42,7 @@ pub trait CodergenBackend: Send + Sync {
         prompt: &str,
         context: &Context,
         thread_id: Option<&str>,
-        emitter: &Arc<EventEmitter>,
+        emitter: &Arc<Emitter>,
         sandbox: &Arc<dyn Sandbox>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
     ) -> Result<CodergenResult, FabroError>;
@@ -393,7 +393,7 @@ impl Handler for AgentHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::EventEmitter;
+    use crate::event::Emitter;
     use fabro_graphviz::graph::AttrValue;
     use fabro_store::{SlateRunStore, SlateStore, StageId};
     use fabro_types::fixtures;
@@ -422,7 +422,7 @@ mod tests {
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         let services = EngineServices {
-            emitter: Arc::new(crate::event::EventEmitter::new(fixtures::RUN_1)),
+            emitter: Arc::new(crate::event::Emitter::new(fixtures::RUN_1)),
             run_store: run_store.clone(),
             ..EngineServices::test_default()
         };
@@ -591,7 +591,7 @@ mod tests {
                 _prompt: &str,
                 _context: &Context,
                 _thread_id: Option<&str>,
-                _emitter: &Arc<EventEmitter>,
+                _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn fabro_agent::Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
@@ -647,7 +647,7 @@ mod tests {
                 _prompt: &str,
                 _context: &Context,
                 _thread_id: Option<&str>,
-                _emitter: &Arc<EventEmitter>,
+                _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn fabro_agent::Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
@@ -705,7 +705,7 @@ mod tests {
                 _prompt: &str,
                 context: &Context,
                 _thread_id: Option<&str>,
-                emitter: &Arc<EventEmitter>,
+                emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn fabro_agent::Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
@@ -812,7 +812,7 @@ mod tests {
                 _prompt: &str,
                 _context: &Context,
                 thread_id: Option<&str>,
-                _emitter: &Arc<EventEmitter>,
+                _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
@@ -864,7 +864,7 @@ mod tests {
                 _prompt: &str,
                 _context: &Context,
                 thread_id: Option<&str>,
-                _emitter: &Arc<EventEmitter>,
+                _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
@@ -911,7 +911,7 @@ mod tests {
                 _prompt: &str,
                 _context: &Context,
                 _thread_id: Option<&str>,
-                _emitter: &Arc<EventEmitter>,
+                _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
@@ -1054,7 +1054,7 @@ Some text in between.
                 _prompt: &str,
                 _context: &Context,
                 _thread_id: Option<&str>,
-                _emitter: &Arc<EventEmitter>,
+                _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
@@ -1092,7 +1092,7 @@ Some text in between.
                 prompt: &str,
                 _context: &Context,
                 _thread_id: Option<&str>,
-                _emitter: &Arc<EventEmitter>,
+                _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
@@ -1161,7 +1161,7 @@ Some text in between.
                 prompt: &str,
                 _context: &Context,
                 _thread_id: Option<&str>,
-                _emitter: &Arc<EventEmitter>,
+                _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {

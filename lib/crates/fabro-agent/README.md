@@ -44,7 +44,7 @@ User Input
 - **`Sandbox`** (trait) -- Abstracts filesystem, shell, grep, and glob operations. `LocalSandbox` provides a real implementation; the trait enables sandboxing and testing.
 - **`ToolRegistry`** -- Maps tool names to definitions and async executor functions. Tools are registered per-profile.
 - **`History`** -- Ordered list of `Turn` variants (`User`, `Assistant`, `ToolResults`, `System`, `Steering`) that converts to LLM messages.
-- **`EventEmitter`** -- Broadcasts `SessionEvent`s (tool calls, text, errors, warnings) over a `tokio::sync::broadcast` channel for UI or logging.
+- **`Emitter`** -- Broadcasts `SessionEvent`s (tool calls, text, errors, warnings) over a `tokio::sync::broadcast` channel for UI or logging.
 - **`SubAgentManager`** -- Spawns child `Session`s on background tasks for delegated work, with depth limits.
 - **`SessionConfig`** -- Tunable parameters: max turns, tool round limits, command timeouts, loop detection, output truncation limits, and user instructions.
 

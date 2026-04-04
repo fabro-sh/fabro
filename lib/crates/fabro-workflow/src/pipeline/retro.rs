@@ -175,7 +175,7 @@ mod tests {
 
     use super::*;
     use crate::context::Context;
-    use crate::event::EventEmitter;
+    use crate::event::Emitter;
     use crate::event::{Event, StoreProgressLogger, append_event};
     use crate::pipeline::types::Executed;
     use crate::records::{Checkpoint, CheckpointExt, RunRecord};
@@ -305,7 +305,7 @@ mod tests {
         let checkpoint = build_checkpoint();
         let run_store = test_run_store(&run_dir, &checkpoint).await;
 
-        let emitter = Arc::new(EventEmitter::new(test_run_id()));
+        let emitter = Arc::new(Emitter::new(test_run_id()));
         let store_logger = StoreProgressLogger::new(run_store.clone());
         store_logger.register(&emitter);
         let sandbox: Arc<dyn fabro_agent::Sandbox> = Arc::new(fabro_agent::LocalSandbox::new(
@@ -357,7 +357,7 @@ mod tests {
         std::fs::create_dir_all(&run_dir).unwrap();
         let checkpoint = build_checkpoint();
 
-        let emitter = Arc::new(EventEmitter::default());
+        let emitter = Arc::new(Emitter::default());
         let seen = Arc::new(Mutex::new(Vec::new()));
         emitter.on_event({
             let seen = Arc::clone(&seen);

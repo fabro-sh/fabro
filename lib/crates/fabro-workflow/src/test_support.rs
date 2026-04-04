@@ -9,7 +9,7 @@ use fabro_store::{RunProjection, SlateStore};
 use object_store::local::LocalFileSystem;
 
 use crate::error::{FabroError, Result};
-use crate::event::{Event, EventEmitter, StoreProgressLogger, append_event};
+use crate::event::{Emitter, Event, StoreProgressLogger, append_event};
 use crate::handler::HandlerRegistry;
 use crate::outcome::Outcome;
 use crate::pipeline;
@@ -28,8 +28,8 @@ struct InitializedState {
     store_logger: StoreProgressLogger,
 }
 
-fn bound_emitter(run_id: fabro_types::RunId, observer: &Arc<EventEmitter>) -> Arc<EventEmitter> {
-    let emitter = Arc::new(EventEmitter::new(run_id));
+fn bound_emitter(run_id: fabro_types::RunId, observer: &Arc<Emitter>) -> Arc<Emitter> {
+    let emitter = Arc::new(Emitter::new(run_id));
     let observer_clone = Arc::clone(observer);
     emitter.on_event(move |event| observer_clone.dispatch_run_event(event));
     emitter
@@ -37,7 +37,7 @@ fn bound_emitter(run_id: fabro_types::RunId, observer: &Arc<EventEmitter>) -> Ar
 
 async fn initialized(
     registry: HandlerRegistry,
-    emitter: Arc<EventEmitter>,
+    emitter: Arc<Emitter>,
     sandbox: Arc<dyn Sandbox>,
     graph: &GvGraph,
     run_options: &RunOptions,
@@ -122,7 +122,7 @@ async fn initialized(
 
 pub async fn run_graph(
     registry: HandlerRegistry,
-    emitter: Arc<EventEmitter>,
+    emitter: Arc<Emitter>,
     sandbox: Arc<dyn Sandbox>,
     graph: &GvGraph,
     run_options: &RunOptions,
@@ -146,7 +146,7 @@ pub async fn run_graph(
 
 pub async fn run_graph_with_state(
     registry: HandlerRegistry,
-    emitter: Arc<EventEmitter>,
+    emitter: Arc<Emitter>,
     sandbox: Arc<dyn Sandbox>,
     graph: &GvGraph,
     run_options: &RunOptions,
@@ -177,7 +177,7 @@ pub async fn run_graph_with_state(
 
 pub async fn run_graph_with_hooks(
     registry: HandlerRegistry,
-    emitter: Arc<EventEmitter>,
+    emitter: Arc<Emitter>,
     sandbox: Arc<dyn Sandbox>,
     graph: &GvGraph,
     run_options: &RunOptions,
@@ -203,7 +203,7 @@ pub async fn run_graph_with_hooks(
 
 pub async fn run_graph_with_hooks_and_state(
     registry: HandlerRegistry,
-    emitter: Arc<EventEmitter>,
+    emitter: Arc<Emitter>,
     sandbox: Arc<dyn Sandbox>,
     graph: &GvGraph,
     run_options: &RunOptions,
@@ -236,7 +236,7 @@ pub async fn run_graph_with_hooks_and_state(
 
 pub async fn run_graph_from_checkpoint(
     registry: HandlerRegistry,
-    emitter: Arc<EventEmitter>,
+    emitter: Arc<Emitter>,
     sandbox: Arc<dyn Sandbox>,
     graph: &GvGraph,
     run_options: &RunOptions,
@@ -261,7 +261,7 @@ pub async fn run_graph_from_checkpoint(
 
 pub async fn run_graph_from_checkpoint_with_state(
     registry: HandlerRegistry,
-    emitter: Arc<EventEmitter>,
+    emitter: Arc<Emitter>,
     sandbox: Arc<dyn Sandbox>,
     graph: &GvGraph,
     run_options: &RunOptions,
@@ -293,7 +293,7 @@ pub async fn run_graph_from_checkpoint_with_state(
 
 pub struct WorkflowRunner {
     registry: std::sync::Mutex<Option<HandlerRegistry>>,
-    emitter: Arc<EventEmitter>,
+    emitter: Arc<Emitter>,
     sandbox: Arc<dyn Sandbox>,
 }
 
@@ -301,7 +301,7 @@ impl WorkflowRunner {
     #[must_use]
     pub fn new(
         registry: HandlerRegistry,
-        emitter: Arc<EventEmitter>,
+        emitter: Arc<Emitter>,
         sandbox: Arc<dyn Sandbox>,
     ) -> Self {
         Self {

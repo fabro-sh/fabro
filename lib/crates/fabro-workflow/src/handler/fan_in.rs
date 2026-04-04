@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::context::Context;
 use crate::context::keys;
 use crate::error::FabroError;
-use crate::event::{Event, EventEmitter};
+use crate::event::{Emitter, Event};
 use crate::outcome::{Outcome, OutcomeExt};
 use crate::run_dir::visit_from_context;
 use crate::sandbox_git::git_merge_ff_only;
@@ -220,7 +220,7 @@ async fn llm_evaluate(
     context: &Context,
     _run_dir: &Path,
     node_id: &str,
-    emitter: &Arc<EventEmitter>,
+    emitter: &Arc<Emitter>,
     sandbox: &Arc<dyn Sandbox>,
 ) -> Result<Candidate, FabroError> {
     let results_text =
@@ -458,7 +458,7 @@ mod tests {
                 _prompt: &str,
                 _context: &Context,
                 _thread_id: Option<&str>,
-                _emitter: &Arc<EventEmitter>,
+                _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {

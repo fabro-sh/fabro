@@ -17,7 +17,7 @@ use super::circuit_breaker::CircuitBreakerLifecycle;
 use super::git::GitCheckpointResult;
 use crate::context;
 use crate::error::FabroError;
-use crate::event::{Event, EventEmitter};
+use crate::event::{Emitter, Event};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::{
@@ -34,7 +34,7 @@ type FailureSignatureSnapshot = (
 
 /// Sub-lifecycle responsible for emitting workflow run events.
 pub(crate) struct EventLifecycle {
-    pub emitter: Arc<EventEmitter>,
+    pub emitter: Arc<Emitter>,
     pub graph_name: String,
     pub run_id: RunId,
     pub run_start: Mutex<Instant>,

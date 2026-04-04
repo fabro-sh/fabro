@@ -19,7 +19,7 @@ use super::super::agent::{CodergenBackend, CodergenResult};
 use crate::context::keys::Fidelity;
 use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
-use crate::event::{Event, EventEmitter};
+use crate::event::{Emitter, Event};
 use crate::outcome::StageUsage;
 use crate::outcome::compute_stage_cost;
 use crate::run_dir::visit_from_context;
@@ -88,7 +88,7 @@ fn spawn_event_forwarder(
     session: &Session,
     node_id: String,
     visit: u32,
-    emitter: Arc<EventEmitter>,
+    emitter: Arc<Emitter>,
     file_tracking: Arc<Mutex<FileTracking>>,
 ) {
     let mut rx = session.subscribe();
@@ -410,7 +410,7 @@ impl CodergenBackend for AgentApiBackend {
         prompt: &str,
         context: &Context,
         thread_id: Option<&str>,
-        emitter: &Arc<EventEmitter>,
+        emitter: &Arc<Emitter>,
         sandbox: &Arc<dyn Sandbox>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
     ) -> Result<CodergenResult, FabroError> {

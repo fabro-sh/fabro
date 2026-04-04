@@ -2,7 +2,7 @@ use crate::agent_profile::AgentProfile;
 use crate::compaction::{check_context_usage, compact_context};
 use crate::config::SessionOptions;
 use crate::error::{AbortReason, AgentError};
-use crate::event::EventEmitter;
+use crate::event::Emitter;
 use crate::file_tracker::FileTracker;
 use crate::history::History;
 use crate::loop_detection::detect_loop;
@@ -39,7 +39,7 @@ pub struct Session {
     id: String,
     config: SessionOptions,
     history: History,
-    event_emitter: EventEmitter,
+    event_emitter: Emitter,
     state: SessionState,
     llm_client: Client,
     provider_profile: Arc<dyn AgentProfile>,
@@ -70,7 +70,7 @@ impl Session {
             id: uuid::Uuid::new_v4().to_string(),
             config,
             history: History::default(),
-            event_emitter: EventEmitter::new(),
+            event_emitter: Emitter::new(),
             state: SessionState::Idle,
             llm_client,
             provider_profile,

@@ -17,7 +17,7 @@ use fabro_validate::Diagnostic;
 
 use crate::context::Context;
 use crate::error::FabroError;
-use crate::event::EventEmitter;
+use crate::event::Emitter;
 use crate::handler::HandlerRegistry;
 use crate::outcome::Outcome;
 use crate::records::{Checkpoint, Conclusion, RunRecord};
@@ -229,7 +229,7 @@ pub struct InitOptions {
     pub run_id: RunId,
     pub run_store: SlateRunStore,
     pub dry_run: bool,
-    pub emitter: Arc<EventEmitter>,
+    pub emitter: Arc<Emitter>,
     pub sandbox: SandboxSpec,
     pub llm: LlmSpec,
     pub interviewer: Arc<dyn Interviewer>,
@@ -254,7 +254,7 @@ pub struct Initialized {
     pub run_store: SlateRunStore,
     pub(crate) checkpoint: Option<Checkpoint>,
     pub(crate) seed_context: Option<Context>,
-    pub emitter: Arc<EventEmitter>,
+    pub emitter: Arc<Emitter>,
     pub sandbox: Arc<dyn Sandbox>,
     pub registry: Arc<HandlerRegistry>,
     pub on_node: crate::OnNodeCallback,
@@ -274,7 +274,7 @@ pub struct Executed {
     pub run_options: RunOptions,
     pub run_store: SlateRunStore,
     pub hook_runner: Option<Arc<HookRunner>>,
-    pub emitter: Arc<EventEmitter>,
+    pub emitter: Arc<Emitter>,
     pub sandbox: Arc<dyn Sandbox>,
     pub duration_ms: u64,
     pub final_context: Context,
@@ -291,7 +291,7 @@ pub struct Retroed {
     pub run_options: RunOptions,
     pub run_store: SlateRunStore,
     pub hook_runner: Option<Arc<HookRunner>>,
-    pub emitter: Arc<EventEmitter>,
+    pub emitter: Arc<Emitter>,
     pub sandbox: Arc<dyn Sandbox>,
     pub duration_ms: u64,
     pub retro: Option<Retro>,
@@ -306,7 +306,7 @@ pub struct Concluded {
     pub pushed_branch: Option<String>,
     pub graph: Graph,
     pub run_options: RunOptions,
-    pub emitter: Arc<EventEmitter>,
+    pub emitter: Arc<Emitter>,
 }
 
 /// Output of the PULL_REQUEST phase.
@@ -333,7 +333,7 @@ pub struct RetroOptions {
     pub goal: String,
     pub run_dir: PathBuf,
     pub sandbox: Arc<dyn Sandbox>,
-    pub emitter: Option<Arc<EventEmitter>>,
+    pub emitter: Option<Arc<Emitter>>,
     pub failed: bool,
     pub run_duration_ms: u64,
     pub enabled: bool,

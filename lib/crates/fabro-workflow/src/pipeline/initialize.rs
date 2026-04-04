@@ -15,7 +15,7 @@ use shlex::try_quote;
 
 use crate::devcontainer_bridge::{devcontainer_to_snapshot_config, run_devcontainer_lifecycle};
 use crate::error::FabroError;
-use crate::event::{Event, EventEmitter, RunNoticeLevel};
+use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::git::{self, GitSyncStatus, MetadataStore};
 use crate::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
 use crate::handler::{HandlerRegistry, default_registry};
@@ -47,7 +47,7 @@ async fn run_hooks(
 }
 
 fn emit_run_notice(
-    emitter: &EventEmitter,
+    emitter: &Emitter,
     level: RunNoticeLevel,
     code: impl Into<String>,
     message: impl Into<String>,
@@ -230,7 +230,7 @@ async fn mint_github_token(
 async fn build_sandbox_env(
     spec: &SandboxEnvSpec,
     github_app: Option<&fabro_github::GitHubAppCredentials>,
-    emitter: &EventEmitter,
+    emitter: &Emitter,
 ) -> Result<HashMap<String, String>, FabroError> {
     let mut env = spec.devcontainer_env.clone();
     env.extend(spec.toml_env.clone());
@@ -754,7 +754,7 @@ mod tests {
         std::fs::create_dir_all(&run_dir).unwrap();
         let (graph, source) = simple_graph();
         let persisted = test_persisted(graph, source.clone(), &run_dir);
-        let emitter = Arc::new(crate::event::EventEmitter::new(test_run_id()));
+        let emitter = Arc::new(crate::event::Emitter::new(test_run_id()));
 
         let initialized = initialize(
             persisted,
@@ -822,7 +822,7 @@ mod tests {
         std::fs::create_dir_all(&run_dir).unwrap();
         let (graph, source) = simple_graph();
         let persisted = test_persisted(graph, source, &run_dir);
-        let emitter = Arc::new(crate::event::EventEmitter::new(test_run_id()));
+        let emitter = Arc::new(crate::event::Emitter::new(test_run_id()));
         let store = memory_store();
         let run_store = store.create_run(&test_run_id()).await.unwrap();
         let store_logger = StoreProgressLogger::new(run_store.clone());

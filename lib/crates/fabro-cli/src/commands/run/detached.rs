@@ -5,7 +5,7 @@ use anyhow::{Result, anyhow};
 use fabro_interview::FileInterviewer;
 use fabro_store::RuntimeState;
 use fabro_types::RunId;
-use fabro_workflow::event::EventEmitter;
+use fabro_workflow::event::Emitter;
 use fabro_workflow::operations::{StartServices, resume as resume_run, start as start_run};
 
 use crate::shared;
@@ -50,7 +50,7 @@ pub(crate) async fn execute(
     let services = StartServices {
         run_id: run_record.run_id,
         cancel_token: None,
-        emitter: Arc::new(EventEmitter::new(run_record.run_id)),
+        emitter: Arc::new(Emitter::new(run_record.run_id)),
         interviewer: Arc::new(FileInterviewer::new(
             runtime_state.interview_request_path(),
             runtime_state.interview_response_path(),

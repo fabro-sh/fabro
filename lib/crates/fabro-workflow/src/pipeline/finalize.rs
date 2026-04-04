@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::error::FabroError;
-use crate::event::{Event, EventEmitter, RunNoticeLevel};
+use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::git::MetadataStore;
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::records::{Checkpoint, Conclusion, StageSummary};
@@ -15,7 +15,7 @@ use fabro_store::SlateRunStore;
 use super::types::{Concluded, FinalizeOptions, Retroed};
 
 fn emit_run_notice(
-    emitter: &EventEmitter,
+    emitter: &Emitter,
     level: RunNoticeLevel,
     code: impl Into<String>,
     message: impl Into<String>,
@@ -365,7 +365,7 @@ mod tests {
         std::fs::create_dir_all(&run_dir).unwrap();
         let inner_store = test_store().create_run(&test_run_id()).await.unwrap();
         let run_store = inner_store;
-        let emitter = Arc::new(EventEmitter::new(test_run_id()));
+        let emitter = Arc::new(Emitter::new(test_run_id()));
         let store_logger = StoreProgressLogger::new(run_store.clone());
         store_logger.register(&emitter);
         let retroed = Retroed {

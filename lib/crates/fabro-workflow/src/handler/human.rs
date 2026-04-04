@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use crate::context::Context;
 use crate::context::keys;
 use crate::error::FabroError;
-use crate::event::{Event, EventEmitter};
+use crate::event::{Emitter, Event};
 use crate::millis_u64;
 use crate::outcome::{Outcome, OutcomeExt};
 use fabro_graphviz::graph::{Graph, Node};
@@ -68,7 +68,7 @@ fn parse_accelerator_key(label: &str) -> String {
 /// Blocks until a human selects an option derived from outgoing edges.
 pub struct HumanHandler {
     interviewer: Arc<dyn Interviewer>,
-    emitter: Option<Arc<EventEmitter>>,
+    emitter: Option<Arc<Emitter>>,
 }
 
 impl HumanHandler {
@@ -80,7 +80,7 @@ impl HumanHandler {
     }
 
     #[must_use]
-    pub fn with_emitter(mut self, emitter: Arc<EventEmitter>) -> Self {
+    pub fn with_emitter(mut self, emitter: Arc<Emitter>) -> Self {
         self.emitter = Some(emitter);
         self
     }

@@ -9,7 +9,7 @@ use fabro_llm::generate::{GenerateParams, generate};
 use fabro_util::text::strip_goal_decoration;
 
 use super::types::{Concluded, Finalized, PullRequestOptions};
-use crate::event::{Event, EventEmitter, RunNoticeLevel};
+use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::outcome::{StageStatus, format_cost as outcome_format_cost};
 use crate::records::{Conclusion, RunRecord};
 use fabro_retro::retro::Retro;
@@ -268,7 +268,7 @@ fn assemble_pr_body(
 }
 
 fn emit_run_notice(
-    emitter: &EventEmitter,
+    emitter: &Emitter,
     level: RunNoticeLevel,
     code: impl Into<String>,
     message: impl Into<String>,

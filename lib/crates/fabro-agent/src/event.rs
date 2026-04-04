@@ -3,11 +3,11 @@ use std::time::SystemTime;
 use tokio::sync::broadcast;
 
 #[derive(Clone)]
-pub struct EventEmitter {
+pub struct Emitter {
     sender: broadcast::Sender<SessionEvent>,
 }
 
-impl EventEmitter {
+impl Emitter {
     #[must_use]
     pub fn new() -> Self {
         let (sender, _) = broadcast::channel(1024);
@@ -36,7 +36,7 @@ impl EventEmitter {
     }
 }
 
-impl Default for EventEmitter {
+impl Default for Emitter {
     fn default() -> Self {
         Self::new()
     }
@@ -49,7 +49,7 @@ mod tests {
 
     #[tokio::test]
     async fn emit_and_receive_event() {
-        let emitter = EventEmitter::new();
+        let emitter = Emitter::new();
         let mut receiver = emitter.subscribe();
 
         emitter.emit(
@@ -74,7 +74,7 @@ mod tests {
 
     #[tokio::test]
     async fn emit_with_data() {
-        let emitter = EventEmitter::new();
+        let emitter = Emitter::new();
         let mut receiver = emitter.subscribe();
 
         emitter.emit(
@@ -93,7 +93,7 @@ mod tests {
 
     #[tokio::test]
     async fn multiple_subscribers() {
-        let emitter = EventEmitter::new();
+        let emitter = Emitter::new();
         let mut rx1 = emitter.subscribe();
         let mut rx2 = emitter.subscribe();
 
@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn emit_without_subscribers_does_not_panic() {
-        let emitter = EventEmitter::new();
+        let emitter = Emitter::new();
         emitter.emit(
             "sess-4".into(),
             AgentEvent::Error {
@@ -122,13 +122,13 @@ mod tests {
 
     #[test]
     fn default_creates_emitter() {
-        let emitter = EventEmitter::default();
+        let emitter = Emitter::default();
         let _rx = emitter.subscribe();
     }
 
     #[tokio::test]
     async fn forward_preserves_session_ids() {
-        let emitter = EventEmitter::new();
+        let emitter = Emitter::new();
         let mut receiver = emitter.subscribe();
 
         emitter.forward(SessionEvent {

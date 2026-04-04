@@ -12,7 +12,7 @@ use fabro_core::state::ExecutionState;
 
 use crate::artifact::{offload_large_values, sync_artifacts_to_env};
 use crate::artifact_snapshot::collect_artifacts;
-use crate::event::{Event, EventEmitter, RunNoticeLevel};
+use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::StageUsage;
@@ -28,7 +28,7 @@ pub(crate) struct ArtifactLifecycle {
     pub sandbox: Arc<dyn fabro_sandbox::Sandbox>,
     pub run_store: SlateRunStore,
     pub blob_cache_dir: PathBuf,
-    pub emitter: Arc<EventEmitter>,
+    pub emitter: Arc<Emitter>,
     pub artifacts_dir: PathBuf,
     pub artifact_globs: Vec<String>,
     pub captured_artifact_count: Arc<AtomicUsize>,
@@ -42,7 +42,7 @@ impl ArtifactLifecycle {
         sandbox: Arc<dyn fabro_sandbox::Sandbox>,
         run_store: SlateRunStore,
         blob_cache_dir: PathBuf,
-        emitter: Arc<EventEmitter>,
+        emitter: Arc<Emitter>,
         artifacts_dir: PathBuf,
         artifact_globs: Vec<String>,
         captured_artifact_count: Arc<AtomicUsize>,

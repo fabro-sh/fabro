@@ -2,7 +2,7 @@ use std::fmt::Write;
 
 use crate::agent_profile::AgentProfile;
 use crate::error::AgentError;
-use crate::event::EventEmitter;
+use crate::event::Emitter;
 use crate::file_tracker::FileTracker;
 use crate::history::History;
 use crate::truncation;
@@ -19,7 +19,7 @@ pub fn check_context_usage(
     history: &History,
     provider_profile: &dyn AgentProfile,
     threshold_percent: usize,
-    emitter: &EventEmitter,
+    emitter: &Emitter,
     session_id: &str,
 ) -> bool {
     let estimated_tokens = estimate_token_count(system_prompt, history);
@@ -57,7 +57,7 @@ pub async fn compact_context(
     system_prompt: &str,
     file_tracker: &FileTracker,
     preserve_count: usize,
-    emitter: &EventEmitter,
+    emitter: &Emitter,
     session_id: &str,
 ) -> Result<(), AgentError> {
     let estimated_tokens = estimate_token_count(system_prompt, history);
@@ -251,7 +251,7 @@ pub fn render_turns_for_summary(turns: &[Turn]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::EventEmitter;
+    use crate::event::Emitter;
     use crate::history::History;
     use crate::test_support::TestProfile;
     use crate::tool_registry::ToolRegistry;
@@ -331,7 +331,7 @@ mod tests {
     #[test]
     fn check_context_usage_below_threshold() {
         let history = History::default();
-        let emitter = EventEmitter::new();
+        let emitter = Emitter::new();
         let profile = TestProfile::new();
         // Empty history, huge context window => well below threshold
         let over = check_context_usage("short", &history, &profile, 80, &emitter, "sess");
@@ -346,7 +346,7 @@ mod tests {
             content: "x".repeat(1000),
             timestamp: SystemTime::now(),
         });
-        let emitter = EventEmitter::new();
+        let emitter = Emitter::new();
         let mut rx = emitter.subscribe();
         // TestProfile has context_window=200_000 by default; use a small one
         let profile = TestProfile::with_context_window(ToolRegistry::new(), 100);

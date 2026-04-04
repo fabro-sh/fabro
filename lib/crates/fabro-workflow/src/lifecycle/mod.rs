@@ -27,7 +27,7 @@ use fabro_core::state::ExecutionState;
 
 use crate::context;
 use crate::error::{FailureSignature, FailureSignatureExt};
-use crate::event::EventEmitter;
+use crate::event::Emitter;
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::{Outcome, StageUsage};
@@ -76,7 +76,7 @@ pub(crate) struct WorkflowLifecycle {
 impl WorkflowLifecycle {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        emitter: &Arc<EventEmitter>,
+        emitter: &Arc<Emitter>,
         hook_runner: Option<Arc<HookRunner>>,
         sandbox: &Arc<dyn Sandbox>,
         graph: Arc<GvGraph>,

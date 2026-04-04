@@ -28,7 +28,7 @@ use object_store::memory::InMemory;
 
 use crate::context::Context;
 use crate::error::FabroError;
-use crate::event::EventEmitter;
+use crate::event::Emitter;
 use crate::outcome::{Outcome, OutcomeExt};
 use crate::sandbox_git::GitState;
 use fabro_graphviz::graph::{Graph, Node, shape_to_handler_type};
@@ -38,7 +38,7 @@ use fabro_interview::Interviewer;
 /// Shared services available to all handlers during execution.
 pub struct EngineServices {
     pub registry: Arc<HandlerRegistry>,
-    pub emitter: Arc<EventEmitter>,
+    pub emitter: Arc<Emitter>,
     pub sandbox: Arc<dyn Sandbox>,
     pub run_store: SlateRunStore,
     /// Git state for the current run. Set via `set_git_state` at the start of
@@ -82,7 +82,7 @@ impl EngineServices {
         ));
         Self {
             registry: Arc::new(HandlerRegistry::new(Box::new(start::StartHandler))),
-            emitter: Arc::new(EventEmitter::default()),
+            emitter: Arc::new(Emitter::default()),
             sandbox: Arc::new(fabro_agent::LocalSandbox::new(
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             )),

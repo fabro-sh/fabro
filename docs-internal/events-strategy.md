@@ -9,7 +9,7 @@ Detached runs rely on this distinction. If something needs to be visible after r
 ## Architecture
 
 ```text
-Engine/Handler -> Event -> EventEmitter::emit()
+Engine/Handler -> Event -> Emitter::emit()
                                        |- trace(raw event)
                                        |- canonicalize -> RunEventEnvelope
                                        `- on_event(&RunEventEnvelope)
@@ -22,7 +22,7 @@ Engine/Handler -> Event -> EventEmitter::emit()
 The canonical envelope is built exactly once in `fabro-workflow/src/event.rs`.
 
 - `Event` remains the internal typed source of truth.
-- `EventEmitter` owns an immutable `run_id` and converts typed events into `RunEventEnvelope`.
+- `Emitter` owns an immutable `run_id` and converts typed events into `RunEventEnvelope`.
 - Every listener receives `&RunEventEnvelope`, not `&Event`.
 - Bypass paths that cannot go through the emitter must call `canonicalize_event()` once and reuse the same envelope for every sink.
 
@@ -100,7 +100,7 @@ Agent events now use explicit session links:
 
 ## Direct-Write Paths
 
-Most events flow through `EventEmitter::emit()`. The remaining direct-write paths must use:
+Most events flow through `Emitter::emit()`. The remaining direct-write paths must use:
 
 1. `canonicalize_event(run_id, event)`
 2. Serialize and redact once
@@ -132,7 +132,7 @@ Update `extract_envelope_fields()`:
 
 ### 5. Emit it
 
-Prefer `EventEmitter::emit(&Event::...)`.
+Prefer `Emitter::emit(&Event::...)`.
 
 Use `canonicalize_event()` only for true bypass paths.
 

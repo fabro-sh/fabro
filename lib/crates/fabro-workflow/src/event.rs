@@ -1489,7 +1489,7 @@ impl StoreProgressLogger {
         Self { tx }
     }
 
-    pub fn register(&self, emitter: &EventEmitter) {
+    pub fn register(&self, emitter: &Emitter) {
         let tx = self.tx.clone();
         emitter.on_event(
             move |event| match build_redacted_event_payload(event, &event.run_id) {
@@ -1532,17 +1532,17 @@ fn epoch_millis() -> i64 {
 type EventListener = Arc<dyn Fn(&RunEvent) + Send + Sync>;
 
 /// Callback-based event emitter for workflow run events.
-pub struct EventEmitter {
+pub struct Emitter {
     run_id: RunId,
     listeners: std::sync::Mutex<Vec<EventListener>>,
     /// Epoch milliseconds of the last `emit()` or `touch()` call. 0 until first event.
     last_event_at: AtomicI64,
 }
 
-impl std::fmt::Debug for EventEmitter {
+impl std::fmt::Debug for Emitter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let count = self.listeners.lock().map(|l| l.len()).unwrap_or(0);
-        f.debug_struct("EventEmitter")
+        f.debug_struct("Emitter")
             .field("run_id", &self.run_id)
             .field("listener_count", &count)
             .field("last_event_at", &self.last_event_at.load(Ordering::Relaxed))
@@ -1550,13 +1550,13 @@ impl std::fmt::Debug for EventEmitter {
     }
 }
 
-impl Default for EventEmitter {
+impl Default for Emitter {
     fn default() -> Self {
         Self::new(RunId::new())
     }
 }
 
-impl EventEmitter {
+impl Emitter {
     #[must_use]
     pub fn new(run_id: RunId) -> Self {
         Self {
@@ -1642,13 +1642,13 @@ mod tests {
 
     #[test]
     fn event_emitter_new_has_no_listeners() {
-        let emitter = EventEmitter::new(fixtures::RUN_1);
+        let emitter = Emitter::new(fixtures::RUN_1);
         assert_eq!(emitter.listeners.lock().unwrap().len(), 0);
     }
 
     #[test]
     fn event_emitter_calls_listener_with_envelope() {
-        let emitter = EventEmitter::new(fixtures::RUN_1);
+        let emitter = Emitter::new(fixtures::RUN_1);
         let received = Arc::new(Mutex::new(Vec::new()));
         let received_clone = Arc::clone(&received);
         emitter.on_event(move |event| {
@@ -1672,7 +1672,7 @@ mod tests {
 
     #[test]
     fn event_emitter_default() {
-        let emitter = EventEmitter::default();
+        let emitter = Emitter::default();
         assert_eq!(emitter.listeners.lock().unwrap().len(), 0);
     }
 

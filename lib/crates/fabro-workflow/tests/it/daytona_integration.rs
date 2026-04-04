@@ -26,7 +26,7 @@ use fabro_types::{RunId, Settings};
 use fabro_workflow::artifact::sync_artifacts_to_env;
 use fabro_workflow::context::Context;
 use fabro_workflow::error::FabroError;
-use fabro_workflow::event::EventEmitter;
+use fabro_workflow::event::Emitter;
 use fabro_workflow::handler::exit::ExitHandler;
 use fabro_workflow::handler::start::StartHandler;
 use fabro_workflow::handler::{Handler, HandlerRegistry};
@@ -468,7 +468,7 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
 
-    let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::default()), env.clone());
+    let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), env.clone());
     let run_options = RunOptions {
         settings: Settings::default(),
         run_dir: dir.path().to_path_buf(),
@@ -644,7 +644,7 @@ async fn daytona_git_checkpoint_remote_emits_events() {
 
     // Set up event collection
     let dir = tempfile::tempdir().unwrap();
-    let emitter = EventEmitter::default();
+    let emitter = Emitter::default();
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     {
         let events_clone = Arc::clone(&events);
@@ -818,7 +818,7 @@ async fn daytona_parallel_git_branching_e2e() {
     graph.edges.push(Edge::new("fan_in", "exit"));
 
     let run_tmp = tempfile::tempdir().unwrap();
-    let emitter = EventEmitter::default();
+    let emitter = Emitter::default();
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     {
         let events_clone = Arc::clone(&events);
@@ -1024,7 +1024,7 @@ async fn run_daytona_cli_test(provider: Provider, model: &str, install_command: 
     let backend = AgentCliBackend::new(model.to_string(), provider);
     let node = Node::new("daytona_cli_test");
     let context = Context::new();
-    let emitter = Arc::new(EventEmitter::default());
+    let emitter = Arc::new(Emitter::default());
 
     let result = backend
         .run(
@@ -1182,7 +1182,7 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
     registry.register("exit", Box::new(ExitHandler));
 
     let meta_branch = MetadataStore::branch_name(&run_id.to_string());
-    let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::default()), env.clone());
+    let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), env.clone());
     let run_options = RunOptions {
         settings: Settings::default(),
         run_dir: dir.path().to_path_buf(),
@@ -1287,7 +1287,7 @@ async fn daytona_asset_collection() {
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
 
-    let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::default()), env.clone());
+    let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), env.clone());
 
     let mut graph = Graph::new("DaytonaAssetTest");
     graph.attrs.insert(
@@ -1575,7 +1575,7 @@ async fn daytona_git_push_run_branch_to_origin() {
     registry.register("start", Box::new(StartHandler));
     registry.register("exit", Box::new(ExitHandler));
 
-    let engine = WorkflowRunner::new(registry, Arc::new(EventEmitter::default()), env.clone());
+    let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), env.clone());
     let run_options = RunOptions {
         settings: Settings::default(),
         run_dir: dir.path().to_path_buf(),
