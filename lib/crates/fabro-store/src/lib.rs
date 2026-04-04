@@ -10,7 +10,7 @@ mod slate;
 mod types;
 
 pub use error::{Result, StoreError};
-pub use fabro_types::StageId;
+pub use fabro_types::{RunBlobId, StageId};
 pub use run_state::{NodeState, RunProjection};
 pub use runtime::RuntimeState;
 pub use slate::{NodeAsset, SlateRunStore, SlateStore};

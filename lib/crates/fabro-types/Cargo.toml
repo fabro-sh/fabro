@@ -23,4 +23,6 @@ dirs.workspace = true
 fabro-macros = { path = "../fabro-macros" }
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 ulid.workspace = true
+uuid.workspace = true

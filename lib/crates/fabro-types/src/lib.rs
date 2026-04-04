@@ -10,6 +10,7 @@ pub mod outcome;
 pub mod pull_request;
 pub mod retro;
 pub mod run;
+pub mod run_blob_id;
 pub mod run_id;
 pub mod sandbox_record;
 pub mod settings;
@@ -30,6 +31,7 @@ pub use retro::{
     OpenItemKind, Retro, RetroNarrative, SmoothnessRating, StageRetro,
 };
 pub use run::RunRecord;
+pub use run_blob_id::RunBlobId;
 pub use run_id::RunId;
 pub use run_id::fixtures;
 pub use sandbox_record::SandboxRecord;

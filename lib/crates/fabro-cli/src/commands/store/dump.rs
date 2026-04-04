@@ -521,12 +521,8 @@ mod tests {
         )
         .await
         .unwrap();
-        run.put_artifact_value("summary", &serde_json::json!({"done": true}))
-            .await
-            .unwrap();
-        run.put_artifact_value("plan", &serde_json::json!({"steps": 3}))
-            .await
-            .unwrap();
+        let summary_blob = run.write_blob(br#"{"done":true}"#).await.unwrap();
+        let plan_blob = run.write_blob(br#"{"steps":3}"#).await.unwrap();
         run.put_asset(&node, "src/lib.rs", b"fn main() {}")
             .await
             .unwrap();
@@ -599,12 +595,14 @@ mod tests {
         assert_eq!(first_checkpoint.current_node, "plan");
         assert_eq!(second_checkpoint.current_node, "code");
 
-        let exported_plan: serde_json::Value =
-            read_json(&output.path().join("artifacts/values/plan.json"));
-        let exported_summary: serde_json::Value =
-            read_json(&output.path().join("artifacts/values/summary.json"));
-        assert_eq!(exported_plan, serde_json::json!({"steps": 3}));
-        assert_eq!(exported_summary, serde_json::json!({"done": true}));
+        assert_eq!(
+            std::fs::read(output.path().join("blobs").join(plan_blob.to_string())).unwrap(),
+            br#"{"steps":3}"#
+        );
+        assert_eq!(
+            std::fs::read(output.path().join("blobs").join(summary_blob.to_string())).unwrap(),
+            br#"{"done":true}"#
+        );
 
         assert_eq!(
             std::fs::read(

@@ -206,19 +206,15 @@ impl RunDump {
             );
         }
 
-        for artifact_id in run_store.list_artifact_values().await? {
-            let artifact_id_segment = validate_single_path_segment("artifact id", &artifact_id)?;
+        for blob_id in run_store.list_blobs().await? {
+            let blob_name = validate_single_path_segment("blob id", &blob_id.to_string())?;
             let value = run_store
-                .get_artifact_value(&artifact_id)
+                .read_blob(&blob_id)
                 .await?
-                .with_context(|| {
-                    format!("artifact value {artifact_id:?} is missing from the store")
-                })?;
-            entries.push(RunDumpEntry::json_path(
-                &PathBuf::from("artifacts")
-                    .join("values")
-                    .join(format!("{}.json", artifact_id_segment.display())),
-                value,
+                .with_context(|| format!("blob {blob_id:?} is missing from the store"))?;
+            entries.push(RunDumpEntry::bytes_path(
+                &PathBuf::from("blobs").join(blob_name),
+                value.to_vec(),
             ));
         }
 

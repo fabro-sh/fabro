@@ -1,8 +1,9 @@
 use crate::StageId;
+use fabro_types::RunBlobId;
 
 pub(crate) const INIT_KEY: &str = "_init.json";
 pub(crate) const EVENTS_PREFIX: &str = "events#";
-pub(crate) const ARTIFACT_VALUES_PREFIX: &str = "artifacts#values#";
+pub(crate) const BLOBS_PREFIX: &str = "blobs#";
 pub(crate) const ARTIFACT_NODES_PREFIX: &str = "artifacts#nodes#";
 
 pub(crate) fn init() -> &'static str {
@@ -13,8 +14,8 @@ pub(crate) fn event_key(seq: u32, epoch_ms: i64) -> String {
     format!("{EVENTS_PREFIX}{seq:06}-{epoch_ms}.json")
 }
 
-pub(crate) fn artifact_value(artifact_id: &str) -> String {
-    format!("{ARTIFACT_VALUES_PREFIX}{artifact_id}.json")
+pub(crate) fn blob_key(id: &RunBlobId) -> String {
+    format!("{BLOBS_PREFIX}{id}")
 }
 
 pub(crate) fn node_asset_prefix(node: &StageId) -> String {
@@ -33,10 +34,8 @@ pub(crate) fn parse_event_seq(key: &str) -> Option<u32> {
     parse_seq(key, EVENTS_PREFIX)
 }
 
-pub(crate) fn parse_artifact_value_id(key: &str) -> Option<String> {
-    key.strip_prefix(ARTIFACT_VALUES_PREFIX)
-        .and_then(|s| s.strip_suffix(".json"))
-        .map(ToString::to_string)
+pub(crate) fn parse_blob_id(key: &str) -> Option<RunBlobId> {
+    key.strip_prefix(BLOBS_PREFIX)?.parse().ok()
 }
 
 pub(crate) fn parse_node_asset_key(key: &str) -> Option<(StageId, String)> {
@@ -72,7 +71,8 @@ mod tests {
     #[test]
     fn artifact_keys_match_spec() {
         let node = StageId::new("code", 2);
-        assert_eq!(artifact_value("summary"), "artifacts#values#summary.json");
+        let blob_id = RunBlobId::new(&"01JT56VE4Z5NZ814GZN2JZD65A".parse().unwrap(), b"summary");
+        assert_eq!(blob_key(&blob_id), format!("blobs#{blob_id}"));
         assert_eq!(
             node_asset(&node, "src/main.rs"),
             "artifacts#nodes#code#visit-2#src/main.rs"
@@ -82,10 +82,8 @@ mod tests {
     #[test]
     fn parse_helpers_extract_sequences_and_node_visits() {
         assert_eq!(parse_event_seq("events#000007-123.json"), Some(7));
-        assert_eq!(
-            parse_artifact_value_id("artifacts#values#summary.json"),
-            Some("summary".to_string())
-        );
+        let blob_id = RunBlobId::new(&"01JT56VE4Z5NZ814GZN2JZD65A".parse().unwrap(), b"summary");
+        assert_eq!(parse_blob_id(&format!("blobs#{blob_id}")), Some(blob_id));
         assert_eq!(
             parse_node_asset_key("artifacts#nodes#code#visit-2#src/main.rs"),
             Some((StageId::new("code", 2), "src/main.rs".to_string()))
@@ -95,10 +93,7 @@ mod tests {
     #[test]
     fn parse_helpers_reject_invalid_keys() {
         assert_eq!(parse_event_seq("events#not-a-seq.json"), None);
-        assert_eq!(
-            parse_artifact_value_id("artifacts#values#summary.txt"),
-            None
-        );
+        assert_eq!(parse_blob_id("blobs#not-a-uuid"), None);
         assert_eq!(
             parse_node_asset_key("artifacts#nodes#code#status.json"),
             None

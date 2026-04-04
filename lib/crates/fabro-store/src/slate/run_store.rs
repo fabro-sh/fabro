@@ -15,7 +15,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use crate::keys;
 use crate::run_state::EventProjectionCache;
 use crate::{EventEnvelope, EventPayload, Result, RunProjection, RunSummary, StageId, StoreError};
-use fabro_types::RunId;
+use fabro_types::{RunBlobId, RunId};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NodeAsset {
@@ -213,26 +213,18 @@ impl SlateRunStore {
         Ok(Box::pin(UnboundedReceiverStream::new(receiver)))
     }
 
-    pub async fn put_artifact_value(
-        &self,
-        artifact_id: &str,
-        value: &serde_json::Value,
-    ) -> Result<()> {
-        self.inner
-            .db
-            .put_json(&keys::artifact_value(artifact_id), value)
-            .await
+    pub async fn write_blob(&self, data: &[u8]) -> Result<RunBlobId> {
+        let id = RunBlobId::new(&self.inner.run_id, data);
+        self.inner.db.put_bytes(&keys::blob_key(&id), data).await?;
+        Ok(id)
     }
 
-    pub async fn get_artifact_value(&self, artifact_id: &str) -> Result<Option<serde_json::Value>> {
-        self.inner
-            .db
-            .get_json(&keys::artifact_value(artifact_id))
-            .await
+    pub async fn read_blob(&self, id: &RunBlobId) -> Result<Option<Bytes>> {
+        self.inner.db.get_bytes(&keys::blob_key(id)).await
     }
 
-    pub async fn list_artifact_values(&self) -> Result<Vec<String>> {
-        self.inner.db.list_artifact_values().await
+    pub async fn list_blobs(&self) -> Result<Vec<RunBlobId>> {
+        self.inner.db.list_blobs().await
     }
 
     pub async fn put_asset(&self, node: &StageId, filename: &str, data: &[u8]) -> Result<()> {
@@ -273,13 +265,6 @@ impl SlateRunDb {
         }
     }
 
-    async fn get_json<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
-        match self {
-            Self::Writer(db) => get_json(db, key).await,
-            Self::Reader(db) => get_json(db.as_ref(), key).await,
-        }
-    }
-
     async fn put_json<T: Serialize>(&self, key: &str, value: &T) -> Result<()> {
         put_json(self.writer()?, key, value).await
     }
@@ -302,10 +287,10 @@ impl SlateRunDb {
         }
     }
 
-    async fn list_artifact_values(&self) -> Result<Vec<String>> {
+    async fn list_blobs(&self) -> Result<Vec<RunBlobId>> {
         match self {
-            Self::Writer(db) => list_artifact_values(db).await,
-            Self::Reader(db) => list_artifact_values(db.as_ref()).await,
+            Self::Writer(db) => list_blobs(db).await,
+            Self::Reader(db) => list_blobs(db.as_ref()).await,
         }
     }
 
@@ -381,23 +366,21 @@ where
     Ok(events)
 }
 
-async fn list_artifact_values<R>(db: &R) -> Result<Vec<String>>
+async fn list_blobs<R>(db: &R) -> Result<Vec<RunBlobId>>
 where
     R: DbRead + Sync,
 {
-    let mut iter = db
-        .scan_prefix(keys::ARTIFACT_VALUES_PREFIX.as_bytes())
-        .await?;
-    let mut artifact_ids = Vec::new();
+    let mut iter = db.scan_prefix(keys::BLOBS_PREFIX.as_bytes()).await?;
+    let mut blob_ids = Vec::new();
     while let Some(entry) = iter.next().await? {
         let key = key_to_string(&entry.key)?;
-        let Some(artifact_id) = keys::parse_artifact_value_id(&key) else {
+        let Some(blob_id) = keys::parse_blob_id(&key) else {
             continue;
         };
-        artifact_ids.push(artifact_id);
+        blob_ids.push(blob_id);
     }
-    artifact_ids.sort();
-    Ok(artifact_ids)
+    blob_ids.sort();
+    Ok(blob_ids)
 }
 
 async fn list_all_assets<R>(db: &R) -> Result<Vec<NodeAsset>>

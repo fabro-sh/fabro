@@ -955,16 +955,15 @@ mod tests {
         let (object_store, store) = make_store();
         let _created_at = dt("2026-03-27T12:00:00Z");
         let run = store.create_run(&test_run_id("run-1")).await.unwrap();
-        run.put_artifact_value("summary", &serde_json::json!({"done": true}))
-            .await
-            .unwrap();
+        let blob_id = run.write_blob(br#"{"done":true}"#).await.unwrap();
+        assert_eq!(
+            run.read_blob(&blob_id).await.unwrap(),
+            Some(Bytes::from_static(br#"{"done":true}"#))
+        );
 
         store.delete_run(&test_run_id("run-1")).await.unwrap();
 
-        let err = run
-            .put_artifact_value("summary", &serde_json::json!({"done": false}))
-            .await
-            .unwrap_err();
+        let err = run.write_blob(br#"{"done":false}"#).await.unwrap_err();
         assert!(matches!(
             err,
             StoreError::Slate(err) if matches!(err.kind(), ErrorKind::Closed(CloseReason::Clean))
@@ -979,9 +978,7 @@ mod tests {
         let _created_at = dt("2026-03-27T12:00:00Z");
         let _wrong_time = dt("2026-03-27T11:00:00Z");
         let run = store.create_run(&test_run_id("run-1")).await.unwrap();
-        run.put_artifact_value("summary", &serde_json::json!({"done": true}))
-            .await
-            .unwrap();
+        run.write_blob(br#"{"done":true}"#).await.unwrap();
 
         let _locator = catalog::read_locator(object_store.clone(), "runs/", &test_run_id("run-1"))
             .await
@@ -1085,16 +1082,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn slate_run_store_lists_artifact_values_and_assets() {
+    async fn slate_run_store_lists_blobs_and_assets() {
         let (_object_store, store) = make_store();
         let _created_at = dt("2026-03-27T12:00:00Z");
         let run = store.create_run(&test_run_id("run-1")).await.unwrap();
-        run.put_artifact_value("summary", &serde_json::json!({"done": true}))
-            .await
-            .unwrap();
-        run.put_artifact_value("plan", &serde_json::json!({"steps": 3}))
-            .await
-            .unwrap();
+        let summary_blob = run.write_blob(br#"{"done":true}"#).await.unwrap();
+        let plan_blob = run.write_blob(br#"{"steps":3}"#).await.unwrap();
 
         let snapshot_node = StageId::new("code", 2);
         run.put_asset(&snapshot_node, "src/lib.rs", b"fn main() {}")
@@ -1107,8 +1100,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            run.list_artifact_values().await.unwrap(),
-            vec!["plan".to_string(), "summary".to_string()]
+            run.list_blobs().await.unwrap(),
+            vec![plan_blob, summary_blob]
         );
         assert_eq!(
             run.list_all_assets().await.unwrap(),
@@ -1363,9 +1356,7 @@ mod tests {
         ))
         .await
         .unwrap();
-        run.put_artifact_value("summary", &serde_json::json!({"done": true}))
-            .await
-            .unwrap();
+        let summary_blob = run.write_blob(br#"{"done":true}"#).await.unwrap();
         run.put_asset(&node, "src/lib.rs", b"fn main() {}")
             .await
             .unwrap();
@@ -1407,8 +1398,8 @@ mod tests {
         assert_eq!(state.retro_prompt.as_deref(), Some("How did it go?"));
         assert_eq!(state.retro_response.as_deref(), Some("Smooth enough"));
         assert_eq!(
-            run.get_artifact_value("summary").await.unwrap(),
-            Some(serde_json::json!({"done": true}))
+            run.read_blob(&summary_blob).await.unwrap(),
+            Some(Bytes::from_static(br#"{"done":true}"#))
         );
         assert_eq!(
             run.get_asset(&node, "src/lib.rs").await.unwrap(),
