@@ -5,8 +5,7 @@ use tokio::time;
 
 use crate::generate::{self, GenerateParams};
 use crate::tools::Tool;
-use crate::types::GenerateResult;
-use crate::types::ReasoningEffort;
+use crate::types::{GenerateResult, ReasoningEffort};
 use fabro_model::Model;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -198,6 +197,7 @@ fn validate_deep_result(result: &GenerateResult) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::ToolResult;
     use crate::types::{FinishReason, Message, Response, StepResult, Usage};
     use fabro_model::{ModelCosts, ModelFeatures, ModelLimits, Provider};
 
@@ -259,10 +259,7 @@ mod tests {
 
     #[test]
     fn validate_deep_result_does_not_fail_only_for_missing_reasoning() {
-        let tool_results = vec![crate::types::ToolResult::success(
-            "call_1",
-            serde_json::json!(42),
-        )];
+        let tool_results = vec![ToolResult::success("call_1", serde_json::json!(42))];
         let first_step = StepResult {
             response: response_with_text("tool step"),
             tool_results: tool_results.clone(),

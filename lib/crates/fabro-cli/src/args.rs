@@ -4,7 +4,6 @@ use std::path::PathBuf;
 use clap::{Args, Subcommand, ValueEnum};
 use fabro_agent::cli::AgentArgs;
 use fabro_graphviz::render::GraphFormat;
-use fabro_llm::cli::ModelsCommand;
 
 pub(crate) const LONG_VERSION: &str = concat!(
     env!("CARGO_PKG_VERSION"),
@@ -727,6 +726,35 @@ impl RunsCommands {
             Self::Inspect(_) => "inspect",
         }
     }
+}
+
+#[derive(Subcommand)]
+pub(crate) enum ModelsCommand {
+    /// List available models
+    List {
+        /// Filter by provider
+        #[arg(short, long)]
+        provider: Option<String>,
+
+        /// Search for models matching this string
+        #[arg(short, long)]
+        query: Option<String>,
+    },
+
+    /// Test model availability by sending a simple prompt
+    Test {
+        /// Filter by provider
+        #[arg(short, long)]
+        provider: Option<String>,
+
+        /// Test a specific model
+        #[arg(short, long)]
+        model: Option<String>,
+
+        /// Run a multi-turn tool-use test (catches reasoning round-trip bugs)
+        #[arg(long)]
+        deep: bool,
+    },
 }
 
 #[derive(Subcommand)]

@@ -21,11 +21,11 @@ impl HttpApi {
     fn build_client(timeout: AdapterTimeout) -> reqwest::Client {
         #[cfg(test)]
         {
-            return reqwest::Client::builder()
+            reqwest::Client::builder()
                 .connect_timeout(Duration::from_secs_f64(timeout.connect))
                 .no_proxy()
                 .build()
-                .unwrap_or_default();
+                .unwrap_or_default()
         }
         #[cfg(not(test))]
         {
