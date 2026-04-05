@@ -498,21 +498,12 @@ mod tests {
 
     use crate::Issue;
     use fabro_github::GitHubAppCredentials;
+    fn test_http_client() -> reqwest::Client {
+        reqwest::Client::builder().no_proxy().build().unwrap()
+    }
 
     fn test_rsa_key() -> String {
-        use std::process::Command;
-        let output = Command::new("openssl")
-            .args([
-                "genpkey",
-                "-algorithm",
-                "RSA",
-                "-pkeyopt",
-                "rsa_keygen_bits:2048",
-            ])
-            .output()
-            .expect("openssl should be available");
-        assert!(output.status.success(), "openssl keygen failed");
-        String::from_utf8(output.stdout).unwrap()
+        include_str!("fixtures/github-app-test-key.pem").to_string()
     }
 
     // -----------------------------------------------------------------------
@@ -535,7 +526,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let result = execute_github_graphql(
             &client,
             "test-token",
@@ -561,7 +552,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let err = execute_github_graphql(
             &client,
             "bad-token",
@@ -587,7 +578,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let err = execute_github_graphql(
             &client,
             "token",
@@ -616,7 +607,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         execute_github_graphql(
             &client,
             "my-token",
@@ -640,7 +631,7 @@ mod tests {
                 app_id: "test-app".to_string(),
                 private_key_pem: pem,
             },
-            reqwest::Client::new(),
+            test_http_client(),
             "owner".to_string(),
             "repo".to_string(),
             1,
@@ -768,7 +759,6 @@ mod tests {
                 then.status(201).body(r#"{"token": "ghs_test"}"#);
             })
             .await;
-        // Org query returns null → fall back to user
         server
             .mock_async(|when, then| {
                 when.method("POST")
@@ -777,7 +767,6 @@ mod tests {
                 then.status(200).body(r#"{"data": {"organization": null}}"#);
             })
             .await;
-        // User query succeeds
         server
             .mock_async(|when, then| {
                 when.method("POST")
@@ -787,7 +776,6 @@ mod tests {
                     .body(r#"{"data": {"user": {"projectV2": {"id": "PVT_user1"}}}}"#);
             })
             .await;
-        // Items page (empty)
         server
             .mock_async(|when, then| {
                 when.method("POST")
@@ -894,7 +882,6 @@ mod tests {
                 then.status(201).body(r#"{"token": "ghs_test"}"#);
             })
             .await;
-        // Resolve project node ID (org path)
         server
             .mock_async(|when, then| {
                 when.method("POST")
@@ -908,7 +895,6 @@ mod tests {
             when.method("POST").path("/graphql").body_includes("field(name:");
             then.status(200).body(r#"{"data": {"node": {"field": {"id": "FLD_1", "options": [{"id": "opt-done", "name": "Done"}, {"id": "opt-todo", "name": "Todo"}]}}}}"#);
         }).await;
-        // Update mutation
         server.mock_async(|when, then| {
             when.method("POST").path("/graphql").body_includes("updateProjectV2ItemFieldValue");
             then.status(200).body(r#"{"data": {"updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "PVTI_item1"}}}}"#);
@@ -937,7 +923,6 @@ mod tests {
                 then.status(201).body(r#"{"token": "ghs_test"}"#);
             })
             .await;
-        // Resolve project node ID
         server
             .mock_async(|when, then| {
                 when.method("POST")

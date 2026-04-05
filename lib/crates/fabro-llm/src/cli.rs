@@ -1413,6 +1413,10 @@ async fn test_models(
 mod tests {
     use super::*;
 
+    fn test_http_client() -> reqwest::Client {
+        reqwest::Client::builder().no_proxy().build().unwrap()
+    }
+
     // --- parse_option ---
 
     #[test]
@@ -1618,7 +1622,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let resp = test_model_via_server(&client, &server.url(""), "test-model")
             .await
             .unwrap();
@@ -1646,7 +1650,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let resp = test_model_via_server(&client, &server.url(""), "test-model")
             .await
             .unwrap();
@@ -1669,7 +1673,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let result = test_model_via_server(&client, &server.url(""), "bad-model").await;
         assert!(result.is_err());
     }
@@ -1701,7 +1705,7 @@ mod tests {
                 }).to_string());
         }).await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let models = fetch_models_from_server(&client, &server.url(""), None)
             .await
             .unwrap();
@@ -1753,7 +1757,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let models = fetch_models_from_server(&client, &server.url(""), Some("anthropic"))
             .await
             .unwrap();
@@ -1772,7 +1776,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let result = fetch_models_from_server(&client, &server.url(""), None).await;
         assert!(result.is_err());
     }
@@ -1801,7 +1805,7 @@ mod tests {
             .await;
 
         let server = ServerConnection {
-            client: reqwest::Client::new(),
+            client: test_http_client(),
             base_url: mock_server.url(""),
         };
 
@@ -1841,7 +1845,7 @@ data: {\"type\":\"finish\",\"finish_reason\":\"stop\",\"usage\":{\"input_tokens\
             .await;
 
         let server = ServerConnection {
-            client: reqwest::Client::new(),
+            client: test_http_client(),
             base_url: mock_server.url(""),
         };
 

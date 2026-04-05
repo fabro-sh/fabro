@@ -394,10 +394,21 @@ impl HookExecutorImpl {
     /// Build a reqwest client for the given TLS mode.
     fn build_http_client(tls: TlsMode) -> reqwest::Client {
         let accept_invalid = matches!(tls, TlsMode::NoVerify | TlsMode::Off);
-        reqwest::Client::builder()
-            .danger_accept_invalid_certs(accept_invalid)
-            .build()
-            .unwrap_or_default()
+        #[cfg(test)]
+        {
+            return reqwest::Client::builder()
+                .danger_accept_invalid_certs(accept_invalid)
+                .no_proxy()
+                .build()
+                .unwrap_or_default();
+        }
+        #[cfg(not(test))]
+        {
+            reqwest::Client::builder()
+                .danger_accept_invalid_certs(accept_invalid)
+                .build()
+                .unwrap_or_default()
+        }
     }
 
     /// Execute an HTTP hook: POST context JSON and parse the response.

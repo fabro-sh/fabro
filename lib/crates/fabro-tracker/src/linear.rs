@@ -355,6 +355,9 @@ impl Tracker for LinearTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn test_http_client() -> reqwest::Client {
+        reqwest::Client::builder().no_proxy().build().unwrap()
+    }
 
     fn mock_config(server_url: &str) -> LinearOptions {
         LinearOptions {
@@ -591,7 +594,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let result = execute_graphql(
             &client,
             &config,
@@ -617,7 +620,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let err = execute_graphql(
             &client,
             &config,
@@ -642,7 +645,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let err = execute_graphql(
             &client,
             &config,
@@ -668,7 +671,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let err = execute_graphql(&client, &config, "query { bad }", serde_json::json!({}))
             .await
             .unwrap_err();
@@ -691,7 +694,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         execute_graphql(
             &client,
             &config,
@@ -721,7 +724,7 @@ mod tests {
             })
             .await;
 
-        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let tracker = LinearTracker::new(config, test_http_client(), "proj".to_string());
         let id = tracker.fetch_viewer_id().await.unwrap();
         assert_eq!(id, "user-abc");
     }
@@ -738,7 +741,7 @@ mod tests {
             })
             .await;
 
-        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let tracker = LinearTracker::new(config, test_http_client(), "proj".to_string());
         let err = tracker.fetch_viewer_id().await.unwrap_err();
         assert!(err.contains("401"), "got: {err}");
     }
@@ -760,7 +763,7 @@ mod tests {
             })
             .await;
 
-        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let tracker = LinearTracker::new(config, test_http_client(), "proj".to_string());
         let issue = make_test_issue();
         tracker.create_comment(&issue, "Hello world").await.unwrap();
     }
@@ -778,7 +781,7 @@ mod tests {
             })
             .await;
 
-        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let tracker = LinearTracker::new(config, test_http_client(), "proj".to_string());
         let issue = make_test_issue();
         let err = tracker.create_comment(&issue, "Hello").await.unwrap_err();
         assert!(err.contains("success: false"), "got: {err}");
@@ -811,7 +814,7 @@ mod tests {
             })
             .await;
 
-        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let tracker = LinearTracker::new(config, test_http_client(), "proj".to_string());
         let issue = make_test_issue();
         tracker.update_issue_state(&issue, "Done").await.unwrap();
 
@@ -832,7 +835,7 @@ mod tests {
             })
             .await;
 
-        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let tracker = LinearTracker::new(config, test_http_client(), "proj".to_string());
         let issue = make_test_issue();
         let err = tracker
             .update_issue_state(&issue, "Nonexistent")
@@ -868,7 +871,7 @@ mod tests {
             })
             .await;
 
-        let tracker = LinearTracker::new(config, reqwest::Client::new(), "my-project".to_string());
+        let tracker = LinearTracker::new(config, test_http_client(), "my-project".to_string());
         let issues = tracker
             .fetch_candidate_issues(&["In Progress"])
             .await
@@ -929,7 +932,7 @@ mod tests {
             })
             .await;
 
-        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let tracker = LinearTracker::new(config, test_http_client(), "proj".to_string());
         let issues = tracker.fetch_candidate_issues(&["Todo"]).await.unwrap();
 
         assert_eq!(issues.len(), 2);
@@ -958,7 +961,7 @@ mod tests {
             })
             .await;
 
-        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let tracker = LinearTracker::new(config, test_http_client(), "proj".to_string());
         let issues = tracker.fetch_candidate_issues(&["Todo"]).await.unwrap();
 
         assert!(issues.is_empty());
@@ -1000,7 +1003,7 @@ mod tests {
             })
             .await;
 
-        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let tracker = LinearTracker::new(config, test_http_client(), "proj".to_string());
         let issues = tracker
             .fetch_issues_by_ids(&["id-a", "id-b"])
             .await
@@ -1060,7 +1063,7 @@ mod tests {
             })
             .await;
 
-        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let tracker = LinearTracker::new(config, test_http_client(), "proj".to_string());
         let issues = tracker.fetch_issues_by_ids(&id_refs).await.unwrap();
 
         assert_eq!(issues.len(), 51);
@@ -1071,7 +1074,7 @@ mod tests {
     #[tokio::test]
     async fn fetch_issues_by_ids_empty() {
         let config = LinearOptions::new("unused".to_string());
-        let tracker = LinearTracker::new(config, reqwest::Client::new(), "proj".to_string());
+        let tracker = LinearTracker::new(config, test_http_client(), "proj".to_string());
         let issues = tracker.fetch_issues_by_ids(&[]).await.unwrap();
         assert!(issues.is_empty());
     }

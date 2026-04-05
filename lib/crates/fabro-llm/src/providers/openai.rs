@@ -1223,7 +1223,6 @@ mod tests {
         assert!(adapter.project_id.is_none());
         assert!(adapter.http.default_headers.is_empty());
     }
-
     #[test]
     fn audio_content_produces_text_fallback() {
         let msg = Message {
