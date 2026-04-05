@@ -8,7 +8,8 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use fabro_types::{EventBody, RunEvent, RunId};
 
-use fabro_interview::{AnswerValue, ConsoleInterviewer};
+use fabro_api::types;
+use fabro_interview::{AnswerValue, ConsoleInterviewer, Question, QuestionOption, QuestionType};
 use fabro_store::{EventEnvelope, RuntimeState};
 use fabro_util::json::normalize_json_value;
 use fabro_util::terminal::Styles;
@@ -97,7 +98,6 @@ async fn attach_run_server(
     json_output: bool,
 ) -> Result<ExitCode> {
     let runtime_state = RuntimeState::new(run_dir);
-    let runtime_interview_paths = InterviewPaths::from_runtime_state(&runtime_state);
 
     let mut engine_guard = engine_child.map(EngineChildGuard::new);
 
@@ -116,6 +116,12 @@ async fn attach_run_server(
 
     for line in &existing_events {
         emit_progress_line(&mut progress_ui, line, json_output)?;
+    }
+
+    if json_output && !client.list_run_questions(run_id).await?.is_empty() {
+        defuse_engine_child(&mut engine_guard);
+        eprintln!("{JSON_INTERVIEW_MESSAGE}");
+        return Ok(ExitCode::from(1));
     }
 
     let mut next_seq = if last_seq == 0 { 1 } else { last_seq + 1 };
@@ -181,50 +187,31 @@ async fn attach_run_server(
             continue;
         }
 
-        // Check for interview request
-        if runtime_interview_paths.request_path.exists() {
-            let interview_paths = &runtime_interview_paths;
-            if !interview_paths.response_path.exists() {
-                if json_output {
-                    defuse_engine_child(&mut engine_guard);
-                    eprintln!("{JSON_INTERVIEW_MESSAGE}");
-                    return Ok(ExitCode::from(1));
-                }
-                if let Some(_claim_guard) =
-                    InterviewClaimGuard::acquire(&interview_paths.claim_path)
-                {
-                    if let Ok(request_data) = std::fs::read_to_string(&interview_paths.request_path)
-                    {
-                        if let Ok(question) =
-                            serde_json::from_str::<fabro_interview::Question>(&request_data)
-                        {
-                            // Hide progress bars during interview
-                            hide_progress(&mut progress_ui, json_output);
-
-                            // Prompt user via ConsoleInterviewer
-                            let interviewer = ConsoleInterviewer::new(styles);
-                            let answer =
-                                fabro_interview::Interviewer::ask(&interviewer, question).await;
-
-                            // Show progress bars again before any return path.
-                            show_progress(&mut progress_ui, json_output);
-
-                            if answer_requires_reattach(&answer) {
-                                if let Some(guard) = engine_guard.as_mut() {
-                                    guard.defuse();
-                                }
-                                eprintln!("{INTERVIEW_UNANSWERED_MESSAGE}");
-                                return Ok(ExitCode::from(1));
-                            }
-
-                            write_interview_response_atomically(
-                                &interview_paths.response_path,
-                                &answer,
-                            )?;
-                        }
-                    }
-                }
+        // Check for server-backed interview request
+        if let Some(question) = client.list_run_questions(run_id).await?.into_iter().next() {
+            if json_output {
+                defuse_engine_child(&mut engine_guard);
+                eprintln!("{JSON_INTERVIEW_MESSAGE}");
+                return Ok(ExitCode::from(1));
             }
+
+            hide_progress(&mut progress_ui, json_output);
+            let interviewer = ConsoleInterviewer::new(styles);
+            let answer =
+                fabro_interview::Interviewer::ask(&interviewer, api_question_to_question(&question))
+                    .await;
+            show_progress(&mut progress_ui, json_output);
+
+            if answer_requires_reattach(&answer) {
+                if let Some(guard) = engine_guard.as_mut() {
+                    guard.defuse();
+                }
+                eprintln!("{INTERVIEW_UNANSWERED_MESSAGE}");
+                return Ok(ExitCode::from(1));
+            }
+
+            submit_server_interview_answer(client, run_id, &question.id, &answer).await?;
+            continue;
         }
 
         let terminal_status = client
@@ -287,6 +274,49 @@ async fn attach_run_server(
         Some(exit_code) => exit_code,
         None => determine_exit_code_with_server(client, run_id).await,
     })
+}
+
+fn api_question_to_question(question: &types::ApiQuestion) -> Question {
+    let question_type = match question.question_type {
+        types::QuestionType::YesNo => QuestionType::YesNo,
+        types::QuestionType::MultipleChoice => QuestionType::MultipleChoice,
+        types::QuestionType::MultiSelect => QuestionType::MultiSelect,
+        types::QuestionType::Freeform => QuestionType::Freeform,
+        types::QuestionType::Confirmation => QuestionType::Confirmation,
+    };
+    let mut converted = Question::new(question.text.clone(), question_type);
+    converted.options = question
+        .options
+        .iter()
+        .map(|option| QuestionOption {
+            key: option.key.clone(),
+            label: option.label.clone(),
+        })
+        .collect();
+    converted.allow_freeform = question.allow_freeform;
+    converted
+}
+
+async fn submit_server_interview_answer(
+    client: &server_client::ServerStoreClient,
+    run_id: &RunId,
+    qid: &str,
+    answer: &fabro_interview::Answer,
+) -> Result<bool> {
+    let (value, selected_option_key, selected_option_keys) = match &answer.value {
+        AnswerValue::Text(text) => (Some(text.clone()), None, Vec::new()),
+        AnswerValue::Selected(key) => (None, Some(key.clone()), Vec::new()),
+        AnswerValue::MultiSelected(keys) => (None, None, keys.clone()),
+        AnswerValue::Yes => (Some("yes".to_string()), None, Vec::new()),
+        AnswerValue::No => (Some("no".to_string()), None, Vec::new()),
+        AnswerValue::Aborted | AnswerValue::Skipped | AnswerValue::Timeout => {
+            return Ok(false);
+        }
+    };
+    client
+        .submit_run_answer(run_id, qid, value, selected_option_key, selected_option_keys)
+        .await?;
+    Ok(true)
 }
 
 async fn flush_remaining_server_events(

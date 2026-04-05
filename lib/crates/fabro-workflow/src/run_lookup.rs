@@ -347,15 +347,20 @@ fn resolve_run_from_infos(runs: &[RunInfo], identifier: &str) -> Result<RunInfo>
 
     let id_lower = identifier.to_lowercase();
     let id_collapsed = collapse_separators(&id_lower);
-    let workflow_match = runs.iter().filter(|run| !run.is_orphan).find(|run| {
-        if let Some(slug) = run.workflow_slug() {
-            if slug.to_lowercase() == id_lower {
-                return true;
+    let workflow_match = runs
+        .iter()
+        .filter(|run| !run.is_orphan)
+        .filter(|run| {
+            if let Some(slug) = run.workflow_slug() {
+                if slug.to_lowercase() == id_lower {
+                    return true;
+                }
             }
-        }
-        let name_lower = run.workflow_name().to_lowercase();
-        name_lower.contains(&id_lower) || collapse_separators(&name_lower).contains(&id_collapsed)
-    });
+            let name_lower = run.workflow_name().to_lowercase();
+            name_lower.contains(&id_lower)
+                || collapse_separators(&name_lower).contains(&id_collapsed)
+        })
+        .max_by_key(|run| run.run_id().created_at());
 
     match workflow_match {
         Some(run) => Ok(run.clone()),
