@@ -13,18 +13,18 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { DiagnosticsSection } from './diagnostics-section';
 
 /**
- * Service health check response.
+ * Server health diagnostics report.
  */
-export interface HealthResponse {
+export interface DiagnosticsReport {
     /**
-     * Health status indicator.
-     */
-    'status': string;
-    /**
-     * Server version string.
+     * Server version.
      */
     'version': string;
+    'sections': Array<DiagnosticsSection>;
 }
 

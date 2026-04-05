@@ -1,19 +1,18 @@
-use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::Result;
 use dialoguer::console::Term;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Confirm, Password};
-use fabro_config::dotenv::{merge_env, write_env_file as write_env};
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate};
+use fabro_model::Catalog;
 use fabro_model::Provider;
 use fabro_util::terminal::Styles;
 use tokio::task::spawn_blocking;
 use tokio::time::timeout;
 
 use super::openai_jwt;
-use crate::commands::doctor;
 
 // ---------------------------------------------------------------------------
 // Provider key URLs
@@ -51,7 +50,7 @@ pub(crate) fn provider_display_name(provider: Provider) -> &'static str {
 // OpenAI OAuth helpers
 // ---------------------------------------------------------------------------
 
-/// Convert OAuth tokens to env var pairs for ~/.fabro/.env.
+/// Convert OAuth tokens to secret name/value pairs.
 pub(crate) fn openai_oauth_env_pairs(
     access_token: &str,
     refresh_token: &str,
@@ -139,45 +138,31 @@ pub(crate) fn prompt_password(prompt: &str) -> Result<String> {
 }
 
 // ---------------------------------------------------------------------------
-// Env file writing
-// ---------------------------------------------------------------------------
-
-pub(crate) fn write_env_file(
-    arc_dir: &Path,
-    env_pairs: &[(String, String)],
-    s: &Styles,
-) -> Result<()> {
-    let env_path = arc_dir.join(".env");
-    let existing = std::fs::read_to_string(&env_path).unwrap_or_default();
-    let refs: Vec<(&str, &str)> = env_pairs
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.as_str()))
-        .collect();
-    let merged = merge_env(&existing, &refs);
-    write_env(&env_path, &merged)?;
-    eprintln!(
-        "  {}",
-        s.dim.apply_to(format!("Wrote {}", env_path.display()))
-    );
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
 // API key validation
 // ---------------------------------------------------------------------------
 
 pub(crate) async fn validate_api_key(provider: Provider, api_key: &str) -> Result<(), String> {
-    // Temporarily set the env var so Client::from_env() picks it up
     let env_var = provider.api_key_env_vars()[0];
-    std::env::set_var(env_var, api_key);
+    let client = LlmClient::from_lookup(|name| {
+        if name == env_var {
+            Some(api_key.to_string())
+        } else {
+            None
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?;
 
-    let client = LlmClient::from_env().await.map_err(|e| e.to_string())?;
+    let probe_model = Catalog::builtin().probe_for_provider(provider).map_or_else(
+        || format!("unknown-{}", provider.as_str()),
+        |model| model.id.clone(),
+    );
 
-    let params = GenerateParams::new(doctor::probe_model(provider))
+    let params = GenerateParams::new(probe_model)
         .provider(provider.as_str())
         .prompt("Say OK")
         .max_tokens(16)
-        .client(std::sync::Arc::new(client));
+        .client(Arc::new(client));
 
     timeout(std::time::Duration::from_secs(30), generate(params))
         .await

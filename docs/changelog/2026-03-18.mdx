@@ -5,12 +5,11 @@ date: "2026-03-18"
 
 ## Secret management from the CLI
 
-Managing API keys and credentials previously meant manually editing `~/.fabro/.env`. The new `fabro secret` commands let you get, set, list, and remove secrets directly from the CLI.
+Managing API keys and credentials previously meant manually editing `~/.fabro/.env`. This release introduced `fabro secret` commands; later releases made secrets server-owned and write-only.
 
 ```bash
 fabro secret set ANTHROPIC_API_KEY sk-ant-...
 fabro secret list
-fabro secret get ANTHROPIC_API_KEY
 fabro secret rm ANTHROPIC_API_KEY
 ```
 
@@ -30,4 +29,5 @@ The old `fabro init` still works but prints a deprecation warning.
 <Accordion title="CLI">
 - Moved `fabro init` to `fabro repo init` with a backwards-compatible deprecation shim
 - Added `--show-values` flag to `fabro secret list` to reveal secret values
+  Later releases removed this flag when secrets became write-only
 </Accordion>

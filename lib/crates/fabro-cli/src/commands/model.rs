@@ -44,12 +44,8 @@ pub(crate) async fn execute(command: Option<ModelsCommand>, globals: &GlobalArgs
         ModelsCommand::Test(args) => &args.target,
     };
     let cli_settings = user_config::load_user_settings_with_storage_dir(target_args.storage_dir())?;
-    let client = match user_config::model_server_target(target_args, &cli_settings) {
-        Some(target) => {
-            server_client::connect_remote_api_client(&target.server_base_url, target.tls.as_ref())?
-        }
-        None => server_client::connect_api_client(&cli_settings.storage_dir()).await?,
-    };
+    let connection = user_config::model_server_connection(target_args, &cli_settings)?;
+    let client = server_client::connect_resolved_api_client(&connection).await?;
 
     run_models(command, client, globals.json).await
 }

@@ -24,7 +24,7 @@ You provide three inputs:
 
 1. **Workflow graph** (`.fabro`) — A Graphviz file defining nodes, edges, and their attributes. This is the core of what Fabro executes. See [Workflows](/core-concepts/workflows).
 2. **Run config** (`.toml`, optional) — Overrides for the default model, sandbox provider, setup commands, and variables. See [Run Configuration](/execution/run-configuration).
-3. **API keys** (`.env`) — Provider credentials for LLM APIs. See [Quick Start](/getting-started/quick-start).
+3. **Credentials** — Provider credentials from the server-owned secret store or the invoking shell environment. See [Quick Start](/getting-started/quick-start).
 
 ## Parse and validate
 
@@ -96,4 +96,3 @@ fabro resume <RUN_ID>
 ```
 
 The engine restores the full context, node visit counts, and retry state from the run directory, then continues execution from the next node.
-

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -11,13 +12,15 @@ use axum::http::{HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use axum_extra::extract::cookie::Key;
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use bytes::Bytes;
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate_object};
-use fabro_llm::model_test::{ModelTestMode, run_model_test};
+use fabro_llm::model_test::{ModelTestMode, run_model_test_with_client};
 use fabro_llm::types::{
     ContentPart, FinishReason, Message as LlmMessage, Request as LlmRequest,
     Response as LlmResponse, Role, StreamEvent, ToolChoice, ToolDefinition, Usage,
@@ -25,13 +28,15 @@ use fabro_llm::types::{
 use fabro_store::{EventEnvelope, EventPayload, StageId, StoreHandle};
 use fabro_types::{RunBlobId, RunEvent, RunId, Settings};
 use fabro_util::redact::redact_jsonl_line;
+use fabro_util::version::FABRO_VERSION;
 use fabro_workflow::error::FabroError;
 use fabro_workflow::handler::HandlerRegistry;
 use futures_util::stream;
 use object_store::memory::InMemory as MemoryObjectStore;
+use tokio::sync::Notify;
+use tokio::sync::RwLock as AsyncRwLock;
 use tokio::sync::broadcast;
 use tokio::sync::oneshot;
-use tokio::sync::{Notify, OnceCell};
 use tokio::task::spawn_blocking;
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
@@ -41,8 +46,10 @@ use ulid::Ulid;
 use tracing::{error, info};
 
 use crate::demo;
+use crate::diagnostics;
 use crate::error::ApiError;
 use crate::jwt_auth::{AuthMode, AuthenticatedService};
+use crate::secret_store::{SecretStore, SecretStoreError};
 use crate::sessions as sessions_mod;
 use crate::sessions::{SessionStore, new_session_store};
 use crate::static_files;
@@ -62,8 +69,8 @@ pub use fabro_api::types::{
     CompletionResponse, CompletionToolChoiceMode, CompletionUsage, CreateCompletionRequest,
     CreateRunRequest, EventEnvelope as ApiEventEnvelope, ModelReference, PaginatedEventList,
     PaginatedRunList, PaginationMeta, QuestionType as ApiQuestionType, RunError,
-    RunEvent as ApiRunEvent, RunStatus, RunStatusResponse, StartRunRequest, SubmitAnswerRequest,
-    TokenUsage, UsageByModel, WriteBlobResponse,
+    RunEvent as ApiRunEvent, RunStatus, RunStatusResponse, SetSecretRequest, StartRunRequest,
+    SubmitAnswerRequest, TokenUsage, UsageByModel, WriteBlobResponse,
 };
 
 pub fn default_page_limit() -> u32 {
@@ -197,9 +204,8 @@ pub struct AppState {
     max_concurrent_runs: usize,
     scheduler_notify: Notify,
     pub sessions: SessionStore,
-    llm_client: OnceCell<LlmClient>,
+    pub(crate) secret_store: AsyncRwLock<SecretStore>,
     pub(crate) settings: Arc<RwLock<Settings>>,
-    pub(crate) session_key: Option<Key>,
     registry_factory_override: Option<Box<RegistryFactoryOverride>>,
 }
 
@@ -207,6 +213,73 @@ impl AppState {
     pub(crate) fn dry_run(&self) -> bool {
         self.settings.read().unwrap().dry_run_enabled()
     }
+
+    pub(crate) async fn build_llm_client(&self) -> Result<LlmClient, String> {
+        let snapshot = self.secret_store.read().await.snapshot();
+        LlmClient::from_lookup(|name| {
+            snapshot
+                .get(name)
+                .cloned()
+                .or_else(|| std::env::var(name).ok())
+        })
+        .await
+        .map_err(|err| err.to_string())
+    }
+
+    pub(crate) fn secret_or_env(&self, name: &str) -> Option<String> {
+        self.secret_store
+            .try_read()
+            .ok()
+            .and_then(|store| store.get(name).map(str::to_string))
+            .or_else(|| std::env::var(name).ok())
+    }
+
+    pub(crate) async fn session_key(&self) -> Option<Key> {
+        let secret = self
+            .secret_store
+            .read()
+            .await
+            .get("SESSION_SECRET")
+            .map(str::to_string);
+        secret
+            .or_else(|| std::env::var("SESSION_SECRET").ok())
+            .map(|value| Key::derive_from(value.as_bytes()))
+    }
+
+    pub(crate) async fn github_app_credentials(
+        &self,
+        app_id: Option<&str>,
+    ) -> Result<Option<fabro_github::GitHubAppCredentials>, String> {
+        let Some(app_id) = app_id else {
+            return Ok(None);
+        };
+        let raw = self
+            .secret_store
+            .read()
+            .await
+            .get("GITHUB_APP_PRIVATE_KEY")
+            .map(str::to_string)
+            .or_else(|| std::env::var("GITHUB_APP_PRIVATE_KEY").ok());
+        let Some(raw) = raw else {
+            return Ok(None);
+        };
+        let private_key_pem = decode_secret_pem("GITHUB_APP_PRIVATE_KEY", &raw)?;
+        Ok(Some(fabro_github::GitHubAppCredentials {
+            app_id: app_id.to_string(),
+            private_key_pem,
+        }))
+    }
+}
+
+fn decode_secret_pem(name: &str, raw: &str) -> Result<String, String> {
+    if raw.starts_with("-----") {
+        return Ok(raw.to_string());
+    }
+    let pem_bytes = BASE64_STANDARD
+        .decode(raw)
+        .map_err(|err| format!("{name} is not valid PEM or base64: {err}"))?;
+    String::from_utf8(pem_bytes)
+        .map_err(|err| format!("{name} base64 decoded to invalid UTF-8: {err}"))
 }
 
 /// Build the axum Router with all run endpoints and embedded static assets.
@@ -346,6 +419,13 @@ fn demo_routes() -> Router<Arc<AppState>> {
         .route("/insights/history", get(demo::list_query_history))
         .route("/models", get(list_models))
         .route("/models/{id}/test", post(test_model))
+        .route("/secrets", get(demo::list_secrets))
+        .route(
+            "/secrets/{name}",
+            put(demo::set_secret).delete(demo::delete_secret),
+        )
+        .route("/repos/github/{owner}/{name}", get(demo::get_github_repo))
+        .route("/health/diagnostics", post(demo::run_diagnostics))
         .route("/completions", post(create_completion))
         .route("/settings", get(demo::get_server_settings))
         .route("/usage", get(demo::get_aggregate_usage))
@@ -426,6 +506,10 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/insights/history", get(not_implemented))
         .route("/models", get(list_models))
         .route("/models/{id}/test", post(test_model))
+        .route("/secrets", get(list_secrets))
+        .route("/secrets/{name}", put(set_secret).delete(delete_secret))
+        .route("/repos/github/{owner}/{name}", get(get_github_repo))
+        .route("/health/diagnostics", post(run_diagnostics))
         .route("/completions", post(create_completion))
         .route("/settings", get(not_implemented))
         .route("/usage", get(get_aggregate_usage))
@@ -436,7 +520,238 @@ async fn not_implemented() -> Response {
 }
 
 async fn health() -> Response {
-    Json(serde_json::json!({"status": "ok"})).into_response()
+    Json(serde_json::json!({
+        "status": "ok",
+        "version": FABRO_VERSION,
+    }))
+    .into_response()
+}
+
+async fn list_secrets(_auth: AuthenticatedService, State(state): State<Arc<AppState>>) -> Response {
+    let data = state.secret_store.read().await.list();
+    (StatusCode::OK, Json(serde_json::json!({ "data": data }))).into_response()
+}
+
+async fn set_secret(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    Json(body): Json<SetSecretRequest>,
+) -> Response {
+    let state_for_write = Arc::clone(&state);
+    let result = spawn_blocking(move || {
+        let mut store = state_for_write.secret_store.blocking_write();
+        store.set(&name, &body.value)
+    })
+    .await;
+
+    match result {
+        Ok(Ok(meta)) => (StatusCode::OK, Json(meta)).into_response(),
+        Ok(Err(SecretStoreError::InvalidName(_))) => {
+            ApiError::bad_request("invalid secret name").into_response()
+        }
+        Ok(Err(SecretStoreError::Io(err))) => {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        }
+        Ok(Err(SecretStoreError::Serde(err))) => {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        }
+        Ok(Err(SecretStoreError::NotFound(_))) => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "secret unexpectedly missing",
+        )
+        .into_response(),
+        Err(err) => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("secret write task failed: {err}"),
+        )
+        .into_response(),
+    }
+}
+
+async fn delete_secret(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> Response {
+    let state_for_write = Arc::clone(&state);
+    let result = spawn_blocking(move || {
+        let mut store = state_for_write.secret_store.blocking_write();
+        store.remove(&name)
+    })
+    .await;
+
+    match result {
+        Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
+        Ok(Err(SecretStoreError::InvalidName(_))) => {
+            ApiError::bad_request("invalid secret name").into_response()
+        }
+        Ok(Err(SecretStoreError::NotFound(name))) => {
+            ApiError::new(StatusCode::NOT_FOUND, format!("secret not found: {name}"))
+                .into_response()
+        }
+        Ok(Err(SecretStoreError::Io(err))) => {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        }
+        Ok(Err(SecretStoreError::Serde(err))) => {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        }
+        Err(err) => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("secret delete task failed: {err}"),
+        )
+        .into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct GitHubRepoResponse {
+    default_branch: String,
+    private: bool,
+    permissions: Option<serde_json::Value>,
+}
+
+async fn get_github_repo(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path((owner, name)): Path<(String, String)>,
+) -> Response {
+    let settings = state
+        .settings
+        .read()
+        .expect("settings lock poisoned")
+        .clone();
+    let app_id = match settings.app_id() {
+        Some(app_id) => app_id.to_string(),
+        None => {
+            return ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "git.app_id is not configured",
+            )
+            .into_response();
+        }
+    };
+
+    let creds = match state.github_app_credentials(Some(&app_id)).await {
+        Ok(Some(creds)) => creds,
+        Ok(None) => {
+            return ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "GITHUB_APP_PRIVATE_KEY is not configured",
+            )
+            .into_response();
+        }
+        Err(err) => {
+            return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err).into_response();
+        }
+    };
+
+    let jwt = match fabro_github::sign_app_jwt(&creds.app_id, &creds.private_key_pem) {
+        Ok(jwt) => jwt,
+        Err(err) => {
+            return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err).into_response();
+        }
+    };
+
+    let base_url = fabro_github::github_api_base_url();
+    let client = reqwest::Client::new();
+    let install_url = settings.slug().map_or_else(
+        || format!("https://github.com/organizations/{owner}/settings/installations"),
+        |slug| format!("https://github.com/apps/{slug}/installations/new"),
+    );
+
+    let installed =
+        match fabro_github::check_app_installed(&client, &jwt, &owner, &name, &base_url).await {
+            Ok(installed) => installed,
+            Err(err) => {
+                return ApiError::new(StatusCode::BAD_GATEWAY, err).into_response();
+            }
+        };
+
+    if !installed {
+        return (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "owner": owner,
+                "name": name,
+                "accessible": false,
+                "default_branch": null,
+                "private": null,
+                "permissions": null,
+                "install_url": install_url,
+            })),
+        )
+            .into_response();
+    }
+
+    let token = match fabro_github::create_installation_access_token_with_permissions(
+        &client,
+        &jwt,
+        &owner,
+        &name,
+        &base_url,
+        serde_json::json!({ "contents": "write", "pull_requests": "write" }),
+    )
+    .await
+    {
+        Ok(token) => token,
+        Err(err) => return ApiError::new(StatusCode::BAD_GATEWAY, err).into_response(),
+    };
+
+    let repo_response = match client
+        .get(format!("{base_url}/repos/{owner}/{name}"))
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "fabro-server")
+        .send()
+        .await
+    {
+        Ok(response) if response.status().is_success() => response,
+        Ok(response) => {
+            return ApiError::new(
+                StatusCode::BAD_GATEWAY,
+                format!("GitHub repo lookup failed: {}", response.status()),
+            )
+            .into_response();
+        }
+        Err(err) => return ApiError::new(StatusCode::BAD_GATEWAY, err.to_string()).into_response(),
+    };
+
+    let repo = match repo_response.json::<GitHubRepoResponse>().await {
+        Ok(repo) => repo,
+        Err(err) => {
+            return ApiError::new(
+                StatusCode::BAD_GATEWAY,
+                format!("Failed to parse GitHub repo response: {err}"),
+            )
+            .into_response();
+        }
+    };
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "owner": owner,
+            "name": name,
+            "accessible": true,
+            "default_branch": repo.default_branch,
+            "private": repo.private,
+            "permissions": repo.permissions,
+            "install_url": serde_json::Value::Null,
+        })),
+    )
+        .into_response()
+}
+
+async fn run_diagnostics(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    (
+        StatusCode::OK,
+        Json(diagnostics::run_all(state.as_ref()).await),
+    )
+        .into_response()
 }
 
 async fn openapi_spec() -> Response {
@@ -459,8 +774,8 @@ async fn cookie_and_demo_middleware(
         req.headers_mut()
             .insert("x-fabro-demo", HeaderValue::from_static("1"));
     }
-    if let Some(key) = &state.session_key {
-        if let Some(session) = web_auth::read_private_session(req.headers(), key) {
+    if let Some(key) = state.session_key().await {
+        if let Some(session) = web_auth::read_private_session(req.headers(), &key) {
             req.extensions_mut().insert(session);
         }
     }
@@ -510,12 +825,14 @@ pub fn create_app_state() -> Arc<AppState> {
 pub fn create_app_state_with_registry_factory(
     registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
-    build_app_state(
+    build_app_state_with_path(
         Arc::new(RwLock::new(Settings::default())),
         Some(Box::new(registry_factory_override)),
         5,
         test_store(),
+        test_secret_store_path(),
     )
+    .expect("test app state should build")
 }
 
 /// Create an `AppState` with the given settings and concurrency limit.
@@ -543,27 +860,39 @@ pub fn create_app_state_with_store(
     max_concurrent_runs: usize,
     store: StoreHandle,
 ) -> Arc<AppState> {
-    build_app_state(settings, None, max_concurrent_runs, store)
+    build_app_state_with_path(
+        settings,
+        None,
+        max_concurrent_runs,
+        store,
+        test_secret_store_path(),
+    )
+    .expect("test app state should build")
 }
 
-fn build_app_state(
+pub(crate) fn build_app_state_with_path(
     settings: Arc<RwLock<Settings>>,
     registry_factory_override: Option<Box<RegistryFactoryOverride>>,
     max_concurrent_runs: usize,
     store: StoreHandle,
-) -> Arc<AppState> {
-    Arc::new(AppState {
+    secret_store_path: PathBuf,
+) -> anyhow::Result<Arc<AppState>> {
+    let secret_store = SecretStore::load(secret_store_path)?;
+    Ok(Arc::new(AppState {
         runs: Mutex::new(HashMap::new()),
         aggregate_usage: Mutex::new(UsageAccumulator::default()),
         store,
         max_concurrent_runs,
         scheduler_notify: Notify::new(),
         sessions: new_session_store(),
-        llm_client: OnceCell::new(),
-        session_key: web_auth::session_key_from_env(),
+        secret_store: AsyncRwLock::new(secret_store),
         settings,
         registry_factory_override,
-    })
+    }))
+}
+
+fn test_secret_store_path() -> PathBuf {
+    std::env::temp_dir().join(format!("fabro-test-secrets-{}.json", Ulid::new()))
 }
 
 async fn list_board_runs(
@@ -1069,9 +1398,10 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
             return;
         }
     };
-    let github_app = match fabro_github::GitHubAppCredentials::from_env(
-        persisted.run_record().settings.app_id(),
-    ) {
+    let github_app = match state
+        .github_app_credentials(persisted.run_record().settings.app_id())
+        .await
+    {
         Ok(github_app) => github_app,
         Err(e) => {
             tracing::error!(run_id = %run_id, error = %e, "Invalid GitHub App credentials");
@@ -1909,7 +2239,18 @@ async fn test_model(
         .into_response();
     }
 
-    let outcome = run_model_test(info, mode).await;
+    let client = match state.build_llm_client().await {
+        Ok(client) => Arc::new(client),
+        Err(err) => {
+            return ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to build LLM client: {err}"),
+            )
+            .into_response();
+        }
+    };
+
+    let outcome = run_model_test_with_client(info, mode, client).await;
     Json(serde_json::json!({
         "model_id": info.id,
         "status": outcome.status.as_str(),
@@ -2103,12 +2444,12 @@ async fn create_completion(
     }
 
     // Get or create LLM client (cached in AppState)
-    let client = match state.llm_client.get_or_try_init(LlmClient::from_env).await {
-        Ok(c) => c,
-        Err(e) => {
+    let client = match state.build_llm_client().await {
+        Ok(client) => client,
+        Err(err) => {
             return ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to create LLM client: {e}"),
+                format!("Failed to create LLM client: {err}"),
             )
             .into_response();
         }

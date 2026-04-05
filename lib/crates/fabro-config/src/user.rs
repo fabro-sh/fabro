@@ -43,7 +43,7 @@ impl TryFrom<ClientTlsConfig> for ClientTlsSettings {
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct ServerConfig {
-    pub base_url: Option<String>,
+    pub target: Option<String>,
     pub tls: Option<ClientTlsConfig>,
 }
 
@@ -52,7 +52,7 @@ impl TryFrom<ServerConfig> for ServerSettings {
 
     fn try_from(value: ServerConfig) -> Result<Self, Self::Error> {
         Ok(Self {
-            base_url: value.base_url,
+            target: value.target,
             tls: value.tls.map(TryInto::try_into).transpose()?,
         })
     }

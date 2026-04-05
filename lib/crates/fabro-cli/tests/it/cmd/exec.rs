@@ -29,7 +29,7 @@ fn help() {
 
     Options:
           --json                           Output as JSON [env: FABRO_JSON=]
-          --server-url <SERVER_URL>        Fabro API server URL (overrides server.base_url from user.toml when supported) [env: FABRO_SERVER_URL=]
+          --server <SERVER>                Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
           --provider <PROVIDER>            LLM provider (anthropic, openai, gemini, kimi, zai, minimax, inception)
           --model <MODEL>                  Model name (defaults per provider)
           --no-upgrade-check               Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
@@ -120,7 +120,7 @@ fn exec_uses_user_config_defaults() {
 }
 
 #[test]
-fn exec_server_url_uses_remote_transport_instead_of_local_api_key_resolution() {
+fn exec_server_target_uses_remote_transport_instead_of_local_api_key_resolution() {
     let context = test_context!();
     let server = MockServer::start();
     server.mock(|when, then| {
@@ -133,7 +133,7 @@ fn exec_server_url_uses_remote_transport_instead_of_local_api_key_resolution() {
     cmd.env("HOME", &context.home_dir);
     cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
     cmd.args([
-        "--server-url",
+        "--server",
         &format!("{}/api/v1", server.base_url()),
         "--provider",
         "openai",
@@ -150,12 +150,12 @@ fn exec_server_url_uses_remote_transport_instead_of_local_api_key_resolution() {
     );
     assert!(
         !stderr.contains("API key not set"),
-        "exec should not fail local API key validation when --server-url is set: {stderr}"
+        "exec should not fail local API key validation when --server is set: {stderr}"
     );
 }
 
 #[test]
-fn exec_configured_server_base_url_alone_does_not_reroute_exec() {
+fn exec_configured_server_target_alone_does_not_reroute_exec() {
     let context = test_context!();
     let server = MockServer::start();
     server.mock(|when, then| {
@@ -164,7 +164,7 @@ fn exec_configured_server_base_url_alone_does_not_reroute_exec() {
     });
     context.write_home(
         ".fabro/user.toml",
-        format!("[server]\nbase_url = \"{}/api/v1\"\n", server.base_url()),
+        format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
     );
 
     let mut cmd = context.exec_cmd();
@@ -187,12 +187,12 @@ fn exec_configured_server_base_url_alone_does_not_reroute_exec() {
     );
     assert!(
         !stderr.contains("config-should-not-be-used"),
-        "exec should ignore configured server.base_url without --server-url: {stderr}"
+        "exec should ignore configured server.target without --server: {stderr}"
     );
 }
 
 #[test]
-fn exec_cli_server_url_overrides_configured_server_base_url() {
+fn exec_cli_server_target_overrides_configured_server_target() {
     let context = test_context!();
     let config_server = MockServer::start();
     config_server.mock(|when, then| {
@@ -207,7 +207,7 @@ fn exec_cli_server_url_overrides_configured_server_base_url() {
     context.write_home(
         ".fabro/user.toml",
         format!(
-            "[server]\nbase_url = \"{}/api/v1\"\n",
+            "[server]\ntarget = \"{}/api/v1\"\n",
             config_server.base_url()
         ),
     );
@@ -217,7 +217,7 @@ fn exec_cli_server_url_overrides_configured_server_base_url() {
     cmd.env("HOME", &context.home_dir);
     cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
     cmd.args([
-        "--server-url",
+        "--server",
         &format!("{}/api/v1", cli_server.base_url()),
         "--provider",
         "openai",
@@ -230,11 +230,11 @@ fn exec_cli_server_url_overrides_configured_server_base_url() {
     let stderr = String::from_utf8(output.stderr).expect("valid utf8");
     assert!(
         stderr.contains("cli-override-marker"),
-        "expected CLI server URL to win, got: {stderr}"
+        "expected CLI server target to win, got: {stderr}"
     );
     assert!(
         !stderr.contains("config-should-not-be-used"),
-        "configured server.base_url should not be used when --server-url is passed: {stderr}"
+        "configured server.target should not be used when --server is passed: {stderr}"
     );
 }
 

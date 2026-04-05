@@ -38,6 +38,18 @@ impl Client {
     ///
     /// Returns `SdkError` if any provider adapter fails to initialize.
     pub async fn from_env() -> Result<Self, SdkError> {
+        Self::from_lookup(|name| std::env::var(name).ok()).await
+    }
+
+    /// Create a Client from a custom variable lookup.
+    ///
+    /// This is useful when credentials come from a source other than process
+    /// environment variables, while still preserving the env-style provider
+    /// configuration surface.
+    pub async fn from_lookup<F>(lookup: F) -> Result<Self, SdkError>
+    where
+        F: Fn(&str) -> Option<String>,
+    {
         let mut client = Self {
             providers: HashMap::new(),
             default_provider: None,
@@ -46,16 +58,16 @@ impl Client {
 
         // Register providers whose API keys are present in the environment.
         // Order determines which becomes the default provider.
-        if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+        if let Some(key) = lookup("ANTHROPIC_API_KEY") {
             let mut adapter = providers::AnthropicAdapter::new(key);
-            if let Ok(base_url) = std::env::var("ANTHROPIC_BASE_URL") {
+            if let Some(base_url) = lookup("ANTHROPIC_BASE_URL") {
                 adapter = adapter.with_base_url(base_url);
             }
             client.register_provider(Arc::new(adapter)).await?;
         }
-        if let Ok(key) = std::env::var("OPENAI_API_KEY") {
+        if let Some(key) = lookup("OPENAI_API_KEY") {
             let mut adapter = providers::OpenAiAdapter::new(key);
-            if let Ok(account_id) = std::env::var("CHATGPT_ACCOUNT_ID") {
+            if let Some(account_id) = lookup("CHATGPT_ACCOUNT_ID") {
                 // Codex OAuth: route through chatgpt.com backend with required headers
                 adapter = adapter
                     .with_base_url("https://chatgpt.com/backend-api/codex")
@@ -64,44 +76,42 @@ impl Client {
                 headers.insert("ChatGPT-Account-Id".to_string(), account_id);
                 headers.insert("originator".to_string(), "fabro".to_string());
                 adapter = adapter.with_default_headers(headers);
-            } else if let Ok(base_url) = std::env::var("OPENAI_BASE_URL") {
+            } else if let Some(base_url) = lookup("OPENAI_BASE_URL") {
                 adapter = adapter.with_base_url(base_url);
             }
-            if let Ok(org_id) = std::env::var("OPENAI_ORG_ID") {
+            if let Some(org_id) = lookup("OPENAI_ORG_ID") {
                 adapter = adapter.with_org_id(org_id);
             }
-            if let Ok(project_id) = std::env::var("OPENAI_PROJECT_ID") {
+            if let Some(project_id) = lookup("OPENAI_PROJECT_ID") {
                 adapter = adapter.with_project_id(project_id);
             }
             client.register_provider(Arc::new(adapter)).await?;
         }
-        if let Ok(key) =
-            std::env::var("GEMINI_API_KEY").or_else(|_| std::env::var("GOOGLE_API_KEY"))
-        {
+        if let Some(key) = lookup("GEMINI_API_KEY").or_else(|| lookup("GOOGLE_API_KEY")) {
             let mut adapter = providers::GeminiAdapter::new(key);
-            if let Ok(base_url) = std::env::var("GEMINI_BASE_URL") {
+            if let Some(base_url) = lookup("GEMINI_BASE_URL") {
                 adapter = adapter.with_base_url(base_url);
             }
             client.register_provider(Arc::new(adapter)).await?;
         }
-        if let Ok(key) = std::env::var("KIMI_API_KEY") {
+        if let Some(key) = lookup("KIMI_API_KEY") {
             let adapter =
                 providers::OpenAiCompatibleAdapter::new(key, "https://api.moonshot.ai/v1")
                     .with_name("kimi");
             client.register_provider(Arc::new(adapter)).await?;
         }
-        if let Ok(key) = std::env::var("ZAI_API_KEY") {
+        if let Some(key) = lookup("ZAI_API_KEY") {
             let adapter =
                 providers::OpenAiCompatibleAdapter::new(key, "https://api.z.ai/api/coding/paas/v4")
                     .with_name("zai");
             client.register_provider(Arc::new(adapter)).await?;
         }
-        if let Ok(key) = std::env::var("MINIMAX_API_KEY") {
+        if let Some(key) = lookup("MINIMAX_API_KEY") {
             let adapter = providers::OpenAiCompatibleAdapter::new(key, "https://api.minimax.io/v1")
                 .with_name("minimax");
             client.register_provider(Arc::new(adapter)).await?;
         }
-        if let Ok(key) = std::env::var("INCEPTION_API_KEY") {
+        if let Some(key) = lookup("INCEPTION_API_KEY") {
             let adapter =
                 providers::OpenAiCompatibleAdapter::new(key, "https://api.inceptionlabs.ai/v1")
                     .with_name("inception");

@@ -24,7 +24,7 @@ pub(crate) async fn execute(mut args: ExecArgs, globals: &GlobalArgs) -> Result<
     if globals.json {
         args.agent.output_format = Some(OutputFormat::Json);
     }
-    let server_target = user_config::exec_server_target(&args.server_url, &cli_settings);
+    let server_target = user_config::exec_server_target(&args.server, &cli_settings)?;
     let mcp_servers: Vec<McpServerSettings> = cli_settings
         .mcp_servers
         .into_iter()
@@ -32,15 +32,27 @@ pub(crate) async fn execute(mut args: ExecArgs, globals: &GlobalArgs) -> Result<
         .collect();
     if let Some(target) = server_target {
         tracing::info!(transport = "server", "Agent session starting");
-        let http_client = user_config::build_server_client(target.tls.as_ref())?;
         let provider_name = args
             .agent
             .provider
             .clone()
             .unwrap_or_else(|| "anthropic".to_string());
+        let (base_url, http_client) = match &target {
+            user_config::ServerTarget::HttpUrl { base_url, tls } => (
+                base_url.clone(),
+                user_config::build_server_client(tls.as_ref())?,
+            ),
+            user_config::ServerTarget::UnixSocket(path) => {
+                let http_client = reqwest::ClientBuilder::new()
+                    .unix_socket(path.as_path())
+                    .no_proxy()
+                    .build()?;
+                ("http://fabro".to_string(), http_client)
+            }
+        };
         let adapter = Arc::new(FabroServerAdapter::new(
             http_client,
-            &target.server_base_url,
+            &base_url,
             &provider_name,
         ));
         let mut client = Client::new(HashMap::new(), None, vec![]);

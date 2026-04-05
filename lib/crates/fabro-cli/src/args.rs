@@ -62,36 +62,36 @@ impl StorageDirArgs {
 }
 
 #[derive(Args, Debug, Clone, Default)]
-pub(crate) struct ServerUrlArgs {
-    /// Fabro API server URL (overrides server.base_url from user.toml when supported)
-    #[arg(long, env = "FABRO_SERVER_URL")]
-    pub(crate) server_url: Option<String>,
+pub(crate) struct ServerTargetArgs {
+    /// Fabro server target: http(s) URL or absolute Unix socket path
+    #[arg(long = "server", env = "FABRO_SERVER")]
+    pub(crate) server: Option<String>,
 }
 
-impl ServerUrlArgs {
+impl ServerTargetArgs {
     pub(crate) fn as_deref(&self) -> Option<&str> {
-        self.server_url.as_deref()
+        self.server.as_deref()
     }
 }
 
 #[derive(Args, Debug, Clone, Default)]
-pub(crate) struct ModelTargetArgs {
+pub(crate) struct ServerConnectionArgs {
     /// Local storage directory (default: ~/.fabro)
-    #[arg(long, env = "FABRO_STORAGE_DIR", conflicts_with = "server_url")]
+    #[arg(long, env = "FABRO_STORAGE_DIR", conflicts_with = "server")]
     pub(crate) storage_dir: Option<PathBuf>,
 
-    /// Fabro API server URL (overrides server.base_url from user.toml when supported)
-    #[arg(long, env = "FABRO_SERVER_URL", conflicts_with = "storage_dir")]
-    pub(crate) server_url: Option<String>,
+    /// Fabro server target: http(s) URL or absolute Unix socket path
+    #[arg(long = "server", env = "FABRO_SERVER", conflicts_with = "storage_dir")]
+    pub(crate) server: Option<String>,
 }
 
-impl ModelTargetArgs {
+impl ServerConnectionArgs {
     pub(crate) fn storage_dir(&self) -> Option<&Path> {
         self.storage_dir.as_deref()
     }
 
-    pub(crate) fn server_url(&self) -> Option<&str> {
-        self.server_url.as_deref()
+    pub(crate) fn server(&self) -> Option<&str> {
+        self.server.as_deref()
     }
 }
 
@@ -491,17 +491,7 @@ pub(crate) struct StoreDumpArgs {
 }
 
 #[derive(Args)]
-pub(crate) struct SecretGetArgs {
-    /// Name of the secret
-    pub(crate) key: String,
-}
-
-#[derive(Args)]
-pub(crate) struct SecretListArgs {
-    /// Show values alongside keys
-    #[arg(long)]
-    pub(crate) show_values: bool,
-}
+pub(crate) struct SecretListArgs;
 
 #[derive(Args)]
 pub(crate) struct SecretRmArgs {
@@ -602,6 +592,9 @@ pub(crate) struct WorkflowCreateArgs {
 
 #[derive(Args)]
 pub(crate) struct ProviderLoginArgs {
+    #[command(flatten)]
+    pub(crate) target: ServerConnectionArgs,
+
     /// LLM provider to authenticate with
     #[arg(long)]
     pub(crate) provider: fabro_model::Provider,
@@ -760,7 +753,7 @@ pub(crate) struct RunnerArgs {
 #[derive(Args, Debug, Clone, Default)]
 pub(crate) struct ModelListArgs {
     #[command(flatten)]
-    pub(crate) target: ModelTargetArgs,
+    pub(crate) target: ServerConnectionArgs,
 
     /// Filter by provider
     #[arg(short, long)]
@@ -774,7 +767,7 @@ pub(crate) struct ModelListArgs {
 #[derive(Args, Debug, Clone, Default)]
 pub(crate) struct ModelTestArgs {
     #[command(flatten)]
-    pub(crate) target: ModelTargetArgs,
+    pub(crate) target: ServerConnectionArgs,
 
     /// Filter by provider
     #[arg(short, long)]
@@ -792,7 +785,7 @@ pub(crate) struct ModelTestArgs {
 #[derive(Args)]
 pub(crate) struct ExecArgs {
     #[command(flatten)]
-    pub(crate) server_url: ServerUrlArgs,
+    pub(crate) server: ServerTargetArgs,
 
     #[command(flatten)]
     pub(crate) agent: AgentArgs,
@@ -939,27 +932,15 @@ pub(crate) enum Commands {
     /// Server operations
     Server(ServerNamespace),
     /// Check environment and integration health
-    Doctor {
-        /// Show detailed information for each check
-        #[arg(short, long)]
-        verbose: bool,
-
-        /// Skip live service probes (LLM, sandbox, API, web, Brave Search)
-        #[arg(long)]
-        dry_run: bool,
-    },
+    Doctor(DoctorArgs),
     /// Set up the Fabro environment (LLMs, certs, GitHub)
-    Install {
-        /// Base URL for the web UI (used for OAuth callback URLs)
-        #[arg(long, default_value = "http://localhost:3000")]
-        web_url: String,
-    },
+    Install(InstallArgs),
     /// Pull request operations
     Pr(PrNamespace),
     /// Skill management
     #[command(hide = true)]
     Skill(SkillNamespace),
-    /// Manage secrets in ~/.fabro/.env
+    /// Manage server-owned secrets
     Secret(SecretNamespace),
     /// Inspect merged configuration
     Settings(SettingsArgs),
@@ -1033,12 +1014,12 @@ impl Commands {
                 ServerCommand::Status(_) => "server status",
                 ServerCommand::Serve(_) => "server __serve",
             },
-            Self::Doctor { .. } => "doctor",
+            Self::Doctor(_) => "doctor",
             Self::Repo(ns) => match &ns.command {
-                RepoCommand::Init { .. } => "repo init",
+                RepoCommand::Init(_) => "repo init",
                 RepoCommand::Deinit => "repo deinit",
             },
-            Self::Install { .. } => "install",
+            Self::Install(_) => "install",
             Self::Pr(ns) => match &ns.command {
                 PrCommand::Create(_) => "pr create",
                 PrCommand::List(_) => "pr list",
@@ -1047,7 +1028,6 @@ impl Commands {
                 PrCommand::Close(_) => "pr close",
             },
             Self::Secret(ns) => match &ns.command {
-                SecretCommand::Get(_) => "secret get",
                 SecretCommand::List(_) => "secret list",
                 SecretCommand::Rm(_) => "secret rm",
                 SecretCommand::Set(_) => "secret set",
@@ -1128,14 +1108,15 @@ pub(crate) enum StoreCommand {
 
 #[derive(Args)]
 pub(crate) struct SecretNamespace {
+    #[command(flatten)]
+    pub(crate) target: ServerConnectionArgs,
+
     #[command(subcommand)]
     pub(crate) command: SecretCommand,
 }
 
 #[derive(Subcommand)]
 pub(crate) enum SecretCommand {
-    /// Get a secret value
-    Get(SecretGetArgs),
     /// List secret names
     #[command(alias = "ls")]
     List(SecretListArgs),
@@ -1249,13 +1230,39 @@ pub(crate) struct RepoNamespace {
 #[derive(Subcommand)]
 pub(crate) enum RepoCommand {
     /// Initialize a new project
-    Init {
-        /// Also install the fabro-create-workflow skill
-        #[arg(long, hide = true)]
-        skill: bool,
-    },
+    Init(RepoInitArgs),
     /// Remove fabro.toml and fabro/ directory
     Deinit,
+}
+
+#[derive(Args)]
+pub(crate) struct RepoInitArgs {
+    #[command(flatten)]
+    pub(crate) target: ServerConnectionArgs,
+
+    /// Also install the fabro-create-workflow skill
+    #[arg(long, hide = true)]
+    pub(crate) skill: bool,
+}
+
+#[derive(Args)]
+pub(crate) struct DoctorArgs {
+    #[command(flatten)]
+    pub(crate) target: ServerConnectionArgs,
+
+    /// Show detailed information for each check
+    #[arg(short, long)]
+    pub(crate) verbose: bool,
+}
+
+#[derive(Args)]
+pub(crate) struct InstallArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
+    /// Base URL for the web UI (used for OAuth callback URLs)
+    #[arg(long, default_value = "http://localhost:3000")]
+    pub(crate) web_url: String,
 }
 
 #[derive(Args)]

@@ -15,16 +15,12 @@
 
 
 /**
- * Service health check response.
+ * Request to store a secret value.
  */
-export interface HealthResponse {
+export interface SetSecretRequest {
     /**
-     * Health status indicator.
+     * The secret value to store.
      */
-    'status': string;
-    /**
-     * Server version string.
-     */
-    'version': string;
+    'value': string;
 }
 

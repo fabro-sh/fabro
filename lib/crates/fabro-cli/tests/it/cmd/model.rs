@@ -176,7 +176,7 @@ fn list_invalid_provider_errors() {
 }
 
 #[test]
-fn list_uses_configured_server_base_url_without_server_url_flag() {
+fn list_uses_configured_server_target_without_server_flag() {
     let context = test_context!();
     let server = MockServer::start();
     let mock = server.mock(|when, then| {
@@ -218,7 +218,7 @@ fn list_uses_configured_server_base_url_without_server_url_flag() {
     });
     context.write_home(
         ".fabro/user.toml",
-        format!("[server]\nbase_url = \"{}/api/v1\"\n", server.base_url()),
+        format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
     );
 
     let mut cmd = context.model();

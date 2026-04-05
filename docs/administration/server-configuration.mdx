@@ -152,9 +152,9 @@ Toggle experimental or opt-in features. All features default to `false`.
 
 The same `[features]` section can be set in `fabro.toml` (project-level) to enable features per-project.
 
-## Environment variables
+## Secrets and environment variables
 
-Fabro reads environment variables from a `.env` file in the working directory (if present) and from the shell environment. Provider API keys are required for the models you want to use; everything else is optional.
+Fabro stores server-managed credentials in `<data_dir>/secrets.json` and also honors relevant environment variables from the server process environment as a fallback. Fabro no longer auto-loads `.env` files. Provider API keys are required for the models you want to use; everything else is optional.
 
 ### LLM provider keys
 

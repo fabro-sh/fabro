@@ -17,7 +17,7 @@ fn help() {
           --json                       Output as JSON [env: FABRO_JSON=]
           --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
           --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --server-url <SERVER_URL>    Fabro API server URL (overrides server.base_url from user.toml when supported) [env: FABRO_SERVER_URL=]
+          --server <SERVER>            Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
           --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
       -p, --provider <PROVIDER>        Filter by provider
       -q, --query <QUERY>              Search for models matching this string

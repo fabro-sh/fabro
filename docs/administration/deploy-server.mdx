@@ -114,16 +114,16 @@ The CLI can target a running Fabro server for commands that support a remote API
 
 ```toml title="user.toml"
 [server]
-base_url = "https://fabro.example.com:3000/api/v1"
+target = "https://fabro.example.com:3000/api/v1"
 ```
 
-Or use the `--server-url` flag:
+Or use the `--server` flag:
 
 ```bash
-fabro --server-url https://fabro.example.com:3000/api/v1 model list
+fabro model list --server https://fabro.example.com:3000/api/v1
 ```
 
-`fabro model list` and `fabro model test` honor `[server].base_url` by default unless you explicitly pass `--storage-dir`. `fabro exec` remains a local agent session and only uses the server when you pass `--server-url`.
+`fabro model list` and `fabro model test` honor `[server].target` by default unless you explicitly pass `--storage-dir`. `fabro exec` remains a local agent session and only uses the server when you pass `--server`.
 
 See [User Configuration](/reference/user-configuration#server-section) for the full connection options, including mTLS setup.
 

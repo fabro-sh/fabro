@@ -13,18 +13,12 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { DiagnosticsCheck } from './diagnostics-check';
 
-/**
- * Service health check response.
- */
-export interface HealthResponse {
-    /**
-     * Health status indicator.
-     */
-    'status': string;
-    /**
-     * Server version string.
-     */
-    'version': string;
+export interface DiagnosticsSection {
+    'title': string;
+    'checks': Array<DiagnosticsCheck>;
 }
 

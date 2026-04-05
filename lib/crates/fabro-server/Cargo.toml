@@ -65,6 +65,8 @@ bytes = "1"
 object_store.workspace = true
 mime_guess.workspace = true
 rust-embed.workspace = true
+regex.workspace = true
+semver.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }

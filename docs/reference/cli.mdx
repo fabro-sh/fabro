@@ -9,14 +9,15 @@ These flags apply to all subcommands:
 
 | Flag | Description |
 |---|---|
+| `--json` | Output machine-readable JSON when the command supports it |
 | `--debug` | Enable DEBUG-level logging (default is INFO) |
 | `--no-upgrade-check` | Skip the automatic background upgrade check |
-| `--storage-dir <DIR>` | Local storage directory for Fabro data (default: `~/.fabro`). |
-| `--server-url <URL>` | Fabro API server URL for commands that support a remote target (overrides `server.base_url` from `user.toml`). |
+| `--quiet` | Suppress non-essential output |
+| `--verbose` | Enable verbose output |
 | `-h, --help` | Print help |
 | `-V, --version` | Print version |
 
-Fabro loads environment variables from `~/.fabro/.env`.
+Connection-target flags like `--storage-dir` and `--server` are command-specific, not global. Fabro no longer auto-loads `~/.fabro/.env`; persist server-owned credentials with `fabro provider login` / `fabro secret set`, or provide environment variables in the invoking shell.
 
 ## Configuration
 
@@ -33,12 +34,12 @@ output_format = "text"
 model = "claude-sonnet-4-5"
 
 [server]
-base_url = "https://fabro.example.com:3000/api/v1"
+target = "https://fabro.example.com:3000/api/v1"
 ```
 
-`[exec]` config applies to `fabro exec`. `[llm]` sets the default workflow model/provider for commands like `fabro run` and `fabro preflight`. `[server]` stores connection info for commands that can target a remote Fabro API.
+`[exec]` config applies to `fabro exec`. `[llm]` sets the default workflow model/provider for commands like `fabro run` and `fabro preflight`. `[server]` stores connection info for commands that can target a remote Fabro server.
 
-`fabro model` uses `[server].base_url` by default when no explicit `--storage-dir` is passed. `fabro exec` remains a local session unless you pass `--server-url`, even if `[server].base_url` is configured.
+`fabro model` uses `[server].target` by default when no explicit `--storage-dir` is passed. `fabro exec` remains a local session unless you pass `--server`, even if `[server].target` is configured.
 
 CLI flags always override `user.toml` values, which override hardcoded defaults.
 
@@ -270,7 +271,7 @@ List available LLM models from the built-in catalog. Running `fabro model` with 
 fabro model list
 fabro model list -p anthropic
 fabro model list -q sonnet
-fabro model list --server-url http://localhost:3000/api/v1
+fabro model list --server http://localhost:3000/api/v1
 ```
 
 | Flag | Description |
@@ -686,18 +687,17 @@ Without `--signed`, the command prints the URL, token, and a `curl` example. See
 
 ## `fabro doctor`
 
-Check environment and integration health. Verifies system dependencies, API keys, and optional services. Probes live services (LLM providers, sandbox, GitHub App) by default.
+Check environment and integration health. `fabro doctor` always performs live server-backed diagnostics and keeps only local user-config and legacy `.env` checks on the CLI side.
 
 ```bash
 fabro doctor
 fabro doctor -v
-fabro doctor --dry-run
+fabro doctor --server https://fabro.example.com:3000/api/v1
 ```
 
 | Flag | Description |
 |---|---|
 | `-v, --verbose` | Show detailed information for each check |
-| `--dry-run` | Skip live service probes (LLM, sandbox, API, web, Brave Search) |
 
 ## `fabro upgrade`
 
@@ -768,7 +768,7 @@ fabro provider login --provider anthropic
 |---|---|
 | `--provider <PROVIDER>` | LLM provider to authenticate with (required) |
 
-For OpenAI, this launches a browser-based OAuth PKCE flow with an automatic fallback to manual API key entry. All other providers prompt for an API key with validation. Credentials are merged non-destructively into `~/.fabro/.env`.
+For OpenAI, this launches a browser-based OAuth PKCE flow with an automatic fallback to manual API key entry. All other providers prompt for an API key with validation. Credentials are saved to the connected Fabro server's secret store.
 
 ## `fabro install`
 
@@ -787,7 +787,7 @@ fabro install --web-url https://fabro.example.com
 
 ## `fabro secret set`
 
-Store a secret in `~/.fabro/.env`.
+Store or update a server-owned secret on the connected Fabro server.
 
 ```bash
 fabro secret set ANTHROPIC_API_KEY sk-ant-...
@@ -798,34 +798,17 @@ fabro secret set ANTHROPIC_API_KEY sk-ant-...
 | `<KEY>` | Name of the secret (required) |
 | `<VALUE>` | Value to store (required) |
 
-## `fabro secret get`
-
-Print the value of a secret from `~/.fabro/.env`.
-
-```bash
-fabro secret get ANTHROPIC_API_KEY
-```
-
-| Argument | Description |
-|---|---|
-| `<KEY>` | Name of the secret (required) |
-
 ## `fabro secret list`
 
-List secret names stored in `~/.fabro/.env`.
+List server-owned secret names. Values are never returned after storage.
 
 ```bash
 fabro secret list
-fabro secret list --show-values
 ```
-
-| Flag | Description |
-|---|---|
-| `--show-values` | Print values alongside keys |
 
 ## `fabro secret rm`
 
-Remove a secret from `~/.fabro/.env`.
+Remove a server-owned secret from the connected Fabro server.
 
 ```bash
 fabro secret rm ANTHROPIC_API_KEY

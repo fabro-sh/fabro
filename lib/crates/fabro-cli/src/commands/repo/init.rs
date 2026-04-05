@@ -3,9 +3,8 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 use tokio::task::spawn_blocking;
 
-use crate::args::GlobalArgs;
-use crate::shared::github::build_github_app_credentials;
-use crate::user_config::load_user_settings;
+use crate::args::{GlobalArgs, RepoInitArgs, ServerConnectionArgs};
+use crate::server_client;
 
 pub(super) fn git_repo_root() -> Result<PathBuf> {
     let output = std::process::Command::new("git")
@@ -22,7 +21,7 @@ pub(super) fn git_repo_root() -> Result<PathBuf> {
     ))
 }
 
-pub(crate) async fn run_init(globals: &GlobalArgs) -> Result<Vec<String>> {
+pub(crate) async fn run_init(args: &RepoInitArgs, globals: &GlobalArgs) -> Result<Vec<String>> {
     let repo_root = git_repo_root()?;
     let mut created = Vec::new();
 
@@ -126,13 +125,13 @@ draft = true
     }
 
     if !globals.json {
-        check_github_app_installation().await;
+        check_github_app_installation(&args.target).await;
     }
 
     Ok(created)
 }
 
-async fn check_github_app_installation() {
+async fn check_github_app_installation(target: &ServerConnectionArgs) {
     // Get the git remote origin URL
     let output = match std::process::Command::new("git")
         .args(["remote", "get-url", "origin"])
@@ -167,158 +166,79 @@ async fn check_github_app_installation() {
         return; // Not a GitHub repo — skip silently
     };
 
-    // Load CLI config to get app_id and slug
-    let Ok(cli_settings) = load_user_settings() else {
-        return;
+    let client = match server_client::connect_server_backed_api_client(target).await {
+        Ok(client) => client,
+        Err(err) => {
+            eprintln!("\n  Warning: could not connect to fabro server: {err}");
+            return;
+        }
     };
 
-    let app_id = if let Some(id) = cli_settings.app_id() {
-        id.to_string()
-    } else {
+    let check = match client
+        .get_github_repo()
+        .owner(owner.clone())
+        .name(repo.clone())
+        .send()
+        .await
+    {
+        Ok(response) => response.into_inner(),
+        Err(err) => {
+            eprintln!("\n  Warning: could not check GitHub App installation: {err}");
+            return;
+        }
+    };
+
+    if check.accessible {
+        let green = console::Style::new().green();
         eprintln!(
-            "\n  Run {} to set up the GitHub App",
-            console::Style::new()
-                .cyan()
-                .bold()
-                .apply_to("fabro install")
+            "\n  {} GitHub App is installed for {owner}/{repo}",
+            green.apply_to("✔")
         );
         return;
-    };
+    }
 
-    let slug = cli_settings.slug().map(String::from);
+    let yellow = console::Style::new().yellow();
+    eprintln!(
+        "\n  {} GitHub App is not installed for {owner}/{repo}",
+        yellow.apply_to("!")
+    );
+    if let Some(url) = &check.install_url {
+        eprintln!("  Install at: {url}");
+    }
 
-    // Build GitHub App credentials
-    let creds = match build_github_app_credentials(Some(&app_id)) {
-        Ok(Some(creds)) => creds,
-        Ok(None) => {
-            eprintln!(
-                "\n  Set {} to enable GitHub App integration",
-                console::Style::new()
-                    .cyan()
-                    .bold()
-                    .apply_to("GITHUB_APP_PRIVATE_KEY")
-            );
-            return;
-        }
-        Err(err) => {
-            eprintln!("\n  Warning: invalid GITHUB_APP_PRIVATE_KEY: {err}");
-            return;
-        }
-    };
+    if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+        eprintln!("  Press Enter to continue after installing...");
+        let _ = spawn_blocking(|| {
+            let mut buf = String::new();
+            let _ = std::io::stdin().read_line(&mut buf);
+        })
+        .await;
 
-    let jwt = match fabro_github::sign_app_jwt(&creds.app_id, &creds.private_key_pem) {
-        Ok(j) => j,
-        Err(e) => {
-            eprintln!("\n  Warning: failed to sign GitHub App JWT: {e}");
-            return;
-        }
-    };
-
-    let client = reqwest::Client::new();
-
-    match fabro_github::check_app_installed(
-        &client,
-        &jwt,
-        &owner,
-        &repo,
-        &fabro_github::github_api_base_url(),
-    )
-    .await
-    {
-        Ok(true) => {
-            let green = console::Style::new().green();
-            eprintln!(
-                "\n  {} GitHub App is installed for {owner}/{repo}",
-                green.apply_to("✔")
-            );
-        }
-        Ok(false) => {
-            let install_url = match &slug {
-                Some(s) => format!("https://github.com/apps/{s}/installations/new"),
-                None => format!("https://github.com/organizations/{owner}/settings/installations"),
-            };
-
-            let yellow = console::Style::new().yellow();
-
-            // Best-effort: warn if the app is private and the repo belongs to a different owner.
-            if let Ok(app_info) = fabro_github::get_authenticated_app(
-                &client,
-                &jwt,
-                &fabro_github::github_api_base_url(),
-            )
+        match client
+            .get_github_repo()
+            .owner(owner.clone())
+            .name(repo.clone())
+            .send()
             .await
-            {
-                let cross_owner = !app_info.owner.login.eq_ignore_ascii_case(&owner);
-                let is_private = cross_owner
-                    && fabro_github::is_app_public(
-                        &client,
-                        &app_info.slug,
-                        &fabro_github::github_api_base_url(),
-                    )
-                    .await
-                        == Ok(false);
-
-                if is_private {
+        {
+            Ok(response) => {
+                let response = response.into_inner();
+                if response.accessible {
+                    let green = console::Style::new().green();
                     eprintln!(
-                        "\n  {} GitHub App \"{}\" is private but this repo belongs to a different owner ({}).",
-                        yellow.apply_to("!"),
-                        app_info.slug,
-                        owner
+                        "  {} GitHub App is installed for {owner}/{repo}",
+                        green.apply_to("✔")
                     );
-                    eprintln!(
-                        "    The app must be made public before it can be installed outside {}.",
-                        app_info.owner.login
-                    );
-                    eprintln!(
-                        "    Update visibility at: https://github.com/settings/apps/{}",
-                        app_info.slug
-                    );
-                }
-            }
-            eprintln!(
-                "\n  {} GitHub App is not installed for {owner}/{repo}",
-                yellow.apply_to("!")
-            );
-            eprintln!("  Install at: {install_url}");
-
-            // Only prompt if stdin is a terminal
-            if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-                eprintln!("  Press Enter to continue after installing...");
-                let _ = spawn_blocking(|| {
-                    let mut buf = String::new();
-                    let _ = std::io::stdin().read_line(&mut buf);
-                })
-                .await;
-
-                // Re-check after user presses Enter
-                match fabro_github::check_app_installed(
-                    &client,
-                    &jwt,
-                    &owner,
-                    &repo,
-                    &fabro_github::github_api_base_url(),
-                )
-                .await
-                {
-                    Ok(true) => {
-                        let green = console::Style::new().green();
-                        eprintln!(
-                            "  {} GitHub App is installed for {owner}/{repo}",
-                            green.apply_to("✔")
-                        );
-                    }
-                    Ok(false) => {
-                        eprintln!("  GitHub App is still not installed.");
-                        eprintln!("  Install at: {install_url}");
-                    }
-                    Err(e) => {
-                        eprintln!("  Warning: could not re-check GitHub App installation: {e}");
+                } else {
+                    eprintln!("  GitHub App is still not installed.");
+                    if let Some(url) = &check.install_url {
+                        eprintln!("  Install at: {url}");
                     }
                 }
             }
-        }
-        Err(e) => {
-            eprintln!("\n  Warning: could not check GitHub App installation: {e}");
+            Err(err) => {
+                eprintln!("  Warning: could not re-check GitHub App installation: {err}");
+            }
         }
     }
 }

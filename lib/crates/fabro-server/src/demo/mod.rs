@@ -432,6 +432,110 @@ pub(crate) async fn create_session_stub(
         .into_response()
 }
 
+pub(crate) async fn list_secrets(
+    _auth: AuthenticatedService,
+    State(_state): State<Arc<AppState>>,
+) -> Response {
+    (
+        StatusCode::OK,
+        Json(json!({
+            "data": [
+                {
+                    "name": "OPENAI_API_KEY",
+                    "created_at": "2026-04-05T12:00:00Z",
+                    "updated_at": "2026-04-05T12:00:00Z"
+                },
+                {
+                    "name": "GITHUB_APP_PRIVATE_KEY",
+                    "created_at": "2026-04-05T12:05:00Z",
+                    "updated_at": "2026-04-05T12:05:00Z"
+                }
+            ]
+        })),
+    )
+        .into_response()
+}
+
+pub(crate) async fn set_secret(
+    _auth: AuthenticatedService,
+    State(_state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> Response {
+    (
+        StatusCode::OK,
+        Json(json!({
+            "name": name,
+            "created_at": "2026-04-05T12:00:00Z",
+            "updated_at": "2026-04-05T12:00:00Z"
+        })),
+    )
+        .into_response()
+}
+
+pub(crate) async fn delete_secret(
+    _auth: AuthenticatedService,
+    State(_state): State<Arc<AppState>>,
+    Path(_name): Path<String>,
+) -> Response {
+    StatusCode::NO_CONTENT.into_response()
+}
+
+pub(crate) async fn get_github_repo(
+    _auth: AuthenticatedService,
+    State(_state): State<Arc<AppState>>,
+    Path((owner, name)): Path<(String, String)>,
+) -> Response {
+    (
+        StatusCode::OK,
+        Json(json!({
+            "owner": owner,
+            "name": name,
+            "accessible": false,
+            "default_branch": null,
+            "private": null,
+            "permissions": null,
+            "install_url": "https://github.com/apps/fabro/installations/new"
+        })),
+    )
+        .into_response()
+}
+
+pub(crate) async fn run_diagnostics(
+    _auth: AuthenticatedService,
+    State(_state): State<Arc<AppState>>,
+) -> Response {
+    (
+        StatusCode::OK,
+        Json(json!({
+            "version": fabro_util::version::FABRO_VERSION,
+            "sections": [
+                {
+                    "title": "Credentials",
+                    "checks": [
+                        { "name": "LLM Providers", "status": "pass", "summary": "demo configured", "details": [], "remediation": null },
+                        { "name": "GitHub App", "status": "pass", "summary": "demo configured", "details": [], "remediation": null },
+                        { "name": "Sandbox", "status": "warning", "summary": "not configured", "details": [], "remediation": "Set DAYTONA_API_KEY to enable cloud sandbox execution" },
+                        { "name": "Brave Search", "status": "warning", "summary": "not configured", "details": [], "remediation": "Set BRAVE_SEARCH_API_KEY to enable web search" }
+                    ]
+                },
+                {
+                    "title": "System",
+                    "checks": [
+                        { "name": "dot", "status": "pass", "summary": "dot available", "details": [], "remediation": null }
+                    ]
+                },
+                {
+                    "title": "Configuration",
+                    "checks": [
+                        { "name": "Crypto", "status": "pass", "summary": "all keys valid", "details": [], "remediation": null }
+                    ]
+                }
+            ]
+        })),
+    )
+        .into_response()
+}
+
 pub(crate) async fn get_session(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,

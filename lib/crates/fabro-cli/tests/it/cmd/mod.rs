@@ -43,7 +43,6 @@ mod sandbox_cp;
 mod sandbox_preview;
 mod sandbox_ssh;
 mod secret;
-mod secret_get;
 mod secret_list;
 mod secret_rm;
 mod secret_set;

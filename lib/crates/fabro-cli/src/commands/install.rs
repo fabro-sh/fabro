@@ -12,8 +12,11 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use dialoguer::console::Term;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{MultiSelect, Select};
+use fabro_api::types::SetSecretRequest;
+use fabro_config::dotenv;
 use fabro_config::user::USER_CONFIG_FILENAME;
 use fabro_model::Provider;
+use fabro_server::secret_store::SecretStore;
 use fabro_util::terminal::Styles;
 use rand::Rng;
 use tokio::net::TcpListener;
@@ -21,11 +24,13 @@ use tokio::sync::oneshot;
 use tokio::task::spawn_blocking;
 
 use super::doctor;
-use crate::args::GlobalArgs;
+use crate::args::{DoctorArgs, GlobalArgs, InstallArgs, ServerConnectionArgs};
+use crate::commands::server::record;
+use crate::server_client;
 use crate::shared::provider_auth::{
     prompt_and_validate_key, prompt_confirm, provider_display_name, run_openai_oauth_or_api_key,
-    write_env_file,
 };
+use crate::user_config;
 
 // ---------------------------------------------------------------------------
 // OpenSSL helpers
@@ -272,7 +277,7 @@ fn build_github_app_manifest(app_name: &str, port: u16, web_url: &str) -> serde_
 }
 
 /// Run the GitHub App manifest registration flow via a temporary local server.
-/// Returns env var pairs (key, value) for secrets to merge into `.env`.
+/// Returns secret pairs `(key, value)` to persist for the local server.
 async fn setup_github_app(
     arc_dir: &Path,
     s: &Styles,
@@ -465,7 +470,7 @@ async fn setup_github_app(
             .apply_to(format!("App: https://github.com/apps/{slug}"))
     );
 
-    // Return secrets as env pairs
+    // Return secret pairs
     let pem_b64 = BASE64_STANDARD.encode(pem.as_bytes());
 
     let mut env_pairs = vec![
@@ -479,10 +484,46 @@ async fn setup_github_app(
     Ok(env_pairs)
 }
 
-pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<()> {
+async fn persist_install_secrets(
+    storage_dir: &Path,
+    secrets: &[(String, String)],
+    server_was_running: bool,
+) -> Result<()> {
+    if secrets.is_empty() {
+        return Ok(());
+    }
+
+    if server_was_running {
+        let client = server_client::connect_api_client(storage_dir).await?;
+        for (name, value) in secrets {
+            client
+                .set_secret()
+                .name(name.clone())
+                .body(SetSecretRequest {
+                    value: value.clone(),
+                })
+                .send()
+                .await?;
+        }
+        return Ok(());
+    }
+
+    let mut store = SecretStore::load(storage_dir.join("secrets.json"))?;
+    for (name, value) in secrets {
+        store.set(name, value)?;
+    }
+    Ok(())
+}
+
+pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Result<()> {
     globals.require_no_json()?;
+    let web_url = &args.web_url;
     let s = Styles::detect_stderr();
     let emoji = console::Emoji("⚒️  ", "");
+    let cli_settings =
+        user_config::load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
+    let storage_dir = cli_settings.storage_dir();
+    let server_was_running = record::active_server_record(&storage_dir).is_some();
 
     eprintln!();
     eprintln!("  {}{}", emoji, s.bold.apply_to("Fabro Install"));
@@ -499,6 +540,16 @@ pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<(
         .context("could not determine home directory")?
         .join(".fabro");
     std::fs::create_dir_all(&arc_dir)?;
+
+    if let Ok(env_path) = dotenv::env_file_path() {
+        if env_path.exists() {
+            eprintln!(
+                "  Warning: {} is no longer read by fabro server. This install will persist credentials in the server secret store instead.",
+                env_path.display()
+            );
+            eprintln!();
+        }
+    }
 
     // Pre-flight checks
     {
@@ -549,7 +600,7 @@ pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<(
     eprintln!("  {}", s.dim.apply_to("──────────────────────"));
     eprintln!();
 
-    let mut env_pairs: Vec<(String, String)> = Vec::new();
+    let mut secret_pairs: Vec<(String, String)> = Vec::new();
     let mut configured_providers: Vec<Provider> = Vec::new();
 
     let codex_detected = detect_binary_on_path("codex");
@@ -567,7 +618,7 @@ pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<(
 
         if use_oauth {
             let pairs = run_openai_oauth_or_api_key(&s).await?;
-            env_pairs.extend(pairs);
+            secret_pairs.extend(pairs);
             configured_providers.push(Provider::OpenAi);
             openai_via_oauth = true;
         }
@@ -590,7 +641,7 @@ pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<(
         let first_provider = primary_providers[primary_idx];
         {
             let (env_var, key) = prompt_and_validate_key(first_provider, &s).await?;
-            env_pairs.push((env_var, key));
+            secret_pairs.push((env_var, key));
             configured_providers.push(first_provider);
         }
     }
@@ -624,13 +675,8 @@ pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<(
         for idx in selected_indices {
             let provider = remaining_providers[idx];
             let (env_var, key) = prompt_and_validate_key(provider, &s).await?;
-            env_pairs.push((env_var, key));
+            secret_pairs.push((env_var, key));
         }
-    }
-
-    // Write LLM provider env vars immediately
-    if !env_pairs.is_empty() {
-        write_env_file(&arc_dir, &env_pairs, &s)?;
     }
     eprintln!();
 
@@ -661,10 +707,7 @@ pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<(
                 s.green.apply_to("✔"),
                 slug
             );
-            // Merge GitHub env vars into .env
-            if !github_env_pairs.is_empty() {
-                write_env_file(&arc_dir, &github_env_pairs, &s)?;
-            }
+            secret_pairs.extend(github_env_pairs);
         } else {
             eprintln!("  Skipped");
         }
@@ -731,7 +774,7 @@ pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<(
             ("FABRO_JWT_PUBLIC_KEY".to_string(), jwt_public_b64),
             ("SESSION_SECRET".to_string(), session_secret),
         ];
-        write_env_file(&arc_dir, &server_env_pairs, &s)?;
+        secret_pairs.extend(server_env_pairs);
         eprintln!();
 
         eprintln!("  To start Arc, run these commands:");
@@ -740,16 +783,34 @@ pub(crate) async fn run_install(web_url: &str, globals: &GlobalArgs) -> Result<(
         eprintln!();
     }
 
+    persist_install_secrets(&storage_dir, &secret_pairs, server_was_running).await?;
+    eprintln!(
+        "  {} Saved {} secrets to {}",
+        s.green.apply_to("✔"),
+        secret_pairs.len(),
+        storage_dir.join("secrets.json").display()
+    );
+    if server_was_running {
+        eprintln!(
+            "  Warning: the local fabro server was already running. Restart it to pick up startup-time features that only initialize at boot."
+        );
+    }
+    eprintln!();
+
     // Verify setup
-    let env_path = arc_dir.join(".env");
     let run_doctor =
         spawn_blocking(|| prompt_confirm("Run fabro doctor to verify?", true)).await??;
 
     if run_doctor {
-        // Reload .env so doctor sees the values we just wrote
-        let _ = dotenvy::from_path(&env_path);
         eprintln!();
-        let _ = doctor::run_doctor(true, true, globals).await?;
+        let doctor_args = DoctorArgs {
+            target: ServerConnectionArgs {
+                storage_dir: Some(storage_dir.clone()),
+                server: None,
+            },
+            verbose: true,
+        };
+        let _ = doctor::run_doctor(&doctor_args, true, globals).await?;
     }
 
     eprintln!();

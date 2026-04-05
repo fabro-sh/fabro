@@ -6,9 +6,11 @@
 pub mod bind;
 #[allow(clippy::wildcard_imports, clippy::absolute_paths)]
 mod demo;
+pub mod diagnostics;
 pub mod error;
 pub mod github_webhooks;
 pub mod jwt_auth;
+pub mod secret_store;
 pub mod serve;
 pub mod server;
 pub mod static_files;

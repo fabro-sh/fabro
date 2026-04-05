@@ -1,8 +1,10 @@
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::time;
 
+use crate::client::Client;
 use crate::generate::{self, GenerateParams};
 use crate::tools::Tool;
 use crate::types::{GenerateResult, ReasoningEffort};
@@ -86,17 +88,36 @@ impl ModelTestOutcome {
 }
 
 pub async fn run_model_test(info: &Model, mode: ModelTestMode) -> ModelTestOutcome {
+    run_model_test_inner(info, mode, None).await
+}
+
+pub async fn run_model_test_with_client(
+    info: &Model,
+    mode: ModelTestMode,
+    client: Arc<Client>,
+) -> ModelTestOutcome {
+    run_model_test_inner(info, mode, Some(client)).await
+}
+
+async fn run_model_test_inner(
+    info: &Model,
+    mode: ModelTestMode,
+    client: Option<Arc<Client>>,
+) -> ModelTestOutcome {
     match mode {
-        ModelTestMode::Basic => run_basic_test(info).await,
-        ModelTestMode::Deep => run_deep_test(info).await,
+        ModelTestMode::Basic => run_basic_test(info, client).await,
+        ModelTestMode::Deep => run_deep_test(info, client).await,
     }
 }
 
-async fn run_basic_test(info: &Model) -> ModelTestOutcome {
-    let params = GenerateParams::new(&info.id)
+async fn run_basic_test(info: &Model, client: Option<Arc<Client>>) -> ModelTestOutcome {
+    let mut params = GenerateParams::new(&info.id)
         .provider(info.provider.as_str())
         .prompt("Say OK")
         .max_tokens(16);
+    if let Some(client) = client {
+        params = params.client(client);
+    }
 
     let result = time::timeout(
         Duration::from_secs(ModelTestMode::Basic.timeout_secs()),
@@ -111,8 +132,8 @@ async fn run_basic_test(info: &Model) -> ModelTestOutcome {
     }
 }
 
-async fn run_deep_test(info: &Model) -> ModelTestOutcome {
-    let Some(params) = build_deep_test_params(info) else {
+async fn run_deep_test(info: &Model, client: Option<Arc<Client>>) -> ModelTestOutcome {
+    let Some(params) = build_deep_test_params(info, client) else {
         return ModelTestOutcome::error("model does not support tools");
     };
 
@@ -132,7 +153,7 @@ async fn run_deep_test(info: &Model) -> ModelTestOutcome {
     }
 }
 
-fn build_deep_test_params(info: &Model) -> Option<GenerateParams> {
+fn build_deep_test_params(info: &Model, client: Option<Arc<Client>>) -> Option<GenerateParams> {
     if !info.features.tools {
         return None;
     }
@@ -173,6 +194,10 @@ fn build_deep_test_params(info: &Model) -> Option<GenerateParams> {
 
     if info.features.reasoning {
         params = params.reasoning_effort(ReasoningEffort::High);
+    }
+
+    if let Some(client) = client {
+        params = params.client(client);
     }
 
     Some(params)

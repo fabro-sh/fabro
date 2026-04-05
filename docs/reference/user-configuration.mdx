@@ -24,7 +24,7 @@ verbose = true
 upgrade_check = true
 
 [server]
-base_url = "https://fabro.example.com:3000/api/v1"
+target = "https://fabro.example.com:3000/api/v1"
 
 [server.tls]
 cert = "~/.fabro/tls/client.crt"
@@ -149,19 +149,19 @@ Customize the git author identity used for checkpoint commits. Overrides the ser
 
 ## `[server]` section
 
-Connection info for commands that can target a remote Fabro API server.
+Connection info for commands that can target a remote Fabro server.
 
 | Key | Description | Default |
 |---|---|---|
-| `base_url` | Server URL | `"http://localhost:3000/api/v1"` |
+| `target` | Server target: `http(s)` URL or absolute Unix socket path | none |
 
-`fabro model` uses `[server].base_url` by default when no explicit `--storage-dir` is passed. `--server-url` overrides `server.base_url`:
+`fabro model` uses `[server].target` by default when no explicit `--storage-dir` is passed. An explicit `--server` flag overrides `server.target`:
 
 ```bash
-fabro --server-url https://fabro.example.com:3000/api/v1 model list
+fabro model list --server https://fabro.example.com:3000/api/v1
 ```
 
-`fabro exec` does not automatically use `[server].base_url`. It only routes model traffic through a Fabro server when you pass `--server-url` for that invocation.
+`fabro exec` does not automatically use `[server].target`. It only routes model traffic through a Fabro server when you pass `--server` for that invocation.
 
 ### `[server.tls]` section
 

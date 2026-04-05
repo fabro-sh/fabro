@@ -94,12 +94,6 @@ async fn main_inner() -> (String, Result<()>) {
     let _ = default_provider().install_default();
 
     let cli = Cli::parse();
-    if let Some(home) = dirs::home_dir() {
-        let env_path = home.join(".fabro").join(".env");
-        if dotenvy::from_path(&env_path).is_ok() {
-            debug!(path = %env_path.display(), "Loaded environment file");
-        }
-    }
 
     let Cli { globals, command } = cli;
     let _printer = Printer::from_flags(globals.quiet, globals.verbose);
@@ -151,7 +145,7 @@ async fn main_inner() -> (String, Result<()>) {
         Commands::RunCmd(RunCommands::Run(_) | RunCommands::Create(_))
             | Commands::Exec(_)
             | Commands::Repo(_)
-            | Commands::Install { .. }
+            | Commands::Install(_)
     ) {
         commands::upgrade::spawn_upgrade_check(globals.no_upgrade_check, upgrade_check_enabled)
     } else {
@@ -181,10 +175,10 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::Server(ns) => {
                 commands::server::dispatch(ns.command, &globals).await?;
             }
-            Commands::Doctor { verbose, dry_run } => {
+            Commands::Doctor(args) => {
                 let cli_settings = user_config::load_user_settings()?;
-                let verbose = verbose || cli_settings.verbose_enabled();
-                let exit_code = commands::doctor::run_doctor(verbose, !dry_run, &globals).await?;
+                let verbose = args.verbose || cli_settings.verbose_enabled();
+                let exit_code = commands::doctor::run_doctor(&args, verbose, &globals).await?;
                 std::process::exit(exit_code);
             }
             Commands::Discord => {
@@ -206,11 +200,11 @@ async fn main_inner() -> (String, Result<()>) {
                 }
             }
             Commands::Repo(ns) => commands::repo::dispatch(ns, &globals).await?,
-            Commands::Install { web_url } => {
-                commands::install::run_install(&web_url, &globals).await?;
+            Commands::Install(args) => {
+                commands::install::run_install(&args, &globals).await?;
             }
             Commands::Pr(ns) => Box::pin(commands::pr::dispatch(ns, &globals)).await?,
-            Commands::Secret(ns) => commands::secret::dispatch(ns, &globals)?,
+            Commands::Secret(ns) => commands::secret::dispatch(ns, &globals).await?,
             Commands::Settings(args) => commands::config::execute(&args, &globals)?,
             Commands::Workflow(ns) => commands::workflow::dispatch(ns, &globals)?,
             Commands::Skill(ns) => commands::skill::dispatch(ns, &globals)?,
@@ -362,54 +356,50 @@ mod tests {
     }
 
     #[test]
-    fn parse_model_list_server_url_after_subcommand() {
+    fn parse_model_list_server_target_after_subcommand() {
         let cli = Cli::try_parse_from([
             "fabro",
             "model",
             "list",
-            "--server-url",
+            "--server",
             "http://localhost:3000/api/v1",
         ])
         .expect("should parse");
         match *cli.command {
             Commands::Model {
                 command: Some(ModelsCommand::List(args)),
-            } => assert_eq!(
-                args.target.server_url(),
-                Some("http://localhost:3000/api/v1")
-            ),
+            } => assert_eq!(args.target.server(), Some("http://localhost:3000/api/v1")),
             _ => panic!("unexpected command variant"),
         }
     }
 
     #[test]
-    fn parse_exec_server_url_after_subcommand() {
+    fn parse_exec_server_target_after_subcommand() {
         let cli = Cli::try_parse_from([
             "fabro",
             "exec",
-            "--server-url",
+            "--server",
             "http://localhost:3000/api/v1",
             "fix the bug",
         ])
         .expect("should parse");
         match *cli.command {
-            Commands::Exec(args) => assert_eq!(
-                args.server_url.as_deref(),
-                Some("http://localhost:3000/api/v1")
-            ),
+            Commands::Exec(args) => {
+                assert_eq!(args.server.as_deref(), Some("http://localhost:3000/api/v1"));
+            }
             _ => panic!("unexpected command variant"),
         }
     }
 
     #[test]
-    fn parse_model_server_url_conflicts_with_storage_dir() {
+    fn parse_model_server_target_conflicts_with_storage_dir() {
         let result = Cli::try_parse_from([
             "fabro",
             "model",
             "list",
             "--storage-dir",
             "/tmp/fabro",
-            "--server-url",
+            "--server",
             "http://localhost:3000",
         ]);
         assert!(
@@ -419,15 +409,15 @@ mod tests {
     }
 
     #[test]
-    fn parse_global_server_url_before_subcommand_is_rejected() {
+    fn parse_global_server_target_before_subcommand_is_rejected() {
         let result = Cli::try_parse_from([
             "fabro",
-            "--server-url",
+            "--server",
             "http://localhost:3000/api/v1",
             "model",
             "list",
         ]);
-        assert!(result.is_err(), "should reject top-level --server-url");
+        assert!(result.is_err(), "should reject top-level --server");
     }
 
     #[test]

@@ -14,17 +14,8 @@
 
 
 
-/**
- * Service health check response.
- */
-export interface HealthResponse {
-    /**
-     * Health status indicator.
-     */
-    'status': string;
-    /**
-     * Server version string.
-     */
-    'version': string;
+export interface DiagnosticsDetail {
+    'text': string;
+    'warn': boolean;
 }
 

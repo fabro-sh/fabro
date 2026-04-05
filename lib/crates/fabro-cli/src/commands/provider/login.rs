@@ -1,18 +1,18 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
+use fabro_api::types;
+use fabro_config::dotenv;
 use fabro_model::Provider;
 use fabro_util::terminal::Styles;
 use tokio::task::spawn_blocking;
 
 use crate::args::{GlobalArgs, ProviderLoginArgs};
+use crate::server_client;
 use crate::shared::provider_auth;
 
 pub(super) async fn login_command(args: ProviderLoginArgs, globals: &GlobalArgs) -> Result<()> {
     globals.require_no_json()?;
     let s = Styles::detect_stderr();
-    let arc_dir = dirs::home_dir()
-        .context("could not determine home directory")?
-        .join(".fabro");
-    std::fs::create_dir_all(&arc_dir)?;
+    let client = server_client::connect_server_backed_api_client(&args.target).await?;
 
     let use_oauth = args.provider == Provider::OpenAi
         && spawn_blocking(|| provider_auth::prompt_confirm("Log in via browser (OAuth)?", true))
@@ -25,6 +25,23 @@ pub(super) async fn login_command(args: ProviderLoginArgs, globals: &GlobalArgs)
         vec![(env_var, key)]
     };
 
-    provider_auth::write_env_file(&arc_dir, &env_pairs, &s)?;
+    if let Ok(path) = dotenv::env_file_path() {
+        if path.exists() {
+            eprintln!(
+                "  Warning: {} is no longer read by fabro server. Re-enter credentials with `fabro provider login` or `fabro secret set`.",
+                path.display()
+            );
+        }
+    }
+
+    for (name, value) in env_pairs {
+        client
+            .set_secret()
+            .name(name.clone())
+            .body(types::SetSecretRequest { value })
+            .send()
+            .await?;
+        eprintln!("  {} Saved {}", s.green.apply_to("✔"), name);
+    }
     Ok(())
 }

@@ -72,6 +72,19 @@ pub fn decode_pem_env(name: &str, value: &str) -> String {
 /// Call this once at startup before serving requests. Panics if the
 /// configuration is invalid (JWT strategy but no public key, or mTLS without TLS config).
 pub fn resolve_auth_mode(api_settings: &ApiSettings, allowed_usernames: &[String]) -> AuthMode {
+    resolve_auth_mode_with_lookup(api_settings, allowed_usernames, |name| {
+        std::env::var(name).ok()
+    })
+}
+
+pub fn resolve_auth_mode_with_lookup<F>(
+    api_settings: &ApiSettings,
+    allowed_usernames: &[String],
+    lookup: F,
+) -> AuthMode
+where
+    F: Fn(&str) -> Option<String>,
+{
     use fabro_config::server::ApiAuthStrategy;
 
     if api_settings.authentication_strategies.is_empty()
@@ -88,7 +101,7 @@ pub fn resolve_auth_mode(api_settings: &ApiSettings, allowed_usernames: &[String
     }
 
     let mut strategies = Vec::new();
-    if std::env::var("SESSION_SECRET").is_ok() {
+    if lookup("SESSION_SECRET").is_some() {
         strategies.push(AuthStrategy::Cookie);
     }
 
@@ -97,7 +110,7 @@ pub fn resolve_auth_mode(api_settings: &ApiSettings, allowed_usernames: &[String
         .iter()
         .map(|s| match s {
             ApiAuthStrategy::Jwt => {
-                let raw = std::env::var("FABRO_JWT_PUBLIC_KEY").unwrap_or_else(|_| {
+                let raw = lookup("FABRO_JWT_PUBLIC_KEY").unwrap_or_else(|| {
                     panic!(
                         "FABRO_JWT_PUBLIC_KEY is not set. Provide an Ed25519 public key in PEM \
                          format (or base64-encoded PEM) for JWT authentication."

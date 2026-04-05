@@ -15,8 +15,9 @@ use fabro_types::Settings;
 
 use crate::bind::{self, Bind};
 use crate::github_webhooks::WebhookManager;
-use crate::jwt_auth::{AuthMode, AuthStrategy, resolve_auth_mode};
-use crate::server::{build_router, create_app_state_with_store, spawn_scheduler};
+use crate::jwt_auth::{AuthMode, AuthStrategy, resolve_auth_mode_with_lookup};
+use crate::secret_store::SecretStore;
+use crate::server::{build_app_state_with_path, build_router, spawn_scheduler};
 use crate::tls::{ClientAuth, build_rustls_config, serve_tls};
 use fabro_llm::client::Client as LlmClient;
 use fabro_sandbox::SandboxProvider;
@@ -80,11 +81,25 @@ pub async fn serve_command(
     styles: &'static Styles,
     storage_dir_override: Option<PathBuf>,
 ) -> anyhow::Result<()> {
+    let config_path = args.config.clone();
+    let disk_settings = load_server_settings(config_path.as_deref())?;
+    let data_dir = storage_dir_override.unwrap_or_else(|| resolve_storage_dir(&disk_settings));
+    let secret_store_path = data_dir.join("secrets.json");
+    let secret_store = SecretStore::load(secret_store_path.clone())?;
+    let secret_snapshot = secret_store.snapshot();
+
     // Resolve dry-run mode (same pattern as run.rs)
     let dry_run_mode = if args.dry_run {
         true
     } else {
-        match LlmClient::from_env().await {
+        match LlmClient::from_lookup(|name| {
+            secret_snapshot
+                .get(name)
+                .cloned()
+                .or_else(|| std::env::var(name).ok())
+        })
+        .await
+        {
             Ok(c) if c.provider_names().is_empty() => {
                 eprintln!(
                     "{} No LLM providers configured. Running in dry-run mode.",
@@ -103,11 +118,6 @@ pub async fn serve_command(
         }
     };
 
-    // Initialize data directory and storage
-    let config_path = args.config.clone();
-    let disk_settings = load_server_settings(config_path.as_deref())?;
-    let data_dir = storage_dir_override.unwrap_or_else(|| resolve_storage_dir(&disk_settings));
-
     // Shared config for live reloading
     let shared_settings = Arc::new(RwLock::new(apply_serve_overrides(
         &disk_settings,
@@ -123,7 +133,12 @@ pub async fn serve_command(
             .as_ref()
             .map(|w| w.auth.allowed_usernames.clone())
             .unwrap_or_default();
-        let auth_mode = resolve_auth_mode(&api, &allowed_usernames);
+        let auth_mode = resolve_auth_mode_with_lookup(&api, &allowed_usernames, |name| {
+            secret_snapshot
+                .get(name)
+                .cloned()
+                .or_else(|| std::env::var(name).ok())
+        });
         let client_auth = api.tls.as_ref().map(|_| client_auth_from_mode(&auth_mode));
         let max_concurrent_runs = args
             .max_concurrent_runs
@@ -140,10 +155,15 @@ pub async fn serve_command(
         "",
         Duration::from_millis(1),
     ));
-    let state =
-        create_app_state_with_store(Arc::clone(&shared_settings), max_concurrent_runs, store);
+    let state = build_app_state_with_path(
+        Arc::clone(&shared_settings),
+        None,
+        max_concurrent_runs,
+        store,
+        secret_store_path,
+    )?;
     spawn_scheduler(Arc::clone(&state));
-    let router = build_router(state, auth_mode);
+    let router = build_router(Arc::clone(&state), auth_mode);
 
     let bind_addr = match args.bind {
         Some(ref s) => bind::parse_bind(s)?,
@@ -173,17 +193,20 @@ pub async fn serve_command(
     };
     let webhook_manager = match webhook_app_id {
         Some(app_id) => {
-            let secret = std::env::var("GITHUB_APP_WEBHOOK_SECRET").ok();
-            let github_app = match fabro_github::GitHubAppCredentials::from_env(Some(&app_id)) {
-                Ok(github_app) => github_app,
-                Err(err) => {
+            let secret = secret_snapshot
+                .get("GITHUB_APP_WEBHOOK_SECRET")
+                .cloned()
+                .or_else(|| std::env::var("GITHUB_APP_WEBHOOK_SECRET").ok());
+            let github_app = state
+                .github_app_credentials(Some(&app_id))
+                .await
+                .unwrap_or_else(|err| {
                     warn!(
                         error = %err,
                         "Webhook config present but GITHUB_APP_PRIVATE_KEY is invalid; skipping webhook listener"
                     );
                     None
-                }
-            };
+                });
             if let (Some(secret), Some(github_app)) = (secret, github_app) {
                 match WebhookManager::start(
                     secret.into_bytes(),

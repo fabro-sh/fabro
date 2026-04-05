@@ -71,6 +71,20 @@ paths:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
 
+  /api/v1/health/diagnostics:
+    post:
+      operationId: runDiagnostics
+      tags: [Discovery]
+      summary: Run server health diagnostics
+      description: Probes external services and server configuration. May be slow.
+      responses:
+        "200":
+          description: Diagnostics report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiagnosticsReport"
+
   /api/v1/openapi.json:
     get:
       operationId: getOpenApiSpec
@@ -1433,6 +1447,110 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AggregateUsage"
+
+  # ── Secrets ──────────────────────────────────────────────────────────
+
+  /api/v1/secrets:
+    get:
+      operationId: listSecrets
+      tags: [Secrets]
+      summary: List stored secrets
+      description: Returns stored secret names and timestamps. Secret values are never exposed.
+      responses:
+        "200":
+          description: Secret metadata list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecretListResponse"
+
+  /api/v1/secrets/{name}:
+    put:
+      operationId: setSecret
+      tags: [Secrets]
+      summary: Store or update a secret
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetSecretRequest"
+      responses:
+        "200":
+          description: Secret stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecretMetadata"
+        "400":
+          description: Invalid secret name or request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteSecret
+      tags: [Secrets]
+      summary: Delete a stored secret
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Secret deleted
+        "400":
+          description: Invalid secret name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Secret not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Secret store write failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── Repos ────────────────────────────────────────────────────────────
+
+  /api/v1/repos/github/{owner}/{name}:
+    get:
+      operationId: getGithubRepo
+      tags: [Repos]
+      summary: Check server access to a GitHub repository
+      parameters:
+        - name: owner
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Repository access details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RepoCheckResponse"
 
   # ── Models ───────────────────────────────────────────────────────────
 
@@ -5231,11 +5349,166 @@ components:
       type: object
       required:
         - status
+        - version
       properties:
         status:
           type: string
           description: Health status indicator.
           example: ok
+        version:
+          type: string
+          description: Server version string.
+          example: "0.176.2"
+
+    SetSecretRequest:
+      description: Request to store a secret value.
+      type: object
+      required:
+        - value
+      properties:
+        value:
+          type: string
+          description: The secret value to store.
+
+    SecretMetadata:
+      description: Metadata for a stored secret (value is never exposed).
+      type: object
+      required:
+        - name
+        - created_at
+        - updated_at
+      properties:
+        name:
+          type: string
+          description: Secret key name.
+          example: ANTHROPIC_API_KEY
+        created_at:
+          type: string
+          format: date-time
+          description: When the secret was first stored.
+        updated_at:
+          type: string
+          format: date-time
+          description: When the secret was last updated.
+
+    SecretListResponse:
+      description: List of stored secret metadata.
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SecretMetadata"
+
+    RepoCheckResponse:
+      description: Repository access check result.
+      type: object
+      required:
+        - owner
+        - name
+        - accessible
+      properties:
+        owner:
+          type: string
+          description: GitHub repository owner.
+          example: acme-corp
+        name:
+          type: string
+          description: GitHub repository name.
+          example: my-app
+        accessible:
+          type: boolean
+          description: Whether the server has read-write access to this repository.
+        default_branch:
+          type: string
+          nullable: true
+          description: Default branch name, if accessible.
+          example: main
+        private:
+          type: boolean
+          nullable: true
+          description: Whether the repository is private, if accessible.
+        permissions:
+          type: object
+          nullable: true
+          description: Detected permission levels.
+          properties:
+            pull:
+              type: boolean
+            push:
+              type: boolean
+            admin:
+              type: boolean
+        install_url:
+          type: string
+          nullable: true
+          description: GitHub App installation URL when the repo is not yet accessible.
+
+    DiagnosticsReport:
+      description: Server health diagnostics report.
+      type: object
+      required:
+        - version
+        - sections
+      properties:
+        version:
+          type: string
+          description: Server version.
+        sections:
+          type: array
+          items:
+            $ref: "#/components/schemas/DiagnosticsSection"
+
+    DiagnosticsSection:
+      type: object
+      required:
+        - title
+        - checks
+      properties:
+        title:
+          type: string
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/DiagnosticsCheck"
+
+    DiagnosticsCheck:
+      type: object
+      required:
+        - name
+        - status
+        - summary
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+          enum:
+            - pass
+            - warning
+            - error
+        summary:
+          type: string
+        details:
+          type: array
+          items:
+            $ref: "#/components/schemas/DiagnosticsDetail"
+        remediation:
+          type: string
+          nullable: true
+
+    DiagnosticsDetail:
+      type: object
+      required:
+        - text
+        - warn
+      properties:
+        text:
+          type: string
+        warn:
+          type: boolean
 
     UserResponse:
       description: Information about the authenticated user.

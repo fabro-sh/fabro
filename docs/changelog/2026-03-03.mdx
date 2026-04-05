@@ -22,9 +22,11 @@ The wizard detects your current configuration, prompts for missing values, and w
 A single command to check your entire installation: system dependencies, cryptographic key validation, LLM provider connectivity, and web server configuration.
 
 ```bash
-fabro doctor         # quick local checks
-fabro doctor --live  # includes real-time API probes to each configured provider
+fabro doctor
+fabro doctor --verbose
 ```
+
+Later releases removed the separate `--live` mode; doctor now always uses live server-backed diagnostics.
 
 If something is misconfigured, `fabro doctor` tells you exactly what's wrong and how to fix it.
 

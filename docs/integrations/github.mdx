@@ -43,7 +43,7 @@ Fabro uses a [GitHub App](https://docs.github.com/en/apps/overview) to authentic
 4. GitHub redirects back to Fabro, which automatically:
    - Exchanges the temporary code for permanent app credentials
    - Writes `app_id`, `client_id`, and `slug` to `~/.fabro/server.toml`
-   - Writes `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`, and `GITHUB_APP_PRIVATE_KEY` to `.env`
+   - Stores `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`, and `GITHUB_APP_PRIVATE_KEY` in the server secret store
    - Generates a `SESSION_SECRET` for web app sessions
    - Redirects you to the login page
 
@@ -63,9 +63,9 @@ The GitHub App check verifies five fields:
 |---|---|
 | `git.app_id` | `~/.fabro/server.toml` |
 | `git.client_id` | `~/.fabro/server.toml` |
-| `GITHUB_APP_CLIENT_SECRET` | `.env` |
-| `GITHUB_APP_WEBHOOK_SECRET` | `.env` |
-| `GITHUB_APP_PRIVATE_KEY` | `.env` |
+| `GITHUB_APP_CLIENT_SECRET` | Server secret store |
+| `GITHUB_APP_WEBHOOK_SECRET` | Server secret store |
+| `GITHUB_APP_PRIVATE_KEY` | Server secret store |
 
 If all five are set, the check passes. If none are set, it warns (GitHub integration is optional). If some are set but others are missing, it errors with the specific missing fields.
 
@@ -90,13 +90,13 @@ slug = "fabro-a3f2"
 | `client_id` | OAuth Client ID for the app |
 | `slug` | App slug, used for linking to the GitHub App settings page |
 
-### `.env`
+### Server secret store
 
-```bash
-GITHUB_APP_CLIENT_SECRET=...       # OAuth client secret
-GITHUB_APP_WEBHOOK_SECRET=...      # Webhook validation secret (reserved for future use)
-GITHUB_APP_PRIVATE_KEY=...         # RSA private key, base64-encoded PEM
-```
+Fabro stores the GitHub App secrets in the server secret store under these keys:
+
+- `GITHUB_APP_CLIENT_SECRET`
+- `GITHUB_APP_WEBHOOK_SECRET`
+- `GITHUB_APP_PRIVATE_KEY`
 
 The private key is stored as base64-encoded PEM. Fabro also accepts raw PEM format (starting with `-----BEGIN`).
 

@@ -14,6 +14,7 @@ use fabro_types::{
 use serde::de::DeserializeOwned;
 use tokio::time::sleep;
 
+use crate::args::ServerConnectionArgs;
 use crate::commands::server::start;
 use crate::user_config;
 
@@ -107,17 +108,50 @@ pub(crate) async fn connect_server(storage_dir: &Path) -> Result<ServerStoreClie
 pub(crate) async fn connect_api_client(storage_dir: &Path) -> Result<fabro_api::Client> {
     let bind = start::ensure_server_running(storage_dir)
         .with_context(|| format!("Failed to start fabro server for {}", storage_dir.display()))?;
-    let socket_path = match bind {
-        Bind::Unix(path) => path,
-        Bind::Tcp(addr) => {
-            return Err(anyhow!(
-                "Unsupported server bind for store client auto-connect: {addr}"
-            ));
-        }
-    };
+    match bind {
+        Bind::Unix(path) => connect_unix_socket_api_client(&path).await,
+        Bind::Tcp(addr) => Err(anyhow!(
+            "Unsupported server bind for store client auto-connect: {addr}"
+        )),
+    }
+}
 
+pub(crate) async fn connect_resolved_api_client(
+    connection: &user_config::ServerConnection,
+) -> Result<fabro_api::Client> {
+    match connection {
+        user_config::ServerConnection::Local { storage_dir } => {
+            connect_api_client(storage_dir).await
+        }
+        user_config::ServerConnection::Target(user_config::ServerTarget::HttpUrl {
+            base_url,
+            tls,
+        }) => connect_remote_api_client(base_url, tls.as_ref()),
+        user_config::ServerConnection::Target(user_config::ServerTarget::UnixSocket(path)) => {
+            connect_unix_socket_api_client(path).await
+        }
+    }
+}
+
+pub(crate) async fn connect_server_backed_api_client(
+    args: &ServerConnectionArgs,
+) -> Result<fabro_api::Client> {
+    let settings = user_config::load_user_settings_with_storage_dir(args.storage_dir())?;
+    let connection = user_config::server_backed_command_connection(args, &settings)?;
+    connect_resolved_api_client(&connection).await
+}
+
+pub(crate) fn connect_remote_api_client(
+    base_url: &str,
+    tls: Option<&user_config::ClientTlsSettings>,
+) -> Result<fabro_api::Client> {
+    let http_client = user_config::build_server_client(tls)?;
+    Ok(fabro_api::Client::new_with_client(base_url, http_client))
+}
+
+pub(crate) async fn connect_unix_socket_api_client(path: &Path) -> Result<fabro_api::Client> {
     let http_client = reqwest::ClientBuilder::new()
-        .unix_socket(socket_path)
+        .unix_socket(path)
         .no_proxy()
         .build()
         .context("Failed to build Unix-socket HTTP client for fabro server")?;
@@ -127,14 +161,6 @@ pub(crate) async fn connect_api_client(storage_dir: &Path) -> Result<fabro_api::
         "http://fabro",
         http_client,
     ))
-}
-
-pub(crate) fn connect_remote_api_client(
-    base_url: &str,
-    tls: Option<&user_config::ClientTlsSettings>,
-) -> Result<fabro_api::Client> {
-    let http_client = user_config::build_server_client(tls)?;
-    Ok(fabro_api::Client::new_with_client(base_url, http_client))
 }
 
 async fn wait_for_server_ready(http_client: &reqwest::Client) -> Result<()> {

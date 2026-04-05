@@ -1,13 +1,9 @@
-use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::{Json, Router, routing::get, routing::post};
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD;
 use cookie::{Cookie, CookieJar, Expiration, Key, SameSite, time::Duration};
 use fabro_types::Settings;
 use fabro_types::settings::{ApiAuthStrategy, GitProvider, GitSettings};
@@ -131,12 +127,6 @@ pub fn parse_cookie_header(headers: &HeaderMap) -> CookieJar {
     jar
 }
 
-pub fn session_key_from_env() -> Option<Key> {
-    std::env::var("SESSION_SECRET")
-        .ok()
-        .map(|secret| Key::derive_from(secret.as_bytes()))
-}
-
 pub fn read_private_session(headers: &HeaderMap, key: &Key) -> Option<SessionCookie> {
     let jar = parse_cookie_header(headers);
     let cookie = jar.private(key).get(SESSION_COOKIE_NAME)?;
@@ -213,7 +203,7 @@ async fn callback_github(
     Query(params): Query<OAuthCallbackParams>,
     headers: HeaderMap,
 ) -> Response {
-    let Some(session_key) = state.session_key.clone() else {
+    let Some(session_key) = state.session_key().await else {
         return json_response(
             StatusCode::CONFLICT,
             json!({"error": "SESSION_SECRET is not configured"}),
@@ -236,7 +226,7 @@ async fn callback_github(
             json!({"error": "GitHub App client_id is not configured"}),
         );
     };
-    let Ok(client_secret) = std::env::var("GITHUB_APP_CLIENT_SECRET") else {
+    let Some(client_secret) = state.secret_or_env("GITHUB_APP_CLIENT_SECRET") else {
         return json_response(
             StatusCode::CONFLICT,
             json!({"error": "GITHUB_APP_CLIENT_SECRET is not configured"}),
@@ -389,8 +379,8 @@ async fn callback_github(
 
 async fn logout(State(state): State<Arc<AppState>>) -> Response {
     let mut jar = CookieJar::new();
-    if let Some(key) = &state.session_key {
-        jar.private_mut(key).remove(
+    if let Some(key) = state.session_key().await {
+        jar.private_mut(&key).remove(
             Cookie::build((SESSION_COOKIE_NAME, ""))
                 .path("/")
                 .http_only(true)
@@ -403,10 +393,10 @@ async fn logout(State(state): State<Arc<AppState>>) -> Response {
 }
 
 async fn auth_me(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
-    let Some(session_key) = &state.session_key else {
+    let Some(session_key) = state.session_key().await else {
         return json_response(StatusCode::UNAUTHORIZED, json!({"error": "Unauthorized"}));
     };
-    let Some(session) = read_private_session(&headers, session_key) else {
+    let Some(session) = read_private_session(&headers, &session_key) else {
         return json_response(StatusCode::UNAUTHORIZED, json!({"error": "Unauthorized"}));
     };
 
@@ -499,12 +489,9 @@ async fn setup_register(
     };
 
     let settings_path = dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join(".fabro")
         .join("server.toml");
-    let env_path = std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join(".env");
 
     let mut settings = state
         .settings
@@ -530,26 +517,23 @@ async fn setup_register(
     }
 
     let session_secret = hex::encode(rand::random::<[u8; 32]>());
-    let env_updates = BTreeMap::from([
-        ("SESSION_SECRET".to_string(), session_secret),
-        (
-            "GITHUB_APP_CLIENT_SECRET".to_string(),
-            data.client_secret.clone(),
-        ),
-        (
-            "GITHUB_APP_WEBHOOK_SECRET".to_string(),
-            data.webhook_secret.clone(),
-        ),
-        (
-            "GITHUB_APP_PRIVATE_KEY".to_string(),
-            STANDARD.encode(data.pem),
-        ),
-    ]);
-    if let Err(error) = write_env_file(&env_path, &env_updates) {
-        return json_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            json!({"error": format!("Failed to write .env: {error}")}),
-        );
+    let secret_updates = [
+        ("SESSION_SECRET", session_secret),
+        ("GITHUB_APP_CLIENT_SECRET", data.client_secret.clone()),
+        ("GITHUB_APP_WEBHOOK_SECRET", data.webhook_secret.clone()),
+        ("GITHUB_APP_PRIVATE_KEY", data.pem.clone()),
+    ];
+
+    {
+        let mut store = state.secret_store.write().await;
+        for (name, value) in secret_updates {
+            if let Err(error) = store.set(name, &value) {
+                return json_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    json!({"error": format!("Failed to save secret {name}: {error}")}),
+                );
+            }
+        }
     }
 
     {
@@ -641,25 +625,4 @@ fn build_server_toml(settings: &Settings, git: &GitSettings) -> String {
         }),
     );
     toml::to_string(&value).unwrap_or_default()
-}
-
-fn write_env_file(path: &PathBuf, updates: &BTreeMap<String, String>) -> std::io::Result<()> {
-    let existing = std::fs::read_to_string(path).unwrap_or_default();
-    let mut merged = BTreeMap::new();
-    for line in existing.lines() {
-        if let Some((key, value)) = line.split_once('=') {
-            merged.insert(key.trim().to_string(), value.to_string());
-        }
-    }
-    merged.extend(
-        updates
-            .iter()
-            .map(|(key, value)| (key.clone(), value.clone())),
-    );
-    let body = merged
-        .into_iter()
-        .map(|(key, value)| format!("{key}={value}"))
-        .collect::<Vec<_>>()
-        .join("\n");
-    std::fs::write(path, format!("{body}\n"))
 }

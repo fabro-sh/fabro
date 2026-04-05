@@ -164,7 +164,7 @@ See [Server Configuration](/administration/server-configuration) for details.
 
 ### "Failed to create Daytona sandbox"
 
-The `DAYTONA_API_KEY` environment variable is missing or invalid. Verify it's set in your `.env` file and check that it's a valid key from [app.daytona.io](https://app.daytona.io).
+The `DAYTONA_API_KEY` environment variable is missing or invalid. Store it with `fabro secret set DAYTONA_API_KEY ...` or export it in the server process environment, then check that it's a valid key from [app.daytona.io](https://app.daytona.io).
 
 ### "Snapshot does not exist and no dockerfile provided"
 

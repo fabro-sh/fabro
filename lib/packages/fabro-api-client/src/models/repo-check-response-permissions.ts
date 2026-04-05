@@ -15,16 +15,11 @@
 
 
 /**
- * Service health check response.
+ * Detected permission levels.
  */
-export interface HealthResponse {
-    /**
-     * Health status indicator.
-     */
-    'status': string;
-    /**
-     * Server version string.
-     */
-    'version': string;
+export interface RepoCheckResponsePermissions {
+    'pull'?: boolean;
+    'push'?: boolean;
+    'admin'?: boolean;
 }
 

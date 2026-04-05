@@ -13,18 +13,14 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { SecretMetadata } from './secret-metadata';
 
 /**
- * Service health check response.
+ * List of stored secret metadata.
  */
-export interface HealthResponse {
-    /**
-     * Health status indicator.
-     */
-    'status': string;
-    /**
-     * Server version string.
-     */
-    'version': string;
+export interface SecretListResponse {
+    'data': Array<SecretMetadata>;
 }
 

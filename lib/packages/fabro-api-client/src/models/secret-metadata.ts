@@ -15,16 +15,20 @@
 
 
 /**
- * Service health check response.
+ * Metadata for a stored secret (value is never exposed).
  */
-export interface HealthResponse {
+export interface SecretMetadata {
     /**
-     * Health status indicator.
+     * Secret key name.
      */
-    'status': string;
+    'name': string;
     /**
-     * Server version string.
+     * When the secret was first stored.
      */
-    'version': string;
+    'created_at': string;
+    /**
+     * When the secret was last updated.
+     */
+    'updated_at': string;
 }
 

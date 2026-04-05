@@ -8,9 +8,9 @@ use crate::shared::print_json_pretty;
 
 pub(crate) async fn dispatch(ns: RepoNamespace, globals: &GlobalArgs) -> Result<()> {
     match ns.command {
-        RepoCommand::Init { skill } => {
-            let created = init::run_init(globals).await?;
-            if skill {
+        RepoCommand::Init(args) => {
+            let created = init::run_init(&args, globals).await?;
+            if args.skill {
                 let base = std::env::current_dir()?.join(".claude").join("skills");
                 super::skill::install_skill_to(&base)?;
             }

@@ -28,7 +28,7 @@ pub struct ClientTlsSettings {
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct ServerSettings {
-    pub base_url: Option<String>,
+    pub target: Option<String>,
     pub tls: Option<ClientTlsSettings>,
 }
 

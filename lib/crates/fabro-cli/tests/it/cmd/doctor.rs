@@ -25,58 +25,33 @@ fn help() {
     Usage: fabro doctor [OPTIONS]
 
     Options:
-          --json              Output as JSON [env: FABRO_JSON=]
-      -v, --verbose           Show detailed information for each check
-          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --dry-run           Skip live service probes (LLM, sandbox, API, web, Brave Search)
-          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
-      -h, --help              Print help
+          --json                       Output as JSON [env: FABRO_JSON=]
+          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --server <SERVER>            Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+      -v, --verbose                    Show detailed information for each check
+          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
+      -h, --help                       Print help
     ----- stderr -----
     ");
 }
 
 #[test]
-fn dry_run_flag() {
+fn dry_run_flag_is_rejected() {
     let context = test_context!();
     let mut cmd = context.doctor();
     cmd.arg("--dry-run");
-    cmd.env(
-        "PATH",
-        "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-    );
-    cmd.env("ANTHROPIC_API_KEY", "sk-test-dummy");
     fabro_snapshot!(context.filters(), cmd, @"
-    success: true
-    exit_code: 0
+    success: false
+    exit_code: 2
     ----- stdout -----
-    Fabro Doctor
-
-      Required
-      [!] Configuration (no user config file found)
-      [✓] LLM providers (1 configured)
-      [!] GitHub App (not configured)
-
-      Optional
-      [!] Cloud sandbox (no sandbox configured)
-      [!] Brave Search (not configured)
-
-      Server
-      [!] System dependencies (some issues)
-      [✓] Fabro API (http://localhost:3000/api/v1)
-      [✓] Fabro Web (http://localhost:3000)
-      [!] Cryptographic keys (no authentication configured)
-
-    Found issues in 6 categories.
-
-    Warnings:
-      • Configuration — Create ~/.fabro/user.toml
-      • GitHub App — Configure GitHub App in server.toml and set env vars to enable GitHub integration
-      • Cloud sandbox — Set DAYTONA_API_KEY to enable cloud sandbox execution
-      • Brave Search — Set BRAVE_SEARCH_API_KEY to enable web search
-      • System dependencies — Install missing system dependencies
-      • Cryptographic keys — Configure authentication_strategies in [api] section of server.toml
     ----- stderr -----
+    error: unexpected argument '--dry-run' found
+
+    Usage: fabro doctor [OPTIONS]
+
+    For more information, try '--help'.
     ");
 }
 
@@ -116,7 +91,6 @@ async fn twin_doctor() {
 fn doctor_no_color_when_no_color_set() {
     let context = test_context!();
     let mut cmd = context.doctor();
-    cmd.arg("--dry-run");
     cmd.env_clear();
     cmd.env("NO_COLOR", "1");
     cmd.assert().stdout(predicate::str::contains("\x1b[").not());

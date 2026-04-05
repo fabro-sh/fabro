@@ -8,21 +8,21 @@ description: "Diagnosing and resolving common issues with Fabro"
 The `fabro doctor` command validates your installation:
 
 ```bash
-fabro doctor           # Check local configuration
-fabro doctor --live    # Also probe live services (LLM APIs, sandbox, Brave Search)
-fabro doctor --verbose # Show detailed output for each check
+fabro doctor            # Local config checks + live server diagnostics
+fabro doctor --verbose  # Show detailed output for each check
+fabro doctor --server https://fabro.example.com:3000/api/v1
 ```
 
 It checks:
-- System dependencies (`openssl`, `node`, `gh`, `dot`)
-- LLM provider API keys
-- Sandbox availability (Docker daemon, Daytona API key)
-- JWT key configuration
-- Brave Search API key
+- Local user config and legacy `~/.fabro/.env` warnings
+- Server-reported LLM provider connectivity
+- GitHub App, sandbox, and Brave Search credentials
+- Server authentication and crypto configuration
+- Server-side Graphviz availability
 
 ## Common issues
 
-**"No API key configured"** — Set at least one provider key in `.env` or your shell environment. Run `fabro doctor --live` to verify connectivity.
+**"No API key configured"** — Set at least one provider key with `fabro provider login` or `fabro secret set`, or export it in the server process environment. Run `fabro doctor` to verify connectivity.
 
 **Stall watchdog timeouts** — If runs are cancelled unexpectedly, the agent may be stuck or the LLM provider may be slow. Check `FABRO_LOG=debug` output for `Agent.LlmRetry` events. Increase `stall_timeout` in the graph if needed, or add [fallback providers](/core-concepts/models) to handle outages.
 

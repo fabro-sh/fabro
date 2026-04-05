@@ -64,7 +64,7 @@ To migrate, regenerate your TypeScript client and update any direct API calls.
 
 <Accordion title="CLI">
 - This release added `fabro llm prompt/chat --server-url`, but the `fabro llm` CLI namespace was later removed
-- `fabro model list --server-url <url>` fetches the model list from the Fabro server
+- `fabro model list --server <target>` now fetches the model list from the Fabro server
 - Added `--goal` arg to `fabro run start` to override the workflow goal from the command line
 - Turn and tool-call counts now display correctly in non-TTY mode
 </Accordion>
