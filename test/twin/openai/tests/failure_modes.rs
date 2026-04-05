@@ -106,6 +106,7 @@ async fn scripted_hang_times_out_client_side() {
         .await;
 
     let client = reqwest::Client::builder()
+        .no_proxy()
         .timeout(Duration::from_millis(150))
         .default_headers(
             [(

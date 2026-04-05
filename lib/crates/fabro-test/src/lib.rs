@@ -873,7 +873,7 @@ pub struct TwinGitHub {
     server: twin_github::TestServer,
 }
 
-fn test_http_client() -> reqwest::Client {
+pub fn test_http_client() -> reqwest::Client {
     reqwest::Client::builder().no_proxy().build().unwrap()
 }
 

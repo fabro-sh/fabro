@@ -1,4 +1,9 @@
 #[cfg(test)]
+pub fn test_http_client() -> reqwest::Client {
+    reqwest::Client::builder().no_proxy().build().unwrap()
+}
+
+#[cfg(test)]
 pub fn test_rsa_private_key() -> &'static str {
     include_str!("testdata/rsa_private.pem")
 }

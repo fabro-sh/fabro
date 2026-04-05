@@ -75,7 +75,9 @@ mod tests {
     async fn server_starts_and_responds() {
         let state = AppState::new();
         let server = TestServer::start(state).await;
-        let resp = reqwest::get(&format!("{}/nonexistent", server.url()))
+        let resp = crate::test_support::test_http_client()
+            .get(format!("{}/nonexistent", server.url()))
+            .send()
             .await
             .unwrap();
         assert_eq!(resp.status(), 404);

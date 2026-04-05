@@ -168,17 +168,13 @@ async fn enable_auto_merge_persists() {
     .unwrap();
 
     let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem).unwrap();
-    let token = create_installation_access_token_for_pr(
-        &reqwest::Client::new(),
-        &jwt,
-        "acme",
-        "widgets",
-        &twin.base_url,
-    )
-    .await
-    .unwrap();
+    let client = fabro_test::test_http_client();
+    let token =
+        create_installation_access_token_for_pr(&client, &jwt, "acme", "widgets", &twin.base_url)
+            .await
+            .unwrap();
 
-    let detail: serde_json::Value = reqwest::Client::new()
+    let detail: serde_json::Value = fabro_test::test_http_client()
         .get(format!(
             "{}/repos/acme/widgets/pulls/{}",
             twin.base_url, created.number

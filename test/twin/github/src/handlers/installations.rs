@@ -178,7 +178,7 @@ pub async fn create_access_token(
 mod tests {
     use crate::server::TestServer;
     use crate::state::{AppOptions, AppState};
-    use crate::test_support::{sign_test_jwt, test_rsa_private_key};
+    use crate::test_support::{sign_test_jwt, test_http_client, test_rsa_private_key};
 
     #[tokio::test]
     async fn get_installation_returns_id() {
@@ -197,7 +197,7 @@ mod tests {
         let server = TestServer::start(state).await;
 
         let jwt = sign_test_jwt("100", pem);
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let resp = client
             .get(&format!("{}/repos/owner/repo/installation", server.url()))
             .header("Authorization", format!("Bearer {jwt}"))
@@ -228,7 +228,7 @@ mod tests {
         let server = TestServer::start(state).await;
 
         let jwt = sign_test_jwt("100", pem);
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let resp = client
             .get(&format!("{}/repos/owner/repo/installation", server.url()))
             .header("Authorization", format!("Bearer {jwt}"))
@@ -256,7 +256,7 @@ mod tests {
         let server = TestServer::start(state).await;
 
         let jwt = sign_test_jwt("100", pem);
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let resp = client
             .get(&format!("{}/repos/owner/repo/installation", server.url()))
             .header("Authorization", format!("Bearer {jwt}"))
@@ -284,7 +284,7 @@ mod tests {
         let server = TestServer::start(state).await;
 
         let jwt = sign_test_jwt("100", pem);
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let resp = client
             .post(&format!(
                 "{}/app/installations/{install_id}/access_tokens",
@@ -322,7 +322,7 @@ mod tests {
         let server = TestServer::start(state).await;
 
         let jwt = sign_test_jwt("100", pem);
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let resp = client
             .post(&format!(
                 "{}/app/installations/{install_id}/access_tokens",

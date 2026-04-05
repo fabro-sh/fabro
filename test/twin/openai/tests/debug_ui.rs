@@ -224,7 +224,7 @@ async fn debug_routes_not_accessible_when_admin_disabled() {
     });
 
     let base_url = format!("http://{addr}");
-    let client = reqwest::Client::new();
+    let client = common::test_http_client().expect("test client");
 
     let html_response = client
         .get(format!("{base_url}/__debug"))

@@ -113,7 +113,7 @@ pub async fn patch_webhook_config(
 mod tests {
     use crate::server::TestServer;
     use crate::state::{AppOptions, AppState};
-    use crate::test_support::{sign_test_jwt, test_rsa_private_key};
+    use crate::test_support::{sign_test_jwt, test_http_client, test_rsa_private_key};
 
     #[tokio::test]
     async fn get_app_returns_app_info() {
@@ -130,7 +130,7 @@ mod tests {
         let server = TestServer::start(state).await;
 
         let jwt = sign_test_jwt("12345", pem);
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let resp = client
             .get(&format!("{}/app", server.url()))
             .header("Authorization", format!("Bearer {jwt}"))
@@ -161,7 +161,7 @@ mod tests {
         });
         let server = TestServer::start(state).await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let resp = client
             .get(&format!("{}/app", server.url()))
             .header("Authorization", "Bearer invalid-jwt")
@@ -187,12 +187,16 @@ mod tests {
         });
         let server = TestServer::start(state).await;
 
-        let resp = reqwest::get(&format!("{}/apps/my-app", server.url()))
+        let resp = test_http_client()
+            .get(format!("{}/apps/my-app", server.url()))
+            .send()
             .await
             .unwrap();
         assert_eq!(resp.status(), 200);
 
-        let resp404 = reqwest::get(&format!("{}/apps/nonexistent", server.url()))
+        let resp404 = test_http_client()
+            .get(format!("{}/apps/nonexistent", server.url()))
+            .send()
             .await
             .unwrap();
         assert_eq!(resp404.status(), 404);
@@ -214,7 +218,9 @@ mod tests {
         });
         let server = TestServer::start(state).await;
 
-        let resp = reqwest::get(&format!("{}/apps/private-app", server.url()))
+        let resp = test_http_client()
+            .get(format!("{}/apps/private-app", server.url()))
+            .send()
             .await
             .unwrap();
         assert_eq!(resp.status(), 404);

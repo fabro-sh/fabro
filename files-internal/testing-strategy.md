@@ -227,12 +227,27 @@ Shared integration-test helpers may:
 - normalize output
 - compact structured events
 - poll for stable command-created conditions
+- centralize localhost HTTP client construction
 
 Shared integration-test helpers should not:
 
 - fabricate run internals
 - write runtime files the engine is supposed to own
 - hide broad scenario setup behind opaque helper functions
+
+### Local HTTP clients
+
+When test code talks to a local server or twin over HTTP, always create the client through a shared test helper that calls `.no_proxy()`.
+
+Do not open-code localhost clients with:
+
+- `reqwest::Client::new()`
+- bare `Client::builder().build()`
+- `reqwest::get(...)`
+
+Use a crate-local helper or a shared helper such as `fabro_test::test_http_client()` instead.
+
+This rule exists because macOS proxy discovery adds hidden startup overhead to repeated reqwest client creation. The result looks like random nextest timeouts even when the server under test is only talking to `127.0.0.1`.
 
 ### Fixtures
 

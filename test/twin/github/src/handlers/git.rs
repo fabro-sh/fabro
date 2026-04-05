@@ -383,7 +383,7 @@ mod tests {
         state.add_repository("owner", "repo", vec!["main".to_string()], false);
         let server = TestServer::start(state).await;
 
-        let client = reqwest::Client::new();
+        let client = crate::test_support::test_http_client();
         let resp = client
             .get(format!(
                 "{}/owner/repo.git/info/refs?service=git-upload-pack",

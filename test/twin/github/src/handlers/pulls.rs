@@ -303,7 +303,7 @@ fn pr_to_json(pr: &PullRequest) -> serde_json::Value {
 mod tests {
     use crate::server::TestServer;
     use crate::state::{AppOptions, AppState};
-    use crate::test_support::{sign_test_jwt, test_rsa_private_key};
+    use crate::test_support::{sign_test_jwt, test_http_client, test_rsa_private_key};
 
     async fn get_installation_token(
         client: &reqwest::Client,
@@ -361,7 +361,7 @@ mod tests {
         let server = TestServer::start(state.clone()).await;
 
         let jwt = sign_test_jwt("100", pem);
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let token = get_installation_token(&client, &jwt, "owner", "repo", server.url()).await;
 
         (server, client, token)

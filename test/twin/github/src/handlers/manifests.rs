@@ -56,7 +56,7 @@ mod tests {
         );
         let server = TestServer::start(state).await;
 
-        let client = reqwest::Client::new();
+        let client = crate::test_support::test_http_client();
         let resp = client
             .post(&format!(
                 "{}/app-manifests/test-code/conversions",
@@ -82,7 +82,7 @@ mod tests {
         let state = AppState::new();
         let server = TestServer::start(state).await;
 
-        let client = reqwest::Client::new();
+        let client = crate::test_support::test_http_client();
         let resp = client
             .post(&format!(
                 "{}/app-manifests/unknown/conversions",

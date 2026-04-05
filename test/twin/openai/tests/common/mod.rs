@@ -61,6 +61,10 @@ pub struct ParsedSseEvent {
 
 static NEXT_BEARER_TOKEN: AtomicU64 = AtomicU64::new(1);
 
+pub fn test_http_client() -> Result<Client> {
+    Client::builder().no_proxy().build().map_err(Into::into)
+}
+
 pub async fn spawn_server() -> Result<TestServer> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let addr: SocketAddr = listener.local_addr()?;
@@ -90,6 +94,7 @@ fn authorization_header_value(bearer_token: &str) -> String {
 
 fn build_authenticated_client(bearer_token: &str) -> Result<Client> {
     Client::builder()
+        .no_proxy()
         .default_headers(
             [(
                 reqwest::header::AUTHORIZATION,
@@ -113,7 +118,10 @@ impl ApiClient {
     ) -> Result<Self> {
         Ok(Self {
             base_url: base_url.into(),
-            client: Client::builder().timeout(Duration::from_secs(30)).build()?,
+            client: Client::builder()
+                .no_proxy()
+                .timeout(Duration::from_secs(30))
+                .build()?,
             bearer_token,
             organization,
             project,
@@ -183,7 +191,7 @@ impl ApiClient {
 
 impl TestServer {
     fn new(base_url: String, bearer_token: String) -> Result<Self> {
-        let client = Client::builder().build()?;
+        let client = test_http_client()?;
         let auth_client = build_authenticated_client(&bearer_token)?;
 
         Ok(Self {

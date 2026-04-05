@@ -79,7 +79,7 @@ async fn openai_server_error() {
         .strip_suffix("/v1")
         .expect("OpenAI base URL should end with /v1");
 
-    reqwest::Client::new()
+    fabro_test::test_http_client()
         .post(format!("{admin_url}/__admin/scenarios"))
         .bearer_auth(&api_key)
         .json(&serde_json::json!({
