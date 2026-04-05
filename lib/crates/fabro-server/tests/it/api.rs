@@ -12,8 +12,7 @@ fn api(path: &str) -> String {
 #[cfg(target_os = "linux")]
 mod mtls_e2e {
     use super::api;
-    use std::path::Path;
-    use std::process::{Command, Stdio};
+    use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
     use fabro_server::jwt_auth::{AuthMode, AuthStrategy};
@@ -22,152 +21,28 @@ mod mtls_e2e {
     use fabro_server::tls::{ClientAuth, build_rustls_config};
     use tokio::net::TcpListener;
 
-    /// Generate a complete CA + server cert + client cert PKI in `dir`.
-    /// Returns paths: (ca_cert, server_cert, server_key, client_cert_pem, client_key_pem)
-    fn generate_pki(dir: &Path, ca_cn: &str, server_cn: &str, client_cn: &str) -> PkiPaths {
-        // CA key
-        let ca_key_path = dir.join("ca.key");
-        let ca_cert_path = dir.join("ca.crt");
-        run_openssl(&[
-            "genpkey",
-            "-algorithm",
-            "Ed25519",
-            "-out",
-            ca_key_path.to_str().unwrap(),
-        ]);
-        run_openssl(&[
-            "req",
-            "-new",
-            "-x509",
-            "-key",
-            ca_key_path.to_str().unwrap(),
-            "-out",
-            ca_cert_path.to_str().unwrap(),
-            "-days",
-            "1",
-            "-subj",
-            &format!("/CN={ca_cn}"),
-            "-addext",
-            "basicConstraints=critical,CA:TRUE",
-            "-addext",
-            "keyUsage=critical,keyCertSign,cRLSign",
-        ]);
+    fn fixture_path(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/mtls")
+            .join(name)
+    }
 
-        // Server key + cert signed by CA
-        let server_key_path = dir.join("server.key");
-        let server_csr_path = dir.join("server.csr");
-        let server_cert_path = dir.join("server.crt");
-        run_openssl(&[
-            "genpkey",
-            "-algorithm",
-            "Ed25519",
-            "-out",
-            server_key_path.to_str().unwrap(),
-        ]);
-        run_openssl(&[
-            "req",
-            "-new",
-            "-key",
-            server_key_path.to_str().unwrap(),
-            "-out",
-            server_csr_path.to_str().unwrap(),
-            "-subj",
-            &format!("/CN={server_cn}"),
-        ]);
-
-        // Create extension file for SAN (reqwest validates server cert hostname)
-        let ext_path = dir.join("server.ext");
-        std::fs::write(&ext_path, "subjectAltName=IP:127.0.0.1").unwrap();
-
-        run_openssl(&[
-            "x509",
-            "-req",
-            "-in",
-            server_csr_path.to_str().unwrap(),
-            "-CA",
-            ca_cert_path.to_str().unwrap(),
-            "-CAkey",
-            ca_key_path.to_str().unwrap(),
-            "-CAcreateserial",
-            "-out",
-            server_cert_path.to_str().unwrap(),
-            "-days",
-            "1",
-            "-extfile",
-            ext_path.to_str().unwrap(),
-        ]);
-
-        // Client key + cert signed by CA
-        let client_key_path = dir.join("client.key");
-        let client_csr_path = dir.join("client.csr");
-        let client_cert_path = dir.join("client.crt");
-        run_openssl(&[
-            "genpkey",
-            "-algorithm",
-            "Ed25519",
-            "-out",
-            client_key_path.to_str().unwrap(),
-        ]);
-        run_openssl(&[
-            "req",
-            "-new",
-            "-key",
-            client_key_path.to_str().unwrap(),
-            "-out",
-            client_csr_path.to_str().unwrap(),
-            "-subj",
-            &format!("/CN={client_cn}"),
-        ]);
-        // Client extension file to produce a v3 certificate
-        let client_ext_path = dir.join("client.ext");
-        std::fs::write(&client_ext_path, "basicConstraints=CA:FALSE\n").unwrap();
-        run_openssl(&[
-            "x509",
-            "-req",
-            "-in",
-            client_csr_path.to_str().unwrap(),
-            "-CA",
-            ca_cert_path.to_str().unwrap(),
-            "-CAkey",
-            ca_key_path.to_str().unwrap(),
-            "-CAcreateserial",
-            "-out",
-            client_cert_path.to_str().unwrap(),
-            "-days",
-            "1",
-            "-extfile",
-            client_ext_path.to_str().unwrap(),
-        ]);
-
+    fn fixture_pki() -> PkiPaths {
         PkiPaths {
-            ca_cert: ca_cert_path,
-            server_cert: server_cert_path,
-            server_key: server_key_path,
-            client_cert: client_cert_path,
-            client_key: client_key_path,
+            ca_cert: fixture_path("ca.crt"),
+            server_cert: fixture_path("server.crt"),
+            server_key: fixture_path("server.key"),
+            client_cert: fixture_path("client.crt"),
+            client_key: fixture_path("client.key"),
         }
     }
 
     struct PkiPaths {
-        ca_cert: std::path::PathBuf,
-        server_cert: std::path::PathBuf,
-        server_key: std::path::PathBuf,
-        client_cert: std::path::PathBuf,
-        client_key: std::path::PathBuf,
-    }
-
-    fn run_openssl(args: &[&str]) {
-        let output = Command::new("openssl")
-            .args(args)
-            .stdin(Stdio::null())
-            .output()
-            .expect("openssl command failed to execute");
-        assert!(
-            output.status.success(),
-            "openssl {} failed: {}",
-            args[0],
-            String::from_utf8_lossy(&output.stderr)
-        );
+        ca_cert: PathBuf,
+        server_cert: PathBuf,
+        server_key: PathBuf,
+        client_cert: PathBuf,
+        client_key: PathBuf,
     }
 
     /// Start a TLS server on a random port, returning the bound address.
@@ -203,6 +78,7 @@ mod mtls_e2e {
 
         let mut builder = reqwest::Client::builder()
             .add_root_certificate(ca_cert)
+            .no_proxy()
             .use_rustls_tls();
 
         if let (Some(cert_path), Some(key_path)) = (client_cert_path, client_key_path) {
@@ -224,8 +100,7 @@ mod mtls_e2e {
     #[tokio::test]
     async fn mtls_accepts_valid_client_cert() {
         install_crypto_provider();
-        let dir = tempfile::tempdir().unwrap();
-        let pki = generate_pki(dir.path(), "TestCA", "localhost", "testuser");
+        let pki = fixture_pki();
 
         let tls_settings = TlsSettings {
             cert: pki.server_cert.clone(),
@@ -250,8 +125,7 @@ mod mtls_e2e {
     #[tokio::test]
     async fn mtls_only_rejects_wrong_ca_client_cert() {
         install_crypto_provider();
-        let dir = tempfile::tempdir().unwrap();
-        let pki = generate_pki(dir.path(), "TestCA", "localhost", "testuser");
+        let pki = fixture_pki();
 
         let tls_settings = TlsSettings {
             cert: pki.server_cert.clone(),
@@ -262,17 +136,11 @@ mod mtls_e2e {
         let auth_mode = AuthMode::Strategies(vec![AuthStrategy::Mtls]);
         let addr = start_tls_server(&tls_settings, ClientAuth::Required, auth_mode).await;
 
-        // Generate a DIFFERENT CA and client cert signed by it
-        let wrong_dir = dir.path().join("wrong_ca");
-        std::fs::create_dir_all(&wrong_dir).unwrap();
-        let wrong_pki = generate_pki(&wrong_dir, "WrongCA", "localhost", "intruder");
+        let wrong_client_cert = fixture_path("wrong-client.crt");
+        let wrong_client_key = fixture_path("wrong-client.key");
 
         // Client trusts the REAL server CA, but presents a cert from the WRONG CA
-        let client = build_client(
-            &pki.ca_cert,
-            Some(&wrong_pki.client_cert),
-            Some(&wrong_pki.client_key),
-        );
+        let client = build_client(&pki.ca_cert, Some(&wrong_client_cert), Some(&wrong_client_key));
 
         let result = client
             .get(format!("https://127.0.0.1:{}{}", addr.port(), api("/runs")))
@@ -291,8 +159,7 @@ mod mtls_e2e {
     #[tokio::test]
     async fn mtls_only_rejects_no_client_cert() {
         install_crypto_provider();
-        let dir = tempfile::tempdir().unwrap();
-        let pki = generate_pki(dir.path(), "TestCA", "localhost", "testuser");
+        let pki = fixture_pki();
 
         let tls_settings = TlsSettings {
             cert: pki.server_cert.clone(),
@@ -320,26 +187,9 @@ mod mtls_e2e {
         );
     }
 
-    /// Generate an Ed25519 JWT keypair. Returns (encoding_key, decoding_key).
-    fn generate_jwt_keypair() -> (jsonwebtoken::EncodingKey, jsonwebtoken::DecodingKey) {
-        let output = Command::new("openssl")
-            .args(["genpkey", "-algorithm", "Ed25519"])
-            .output()
-            .expect("openssl must be available for tests");
-        let private_pem = output.stdout;
-
-        let output = Command::new("openssl")
-            .args(["pkey", "-pubout"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .and_then(|mut child| {
-                use std::io::Write;
-                child.stdin.take().unwrap().write_all(&private_pem).unwrap();
-                child.wait_with_output()
-            })
-            .expect("openssl pkey failed");
-        let public_pem = output.stdout;
+    fn fixture_jwt_keypair() -> (jsonwebtoken::EncodingKey, jsonwebtoken::DecodingKey) {
+        let private_pem = std::fs::read(fixture_path("jwt-ed25519-private.pem")).unwrap();
+        let public_pem = std::fs::read(fixture_path("jwt-ed25519-public.pem")).unwrap();
 
         let encoding =
             jsonwebtoken::EncodingKey::from_ed_pem(&private_pem).expect("invalid private key");
@@ -366,8 +216,7 @@ mod mtls_e2e {
     #[tokio::test]
     async fn mtls_and_jwt_accepts_valid_jwt_without_client_cert() {
         install_crypto_provider();
-        let dir = tempfile::tempdir().unwrap();
-        let pki = generate_pki(dir.path(), "TestCA", "localhost", "testuser");
+        let pki = fixture_pki();
 
         let tls_settings = TlsSettings {
             cert: pki.server_cert.clone(),
@@ -375,7 +224,7 @@ mod mtls_e2e {
             ca: pki.ca_cert.clone(),
         };
 
-        let (encoding_key, decoding_key) = generate_jwt_keypair();
+        let (encoding_key, decoding_key) = fixture_jwt_keypair();
 
         // Both mTLS and JWT strategies; mTLS is optional since JWT is also present
         let auth_mode = AuthMode::Strategies(vec![
