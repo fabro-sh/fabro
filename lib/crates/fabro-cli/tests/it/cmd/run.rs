@@ -242,7 +242,10 @@ fn json_run_implies_auto_approve_for_human_gates() {
         let Some(llm) = llm.as_object_mut() else {
             continue;
         };
-        llm.insert("model".to_string(), Value::String("[LLM_MODEL]".to_string()));
+        llm.insert(
+            "model".to_string(),
+            Value::String("[LLM_MODEL]".to_string()),
+        );
         llm.insert(
             "provider".to_string(),
             Value::String("[LLM_PROVIDER]".to_string()),
