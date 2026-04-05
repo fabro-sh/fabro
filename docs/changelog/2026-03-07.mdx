@@ -7,12 +7,7 @@ date: "2026-03-07"
 
 Fabro now exposes a `POST /completions` endpoint for single-turn LLM completions. You can use it for structured output via JSON Schema, one-off prompts, or building custom frontends on top of Fabro's model routing. Streaming uses Anthropic-style SSE events (`message_start`, `content_block_delta`, `message_stop`, etc.), so you get tokens as they're generated rather than waiting for the full response.
 
-The CLI's `fabro llm` commands can now target the server instead of calling providers directly:
-
-```bash
-fabro llm prompt "Summarize this file" --server-url http://localhost:3000
-fabro llm chat --server-url http://localhost:3000
-```
+At the time of this release, the CLI's `fabro llm` commands could target the server instead of calling providers directly. That CLI namespace has since been removed.
 
 ## Two new sandbox providers: exe.dev and Sprites
 
@@ -63,13 +58,12 @@ To migrate, regenerate your TypeScript client and update any direct API calls.
 - New `POST /completions` endpoint for single-turn LLM completions with SSE streaming and structured output via JSON Schema
 - New `GET /models` endpoint exposes the full LLM model catalog with pagination
 - New `POST /models/{id}/test` endpoint for testing model connectivity in server mode
-- Session endpoints for interactive LLM chat via `fabro llm chat --server-url http://localhost:3000`
+- Session endpoints for interactive LLM chat; the old `fabro llm chat` CLI wrapper has since been removed
 - Verification API reorganized: `/verifications` split into `/verification/criteria` and `/verification/controls`
 </Accordion>
 
 <Accordion title="CLI">
-- `fabro llm prompt --server-url <url>` routes prompts through the Fabro server
-- `fabro llm chat --server-url <url>` enables interactive chat sessions through the server
+- This release added `fabro llm prompt/chat --server-url`, but the `fabro llm` CLI namespace was later removed
 - `fabro model list --server-url <url>` fetches the model list from the Fabro server
 - Added `--goal` arg to `fabro run start` to override the workflow goal from the command line
 - Turn and tool-call counts now display correctly in non-TTY mode

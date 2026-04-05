@@ -33,6 +33,8 @@ output_format = "text"
 model = "claude-sonnet-4-5"
 ```
 
+`[exec]` config applies to `fabro exec`. `[llm]` sets the default workflow model/provider for commands like `fabro run` and `fabro preflight`.
+
 CLI flags always override `user.toml` values, which override hardcoded defaults.
 
 ---
@@ -252,44 +254,6 @@ fabro exec "Refactor the auth module" --permissions full --auto-approve
 | `--output-format <FORMAT>` | Output format: `text` (human-readable) or `json` (NDJSON event stream) | `text` |
 
 Permission levels control which tools are auto-approved: `read-only` allows read tools (`read_file`, `grep`, `glob`, `list_dir`) and subagent tools; `read-write` adds write tools (`write_file`, `edit_file`, `apply_patch`); `full` allows all tools including shell commands. Tools outside the permission level are either interactively prompted (if a TTY is present) or denied (with `--auto-approve`). See [default models by provider](/core-concepts/models#default-models).
-
----
-
-## `fabro llm prompt`
-
-Send a one-shot prompt to an LLM. Accepts a prompt as an argument, via stdin, or both (stdin is prepended).
-
-```bash
-fabro llm prompt "Explain quicksort in one paragraph"
-echo "Summarize this:" | fabro llm prompt
-fabro llm prompt "Translate to French" -m claude-sonnet-4-5 -o temperature=0.3
-fabro llm prompt -S '{"type":"object","properties":{"name":{"type":"string"}}}' "Extract the name from: John Smith"
-```
-
-| Argument / Flag | Description |
-|---|---|
-| `[PROMPT]` | The prompt text (also accepts stdin) |
-| `-m, --model <MODEL>` | Model to use |
-| `-s, --system <SYSTEM>` | System prompt |
-| `--no-stream` | Do not stream output |
-| `-u, --usage` | Show token usage |
-| `-S, --schema <SCHEMA>` | JSON schema for structured output (inline JSON string) |
-| `-o, --option <KEY=VALUE>` | Generation options: `temperature`, `max_tokens`, `top_p`, or provider-specific keys |
-
-## `fabro llm chat`
-
-Start an interactive multi-turn chat session. In server mode, the session is backed by the Fabro server's session endpoints.
-
-```bash
-fabro llm chat
-fabro llm chat -m claude-opus-4-6 -s "You are a helpful coding assistant"
-fabro llm chat --server-url http://localhost:3000/api/v1
-```
-
-| Flag | Description |
-|---|---|
-| `-m, --model <MODEL>` | Model to use |
-| `-s, --system <SYSTEM>` | System prompt |
 
 ---
 

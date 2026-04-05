@@ -118,14 +118,15 @@ Tools outside the permission level are interactively prompted (if a TTY is prese
 
 ## `[llm]` section
 
-Defaults for `fabro llm prompt` and `fabro llm chat`.
+Defaults for workflow model selection in commands like `fabro run` and `fabro preflight`.
 
 | Key | Description | Values | Default |
 |---|---|---|---|
 | `model` | Model name | Any model ID from `fabro model list` | Per provider |
+| `provider` | Provider name | `"anthropic"`, `"openai"`, `"gemini"`, etc. | Auto-inferred from model/catalog |
 
 <Note>
-The `[llm]` section only sets the default model. Use `[exec]` to configure provider, permissions, and output format for `fabro exec`.
+Use `[exec]` to configure provider, permissions, and output format for `fabro exec`. Use `[llm]` for workflow-oriented defaults.
 </Note>
 
 ## `[log]` section
