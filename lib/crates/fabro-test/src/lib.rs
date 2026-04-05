@@ -297,39 +297,47 @@ fn write_marker(root: &Path) {
         .unwrap_or_else(|err| panic!("failed to write {}: {err}", marker_path.display()));
 }
 
-fn stop_session_server(fabro_bin: &Path, storage_dir: &Path) {
+fn stop_session_server(storage_dir: &Path) {
     let record_path = storage_dir.join("server.json");
-    if !record_path.exists() {
+    let Ok(content) = std::fs::read_to_string(&record_path) else {
         return;
+    };
+    let Ok(record) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return;
+    };
+    let Some(pid) = record["pid"].as_u64().map(|p| p as u32) else {
+        return;
+    };
+
+    fabro_proc::sigterm(pid);
+
+    let poll = std::time::Duration::from_millis(50);
+    let timeout = std::time::Duration::from_secs(3);
+    let mut elapsed = std::time::Duration::ZERO;
+    while elapsed < timeout && fabro_proc::process_alive(pid) {
+        std::thread::sleep(poll);
+        elapsed += poll;
+    }
+    if fabro_proc::process_alive(pid) {
+        fabro_proc::sigkill(pid);
     }
 
-    let _ = std::process::Command::new(fabro_bin)
-        .arg("server")
-        .arg("stop")
-        .arg("--storage-dir")
-        .arg(storage_dir)
-        .arg("--no-upgrade-check")
-        .env("NO_COLOR", "1")
-        .env("FABRO_NO_UPGRADE_CHECK", "true")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
+    let _ = std::fs::remove_file(&record_path);
 }
 
-fn cleanup_session_root(fabro_bin: &Path, root: &Path, storage_dir: &Path) {
+fn cleanup_session_root(root: &Path, storage_dir: &Path) {
     with_session_lock(root, || {
         let marker_path = session_marker_path(root, current_pid());
         let _ = std::fs::remove_file(&marker_path);
         let live_count = live_marker_count(root);
         if live_count == 0 {
-            stop_session_server(fabro_bin, storage_dir);
+            stop_session_server(storage_dir);
             let _ = std::fs::remove_dir_all(root);
         }
     });
 }
 
-fn reap_stale_session_roots(fabro_bin: &Path, mode: SessionMode) {
+fn reap_stale_session_roots(mode: SessionMode) {
     let base_dir = short_session_base_dir();
     let Ok(entries) = std::fs::read_dir(&base_dir) else {
         return;
@@ -354,7 +362,7 @@ fn reap_stale_session_roots(fabro_bin: &Path, mode: SessionMode) {
         with_session_lock(&root, || {
             if live_marker_count(&root) == 0 {
                 let storage_dir = root.join("storage");
-                stop_session_server(fabro_bin, &storage_dir);
+                stop_session_server(&storage_dir);
                 let _ = std::fs::remove_dir_all(&root);
             }
         });
@@ -367,11 +375,24 @@ impl TestContext {
     /// `fabro_bin` should be the path to the compiled `fabro` binary,
     /// typically obtained via `env!("CARGO_BIN_EXE_fabro")`.
     pub fn new(fabro_bin: PathBuf) -> Self {
-        let context_root = tempfile::tempdir().expect("failed to create temp dir");
+        let test_name: String = std::thread::current()
+            .name()
+            .unwrap_or("unknown")
+            .rsplit("::")
+            .next()
+            .unwrap_or("unknown")
+            .to_string();
+        // Truncate to keep total temp path under Unix socket limit (104 bytes).
+        // Budget: TMPDIR (~49) + prefix + suffix (~6) + /home/fabro-data/fabro.sock (27) < 104
+        let label = &test_name[..test_name.len().min(16)];
+        let context_root = tempfile::Builder::new()
+            .prefix(&format!(".ft-{label}-"))
+            .tempdir()
+            .expect("failed to create temp dir");
         let root_path = context_root.path().to_path_buf();
         let (_, test_run_id, session_paths) = session_paths();
-        reap_stale_session_roots(&fabro_bin, SessionMode::Nextest);
-        reap_stale_session_roots(&fabro_bin, SessionMode::Process);
+        reap_stale_session_roots(SessionMode::Nextest);
+        reap_stale_session_roots(SessionMode::Process);
         with_session_lock(&session_paths.root, || {
             std::fs::create_dir_all(session_clients_dir(&session_paths.root)).unwrap_or_else(
                 |err| {
@@ -750,7 +771,7 @@ impl TestContext {
 impl Drop for TestContext {
     fn drop(&mut self) {
         for storage_dir in &self.managed_storage_dirs {
-            stop_session_server(&self.fabro_bin, storage_dir);
+            stop_session_server(storage_dir);
         }
 
         let is_last_ref = {
@@ -771,7 +792,7 @@ impl Drop for TestContext {
             return;
         }
 
-        cleanup_session_root(&self.fabro_bin, &self.session_root, &self.storage_dir);
+        cleanup_session_root(&self.session_root, &self.storage_dir);
     }
 }
 
