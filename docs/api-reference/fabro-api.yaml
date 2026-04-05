@@ -1443,6 +1443,8 @@ paths:
       summary: List Models
       description: Returns a paginated list of available LLM models from the built-in catalog.
       parameters:
+        - $ref: "#/components/parameters/ModelProviderFilter"
+        - $ref: "#/components/parameters/ModelQueryFilter"
         - $ref: "#/components/parameters/PageLimit"
         - $ref: "#/components/parameters/PageOffset"
       responses:
@@ -1452,6 +1454,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PaginatedModelList"
+        "400":
+          description: Invalid filter value
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/v1/models/{id}/test:
     post:
@@ -1466,6 +1474,7 @@ paths:
           schema:
             type: string
           description: The model identifier.
+        - $ref: "#/components/parameters/ModelTestModeParam"
       responses:
         "200":
           description: Test result
@@ -1473,6 +1482,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ModelTestResult"
+        "400":
+          description: Invalid test mode
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Model not found
           content:
@@ -1751,6 +1766,33 @@ components:
         default: 0
       example: 0
 
+    ModelProviderFilter:
+      name: provider
+      in: query
+      required: false
+      description: Filter models by provider name. Invalid values return `400`.
+      schema:
+        type: string
+      example: anthropic
+
+    ModelQueryFilter:
+      name: query
+      in: query
+      required: false
+      description: Case-insensitive substring search across `id`, `display_name`, and `aliases`.
+      schema:
+        type: string
+      example: opus
+
+    ModelTestModeParam:
+      name: mode
+      in: query
+      required: false
+      description: Test mode for the single-model test endpoint. Defaults to `basic`.
+      schema:
+        $ref: "#/components/schemas/ModelTestMode"
+      example: basic
+
   schemas:
     # ── Pagination ───────────────────────────────────────────────────────
 
@@ -1951,7 +1993,7 @@ components:
           description: Whether this is the default model for its provider.
 
     ModelTestResult:
-      description: Result of testing a model with a simple prompt.
+      description: Result of testing a model in `basic` or `deep` mode.
       type: object
       required:
         - model_id
@@ -1971,6 +2013,13 @@ components:
           type: string
           nullable: true
           description: Error details when status is "error".
+
+    ModelTestMode:
+      description: Single-model test mode.
+      type: string
+      enum:
+        - basic
+        - deep
 
     # ── Completion Schemas ─────────────────────────────────────────────
 

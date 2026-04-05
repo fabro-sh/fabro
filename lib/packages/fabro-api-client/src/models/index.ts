@@ -67,6 +67,7 @@ export * from './model-costs';
 export * from './model-features';
 export * from './model-limits';
 export * from './model-reference';
+export * from './model-test-mode';
 export * from './model-test-result';
 export * from './node-state';
 export * from './node-status-record';

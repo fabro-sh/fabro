@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use clap::{Args, Subcommand, ValueEnum};
 use fabro_agent::cli::AgentArgs;
 use fabro_graphviz::render::GraphFormat;
-use fabro_llm::cli::{ChatArgs, ModelsCommand, PromptArgs};
+use fabro_llm::cli::ModelsCommand;
 
 pub(crate) const LONG_VERSION: &str = concat!(
     env!("CARGO_PKG_VERSION"),
@@ -731,9 +731,6 @@ impl RunsCommands {
 
 #[derive(Subcommand)]
 pub(crate) enum Commands {
-    /// LLM prompt operations
-    #[command(hide = true)]
-    Llm(LlmNamespace),
     /// Run an agentic coding session
     #[command(hide = true)]
     Exec(AgentArgs),
@@ -831,10 +828,6 @@ pub(crate) enum Commands {
 impl Commands {
     pub(crate) fn name(&self) -> &'static str {
         match self {
-            Self::Llm(ns) => match &ns.command {
-                LlmCommand::Prompt(_) => "llm prompt",
-                LlmCommand::Chat(_) => "llm chat",
-            },
             Self::Artifact(ns) => match &ns.command {
                 ArtifactCommand::List(_) => "artifact list",
                 ArtifactCommand::Cp(_) => "artifact cp",
@@ -1077,20 +1070,6 @@ pub(crate) enum ProviderCommand {
 pub(crate) struct CompletionArgs {
     /// Shell to generate completions for
     pub shell: clap_complete::Shell,
-}
-
-#[derive(Args)]
-pub(crate) struct LlmNamespace {
-    #[command(subcommand)]
-    pub(crate) command: LlmCommand,
-}
-
-#[derive(Subcommand)]
-pub(crate) enum LlmCommand {
-    /// Execute a prompt
-    Prompt(PromptArgs),
-    /// Interactive multi-turn chat
-    Chat(ChatArgs),
 }
 
 #[derive(Args)]

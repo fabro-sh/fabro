@@ -161,3 +161,17 @@ fn list_query_case_insensitive() {
     ----- stderr -----
     ");
 }
+
+#[test]
+fn list_invalid_provider_errors() {
+    let context = test_context!();
+    let mut cmd = context.model();
+    cmd.args(["list", "--provider", "not-a-provider"]);
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 1
+    ----- stdout -----
+    ----- stderr -----
+    error: unknown provider: not-a-provider
+    ");
+}

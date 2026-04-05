@@ -40,6 +40,7 @@ fn model_test_unknown_model_errors() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
+    Testing nonexistent-model-xyz... done
     error: Unknown model: nonexistent-model-xyz
     ");
 }

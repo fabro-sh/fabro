@@ -15,7 +15,7 @@
 
 
 /**
- * Result of testing a model with a simple prompt.
+ * Result of testing a model in `basic` or `deep` mode.
  */
 export interface ModelTestResult {
     /**

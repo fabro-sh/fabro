@@ -15,6 +15,7 @@ use serde::de::DeserializeOwned;
 use tokio::time::sleep;
 
 use crate::commands::server::start;
+use crate::user_config;
 
 pub(crate) struct ServerStoreClient {
     client: fabro_api::Client,
@@ -98,6 +99,12 @@ impl RunProjection {
 }
 
 pub(crate) async fn connect_server(storage_dir: &Path) -> Result<ServerStoreClient> {
+    Ok(ServerStoreClient {
+        client: connect_api_client(storage_dir).await?,
+    })
+}
+
+pub(crate) async fn connect_api_client(storage_dir: &Path) -> Result<fabro_api::Client> {
     let bind = start::ensure_server_running(storage_dir)
         .with_context(|| format!("Failed to start fabro server for {}", storage_dir.display()))?;
     let socket_path = match bind {
@@ -116,9 +123,18 @@ pub(crate) async fn connect_server(storage_dir: &Path) -> Result<ServerStoreClie
         .context("Failed to build Unix-socket HTTP client for fabro server")?;
     wait_for_server_ready(&http_client).await?;
 
-    Ok(ServerStoreClient {
-        client: fabro_api::Client::new_with_client("http://fabro", http_client),
-    })
+    Ok(fabro_api::Client::new_with_client(
+        "http://fabro",
+        http_client,
+    ))
+}
+
+pub(crate) fn connect_remote_api_client(
+    base_url: &str,
+    tls: Option<&user_config::ClientTlsSettings>,
+) -> Result<fabro_api::Client> {
+    let http_client = user_config::build_server_client(tls)?;
+    Ok(fabro_api::Client::new_with_client(base_url, http_client))
 }
 
 async fn wait_for_server_ready(http_client: &reqwest::Client) -> Result<()> {

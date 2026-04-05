@@ -2,24 +2,23 @@ use std::io::{self, IsTerminal, Read, Write};
 
 use dialoguer::console::Term;
 use dialoguer::theme::ColorfulTheme;
-use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Subcommand};
 use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
-use futures::{StreamExt, stream};
-use serde::{Deserialize, Serialize};
+use futures::StreamExt;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use tokio::task;
-use tokio::time;
 
+use fabro_api::{self, types as api_types};
 use fabro_util::terminal::Styles;
 
 use fabro_model::{Catalog, Model, Provider};
 
 use crate::generate::{self, GenerateParams};
-use crate::tools::Tool;
-use crate::types::{ContentPart, GenerateResult, Message, ReasoningEffort, StreamEvent, Usage};
+use crate::types::{Message, StreamEvent, Usage};
 
 pub struct ServerConnection {
     pub client: reqwest::Client,
@@ -47,8 +46,6 @@ struct ModelTestRow {
 
 #[derive(Serialize)]
 struct ModelTestOutput {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    deep_unsupported: Option<bool>,
     results: Vec<ModelTestRow>,
     total: usize,
     failures: u32,
@@ -932,186 +929,93 @@ pub async fn run_chat_via_server(args: ChatArgs, server: &ServerConnection) -> R
     Ok(())
 }
 
-#[derive(Deserialize)]
-struct PaginatedModelsResponse {
-    data: Vec<Model>,
+fn map_api_error<E>(err: progenitor_client::Error<E>) -> anyhow::Error
+where
+    E: serde::Serialize + std::fmt::Debug,
+{
+    match err {
+        progenitor_client::Error::ErrorResponse(response) => {
+            if let Ok(value) = serde_json::to_value(response.into_inner()) {
+                if let Some(detail) = value
+                    .get("errors")
+                    .and_then(serde_json::Value::as_array)
+                    .and_then(|errors| errors.first())
+                    .and_then(|entry| entry.get("detail"))
+                    .and_then(serde_json::Value::as_str)
+                {
+                    return anyhow!("{detail}");
+                }
+            }
+            anyhow!("request failed")
+        }
+        progenitor_client::Error::UnexpectedResponse(response) => {
+            anyhow!("request failed with status {}", response.status())
+        }
+        other => anyhow!("{other}"),
+    }
 }
 
-#[derive(Deserialize)]
-struct ModelTestResponse {
-    status: String,
-    error_message: Option<String>,
+fn convert_type<TInput, TOutput>(value: TInput) -> Result<TOutput>
+where
+    TInput: serde::Serialize,
+    TOutput: DeserializeOwned,
+{
+    serde_json::from_value(serde_json::to_value(value)?).map_err(Into::into)
 }
 
 async fn fetch_models_from_server(
-    client: &reqwest::Client,
-    base_url: &str,
+    client: &fabro_api::Client,
     provider: Option<&str>,
+    query: Option<&str>,
 ) -> Result<Vec<Model>> {
-    let url = format!("{base_url}/models?page[limit]=100");
-    tracing::debug!(url = %url, "Fetching models from server");
+    let mut offset = 0u64;
+    let mut models = Vec::new();
 
-    let response = client
-        .get(&url)
-        .send()
-        .await
-        .with_context(|| format!("Failed to connect to server at {base_url}"))?;
+    loop {
+        let mut request = client.list_models().page_limit(100u64).page_offset(offset);
+        if let Some(provider) = provider {
+            request = request.provider(provider.to_string());
+        }
+        if let Some(query) = query {
+            request = request.query(query.to_string());
+        }
 
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        bail!("Server returned {status}: {body}");
-    }
-
-    let parsed: PaginatedModelsResponse = response
-        .json()
-        .await
-        .context("Failed to parse models response from server")?;
-
-    let mut models = parsed.data;
-    tracing::debug!(model_count = models.len(), "Models received from server");
-
-    if let Some(p) = provider {
-        models.retain(|m| m.provider.as_str() == p);
+        let response = request.send().await.map_err(map_api_error)?;
+        let parsed = response.into_inner();
+        let count = parsed.data.len() as u64;
+        models.extend(convert_type::<_, Vec<Model>>(parsed.data)?);
+        if !parsed.meta.has_more {
+            break;
+        }
+        offset += count;
     }
 
     Ok(models)
 }
 
 async fn test_model_via_server(
-    client: &reqwest::Client,
-    base_url: &str,
+    client: &fabro_api::Client,
     model_id: &str,
-) -> Result<ModelTestResponse> {
-    let url = format!("{base_url}/models/{model_id}/test");
-    let response = client
-        .post(&url)
-        .send()
-        .await
-        .with_context(|| format!("Failed to connect to server at {base_url}"))?;
-
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().await.unwrap_or_default();
-        bail!("Server returned {status}: {body}");
+    mode: Option<api_types::ModelTestMode>,
+) -> Result<api_types::ModelTestResult> {
+    let mut request = client.test_model().id(model_id.to_string());
+    if let Some(mode) = mode {
+        request = request.mode(mode);
     }
-
-    response
-        .json()
-        .await
-        .context("Failed to parse model test response from server")
-}
-
-fn build_deep_test_params(info: &Model) -> Option<GenerateParams> {
-    if !info.features.tools {
-        return None;
-    }
-
-    let add_tool = Tool::active(
-        "add",
-        "Add two integers and return the sum",
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "a": { "type": "integer", "description": "First number" },
-                "b": { "type": "integer", "description": "Second number" }
-            },
-            "required": ["a", "b"]
-        }),
-        |args, _ctx| async move {
-            let a = args
-                .get("a")
-                .and_then(serde_json::Value::as_i64)
-                .unwrap_or(0);
-            let b = args
-                .get("b")
-                .and_then(serde_json::Value::as_i64)
-                .unwrap_or(0);
-            Ok(serde_json::json!(a + b))
-        },
-    );
-
-    let mut params = GenerateParams::new(&info.id)
-        .provider(info.provider.as_str())
-        .prompt(
-            "I have three numbers: 15, 27, and 42. \
-             First use the add tool to compute 15 + 27, \
-             then use the add tool to add that result to 42. \
-             Finally, tell me whether the grand total is even or odd and why.",
-        )
-        .tools(vec![add_tool])
-        .max_tool_rounds(5)
-        .max_tokens(1024);
-
-    if info.features.reasoning {
-        params = params.reasoning_effort(ReasoningEffort::High);
-    }
-
-    Some(params)
-}
-
-fn validate_deep_result(result: &GenerateResult, info: &Model) -> (cli_table::Color, String) {
-    // Check tool use: need at least 2 steps (tool call + follow-up)
-    if result.steps.len() < 2 {
-        return (
-            Color::Red,
-            "deep: fail (model did not call tool)".to_string(),
-        );
-    }
-
-    // Check that step 0 had tool results (tool was executed)
-    if result.steps[0].tool_results.is_empty() {
-        return (Color::Red, "deep: fail (tool not executed)".to_string());
-    }
-
-    // Check correctness: 15+27=42, 42+42=84 — final response should contain "84"
-    let final_text = result.response.text();
-    if !final_text.contains("84") {
-        return (Color::Red, "deep: fail (wrong answer)".to_string());
-    }
-
-    // Check reasoning if the model supports it
-    if info.features.reasoning {
-        let has_reasoning = result.steps.iter().any(|step| {
-            step.response.message.content.iter().any(|part| {
-                matches!(part, ContentPart::Thinking(_))
-                    || matches!(part, ContentPart::Other { kind, .. } if kind == ContentPart::OPENAI_REASONING)
-            })
-        });
-        if !has_reasoning {
-            return (Color::Yellow, "deep: ok (no reasoning)".to_string());
-        }
-    }
-
-    (Color::Green, "deep: ok".to_string())
+    let response = request.send().await.map_err(map_api_error)?;
+    Ok(response.into_inner())
 }
 
 #[allow(clippy::print_stdout, clippy::print_stderr)]
 async fn test_models_via_server(
-    server: &ServerConnection,
+    client: &fabro_api::Client,
     provider: Option<&str>,
     model: Option<&str>,
     deep: bool,
     s: &Styles,
     json_output: bool,
 ) -> Result<()> {
-    if deep && !json_output {
-        eprintln!("Warning: --deep is not supported in server mode");
-    }
-    let models_to_test = if let Some(model_id) = model {
-        let all = fetch_models_from_server(&server.client, &server.base_url, None).await?;
-        let found: Vec<_> = all.into_iter().filter(|m| m.id == model_id).collect();
-        if found.is_empty() {
-            bail!("Unknown model: {model_id}");
-        }
-        found
-    } else {
-        fetch_models_from_server(&server.client, &server.base_url, provider).await?
-    };
-
-    if models_to_test.is_empty() {
-        bail!("No models found");
-    }
+    let request_mode = deep.then_some(api_types::ModelTestMode::Deep);
 
     let use_color = s.use_color;
     let mut title = models_title(use_color);
@@ -1120,31 +1024,47 @@ async fn test_models_via_server(
     let mut rows: Vec<Vec<CellStruct>> = Vec::new();
     let mut json_rows = Vec::new();
     let mut failures = 0u32;
-    for info in &models_to_test {
+    if let Some(model_id) = model {
         if !json_output {
-            eprint!("Testing {}...", info.id);
+            eprint!("Testing {model_id}...");
         }
-        let result = test_model_via_server(&server.client, &server.base_url, &info.id).await;
+        let result = test_model_via_server(client, model_id, request_mode).await;
         if !json_output {
             eprintln!(" done");
         }
 
-        let (result_color, status) = match result {
-            Ok(resp) if resp.status == "ok" => (Color::Green, "ok".to_string()),
+        let (info, result_color, status) = match result {
             Ok(resp) => {
-                failures += 1;
-                let msg = resp
-                    .error_message
-                    .unwrap_or_else(|| "unknown error".to_string());
-                (Color::Red, format!("error: {msg}"))
+                let info = Catalog::builtin()
+                    .get(&resp.model_id)
+                    .cloned()
+                    .with_context(|| {
+                        format!("Unknown model returned by server: {}", resp.model_id)
+                    })?;
+                if resp.status == api_types::ModelTestResultStatus::Ok {
+                    (info, Color::Green, "ok".to_string())
+                } else {
+                    failures += 1;
+                    let message = resp
+                        .error_message
+                        .unwrap_or_else(|| "unknown error".to_string());
+                    (info, Color::Red, format!("error: {message}"))
+                }
             }
-            Err(e) => {
+            Err(err) if err.to_string().contains("Model not found") => {
+                bail!("Unknown model: {model_id}");
+            }
+            Err(err) => {
+                let info = Catalog::builtin()
+                    .get(model_id)
+                    .cloned()
+                    .with_context(|| format!("Unknown model: {model_id}"))?;
                 failures += 1;
-                (Color::Red, format!("error: {e}"))
+                (info, Color::Red, format!("error: {err}"))
             }
         };
 
-        let mut row = model_row(info, use_color);
+        let mut row = model_row(&info, use_color);
         row.push(
             status
                 .clone()
@@ -1152,14 +1072,55 @@ async fn test_models_via_server(
                 .foreground_color(color_if(use_color, result_color)),
         );
         rows.push(row);
-        json_rows.push(model_test_row_from_status(info, &status, result_color));
+        json_rows.push(model_test_row_from_status(&info, &status, result_color));
+    } else {
+        let models_to_test = fetch_models_from_server(client, provider, None).await?;
+        if models_to_test.is_empty() {
+            bail!("No models found");
+        }
+
+        for info in &models_to_test {
+            if !json_output {
+                eprint!("Testing {}...", info.id);
+            }
+            let result = test_model_via_server(client, &info.id, request_mode).await;
+            if !json_output {
+                eprintln!(" done");
+            }
+
+            let (result_color, status) = match result {
+                Ok(resp) if resp.status == api_types::ModelTestResultStatus::Ok => {
+                    (Color::Green, "ok".to_string())
+                }
+                Ok(resp) => {
+                    failures += 1;
+                    let message = resp
+                        .error_message
+                        .unwrap_or_else(|| "unknown error".to_string());
+                    (Color::Red, format!("error: {message}"))
+                }
+                Err(err) => {
+                    failures += 1;
+                    (Color::Red, format!("error: {err}"))
+                }
+            };
+
+            let mut row = model_row(info, use_color);
+            row.push(
+                status
+                    .clone()
+                    .cell()
+                    .foreground_color(color_if(use_color, result_color)),
+            );
+            rows.push(row);
+            json_rows.push(model_test_row_from_status(info, &status, result_color));
+        }
     }
 
     if json_output {
         println!(
             "{}",
             serde_json::to_string_pretty(&ModelTestOutput {
-                deep_unsupported: deep.then_some(true),
                 total: json_rows.len(),
                 failures,
                 results: json_rows,
@@ -1189,7 +1150,7 @@ async fn test_models_via_server(
 #[allow(clippy::print_stdout)]
 pub async fn run_models(
     command: Option<ModelsCommand>,
-    server: Option<ServerConnection>,
+    client: fabro_api::Client,
     json_output: bool,
 ) -> Result<()> {
     let command = command.unwrap_or(ModelsCommand::List {
@@ -1201,23 +1162,8 @@ pub async fn run_models(
 
     match command {
         ModelsCommand::List { provider, query } => {
-            let mut models = if let Some(s) = &server {
-                fetch_models_from_server(&s.client, &s.base_url, provider.as_deref()).await?
-            } else {
-                let p = provider.as_deref().and_then(|s| s.parse::<Provider>().ok());
-                Catalog::builtin().list(p).into_iter().cloned().collect()
-            };
-
-            if let Some(q) = &query {
-                let q_lower = q.to_lowercase();
-                models.retain(|m| {
-                    m.id.to_lowercase().contains(&q_lower)
-                        || m.display_name.to_lowercase().contains(&q_lower)
-                        || m.aliases
-                            .iter()
-                            .any(|a| a.to_lowercase().contains(&q_lower))
-                });
-            }
+            let models =
+                fetch_models_from_server(&client, provider.as_deref(), query.as_deref()).await?;
 
             if json_output {
                 println!("{}", serde_json::to_string_pretty(&models)?);
@@ -1229,181 +1175,17 @@ pub async fn run_models(
             provider,
             model,
             deep,
-        } => match &server {
-            Some(s) => {
-                test_models_via_server(
-                    s,
-                    provider.as_deref(),
-                    model.as_deref(),
-                    deep,
-                    &styles,
-                    json_output,
-                )
-                .await?;
-            }
-            None => {
-                test_models(
-                    provider.as_deref(),
-                    model.as_deref(),
-                    deep,
-                    &styles,
-                    json_output,
-                )
-                .await?;
-            }
-        },
-    }
-
-    Ok(())
-}
-
-async fn test_one_model(info: &Model, deep: bool) -> (Color, String) {
-    if deep {
-        match build_deep_test_params(info) {
-            None => (Color::Yellow, "deep: skipped (no tool support)".to_string()),
-            Some(params) => {
-                let result =
-                    time::timeout(Duration::from_secs(90), generate::generate(params)).await;
-                match result {
-                    Ok(Ok(ref gen_result)) => validate_deep_result(gen_result, info),
-                    Ok(Err(e)) => (Color::Red, format!("deep: error: {e}")),
-                    Err(_) => (Color::Red, "deep: error: timeout (90s)".to_string()),
-                }
-            }
+        } => {
+            test_models_via_server(
+                &client,
+                provider.as_deref(),
+                model.as_deref(),
+                deep,
+                &styles,
+                json_output,
+            )
+            .await?;
         }
-    } else {
-        let params = GenerateParams::new(&info.id)
-            .provider(info.provider.as_str())
-            .prompt("Say OK")
-            .max_tokens(16);
-
-        let result = time::timeout(Duration::from_secs(30), generate::generate(params)).await;
-        match result {
-            Ok(Ok(_)) => (Color::Green, "ok".to_string()),
-            Ok(Err(e)) => (Color::Red, format!("error: {e}")),
-            Err(_) => (Color::Red, "error: timeout (30s)".to_string()),
-        }
-    }
-}
-
-#[allow(clippy::print_stdout)]
-async fn test_models(
-    provider: Option<&str>,
-    model: Option<&str>,
-    deep: bool,
-    s: &Styles,
-    json_output: bool,
-) -> Result<()> {
-    use rand::seq::SliceRandom;
-
-    let models_to_test = if let Some(model_id) = model {
-        match Catalog::builtin().get(model_id) {
-            Some(info) => vec![info.clone()],
-            None => bail!("Unknown model: {model_id}"),
-        }
-    } else {
-        let p = provider.and_then(|s| s.parse::<Provider>().ok());
-        Catalog::builtin().list(p).into_iter().cloned().collect()
-    };
-
-    if models_to_test.is_empty() {
-        bail!("No models found");
-    }
-
-    let pb = if json_output {
-        None
-    } else {
-        let test_kind = if deep { "Deep testing" } else { "Testing" };
-        let pb = indicatif::ProgressBar::new(models_to_test.len() as u64);
-        pb.set_style(
-            indicatif::ProgressStyle::with_template(&format!(
-                "{{spinner:.green}} {test_kind} {{pos}}/{{len}} models {{wide_bar}} {{eta}}"
-            ))
-            .unwrap(),
-        );
-        pb.enable_steady_tick(Duration::from_millis(100));
-        Some(pb)
-    };
-
-    // Build (original_index, model_info) pairs, then shuffle for provider spread
-    let mut indexed: Vec<(usize, &Model)> = models_to_test.iter().enumerate().collect();
-    indexed.shuffle(&mut rand::thread_rng());
-
-    // Run tests concurrently, 6 at a time
-    let results: Vec<(usize, Color, String)> = stream::iter(indexed)
-        .map(|(idx, info)| {
-            let pb = pb.clone();
-            async move {
-                let (color, status) = test_one_model(info, deep).await;
-                if let Some(pb) = pb {
-                    pb.inc(1);
-                }
-                (idx, color, status)
-            }
-        })
-        .buffer_unordered(6)
-        .collect()
-        .await;
-
-    if let Some(pb) = pb {
-        pb.finish_and_clear();
-    }
-
-    // Sort back to original catalog order
-    let mut sorted_results = results;
-    sorted_results.sort_by_key(|(idx, _, _)| *idx);
-
-    let use_color = s.use_color;
-    let mut title = models_title(use_color);
-    title.push("RESULT".cell().bold(use_color));
-
-    let mut rows: Vec<Vec<CellStruct>> = Vec::new();
-    let mut json_rows = Vec::new();
-    let mut failures = 0u32;
-    for (idx, result_color, status) in &sorted_results {
-        if *result_color == Color::Red {
-            failures += 1;
-        }
-        json_rows.push(model_test_row_from_status(
-            &models_to_test[*idx],
-            status,
-            *result_color,
-        ));
-        let mut row = model_row(&models_to_test[*idx], use_color);
-        row.push(
-            status
-                .cell()
-                .foreground_color(color_if(use_color, *result_color)),
-        );
-        rows.push(row);
-    }
-
-    if json_output {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&ModelTestOutput {
-                deep_unsupported: None,
-                total: json_rows.len(),
-                failures,
-                results: json_rows,
-            })?
-        );
-        if failures > 0 {
-            bail!("{failures} model(s) failed");
-        }
-        return Ok(());
-    }
-
-    let table = rows
-        .table()
-        .title(title)
-        .color_choice(color_choice(use_color))
-        .border(Border::builder().build())
-        .separator(Separator::builder().build());
-    println!("{}", table.display()?);
-
-    if failures > 0 {
-        bail!("{failures} model(s) failed");
     }
 
     Ok(())
@@ -1412,9 +1194,44 @@ async fn test_models(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fabro_model::{ModelCosts, ModelFeatures, ModelLimits, Provider};
 
     fn test_http_client() -> reqwest::Client {
         reqwest::Client::builder().no_proxy().build().unwrap()
+    }
+
+    fn test_api_client(base_url: &str) -> fabro_api::Client {
+        fabro_api::Client::new_with_client(base_url, test_http_client())
+    }
+
+    fn test_model_json(id: &str, provider: Provider) -> serde_json::Value {
+        serde_json::to_value(Model {
+            id: id.to_string(),
+            provider,
+            family: "test".to_string(),
+            display_name: format!("{id} display"),
+            limits: ModelLimits {
+                context_window: 128_000,
+                max_output: Some(4096),
+            },
+            training: None,
+            knowledge_cutoff: None,
+            features: ModelFeatures {
+                tools: true,
+                vision: false,
+                reasoning: false,
+                effort: false,
+            },
+            costs: ModelCosts {
+                input_cost_per_mtok: Some(1.0),
+                output_cost_per_mtok: Some(2.0),
+                cache_input_cost_per_mtok: None,
+            },
+            estimated_output_tps: Some(100.0),
+            aliases: vec!["tm".to_string()],
+            default: false,
+        })
+        .unwrap()
     }
 
     // --- parse_option ---
@@ -1609,7 +1426,7 @@ mod tests {
         let server = httpmock::MockServer::start_async().await;
         server
             .mock_async(|when, then| {
-                when.method("POST").path("/models/test-model/test");
+                when.method("POST").path("/api/v1/models/test-model/test");
                 then.status(200)
                     .header("Content-Type", "application/json")
                     .body(
@@ -1622,21 +1439,23 @@ mod tests {
             })
             .await;
 
-        let client = test_http_client();
-        let resp = test_model_via_server(&client, &server.url(""), "test-model")
+        let client = test_api_client(&server.url(""));
+        let resp = test_model_via_server(&client, "test-model", None)
             .await
             .unwrap();
 
-        assert_eq!(resp.status, "ok");
+        assert_eq!(resp.status, api_types::ModelTestResultStatus::Ok);
         assert!(resp.error_message.is_none());
     }
 
     #[tokio::test]
-    async fn test_model_via_server_parses_error() {
+    async fn test_model_via_server_passes_mode_and_parses_error() {
         let server = httpmock::MockServer::start_async().await;
         server
             .mock_async(|when, then| {
-                when.method("POST").path("/models/test-model/test");
+                when.method("POST")
+                    .path("/api/v1/models/test-model/test")
+                    .query_param("mode", "deep");
                 then.status(200)
                     .header("Content-Type", "application/json")
                     .body(
@@ -1650,12 +1469,13 @@ mod tests {
             })
             .await;
 
-        let client = test_http_client();
-        let resp = test_model_via_server(&client, &server.url(""), "test-model")
-            .await
-            .unwrap();
+        let client = test_api_client(&server.url(""));
+        let resp =
+            test_model_via_server(&client, "test-model", Some(api_types::ModelTestMode::Deep))
+                .await
+                .unwrap();
 
-        assert_eq!(resp.status, "error");
+        assert_eq!(resp.status, api_types::ModelTestResultStatus::Error);
         assert_eq!(resp.error_message.as_deref(), Some("timeout"));
     }
 
@@ -1664,7 +1484,7 @@ mod tests {
         let server = httpmock::MockServer::start_async().await;
         server
             .mock_async(|when, then| {
-                when.method("POST").path("/models/bad-model/test");
+                when.method("POST").path("/api/v1/models/bad-model/test");
                 then.status(404)
                 .header("Content-Type", "application/json")
                 .body(serde_json::json!({
@@ -1673,9 +1493,10 @@ mod tests {
             })
             .await;
 
-        let client = test_http_client();
-        let result = test_model_via_server(&client, &server.url(""), "bad-model").await;
+        let client = test_api_client(&server.url(""));
+        let result = test_model_via_server(&client, "bad-model", None).await;
         assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Model not found"));
     }
 
     // --- fetch_models_from_server ---
@@ -1683,32 +1504,26 @@ mod tests {
     #[tokio::test]
     async fn fetch_models_from_server_parses_response() {
         let server = httpmock::MockServer::start_async().await;
-        let mock = server.mock_async(|when, then| {
-            when.method("GET").path("/models").query_param("page[limit]", "100");
-            then.status(200)
-                .header("Content-Type", "application/json")
-                .body(serde_json::json!({
-                    "data": [{
-                        "id": "test-model",
-                        "provider": "anthropic",
-                        "family": "test",
-                        "display_name": "Test Model",
-                        "limits": { "context_window": 128_000, "max_output": 4096 },
-                        "training": null,
-                        "features": { "tools": true, "vision": false, "reasoning": false },
-                        "costs": { "input_cost_per_mtok": 1.0, "output_cost_per_mtok": 2.0, "cache_input_cost_per_mtok": null },
-                        "estimated_output_tps": 100.0,
-                        "aliases": ["tm"],
-                        "default": false
-                    }],
-                    "meta": { "has_more": false }
-                }).to_string());
-        }).await;
+        let mock = server
+            .mock_async(|when, then| {
+                when.method("GET")
+                    .path("/api/v1/models")
+                    .query_param("page[limit]", "100")
+                    .query_param("page[offset]", "0");
+                then.status(200)
+                    .header("Content-Type", "application/json")
+                    .body(
+                        serde_json::json!({
+                            "data": [test_model_json("test-model", Provider::Anthropic)],
+                            "meta": { "has_more": false }
+                        })
+                        .to_string(),
+                    );
+            })
+            .await;
 
-        let client = test_http_client();
-        let models = fetch_models_from_server(&client, &server.url(""), None)
-            .await
-            .unwrap();
+        let client = test_api_client(&server.url(""));
+        let models = fetch_models_from_server(&client, None, None).await.unwrap();
 
         mock.assert_async().await;
         assert_eq!(models.len(), 1);
@@ -1721,44 +1536,25 @@ mod tests {
         let server = httpmock::MockServer::start_async().await;
         server
             .mock_async(|when, then| {
-                when.method("GET").path("/models");
+                when.method("GET")
+                    .path("/api/v1/models")
+                    .query_param("page[limit]", "100")
+                    .query_param("page[offset]", "0")
+                    .query_param("provider", "anthropic");
                 then.status(200)
                     .header("Content-Type", "application/json")
                     .body(
-                    serde_json::json!({
-                        "data": [
-                            {
-                                "id": "model-a",
-                                "provider": "anthropic",
-                                "family": "a",
-                                "display_name": "Model A",
-                                "limits": { "context_window": 8000 },
-                                "features": { "tools": false, "vision": false, "reasoning": false },
-                                "costs": {},
-                                "aliases": [],
-                                "default": false
-                            },
-                            {
-                                "id": "model-b",
-                                "provider": "openai",
-                                "family": "b",
-                                "display_name": "Model B",
-                                "limits": { "context_window": 8000 },
-                                "features": { "tools": false, "vision": false, "reasoning": false },
-                                "costs": {},
-                                "aliases": [],
-                                "default": false
-                            }
-                        ],
-                        "meta": { "has_more": false }
-                    })
-                    .to_string(),
-                );
+                        serde_json::json!({
+                            "data": [test_model_json("model-a", Provider::Anthropic)],
+                            "meta": { "has_more": false }
+                        })
+                        .to_string(),
+                    );
             })
             .await;
 
-        let client = test_http_client();
-        let models = fetch_models_from_server(&client, &server.url(""), Some("anthropic"))
+        let client = test_api_client(&server.url(""));
+        let models = fetch_models_from_server(&client, Some("anthropic"), None)
             .await
             .unwrap();
 
@@ -1767,17 +1563,100 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fetch_models_from_server_passes_query_param() {
+        let server = httpmock::MockServer::start_async().await;
+        let mock = server
+            .mock_async(|when, then| {
+                when.method("GET")
+                    .path("/api/v1/models")
+                    .query_param("page[limit]", "100")
+                    .query_param("page[offset]", "0")
+                    .query_param("query", "sonnet");
+                then.status(200)
+                    .header("Content-Type", "application/json")
+                    .body(
+                        serde_json::json!({
+                            "data": [test_model_json("claude-sonnet-4-5", Provider::Anthropic)],
+                            "meta": { "has_more": false }
+                        })
+                        .to_string(),
+                    );
+            })
+            .await;
+
+        let client = test_api_client(&server.url(""));
+        let models = fetch_models_from_server(&client, None, Some("sonnet"))
+            .await
+            .unwrap();
+
+        mock.assert_async().await;
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "claude-sonnet-4-5");
+    }
+
+    #[tokio::test]
+    async fn fetch_models_from_server_follows_pagination() {
+        let server = httpmock::MockServer::start_async().await;
+        let first_page = server
+            .mock_async(|when, then| {
+                when.method("GET")
+                    .path("/api/v1/models")
+                    .query_param("page[limit]", "100")
+                    .query_param("page[offset]", "0");
+                then.status(200)
+                    .header("Content-Type", "application/json")
+                    .body(
+                        serde_json::json!({
+                            "data": [test_model_json("model-a", Provider::Anthropic)],
+                            "meta": { "has_more": true }
+                        })
+                        .to_string(),
+                    );
+            })
+            .await;
+        let second_page = server
+            .mock_async(|when, then| {
+                when.method("GET")
+                    .path("/api/v1/models")
+                    .query_param("page[limit]", "100")
+                    .query_param("page[offset]", "1");
+                then.status(200)
+                    .header("Content-Type", "application/json")
+                    .body(
+                        serde_json::json!({
+                            "data": [test_model_json("model-b", Provider::OpenAi)],
+                            "meta": { "has_more": false }
+                        })
+                        .to_string(),
+                    );
+            })
+            .await;
+
+        let client = test_api_client(&server.url(""));
+        let models = fetch_models_from_server(&client, None, None).await.unwrap();
+
+        first_page.assert_async().await;
+        second_page.assert_async().await;
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].id, "model-a");
+        assert_eq!(models[1].id, "model-b");
+    }
+
+    #[tokio::test]
     async fn fetch_models_from_server_error_on_failure() {
         let server = httpmock::MockServer::start_async().await;
         server
             .mock_async(|when, then| {
-                when.method("GET").path("/models");
+                when.method("GET")
+                    .path("/api/v1/models")
+                    .query_param("page[limit]", "100")
+                    .query_param("page[offset]", "0");
                 then.status(500).body("internal error");
             })
             .await;
 
-        let client = test_http_client();
-        let result = fetch_models_from_server(&client, &server.url(""), None).await;
+        let client = test_api_client(&server.url(""));
+        let result = fetch_models_from_server(&client, None, None).await;
         assert!(result.is_err());
     }
 

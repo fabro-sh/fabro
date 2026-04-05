@@ -3,6 +3,7 @@ pub mod client;
 pub mod error;
 pub mod generate;
 pub mod middleware;
+pub mod model_test;
 pub mod provider;
 pub mod providers;
 pub mod retry;

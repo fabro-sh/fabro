@@ -578,23 +578,6 @@ pub(crate) async fn list_query_history(
     paginated_response(insights::history(), &pagination)
 }
 
-// ── Models ────────────────────────────────────────────────────────────
-
-pub(crate) async fn list_models(
-    _auth: AuthenticatedService,
-    State(_state): State<Arc<AppState>>,
-    Query(pagination): Query<PaginationParams>,
-) -> Response {
-    paginated_response(
-        fabro_model::Catalog::builtin()
-            .list(None)
-            .into_iter()
-            .cloned()
-            .collect::<Vec<_>>(),
-        &pagination,
-    )
-}
-
 // ── Settings ───────────────────────────────────────────────────────────
 
 pub(crate) async fn get_server_settings(

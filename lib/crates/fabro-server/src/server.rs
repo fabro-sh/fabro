@@ -16,7 +16,8 @@ use axum::{Json, Router};
 use axum_extra::extract::cookie::Key;
 use bytes::Bytes;
 use fabro_llm::client::Client as LlmClient;
-use fabro_llm::generate::{GenerateParams, generate, generate_object};
+use fabro_llm::generate::{GenerateParams, generate_object};
+use fabro_llm::model_test::{ModelTestMode, run_model_test};
 use fabro_llm::types::{
     ContentPart, FinishReason, Message as LlmMessage, Request as LlmRequest,
     Response as LlmResponse, Role, StreamEvent, ToolChoice, ToolDefinition, Usage,
@@ -32,7 +33,7 @@ use tokio::sync::broadcast;
 use tokio::sync::oneshot;
 use tokio::sync::{Notify, OnceCell};
 use tokio::task::spawn_blocking;
-use tokio::time::{sleep, timeout};
+use tokio::time::sleep;
 use tokio_stream::StreamExt;
 use tower::{ServiceExt, service_fn};
 use ulid::Ulid;
@@ -75,6 +76,24 @@ pub struct PaginationParams {
     pub limit: u32,
     #[serde(rename = "page[offset]", default)]
     pub offset: u32,
+}
+
+#[derive(serde::Deserialize)]
+struct ModelListParams {
+    #[serde(rename = "page[limit]", default = "default_page_limit")]
+    limit: u32,
+    #[serde(rename = "page[offset]", default)]
+    offset: u32,
+    #[serde(default)]
+    provider: Option<String>,
+    #[serde(default)]
+    query: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct ModelTestParams {
+    #[serde(default)]
+    mode: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -325,7 +344,7 @@ fn demo_routes() -> Router<Arc<AppState>> {
         )
         .route("/insights/execute", post(demo::execute_query_stub))
         .route("/insights/history", get(demo::list_query_history))
-        .route("/models", get(demo::list_models))
+        .route("/models", get(list_models))
         .route("/models/{id}/test", post(test_model))
         .route("/completions", post(create_completion))
         .route("/settings", get(demo::get_server_settings))
@@ -405,7 +424,7 @@ fn real_routes() -> Router<Arc<AppState>> {
         )
         .route("/insights/execute", post(not_implemented))
         .route("/insights/history", get(not_implemented))
-        .route("/models", get(demo::list_models))
+        .route("/models", get(list_models))
         .route("/models/{id}/test", post(test_model))
         .route("/completions", post(create_completion))
         .route("/settings", get(not_implemented))
@@ -1818,49 +1837,85 @@ async fn unpause_run(
     }
 }
 
+async fn list_models(
+    _auth: AuthenticatedService,
+    State(_state): State<Arc<AppState>>,
+    Query(params): Query<ModelListParams>,
+) -> Response {
+    let provider = match params.provider.as_deref() {
+        Some(value) => match fabro_model::Provider::from_str(value) {
+            Ok(provider) => Some(provider),
+            Err(err) => return ApiError::new(StatusCode::BAD_REQUEST, err).into_response(),
+        },
+        None => None,
+    };
+
+    let query = params.query.as_ref().map(|value| value.to_lowercase());
+    let limit = params.limit.clamp(1, 100) as usize;
+    let offset = params.offset as usize;
+
+    let mut models = fabro_model::Catalog::builtin()
+        .list(provider)
+        .into_iter()
+        .filter(|model| match &query {
+            Some(query) => {
+                model.id.to_lowercase().contains(query)
+                    || model.display_name.to_lowercase().contains(query)
+                    || model
+                        .aliases
+                        .iter()
+                        .any(|alias| alias.to_lowercase().contains(query))
+            }
+            None => true,
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let has_more = models.len() > offset.saturating_add(limit);
+    let data = models.drain(offset..models.len().min(offset.saturating_add(limit)));
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "data": data.collect::<Vec<_>>(),
+            "meta": { "has_more": has_more }
+        })),
+    )
+        .into_response()
+}
+
 async fn test_model(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
+    Query(params): Query<ModelTestParams>,
 ) -> Response {
+    let mode = match params.mode.as_deref() {
+        Some(value) => match ModelTestMode::from_str(value) {
+            Ok(mode) => mode,
+            Err(err) => return ApiError::new(StatusCode::BAD_REQUEST, err).into_response(),
+        },
+        None => ModelTestMode::Basic,
+    };
     let Some(info) = fabro_model::Catalog::builtin().get(&id) else {
         return ApiError::not_found(format!("Model not found: {id}")).into_response();
     };
 
     if state.dry_run() {
         return Json(serde_json::json!({
-            "model_id": id,
+            "model_id": info.id,
             "status": "ok",
         }))
         .into_response();
     }
 
-    let params = GenerateParams::new(&info.id)
-        .provider(info.provider.as_str())
-        .prompt("Say OK")
-        .max_tokens(16);
-
-    let result = timeout(Duration::from_secs(30), generate(params)).await;
-
-    match result {
-        Ok(Ok(_)) => Json(serde_json::json!({
-            "model_id": id,
-            "status": "ok",
-        }))
-        .into_response(),
-        Ok(Err(e)) => Json(serde_json::json!({
-            "model_id": id,
-            "status": "error",
-            "error_message": e.to_string(),
-        }))
-        .into_response(),
-        Err(_) => Json(serde_json::json!({
-            "model_id": id,
-            "status": "error",
-            "error_message": "timeout (30s)",
-        }))
-        .into_response(),
-    }
+    let outcome = run_model_test(info, mode).await;
+    Json(serde_json::json!({
+        "model_id": info.id,
+        "status": outcome.status.as_str(),
+        "error_message": outcome.error_message,
+    }))
+    .into_response()
 }
 
 fn finish_reason_to_api_stop_reason(reason: &FinishReason) -> String {
@@ -2344,6 +2399,109 @@ mod tests {
         let body = body_json(response.into_body()).await;
         assert_eq!(body["model_id"], "claude-opus-4-6");
         assert!(body["status"] == "ok" || body["status"] == "error");
+    }
+
+    #[tokio::test]
+    async fn test_model_alias_returns_canonical_model_id() {
+        let state = create_app_state_with_options(dry_run_settings(), 5);
+        let app = build_router(state, AuthMode::Disabled);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api("/models/sonnet/test"))
+            .header("content-type", "application/json")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = body_json(response.into_body()).await;
+        assert_eq!(body["model_id"], "claude-sonnet-4-6");
+        assert_eq!(body["status"], "ok");
+    }
+
+    #[tokio::test]
+    async fn test_model_invalid_mode_returns_400() {
+        let state = create_app_state_with_options(dry_run_settings(), 5);
+        let app = build_router(state, AuthMode::Disabled);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api("/models/claude-opus-4-6/test?mode=bogus"))
+            .header("content-type", "application/json")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn list_models_filters_by_provider() {
+        let app = test_app_with();
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api("/models?provider=anthropic"))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = body_json(response.into_body()).await;
+        let models = body["data"].as_array().unwrap();
+        assert!(!models.is_empty());
+        assert!(
+            models
+                .iter()
+                .all(|model| model["provider"] == serde_json::Value::String("anthropic".into()))
+        );
+    }
+
+    #[tokio::test]
+    async fn list_models_filters_by_query_across_aliases() {
+        let app = test_app_with();
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api("/models?query=codex"))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = body_json(response.into_body()).await;
+        let model_ids = body["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|model| model["id"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            model_ids,
+            vec![
+                "gpt-5.2-codex".to_string(),
+                "gpt-5.3-codex".to_string(),
+                "gpt-5.3-codex-spark".to_string()
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn list_models_invalid_provider_returns_400() {
+        let app = test_app_with();
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api("/models?provider=not-a-provider"))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

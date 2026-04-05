@@ -86,6 +86,7 @@ models/model-costs.ts
 models/model-features.ts
 models/model-limits.ts
 models/model-reference.ts
+models/model-test-mode.ts
 models/model-test-result.ts
 models/model.ts
 models/node-state.ts

@@ -36,6 +36,8 @@ indicatif.workspace = true
 clap.workspace = true
 dialoguer.workspace = true
 tracing.workspace = true
+progenitor-client = "0.13"
+fabro-api = { path = "../fabro-api" }
 fabro-model = { path = "../fabro-model" }
 fabro-util = { path = "../fabro-util" }
 

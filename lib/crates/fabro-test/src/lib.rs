@@ -561,13 +561,6 @@ impl TestContext {
         cmd
     }
 
-    /// Build a `llm` subcommand.
-    pub fn llm(&self) -> Command {
-        let mut cmd = self.command();
-        cmd.arg("llm");
-        cmd
-    }
-
     /// Build a `settings` subcommand.
     pub fn settings(&self) -> Command {
         let mut cmd = self.command();

@@ -59,3 +59,21 @@ fn help() {
     ----- stderr -----
     ");
 }
+
+#[test]
+fn llm_namespace_is_not_available() {
+    let context = test_context!();
+    let mut cmd = context.command();
+    cmd.arg("llm");
+    fabro_snapshot!(context.filters(), cmd, @"
+    success: false
+    exit_code: 2
+    ----- stdout -----
+    ----- stderr -----
+    error: unrecognized subcommand 'llm'
+
+    Usage: fabro [OPTIONS] <COMMAND>
+
+    For more information, try '--help'.
+    ");
+}

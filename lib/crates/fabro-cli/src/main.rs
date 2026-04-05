@@ -160,7 +160,6 @@ async fn main_inner() -> (String, Result<()>) {
 
     let result = Box::pin(async move {
         match *command {
-            Commands::Llm(ns) => commands::llm::dispatch(ns, &globals).await?,
             Commands::Exec(args) => commands::exec::execute(args, &globals).await?,
             Commands::RunCmd(cmd) => Box::pin(commands::run::dispatch(cmd, &globals)).await?,
             Commands::Preflight(args) => commands::preflight::execute(args, &globals).await?,

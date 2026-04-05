@@ -4,7 +4,6 @@ pub(crate) mod doctor;
 pub(crate) mod exec;
 pub(crate) mod graph;
 pub(crate) mod install;
-pub(crate) mod llm;
 pub(crate) mod model;
 pub(crate) mod parse;
 pub(crate) mod pr;
