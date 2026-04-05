@@ -9,13 +9,10 @@ mod human_gate;
 mod real_cli;
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::Duration;
 
-use fabro_store::{SlateRunStore, SlateStore};
+use crate::cmd::support::RunProjection;
 use fabro_test::TestContext;
-use fabro_types::RunId;
-use object_store::local::LocalFileSystem;
 use serde_json::Value;
 
 pub(super) fn fixture(name: &str) -> PathBuf {
@@ -74,20 +71,18 @@ pub(super) fn store_dump_export(context: &TestContext, run_id: &str) -> PathBuf 
 /// Find the single run directory for this test context.
 pub(super) fn find_run_dir(context: &TestContext) -> PathBuf {
     let runs_base = context.storage_dir.join("runs");
-    let entries: Vec<_> = std::fs::read_dir(&runs_base)
-        .unwrap_or_else(|e| panic!("failed to read {}: {e}", runs_base.display()))
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().is_dir())
-        .filter(|entry| {
-            run_state(&entry.path())
-                .run
-                .as_ref()
-                .is_some_and(|run| {
-                    run.labels
-                        .get("fabro_test_case")
-                        .is_some_and(|value| value == context.test_case_id())
-                })
+    let runs: Vec<RunSummaryRecord> = block_on(get_server_json_for_storage(
+        &context.storage_dir,
+        "/api/v1/runs",
+    ));
+    let entries: Vec<_> = runs
+        .into_iter()
+        .filter(|run| {
+            run.labels
+                .get("fabro_test_case")
+                .is_some_and(|value| value == context.test_case_id())
         })
+        .filter_map(|run| find_run_dir_for_id(&context.storage_dir, &run.run_id))
         .collect();
     assert_eq!(
         entries.len(),
@@ -96,12 +91,12 @@ pub(super) fn find_run_dir(context: &TestContext) -> PathBuf {
         context.test_case_id(),
         runs_base.display()
     );
-    entries[0].path()
+    entries[0].clone()
 }
 
-fn infer_run_id(run_dir: &Path) -> RunId {
+fn infer_run_id(run_dir: &Path) -> String {
     if let Ok(id) = std::fs::read_to_string(run_dir.join("id.txt")) {
-        return id.trim().parse().expect("run id should parse");
+        return id.trim().to_string();
     }
     run_dir
         .file_name()
@@ -109,8 +104,13 @@ fn infer_run_id(run_dir: &Path) -> RunId {
         .and_then(|name| name.rsplit('-').next().map(ToOwned::to_owned))
         .filter(|value| !value.is_empty())
         .expect("run directory name should contain run id suffix")
-        .parse()
-        .expect("run id should parse")
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct RunSummaryRecord {
+    run_id: String,
+    #[serde(default)]
+    labels: std::collections::HashMap<String, String>,
 }
 
 fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
@@ -121,19 +121,56 @@ fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
         .block_on(future)
 }
 
-fn run_store(run_dir: &Path) -> SlateRunStore {
-    let runs_dir = run_dir.parent().expect("run dir should have parent");
-    let storage_dir = runs_dir.parent().expect("runs dir should have parent");
-    let object_store = Arc::new(
-        LocalFileSystem::new_with_prefix(storage_dir.join("store"))
-            .expect("test store path should be accessible"),
-    );
-    let store = Arc::new(SlateStore::new(object_store, "", Duration::from_millis(1)));
-    block_on(store.open_run_reader(&infer_run_id(run_dir))).expect("run store should exist")
+fn server_http_client(storage_dir: &Path) -> reqwest::Client {
+    reqwest::ClientBuilder::new()
+        .unix_socket(storage_dir.join("fabro.sock"))
+        .no_proxy()
+        .build()
+        .expect("test HTTP client should build")
 }
 
-fn run_state(run_dir: &Path) -> fabro_store::RunProjection {
-    block_on(run_store(run_dir).state()).expect("run store state should exist")
+async fn get_server_json_for_storage<T: serde::de::DeserializeOwned>(
+    storage_dir: &Path,
+    path: &str,
+) -> T {
+    let response = server_http_client(storage_dir)
+        .get(format!("http://fabro{path}"))
+        .send()
+        .await
+        .expect("server request should succeed");
+    assert!(
+        response.status().is_success(),
+        "server request failed for {path}: {}",
+        response.status()
+    );
+    response
+        .json::<T>()
+        .await
+        .expect("server response should parse")
+}
+
+fn find_run_dir_for_id(storage_dir: &Path, run_id: &str) -> Option<PathBuf> {
+    let runs_dir = storage_dir.join("runs");
+    let entries = std::fs::read_dir(&runs_dir).ok()?;
+    entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.is_dir()
+                && path
+                    .file_name()
+                    .is_some_and(|name| name.to_string_lossy().ends_with(run_id))
+        })
+}
+
+fn run_state(run_dir: &Path) -> RunProjection {
+    let run_id = infer_run_id(run_dir);
+    let runs_dir = run_dir.parent().expect("run dir should have parent");
+    let storage_dir = runs_dir.parent().expect("runs dir should have parent");
+    block_on(get_server_json_for_storage(
+        storage_dir,
+        &format!("/api/v1/runs/{run_id}/state"),
+    ))
 }
 
 macro_rules! sandbox_tests {

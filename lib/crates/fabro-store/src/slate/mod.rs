@@ -117,9 +117,6 @@ impl SlateStore {
 
     pub async fn open_run(&self, run_id: &RunId) -> Result<SlateRunStore> {
         let db = self.open_db().await?;
-        if !catalog::read_locator(&db, run_id).await? {
-            return Err(StoreError::RunNotFound(run_id.to_string()));
-        }
         if let Some(active) = self.get_active_run(run_id).await {
             if !active.matches_run(run_id) {
                 return Err(StoreError::Other(format!(
@@ -127,6 +124,9 @@ impl SlateStore {
                 )));
             }
             return Ok(active);
+        }
+        if !catalog::read_locator(&db, run_id).await? {
+            return Err(StoreError::RunNotFound(run_id.to_string()));
         }
         if !SlateRunStore::validate_init(&db, run_id).await? {
             return Err(StoreError::RunNotFound(run_id.to_string()));
@@ -138,9 +138,6 @@ impl SlateStore {
 
     pub async fn open_run_reader(&self, run_id: &RunId) -> Result<SlateRunStore> {
         let db = self.open_db().await?;
-        if !catalog::read_locator(&db, run_id).await? {
-            return Err(StoreError::RunNotFound(run_id.to_string()));
-        }
         if let Some(active) = self.get_active_run(run_id).await {
             if !active.matches_run(run_id) {
                 return Err(StoreError::Other(format!(
@@ -148,6 +145,9 @@ impl SlateStore {
                 )));
             }
             return Ok(active.into_read_only());
+        }
+        if !catalog::read_locator(&db, run_id).await? {
+            return Err(StoreError::RunNotFound(run_id.to_string()));
         }
         if !SlateRunStore::validate_init(&db, run_id).await? {
             return Err(StoreError::RunNotFound(run_id.to_string()));

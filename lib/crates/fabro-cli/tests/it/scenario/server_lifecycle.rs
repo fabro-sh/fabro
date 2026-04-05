@@ -3,6 +3,9 @@ use fabro_test::{fabro_snapshot, test_context};
 #[test]
 fn start_status_stop_lifecycle() {
     let context = test_context!();
+    let storage_root = tempfile::tempdir_in("/tmp").unwrap();
+    let storage_dir = storage_root.path().join("storage");
+    std::fs::create_dir_all(&storage_dir).unwrap();
 
     let sock_dir = tempfile::tempdir_in("/tmp").unwrap();
     let bind_addr = sock_dir.path().join("test.sock");
@@ -17,6 +20,7 @@ fn start_status_stop_lifecycle() {
     ));
 
     let mut cmd = context.command();
+    cmd.env("FABRO_STORAGE_DIR", &storage_dir);
     cmd.args(["server", "start", "--dry-run", "--bind", &bind_str]);
     fabro_snapshot!(filters.clone(), cmd, @"
     success: true
@@ -27,6 +31,7 @@ fn start_status_stop_lifecycle() {
     ");
 
     let mut cmd = context.command();
+    cmd.env("FABRO_STORAGE_DIR", &storage_dir);
     cmd.args(["server", "status"]);
     fabro_snapshot!(filters.clone(), cmd, @"
     success: true
@@ -38,6 +43,7 @@ fn start_status_stop_lifecycle() {
 
     let status_output = context
         .command()
+        .env("FABRO_STORAGE_DIR", &storage_dir)
         .args(["server", "status", "--json"])
         .assert()
         .success();
@@ -52,6 +58,7 @@ fn start_status_stop_lifecycle() {
     );
 
     let mut cmd = context.command();
+    cmd.env("FABRO_STORAGE_DIR", &storage_dir);
     cmd.args(["server", "stop"]);
     fabro_snapshot!(filters.clone(), cmd, @"
     success: true
@@ -62,6 +69,7 @@ fn start_status_stop_lifecycle() {
     ");
 
     let mut cmd = context.command();
+    cmd.env("FABRO_STORAGE_DIR", &storage_dir);
     cmd.args(["server", "status"]);
     fabro_snapshot!(filters, cmd, @"
     success: false
@@ -72,7 +80,7 @@ fn start_status_stop_lifecycle() {
     ");
 
     assert!(
-        !context.storage_dir.join("server.json").exists(),
+        !storage_dir.join("server.json").exists(),
         "server.json should be removed after stop"
     );
 }

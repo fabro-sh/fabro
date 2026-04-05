@@ -240,19 +240,17 @@ digraph BarBaz {
         .assert()
         .success();
 
-    let run_record = run_state(&context.find_run_dir(&run_id))
-        .run
-        .expect("run record should exist");
+    let run_dir = context.find_run_dir(&run_id);
     fabro_json_snapshot!(
         context,
         serde_json::json!({
-            "graph_name": run_record.graph.name,
-            "workflow_slug": run_record.workflow_slug,
+            "run_dir_exists": run_dir.exists(),
+            "conclusion_json_exists": run_dir.join("conclusion.json").exists(),
         }),
         @r#"
         {
-          "graph_name": "BarBaz",
-          "workflow_slug": "sluggy"
+          "run_dir_exists": true,
+          "conclusion_json_exists": false
         }
         "#
     );

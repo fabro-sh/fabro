@@ -4,12 +4,9 @@ mod recovery;
 mod server_lifecycle;
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::Duration;
 
-use fabro_store::{RunProjection, SlateRunStore, SlateStore};
-use fabro_types::RunId;
-use object_store::local::LocalFileSystem;
+use crate::cmd::support::RunProjection;
 pub(super) fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/it/workflow/fixtures")
@@ -24,10 +21,8 @@ fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
         .block_on(future)
 }
 
-fn run_store(run_dir: &Path) -> SlateRunStore {
-    let runs_dir = run_dir.parent().expect("run dir should have parent");
-    let storage_dir = runs_dir.parent().expect("runs dir should have parent");
-    let run_id: RunId = std::fs::read_to_string(run_dir.join("id.txt"))
+fn infer_run_id(run_dir: &Path) -> String {
+    std::fs::read_to_string(run_dir.join("id.txt"))
         .ok()
         .map(|id| id.trim().to_string())
         .or_else(|| {
@@ -37,19 +32,44 @@ fn run_store(run_dir: &Path) -> SlateRunStore {
                 .and_then(|name| name.rsplit('-').next().map(ToOwned::to_owned))
         })
         .expect("run dir should contain resolvable run id")
-        .parse()
-        .expect("run id should parse");
-    let object_store = Arc::new(
-        LocalFileSystem::new_with_prefix(storage_dir.join("store"))
-            .expect("test store path should be accessible"),
+}
+
+fn server_http_client(storage_dir: &Path) -> reqwest::Client {
+    reqwest::ClientBuilder::new()
+        .unix_socket(storage_dir.join("fabro.sock"))
+        .no_proxy()
+        .build()
+        .expect("test HTTP client should build")
+}
+
+async fn get_server_json_for_storage<T: serde::de::DeserializeOwned>(
+    storage_dir: &Path,
+    path: &str,
+) -> T {
+    let response = server_http_client(storage_dir)
+        .get(format!("http://fabro{path}"))
+        .send()
+        .await
+        .expect("server request should succeed");
+    assert!(
+        response.status().is_success(),
+        "server request failed for {path}: {}",
+        response.status()
     );
-    let store = Arc::new(SlateStore::new(object_store, "", Duration::from_millis(1)));
-    block_on(store.open_run_reader(&run_id)).expect("run store should exist")
+    response
+        .json::<T>()
+        .await
+        .expect("server response should parse")
 }
 
 pub(super) fn run_state(run_dir: &Path) -> RunProjection {
-    let store = run_store(run_dir);
-    block_on(store.state()).expect("run store state should exist")
+    let runs_dir = run_dir.parent().expect("run dir should have parent");
+    let storage_dir = runs_dir.parent().expect("runs dir should have parent");
+    let run_id = infer_run_id(run_dir);
+    block_on(get_server_json_for_storage(
+        storage_dir,
+        &format!("/api/v1/runs/{run_id}/state"),
+    ))
 }
 
 pub(super) fn timeout_for(sandbox: &str) -> Duration {

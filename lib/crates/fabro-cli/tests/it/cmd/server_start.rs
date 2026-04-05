@@ -3,6 +3,12 @@ use std::process::Stdio;
 use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
 
+fn isolated_storage_dir() -> tempfile::TempDir {
+    let root = tempfile::tempdir_in("/tmp").unwrap();
+    std::fs::create_dir_all(root.path().join("storage")).unwrap();
+    root
+}
+
 #[test]
 fn help() {
     let context = test_context!();
@@ -56,6 +62,8 @@ fn help() {
 #[test]
 fn start_already_running_exits_with_error() {
     let context = test_context!();
+    let storage_root = isolated_storage_dir();
+    let storage_dir = storage_root.path().join("storage");
 
     let sock_dir = tempfile::tempdir_in("/tmp").unwrap();
     let bind_addr = sock_dir.path().join("test.sock");
@@ -63,6 +71,7 @@ fn start_already_running_exits_with_error() {
 
     context
         .command()
+        .env("FABRO_STORAGE_DIR", &storage_dir)
         .args(["server", "start", "--dry-run", "--bind", &bind_str])
         .assert()
         .success();
@@ -71,6 +80,7 @@ fn start_already_running_exits_with_error() {
     filters.push((r"pid \d+".to_string(), "pid [PID]".to_string()));
     filters.push((regex::escape(&bind_str), "[SOCKET_PATH]".to_string()));
     let mut cmd = context.command();
+    cmd.env("FABRO_STORAGE_DIR", &storage_dir);
     cmd.args(["server", "start", "--dry-run", "--bind", &bind_str]);
     fabro_snapshot!(filters, cmd, @"
     success: false
@@ -82,6 +92,7 @@ fn start_already_running_exits_with_error() {
 
     context
         .command()
+        .env("FABRO_STORAGE_DIR", &storage_dir)
         .args(["server", "stop"])
         .assert()
         .success();

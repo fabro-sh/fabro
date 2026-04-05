@@ -43,6 +43,7 @@ pub(crate) struct SlateRunStoreInner {
     db: Db,
     event_seq: AtomicU32,
     close_lock: Mutex<()>,
+    state_lock: Mutex<()>,
     projection_cache: Mutex<EventProjectionCache>,
     recent_events: Mutex<VecDeque<EventEnvelope>>,
     recent_event_limit: usize,
@@ -59,6 +60,7 @@ impl SlateRunStore {
                 db,
                 event_seq: AtomicU32::new(event_seq),
                 close_lock: Mutex::new(()),
+                state_lock: Mutex::new(()),
                 projection_cache: Mutex::new(EventProjectionCache::default()),
                 recent_events: Mutex::new(VecDeque::with_capacity(DEFAULT_EVENT_TAIL_LIMIT)),
                 recent_event_limit: DEFAULT_EVENT_TAIL_LIMIT,
@@ -77,6 +79,7 @@ impl SlateRunStore {
                 db,
                 event_seq: AtomicU32::new(event_seq),
                 close_lock: Mutex::new(()),
+                state_lock: Mutex::new(()),
                 projection_cache: Mutex::new(EventProjectionCache::default()),
                 recent_events: Mutex::new(VecDeque::with_capacity(DEFAULT_EVENT_TAIL_LIMIT)),
                 recent_event_limit: DEFAULT_EVENT_TAIL_LIMIT,
@@ -148,6 +151,7 @@ impl SlateRunStore {
     }
 
     async fn projected_state(&self) -> Result<RunProjection> {
+        let _state_guard = self.inner.state_lock.lock().await;
         let next_seq = {
             let cache = self.inner.projection_cache.lock().await;
             cache.last_seq.saturating_add(1)
@@ -201,6 +205,7 @@ impl SlateRunStore {
             return Err(StoreError::ReadOnly);
         }
         payload.validate(&self.inner.run_id)?;
+        let _state_guard = self.inner.state_lock.lock().await;
         let seq = self.inner.event_seq.fetch_add(1, Ordering::SeqCst);
         let event = EventEnvelope {
             seq,
