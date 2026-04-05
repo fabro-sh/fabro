@@ -19,7 +19,7 @@ const tabs = [
 export const handle = { hideHeader: true };
 
 export async function loader({ request, params }: any) {
-  const response = await apiJson<PaginatedRunList>("/runs", { request });
+  const response = await apiJson<PaginatedRunList>("/boards/runs", { request });
   const apiRun = response.data.find((r) => r.id === params.id);
   if (!apiRun) return { run: null };
   return {

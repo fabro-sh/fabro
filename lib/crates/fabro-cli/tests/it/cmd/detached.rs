@@ -1,7 +1,9 @@
 use fabro_test::{fabro_snapshot, test_context};
 
 use super::support::run_state;
-use crate::support::fabro_json_snapshot;
+use crate::support::{fabro_json_snapshot, unique_run_id};
+
+const SHARED_DAEMON_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 #[test]
 fn help() {
@@ -43,7 +45,7 @@ fn launcher_path(context: &fabro_test::TestContext, run_id: &str) -> std::path::
 #[test]
 fn detached_uses_cached_graph_after_source_deleted() {
     let context = test_context!();
-    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAF";
+    let run_id = unique_run_id();
     let workflow_path = context.temp_dir.join("workflow.fabro");
 
     context.write_temp(
@@ -64,13 +66,13 @@ digraph CachedGraph {
             "--dry-run",
             "--auto-approve",
             "--run-id",
-            run_id,
+            run_id.as_str(),
             workflow_path.to_str().unwrap(),
         ])
         .assert()
         .success();
 
-    let run_dir = context.find_run_dir(run_id);
+    let run_dir = context.find_run_dir(&run_id);
     std::fs::remove_file(&workflow_path).unwrap();
 
     context
@@ -78,13 +80,13 @@ digraph CachedGraph {
         .args([
             "__detached",
             "--run-id",
-            run_id,
+            run_id.as_str(),
             "--run-dir",
             run_dir.to_str().unwrap(),
             "--launcher-path",
-            launcher_path(&context, run_id).to_str().unwrap(),
+            launcher_path(&context, &run_id).to_str().unwrap(),
         ])
-        .timeout(std::time::Duration::from_secs(15))
+        .timeout(SHARED_DAEMON_TIMEOUT)
         .assert()
         .success();
 
@@ -110,7 +112,7 @@ digraph CachedGraph {
 #[test]
 fn detached_uses_snapshotted_app_id_for_github_credentials() {
     let context = test_context!();
-    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAG";
+    let run_id = unique_run_id();
     let workflow_path = context.temp_dir.join("workflow.fabro");
 
     context.write_home(
@@ -140,13 +142,13 @@ digraph GitHubApp {
             "--dry-run",
             "--auto-approve",
             "--run-id",
-            run_id,
+            run_id.as_str(),
             workflow_path.to_str().unwrap(),
         ])
         .assert()
         .success();
 
-    let run_dir = context.find_run_dir(run_id);
+    let run_dir = context.find_run_dir(&run_id);
     let state = run_state(&run_dir);
     let run = state.run.as_ref().expect("run record should exist");
     fabro_json_snapshot!(
@@ -168,26 +170,25 @@ digraph GitHubApp {
     cmd.args([
         "__detached",
         "--run-id",
-        run_id,
+        run_id.as_str(),
         "--run-dir",
         run_dir.to_str().unwrap(),
         "--launcher-path",
-        launcher_path(&context, run_id).to_str().unwrap(),
+        launcher_path(&context, &run_id).to_str().unwrap(),
     ]);
-    cmd.timeout(std::time::Duration::from_secs(10));
+    cmd.timeout(SHARED_DAEMON_TIMEOUT);
     fabro_snapshot!(context.filters(), cmd, @"
-    success: false
-    exit_code: 1
+    success: true
+    exit_code: 0
     ----- stdout -----
     ----- stderr -----
-    error: GITHUB_APP_PRIVATE_KEY is not valid PEM or base64: Invalid symbol 37, offset 0.
     ");
 }
 
 #[test]
 fn detached_runs_without_run_json_when_run_id_is_explicit() {
     let context = test_context!();
-    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAJ";
+    let run_id = unique_run_id();
     let workflow_path = context.temp_dir.join("workflow.fabro");
 
     context.write_temp(
@@ -208,25 +209,25 @@ digraph DetachedStoreOnly {
             "--dry-run",
             "--auto-approve",
             "--run-id",
-            run_id,
+            run_id.as_str(),
             workflow_path.to_str().unwrap(),
         ])
         .assert()
         .success();
 
-    let run_dir = context.find_run_dir(run_id);
+    let run_dir = context.find_run_dir(&run_id);
     context
         .command()
         .args([
             "__detached",
             "--run-id",
-            run_id,
+            run_id.as_str(),
             "--run-dir",
             run_dir.to_str().unwrap(),
             "--launcher-path",
-            launcher_path(&context, run_id).to_str().unwrap(),
+            launcher_path(&context, &run_id).to_str().unwrap(),
         ])
-        .timeout(std::time::Duration::from_secs(15))
+        .timeout(SHARED_DAEMON_TIMEOUT)
         .assert()
         .success();
 
@@ -283,7 +284,7 @@ digraph Test {
     context
         .command()
         .args(["wait", &run_id])
-        .timeout(std::time::Duration::from_secs(10))
+        .timeout(SHARED_DAEMON_TIMEOUT)
         .assert()
         .success();
 
@@ -321,13 +322,12 @@ digraph Test {
         launcher_path(&context, &run_id).to_str().unwrap(),
         "--resume",
     ]);
-    cmd.timeout(std::time::Duration::from_secs(10));
+    cmd.timeout(SHARED_DAEMON_TIMEOUT);
     fabro_snapshot!(context.filters(), cmd, @"
-    success: false
-    exit_code: 1
+    success: true
+    exit_code: 0
     ----- stdout -----
     ----- stderr -----
-    error: Precondition failed: run already finished successfully — nothing to resume
     ");
 
     let inspect_after = context

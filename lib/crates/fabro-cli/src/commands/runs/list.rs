@@ -7,12 +7,12 @@ use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_util::terminal::Styles;
 
 use fabro_util::text::strip_goal_decoration;
-use fabro_workflow::run_lookup::{StatusFilter, filter_runs, runs_base, scan_runs_combined};
+use fabro_workflow::run_lookup::{StatusFilter, filter_runs, runs_base, scan_runs_with_summaries};
 use fabro_workflow::run_status::RunStatus;
 
 use crate::args::{GlobalArgs, RunsListArgs};
 use crate::shared::{color_if, format_duration_ms, tilde_path};
-use crate::store;
+use crate::server_client;
 use crate::user_config::load_user_settings_with_globals;
 
 use super::short_run_id;
@@ -25,8 +25,9 @@ pub(crate) async fn list_command(
 ) -> Result<()> {
     let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
-    let store = store::build_store(&cli_settings.storage_dir())?;
-    let runs = scan_runs_combined(store.as_ref(), &base).await?;
+    let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
+    let summaries = client.list_store_runs().await?;
+    let runs = scan_runs_with_summaries(&summaries, &base)?;
     let label_filters = parse_label_filters(&args.filter.label);
     let filtered = filter_runs(
         &runs,

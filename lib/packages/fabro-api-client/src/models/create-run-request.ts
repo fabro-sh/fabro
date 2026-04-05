@@ -15,12 +15,28 @@
 
 
 /**
- * Request body for creating a new run from a Graphviz graph source.
+ * Request body for creating a new run, either from inline Graphviz source or from a local workflow path plus resolved settings.
  */
 export interface CreateRunRequest {
     /**
      * Graphviz DOT language source defining the workflow graph.
      */
-    'dot_source': string;
+    'dot_source'?: string;
+    /**
+     * Absolute or relative path to the workflow file to load on the local machine.
+     */
+    'workflow_path'?: string;
+    /**
+     * Working directory used to resolve the workflow path.
+     */
+    'cwd'?: string;
+    /**
+     * JSON-serialized `fabro_types::Settings` payload resolved by the CLI.
+     */
+    'settings_json'?: string;
+    /**
+     * Optional pre-generated run ID to use instead of allocating a new ULID.
+     */
+    'run_id'?: string;
 }
 

@@ -1,7 +1,7 @@
 use fabro_test::{fabro_snapshot, test_context};
 use serde_json::Value;
 
-use crate::support::{example_fixture, fabro_json_snapshot, run_output_filters};
+use crate::support::{example_fixture, fabro_json_snapshot, run_output_filters, unique_run_id};
 
 #[test]
 fn help() {
@@ -78,7 +78,7 @@ fn dry_run_simple() {
 #[test]
 fn dry_run_persists_event_history_in_store() {
     let context = test_context!();
-    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FB8";
+    let run_id = unique_run_id();
 
     context
         .command()
@@ -89,16 +89,16 @@ fn dry_run_persists_event_history_in_store() {
             "--sandbox",
             "local",
             "--run-id",
-            run_id,
+            run_id.as_str(),
             example_fixture("simple.fabro").to_str().unwrap(),
         ])
         .assert()
         .success();
 
-    context.find_run_dir(run_id);
+    context.find_run_dir(&run_id);
     let output = context
         .command()
-        .args(["logs", run_id])
+        .args(["logs", &run_id])
         .output()
         .expect("logs command should execute");
     assert!(
@@ -135,7 +135,7 @@ fn dry_run_persists_event_history_in_store() {
 
     let tail_output = context
         .command()
-        .args(["logs", "--tail", "1", run_id])
+        .args(["logs", "--tail", "1", &run_id])
         .output()
         .expect("tail logs command should execute");
     assert!(
@@ -169,7 +169,7 @@ fn dry_run_persists_event_history_in_store() {
 #[test]
 fn run_id_passthrough_uses_provided_ulid() {
     let context = test_context!();
-    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+    let run_id = unique_run_id();
 
     context
         .command()
@@ -178,13 +178,13 @@ fn run_id_passthrough_uses_provided_ulid() {
             "--dry-run",
             "--auto-approve",
             "--run-id",
-            run_id,
+            run_id.as_str(),
             example_fixture("simple.fabro").to_str().unwrap(),
         ])
         .assert()
         .success();
 
-    context.find_run_dir(run_id);
+    context.find_run_dir(&run_id);
 }
 
 #[test]
@@ -916,7 +916,7 @@ fn detach_prints_ulid_and_exits() {
 #[test]
 fn detach_creates_run_dir_with_detach_log() {
     let context = test_context!();
-    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FB9";
+    let run_id = unique_run_id();
 
     context
         .run_cmd()
@@ -925,13 +925,13 @@ fn detach_creates_run_dir_with_detach_log() {
             "--dry-run",
             "--auto-approve",
             "--run-id",
-            run_id,
+            run_id.as_str(),
             example_fixture("simple.fabro").to_str().unwrap(),
         ])
         .assert()
         .success();
 
-    let run_dir = context.find_run_dir(run_id);
+    let run_dir = context.find_run_dir(&run_id);
     fabro_json_snapshot!(
         context,
         serde_json::json!({

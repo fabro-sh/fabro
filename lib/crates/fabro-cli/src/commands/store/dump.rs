@@ -1,27 +1,29 @@
 use std::io::ErrorKind;
 use std::path::Path;
-
 use anyhow::{Context, Result};
 #[cfg(test)]
 use fabro_store::StageId;
 use fabro_store::{RunProjection, SlateRunStore};
 use fabro_workflow::run_dump::RunDump;
-use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
+use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 #[cfg(test)]
 use serde::de::DeserializeOwned;
 
 use crate::args::{GlobalArgs, StoreDumpArgs};
+use crate::commands::store::rebuild::rebuild_run_store;
+use crate::server_client;
 use crate::shared::{absolute_or_current, print_json_pretty};
-use crate::store;
 use crate::user_config::load_user_settings_with_globals;
 
 pub(crate) async fn dump_command(args: &StoreDumpArgs, globals: &GlobalArgs) -> Result<()> {
     let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
-    let store = store::build_store(&cli_settings.storage_dir())?;
-    let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
+    let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
+    let summaries = client.list_store_runs().await?;
+    let run = resolve_run_from_summaries(&summaries, &base, &args.run)?;
     let run_id = run.run_id();
-    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run_id).await?;
+    let events = client.list_run_events(&run_id, None, None).await?;
+    let run_store = rebuild_run_store(&run_id, &events).await?;
 
     let file_count = export_run(&run_store, &args.output).await?;
     if globals.json {

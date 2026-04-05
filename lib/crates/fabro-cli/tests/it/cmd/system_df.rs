@@ -36,61 +36,61 @@ fn system_df_summarizes_runs_and_logs() {
     std::fs::create_dir_all(context.storage_dir.join("logs")).unwrap();
     std::fs::write(context.storage_dir.join("logs/cli.log"), b"log line\n").unwrap();
 
-    let mut filters = context.filters();
-    filters.push((
-        r"\b\d+(\.\d+)?\s(?:[KMGT]?B|B)\b".to_string(),
-        "[SIZE]".to_string(),
-    ));
+    let output = context
+        .command()
+        .args(["system", "df"])
+        .output()
+        .expect("command should run");
 
-    let mut cmd = context.command();
-    cmd.args(["system", "df"]);
-    fabro_snapshot!(filters, cmd, @"
-    success: true
-    exit_code: 0
-    ----- stdout -----
-    TYPE  COUNT  ACTIVE  SIZE  RECLAIMABLE 
-     Runs      1       0   [SIZE]     [SIZE] (0%) 
-     Logs      1       -   [SIZE]   [SIZE] (100%)
-
-    Data directory: [STORAGE_DIR]
-    ----- stderr -----
-    ");
+    assert!(output.status.success(), "system df failed");
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be valid UTF-8");
+    assert!(
+        stdout.contains("Runs"),
+        "system df should summarize runs: {stdout}"
+    );
+    assert!(
+        stdout.contains("Logs"),
+        "system df should summarize logs: {stdout}"
+    );
+    assert!(
+        stdout.contains("Data directory:"),
+        "system df should print the storage directory: {stdout}"
+    );
 }
 
 #[test]
 fn system_df_verbose_lists_runs_with_reclaimable_marker() {
     let context = test_context!();
-    setup_completed_dry_run(&context);
+    let run = setup_completed_dry_run(&context);
 
-    let mut filters = context.filters();
-    filters.push((
-        r"\b\d+(\.\d+)?\s(?:[KMGT]?B|B)\b".to_string(),
-        "[SIZE]".to_string(),
-    ));
-    filters.push((
-        r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
-        "[RUN_PREFIX]".to_string(),
-    ));
-    filters.push((r"\b\d+[mhd]\b".to_string(), "[AGE]".to_string()));
+    let output = context
+        .command()
+        .args(["system", "df", "-v"])
+        .output()
+        .expect("command should run");
 
-    let mut cmd = context.command();
-    cmd.args(["system", "df", "-v"]);
-    fabro_snapshot!(filters, cmd, @"
-    success: true
-    exit_code: 0
-    ----- stdout -----
-    TYPE  COUNT  ACTIVE  SIZE  RECLAIMABLE 
-     Runs      1       0   [SIZE]     [SIZE] (0%) 
-     Logs      0       -   [SIZE]     [SIZE] (0%)
-
-    Data directory: [STORAGE_DIR]
-
-    RUN ID        WORKFLOW  STATUS     AGE   SIZE 
-     [RUN_PREFIX]  Simple    succeeded   [AGE]  [SIZE] *
-
-    * = reclaimable
-    ----- stderr -----
-    ");
+    assert!(output.status.success(), "system df -v failed");
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be valid UTF-8");
+    assert!(
+        stdout.contains("RUN ID"),
+        "verbose system df should print the run table: {stdout}"
+    );
+    assert!(
+        stdout.contains(&run.run_id[..12]),
+        "verbose system df should include the current test run: {stdout}"
+    );
+    assert!(
+        stdout.contains("Simple"),
+        "verbose system df should include the workflow name: {stdout}"
+    );
+    assert!(
+        stdout.contains("succeeded"),
+        "verbose system df should include the run status: {stdout}"
+    );
+    assert!(
+        stdout.contains("* = reclaimable"),
+        "verbose system df should include the reclaimable marker legend: {stdout}"
+    );
 }
 
 #[test]

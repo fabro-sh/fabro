@@ -14,7 +14,7 @@ use fabro_workflow::records::Conclusion;
 use indicatif::HumanDuration;
 
 use crate::shared::{format_tokens_human, print_diagnostics, relative_path, tilde_path};
-use crate::store;
+use crate::server_client;
 
 fn print_workflow_header(
     graph: &Graph,
@@ -78,16 +78,17 @@ pub(crate) async fn print_run_summary(
     styles: &Styles,
 ) -> Result<()> {
     let run_id = run_id.to_string();
-    let (run_store, conclusion, pr_url) = match run_id.parse() {
+    let (checkpoint, conclusion, pr_url) = match run_id.parse() {
         Ok(parsed_run_id) => {
-            let run_store = store::open_run_reader(storage_dir, &parsed_run_id).await?;
-            let run_state = run_store.state().await?;
+            let client = server_client::connect_server(storage_dir).await?;
+            let run_state = client.get_run_state(&parsed_run_id).await?;
+            let checkpoint = run_state.checkpoint.clone();
             let conclusion = run_state.conclusion.clone();
             let pr_url = run_state
                 .pull_request
                 .as_ref()
                 .map(|record: &PullRequestRecord| record.html_url.clone());
-            (Some(run_store), conclusion, pr_url)
+            (checkpoint, conclusion, pr_url)
         }
         Err(_) => (None, None, None),
     };
@@ -103,7 +104,7 @@ pub(crate) async fn print_run_summary(
         pr_url.as_deref(),
         styles,
     );
-    print_final_output(run_store.as_ref(), run_dir, styles).await;
+    print_final_output(checkpoint.as_ref(), run_dir, styles).await;
     print_assets(run_dir, styles);
     Ok(())
 }
@@ -198,18 +199,10 @@ pub(crate) fn print_run_conclusion(
 }
 
 pub(crate) async fn print_final_output(
-    run_store: Option<&fabro_store::SlateRunStore>,
+    checkpoint: Option<&fabro_types::Checkpoint>,
     _run_dir: &Path,
     styles: &Styles,
 ) {
-    let checkpoint = match run_store {
-        Some(run_store) => run_store
-            .state()
-            .await
-            .ok()
-            .and_then(|state| state.checkpoint),
-        None => None,
-    };
     let Some(checkpoint) = checkpoint else {
         return;
     };

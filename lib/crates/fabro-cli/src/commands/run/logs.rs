@@ -1,28 +1,26 @@
 use std::fmt::Write as _;
 use std::io::{self, IsTerminal, Write};
-use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
-use fabro_store::SlateRunStore;
 use fabro_util::json::normalize_json_value;
 use fabro_util::redact::redact_jsonl_line;
 use fabro_util::terminal::Styles;
-use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
-use futures::StreamExt;
+use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 use tokio::time;
 use tracing::{debug, info};
 
 use crate::args::{GlobalArgs, LogsArgs};
-use crate::store;
+use crate::server_client;
 use crate::user_config::load_user_settings_with_globals;
 
 pub(crate) async fn run(args: &LogsArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
     let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
-    let store = store::build_store(&cli_settings.storage_dir())?;
-    let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
+    let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
+    let summaries = client.list_store_runs().await?;
+    let run = resolve_run_from_summaries(&summaries, &base, &args.run)?;
 
     let run_id = run.run_id();
     info!(run_id = %run_id, "Showing logs");
@@ -32,20 +30,15 @@ pub(crate) async fn run(args: &LogsArgs, styles: &Styles, globals: &GlobalArgs) 
         None => None,
     };
 
-    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run_id).await?;
-    let (all_lines, last_seq) = match run_store.list_events().await {
-        Ok(events) => {
-            let last_seq = events.last().map_or(0, |event| event.seq);
-            let lines = events
-                .iter()
-                .map(event_payload_line)
-                .collect::<Result<Vec<_>>>()?;
-            (lines, last_seq)
-        }
-        Err(err) => {
-            return Err(err).context("Failed to list store-backed run events");
-        }
-    };
+    let events = client
+        .list_run_events(&run_id, None, None)
+        .await
+        .context("Failed to list server-backed run events")?;
+    let last_seq = events.last().map_or(0, |event| event.seq);
+    let all_lines = events
+        .iter()
+        .map(event_payload_line)
+        .collect::<Result<Vec<_>>>()?;
     let filtered = apply_filters(&all_lines, since_cutoff.as_ref(), args.tail);
 
     let stdout = io::stdout();
@@ -65,8 +58,8 @@ pub(crate) async fn run(args: &LogsArgs, styles: &Styles, globals: &GlobalArgs) 
 
     if args.follow {
         follow_store_logs(
-            &run_store,
-            &run.path,
+            &client,
+            &run_id,
             if last_seq == 0 { 1 } else { last_seq + 1 },
             pretty,
             styles,
@@ -139,23 +132,21 @@ fn try_parse_relative_duration(s: &str) -> Option<chrono::Duration> {
 }
 
 async fn follow_store_logs(
-    run_store: &SlateRunStore,
-    run_dir: &Path,
+    client: &server_client::ServerStoreClient,
+    run_id: &fabro_types::RunId,
     seq: u32,
     pretty: bool,
     styles: &Styles,
     _is_tty: bool,
 ) -> Result<()> {
-    let mut stream = run_store
-        .watch_events_from(seq)
-        .context("Failed to watch store-backed run events")?;
     let stdout = io::stdout();
     let mut out = stdout.lock();
     let mut next_seq = seq;
 
     loop {
-        match time::timeout(Duration::from_millis(200), stream.next()).await {
-            Ok(Some(Ok(event))) => {
+        match time::timeout(Duration::from_millis(200), client.list_run_events(run_id, Some(next_seq), None)).await {
+            Ok(Ok(events)) => {
+                for event in events {
                 let line = event_payload_line(&event)?;
                 if pretty {
                     if let Some(formatted) = format_event_pretty(&line, styles) {
@@ -167,31 +158,30 @@ async fn follow_store_logs(
                 out.flush()?;
                 next_seq = event.seq.saturating_add(1);
             }
-            Ok(Some(Err(err))) => return Err(err.into()),
-            Ok(None) => {
-                if run_concluded(run_store, run_dir).await? {
-                    break;
-                }
             }
             Err(_) => {
-                if run_concluded(run_store, run_dir).await? {
-                    flush_remaining_store_events(run_store, next_seq, pretty, styles, &mut out)
+                if run_concluded(client, run_id).await? {
+                    flush_remaining_store_events(client, run_id, next_seq, pretty, styles, &mut out)
                         .await?;
                     debug!("Run reached terminal status, stopping follow");
                     break;
                 }
             }
+            Ok(Err(err)) => return Err(err),
         }
     }
 
     Ok(())
 }
 
-async fn run_concluded(run_store: &SlateRunStore, _run_dir: &Path) -> Result<bool> {
-    let state = run_store
-        .state()
+async fn run_concluded(
+    client: &server_client::ServerStoreClient,
+    run_id: &fabro_types::RunId,
+) -> Result<bool> {
+    let state = client
+        .get_run_state(run_id)
         .await
-        .context("Failed to read run state from store while following logs")?;
+        .context("Failed to read run state from server while following logs")?;
     Ok(state.conclusion.is_some()
         || state
             .status
@@ -199,18 +189,19 @@ async fn run_concluded(run_store: &SlateRunStore, _run_dir: &Path) -> Result<boo
 }
 
 async fn flush_remaining_store_events(
-    run_store: &SlateRunStore,
+    client: &server_client::ServerStoreClient,
+    run_id: &fabro_types::RunId,
     next_seq: u32,
     pretty: bool,
     styles: &Styles,
     out: &mut dyn Write,
 ) -> Result<()> {
-    let events = run_store
-        .list_events()
+    let events = client
+        .list_run_events(run_id, Some(next_seq), None)
         .await
-        .context("Failed to list store-backed run events while finalizing follow")?;
+        .context("Failed to list server-backed run events while finalizing follow")?;
 
-    for event in events.into_iter().filter(|event| event.seq >= next_seq) {
+    for event in events {
         let line = event_payload_line(&event)?;
         if pretty {
             if let Some(formatted) = format_event_pretty(&line, styles) {
@@ -225,8 +216,31 @@ async fn flush_remaining_store_events(
 }
 
 fn event_payload_line(event: &fabro_store::EventEnvelope) -> Result<String> {
-    let line = serde_json::to_string(&normalize_json_value(event.payload.as_value().clone()))?;
+    let mut value = normalize_json_value(event.payload.as_value().clone());
+    restore_empty_run_properties(&mut value);
+    let line = serde_json::to_string(&value)?;
     Ok(redact_jsonl_line(&line))
+}
+
+fn restore_empty_run_properties(value: &mut serde_json::Value) {
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
+    let Some(event_name) = object.get("event").and_then(serde_json::Value::as_str) else {
+        return;
+    };
+    if matches!(event_name, "run.submitted" | "run.running") && !object.contains_key("properties")
+    {
+        let run_id = object.remove("run_id");
+        let ts = object.remove("ts");
+        object.insert("properties".to_string(), serde_json::json!({}));
+        if let Some(run_id) = run_id {
+            object.insert("run_id".to_string(), run_id);
+        }
+        if let Some(ts) = ts {
+            object.insert("ts".to_string(), ts);
+        }
+    }
 }
 
 fn render_indented_markdown(styles: &Styles, text: &str, indent: &str) -> String {

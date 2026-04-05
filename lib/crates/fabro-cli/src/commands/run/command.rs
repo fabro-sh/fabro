@@ -21,8 +21,7 @@ pub(crate) async fn execute(mut args: RunArgs, globals: &GlobalArgs) -> Result<(
     #[cfg(not(feature = "sleep_inhibitor"))]
     let _ = prevent_idle_sleep;
 
-    let child =
-        super::start::start_run(&run_dir, &run_id, &cli_settings.storage_dir(), false).await?;
+    super::start::start_run(&run_id, &cli_settings.storage_dir(), false).await?;
 
     if args.detach {
         if globals.json {
@@ -37,7 +36,7 @@ pub(crate) async fn execute(mut args: RunArgs, globals: &GlobalArgs) -> Result<(
             Some(&run_id),
             true,
             styles,
-            Some(child),
+            None,
             globals.json,
         )
         .await?;

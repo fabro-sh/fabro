@@ -6,12 +6,12 @@ use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Style, Table};
 use serde::Serialize;
 
-use fabro_workflow::run_lookup::{logs_base, runs_base, scan_runs_combined};
+use fabro_workflow::run_lookup::{logs_base, runs_base, scan_runs_with_summaries};
 use fabro_workflow::run_status::RunStatus;
 
 use crate::args::{DfArgs, GlobalArgs};
 use crate::shared::{format_size, print_json_pretty};
-use crate::store;
+use crate::server_client;
 use crate::user_config::load_user_settings_with_globals;
 
 #[derive(Serialize)]
@@ -49,10 +49,11 @@ pub(super) async fn df_command(args: &DfArgs, globals: &GlobalArgs) -> Result<()
     let data_dir = cli_settings.storage_dir();
     let runs_base_dir = runs_base(&data_dir);
     let logs_base_dir = logs_base(&data_dir);
-    let store = store::build_store(&data_dir)?;
+    let client = server_client::connect_server(&data_dir).await?;
+    let summaries = client.list_store_runs().await?;
     df_from(
         args,
-        store.as_ref(),
+        &summaries,
         &data_dir,
         &runs_base_dir,
         &logs_base_dir,
@@ -64,7 +65,7 @@ pub(super) async fn df_command(args: &DfArgs, globals: &GlobalArgs) -> Result<()
 #[allow(clippy::print_stdout)]
 async fn df_from(
     args: &DfArgs,
-    store: &fabro_store::SlateStore,
+    summaries: &[fabro_store::RunSummary],
     data_dir: &Path,
     runs_base: &Path,
     logs_base: &Path,
@@ -79,7 +80,7 @@ async fn df_from(
         size: u64,
     }
 
-    let runs = scan_runs_combined(store, runs_base).await?;
+    let runs = scan_runs_with_summaries(summaries, runs_base)?;
     let mut active_count = 0u64;
     let mut total_run_size = 0u64;
     let mut reclaimable_run_size = 0u64;

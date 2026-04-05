@@ -7,19 +7,18 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use fabro_types::RunId;
-use futures::StreamExt;
 
 use fabro_interview::{AnswerValue, ConsoleInterviewer};
-use fabro_store::{EventEnvelope, RuntimeState, SlateRunStore};
+use fabro_store::{EventEnvelope, RuntimeState};
 use fabro_util::json::normalize_json_value;
 use fabro_util::terminal::Styles;
 use fabro_workflow::outcome::StageStatus;
 use fabro_workflow::run_status::RunStatus;
 use tokio::signal::ctrl_c;
-use tokio::time::{self, sleep};
+use tokio::time::sleep;
 
 use super::run_progress;
-use crate::store;
+use crate::server_client;
 
 #[cfg(test)]
 const ATTACH_STARTUP_GRACE: Duration = Duration::from_millis(200);
@@ -28,6 +27,9 @@ const ATTACH_STARTUP_GRACE: Duration = Duration::from_secs(3);
 const INTERVIEW_UNANSWERED_MESSAGE: &str =
     "Interview ended without an answer. The run is still waiting for input; reattach to answer it.";
 const JSON_INTERVIEW_MESSAGE: &str = "This run is waiting for human input, but --json is non-interactive. Reattach without --json to answer it.";
+#[cfg(test)]
+const ATTACH_FINAL_STATUS_GRACE: Duration = Duration::from_millis(250);
+#[cfg(not(test))]
 const ATTACH_FINAL_STATUS_GRACE: Duration = Duration::from_secs(2);
 
 /// Attach to a running (or finished) workflow run, rendering progress live.
@@ -48,44 +50,30 @@ pub(crate) async fn attach_run(
     let run_id = run_id.copied().or(inferred_run_id);
 
     if let (Some(storage_dir), Some(run_id)) = (storage_dir.as_deref(), run_id.as_ref()) {
-        match store::open_run_reader(storage_dir, run_id).await {
-            Ok(run_store) => match run_store.list_events().await {
-                Ok(events) => {
-                    let verbose = run_store
-                        .state()
-                        .await
-                        .ok()
-                        .and_then(|state| state.run)
-                        .is_some_and(|record| record.settings.verbose_enabled());
-                    let event_lines = events
-                        .iter()
-                        .map(event_payload_line)
-                        .collect::<Result<Vec<_>>>()?;
-                    return attach_run_store(
-                        run_dir,
-                        &run_store,
-                        verbose,
-                        event_lines,
-                        events.last().map_or(0, |event| event.seq),
-                        kill_on_detach,
-                        styles,
-                        engine_child,
-                        json_output,
-                    )
-                    .await;
-                }
-                Err(err) => {
-                    return Err(anyhow::anyhow!(
-                        "Failed to list events from SlateDB for run {run_id}: {err}"
-                    ));
-                }
-            },
-            Err(err) => {
-                return Err(anyhow::anyhow!(
-                    "Failed to open SlateDB reader for run {run_id}: {err}"
-                ));
-            }
-        }
+        let client = server_client::connect_server(storage_dir).await?;
+        let state = client.get_run_state(run_id).await?;
+        let verbose = state
+            .run
+            .as_ref()
+            .is_some_and(|record| record.settings.verbose_enabled());
+        let events = client.list_run_events(run_id, None, None).await?;
+        let event_lines = events
+            .iter()
+            .map(event_payload_line)
+            .collect::<Result<Vec<_>>>()?;
+        return attach_run_server(
+            run_dir,
+            &client,
+            run_id,
+            verbose,
+            event_lines,
+            events.last().map_or(0, |event| event.seq),
+            kill_on_detach,
+            styles,
+            engine_child,
+            json_output,
+        )
+        .await;
     }
 
     Err(anyhow::anyhow!(
@@ -93,9 +81,10 @@ pub(crate) async fn attach_run(
     ))
 }
 
-async fn attach_run_store(
+async fn attach_run_server(
     run_dir: &Path,
-    run_store: &SlateRunStore,
+    client: &server_client::ServerStoreClient,
+    run_id: &RunId,
     verbose: bool,
     existing_events: Vec<String>,
     last_seq: u32,
@@ -126,24 +115,26 @@ async fn attach_run_store(
         emit_progress_line(&mut progress_ui, line, json_output)?;
     }
 
-    let mut stream = run_store.watch_events_from(if last_seq == 0 { 1 } else { last_seq + 1 })?;
     let mut next_seq = if last_seq == 0 { 1 } else { last_seq + 1 };
     let mut cached_pid: Option<u32> = None;
     let attach_started = Instant::now();
 
     loop {
+        let server_owned = engine_guard.is_none() && read_launcher_pid(run_dir).is_none();
         if cancelled.load(Ordering::Relaxed) {
             if kill_on_detach {
                 if let Some(guard) = engine_guard.as_mut() {
                     if let Some(child) = guard.inner() {
                         let _ = child.kill();
                     }
+                } else if server_owned {
+                    let _ = client.cancel_run(run_id).await;
                 } else {
                     kill_engine(run_dir);
                 }
                 // Wait briefly for a terminal status or conclusion
                 for _ in 0..20 {
-                    if run_store.state().await.ok().is_some_and(|state| {
+                    if client.get_run_state(run_id).await.ok().is_some_and(|state| {
                         state.conclusion.is_some()
                             || state
                                 .status
@@ -163,15 +154,12 @@ async fn attach_run_store(
         }
 
         let mut saw_event = false;
-        match time::timeout(Duration::from_millis(100), stream.next()).await {
-            Ok(Some(Ok(event))) => {
-                let line = event_payload_line(&event)?;
-                emit_progress_line(&mut progress_ui, &line, json_output)?;
-                next_seq = event.seq.saturating_add(1);
-                saw_event = true;
-            }
-            Ok(Some(Err(err))) => return Err(err.into()),
-            Ok(None) | Err(_) => {}
+        let events = client.list_run_events(run_id, Some(next_seq), None).await?;
+        for event in events {
+            let line = event_payload_line(&event)?;
+            emit_progress_line(&mut progress_ui, &line, json_output)?;
+            next_seq = event.seq.saturating_add(1);
+            saw_event = true;
         }
 
         // Check for interview request
@@ -220,8 +208,8 @@ async fn attach_run_store(
             }
         }
 
-        let terminal_status = run_store
-            .state()
+        let terminal_status = client
+            .get_run_state(run_id)
             .await
             .ok()
             .and_then(|state| state.status.map(|record| record.status))
@@ -236,43 +224,52 @@ async fn attach_run_store(
 
         if let Some(child_alive) = child_alive_via_handle {
             if !child_alive && !saw_event {
-                flush_remaining_store_events(run_store, next_seq, &mut progress_ui, json_output)
+                flush_remaining_server_events(client, run_id, next_seq, &mut progress_ui, json_output)
                     .await?;
                 break;
             }
         } else {
             if terminal_status.is_some() && !saw_event {
-                flush_remaining_store_events(run_store, next_seq, &mut progress_ui, json_output)
+                flush_remaining_server_events(client, run_id, next_seq, &mut progress_ui, json_output)
                     .await?;
                 break;
             }
 
-            let engine_alive = match cached_pid {
-                Some(pid) => process_alive(pid),
-                None => {
-                    if let Some(pid) = read_launcher_pid(run_dir) {
-                        cached_pid = Some(pid);
-                        process_alive(pid)
-                    } else {
-                        attach_started.elapsed() < ATTACH_STARTUP_GRACE
+            let engine_alive = if server_owned {
+                true
+            } else {
+                match cached_pid {
+                    Some(pid) => process_alive(pid),
+                    None => {
+                        if let Some(pid) = read_launcher_pid(run_dir) {
+                            cached_pid = Some(pid);
+                            process_alive(pid)
+                        } else {
+                            attach_started.elapsed() < ATTACH_STARTUP_GRACE
+                        }
                     }
                 }
             };
             if !engine_alive {
-                flush_remaining_store_events(run_store, next_seq, &mut progress_ui, json_output)
+                flush_remaining_server_events(client, run_id, next_seq, &mut progress_ui, json_output)
                     .await?;
                 break;
             }
+        }
+
+        if !saw_event {
+            sleep(Duration::from_millis(100)).await;
         }
     }
 
     finish_progress(&mut progress_ui, json_output);
 
-    Ok(determine_exit_code_with_store(run_store).await)
+    Ok(determine_exit_code_with_server(client, run_id).await)
 }
 
-async fn flush_remaining_store_events(
-    run_store: &SlateRunStore,
+async fn flush_remaining_server_events(
+    client: &server_client::ServerStoreClient,
+    run_id: &RunId,
     mut next_seq: u32,
     progress_ui: &mut run_progress::ProgressUI,
     json_output: bool,
@@ -280,12 +277,7 @@ async fn flush_remaining_store_events(
     let deadline = Instant::now() + ATTACH_FINAL_STATUS_GRACE;
     loop {
         let mut saw_new_event = false;
-        let events = run_store
-            .list_events()
-            .await?
-            .into_iter()
-            .filter(|e| e.seq >= next_seq)
-            .collect::<Vec<_>>();
+        let events = client.list_run_events(run_id, Some(next_seq), None).await?;
         for event in events {
             let line = event_payload_line(&event)?;
             emit_progress_line(progress_ui, &line, json_output)?;
@@ -339,8 +331,30 @@ fn show_progress(progress_ui: &mut run_progress::ProgressUI, json_output: bool) 
 }
 
 fn event_payload_line(event: &EventEnvelope) -> Result<String> {
-    serde_json::to_string(&normalize_json_value(event.payload.as_value().clone()))
-        .map_err(Into::into)
+    let mut value = normalize_json_value(event.payload.as_value().clone());
+    restore_empty_run_properties(&mut value);
+    serde_json::to_string(&value).map_err(Into::into)
+}
+
+fn restore_empty_run_properties(value: &mut serde_json::Value) {
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
+    let Some(event_name) = object.get("event").and_then(serde_json::Value::as_str) else {
+        return;
+    };
+    if matches!(event_name, "run.submitted" | "run.running") && !object.contains_key("properties")
+    {
+        let run_id = object.remove("run_id");
+        let ts = object.remove("ts");
+        object.insert("properties".to_string(), serde_json::json!({}));
+        if let Some(run_id) = run_id {
+            object.insert("run_id".to_string(), run_id);
+        }
+        if let Some(ts) = ts {
+            object.insert("ts".to_string(), ts);
+        }
+    }
 }
 
 fn read_launcher_pid(run_dir: &Path) -> Option<u32> {
@@ -485,10 +499,13 @@ fn write_interview_response_atomically(
     Ok(())
 }
 
-async fn determine_exit_code_with_store(run_store: &SlateRunStore) -> ExitCode {
+async fn determine_exit_code_with_server(
+    client: &server_client::ServerStoreClient,
+    run_id: &RunId,
+) -> ExitCode {
     let deadline = Instant::now() + ATTACH_FINAL_STATUS_GRACE;
     loop {
-        if let Ok(state) = run_store.state().await {
+        if let Ok(state) = client.get_run_state(run_id).await {
             if let Some(conclusion) = state.conclusion {
                 let success = matches!(
                     conclusion.status,

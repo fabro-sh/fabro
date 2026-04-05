@@ -195,18 +195,21 @@ fn scan_orphan_runs(base: &Path) -> Result<Vec<RunInfo>> {
 }
 
 pub async fn scan_runs_combined(store: &SlateStore, base: &Path) -> Result<Vec<RunInfo>> {
-    let mut runs_by_id: HashMap<RunId, RunInfo> = HashMap::new();
-
-    if let Ok(store_runs) = store
+    let store_runs = store
         .list_runs(&fabro_store::ListRunsQuery::default())
         .await
-    {
-        for summary in store_runs {
-            let Some(run_info) = run_info_from_summary(&summary, base) else {
-                continue;
-            };
-            runs_by_id.insert(run_info.run_id(), run_info);
-        }
+        .unwrap_or_default();
+    Ok(scan_runs_with_summaries(&store_runs, base)?)
+}
+
+pub fn scan_runs_with_summaries(summaries: &[RunSummary], base: &Path) -> Result<Vec<RunInfo>> {
+    let mut runs_by_id: HashMap<RunId, RunInfo> = HashMap::new();
+
+    for summary in summaries {
+        let Some(run_info) = run_info_from_summary(summary, base) else {
+            continue;
+        };
+        runs_by_id.insert(run_info.run_id(), run_info);
     }
 
     let store_run_ids = runs_by_id
@@ -309,7 +312,19 @@ pub async fn resolve_run_combined(
     let runs = scan_runs_combined(store, base)
         .await
         .context("Failed to scan runs")?;
+    resolve_run_from_infos(&runs, identifier)
+}
 
+pub fn resolve_run_from_summaries(
+    summaries: &[RunSummary],
+    base: &Path,
+    identifier: &str,
+) -> Result<RunInfo> {
+    let runs = scan_runs_with_summaries(summaries, base).context("Failed to scan runs")?;
+    resolve_run_from_infos(&runs, identifier)
+}
+
+fn resolve_run_from_infos(runs: &[RunInfo], identifier: &str) -> Result<RunInfo> {
     let id_matches: Vec<_> = runs
         .iter()
         .filter(|run| run_id_matches(run.run_id(), identifier))

@@ -23,8 +23,43 @@ pub(crate) async fn execute(
     if foreground {
         execute_foreground(bind, serve_args, storage_dir, styles).await
     } else {
-        execute_daemon(&bind, &serve_args, &storage_dir)
+        execute_daemon(&bind, &serve_args, &storage_dir, true)
     }
+}
+
+pub(crate) fn ensure_server_running(storage_dir: &Path) -> Result<Bind> {
+    if let Some(existing) = record::active_server_record(storage_dir) {
+        return Ok(existing.bind);
+    }
+
+    let bind = Bind::Unix(storage_dir.join("fabro.sock"));
+    let serve_args = ServeArgs {
+        bind: None,
+        model: None,
+        provider: None,
+        dry_run: false,
+        sandbox: None,
+        max_concurrent_runs: server_max_concurrent_runs_override(),
+        config: None,
+    };
+
+    match execute_daemon(&bind, &serve_args, storage_dir, false) {
+        Ok(()) => Ok(bind),
+        Err(err) => {
+            if let Some(existing) = record::active_server_record(storage_dir) {
+                Ok(existing.bind)
+            } else {
+                Err(err)
+            }
+        }
+    }
+}
+
+fn server_max_concurrent_runs_override() -> Option<usize> {
+    std::env::var("FABRO_SERVER_MAX_CONCURRENT_RUNS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
 }
 
 // ---------------------------------------------------------------------------
@@ -79,16 +114,24 @@ async fn execute_foreground(
 // Daemon mode
 // ---------------------------------------------------------------------------
 
-fn execute_daemon(bind: &Bind, serve_args: &ServeArgs, storage_dir: &Path) -> Result<()> {
+fn execute_daemon(
+    bind: &Bind,
+    serve_args: &ServeArgs,
+    storage_dir: &Path,
+    announce: bool,
+) -> Result<()> {
     let lock_file = acquire_lock(storage_dir)?;
     let _lock_file = lock_file; // keep alive until function returns
 
     if let Some(existing) = record::active_server_record(storage_dir) {
-        bail!(
-            "Server already running (pid {}) on {}",
-            existing.pid,
-            existing.bind
-        );
+        if announce {
+            bail!(
+                "Server already running (pid {}) on {}",
+                existing.pid,
+                existing.bind
+            );
+        }
+        return Ok(());
     }
 
     // Rotate logs
@@ -128,6 +171,9 @@ fn execute_daemon(bind: &Bind, serve_args: &ServeArgs, storage_dir: &Path) -> Re
     }
 
     cmd.arg("--storage-dir").arg(storage_dir);
+    if matches!(bind, Bind::Unix(_)) {
+        cmd.env("FABRO_LOCAL_NO_AUTH", "1");
+    }
 
     cmd.env_remove("FABRO_JSON");
     cmd.stdout(stdout_log)
@@ -164,7 +210,9 @@ fn execute_daemon(bind: &Bind, serve_args: &ServeArgs, storage_dir: &Path) -> Re
 
     while elapsed < timeout {
         if try_connect(bind) {
-            eprintln!("Server started (pid {}) on {bind}", child.id());
+            if announce {
+                eprintln!("Server started (pid {}) on {bind}", child.id());
+            }
             return Ok(());
         }
 

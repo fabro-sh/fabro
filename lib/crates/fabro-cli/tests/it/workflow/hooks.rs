@@ -60,7 +60,7 @@ fn configure_hook_env(cmd: &mut assert_cmd::Command, hook_model: &str) {
 }
 
 fn conclusion_status(context: &fabro_test::TestContext) -> String {
-    let run_dir = find_run_dir(&context.storage_dir);
+    let run_dir = find_run_dir(&context);
     read_conclusion(&run_dir)["status"]
         .as_str()
         .unwrap()

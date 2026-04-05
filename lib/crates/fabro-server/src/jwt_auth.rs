@@ -74,6 +74,13 @@ pub fn decode_pem_env(name: &str, value: &str) -> String {
 pub fn resolve_auth_mode(api_settings: &ApiSettings, allowed_usernames: &[String]) -> AuthMode {
     use fabro_config::server::ApiAuthStrategy;
 
+    if api_settings.authentication_strategies.is_empty()
+        && std::env::var("FABRO_LOCAL_NO_AUTH").ok().as_deref() == Some("1")
+    {
+        warn!("No authentication strategies configured; allowing unauthenticated local daemon access");
+        return AuthMode::Disabled;
+    }
+
     if api_settings.authentication_strategies.is_empty() {
         warn!("No authentication strategies configured; all requests will be rejected");
     }

@@ -1,10 +1,10 @@
 use anyhow::Result;
 use fabro_util::terminal::Styles;
-use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
+use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 
 use crate::args::{GlobalArgs, RunArgs, RunCommands};
+use crate::server_client;
 use crate::shared::print_json_pretty;
-use crate::store;
 use crate::user_config::{load_user_settings_with_globals, user_layer_with_globals};
 
 pub(crate) mod attach;
@@ -57,16 +57,13 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
         RunCommands::Start { run } => {
             let cli_settings = load_user_settings_with_globals(globals)?;
             let base = runs_base(&cli_settings.storage_dir());
-            let store = store::build_store(&cli_settings.storage_dir())?;
-            let run_info = resolve_run_combined(store.as_ref(), &base, &run).await?;
+            let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
+            let summaries = client.list_store_runs().await?;
+            let run_info = resolve_run_from_summaries(&summaries, &base, &run)?;
             let run_id = run_info.run_id();
-            let child =
-                start::start_run(&run_info.path, &run_id, &cli_settings.storage_dir(), false)
-                    .await?;
+            start::start_run(&run_id, &cli_settings.storage_dir(), false).await?;
             if globals.json {
                 print_json_pretty(&serde_json::json!({ "run_id": run_id }))?;
-            } else {
-                eprintln!("Started engine process (PID {})", child.id());
             }
             Ok(())
         }
@@ -74,8 +71,9 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             let cli_settings = load_user_settings_with_globals(globals)?;
             let base = runs_base(&cli_settings.storage_dir());
-            let store = store::build_store(&cli_settings.storage_dir())?;
-            let run_info = resolve_run_combined(store.as_ref(), &base, &run).await?;
+            let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
+            let summaries = client.list_store_runs().await?;
+            let run_info = resolve_run_from_summaries(&summaries, &base, &run)?;
             let run_id = run_info.run_id();
             let exit_code = attach::attach_run(
                 &run_info.path,

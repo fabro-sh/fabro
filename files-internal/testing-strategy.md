@@ -209,7 +209,7 @@ Use the test helpers that reinforce the rules above.
 
 ### `TestContext`
 
-Use `TestContext` for CLI integration tests so each test gets isolated home, storage, and temp directories.
+Use `TestContext` for CLI integration tests so each test gets isolated home and temp directories, with storage shared per nextest run or per test process depending on the harness mode.
 
 Prefer helpers like:
 

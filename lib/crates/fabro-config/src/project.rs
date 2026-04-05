@@ -163,8 +163,17 @@ fn resolve_workflow_arg_impl(
     user_workflows: Option<&Path>,
 ) -> anyhow::Result<PathBuf> {
     if arg.extension().is_some() {
-        tracing::debug!(arg = %arg.display(), "Workflow arg has extension, returning as-is");
-        return Ok(arg.to_path_buf());
+        let resolved = if arg.is_absolute() {
+            arg.to_path_buf()
+        } else {
+            start_dir.join(arg)
+        };
+        tracing::debug!(
+            arg = %arg.display(),
+            resolved = %resolved.display(),
+            "Workflow arg has extension, resolving relative to start dir"
+        );
+        return Ok(resolved);
     }
 
     let name = arg.to_string_lossy();
@@ -648,17 +657,25 @@ model = "claude-sonnet-4-6"
     }
 
     #[test]
-    fn resolve_workflow_arg_toml_extension_returned_as_is() {
+    fn resolve_workflow_arg_toml_extension_resolves_relative_to_start_dir() {
         let tmp = TempDir::new().unwrap();
         let result = resolve_workflow_arg_from(Path::new("my-workflow.toml"), tmp.path()).unwrap();
-        assert_eq!(result, Path::new("my-workflow.toml"));
+        assert_eq!(result, tmp.path().join("my-workflow.toml"));
     }
 
     #[test]
-    fn resolve_workflow_arg_fabro_extension_returned_as_is() {
+    fn resolve_workflow_arg_fabro_extension_resolves_relative_to_start_dir() {
         let tmp = TempDir::new().unwrap();
         let result = resolve_workflow_arg_from(Path::new("my-workflow.fabro"), tmp.path()).unwrap();
-        assert_eq!(result, Path::new("my-workflow.fabro"));
+        assert_eq!(result, tmp.path().join("my-workflow.fabro"));
+    }
+
+    #[test]
+    fn resolve_workflow_arg_absolute_extension_preserves_absolute_path() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("my-workflow.toml");
+        let result = resolve_workflow_arg_from(&path, Path::new("/tmp")).unwrap();
+        assert_eq!(result, path);
     }
 
     #[test]

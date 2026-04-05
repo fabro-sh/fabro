@@ -1,30 +1,31 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use fabro_store::SlateStore;
 use tracing::warn;
 
 use crate::args::{GlobalArgs, RunsRemoveArgs};
+use crate::server_client;
 use crate::shared::print_json_pretty;
-use crate::store;
 use crate::user_config::load_user_settings_with_globals;
 use fabro_sandbox::reconnect::reconnect as reconnect_sandbox;
-use fabro_workflow::event::{Event, append_event};
+use fabro_workflow::event::{Event, to_run_event};
 use fabro_workflow::run_lookup::RunInfo;
-use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
+use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 
 use super::short_run_id;
 
 pub(crate) async fn remove_command(args: &RunsRemoveArgs, globals: &GlobalArgs) -> Result<()> {
     let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
-    let store = store::build_store(&cli_settings.storage_dir())?;
-    remove_from(args, store.as_ref(), &base, globals).await
+    let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
+    let summaries = client.list_store_runs().await?;
+    remove_from(args, &client, &summaries, &base, globals).await
 }
 
 async fn remove_from(
     args: &RunsRemoveArgs,
-    store: &SlateStore,
+    client: &server_client::ServerStoreClient,
+    summaries: &[fabro_store::RunSummary],
     base: &Path,
     globals: &GlobalArgs,
 ) -> Result<()> {
@@ -33,7 +34,7 @@ async fn remove_from(
     let mut errors = Vec::new();
 
     for identifier in &args.runs {
-        let run = match resolve_run_combined(store, base, identifier).await {
+        let run = match resolve_run_from_summaries(summaries, base, identifier) {
             Ok(run) => run,
             Err(err) => {
                 if !globals.json {
@@ -67,7 +68,7 @@ async fn remove_from(
         }
 
         let run_id = run.run_id().to_string();
-        if let Err(err) = remove_run_dir_with_cleanup(store, &run).await {
+        if let Err(err) = remove_run_dir_with_cleanup(client, &run).await {
             if !globals.json {
                 eprintln!("error: {identifier}: {err}");
             }
@@ -82,7 +83,7 @@ async fn remove_from(
         if !globals.json {
             eprintln!("{}", short_run_id(&run_id));
         }
-        if let Err(err) = delete_run_store_state(store, &run).await {
+        if let Err(err) = delete_run_store_state(client, &run).await {
             if !globals.json {
                 eprintln!("error: {identifier}: {err}");
             }
@@ -107,15 +108,21 @@ async fn remove_from(
     Ok(())
 }
 
-pub(crate) async fn remove_run_with_cleanup(store: &SlateStore, run: &RunInfo) -> Result<()> {
-    remove_run_dir_with_cleanup(store, run).await?;
-    delete_run_store_state(store, run).await
+pub(crate) async fn remove_run_with_cleanup(
+    client: &server_client::ServerStoreClient,
+    run: &RunInfo,
+) -> Result<()> {
+    remove_run_dir_with_cleanup(client, run).await?;
+    delete_run_store_state(client, run).await
 }
 
-async fn remove_run_dir_with_cleanup(store: &SlateStore, run: &RunInfo) -> Result<()> {
+async fn remove_run_dir_with_cleanup(
+    client: &server_client::ServerStoreClient,
+    run: &RunInfo,
+) -> Result<()> {
     let run_id = run.run_id();
-    let run_store = match store.open_run_reader(&run_id).await {
-        Ok(run_store) => Some(run_store),
+    let run_state = match client.get_run_state(&run_id).await {
+        Ok(run_state) => Some(run_state),
         Err(err) => {
             warn!(
                 run_id = %run_id,
@@ -125,9 +132,11 @@ async fn remove_run_dir_with_cleanup(store: &SlateStore, run: &RunInfo) -> Resul
             None
         }
     };
-    if let Some(run_store) = run_store.as_ref() {
-        if let Err(err) =
-            append_event(run_store, &run_id, &Event::RunRemoving { reason: None }).await
+    if run_state.is_some() {
+        let run_event = to_run_event(&run_id, &Event::RunRemoving { reason: None });
+        if let Err(err) = client
+            .append_run_event(&run_id, &run_event)
+            .await
         {
             warn!(
                 run_id = %run_id,
@@ -137,7 +146,7 @@ async fn remove_run_dir_with_cleanup(store: &SlateStore, run: &RunInfo) -> Resul
         }
     }
 
-    if let Some(record) = load_sandbox_record(&run.path, run_store.as_ref()).await {
+    if let Some(record) = load_sandbox_record(run_state.as_ref()).await {
         if record.provider != "local" {
             match reconnect_sandbox(&record).await {
                 Ok(sandbox) => {
@@ -156,24 +165,21 @@ async fn remove_run_dir_with_cleanup(store: &SlateStore, run: &RunInfo) -> Resul
         .with_context(|| format!("failed to delete {}", run.path.display()))
 }
 
-async fn delete_run_store_state(store: &SlateStore, run: &RunInfo) -> Result<()> {
-    store
-        .delete_run(&run.run_id())
+async fn delete_run_store_state(
+    client: &server_client::ServerStoreClient,
+    run: &RunInfo,
+) -> Result<()> {
+    client
+        .delete_store_run(&run.run_id())
         .await
         .with_context(|| format!("failed to delete store state for {}", run.run_id()))
 }
 
 async fn load_sandbox_record(
-    _run_dir: &Path,
-    run_store: Option<&fabro_store::SlateRunStore>,
+    run_state: Option<&crate::server_client::RunProjection>,
 ) -> Option<fabro_sandbox::SandboxRecord> {
-    if let Some(run_store) = run_store {
-        match run_store.state().await {
-            Ok(state) => return state.sandbox,
-            Err(err) => {
-                warn!(error = %err, "failed to load sandbox record from store");
-            }
-        }
+    if let Some(run_state) = run_state {
+        return run_state.sandbox.clone();
     }
     None
 }

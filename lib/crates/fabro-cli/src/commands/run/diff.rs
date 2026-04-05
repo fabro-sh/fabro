@@ -3,25 +3,26 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use fabro_sandbox::reconnect::reconnect;
-use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
+use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 use fabro_workflow::sandbox_git::GIT_REMOTE;
 use tracing::{debug, info};
 
 use crate::args::{DiffArgs, GlobalArgs};
 use crate::shared::print_json_pretty;
-use crate::store;
+use crate::server_client;
 use crate::user_config::load_user_settings_with_globals;
 
 pub(crate) async fn run(args: DiffArgs, globals: &GlobalArgs) -> Result<()> {
     info!(run_id = %args.run, "Showing diff");
     let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
-    let store = store::build_store(&cli_settings.storage_dir())?;
-    let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
+    let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
+    let summaries = client.list_store_runs().await?;
+    let run = resolve_run_from_summaries(&summaries, &base, &args.run)?;
     let run_id = run.run_id();
-    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run_id).await?;
+    let state = client.get_run_state(&run_id).await?;
 
-    let patch = resolve_diff(&run.path, &run_store, &args).await?;
+    let patch = resolve_diff(&run.path, &state, &args).await?;
 
     if globals.json {
         let mut value = serde_json::json!({
@@ -53,10 +54,9 @@ pub(crate) async fn run(args: DiffArgs, globals: &GlobalArgs) -> Result<()> {
 
 async fn resolve_diff(
     _run_dir: &Path,
-    run_store: &fabro_store::SlateRunStore,
+    state: &crate::server_client::RunProjection,
     args: &DiffArgs,
 ) -> Result<String> {
-    let state = run_store.state().await?;
     if let Some(ref node_id) = args.node {
         if let Some(visit) = state.list_node_visits(node_id).into_iter().max() {
             if let Some(node) = state.node(&fabro_store::StageId::new(node_id, visit)) {
@@ -72,6 +72,7 @@ async fn resolve_diff(
 
     let start = state
         .start
+        .clone()
         .context("Failed to load start record from store")?;
 
     let base_sha = start
@@ -79,7 +80,7 @@ async fn resolve_diff(
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("This run was not git-checkpointed; no diff available"))?;
 
-    if let Some(patch) = state.final_patch {
+    if let Some(patch) = state.final_patch.clone() {
         debug!("Reading final.patch from store");
         return Ok(patch);
     }
@@ -94,6 +95,7 @@ async fn resolve_diff(
     debug!("No final.patch found; attempting live diff from sandbox");
     let record = state
         .sandbox
+        .clone()
         .context("Failed to load sandbox record from store")?;
 
     info!(provider = %record.provider, "Reconnecting to sandbox for live diff");

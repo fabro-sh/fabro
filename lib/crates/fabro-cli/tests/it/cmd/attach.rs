@@ -3,9 +3,11 @@ use std::time::Duration;
 use fabro_test::{fabro_snapshot, run_and_format, test_context};
 use serde_json::Value;
 
-use crate::support::{example_fixture, fabro_json_snapshot, run_output_filters};
+use crate::support::{example_fixture, fabro_json_snapshot, run_output_filters, unique_run_id};
 
 use super::support::{output_stdout, resolve_run, wait_for_status, write_gated_workflow};
+
+const SHARED_DAEMON_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[test]
 fn help() {
@@ -58,7 +60,7 @@ fn attach_requires_run_arg() {
 #[test]
 fn attach_replays_completed_detached_run() {
     let context = test_context!();
-    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAQ";
+    let run_id = unique_run_id();
 
     context
         .command()
@@ -69,7 +71,7 @@ fn attach_replays_completed_detached_run() {
             "--no-retro",
             "--detach",
             "--run-id",
-            run_id,
+            run_id.as_str(),
             example_fixture("simple.fabro").to_str().unwrap(),
         ])
         .assert()
@@ -77,14 +79,14 @@ fn attach_replays_completed_detached_run() {
 
     context
         .command()
-        .args(["wait", run_id])
-        .timeout(std::time::Duration::from_secs(10))
+        .args(["wait", &run_id])
+        .timeout(SHARED_DAEMON_TIMEOUT)
         .assert()
         .success();
 
     let mut cmd = context.command();
-    cmd.args(["attach", run_id]);
-    cmd.timeout(std::time::Duration::from_secs(10));
+    cmd.args(["attach", &run_id]);
+    cmd.timeout(SHARED_DAEMON_TIMEOUT);
     fabro_snapshot!(run_output_filters(&context), cmd, @"
     success: true
     exit_code: 0
@@ -101,7 +103,7 @@ fn attach_replays_completed_detached_run() {
 #[test]
 fn attach_replays_from_store_without_run_json_or_progress_jsonl() {
     let context = test_context!();
-    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAQ";
+    let run_id = unique_run_id();
 
     context
         .command()
@@ -112,7 +114,7 @@ fn attach_replays_from_store_without_run_json_or_progress_jsonl() {
             "--no-retro",
             "--detach",
             "--run-id",
-            run_id,
+            run_id.as_str(),
             example_fixture("simple.fabro").to_str().unwrap(),
         ])
         .assert()
@@ -120,18 +122,18 @@ fn attach_replays_from_store_without_run_json_or_progress_jsonl() {
 
     context
         .command()
-        .args(["wait", run_id])
-        .timeout(std::time::Duration::from_secs(10))
+        .args(["wait", &run_id])
+        .timeout(SHARED_DAEMON_TIMEOUT)
         .assert()
         .success();
 
-    let run = resolve_run(&context, run_id);
+    let run = resolve_run(&context, &run_id);
     let _ = std::fs::remove_file(run.run_dir.join("run.json"));
     let _ = std::fs::remove_file(run.run_dir.join("progress.jsonl"));
 
     let mut cmd = context.command();
-    cmd.args(["attach", run_id]);
-    cmd.timeout(std::time::Duration::from_secs(10));
+    cmd.args(["attach", &run_id]);
+    cmd.timeout(SHARED_DAEMON_TIMEOUT);
     fabro_snapshot!(run_output_filters(&context), cmd, @"
     success: true
     exit_code: 0
@@ -251,7 +253,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
     let run_dir = context.find_run_dir(&run_id);
 
     let request_path = run_dir.join("runtime/interview_request.json");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + SHARED_DAEMON_TIMEOUT;
     while !request_path.exists() {
         assert!(
             std::time::Instant::now() < deadline,
@@ -263,7 +265,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
     let output = context
         .command()
         .args(["--json", "attach", &run_id])
-        .timeout(std::time::Duration::from_secs(5))
+        .timeout(SHARED_DAEMON_TIMEOUT)
         .output()
         .expect("attach should execute");
 

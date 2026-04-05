@@ -46,7 +46,14 @@ fn system_prune_dry_run_lists_matching_runs_without_deleting() {
     ));
 
     let mut cmd = context.command();
-    cmd.args(["system", "prune", "--workflow", "Simple"]);
+    cmd.args([
+        "system",
+        "prune",
+        "--workflow",
+        "Simple",
+        "--label",
+        &context.test_case_label(),
+    ]);
     fabro_snapshot!(filters, cmd, @"
     success: true
     exit_code: 0
@@ -73,7 +80,15 @@ fn system_prune_yes_deletes_matching_runs() {
     ));
 
     let mut cmd = context.command();
-    cmd.args(["system", "prune", "--workflow", "Simple", "--yes"]);
+    cmd.args([
+        "system",
+        "prune",
+        "--workflow",
+        "Simple",
+        "--label",
+        &context.test_case_label(),
+        "--yes",
+    ]);
     fabro_snapshot!(filters, cmd, @"
     success: true
     exit_code: 0
@@ -84,7 +99,7 @@ fn system_prune_yes_deletes_matching_runs() {
     assert!(!run.run_dir.exists(), "matching run should be deleted");
 
     let mut ps = context.ps();
-    ps.args(["-a", "--json"]);
+    ps.args(["-a", "--json", "--label", &context.test_case_label()]);
     fabro_snapshot!(context.filters(), ps, @r###"
     success: true
     exit_code: 0
@@ -99,7 +114,15 @@ fn system_prune_does_not_delete_active_or_submitted_runs() {
     let context = test_context!();
     let run = setup_created_dry_run(&context);
     let mut cmd = context.command();
-    cmd.args(["system", "prune", "--workflow", "Simple", "--yes"]);
+    cmd.args([
+        "system",
+        "prune",
+        "--workflow",
+        "Simple",
+        "--label",
+        &context.test_case_label(),
+        "--yes",
+    ]);
 
     fabro_snapshot!(context.filters(), cmd, @"
     success: true

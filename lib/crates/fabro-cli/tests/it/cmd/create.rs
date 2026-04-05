@@ -3,9 +3,9 @@ use serde_json::json;
 
 use fabro_test::{fabro_snapshot, test_context};
 
-use crate::support::fabro_json_snapshot;
+use crate::support::{fabro_json_snapshot, unique_run_id};
 
-use super::support::{fixture, output_stdout, resolve_run, run_state};
+use super::support::{fixture, output_stdout, resolve_run, run_count_for_test_case, run_state};
 
 #[test]
 fn help() {
@@ -50,7 +50,7 @@ fn help() {
 #[test]
 fn create_persists_directory_workflow_slug_and_cached_graph() {
     let context = test_context!();
-    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAA";
+    let run_id = unique_run_id();
     let workflow_path = context.temp_dir.join("sluggy/workflow.fabro");
 
     context.write_temp(
@@ -71,13 +71,13 @@ digraph BarBaz {
             "--dry-run",
             "--auto-approve",
             "--run-id",
-            run_id,
+            run_id.as_str(),
             workflow_path.to_str().unwrap(),
         ])
         .assert()
         .success();
 
-    let run_dir = context.find_run_dir(run_id);
+    let run_dir = context.find_run_dir(&run_id);
     let state = run_state(&run_dir);
     let run = state.run.as_ref().expect("run record should exist");
     fabro_json_snapshot!(
@@ -106,7 +106,7 @@ digraph BarBaz {
 #[test]
 fn create_persists_file_stem_slug_for_standalone_file() {
     let context = test_context!();
-    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAB";
+    let run_id = unique_run_id();
     let workflow_path = context.temp_dir.join("alpha.fabro");
 
     context.write_temp(
@@ -127,13 +127,13 @@ digraph FooWorkflow {
             "--dry-run",
             "--auto-approve",
             "--run-id",
-            run_id,
+            run_id.as_str(),
             workflow_path.to_str().unwrap(),
         ])
         .assert()
         .success();
 
-    let run_dir = context.find_run_dir(run_id);
+    let run_dir = context.find_run_dir(&run_id);
     let state = run_state(&run_dir);
     let run = state.run.as_ref().expect("run record should exist");
     fabro_json_snapshot!(
@@ -292,8 +292,9 @@ fn create_json_implies_auto_approve() {
 fn create_invalid_workflow_fails_without_creating_run() {
     let context = test_context!();
     let workflow = fixture("invalid.fabro");
-    let mut cmd = context.command();
-    cmd.args(["create", workflow.to_str().unwrap()]);
+    let initial_run_count = run_count_for_test_case(&context);
+    let mut cmd = context.create_cmd();
+    cmd.arg(workflow.to_str().unwrap());
 
     fabro_snapshot!(context.filters(), cmd, @"
     success: false
@@ -303,10 +304,9 @@ fn create_invalid_workflow_fails_without_creating_run() {
     error: Validation failed
     ");
 
-    let runs_dir = context.storage_dir.join("runs");
-    let run_count = std::fs::read_dir(&runs_dir)
-        .ok()
-        .map(|entries| entries.flatten().count())
-        .unwrap_or(0);
-    assert_eq!(run_count, 0, "invalid create should not persist a run");
+    let run_count = run_count_for_test_case(&context);
+    assert_eq!(
+        run_count, initial_run_count,
+        "invalid create should not persist a run for this test case"
+    );
 }

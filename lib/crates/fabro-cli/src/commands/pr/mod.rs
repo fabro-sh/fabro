@@ -9,11 +9,11 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use fabro_types::PullRequestRecord;
-use fabro_workflow::run_lookup::resolve_run_combined;
+use fabro_workflow::run_lookup::resolve_run_from_summaries;
 
 use crate::args::{GlobalArgs, PrCommand, PrNamespace};
 use crate::shared::github::build_github_app_credentials;
-use crate::store;
+use crate::server_client;
 use crate::user_config::load_user_settings_with_globals;
 
 pub(crate) async fn dispatch(ns: PrNamespace, globals: &GlobalArgs) -> Result<()> {
@@ -36,12 +36,12 @@ pub(crate) async fn load_pr_record(
     run_id: &str,
 ) -> Result<(PullRequestRecord, PathBuf)> {
     let storage_dir = base.parent().unwrap_or(base);
-    let store = store::build_store(storage_dir)?;
-    let run = resolve_run_combined(store.as_ref(), base, run_id).await?;
+    let client = server_client::connect_server(storage_dir).await?;
+    let summaries = client.list_store_runs().await?;
+    let run = resolve_run_from_summaries(&summaries, base, run_id)?;
     let run_id = run.run_id();
     let run_dir = run.path;
-    let run_store = store::open_run_reader(storage_dir, &run_id).await?;
-    let state = run_store.state().await?;
+    let state = client.get_run_state(&run_id).await?;
     let record = state.pull_request.with_context(|| {
         format!("No pull request found in store. Create one first with: fabro pr create {run_id}")
     })?;

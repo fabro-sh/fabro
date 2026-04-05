@@ -2,14 +2,14 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use fabro_types::PullRequestRecord;
-use fabro_workflow::run_lookup::{runs_base, scan_runs_combined};
+use fabro_workflow::run_lookup::{runs_base, scan_runs_with_summaries};
 use futures::future::join_all;
 use serde::Serialize;
 use tracing::info;
 
 use crate::args::{GlobalArgs, PrListArgs};
 use crate::shared::print_json_pretty;
-use crate::store;
+use crate::server_client;
 use crate::user_config::load_user_settings_with_globals;
 
 #[derive(Serialize)]
@@ -28,12 +28,14 @@ pub(super) async fn list_command(
 ) -> Result<()> {
     let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
-    let store = store::build_store(&cli_settings.storage_dir())?;
-    list_from(store.as_ref(), &base, args, github_app, globals).await
+    let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
+    let summaries = client.list_store_runs().await?;
+    list_from(&client, &summaries, &base, args, github_app, globals).await
 }
 
 async fn list_from(
-    store: &fabro_store::SlateStore,
+    client: &server_client::ServerStoreClient,
+    summaries: &[fabro_store::RunSummary],
     base: &Path,
     args: PrListArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
@@ -43,17 +45,13 @@ async fn list_from(
         "GitHub App credentials required — set GITHUB_APP_PRIVATE_KEY and configure app_id",
     )?;
 
-    let runs = scan_runs_combined(store, base)
-        .await
-        .context("Failed to scan runs")?;
+    let runs = scan_runs_with_summaries(summaries, base).context("Failed to scan runs")?;
 
     let mut entries: Vec<(String, PullRequestRecord)> = Vec::new();
     for run in &runs {
-        if let Ok(run_store) = store.open_run_reader(&run.run_id()).await {
-            if let Ok(state) = run_store.state().await {
-                if let Some(record) = state.pull_request {
-                    entries.push((run.run_id().to_string(), record));
-                }
+        if let Ok(state) = client.get_run_state(&run.run_id()).await {
+            if let Some(record) = state.pull_request {
+                entries.push((run.run_id().to_string(), record));
             }
         }
     }

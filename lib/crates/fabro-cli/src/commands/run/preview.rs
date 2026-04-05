@@ -1,21 +1,21 @@
 use anyhow::{Context, Result};
 use fabro_sandbox::daytona::DaytonaSandbox;
-use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
+use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 use tracing::info;
 
 use crate::args::{GlobalArgs, PreviewArgs};
 use crate::shared::{print_json_pretty, validate_daytona_provider};
-use crate::store;
+use crate::server_client;
 use crate::user_config::load_user_settings_with_globals;
 
 pub(crate) async fn run(args: PreviewArgs, globals: &GlobalArgs) -> Result<()> {
     let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
-    let store = store::build_store(&cli_settings.storage_dir())?;
-    let run = resolve_run_combined(store.as_ref(), &base, &args.run).await?;
-    let run_store = store::open_run_reader(&cli_settings.storage_dir(), &run.run_id()).await?;
-    let record = run_store
-        .state()
+    let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
+    let summaries = client.list_store_runs().await?;
+    let run = resolve_run_from_summaries(&summaries, &base, &args.run)?;
+    let record = client
+        .get_run_state(&run.run_id())
         .await?
         .sandbox
         .context("Failed to load sandbox record from store")?;

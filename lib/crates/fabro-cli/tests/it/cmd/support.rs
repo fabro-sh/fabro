@@ -95,37 +95,39 @@ fn run_success_in(context: &TestContext, args: &[&str], cwd: &Path) -> Output {
 
 pub(crate) fn setup_completed_dry_run(context: &TestContext) -> RunSetup {
     let workflow = fixture("simple.fabro");
-    run_success_in(
-        context,
-        &[
-            "run",
-            "--dry-run",
-            "--auto-approve",
-            "--no-retro",
-            "--sandbox",
-            "local",
-            workflow.to_str().unwrap(),
-        ],
-        &context.temp_dir,
-    );
+    let mut cmd = context.run_cmd();
+    cmd.current_dir(&context.temp_dir);
+    cmd.timeout(COMMAND_TIMEOUT);
+    cmd.args(["--dry-run", "--auto-approve", "--no-retro", "--sandbox", "local"]);
+    cmd.arg(workflow);
+    let output = cmd.output().expect("command should execute");
+    if !output.status.success() {
+        panic!(
+            "command failed: fabro run --dry-run --auto-approve --no-retro --sandbox local {}\nstdout:\n{}\nstderr:\n{}",
+            fixture("simple.fabro").display(),
+            stdout(&output),
+            stderr(&output)
+        );
+    }
     only_run(context)
 }
 
 pub(crate) fn setup_created_dry_run(context: &TestContext) -> RunSetup {
     let workflow = fixture("simple.fabro");
-    let output = run_success_in(
-        context,
-        &[
-            "create",
-            "--dry-run",
-            "--auto-approve",
-            "--no-retro",
-            "--sandbox",
-            "local",
-            workflow.to_str().unwrap(),
-        ],
-        &context.temp_dir,
-    );
+    let mut cmd = context.create_cmd();
+    cmd.current_dir(&context.temp_dir);
+    cmd.timeout(COMMAND_TIMEOUT);
+    cmd.args(["--dry-run", "--auto-approve", "--no-retro", "--sandbox", "local"]);
+    cmd.arg(workflow);
+    let output = cmd.output().expect("command should execute");
+    if !output.status.success() {
+        panic!(
+            "command failed: fabro create --dry-run --auto-approve --no-retro --sandbox local {}\nstdout:\n{}\nstderr:\n{}",
+            fixture("simple.fabro").display(),
+            stdout(&output),
+            stderr(&output)
+        );
+    }
     let run_id = stdout(&output)
         .lines()
         .find(|line| !line.trim().is_empty())
@@ -137,20 +139,27 @@ pub(crate) fn setup_created_dry_run(context: &TestContext) -> RunSetup {
 
 pub(crate) fn setup_detached_dry_run(context: &TestContext) -> RunSetup {
     let workflow = fixture("simple.fabro");
-    let output = run_success_in(
-        context,
-        &[
-            "run",
-            "--detach",
-            "--dry-run",
-            "--auto-approve",
-            "--no-retro",
-            "--sandbox",
-            "local",
-            workflow.to_str().unwrap(),
-        ],
-        &context.temp_dir,
-    );
+    let mut cmd = context.run_cmd();
+    cmd.current_dir(&context.temp_dir);
+    cmd.timeout(COMMAND_TIMEOUT);
+    cmd.args([
+        "--detach",
+        "--dry-run",
+        "--auto-approve",
+        "--no-retro",
+        "--sandbox",
+        "local",
+    ]);
+    cmd.arg(workflow);
+    let output = cmd.output().expect("command should execute");
+    if !output.status.success() {
+        panic!(
+            "command failed: fabro run --detach --dry-run --auto-approve --no-retro --sandbox local {}\nstdout:\n{}\nstderr:\n{}",
+            fixture("simple.fabro").display(),
+            stdout(&output),
+            stderr(&output)
+        );
+    }
     let run_id = stdout(&output)
         .lines()
         .find(|line| !line.trim().is_empty())
@@ -294,12 +303,11 @@ worktree_mode = "never"
 }
 
 fn run_local_workflow(context: &TestContext, workspace_dir: &Path, workflow: &str) -> RunSetup {
-    let mut cmd = context.command();
+    let mut cmd = context.run_cmd();
     cmd.current_dir(workspace_dir);
     cmd.timeout(COMMAND_TIMEOUT);
     cmd.env("OPENAI_API_KEY", "test");
     cmd.args([
-        "run",
         "--auto-approve",
         "--no-retro",
         "--sandbox",
@@ -393,22 +401,43 @@ pub(crate) fn wait_for_status(run_dir: &Path, expected: &[&str]) -> String {
 }
 
 pub(crate) fn only_run(context: &TestContext) -> RunSetup {
+    let entries = run_dirs_for_test_case(context);
     let runs_dir = context.storage_dir.join("runs");
-    let entries: Vec<_> = std::fs::read_dir(&runs_dir)
-        .unwrap_or_else(|err| panic!("failed to read {}: {err}", runs_dir.display()))
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.is_dir())
-        .collect();
     assert_eq!(
         entries.len(),
         1,
-        "expected exactly one run under {}",
-        runs_dir.display()
+        "expected exactly one run for fabro_test_case={} under {}",
+        context.test_case_id(),
+        runs_dir.display(),
     );
     let run_dir = entries[0].clone();
     let run_id = infer_run_id(&run_dir);
     RunSetup { run_id, run_dir }
+}
+
+pub(crate) fn run_count_for_test_case(context: &TestContext) -> usize {
+    run_dirs_for_test_case(context).len()
+}
+
+fn run_dirs_for_test_case(context: &TestContext) -> Vec<PathBuf> {
+    let runs_dir = context.storage_dir.join("runs");
+    let entries = match std::fs::read_dir(&runs_dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(err) => panic!("failed to read {}: {err}", runs_dir.display()),
+    };
+    entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .filter(|path| {
+            std::panic::catch_unwind(|| run_state(path)).ok().and_then(|state| state.run).is_some_and(|run| {
+                run.labels
+                    .get("fabro_test_case")
+                    .is_some_and(|value| value == context.test_case_id())
+            })
+        })
+        .collect()
 }
 
 pub(crate) fn git_filters(context: &TestContext) -> Vec<(String, String)> {
@@ -742,11 +771,10 @@ fn setup_git_backed_run(context: &TestContext, workflow: GitWorkflowKind) -> Git
         .trim()
         .to_string();
 
-    let mut cmd = context.command();
+    let mut cmd = context.run_cmd();
     cmd.current_dir(&repo_dir);
     cmd.env("OPENAI_API_KEY", "test");
     cmd.args([
-        "run",
         "--sandbox",
         "local",
         "--no-retro",

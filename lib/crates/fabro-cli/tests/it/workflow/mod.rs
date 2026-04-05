@@ -71,18 +71,29 @@ pub(super) fn store_dump_export(context: &TestContext, run_id: &str) -> PathBuf 
     output_dir
 }
 
-/// Find the single run directory under `storage_dir/runs/`.
-pub(super) fn find_run_dir(storage_dir: &Path) -> PathBuf {
-    let runs_base = storage_dir.join("runs");
+/// Find the single run directory for this test context.
+pub(super) fn find_run_dir(context: &TestContext) -> PathBuf {
+    let runs_base = context.storage_dir.join("runs");
     let entries: Vec<_> = std::fs::read_dir(&runs_base)
         .unwrap_or_else(|e| panic!("failed to read {}: {e}", runs_base.display()))
         .filter_map(|e| e.ok())
         .filter(|e| e.path().is_dir())
+        .filter(|entry| {
+            run_state(&entry.path())
+                .run
+                .as_ref()
+                .is_some_and(|run| {
+                    run.labels
+                        .get("fabro_test_case")
+                        .is_some_and(|value| value == context.test_case_id())
+                })
+        })
         .collect();
     assert_eq!(
         entries.len(),
         1,
-        "expected exactly one run directory under {}",
+        "expected exactly one run directory for fabro_test_case={} under {}",
+        context.test_case_id(),
         runs_base.display()
     );
     entries[0].path()

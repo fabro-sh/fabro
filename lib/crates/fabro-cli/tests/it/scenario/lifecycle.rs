@@ -2,7 +2,7 @@ use fabro_test::test_context;
 use serde_json::Value;
 
 use super::{fixture, run_state, timeout_for};
-use crate::support::{example_fixture, fabro_json_snapshot};
+use crate::support::{example_fixture, fabro_json_snapshot, unique_run_id};
 
 #[fabro_macros::e2e_test()]
 fn local_run_lifecycle() {
@@ -28,7 +28,8 @@ fn local_run_lifecycle() {
     .success();
 
     // 2. ps -a --json — should list exactly one run
-    let ps_out = cmd(&["ps", "-a", "--json"]).success();
+    let label = context.test_case_label();
+    let ps_out = cmd(&["ps", "-a", "--json", "--label", &label]).success();
     let ps_stdout = String::from_utf8(ps_out.get_output().stdout.clone()).unwrap();
     let runs: Vec<Value> =
         serde_json::from_str(&ps_stdout).expect("ps --json should produce a JSON array");
@@ -90,7 +91,7 @@ fn local_run_lifecycle() {
     cmd(&["rm", &run_id]).success();
 
     // 8. ps -a --json — should be empty
-    let ps_out2 = cmd(&["ps", "-a", "--json"]).success();
+    let ps_out2 = cmd(&["ps", "-a", "--json", "--label", &label]).success();
     let ps_stdout2 = String::from_utf8(ps_out2.get_output().stdout.clone()).unwrap();
     let runs2: Vec<Value> =
         serde_json::from_str(&ps_stdout2).expect("ps --json should produce a JSON array");
@@ -103,7 +104,7 @@ fn local_run_lifecycle() {
 #[test]
 fn dry_run_create_start_attach_works_with_default_run_lookup() {
     let context = test_context!();
-    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAJ";
+    let run_id = unique_run_id();
 
     context
         .command()
@@ -112,21 +113,21 @@ fn dry_run_create_start_attach_works_with_default_run_lookup() {
             "--dry-run",
             "--auto-approve",
             "--run-id",
-            run_id,
+            run_id.as_str(),
             example_fixture("simple.fabro").to_str().unwrap(),
         ])
         .assert()
         .success();
 
-    context.command().args(["start", run_id]).assert().success();
+    context.command().args(["start", &run_id]).assert().success();
     context
         .command()
-        .args(["attach", run_id])
+        .args(["attach", &run_id])
         .timeout(std::time::Duration::from_secs(10))
         .assert()
         .success();
 
-    let run_dir = context.find_run_dir(run_id);
+    let run_dir = context.find_run_dir(&run_id);
     fabro_json_snapshot!(
         context,
         serde_json::json!({
@@ -145,7 +146,7 @@ fn dry_run_create_start_attach_works_with_default_run_lookup() {
 #[test]
 fn dry_run_detach_attach_works_with_default_run_lookup() {
     let context = test_context!();
-    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAK";
+    let run_id = unique_run_id();
 
     context
         .command()
@@ -155,7 +156,7 @@ fn dry_run_detach_attach_works_with_default_run_lookup() {
             "--dry-run",
             "--auto-approve",
             "--run-id",
-            run_id,
+            run_id.as_str(),
             example_fixture("simple.fabro").to_str().unwrap(),
         ])
         .assert()
@@ -163,12 +164,12 @@ fn dry_run_detach_attach_works_with_default_run_lookup() {
 
     context
         .command()
-        .args(["attach", run_id])
+        .args(["attach", &run_id])
         .timeout(std::time::Duration::from_secs(10))
         .assert()
         .success();
 
-    let run_dir = context.find_run_dir(run_id);
+    let run_dir = context.find_run_dir(&run_id);
     fabro_json_snapshot!(
         context,
         serde_json::json!({
@@ -190,7 +191,7 @@ fn completed_run_can_be_attached_by_workflow_slug() {
     let project = tempfile::tempdir().unwrap();
     let workflow_dir = project.path().join("workflows").join("sluggy");
     let workflow_path = workflow_dir.join("workflow.fabro");
-    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAQ";
+    let run_id = unique_run_id();
 
     std::fs::create_dir_all(&workflow_dir).unwrap();
     std::fs::write(
@@ -213,7 +214,7 @@ digraph BarBaz {
             "--dry-run",
             "--auto-approve",
             "--run-id",
-            run_id,
+            run_id.as_str(),
             workflow_path.to_str().unwrap(),
         ])
         .assert()
@@ -227,7 +228,7 @@ digraph BarBaz {
     context
         .command()
         .current_dir(project.path())
-        .args(["attach", run_id])
+        .args(["attach", &run_id])
         .timeout(std::time::Duration::from_secs(10))
         .assert()
         .success();
@@ -239,7 +240,7 @@ digraph BarBaz {
         .assert()
         .success();
 
-    let run_record = run_state(&context.find_run_dir(run_id))
+    let run_record = run_state(&context.find_run_dir(&run_id))
         .run
         .expect("run record should exist");
     fabro_json_snapshot!(
@@ -262,7 +263,7 @@ fn completed_run_can_be_attached_by_file_stem() {
     let context = test_context!();
     let workflow_dir = tempfile::tempdir().unwrap();
     let workflow_path = workflow_dir.path().join("alpha.fabro");
-    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAM";
+    let run_id = unique_run_id();
 
     std::fs::write(
         &workflow_path,
@@ -283,7 +284,7 @@ digraph FooWorkflow {
             "--dry-run",
             "--auto-approve",
             "--run-id",
-            run_id,
+            run_id.as_str(),
             workflow_path.to_str().unwrap(),
         ])
         .assert()
@@ -300,7 +301,7 @@ digraph FooWorkflow {
         .assert()
         .success();
 
-    let run_record = run_state(&context.find_run_dir(run_id))
+    let run_record = run_state(&context.find_run_dir(&run_id))
         .run
         .expect("run record should exist");
     fabro_json_snapshot!(

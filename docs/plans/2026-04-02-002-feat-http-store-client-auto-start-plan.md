@@ -1,501 +1,566 @@
 ---
-title: "feat: HTTP store client with CLI auto-start"
+title: "feat: auto-start server and route CLI store access over HTTP"
 type: feat
 status: active
 date: 2026-04-02
 origin: docs/ideation/2026-04-02-slatedb-consolidation-ideation.md
-deepened: 2026-04-02
+deepened: 2026-04-04
 ---
 
-# feat: HTTP store client with CLI auto-start
+# feat: auto-start server and route CLI store access over HTTP
 
 ## Overview
 
-Replace direct SlateDB access from CLI processes with an HTTP-backed `Store`/`RunStore` implementation that routes all operations through the `fabro server` over a Unix socket. Add transparent auto-start so the server daemon launches on demand when any CLI command needs store access.
+Phase 1 replaces direct CLI access to SlateDB with a Unix-socket HTTP client that talks to `fabro server`, and auto-starts that daemon whenever CLI store access is needed. Use the generated `fabro-api` Rust client as the transport surface where the existing API already matches the needed operations.
+
+Phase 2 is an explicit follow-on decision: if we require strict single-owner semantics for all workflow execution writes, detached/start/resume execution must also move under server ownership rather than remaining in CLI-spawned engine processes.
 
 ## Problem Frame
 
-Currently every CLI command opens its own `SlateStore` via `build_store()` (~25 call sites). This means each process opens its own SlateDB instance, creating contention, reader polling latency, and multiple database handles. The consolidation to a single SlateDB instance owned by the server requires all CLI store access to go through HTTP.
+The old plan assumed most of the HTTP surface and daemon infrastructure still needed to be built. That is no longer true.
 
-Without auto-start, requiring a running server for every CLI command would be a DX regression. The server daemon infrastructure (start/stop/status, flock locking, readiness polling) is already complete.
+Current state in the repo:
 
-**Assumption:** Events-First Server Architecture is already complete. Events are the sole write path, the server materializes state from events, and SSE pushes events to subscribers.
+- Server daemon management is already implemented in `fabro-cli`:
+  - `lib/crates/fabro-cli/src/commands/server/start.rs`
+  - `lib/crates/fabro-cli/src/commands/server/record.rs`
+- Unix socket bind support is already implemented in `fabro-server`:
+  - `lib/crates/fabro-server/src/serve.rs`
+  - `lib/crates/fabro-server/src/bind.rs`
+- The server already owns a single `SlateStore` instance and already exposes store-backed endpoints for:
+  - run state
+  - events
+  - live event attach over SSE
+  - blobs
+  - checkpoint
+  - retro
+  - stage artifacts
+- The generated `fabro-api` client is reqwest-based and can be constructed with a custom `reqwest::Client`.
+- Reqwest 0.13 in this repo supports Unix sockets via `ClientBuilder::unix_socket(...)`.
+
+The real remaining work is narrower:
+
+1. CLI store access still opens `SlateStore` directly from local disk.
+2. CLI does not auto-start the server when store access is needed.
+3. Some API gaps remain, especially durable run listing and durable run deletion.
+4. Several CLI command paths still assume local engine processes own workflow execution and store writes.
 
 ## Requirements Trace
 
-- R1. An HTTP-backed `Store` + `RunStore` implementation connects to the server over Unix socket
-- R2. CLI auto-starts the server daemon when store access is needed and no server is running
-- R3. All ~25 CLI `build_store()` call sites transparently switch to the HTTP-backed store
-- R4. `watch_events_from` returns a live `Stream` via SSE subscription
-- R5. `InMemoryStore` tests are completely unaffected
-- R6. Binary assets transfer efficiently over HTTP (raw bytes, not base64)
-- R7. Clear error messages when server fails to start or becomes unreachable mid-operation
+- R1. CLI commands that need store access auto-start `fabro server` when no active daemon is available.
+- R2. CLI store reads and writes stop opening SlateDB directly and instead use the server over HTTP via Unix socket.
+- R3. `fabro server` becomes the only process that opens SlateDB for migrated CLI store-access flows in phase 1, with full execution-path consolidation tracked separately in Unit 6 if strict single-owner semantics remain required.
+- R4. The generated `fabro-api` Rust client is used for server communication where its current API surface applies.
+- R5. Existing `InMemoryStore`-based tests and server-internal `SlateStore` usage remain unaffected.
+- R6. Event streaming remains live and efficient for attach/log-follow workflows.
+- R7. Binary transfer for blobs and artifacts remains raw bytes over HTTP.
+- R8. Error messages for server startup and server-unreachable cases are explicit and actionable.
+- R9. The plan must reflect the current repo state rather than the assumptions in the original 2026-04-02 draft.
 
 ## Scope Boundaries
 
-- Server-side Events-First architecture (assumed complete)
-- Web UI or TypeScript API client changes (separate concern)
-- Cloud/S3 object store configuration (orthogonal)
-- Changes to the `RunStore` trait interface (trait stays as-is; the HTTP client implements it fully)
-- Removing the `SlateStore` implementation (kept for server-internal use)
+In scope:
 
-## Context & Research
+- CLI auto-start of the local server daemon
+- HTTP-backed client access for CLI store consumers
+- Server API additions needed for store parity
+- Migration of CLI run discovery, logs/attach, blob/artifact access, and delete flows to server-backed access
 
-### Relevant Code and Patterns
+Out of scope for the first pass:
 
-- `lib/crates/fabro-store/src/lib.rs` -- `Store` (5 methods) and `RunStore` (~53 methods) trait definitions
-- `lib/crates/fabro-store/src/memory.rs` -- `InMemoryStore` reference impl using BTreeMap
-- `lib/crates/fabro-cli/src/store.rs` -- `build_store()` factory, returns `Arc<SlateStore>`
-- `lib/crates/fabro-cli/src/commands/server/record.rs` -- `ServerRecord`, `active_server_record()`, path helpers
-- `lib/crates/fabro-cli/src/commands/server/start.rs` -- `execute_daemon()`, `acquire_lock()`, `try_connect()`, readiness polling
-- `lib/crates/fabro-server/src/server.rs` -- Axum router, existing REST + SSE endpoints
-- `lib/crates/fabro-server/src/bind.rs` -- `Bind` enum (Unix | Tcp)
-- `lib/crates/fabro-llm/src/providers/fabro_server.rs` -- existing pattern for consuming SSE from server (LineReader + parse_sse_block)
-- `lib/crates/fabro-store/src/types.rs` -- `RunSnapshot`, `EventEnvelope`, `EventPayload`, `RunSummary`
+- TypeScript/web client changes
+- Replacing server-internal `SlateStore`
+- Removing local run directories or runtime files
+- Re-architecting workflow execution to be fully server-owned in the same change set
+- Full trait refactors across `fabro-workflow` unless they are required to unblock the CLI migration
 
-### Institutional Learnings
+Follow-on scope, likely separate plan or addressed by Unit 6's decision fork:
 
-No `docs/solutions/` exists. Key codebase patterns serve as institutional knowledge:
-- Launcher/ServerRecord pattern for daemon discovery and stale cleanup
-- SSE consumption pattern in fabro-llm (LineReader + parse_sse_block)
-- All CLI commands follow the same `build_store() -> resolve_run_combined()` flow
+- Consolidating detached/resume/start execution so workflow engine writes are also server-owned end-to-end
+
+## Current-State Audit
+
+### Already Implemented
+
+- Daemon lifecycle:
+  - `lib/crates/fabro-cli/src/commands/server/start.rs`
+  - `lib/crates/fabro-cli/src/commands/server/status.rs`
+  - `lib/crates/fabro-cli/src/commands/server/stop.rs`
+  - `lib/crates/fabro-cli/src/commands/server/record.rs`
+- Unix socket server binding:
+  - `lib/crates/fabro-server/src/serve.rs`
+  - `lib/crates/fabro-server/src/bind.rs`
+- Existing server routes relevant to store access:
+  - `GET /api/v1/runs/{id}/state`
+  - `GET /api/v1/runs/{id}/events`
+  - `GET /api/v1/runs/{id}/attach`
+  - `POST /api/v1/runs/{id}/events`
+  - `POST /api/v1/runs/{id}/blobs`
+  - `GET /api/v1/runs/{id}/blobs/{blobId}`
+  - `GET|POST /api/v1/runs/{id}/stages/{stageId}/artifacts`
+  - `GET /api/v1/runs/{id}/stages/{stageId}/artifacts/download`
+  - `GET /api/v1/runs/{id}/checkpoint`
+  - `GET /api/v1/runs/{id}/retro`
+- `RunProjection` already contains much more than the old plan assumed:
+  - checkpoint and checkpoint history
+  - retro and retro prompt/response
+  - sandbox
+  - final patch
+  - pull request
+
+### Still Missing or Mismatched
+
+- `lib/crates/fabro-cli/src/store.rs` still builds a local `SlateStore`
+- CLI commands are typed against concrete `SlateStore` / `SlateRunStore`
+- Server `GET /api/v1/runs` is not durable store-backed; it serves in-memory managed runs only
+- No durable delete endpoint exists for runs
+- Artifact listing CLI still reads local artifact directories directly rather than using the server
+- Detached CLI execution still opens the store directly and runs workflow engine code locally
 
 ## Key Technical Decisions
 
-- **New crate `fabro-store-client`**: Implements `Store` + `RunStore` over HTTP. Separate crate avoids circular dependencies (depends on `fabro-store` for traits and `hyper`/`http-body-util` for HTTP transport; does NOT depend on `fabro-server` or `fabro-cli`).
+- **Use `fabro-api::Client` over Unix socket, not a custom hyper-only client.**
+  - The previous plan's "reqwest cannot do Unix sockets" assumption is stale.
+  - The generated client already covers `state`, `events`, `attach`, `blobs`, and artifact endpoints.
+  - Build a thin `fabro-cli` client wrapper around:
+    - `fabro_api::Client`
+    - `reqwest::ClientBuilder::unix_socket(socket_path)`
+  - For any operation not yet present in the OpenAPI spec, add the endpoint to the spec and regenerate `fabro-api`.
 
-- **hyper over Unix socket, not reqwest**: Use `hyper` + `hyper-util` + `tokio::net::UnixStream` directly for the Unix socket transport. `reqwest` doesn't natively support Unix sockets. This is a deliberate divergence from the codebase pattern where `reqwest` is used in 17 crates for TCP HTTP — justified because Unix socket transport requires a lower-level connector, and the client only talks to one known server (no redirects, cookies, or TLS needed). The SSE parser in `fabro-llm` (`LineReader`) is built on `reqwest::Response` — the new SSE module must implement its own parser over hyper's byte stream rather than reusing `LineReader` directly.
+- **Do not introduce a new transport crate until there is a clear reuse case.**
+  - The immediate consumers are in `fabro-cli`.
+  - A small `fabro-cli::server_client` module is enough for the first migration.
+  - If a second Rust crate later needs the same client, extract then.
 
-- **Coarse-grained API, not trait mirroring**: The server exposes a small set of endpoints. The `HttpRunStore` translates between the fine-grained trait and the coarse API:
-  - **Reads (snapshot-covered)**: `GET /api/v1/runs/{id}/snapshot` returns full `RunSnapshot`. Methods covered: `get_run`, `get_start`, `get_status`, `get_checkpoint`, `get_conclusion`, `get_retro`, `get_graph`, `get_sandbox`, `get_node`, `list_node_visits`, `list_node_ids`, `get_final_patch`, `get_pull_request`.
-  - **Reads (dedicated endpoints needed)**: `RunSnapshot` does NOT include: `retro_prompt`, `retro_response`, artifacts, assets, events, or checkpoint history. These need dedicated GET endpoints: `GET /runs/{id}/retro-prompt`, `GET /runs/{id}/artifacts`, `GET /runs/{id}/assets`, `GET /runs/{id}/events` (JSON), `GET /runs/{id}/checkpoints`.
-  - **Writes**: `POST /api/v1/runs/{id}/events` for event append. Other write methods forward as typed store operations to a generic `POST /api/v1/runs/{id}/store` endpoint.
-  - **Streaming**: `GET /api/v1/runs/{id}/events` SSE for `watch_events_from`.
+- **Auto-start belongs in CLI store/bootstrap code, not in the generated client.**
+  - The generated client should stay transport-only.
+  - Server lifecycle discovery/start remains in `fabro-cli`.
 
-- **`create_run` vs `start_run` endpoint distinction**: The existing `POST /api/v1/runs` endpoint (`start_run`) starts a full workflow execution. The `Store::create_run` trait method is a lower-level catalog operation. Unit 3 must add a store-level create endpoint (e.g., `POST /api/v1/store/runs`) distinct from the workflow-level start endpoint.
+- **Treat `RunProjection` as the primary read snapshot.**
+  - The existing `/runs/{id}/state` endpoint already returns the coarse-grained shape most CLI reads need.
+  - This should replace many fine-grained local store reads without widening the API.
 
-- **Authentication bypass for local Unix socket**: When the server is auto-started for local daemon mode, it uses `AuthMode::Disabled`. The HTTP store client does not send auth headers. This is safe because Unix sockets are local-only and filesystem permissions control access.
+- **Split the migration into two layers.**
+  - Layer 1: CLI read/write operations that are naturally expressible against the current server API
+  - Layer 2: execution-path consolidation for detached/resume/start flows if we want the server, not CLI subprocesses, to be the sole write owner
 
-- **`open_run` is lightweight**: `HttpStore::open_run(run_id)` just constructs an `HttpRunStore` with the run_id and shared HTTP client. No server round trip needed — existence check happens lazily on first operation (404 → `Ok(None)` at the Store level).
-
-- **`open_run` and `open_run_reader` return the same type**: No Writer/Reader distinction in the HTTP model. Both return `HttpRunStore`. The server decides write permissions internally.
-
-- **Auto-start reuses existing daemon infrastructure**: `ensure_server_running()` is a sibling function to `execute_daemon()`, not a refactoring of it. Shared logic: acquire_lock, spawn child with `pre_exec_setsid`, try_connect readiness polling. Distinct behavior: does NOT bail on "already running" (that's the success fast path), does NOT rotate logs (the running server's logs are fine), does NOT print "Server started..." to stderr (prints "Starting server..." instead for DX).
-
-- **`server` feature becomes effectively required**: `ensure_server_running` depends on `fabro-server` (for `Bind`, `ServeArgs`), which is gated behind `fabro-cli`'s optional `server` feature. Since `get_or_start_store` calls `ensure_server_running`, all CLI commands that use the store now require the `server` feature. This is acceptable — the `server` feature should be enabled by default in the CLI binary build.
-
-- **Auto-start is in `fabro-cli`, not in `fabro-store-client`**: The HTTP store client is transport-only. It doesn't know about daemons, flock, or process management. The CLI's `store.rs` orchestrates: check server → auto-start → create `HttpStore`.
+- **Preserve local run-directory access where it is orthogonal to SlateDB.**
+  - Run discovery still needs local run-dir paths for UI output and fallback/orphan detection.
+  - Runtime interview files and launcher metadata remain file-based unless separately redesigned.
 
 ## Open Questions
 
-### Resolved During Planning
+### Resolved for This Plan
 
-- **Where does auto-start live?** In `fabro-cli/src/commands/server/start.rs` as a new `ensure_server_running()` function, called from `fabro-cli/src/store.rs`. The store client crate is purely transport.
-- **How does the client discover the socket?** Reads `ServerRecord.bind` from `server.json`. Same discovery mechanism as `server status`/`server stop`.
-- **Should the client cache snapshot data?** Yes, per-request. A single CLI command (e.g., `fabro runs inspect`) may call multiple `get_*` methods. Fetch snapshot once, serve subsequent reads from cache. No cross-command caching.
+- **Should we use the generated `fabro-api` client?**
+  - Yes. It matches the repo direction and now works with Unix socket transport via reqwest.
+
+- **Do we need a brand-new HTTP store crate first?**
+  - No. Start with a thin CLI-side server client and only extract if a second consumer appears.
+
+- **Does the server already expose enough snapshot data?**
+  - Mostly yes. `RunProjection` already covers much more than the earlier plan assumed.
 
 ### Deferred to Implementation
 
-- Exact set of server endpoints needed vs what events-first already provides (inventory during Unit 3)
-- Whether `POST /api/v1/runs/{id}/store` generic write endpoint is better than individual write endpoints (decide based on actual write patterns the CLI uses)
-- HTTP client connection timeout and retry values
-- Whether `hyper` or a lighter HTTP approach (raw HTTP/1.1 over `tokio::io`) is the right fit — start with hyper, simplify if warranted. Do NOT consider `ureq` — it is a blocking client incompatible with the async `RunStore` trait and SSE streaming
+- Whether to model the new CLI-side access layer as:
+  - a direct "server client" API, or
+  - a local wrapper that mimics `SlateStore` / `SlateRunStore`
+- Whether artifact-list CLI should remain filesystem-based for local-only debugging or migrate fully to server-backed listing in phase 1
+- Whether detached engine execution should be migrated in the same branch or explicitly deferred behind a feature boundary
 
-## High-Level Technical Design
+## Relevant Code and Patterns
 
-> *This illustrates the intended approach and is directional guidance for review, not implementation specification. The implementing agent should treat it as context, not code to reproduce.*
+### Daemon and Unix Socket Patterns
 
-```
-CLI command (e.g., `fabro runs list`)
-    |
-store::get_or_start_store(storage_dir)
-    |
-    ├── record::active_server_record(storage_dir)
-    │   ├── Some(record) → server is running
-    │   └── None → ensure_server_running(storage_dir)
-    │              ├── acquire_lock(server.lock)
-    │              ├── re-check active_server_record (may have started between checks)
-    │              ├── execute_daemon (spawn fabro server __serve ...)
-    │              ├── poll try_connect(fabro.sock)
-    │              └── return bind address
-    |
-    ├── HttpStore::connect(socket_path)
-    │   └── creates hyper client with Unix socket connector
-    |
-    └── return Arc<dyn Store>
-         |
-    store.list_runs(query)
-         |
-    HttpStore → GET /api/v1/runs?start=...&end=...
-         |
-    server (Axum) → SlateStore.list_runs(query) → response
-         |
-    HttpStore ← JSON response → Vec<RunSummary>
-```
+- `lib/crates/fabro-cli/src/commands/server/start.rs`
+- `lib/crates/fabro-cli/src/commands/server/record.rs`
+- `lib/crates/fabro-server/src/serve.rs`
+- `lib/crates/fabro-server/src/bind.rs`
 
-```
-watch_events_from(seq) flow:
+### Existing Generated Client
 
-HttpRunStore → GET /api/v1/runs/{id}/events?from={seq} (Accept: text/event-stream)
-    |
-Server → SSE stream (broadcast channel + catch-up from store)
-    |
-HttpRunStore ← parse SSE blocks → yield EventEnvelope items
-    |
-Returns Pin<Box<dyn Stream<Item = Result<EventEnvelope>> + Send>>
-```
+- `lib/crates/fabro-api/src/lib.rs`
+- `lib/crates/fabro-api/build.rs`
+- `docs/api-reference/fabro-api.yaml`
 
-```mermaid
-graph TB
-    U1[Unit 1: fabro-store-client crate foundation]
-    U2[Unit 2: Implement Store trait]
-    U3[Unit 3: Server-side API additions]
-    U4[Unit 4: Implement RunStore trait]
-    U5[Unit 5: SSE streaming for watch_events_from]
-    U6[Unit 6: Auto-start server daemon]
-    U7[Unit 7: Migrate CLI to HTTP store]
+### Store-Backed Server Routes
 
-    U1 --> U2
-    U1 --> U5
-    U2 --> U4
-    U3 --> U4
-    U5 --> U4
-    U4 --> U7
-    U6 --> U7
-```
+- `lib/crates/fabro-server/src/server.rs`
 
-Units 1, 3, and 6 can start in parallel. Unit 2 depends on 1. Unit 5 depends on 1. Unit 4 depends on 1, 2, 3, and 5. Unit 7 depends on 4 and 6.
+### CLI Entry Points That Must Migrate
+
+- `lib/crates/fabro-cli/src/store.rs`
+- `lib/crates/fabro-cli/src/commands/runs/list.rs`
+- `lib/crates/fabro-cli/src/commands/run/logs.rs`
+- `lib/crates/fabro-cli/src/commands/run/attach.rs`
+- `lib/crates/fabro-cli/src/commands/run/diff.rs`
+- `lib/crates/fabro-cli/src/commands/run/ssh.rs`
+- `lib/crates/fabro-cli/src/commands/run/output.rs`
+- `lib/crates/fabro-cli/src/commands/store/dump.rs`
+- `lib/crates/fabro-cli/src/commands/pr/create.rs`
+- `lib/crates/fabro-cli/src/commands/pr/list.rs`
+- `lib/crates/fabro-cli/src/commands/pr/view.rs`
+- `lib/crates/fabro-cli/src/commands/runs/rm.rs`
+- `lib/crates/fabro-cli/src/commands/system/df.rs`
+- `lib/crates/fabro-cli/src/commands/artifact/list.rs`
+- `lib/crates/fabro-cli/src/commands/artifact/cp.rs`
+- `lib/crates/fabro-cli/src/commands/run/wait.rs`
+- `lib/crates/fabro-cli/src/commands/run/preview.rs`
+- `lib/crates/fabro-cli/src/commands/run/rewind.rs`
+
+### Run Discovery Coupling
+
+- `lib/crates/fabro-workflow/src/run_lookup.rs`
+
+### Execution-Path Coupling
+
+- `lib/crates/fabro-cli/src/commands/run/create.rs`
+- `lib/crates/fabro-cli/src/commands/run/start.rs`
+- `lib/crates/fabro-cli/src/commands/run/detached.rs`
+- `lib/crates/fabro-cli/src/commands/run/resume.rs`
+
+## High-Level Design
+
+### Layer 1: CLI server-backed store access
+
+`fabro-cli` gains a small client/bootstrap layer:
+
+1. Resolve active server from `server.json`
+2. If absent or stale, auto-start daemon using existing lock/spawn/readiness logic
+3. Construct `reqwest::Client` bound to the Unix socket
+4. Construct `fabro_api::Client` with base URL like `http://fabro`
+5. Expose helper methods for:
+   - run state
+   - run events list
+   - run events attach SSE stream
+   - blob read/write
+   - stage artifact list/read/write
+   - durable run list
+   - durable run delete
+
+CLI command handlers stop calling `build_store()` and instead call a new helper such as:
+
+`store::connect_server(storage_dir) -> Result<ServerStoreClient>`
+
+### Layer 2: API parity for run discovery and deletion
+
+The server adds durable endpoints for:
+
+- listing runs from the store catalog rather than only in-memory managed runs
+- deleting run store state
+
+The CLI keeps local run-dir fallback/orphan detection logic from `run_lookup.rs`, but its durable run summary source becomes the server.
+
+### Layer 3: Optional execution consolidation
+
+If we want strict compliance with "server is the only process accessing SlateDB", then detached/resume/start flows must stop opening run stores locally. That likely means:
+
+- CLI creates/starts runs by calling server APIs
+- server-owned scheduler/executor performs writes
+- attach/logs become purely server-backed observers
+
+This is separable from the read-path migration and should be treated as a deliberate second stage.
+
+### Artifact handling boundary in phase 1
+
+Artifact metadata and binary reads can move to server-backed endpoints in phase 1, but local run-directory artifact scanning may remain temporarily filesystem-based where commands are acting as local debugging tools rather than store clients. Implementation should make that boundary explicit rather than leaving a silent mixed-mode design.
 
 ## Implementation Units
 
-- [ ] **Unit 1: Create fabro-store-client crate with Unix socket HTTP foundation**
+- [ ] **Unit 1: Add CLI server bootstrap and generated-client construction**
 
-**Goal:** New crate with an HTTP client that communicates over Unix sockets. Provides typed request helpers the Store/RunStore impls will build on.
+**Goal:** Replace raw local `SlateStore` bootstrap in `fabro-cli` with "find or start server, then connect over Unix socket".
 
-**Requirements:** R1
-
-**Dependencies:** None
+**Requirements:** R1, R2, R4, R5, R8
 
 **Files:**
-- Create: `lib/crates/fabro-store-client/Cargo.toml`
-- Create: `lib/crates/fabro-store-client/src/lib.rs`
-- Create: `lib/crates/fabro-store-client/src/http.rs`
-- Modify: `lib/crates/fabro-store/src/error.rs` (add `Http`/`Transport` variant to `StoreError`)
-- Test: `lib/crates/fabro-store-client/tests/it/main.rs`
-
-Note: No workspace `Cargo.toml` modification needed — the `lib/crates/*` glob member pattern already covers the new crate.
+- Modify: `lib/crates/fabro-cli/src/store.rs`
+- Create: `lib/crates/fabro-cli/src/server_client.rs`
+- Modify: `lib/crates/fabro-cli/src/main.rs`
+- Modify: `lib/crates/fabro-cli/Cargo.toml`
 
 **Approach:**
-- `HttpClient` struct holds a hyper client configured for Unix socket transport and the socket path
-- `HttpClient::connect(socket_path: PathBuf) -> Self` constructor
-- Helper methods: `get<T: DeserializeOwned>(&self, path) -> Result<T>`, `post<T, R>(&self, path, body: &T) -> Result<R>`, `delete(&self, path) -> Result<()>`, `get_bytes(&self, path) -> Result<Option<Bytes>>`, `put_bytes(&self, path, data: &[u8]) -> Result<()>`
-- All helpers prepend `/api/v1` to paths
-- Map HTTP status codes: 404 → Ok(None) for Option-returning endpoints, 4xx/5xx → StoreError::Http
-- Map transport errors (connection refused, timeout, broken pipe) → StoreError::Transport
-- Use `tokio::net::UnixStream` as the transport layer
-- Add `StoreError::Http { status: u16, message: String }` and `StoreError::Transport(String)` variants to `fabro-store/src/error.rs`
+- Add `ensure_server_running(storage_dir: &Path) -> Result<Bind>` in `server/start.rs` or a sibling helper module.
+- Reuse:
+  - `acquire_lock`
+  - `active_server_record`
+  - daemon spawn path
+  - readiness polling
+- Fast path: if `active_server_record()` exists, return its bind.
+- If no record exists, start the daemon on the default Unix socket path and wait for readiness.
+- In a new `server_client.rs`, build:
+  - `reqwest::ClientBuilder::new().unix_socket(socket_path)`
+  - `fabro_api::Client::new_with_client("http://fabro", reqwest_client)`
 
 **Patterns to follow:**
-- `lib/crates/fabro-server/src/bind.rs` -- Bind enum for address representation
-- `lib/crates/fabro-store/src/error.rs` -- existing StoreError enum for variant style
+- `lib/crates/fabro-cli/src/commands/server/start.rs`
+- `lib/crates/fabro-cli/src/commands/server/record.rs`
+- `lib/crates/fabro-api/src/lib.rs`
 
 **Test scenarios:**
-- Happy path: HttpClient connects to a Unix socket and makes a GET request, receives JSON response
-- Happy path: POST with JSON body returns expected response
-- Error path: connection refused when socket doesn't exist → clear error
-- Error path: server returns 500 → mapped to StoreError
-- Edge case: server returns 404 → mapped to Ok(None) for option helpers
+- Existing active server record returns immediately without spawning
+- Missing server record triggers daemon start and waits for readiness
+- Stale server record is ignored and replaced by a working daemon
+- Unix socket connection errors produce a clear CLI-facing error
 
 **Verification:**
-- `cargo build -p fabro-store-client` compiles
-- `cargo nextest run -p fabro-store-client` passes
+- `cargo build -p fabro-cli`
+- targeted tests for server start/status helpers in `fabro-cli`
 
-- [ ] **Unit 2: Implement Store trait on HttpStore**
+- [ ] **Unit 2: Add durable server endpoints needed for CLI parity**
 
-**Goal:** `HttpStore` implements the `Store` trait, routing catalog operations (create, open, list, delete runs) through the server HTTP API.
+**Goal:** Close the durable API gaps that block CLI migration.
 
-**Requirements:** R1, R3
-
-**Dependencies:** Unit 1
+**Requirements:** R2, R3, R4, R5
 
 **Files:**
-- Create: `lib/crates/fabro-store-client/src/store.rs`
-- Modify: `lib/crates/fabro-store-client/src/lib.rs` (pub mod store, re-export HttpStore)
-- Modify: `lib/crates/fabro-store-client/Cargo.toml` (add fabro-store dependency for trait defs)
-- Test: `lib/crates/fabro-store-client/tests/it/store.rs`
+- Modify: `docs/api-reference/fabro-api.yaml`
+- Modify: `lib/crates/fabro-server/src/server.rs`
+- Modify: `lib/crates/fabro-api/build.rs` only if codegen constraints require it
+- Regenerate: `lib/crates/fabro-api` via normal build
 
-**Approach:**
-- `HttpStore` wraps `Arc<HttpClient>` and implements `Store`
-- `create_run(run_id, created_at, run_dir)` → `POST /store/runs` with JSON body, returns `Arc<dyn RunStore>` (HttpRunStore). Note: this is the store-level create endpoint, distinct from the workflow-level `POST /runs` that starts execution.
-- `open_run(run_id)` → constructs `HttpRunStore` directly (no server call; existence checked lazily)
-- `open_run_reader(run_id)` → same as `open_run` (no distinction in HTTP model)
-- `list_runs(query)` → `GET /runs` with query params for start/end dates, deserializes `Vec<RunSummary>`
-- `delete_run(run_id)` → `DELETE /runs/{id}`
-- `HttpRunStore` struct: holds `Arc<HttpClient>` + `RunId`
+**Required endpoints:**
+- `GET /api/v1/store/runs`
+  - durable run summaries from `state.store.list_runs(...)`
+- `DELETE /api/v1/store/runs/{id}`
+  - durable store deletion for a run
+
+**Contract guardrail:**
+- Do not change existing `GET /api/v1/runs` response semantics in this unit.
+- The existing `/runs` route remains the board-oriented runtime view backed by `state.runs`.
+- Durable catalog access belongs on the distinct `/api/v1/store/runs` surface unless a separate reviewed plan intentionally merges the concepts.
+
+**Optional endpoint for phase-1 cleanup if needed:**
+- `GET /api/v1/runs/{id}/artifacts`
+  - if we decide to stop using local artifact directory scanning for listing/copy
 
 **Patterns to follow:**
-- `lib/crates/fabro-store/src/memory.rs` -- InMemoryStore's Store impl for trait contract reference
+- Existing store-backed handlers in `lib/crates/fabro-server/src/server.rs`
 
 **Test scenarios:**
-- Happy path: list_runs with no filter returns deserialized run summaries
-- Happy path: create_run returns an HttpRunStore that can be used for subsequent operations
-- Happy path: delete_run sends DELETE and succeeds
-- Edge case: open_run for non-existent run — first operation on the HttpRunStore returns None/error (lazy check)
-- Error path: server unreachable → StoreError with clear message
+- Durable run list returns runs persisted before current server boot
+- Durable run delete removes store state for existing run
+- Deleting missing run is idempotent or returns a clearly documented 404 behavior
+- New endpoints are represented in `fabro-api` codegen output
 
 **Verification:**
-- `cargo nextest run -p fabro-store-client` passes
-- HttpStore satisfies `Store: Send + Sync` bounds
+- `cargo build -p fabro-api`
+- `cargo nextest run -p fabro-server`
 
-- [ ] **Unit 3: Server-side API endpoint additions**
+- [ ] **Unit 3: Migrate run discovery to server-backed durable summaries**
 
-**Goal:** Add server endpoints that the HTTP store client needs but don't exist yet. Update OpenAPI spec.
+**Goal:** Stop CLI run discovery from reading store summaries via direct `SlateStore`.
 
-**Requirements:** R1, R6
-
-**Dependencies:** None (parallel with Units 1-2)
+**Requirements:** R2, R3, R4
 
 **Files:**
-- Modify: `lib/crates/fabro-server/src/server.rs` (add handlers and routes)
-- Modify: `docs/api-reference/fabro-api.yaml` (add endpoint specs)
-- Test: `lib/crates/fabro-server/tests/it/api.rs`
+- Modify: `lib/crates/fabro-workflow/src/run_lookup.rs`
+- Modify: `lib/crates/fabro-cli/src/commands/runs/list.rs`
+- Modify: `lib/crates/fabro-cli/src/commands/system/df.rs`
+- Modify: `lib/crates/fabro-cli/src/commands/pr/list.rs`
+- Modify: `lib/crates/fabro-cli/src/commands/run/mod.rs`
+- Add tests in:
+  - `lib/crates/fabro-cli/tests/it/cmd/`
+  - `lib/crates/fabro-workflow` tests if `run_lookup` signatures change
 
 **Approach:**
-- Inventory the existing endpoints against what the HTTP client needs. Known gaps (verify at implementation time):
-  - `POST /api/v1/store/runs` — store-level create_run (distinct from existing `POST /api/v1/runs` which starts a full workflow execution). Takes `run_id`, `created_at`, `run_dir`
-  - `DELETE /api/v1/runs/{id}` — delete a run (calls `store.delete_run`)
-  - `GET /api/v1/runs/{id}/snapshot` — returns full `RunSnapshot` as JSON
-  - `GET /api/v1/runs/{id}/events` with `Accept: application/json` — returns `Vec<EventEnvelope>` as JSON (vs SSE for `text/event-stream`). Support `?from={seq}` query param
-  - `POST /api/v1/runs/{id}/events` — append an `EventPayload`, returns the assigned sequence number
-  - `POST /api/v1/runs/{id}/rewind` — calls `reset_for_rewind`
-  - `GET /api/v1/runs/{id}/retro-prompt` — returns retro prompt text (not in RunSnapshot)
-  - `GET /api/v1/runs/{id}/retro-response` — returns retro response text (not in RunSnapshot)
-  - `GET /api/v1/runs/{id}/artifacts` — lists artifact values (not in RunSnapshot)
-  - `GET /api/v1/runs/{id}/artifacts/{id}` — gets single artifact value
-  - `GET /api/v1/runs/{id}/checkpoints` — lists checkpoint history (not in RunSnapshot)
-  - `PUT /api/v1/runs/{id}/assets/{node_id}/{visit}/{filename}` — binary body, calls `put_asset`
-  - `GET /api/v1/runs/{id}/assets/{node_id}/{visit}/{filename}` — returns raw bytes, calls `get_asset`
-  - `GET /api/v1/runs/{id}/assets` — lists all assets
-  - `POST /api/v1/runs/{id}/store` — generic write endpoint for put_* methods not covered by events
-- Content negotiation on `/events`: `Accept: text/event-stream` → SSE (existing behavior), `Accept: application/json` → JSON array
-- Asset endpoints use `application/octet-stream` content type for binary transfer (R6)
-- Add to OpenAPI spec, rebuild types: `cargo build -p fabro-api-types`
+- Decouple `run_lookup` from concrete `SlateStore` inputs.
+- Introduce a smaller input shape for durable summaries, likely:
+  - a plain `Vec<RunSummary>`, or
+  - a small trait implemented by both local tests and the new CLI client wrapper
+- Preserve local run-dir fallback/orphan detection from filesystem scanning.
+- Use server-provided durable summaries as the authoritative store source.
 
 **Patterns to follow:**
-- Existing handlers in `server.rs` (e.g., `get_run_status`, `get_checkpoint`, `get_graph`)
-- `extract::Path(run_id)` + `State(state)` pattern for route handlers
-- `AppState.store` for store access
+- `lib/crates/fabro-workflow/src/run_lookup.rs`
 
 **Test scenarios:**
-- Happy path: DELETE /runs/{id} removes the run, subsequent GET returns 404
-- Happy path: GET /runs/{id}/snapshot returns complete RunSnapshot JSON
-- Happy path: POST /runs/{id}/events appends event and returns sequence number
-- Happy path: GET /runs/{id}/events with Accept: application/json returns JSON array
-- Happy path: PUT then GET asset round-trips binary data correctly
-- Happy path: POST /runs/{id}/rewind resets the run state
-- Edge case: DELETE /runs/{nonexistent} returns 404
-- Edge case: GET /runs/{id}/events?from=5 returns only events with seq >= 5
-- Edge case: PUT asset with empty body succeeds (zero-length asset)
+- Persisted run appears in list even after server restart
+- Local orphan run still appears when store summary is absent
+- Prefix resolution still works against durable summaries plus local paths
+- `runs list` behavior remains unchanged for filters and JSON output
 
 **Verification:**
-- `cargo nextest run -p fabro-server` passes
-- `cargo build -p fabro-api-types` regenerates without errors
-- OpenAPI spec validates
+- `cargo nextest run -p fabro-cli runs_list`
+- targeted `run_lookup` tests
 
-- [ ] **Unit 4: Implement RunStore trait on HttpRunStore**
+- [ ] **Unit 4: Migrate read-heavy CLI commands to server-backed state/events/blob/artifact access**
 
-**Goal:** `HttpRunStore` implements the full `RunStore` trait, mapping ~48 methods to server HTTP endpoints.
+**Goal:** Move the majority of CLI read flows off direct SlateDB access.
 
-**Requirements:** R1, R6
-
-**Dependencies:** Units 1, 2, 3, 5
+**Requirements:** R2, R3, R4, R6, R7, R8
 
 **Files:**
-- Create: `lib/crates/fabro-store-client/src/run_store.rs`
-- Modify: `lib/crates/fabro-store-client/src/lib.rs`
-- Test: `lib/crates/fabro-store-client/tests/it/run_store.rs`
+- Modify: `lib/crates/fabro-cli/src/commands/run/logs.rs`
+- Modify: `lib/crates/fabro-cli/src/commands/run/attach.rs`
+- Modify: `lib/crates/fabro-cli/src/commands/run/diff.rs`
+- Modify: `lib/crates/fabro-cli/src/commands/run/ssh.rs`
+- Modify: `lib/crates/fabro-cli/src/commands/run/output.rs`
+- Modify: `lib/crates/fabro-cli/src/commands/store/dump.rs`
+- Modify: `lib/crates/fabro-cli/src/commands/pr/create.rs`
+- Modify: `lib/crates/fabro-cli/src/commands/pr/view.rs`
+- Modify: `lib/crates/fabro-cli/src/commands/run/wait.rs`
+- Modify: `lib/crates/fabro-cli/src/commands/run/preview.rs`
 
 **Approach:**
-- **Read methods** (`get_*`): fetch `RunSnapshot` via `GET /runs/{id}/snapshot`, cache it in an `OnceCell` or `Mutex<Option<RunSnapshot>>` on the `HttpRunStore`. Individual `get_run`, `get_status`, `get_checkpoint`, `get_node`, etc. extract from the cached snapshot. Targeted endpoints for frequently-changing data: `get_status` → `GET /runs/{id}` (status endpoint already exists), event listing → `GET /runs/{id}/events`
-- **Write methods** (`put_*`): forward to server. Two approaches to evaluate:
-  - (a) Generic: `POST /runs/{id}/store` with `{ "op": "put_status", "data": {...} }`
-  - (b) Event-based: translate the put into the corresponding event and `POST /runs/{id}/events`
-  - Decision deferred to implementation — start with (a) for simplicity since events-first handles the actual persistence
-- **Node methods**: `get_node(NodeVisitRef)` extracts from snapshot. `list_node_visits`, `list_node_ids` likewise
-- **Event methods**: `append_event` → `POST /runs/{id}/events`. `list_events` / `list_events_from` → `GET /runs/{id}/events?from={seq}` (JSON mode). `watch_events_from` → delegates to SSE stream (Unit 5)
-- **Asset methods**: `put_asset` → `PUT /runs/{id}/assets/{node}/{visit}/{filename}` (raw bytes). `get_asset` → `GET /runs/{id}/assets/{node}/{visit}/{filename}`. `list_assets` / `list_all_assets` → `GET /runs/{id}/assets`
-- **Artifact methods**: `put_artifact_value` / `get_artifact_value` / `list_artifact_values` → can use snapshot for reads, POST for writes
-- **`reset_for_rewind`** → `POST /runs/{id}/rewind`
-- **`get_snapshot`** → `GET /runs/{id}/snapshot` (same as the caching endpoint, but returns the full value)
-- Invalidate snapshot cache after any write operation
+- Replace direct `open_run_reader()` usage with calls to:
+  - `get_run_state`
+  - `list_run_events`
+  - `attach_run_events`
+  - `read_run_blob`
+  - `list_stage_artifacts`
+  - artifact download endpoint
+- Build one SSE parsing helper in CLI for `attach_run_events()` byte streams.
+- Continue using `RunProjection` as the coarse-grained read model.
 
 **Patterns to follow:**
-- `lib/crates/fabro-store/src/memory.rs` -- InMemoryStore's RunStore impl as trait contract reference
-- `lib/crates/fabro-store/src/types.rs` -- RunSnapshot, NodeSnapshot field structure
+- `lib/crates/fabro-server/src/server.rs` attach SSE response shape
+- Existing CLI attach/log rendering logic
 
 **Test scenarios:**
-- Happy path: get_status returns deserialized RunStatusRecord from server
-- Happy path: put_status sends to server and subsequent get_status reflects the change
-- Happy path: append_event returns sequence number
-- Happy path: list_events_from(5) returns only events with seq >= 5
-- Happy path: get_node returns correct NodeSnapshot for a given visit
-- Happy path: put_asset / get_asset round-trips binary data
-- Happy path: get_snapshot returns full RunSnapshot
-- Edge case: get_checkpoint when no checkpoint exists returns None
-- Edge case: snapshot cache is invalidated after a write
-- Error path: server returns 500 on write → StoreError propagated
+- `logs --follow` continues to stream events to completion
+- `attach` replays existing events then follows live events
+- state-driven commands still read final patch, PR data, sandbox, checkpoint, and retro from `RunProjection`
+- blob and artifact download remain raw bytes
 
 **Verification:**
-- `cargo nextest run -p fabro-store-client` passes
-- HttpRunStore satisfies `RunStore: Send + Sync` bounds
+- targeted `fabro-cli` command tests:
+  - logs
+  - attach
+  - diff
+  - pr view/create
+  - store dump
 
-- [ ] **Unit 5: SSE streaming for watch_events_from**
+- [ ] **Unit 5: Migrate write/delete CLI operations that should hit the server**
 
-**Goal:** Implement `watch_events_from` by subscribing to the server's SSE event stream, returning a `Pin<Box<dyn Stream>>`.
+**Goal:** Stop CLI deletion and similar store mutations from touching SlateDB directly.
 
-**Requirements:** R4
-
-**Dependencies:** Unit 1
+**Requirements:** R2, R3, R4, R8
 
 **Files:**
-- Create: `lib/crates/fabro-store-client/src/sse.rs`
-- Test: `lib/crates/fabro-store-client/tests/it/sse.rs`
-
-Note: Wiring `sse::subscribe_events` into `HttpRunStore::watch_events_from` happens in Unit 4 (which owns `run_store.rs`), not here.
+- Modify: `lib/crates/fabro-cli/src/commands/runs/rm.rs`
+- Modify: `lib/crates/fabro-cli/src/commands/run/start.rs` if status validation moves to server reads only
+- Modify: `lib/crates/fabro-cli/src/commands/run/rewind.rs` only if it currently depends on direct store writes in the targeted path
 
 **Approach:**
-- `subscribe_events(client, run_id, from_seq) -> impl Stream<Item = Result<EventEnvelope>>`
-- Opens HTTP connection to `GET /runs/{id}/events?from={seq}` with `Accept: text/event-stream`
-- Implements its own SSE parser over hyper's byte stream (cannot reuse `LineReader` from `fabro-llm` which is tied to `reqwest::Response`)
-- Parses SSE format: `data:` lines containing JSON `EventEnvelope`, delimited by `\n\n`
-- Returns an async `Stream` that yields deserialized `EventEnvelope` items
-- Stream ends when server closes the connection (run completed) or on error
-- Reconnection logic: if connection drops unexpectedly, reconnect from last seen sequence number
-
-**Patterns to follow:**
-- `lib/crates/fabro-llm/src/providers/common.rs` -- `LineReader` + `parse_sse_block` as a reference for SSE parsing logic (but implemented over hyper byte stream, not reqwest)
-- `lib/crates/fabro-server/src/server.rs` get_events handler -- the server-side SSE format to match
+- Replace direct `store.delete_run()` calls with server API delete.
+- Replace direct event append for `RunRemoving` with `POST /runs/{id}/events`.
+- Keep local run-dir deletion and sandbox cleanup local unless a server-owned deletion flow is explicitly introduced.
 
 **Test scenarios:**
-- Happy path: subscribe to event stream, receive events in order, each deserializes to EventEnvelope
-- Happy path: stream ends cleanly when server closes connection
-- Edge case: from_seq > 0 skips earlier events
-- Edge case: reconnect after connection drop resumes from last sequence
-- Error path: invalid SSE data → StoreError in stream item
+- removing a completed run deletes local run dir and durable store state
+- removing a run with missing store state still behaves predictably
+- server-unreachable deletion path returns actionable error text
 
 **Verification:**
-- `cargo nextest run -p fabro-store-client` passes
-- Stream satisfies `Pin<Box<dyn Stream<Item = Result<EventEnvelope>> + Send>>` return type
+- `cargo nextest run -p fabro-cli runs_rm`
 
-- [ ] **Unit 6: Auto-start server daemon**
+- [ ] **Unit 6: Decide and document the execution-ownership boundary**
 
-**Goal:** Add `ensure_server_running()` that starts the server daemon if not already running, reusing existing infrastructure. Returns the socket path for the HTTP client.
+**Goal:** Explicitly close the gap between "CLI reads via server" and "server is the only process accessing SlateDB".
 
-**Requirements:** R2, R7
-
-**Dependencies:** None (parallel with Units 1-5)
+**Requirements:** R3, R9
 
 **Files:**
-- Modify: `lib/crates/fabro-cli/src/commands/server/start.rs` (extract `ensure_server_running`)
-- Test: `lib/crates/fabro-cli/tests/it/cmd/server_start.rs` (add auto-start tests)
+- Modify: this plan document after implementation decision, or create follow-on plan
+- Review:
+  - `lib/crates/fabro-cli/src/commands/run/create.rs`
+  - `lib/crates/fabro-cli/src/commands/run/start.rs`
+  - `lib/crates/fabro-cli/src/commands/run/detached.rs`
+  - `lib/crates/fabro-cli/src/commands/run/resume.rs`
 
-**Approach:**
-- Extract a `pub(crate) fn ensure_server_running(storage_dir: &Path) -> Result<Bind>` from `execute_daemon`:
-  1. Check `active_server_record(storage_dir)` — if running, return `record.bind` immediately (the success case)
-  2. Acquire flock on `server.lock`
-  3. Re-check `active_server_record` (another process may have started the server between step 1 and lock acquisition)
-  4. If still not running, call `execute_daemon` logic (spawn child, write record, poll readiness)
-  5. Return the bind address
-- Key difference from `execute_daemon`: does NOT bail on "already running" — that's the fast path
-- On failure: return error with message "Failed to start server: {reason}. Start manually with `fabro server start`"
-- The function is idempotent and race-safe (flock serializes concurrent callers)
+**Decision fork:**
 
-**Patterns to follow:**
-- `lib/crates/fabro-cli/src/commands/server/start.rs` -- `execute_daemon()` for the full spawn + readiness logic
-- `lib/crates/fabro-cli/src/commands/server/record.rs` -- `active_server_record()` for discovery
+Option A: **Phase-1 complete means CLI read/write store access is server-backed, but local engine subprocesses remain**
+- Faster
+- Leaves a strict reading of R3 partially unmet
 
-**Test scenarios:**
-- Happy path: ensure_server_running when server is already running returns bind address immediately
-- Happy path: ensure_server_running when server is not running starts it and returns bind address
-- Happy path: concurrent calls to ensure_server_running — only one starts the daemon, others wait and find it running
-- Edge case: stale server record (dead PID) — cleaned up, fresh server started
-- Error path: server fails to start — clear error message suggesting manual start
+Option B: **Phase-2 also migrates execution ownership to the server**
+- CLI create/start/resume become HTTP calls
+- Detached local engine path is retired or reduced to server-only launch
+- Strictly satisfies "server is the only process accessing SlateDB"
 
-**Verification:**
-- `cargo nextest run -p fabro-cli` passes
-- Manual: running a CLI command without a server auto-starts one
+**Recommendation:**
+- Treat Option A as the first implementation milestone
+- Open a follow-on plan immediately for Option B if the requirement remains strict
 
-- [ ] **Unit 7: Migrate CLI to HTTP-backed store**
-
-**Goal:** Replace `build_store()` with `get_or_start_store()` that returns an HTTP-backed store connected through the server. All ~25 CLI call sites get the new behavior.
-
-**Requirements:** R2, R3, R4, R5, R7
-
-**Dependencies:** Units 4, 5, 6
-
-**Files:**
-- Modify: `lib/crates/fabro-cli/src/store.rs` (new `get_or_start_store`, keep `build_store` for server-internal use)
-- Modify: `lib/crates/fabro-cli/Cargo.toml` (add fabro-store-client dependency)
-- Modify: ~25 CLI command files (change `build_store` calls to `get_or_start_store`)
-- Test: `lib/crates/fabro-cli/tests/it/scenario/` (integration test for CLI-through-server flow)
-
-**Approach:**
-- New function `pub(crate) async fn get_or_start_store(storage_dir: &Path) -> Result<Arc<dyn Store>>`:
-  1. Call `ensure_server_running(storage_dir)` → get bind address
-  2. Extract socket path from `Bind::Unix(path)` (error if TCP — auto-start always uses Unix socket)
-  3. Construct `HttpStore::connect(socket_path)`
-  4. Return as `Arc<dyn Store>`
-- Keep `build_store()` as `pub(crate)` for server-internal use (the server still opens SlateDB directly)
-- Rename to make the distinction clear: `build_local_store()` (server use) vs `get_or_start_store()` (CLI use)
-- `open_run_reader()` helper in store.rs also migrates to use `get_or_start_store`
-- All CLI call sites: mechanical replacement of `store::build_store(&storage_dir)?` → `store::get_or_start_store(&storage_dir).await?`
-  - All ~25 callers are already in `async fn` contexts, so the migration is adding `.await` at each site. No `block_on()` needed.
-
-**Patterns to follow:**
-- Current `build_store()` usage pattern across all CLI commands
-- `lib/crates/fabro-cli/src/commands/server/start.rs` -- daemon management functions
+**Implementation note (2026-04-04):**
+- This branch follows Option A.
+- CLI durable run discovery, wait/logs/diff/preview/PR listing, and run deletion are moving behind the server-backed store client.
+- Detached/create/start/resume execution ownership remains local for now and still needs a follow-on server-owned execution plan if strict single-owner SlateDB semantics remain required.
 
 **Test scenarios:**
-- Happy path: `fabro runs list` with no running server auto-starts server and returns results
-- Happy path: `fabro runs list` with running server connects and returns results (no extra start)
-- Happy path: `fabro run logs <id>` streams events via SSE through the server
-- Integration: full lifecycle — auto-start → create run → list runs → inspect run → delete run
-- Error path: server fails to auto-start — CLI prints clear error with suggestion
-- Edge case: multiple CLI commands in quick succession — first starts server, subsequent reuse it
+- explicit documentation of whichever boundary we choose
+- no silent mixing of local-store and server-store code paths remains after the chosen milestone
 
-**Verification:**
-- `cargo nextest run -p fabro-cli` passes (including existing tests)
-- `cargo clippy --workspace -- -D warnings` clean
-- Manual: `fabro server stop && fabro runs list` auto-starts and succeeds
+## Sequencing
 
-## System-Wide Impact
+1. Unit 1 first: auto-start and client bootstrap
+2. Unit 2 second: add missing durable API surface
+3. Unit 3 third: migrate run discovery and durable summary reads
+4. Unit 4 fourth: migrate read-heavy commands
+5. Unit 5 fifth: migrate store mutations that still happen in CLI
+6. Unit 6 last: finalize the execution-ownership boundary and either defer or continue
 
-- **Interaction graph:** `build_store()` in `fabro-cli/src/store.rs` is the sole injection point for store access in all CLI commands. Replacing it with `get_or_start_store()` transparently routes all ~25 commands through the server. The server's `serve.rs` constructs its own `SlateStore` inline (not via `build_store`) — no change to server internals. The `build_store` function in `fabro-cli` is renamed to `build_local_store` to clarify it's only for server-internal use.
-- **Error propagation:** HTTP errors from the store client propagate as `StoreError` through existing error handling. New `StoreError::Http` and `StoreError::Transport` variants (Unit 1) carry structured error context. Auto-start failures include actionable messages.
-- **State lifecycle risks:** The server process may crash between CLI operations. The HTTP client should handle connection errors gracefully (not panic). The auto-start function is idempotent — re-running after a crash starts a fresh server.
-- **API surface parity:** New server endpoints (Unit 3) extend the REST API. The OpenAPI spec and `fabro-api-types` must be updated. The TypeScript API client (`fabro-api-client`) will gain these endpoints on next generation but is not required for this plan.
-- **Feature flag impact:** `ensure_server_running` depends on `fabro-server` (optional dep in `fabro-cli`). Since all CLI store access routes through auto-start, the `server` feature effectively becomes required for the CLI binary. Ensure `server` is in `default` features for `fabro-cli`.
-- **Integration coverage:** End-to-end tests must verify the full CLI → auto-start → HTTP → server → SlateDB path. Tests for `HttpStore`/`HttpRunStore` should use an embedded Axum test server (matching the `tower::ServiceExt::oneshot` pattern in `fabro-server/tests/it/`) backed by `InMemoryStore`.
-- **Unchanged invariants:** The `Store`/`RunStore` trait interfaces are unchanged (only `StoreError` gains new variants). `InMemoryStore` is unchanged. Server-internal store access is unchanged. All existing server tests continue to use `InMemoryStore`.
+## Risks and Mitigations
 
-## Risks & Dependencies
+- **Risk: `/api/v1/runs` semantics are runtime-board state, not durable store state**
+  - Mitigation: add distinct `/api/v1/store/runs` routes rather than silently repurposing `/runs`
 
-| Risk | Mitigation |
-|------|------------|
-| Server endpoint inventory incomplete — events-first may not provide all needed endpoints | Unit 3 inventories gaps at implementation time. The plan lists known gaps; additional ones are handled as they're discovered |
-| Unix socket HTTP client adds latency vs direct SlateDB | Benchmark critical paths (list_runs, watch_events). Unix socket IPC is typically <1ms overhead. Snapshot caching reduces round trips |
-| Auto-start adds ~1-2s to first CLI command in a session | Acceptable tradeoff. Subsequent commands are instant. Print "Starting server..." to stderr so user knows what's happening |
-| Concurrent CLI commands during auto-start race | flock serializes. Second caller waits for lock, then finds server running. Already proven in daemon management |
-| Large RunSnapshot for runs with many nodes/events | Snapshot endpoint should support partial responses in the future. For now, full snapshot is acceptable — most runs are <10MB |
-| CLI commands that are currently sync need async for HTTP | `build_store()` is currently sync (`fn`, not `async fn`). `get_or_start_store()` is async. All ~25 callers already run inside a tokio runtime (CLI entry point sets up runtime). The migration is mechanical: add `.await` at each call site. Do NOT use `block_on()` inside an async context (will panic) — instead ensure each caller is already in an async fn |
-| `server` feature becomes effectively mandatory | Acceptable — make it a default feature for the CLI binary. Non-server builds (e.g., embedded use) can opt out |
+- **Risk: `run_lookup` is coupled to concrete `SlateStore`**
+  - Mitigation: extract a smaller durable-summary input shape before touching multiple commands
 
-## Sources & References
+- **Risk: SSE parsing via generated client is lower-level than current in-process stream usage**
+  - Mitigation: centralize byte-stream-to-event parsing in one helper and cover it with focused tests
 
-- **Origin document:** [docs/ideation/2026-04-02-slatedb-consolidation-ideation.md](docs/ideation/2026-04-02-slatedb-consolidation-ideation.md)
-- Related plan: [docs/plans/2026-04-02-001-feat-server-daemon-management-plan.md](docs/plans/2026-04-02-001-feat-server-daemon-management-plan.md) (completed — this plan builds on it)
-- Related code: `lib/crates/fabro-store/src/lib.rs` (Store + RunStore traits)
-- Related code: `lib/crates/fabro-cli/src/store.rs` (build_store factory)
-- Related code: `lib/crates/fabro-cli/src/commands/server/` (daemon management)
-- Related code: `lib/crates/fabro-server/src/server.rs` (API handlers)
-- Related docs: `docs-internal/events-strategy.md` (event system architecture)
+- **Risk: some CLI commands still depend on local runtime files rather than store data**
+  - Mitigation: migrate only true store access in this plan; do not conflate run-dir filesystem concerns with SlateDB consolidation
+
+- **Risk: execution paths still open the store directly after read-path migration**
+  - Mitigation: explicitly treat execution consolidation as a tracked decision point, not an accidental omission
+
+## Verification Strategy
+
+Per-unit targeted verification:
+
+- `cargo build -p fabro-api`
+- `cargo nextest run -p fabro-server`
+- `cargo nextest run -p fabro-cli`
+
+Focused command coverage should include:
+
+- server start/status/stop
+- runs list
+- logs
+- attach
+- diff
+- pr view/create/list
+- runs rm
+- store dump
+
+Manual smoke flow after Units 1-5:
+
+1. stop any running server
+2. run a CLI command that needs store access
+3. verify server auto-starts
+4. verify the command succeeds through the Unix socket path
+5. verify no CLI path in the tested flow opens local SlateDB directly
+
+Durability smoke flow:
+
+1. create or identify a persisted run
+2. stop the server
+3. start the server again
+4. verify durable run listing still finds the run through the HTTP path
+5. verify run state for that run is still readable through the HTTP path
+
+## Change Summary
+
+The old plan is no longer the right implementation guide. The repo already has daemon management, Unix socket support, store-backed server endpoints, and a generated Rust client that can be used over UDS. The remaining plan is to:
+
+- auto-start the server from CLI store bootstrap
+- use `fabro-api::Client` over Unix socket
+- add the missing durable run-list/delete endpoints
+- migrate CLI store consumers off direct `SlateStore`
+- then explicitly decide whether execution ownership also moves fully into the server

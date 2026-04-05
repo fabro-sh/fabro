@@ -2,16 +2,15 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
-use fabro_store::SlateStore;
 use serde::Serialize;
 use tracing::{debug, info};
 
-use fabro_workflow::run_lookup::{StatusFilter, filter_runs, runs_base, scan_runs_combined};
+use fabro_workflow::run_lookup::{StatusFilter, filter_runs, runs_base, scan_runs_with_summaries};
 
 use crate::args::{GlobalArgs, RunsPruneArgs};
 use crate::commands::runs::rm::remove_run_with_cleanup;
+use crate::server_client;
 use crate::shared::{format_size, print_json_pretty};
-use crate::store;
 use crate::user_config::load_user_settings_with_globals;
 
 #[derive(Serialize)]
@@ -25,8 +24,9 @@ struct PruneRunRow {
 pub(super) async fn prune_command(args: &RunsPruneArgs, globals: &GlobalArgs) -> Result<()> {
     let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
-    let store = store::build_store(&cli_settings.storage_dir())?;
-    prune_from(args, store.as_ref(), &base, globals).await
+    let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
+    let summaries = client.list_store_runs().await?;
+    prune_from(args, &client, &summaries, &base, globals).await
 }
 
 pub(crate) fn parse_duration(s: &str) -> Result<chrono::Duration> {
@@ -47,11 +47,12 @@ pub(crate) fn parse_duration(s: &str) -> Result<chrono::Duration> {
 
 async fn prune_from(
     args: &RunsPruneArgs,
-    store: &SlateStore,
+    client: &server_client::ServerStoreClient,
+    summaries: &[fabro_store::RunSummary],
     base: &Path,
     globals: &GlobalArgs,
 ) -> Result<()> {
-    let runs = scan_runs_combined(store, base).await?;
+    let runs = scan_runs_with_summaries(summaries, base)?;
     let label_filters = parse_label_filters(&args.filter.label);
     let mut filtered = filter_runs(
         &runs,
@@ -120,7 +121,7 @@ async fn prune_from(
     if args.yes {
         for run in &filtered {
             info!(run_id = %run.run_id(), path = %run.path.display(), "deleting run");
-            remove_run_with_cleanup(store, run).await?;
+            remove_run_with_cleanup(client, run).await?;
         }
         if globals.json {
             print_json_pretty(&serde_json::json!({

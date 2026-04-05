@@ -4,11 +4,10 @@ use crate::args::RunArgs;
 use fabro_config::ConfigLayer;
 use fabro_types::{RunId, Settings};
 use fabro_util::terminal::Styles;
-use fabro_workflow::error::FabroError;
-use fabro_workflow::operations::{CreateRunInput, WorkflowInput, create};
+use fabro_workflow::operations::{ValidateInput, WorkflowInput, make_run_dir, validate};
 
-use super::output::{print_diagnostics_from_error, print_workflow_report_from_persisted};
-use crate::store;
+use super::output::print_workflow_report;
+use crate::server_client;
 
 /// Create a workflow run: allocate run directory, persist RunRecord, return (run_id, run_dir).
 ///
@@ -37,39 +36,25 @@ pub(crate) async fn create_run(
         .transpose()
         .map_err(|err| anyhow::anyhow!("invalid run ID: {err}"))?;
 
-    let store = store::build_store(settings.storage_dir().as_path())?;
-
-    let created = match Box::pin(create(
-        store.as_ref(),
-        CreateRunInput {
-            workflow: WorkflowInput::Path(workflow_path.clone()),
-            settings,
-            cwd,
-            workflow_slug: None,
-            run_id,
-            base_branch: None,
-            host_repo_path: None,
-        },
-    ))
-    .await
-    {
-        Ok(created) => created,
-        Err(FabroError::ValidationFailed { diagnostics }) => {
-            if !quiet {
-                print_diagnostics_from_error(&diagnostics, styles);
-            }
-            anyhow::bail!("Validation failed");
-        }
-        Err(err) => return Err(err.into()),
-    };
-
     if !quiet {
-        print_workflow_report_from_persisted(
-            &created.persisted,
-            created.dot_path.as_deref(),
-            styles,
-        );
+        let validated = validate(ValidateInput {
+            workflow: WorkflowInput::Path(workflow_path.clone()),
+            settings: settings.clone(),
+            cwd: cwd.clone(),
+            custom_transforms: Vec::new(),
+        });
+        if let Ok(validated) = validated {
+            if !validated.has_errors() {
+                print_workflow_report(&validated, Some(workflow_path.as_path()), styles);
+            }
+        }
     }
 
-    Ok((created.run_id, created.run_dir))
+    let client = server_client::connect_server(settings.storage_dir().as_path()).await?;
+    let created_run_id = client
+        .create_run_from_workflow_path(workflow_path, &cwd, &settings, run_id.as_ref())
+        .await?;
+    let run_dir = make_run_dir(&settings.storage_dir().join("runs"), &created_run_id);
+
+    Ok((created_run_id, run_dir))
 }

@@ -1,4 +1,7 @@
 use fabro_test::{fabro_snapshot, test_context};
+use std::process::Stdio;
+use std::sync::{Arc, Barrier};
+use std::time::{Duration, Instant};
 
 #[test]
 fn help() {
@@ -82,4 +85,112 @@ fn start_already_running_exits_with_error() {
         .args(["server", "stop"])
         .assert()
         .success();
+}
+
+#[test]
+fn concurrent_autostart_converges_on_one_shared_daemon_and_cleans_up() {
+    fn run_ps_json(home_dir: &std::path::Path, temp_dir: &std::path::Path, storage_dir: &std::path::Path) -> std::process::Output {
+        std::process::Command::new(env!("CARGO_BIN_EXE_fabro"))
+            .current_dir(temp_dir)
+            .env("NO_COLOR", "1")
+            .env("HOME", home_dir)
+            .env("FABRO_NO_UPGRADE_CHECK", "true")
+            .env("FABRO_STORAGE_DIR", storage_dir)
+            .args(["ps", "-a", "--json"])
+            .output()
+            .expect("ps command should execute")
+    }
+
+    fn daemon_match_count(socket_path: &str) -> usize {
+        let output = std::process::Command::new("ps")
+            .args(["-ww", "-axo", "command="])
+            .stdout(Stdio::piped())
+            .output()
+            .expect("ps should execute");
+        assert!(output.status.success(), "ps should succeed");
+        String::from_utf8(output.stdout)
+            .expect("ps output should be UTF-8")
+            .lines()
+            .filter(|line| line.contains("fabro: server") && line.contains(socket_path))
+            .count()
+    }
+
+    let storage_dir;
+    let socket_path;
+    {
+        let context_a = test_context!();
+        let context_b = test_context!();
+        assert_eq!(context_a.storage_dir, context_b.storage_dir);
+        storage_dir = context_a.storage_dir.clone();
+        socket_path = storage_dir.join("fabro.sock").display().to_string();
+
+        let barrier = Arc::new(Barrier::new(3));
+        let home_a = context_a.home_dir.clone();
+        let temp_a = context_a.temp_dir.clone();
+        let storage_a = context_a.storage_dir.clone();
+        let barrier_a = Arc::clone(&barrier);
+        let thread_a = std::thread::spawn(move || {
+            barrier_a.wait();
+            run_ps_json(&home_a, &temp_a, &storage_a)
+        });
+
+        let home_b = context_b.home_dir.clone();
+        let temp_b = context_b.temp_dir.clone();
+        let storage_b = context_b.storage_dir.clone();
+        let barrier_b = Arc::clone(&barrier);
+        let thread_b = std::thread::spawn(move || {
+            barrier_b.wait();
+            run_ps_json(&home_b, &temp_b, &storage_b)
+        });
+
+        barrier.wait();
+        let output_a = thread_a.join().expect("thread A should join");
+        let output_b = thread_b.join().expect("thread B should join");
+        assert!(
+            output_a.status.success(),
+            "first concurrent ps should succeed:\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output_a.stdout),
+            String::from_utf8_lossy(&output_a.stderr)
+        );
+        assert!(
+            output_b.status.success(),
+            "second concurrent ps should succeed:\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output_b.stdout),
+            String::from_utf8_lossy(&output_b.stderr)
+        );
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            if storage_dir.join("server.json").exists() && daemon_match_count(&socket_path) == 1 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(
+            storage_dir.join("server.json").exists(),
+            "shared storage should have an active server record"
+        );
+        assert_eq!(
+            daemon_match_count(&socket_path),
+            1,
+            "concurrent auto-start should converge on one daemon"
+        );
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if !storage_dir.join("server.json").exists() && daemon_match_count(&socket_path) == 0 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        !storage_dir.join("server.json").exists(),
+        "last TestContext drop should remove the server record"
+    );
+    assert_eq!(
+        daemon_match_count(&socket_path),
+        0,
+        "last TestContext drop should clean up the shared daemon"
+    );
 }

@@ -56,7 +56,7 @@ fn rm_deletes_completed_run() {
     assert!(!run.run_dir.exists(), "run directory should be deleted");
 
     let mut ps = context.ps();
-    ps.args(["-a", "--json"]);
+    ps.args(["-a", "--json", "--label", &context.test_case_label()]);
     fabro_snapshot!(context.filters(), ps, @r###"
     success: true
     exit_code: 0
@@ -109,7 +109,7 @@ fn rm_force_deletes_submitted_run() {
     assert!(!run.run_dir.exists(), "run directory should be deleted");
 
     let mut ps = context.ps();
-    ps.args(["-a", "--json"]);
+    ps.args(["-a", "--json", "--label", &context.test_case_label()]);
     fabro_snapshot!(context.filters(), ps, @r###"
     success: true
     exit_code: 0

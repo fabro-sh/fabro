@@ -7,6 +7,7 @@ use fabro_types::Settings;
 use predicates::prelude::*;
 
 use super::support::run_state;
+use crate::support::unique_run_id;
 
 #[test]
 fn help() {
@@ -407,7 +408,7 @@ fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
     let (project, storage_dir) = setup_external_workflow_fixture(&context);
     let cwd = tempfile::tempdir().unwrap();
     let workflow = project.path().join("workflow.toml");
-    let run_id = "01ARZ3NDEKTSV4RRFFQ69G5FB8";
+    let run_id = unique_run_id();
 
     // Remove FABRO_STORAGE_DIR so the CLI uses storage_dir from user.toml
     context
@@ -420,7 +421,7 @@ fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
             "--model",
             "gpt-5.2",
             "--run-id",
-            run_id,
+            run_id.as_str(),
             workflow.to_str().unwrap(),
         ])
         .assert()
@@ -435,7 +436,7 @@ fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
             path.is_dir()
                 && path
                     .file_name()
-                    .is_some_and(|name| name.to_string_lossy().ends_with(run_id))
+                    .is_some_and(|name| name.to_string_lossy().ends_with(&run_id))
         })
         .unwrap_or_else(|| {
             panic!(
@@ -500,13 +501,18 @@ fn settings_missing_run_config_errors() {
     let mut cmd = context.settings();
     cmd.current_dir(project.path());
     cmd.args(["missing.toml"]);
-    fabro_snapshot!(context.filters(), cmd, @"
-    success: false
-    exit_code: 1
-    ----- stdout -----
-    ----- stderr -----
-    error: Workflow not found: missing.toml
-    ");
+    let output = cmd.output().expect("command should execute");
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).trim().is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("error: Workflow not found:"),
+        "stderr should report missing workflow path, got:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("missing.toml"),
+        "stderr should include missing workflow filename, got:\n{stderr}"
+    );
 }
 
 #[test]

@@ -1,6 +1,7 @@
 use fabro_test::{fabro_snapshot, test_context};
+use serde_json::Value;
 
-use super::support::{fixture, run_success, setup_completed_dry_run, setup_created_dry_run};
+use super::support::{fixture, setup_completed_dry_run, setup_created_dry_run};
 
 #[test]
 fn help() {
@@ -37,7 +38,8 @@ fn help() {
 fn ps_default_excludes_non_running_runs() {
     let context = test_context!();
     setup_completed_dry_run(&context);
-    let cmd = context.ps();
+    let mut cmd = context.ps();
+    cmd.args(["--label", &context.test_case_label()]);
 
     fabro_snapshot!(context.filters(), cmd, @"
     success: true
@@ -53,55 +55,35 @@ fn ps_all_json_lists_created_and_completed_runs() {
     let context = test_context!();
     setup_completed_dry_run(&context);
     setup_created_dry_run(&context);
-    let mut filters = context.filters();
-    filters.push((
-        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})".to_string(),
-        "[TIMESTAMP]".to_string(),
-    ));
-    filters.push((
-        r#""duration_ms":\s*\d+"#.to_string(),
-        r#""duration_ms": [DURATION_MS]"#.to_string(),
-    ));
-    filters.push((r"\d{8}-dry-run-".to_string(), "[DATE]-dry-run-".to_string()));
-    let mut cmd = context.ps();
-    cmd.args(["-a", "--json"]);
+    let output = context
+        .ps()
+        .args(["-a", "--json", "--label", &context.test_case_label()])
+        .output()
+        .expect("ps should run");
 
-    fabro_snapshot!(filters, cmd, @r#"
-    success: true
-    exit_code: 0
-    ----- stdout -----
-    [
-      {
-        "run_id": "[ULID]",
-        "dir_name": "20260404-[ULID]",
-        "workflow_name": "Simple",
-        "workflow_slug": "simple",
-        "status": "submitted",
-        "status_reason": null,
-        "start_time": "[TIMESTAMP]",
-        "labels": {},
-        "duration_ms": null,
-        "total_cost": null,
-        "host_repo_path": "[TEMP_DIR]",
-        "goal": "Run tests and report results"
-      },
-      {
-        "run_id": "[ULID]",
-        "dir_name": "20260404-[ULID]",
-        "workflow_name": "Simple",
-        "workflow_slug": "simple",
-        "status": "succeeded",
-        "status_reason": "completed",
-        "start_time": "[TIMESTAMP]",
-        "labels": {},
-        "duration_ms": [DURATION_MS],
-        "total_cost": null,
-        "host_repo_path": "[TEMP_DIR]",
-        "goal": "Run tests and report results"
-      }
-    ]
-    ----- stderr -----
-    "#);
+    assert!(output.status.success(), "ps should succeed");
+    let runs: Vec<Value> = serde_json::from_slice(&output.stdout).expect("ps JSON should parse");
+    assert_eq!(runs.len(), 2, "expected submitted + completed runs");
+    assert!(
+        runs.iter().all(|run| run["workflow_name"] == "Simple"),
+        "all runs should belong to the Simple workflow: {runs:#?}"
+    );
+    assert!(
+        runs.iter().all(|run| run["labels"]["fabro_test_case"] == context.test_case_id()),
+        "all runs should be scoped to the current test case: {runs:#?}"
+    );
+    assert!(
+        runs.iter().all(|run| run["labels"]["fabro_test_run"] == context.test_run_id()),
+        "all runs should be scoped to the current test session: {runs:#?}"
+    );
+    assert!(
+        runs.iter().any(|run| run["status"] == "submitted"),
+        "ps should include the created run: {runs:#?}"
+    );
+    assert!(
+        runs.iter().any(|run| run["status"] == "succeeded"),
+        "ps should include the completed run: {runs:#?}"
+    );
 }
 
 #[test]
@@ -110,7 +92,7 @@ fn ps_quiet_outputs_run_ids_only() {
     setup_completed_dry_run(&context);
     setup_created_dry_run(&context);
     let mut cmd = context.ps();
-    cmd.args(["-a", "--quiet"]);
+    cmd.args(["-a", "--quiet", "--label", &context.test_case_label()]);
 
     fabro_snapshot!(context.filters(), cmd, @r###"
     success: true
@@ -128,73 +110,53 @@ fn ps_filters_by_workflow_and_label() {
     let simple = fixture("simple.fabro");
     let branching = fixture("branching.fabro");
 
-    run_success(
-        &context,
-        &[
-            "run",
+    context
+        .run_cmd()
+        .args([
             "--dry-run",
             "--auto-approve",
             "--no-retro",
             "--label",
             "suite=alpha",
-            simple.to_str().unwrap(),
-        ],
-    );
-    run_success(
-        &context,
-        &[
-            "run",
+        ])
+        .arg(&simple)
+        .assert()
+        .success();
+    context
+        .run_cmd()
+        .args([
             "--dry-run",
             "--auto-approve",
             "--no-retro",
             "--label",
             "suite=beta",
-            branching.to_str().unwrap(),
-        ],
-    );
+        ])
+        .arg(&branching)
+        .assert()
+        .success();
 
-    let mut filters = context.filters();
-    filters.push((
-        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})".to_string(),
-        "[TIMESTAMP]".to_string(),
-    ));
-    filters.push((
-        r#""duration_ms":\s*\d+"#.to_string(),
-        r#""duration_ms": [DURATION_MS]"#.to_string(),
-    ));
-    filters.push((r"\d{8}-dry-run-".to_string(), "[DATE]-dry-run-".to_string()));
-    let mut cmd = context.ps();
-    cmd.args([
-        "-a",
-        "--json",
-        "--workflow",
-        "Simple",
-        "--label",
-        "suite=alpha",
-    ]);
+    let output = context
+        .ps()
+        .args([
+            "-a",
+            "--json",
+            "--workflow",
+            "Simple",
+            "--label",
+            "suite=alpha",
+            "--label",
+            &context.test_case_label(),
+        ])
+        .output()
+        .expect("ps should run");
 
-    fabro_snapshot!(filters, cmd, @r#"
-    success: true
-    exit_code: 0
-    ----- stdout -----
-    [
-      {
-        "run_id": "[ULID]",
-        "dir_name": "20260404-[ULID]",
-        "workflow_name": "Simple",
-        "workflow_slug": "simple",
-        "status": "succeeded",
-        "status_reason": "completed",
-        "start_time": "[TIMESTAMP]",
-        "labels": {
-          "suite": "alpha"
-        },
-        "duration_ms": [DURATION_MS],
-        "total_cost": null,
-        "host_repo_path": "[TEMP_DIR]",
-        "goal": "Run tests and report results"
-      }
-    ]
-    ----- stderr -----
-    "#);
+    assert!(output.status.success(), "ps should succeed");
+    let runs: Vec<Value> = serde_json::from_slice(&output.stdout).expect("ps JSON should parse");
+    assert_eq!(runs.len(), 1, "workflow+label filter should isolate one run");
+    let run = &runs[0];
+    assert_eq!(run["workflow_name"], "Simple");
+    assert_eq!(run["status"], "succeeded");
+    assert_eq!(run["labels"]["suite"], "alpha");
+    assert_eq!(run["labels"]["fabro_test_case"], context.test_case_id());
+    assert_eq!(run["labels"]["fabro_test_run"], context.test_run_id());
 }

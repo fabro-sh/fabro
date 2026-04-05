@@ -1,8 +1,13 @@
+use std::collections::HashMap;
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::Output;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use assert_cmd::Command;
 use regex::Regex;
+use serde::Serialize;
 use serde_json::{Map, Value, json};
 
 /// Walk up from `start` to find the repo-level `test/` fixtures directory.
@@ -83,17 +88,272 @@ pub fn require_env(name: &str) -> Option<String> {
     }
 }
 
-/// An isolated test context for running fabro CLI commands.
+/// A test context for running fabro CLI commands.
 ///
-/// Creates temporary directories for home, storage, and working directory,
-/// and provides methods to build commands with proper isolation env vars.
+/// Each context gets isolated home/temp directories. The storage directory is
+/// shared per nextest run when `NEXTEST_RUN_ID` is present, otherwise shared
+/// per test process.
 pub struct TestContext {
     pub temp_dir: PathBuf,
     pub home_dir: PathBuf,
     pub storage_dir: PathBuf,
+    test_case_id: String,
+    test_run_id: String,
+    session_root: PathBuf,
     fabro_bin: PathBuf,
     filters: Vec<(String, String)>,
-    _root: tempfile::TempDir,
+    _context_root: tempfile::TempDir,
+}
+
+#[derive(Debug, Clone)]
+struct SessionPaths {
+    root: PathBuf,
+    storage_dir: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SessionMode {
+    Nextest,
+    Process,
+}
+
+#[derive(Debug, Serialize)]
+struct ClientMarker {
+    pid: u32,
+    touched_at_ms: u128,
+}
+
+static SESSION_REFS: OnceLock<Mutex<HashMap<PathBuf, usize>>> = OnceLock::new();
+
+fn session_refs() -> &'static Mutex<HashMap<PathBuf, usize>> {
+    SESSION_REFS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn test_case_id() -> String {
+    let ulid = std::process::Command::new("uuidgen")
+        .arg("-r")
+        .output()
+        .ok()
+        .and_then(|output| output.status.success().then_some(output.stdout))
+        .and_then(|stdout| String::from_utf8(stdout).ok())
+        .map(|value| value.trim().replace('-', ""))
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| {
+            let nanos = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos();
+            format!("{nanos:032x}")
+        });
+    ulid
+}
+
+fn current_timestamp_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_millis()
+}
+
+fn current_pid() -> u32 {
+    std::process::id()
+}
+
+fn session_paths() -> (SessionMode, String, SessionPaths) {
+    let base_dir = short_session_base_dir();
+    if let Ok(run_id) = std::env::var("NEXTEST_RUN_ID") {
+        if !run_id.trim().is_empty() {
+            let short_id = shorten_session_id(&run_id);
+            let root = base_dir.join(format!("n-{short_id}"));
+            return (
+                SessionMode::Nextest,
+                run_id,
+                SessionPaths {
+                    storage_dir: root.join("storage"),
+                    root,
+                },
+            );
+        }
+    }
+
+    let process_id = format!("process-{}", current_pid());
+    let root = base_dir.join(format!("p-{}", current_pid()));
+    (
+        SessionMode::Process,
+        process_id,
+        SessionPaths {
+            storage_dir: root.join("storage"),
+            root,
+        },
+    )
+}
+
+fn short_session_base_dir() -> PathBuf {
+    #[cfg(unix)]
+    {
+        PathBuf::from("/tmp/fx")
+    }
+    #[cfg(not(unix))]
+    {
+        std::env::temp_dir().join("fabro-test")
+    }
+}
+
+fn shorten_session_id(id: &str) -> String {
+    let trimmed = id.trim();
+    let shortened: String = trimmed
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .take(12)
+        .collect();
+    if shortened.is_empty() {
+        "session".to_string()
+    } else {
+        shortened
+    }
+}
+
+fn session_lock_path(root: &Path) -> PathBuf {
+    root.join("session.lock")
+}
+
+fn session_clients_dir(root: &Path) -> PathBuf {
+    root.join("clients")
+}
+
+fn session_marker_path(root: &Path, pid: u32) -> PathBuf {
+    session_clients_dir(root).join(pid.to_string())
+}
+
+fn ensure_parent_dir(path: &Path) {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .unwrap_or_else(|err| panic!("failed to create {}: {err}", parent.display()));
+    }
+}
+
+fn with_session_lock<T>(root: &Path, f: impl FnOnce() -> T) -> T {
+    std::fs::create_dir_all(root)
+        .unwrap_or_else(|err| panic!("failed to create {}: {err}", root.display()));
+    let lock_path = session_lock_path(root);
+    ensure_parent_dir(&lock_path);
+    let lock_file = File::create(&lock_path)
+        .unwrap_or_else(|err| panic!("failed to create {}: {err}", lock_path.display()));
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !fabro_proc::try_flock_exclusive(&lock_file)
+        .unwrap_or_else(|err| panic!("failed to lock {}: {err}", lock_path.display()))
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for session lock {}",
+            lock_path.display()
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let result = f();
+    fabro_proc::flock_unlock(&lock_file)
+        .unwrap_or_else(|err| panic!("failed to unlock {}: {err}", lock_path.display()));
+    result
+}
+
+fn live_marker_count(root: &Path) -> usize {
+    let clients_dir = session_clients_dir(root);
+    let Ok(entries) = std::fs::read_dir(&clients_dir) else {
+        return 0;
+    };
+    entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .parse::<u32>()
+                .ok()
+                .map(|pid| (pid, entry.path()))
+        })
+        .filter(|(pid, path)| {
+            if fabro_proc::process_alive(*pid) {
+                true
+            } else {
+                let _ = std::fs::remove_file(path);
+                false
+            }
+        })
+        .count()
+}
+
+fn write_marker(root: &Path) {
+    let marker = ClientMarker {
+        pid: current_pid(),
+        touched_at_ms: current_timestamp_ms(),
+    };
+    let marker_path = session_marker_path(root, marker.pid);
+    ensure_parent_dir(&marker_path);
+    let contents =
+        serde_json::to_vec(&marker).expect("client marker should serialize to JSON bytes");
+    std::fs::write(&marker_path, contents)
+        .unwrap_or_else(|err| panic!("failed to write {}: {err}", marker_path.display()));
+}
+
+fn stop_session_server(fabro_bin: &Path, storage_dir: &Path) {
+    let record_path = storage_dir.join("server.json");
+    if !record_path.exists() {
+        return;
+    }
+
+    let _ = std::process::Command::new(fabro_bin)
+        .arg("server")
+        .arg("stop")
+        .arg("--storage-dir")
+        .arg(storage_dir)
+        .arg("--no-upgrade-check")
+        .env("NO_COLOR", "1")
+        .env("FABRO_NO_UPGRADE_CHECK", "true")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+}
+
+fn cleanup_session_root(fabro_bin: &Path, root: &Path, storage_dir: &Path) {
+    with_session_lock(root, || {
+        let marker_path = session_marker_path(root, current_pid());
+        let _ = std::fs::remove_file(&marker_path);
+        let live_count = live_marker_count(root);
+        if live_count == 0 {
+            stop_session_server(fabro_bin, storage_dir);
+            let _ = std::fs::remove_dir_all(root);
+        }
+    });
+}
+
+fn reap_stale_session_roots(fabro_bin: &Path, mode: SessionMode) {
+    let base_dir = short_session_base_dir();
+    let Ok(entries) = std::fs::read_dir(&base_dir) else {
+        return;
+    };
+
+    for entry in entries.filter_map(Result::ok) {
+        let root = entry.path();
+        if !root.is_dir() {
+            continue;
+        }
+        let file_name = root.file_name().and_then(|name| name.to_str()).unwrap_or("");
+        let expected_prefix = match mode {
+            SessionMode::Nextest => "n-",
+            SessionMode::Process => "p-",
+        };
+        if !file_name.starts_with(expected_prefix) {
+            continue;
+        }
+        with_session_lock(&root, || {
+            if live_marker_count(&root) == 0 {
+                let storage_dir = root.join("storage");
+                stop_session_server(fabro_bin, &storage_dir);
+                let _ = std::fs::remove_dir_all(&root);
+            }
+        });
+    }
 }
 
 impl TestContext {
@@ -102,16 +362,36 @@ impl TestContext {
     /// `fabro_bin` should be the path to the compiled `fabro` binary,
     /// typically obtained via `env!("CARGO_BIN_EXE_fabro")`.
     pub fn new(fabro_bin: PathBuf) -> Self {
-        let root = tempfile::tempdir().expect("failed to create temp dir");
-        let root_path = root.path().to_path_buf();
+        let context_root = tempfile::tempdir().expect("failed to create temp dir");
+        let root_path = context_root.path().to_path_buf();
+        let (_, test_run_id, session_paths) = session_paths();
+        reap_stale_session_roots(&fabro_bin, SessionMode::Nextest);
+        reap_stale_session_roots(&fabro_bin, SessionMode::Process);
+        with_session_lock(&session_paths.root, || {
+            std::fs::create_dir_all(session_clients_dir(&session_paths.root)).unwrap_or_else(
+                |err| {
+                    panic!(
+                        "failed to create {}: {err}",
+                        session_clients_dir(&session_paths.root).display()
+                    )
+                },
+            );
+            std::fs::create_dir_all(&session_paths.storage_dir).unwrap_or_else(|err| {
+                panic!(
+                    "failed to create {}: {err}",
+                    session_paths.storage_dir.display()
+                )
+            });
+            write_marker(&session_paths.root);
+        });
 
         let temp_dir = root_path.join("temp");
         let home_dir = root_path.join("home");
-        let storage_dir = root_path.join("storage");
+        let storage_dir = session_paths.storage_dir.clone();
+        let test_case_id = test_case_id();
 
         std::fs::create_dir_all(&temp_dir).expect("failed to create temp_dir");
         std::fs::create_dir_all(&home_dir).expect("failed to create home_dir");
-        std::fs::create_dir_all(&storage_dir).expect("failed to create storage_dir");
 
         let filters = vec![
             (
@@ -138,15 +418,25 @@ impl TestContext {
                 regex::escape(storage_dir.to_str().unwrap()),
                 "[STORAGE_DIR]".to_string(),
             ),
+            (regex::escape(&test_case_id), "[TEST_CASE]".to_string()),
+            (regex::escape(&test_run_id), "[TEST_RUN]".to_string()),
         ];
+
+        {
+            let mut refs = session_refs().lock().expect("session refs lock poisoned");
+            *refs.entry(session_paths.root.clone()).or_default() += 1;
+        }
 
         Self {
             temp_dir,
             home_dir,
             storage_dir,
+            test_case_id,
+            test_run_id,
+            session_root: session_paths.root,
             fabro_bin,
             filters,
-            _root: root,
+            _context_root: context_root,
         }
     }
 
@@ -167,6 +457,29 @@ impl TestContext {
         filters
     }
 
+    pub fn test_run_id(&self) -> &str {
+        &self.test_run_id
+    }
+
+    pub fn test_case_id(&self) -> &str {
+        &self.test_case_id
+    }
+
+    pub fn test_run_label(&self) -> String {
+        format!("fabro_test_run={}", self.test_run_id)
+    }
+
+    pub fn test_case_label(&self) -> String {
+        format!("fabro_test_case={}", self.test_case_id)
+    }
+
+    fn append_test_labels(&self, cmd: &mut Command) {
+        cmd.arg("--label");
+        cmd.arg(self.test_run_label());
+        cmd.arg("--label");
+        cmd.arg(self.test_case_label());
+    }
+
     /// Build a base `Command` with all isolation env vars set.
     ///
     /// The working directory defaults to `self.temp_dir` (a non-git temp
@@ -180,6 +493,10 @@ impl TestContext {
         cmd.env("HOME", &self.home_dir);
         cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
         cmd.env("FABRO_STORAGE_DIR", &self.storage_dir);
+        cmd.env(
+            "FABRO_SERVER_MAX_CONCURRENT_RUNS",
+            "64",
+        );
         cmd
     }
 
@@ -194,6 +511,15 @@ impl TestContext {
     pub fn run_cmd(&self) -> Command {
         let mut cmd = self.command();
         cmd.arg("run");
+        self.append_test_labels(&mut cmd);
+        cmd
+    }
+
+    /// Build a `create` subcommand with per-test labels attached.
+    pub fn create_cmd(&self) -> Command {
+        let mut cmd = self.command();
+        cmd.arg("create");
+        self.append_test_labels(&mut cmd);
         cmd
     }
 
@@ -380,14 +706,55 @@ impl TestContext {
             .flatten()
             .map(|entry| entry.path())
             .filter(|path| path.is_dir())
+            .filter(|path| {
+                let Ok(contents) = std::fs::read_to_string(path.join("run.json")) else {
+                    return false;
+                };
+                serde_json::from_str::<Value>(&contents)
+                    .ok()
+                    .and_then(|value| {
+                        value
+                            .get("labels")
+                            .and_then(Value::as_object)
+                            .and_then(|labels| labels.get("fabro_test_case"))
+                            .and_then(Value::as_str)
+                            .map(|value| value == self.test_case_id())
+                    })
+                    .unwrap_or(false)
+            })
             .collect();
         assert_eq!(
             entries.len(),
             1,
-            "expected exactly one run directory under {}",
+            "expected exactly one run directory for fabro_test_case={} under {}",
+            self.test_case_id(),
             runs_dir.display()
         );
         entries.into_iter().next().unwrap()
+    }
+}
+
+impl Drop for TestContext {
+    fn drop(&mut self) {
+        let is_last_ref = {
+            let mut refs = session_refs().lock().expect("session refs lock poisoned");
+            let Some(count) = refs.get_mut(&self.session_root) else {
+                return;
+            };
+            *count -= 1;
+            if *count == 0 {
+                refs.remove(&self.session_root);
+                true
+            } else {
+                false
+            }
+        };
+
+        if !is_last_ref {
+            return;
+        }
+
+        cleanup_session_root(&self.fabro_bin, &self.session_root, &self.storage_dir);
     }
 }
 
@@ -829,6 +1196,13 @@ macro_rules! e2e_openai {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn env_lock() -> &'static Mutex<()> {
+        ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn twin_admin_url_removes_v1_suffix() {
@@ -886,5 +1260,76 @@ mod tests {
     #[should_panic(expected = "TwinScenario::retry_after requires a error script")]
     fn twin_scenario_rejects_retry_after_on_success() {
         let _ = TwinScenario::responses("gpt-5.4-mini").retry_after("30");
+    }
+
+    #[test]
+    fn session_paths_share_nextest_storage_dir() {
+        let _lock = env_lock().lock().expect("env lock poisoned");
+        let _guard = EnvGuard::set("NEXTEST_RUN_ID", Some("nextest-run-123"));
+        let (_, run_id, paths) = session_paths();
+        assert_eq!(run_id, "nextest-run-123");
+        assert!(paths.root.ends_with(Path::new("fx").join("n-nextestrun12")));
+        assert_eq!(paths.storage_dir, paths.root.join("storage"));
+    }
+
+    #[test]
+    fn session_paths_fall_back_to_process_storage_dir() {
+        let _lock = env_lock().lock().expect("env lock poisoned");
+        let _guard = EnvGuard::set("NEXTEST_RUN_ID", None);
+        let (_, run_id, paths) = session_paths();
+        assert_eq!(run_id, format!("process-{}", current_pid()));
+        assert!(paths.root.ends_with(Path::new("fx").join(format!("p-{}", current_pid()))));
+        assert_eq!(paths.storage_dir, paths.root.join("storage"));
+    }
+
+    #[test]
+    fn run_and_create_commands_include_test_labels() {
+        let _lock = env_lock().lock().expect("env lock poisoned");
+        let _guard = EnvGuard::set("NEXTEST_RUN_ID", Some("run-cmd-labels"));
+        let context = TestContext::new(PathBuf::from("/tmp/fabro"));
+
+        let run_args = context
+            .run_cmd()
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(run_args[0], "run");
+        assert!(run_args.contains(&"--label".to_string()));
+        assert!(run_args.contains(&context.test_run_label()));
+        assert!(run_args.contains(&context.test_case_label()));
+
+        let create_args = context
+            .create_cmd()
+            .get_args()
+            .map(|arg| arg.to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(create_args[0], "create");
+        assert!(create_args.contains(&context.test_run_label()));
+        assert!(create_args.contains(&context.test_case_label()));
+    }
+
+    struct EnvGuard {
+        key: &'static str,
+        original: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: Option<&str>) -> Self {
+            let original = std::env::var(key).ok();
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+            Self { key, original }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
     }
 }

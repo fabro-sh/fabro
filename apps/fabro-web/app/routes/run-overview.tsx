@@ -23,7 +23,7 @@ interface Stage {
 export async function loader({ request, params }: any) {
   const [{ data: apiStages }, response] = await Promise.all([
     apiJson<PaginatedRunStageList>(`/runs/${params.id}/stages`, { request }),
-    apiJson<PaginatedRunList>("/runs", { request }),
+    apiJson<PaginatedRunList>("/boards/runs", { request }),
   ]);
   const stages: Stage[] = apiStages.map((s) => ({
     id: s.id,

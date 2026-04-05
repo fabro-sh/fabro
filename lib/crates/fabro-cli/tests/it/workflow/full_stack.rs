@@ -25,7 +25,7 @@ fn scenario_full_stack(sandbox: &str) {
         .assert()
         .success();
 
-    let run_dir = find_run_dir(&context.storage_dir);
+    let run_dir = find_run_dir(&context);
     let conclusion = read_conclusion(&run_dir);
     assert_eq!(
         conclusion["status"].as_str(),

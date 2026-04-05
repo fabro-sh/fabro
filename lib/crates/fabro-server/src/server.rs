@@ -58,9 +58,9 @@ pub use fabro_api::types::{
     ArtifactListResponse, CompletionContentPart, CompletionMessage, CompletionMessageRole,
     CompletionResponse, CompletionToolChoiceMode, CompletionUsage, CreateCompletionRequest,
     CreateRunRequest, EventEnvelope as ApiEventEnvelope, ModelReference, PaginatedEventList,
-    PaginatedRunList, PaginationMeta, QuestionType as ApiQuestionType, RunError, RunEvent as ApiRunEvent,
-    RunStatus, RunStatusResponse, SubmitAnswerRequest, TokenUsage, UsageByModel,
-    WriteBlobResponse,
+    PaginatedRunList, PaginationMeta, QuestionType as ApiQuestionType, RunError,
+    RunEvent as ApiRunEvent, RunStatus, RunStatusResponse, StartRunRequest,
+    SubmitAnswerRequest, TokenUsage, UsageByModel, WriteBlobResponse,
 };
 
 pub fn default_page_limit() -> u32 {
@@ -134,6 +134,13 @@ struct ManagedRun {
     cancel_tx: Option<oneshot::Sender<()>>,
     cancel_token: Option<Arc<AtomicBool>>,
     run_dir: Option<std::path::PathBuf>,
+    execution_mode: RunExecutionMode,
+}
+
+#[derive(Clone, Copy)]
+enum RunExecutionMode {
+    Start,
+    Resume,
 }
 
 /// Per-model usage totals.
@@ -317,7 +324,8 @@ fn demo_routes() -> Router<Arc<AppState>> {
 fn real_routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/runs", get(list_runs).post(create_run))
-        .route("/runs/{id}", get(get_run_status))
+        .route("/boards/runs", get(list_board_runs))
+        .route("/runs/{id}", get(get_run_status).delete(delete_run))
         .route("/runs/{id}/questions", get(get_questions))
         .route("/runs/{id}/questions/{qid}/answer", post(submit_answer))
         .route("/runs/{id}/state", get(get_run_state))
@@ -525,7 +533,7 @@ fn build_app_state(
     })
 }
 
-async fn list_runs(
+async fn list_board_runs(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationParams>,
@@ -557,6 +565,40 @@ async fn list_runs(
         })),
     )
         .into_response()
+}
+
+async fn list_runs(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    match state
+        .store
+        .list_runs(&fabro_store::ListRunsQuery::default())
+        .await
+    {
+        Ok(runs) => (StatusCode::OK, Json(runs)).into_response(),
+        Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    }
+}
+
+async fn delete_run(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+
+    if let Ok(mut runs) = state.runs.lock() {
+        runs.remove(&id);
+    }
+
+    match state.store.delete_run(&id).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    }
 }
 
 fn compute_queue_positions(runs: &HashMap<RunId, ManagedRun>) -> HashMap<RunId, i64> {
@@ -633,46 +675,100 @@ fn clear_live_run_state(run: &mut ManagedRun) {
     run.cancel_token = None;
 }
 
+fn managed_run(
+    dot_source: String,
+    status: RunStatus,
+    created_at: chrono::DateTime<chrono::Utc>,
+    run_dir: std::path::PathBuf,
+    execution_mode: RunExecutionMode,
+) -> ManagedRun {
+    ManagedRun {
+        dot_source,
+        status,
+        error: None,
+        created_at,
+        interviewer: None,
+        event_tx: None,
+        checkpoint: None,
+        cancel_tx: None,
+        cancel_token: None,
+        run_dir: Some(run_dir),
+        execution_mode,
+    }
+}
+
 async fn create_run(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreateRunRequest>,
 ) -> Response {
-    let run_id = RunId::new();
+    let run_id = match req.run_id.as_deref() {
+        Some(raw) => match raw.parse::<RunId>() {
+            Ok(parsed) => parsed,
+            Err(_) => return ApiError::bad_request("Invalid run ID.").into_response(),
+        },
+        None => RunId::new(),
+    };
     info!(run_id = %run_id, "Run created");
-    let settings = state.settings.read().unwrap().clone();
-    let created = match Box::pin(operations::create(
-        state.store.as_ref(),
+
+    let using_dot_source = req.dot_source.as_ref().is_some_and(|value| !value.is_empty());
+    let using_local_workflow = req
+        .workflow_path
+        .as_ref()
+        .is_some_and(|value| !value.is_empty());
+
+    if using_dot_source == using_local_workflow {
+        return ApiError::bad_request(
+            "Provide exactly one of dot_source or workflow_path/cwd/settings_json.",
+        )
+        .into_response();
+    }
+
+    let create_input = if let Some(dot_source) = req.dot_source.clone() {
         CreateRunInput {
             workflow: WorkflowInput::DotSource {
-                source: req.dot_source.clone(),
+                source: dot_source,
                 base_dir: None,
             },
-            settings,
+            settings: state.settings.read().unwrap().clone(),
             cwd: std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir()),
             workflow_slug: None,
             run_id: Some(run_id),
             host_repo_path: None,
             base_branch: None,
-        },
-    ))
-    .await
-    {
-        Ok(created) => created,
-        Err(ref err @ FabroError::ValidationFailed { ref diagnostics }) => {
-            let message = if diagnostics.is_empty() {
-                err.to_string()
-            } else {
-                diagnostics
-                    .iter()
-                    .map(|diagnostic| diagnostic.message.as_str())
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            };
-            return ApiError::bad_request(message).into_response();
         }
-        Err(err @ FabroError::Parse(_)) => {
-            return ApiError::bad_request(err.to_string()).into_response();
+    } else {
+        let Some(workflow_path) = req.workflow_path.as_ref() else {
+            return ApiError::bad_request("workflow_path is required").into_response();
+        };
+        let Some(cwd) = req.cwd.as_ref() else {
+            return ApiError::bad_request("cwd is required").into_response();
+        };
+        let Some(settings_json) = req.settings_json.as_ref() else {
+            return ApiError::bad_request("settings_json is required").into_response();
+        };
+        let settings = match serde_json::from_str::<Settings>(settings_json) {
+            Ok(settings) => settings,
+            Err(err) => {
+                return ApiError::bad_request(format!("Invalid settings_json payload: {err}"))
+                    .into_response();
+            }
+        };
+        CreateRunInput {
+            workflow: WorkflowInput::Path(std::path::PathBuf::from(workflow_path)),
+            settings,
+            cwd: std::path::PathBuf::from(cwd),
+            workflow_slug: None,
+            run_id: Some(run_id),
+            host_repo_path: None,
+            base_branch: None,
+        }
+    };
+
+    let created = match Box::pin(operations::create(state.store.as_ref(), create_input)).await {
+        Ok(created) => created,
+        Err(FabroError::ValidationFailed { .. } | FabroError::Parse(_)) => {
+            return ApiError::bad_request("Validation failed").into_response();
         }
         Err(err) => {
             return ApiError::new(
@@ -682,25 +778,19 @@ async fn create_run(
             .into_response();
         }
     };
-    let created_at = run_id.created_at();
-    let run_dir = created.run_dir;
+    let created_at = created.run_id.created_at();
 
     {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         runs.insert(
-            run_id,
-            ManagedRun {
-                dot_source: req.dot_source,
-                status: RunStatus::Submitted,
-                error: None,
+            created.run_id,
+            managed_run(
+                created.persisted.source().to_string(),
+                RunStatus::Submitted,
                 created_at,
-                interviewer: None,
-                event_tx: None,
-                checkpoint: None,
-                cancel_tx: None,
-                cancel_token: None,
-                run_dir: Some(run_dir),
-            },
+                created.run_dir,
+                RunExecutionMode::Start,
+            ),
         );
     }
 
@@ -714,49 +804,115 @@ async fn create_run(
             created_at,
         }),
     )
-        .into_response()
+    .into_response()
 }
 
 async fn start_run(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
+    body: Option<Json<StartRunRequest>>,
 ) -> Response {
     let id = match parse_run_id_path(&id) {
         Ok(id) => id,
         Err(response) => return response,
     };
-    let mut runs = state.runs.lock().expect("runs lock poisoned");
-    match runs.get_mut(&id) {
-        Some(managed_run) => {
-            if managed_run.status != RunStatus::Submitted {
-                return ApiError::new(StatusCode::CONFLICT, "Run is not in submitted status.")
-                    .into_response();
-            }
-            managed_run.status = RunStatus::Queued;
-            let response = (
-                StatusCode::OK,
-                Json(RunStatusResponse {
-                    id: id.to_string(),
-                    status: RunStatus::Queued,
-                    error: None,
-                    queue_position: None,
-                    created_at: managed_run.created_at,
-                }),
-            )
+    let resume = body.map(|Json(req)| req.resume).unwrap_or(false);
+
+    {
+        let runs = state.runs.lock().expect("runs lock poisoned");
+        if let Some(managed_run) = runs.get(&id) {
+            if matches!(
+                managed_run.status,
+                RunStatus::Queued | RunStatus::Starting | RunStatus::Running
+            ) {
+                return ApiError::new(
+                    StatusCode::CONFLICT,
+                    if resume {
+                        "an engine process is still running for this run — cannot resume"
+                    } else {
+                        "an engine process is still running for this run — cannot start"
+                    },
+                )
                 .into_response();
-            drop(runs);
-            state.scheduler_notify.notify_one();
-            response
+            }
         }
-        None => ApiError::not_found("Run not found.").into_response(),
     }
+
+    let run_store = match state.store.open_run(&id).await {
+        Ok(run_store) => run_store,
+        Err(_) => return ApiError::not_found("Run not found.").into_response(),
+    };
+    let run_state = match run_store.state().await {
+        Ok(state) => state,
+        Err(err) => {
+            return ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to load run state: {err}"),
+            )
+            .into_response();
+        }
+    };
+
+    if resume {
+        if run_state.checkpoint.is_none() {
+            return ApiError::new(StatusCode::CONFLICT, "no checkpoint to resume from")
+                .into_response();
+        }
+    } else if let Some(record) = run_state.status.as_ref() {
+        if !matches!(record.status, fabro_workflow::run_status::RunStatus::Submitted | fabro_workflow::run_status::RunStatus::Starting)
+        {
+            return ApiError::new(
+                StatusCode::CONFLICT,
+                format!("cannot start run: status is {:?}, expected submitted", record.status),
+            )
+            .into_response();
+        }
+    }
+
+    let Some(run_record) = run_state.run.as_ref() else {
+        return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "run record missing from store")
+            .into_response();
+    };
+    let run_dir = operations::make_run_dir(&run_record.settings.storage_dir().join("runs"), &id);
+    let dot_source = run_state.graph_source.unwrap_or_default();
+
+    {
+        let mut runs = state.runs.lock().expect("runs lock poisoned");
+        runs.insert(
+            id,
+            managed_run(
+                dot_source,
+                RunStatus::Queued,
+                id.created_at(),
+                run_dir,
+                if resume {
+                    RunExecutionMode::Resume
+                } else {
+                    RunExecutionMode::Start
+                },
+            ),
+        );
+    }
+
+    state.scheduler_notify.notify_one();
+    (
+        StatusCode::OK,
+        Json(RunStatusResponse {
+            id: id.to_string(),
+            status: RunStatus::Queued,
+            error: None,
+            queue_position: None,
+            created_at: id.created_at(),
+        }),
+    )
+    .into_response()
 }
 
 /// Execute a single run: transitions queued → starting → running → completed/failed/cancelled.
 async fn execute_run(state: Arc<AppState>, run_id: RunId) {
     // Transition to Starting and set up cancel infrastructure
-    let (cancel_rx, run_dir, event_tx, cancel_token) = {
+    let (cancel_rx, run_dir, event_tx, cancel_token, execution_mode) = {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         let managed_run = match runs.get_mut(&run_id) {
             Some(r) if r.status == RunStatus::Queued => r,
@@ -780,6 +936,7 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
             run_dir,
             managed_run.event_tx.clone(),
             cancel_token,
+            managed_run.execution_mode,
         )
     };
 
@@ -867,8 +1024,15 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
         registry_override,
     };
 
+    let execution = async {
+        match execution_mode {
+            RunExecutionMode::Start => operations::start(&run_dir, services).await,
+            RunExecutionMode::Resume => operations::resume(&run_dir, services).await,
+        }
+    };
+
     let result = tokio::select! {
-        result = operations::start(&run_dir, services) => result,
+        result = execution => result,
         _ = cancel_rx => {
             cancel_token.store(true, Ordering::SeqCst);
             Err(FabroError::Cancelled)
@@ -996,30 +1160,16 @@ async fn get_run_status(
         Ok(id) => id,
         Err(response) => return response,
     };
-    let runs = state.runs.lock().expect("runs lock poisoned");
-    match runs.get(&id) {
-        Some(managed_run) => {
-            let queue_position = if managed_run.status == RunStatus::Queued {
-                let positions = compute_queue_positions(&runs);
-                positions.get(&id).copied()
-            } else {
-                None
-            };
-            (
-                StatusCode::OK,
-                Json(RunStatusResponse {
-                    id: id.to_string(),
-                    status: managed_run.status,
-                    error: managed_run.error.as_ref().map(|msg| RunError {
-                        message: msg.clone(),
-                    }),
-                    created_at: managed_run.created_at,
-                    queue_position,
-                }),
-            )
-                .into_response()
-        }
-        None => ApiError::not_found("Run not found.").into_response(),
+    match state
+        .store
+        .list_runs(&fabro_store::ListRunsQuery::default())
+        .await
+    {
+        Ok(runs) => match runs.into_iter().find(|run| run.run_id == id) {
+            Some(run) => (StatusCode::OK, Json(run)).into_response(),
+            None => ApiError::not_found("Run not found.").into_response(),
+        },
+        Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
     }
 }
 
@@ -2293,15 +2443,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
 
         let body = body_json(response.into_body()).await;
-        assert_eq!(body["id"].as_str().unwrap(), run_id);
-        let status = body["status"].as_str().unwrap();
-        assert!(
-            status == "queued"
-                || status == "starting"
-                || status == "running"
-                || status == "completed",
-            "unexpected status: {status}"
-        );
+        assert_eq!(body["run_id"].as_str().unwrap(), run_id);
+        assert!(body["labels"].is_object());
     }
 
     #[tokio::test]
@@ -2892,8 +3035,7 @@ mod tests {
         let response = app.clone().oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let body = body_json(response.into_body()).await;
-        assert_eq!(body["data"].as_array().unwrap().len(), 0);
-        assert!(!body["meta"]["has_more"].as_bool().unwrap());
+        assert_eq!(body.as_array().unwrap().len(), 0);
 
         // Start a run
         let req = Request::builder()
@@ -2919,11 +3061,45 @@ mod tests {
         let response = app.oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let body = body_json(response.into_body()).await;
-        let items = body["data"].as_array().unwrap();
+        let items = body.as_array().unwrap();
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0]["id"].as_str().unwrap(), run_id.to_string());
+        assert_eq!(items[0]["run_id"].as_str().unwrap(), run_id.to_string());
         assert!(items[0]["status"].as_str().is_some());
-        assert!(!body["meta"]["has_more"].as_bool().unwrap());
+    }
+
+    #[tokio::test]
+    async fn delete_run_removes_durable_run() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api("/runs"))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
+            ))
+            .unwrap();
+
+        let response = app.clone().oneshot(req).await.unwrap();
+        let body = body_json(response.into_body()).await;
+        let run_id = body["id"].as_str().unwrap();
+
+        let req = Request::builder()
+            .method("DELETE")
+            .uri(api(&format!("/runs/{run_id}")))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{run_id}")))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

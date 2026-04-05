@@ -113,22 +113,21 @@ paths:
       operationId: listRuns
       tags: [Runs]
       summary: List Runs
-      description: Returns a paginated list of runs for the board view, ordered by recency.
-      parameters:
-        - $ref: "#/components/parameters/PageLimit"
-        - $ref: "#/components/parameters/PageOffset"
+      description: Returns durable run summaries from the backing store, including runs persisted before the current server boot.
       responses:
         "200":
-          description: Paginated list of runs for the board view
+          description: Durable run summaries
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PaginatedRunList"
+                type: array
+                items:
+                  $ref: "#/components/schemas/StoreRunSummary"
     post:
       operationId: createRun
       tags: [Runs]
       summary: Create Run
-      description: Creates a new workflow run from a Graphviz graph source. The run is created in `submitted` status. Use `POST /api/v1/runs/{id}/start` to begin execution.
+      description: Creates a new workflow run in `submitted` status. Callers may either provide `dot_source` directly or provide `workflow_path`, `cwd`, and `settings_json` so the server can load a local workflow path for trusted CLI execution.
       requestBody:
         required: true
         content:
@@ -154,16 +153,32 @@ paths:
       operationId: retrieveRun
       tags: [Runs]
       summary: Retrieve Run
-      description: Returns the current status of a run, including error details and queue position if applicable.
+      description: Returns the durable run summary for a run.
       parameters:
         - $ref: "#/components/parameters/RunId"
       responses:
         "200":
-          description: Run status
+          description: Durable run summary
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RunStatusResponse"
+                $ref: "#/components/schemas/StoreRunSummary"
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteRun
+      tags: [Runs]
+      summary: Delete Run
+      description: Deletes durable store state for a run. This does not remove any local run directory.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "204":
+          description: Run deleted or already absent
         "404":
           description: Run not found
           content:
@@ -204,9 +219,15 @@ paths:
       operationId: startRun
       tags: [Runs]
       summary: Start Run
-      description: Starts a submitted run, queuing it for execution. Returns 409 if the run is not in `submitted` status.
+      description: Starts a submitted run, queuing it for execution. Provide `resume=true` to resume an interrupted run from checkpoint. Returns 409 if the run is not startable.
       parameters:
         - $ref: "#/components/parameters/RunId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartRunRequest"
       responses:
         "200":
           description: Run started
@@ -334,6 +355,23 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/boards/runs:
+    get:
+      operationId: listBoardRuns
+      tags: [Runs]
+      summary: List Board Runs
+      description: Temporary board-view list of managed runs. This endpoint is UI-oriented and may change as the app evolves.
+      parameters:
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageOffset"
+      responses:
+        "200":
+          description: Paginated list of runs for the board view
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginatedRunList"
 
   /api/v1/runs/{id}/state:
     get:
@@ -2189,15 +2227,42 @@ components:
         - paused
 
     CreateRunRequest:
-      description: Request body for creating a new run from a Graphviz graph source.
+      description: Request body for creating a new run, either from inline Graphviz source or from a local workflow path plus resolved settings.
       type: object
-      required:
-        - dot_source
       properties:
         dot_source:
           type: string
+          nullable: true
           description: Graphviz DOT language source defining the workflow graph.
           example: 'digraph { start [shape=Mdiamond]; exit [shape=Msquare]; start -> exit }'
+        workflow_path:
+          type: string
+          nullable: true
+          description: Absolute or relative path to the workflow file to load on the local machine.
+          example: "/tmp/project/fabro/workflows/simple/workflow.fabro"
+        cwd:
+          type: string
+          nullable: true
+          description: Working directory used to resolve the workflow path.
+          example: "/tmp/project"
+        settings_json:
+          type: string
+          nullable: true
+          description: JSON-serialized `fabro_types::Settings` payload resolved by the CLI.
+        run_id:
+          type: string
+          nullable: true
+          description: Optional pre-generated run ID to use instead of allocating a new ULID.
+          example: "01HV6D7S5YF4Z4B2M7K4N0Q6T9"
+
+    StartRunRequest:
+      description: Request body for starting or resuming a run.
+      type: object
+      properties:
+        resume:
+          type: boolean
+          description: Resume from checkpoint instead of starting from submitted state.
+          default: false
 
     RunStatusResponse:
       description: Current status of a run with optional error and queue position.
@@ -2619,6 +2684,51 @@ components:
           description: Map from StageId (`node_id@visit`) to NodeState.
           additionalProperties:
             $ref: "#/components/schemas/NodeState"
+
+    StoreRunSummary:
+      description: Durable run summary derived from the backing store.
+      type: object
+      required:
+        - run_id
+        - labels
+      properties:
+        run_id:
+          type: string
+        workflow_name:
+          type: string
+          nullable: true
+        workflow_slug:
+          type: string
+          nullable: true
+        goal:
+          type: string
+          nullable: true
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        host_repo_path:
+          type: string
+          nullable: true
+        start_time:
+          type: string
+          format: date-time
+          nullable: true
+        status:
+          type: string
+          nullable: true
+        status_reason:
+          type: string
+          nullable: true
+        duration_ms:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+        total_cost:
+          type: number
+          format: double
+          nullable: true
 
     # ── Run Board Schemas ────────────────────────────────────────────────
 

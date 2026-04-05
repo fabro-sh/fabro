@@ -1,4 +1,5 @@
-mod dump;
+pub(crate) mod dump;
+pub(crate) mod rebuild;
 
 use anyhow::Result;
 

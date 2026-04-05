@@ -6,6 +6,7 @@ mod logging;
 mod shared;
 #[cfg(feature = "sleep_inhibitor")]
 mod sleep_inhibitor;
+mod server_client;
 mod store;
 mod user_config;
 

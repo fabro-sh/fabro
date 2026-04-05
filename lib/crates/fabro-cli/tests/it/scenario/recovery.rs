@@ -7,6 +7,8 @@ use fabro_test::{fabro_snapshot, test_context};
 use fabro_types::Checkpoint;
 use git2::{Repository, Signature};
 
+use crate::support::unique_run_id;
+
 fn list_metadata_run_ids(repo_dir: &Path) -> BTreeSet<String> {
     let repo = Repository::discover(repo_dir).unwrap();
     repo.references()
@@ -104,7 +106,7 @@ digraph Recovery {
 fn rewind_and_fork_recover_missing_metadata_from_real_run_state() {
     let context = test_context!();
     let repo_dir = tempfile::tempdir().unwrap();
-    let source_run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAN";
+    let source_run_id = unique_run_id();
 
     init_repo_with_workflow(repo_dir.path());
 
@@ -118,7 +120,7 @@ fn rewind_and_fork_recover_missing_metadata_from_real_run_state() {
             "--sandbox",
             "local",
             "--run-id",
-            source_run_id,
+            source_run_id.as_str(),
             "workflow.fabro",
         ])
         .assert()
@@ -142,7 +144,7 @@ fn rewind_and_fork_recover_missing_metadata_from_real_run_state() {
 
     let mut rewind_list = context.command();
     rewind_list.current_dir(repo_dir.path());
-    rewind_list.args(["rewind", source_run_id, "--list"]);
+    rewind_list.args(["rewind", &source_run_id, "--list"]);
     rewind_list.timeout(std::time::Duration::from_secs(15));
     fabro_snapshot!(filters.clone(), rewind_list, @"
     success: true
@@ -155,7 +157,7 @@ fn rewind_and_fork_recover_missing_metadata_from_real_run_state() {
      @3  build
     ");
 
-    let rebuilt_checkpoints = metadata_checkpoints(repo_dir.path(), source_run_id);
+    let rebuilt_checkpoints = metadata_checkpoints(repo_dir.path(), &source_run_id);
     assert_eq!(
         rebuilt_checkpoints
             .first()
@@ -175,7 +177,7 @@ fn rewind_and_fork_recover_missing_metadata_from_real_run_state() {
     context
         .command()
         .current_dir(repo_dir.path())
-        .args(["fork", source_run_id, "--no-push"])
+        .args(["fork", &source_run_id, "--no-push"])
         .timeout(std::time::Duration::from_secs(15))
         .assert()
         .success();
@@ -195,7 +197,7 @@ fn rewind_and_fork_recover_missing_metadata_from_real_run_state() {
 
     let mut source_rewind = context.command();
     source_rewind.current_dir(repo_dir.path());
-    source_rewind.args(["rewind", source_run_id, "@2", "--no-push"]);
+    source_rewind.args(["rewind", &source_run_id, "@2", "--no-push"]);
     source_rewind.timeout(std::time::Duration::from_secs(15));
     fabro_snapshot!(rewind_filters, source_rewind, @"
     success: true
@@ -208,14 +210,14 @@ fn rewind_and_fork_recover_missing_metadata_from_real_run_state() {
     To resume: fabro resume [RUN_PREFIX]
     ");
 
-    let rewound_child = latest_metadata_checkpoint(repo_dir.path(), source_run_id);
+    let rewound_child = latest_metadata_checkpoint(repo_dir.path(), &source_run_id);
     assert_eq!(rewound_child.git_commit_sha, plan_sha);
 
     let before_grandchild = list_metadata_run_ids(repo_dir.path());
     context
         .command()
         .current_dir(repo_dir.path())
-        .args(["fork", source_run_id, "--no-push"])
+        .args(["fork", &source_run_id, "--no-push"])
         .timeout(std::time::Duration::from_secs(15))
         .assert()
         .success();

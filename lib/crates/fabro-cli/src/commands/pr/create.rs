@@ -4,13 +4,13 @@ use anyhow::{Context, Result, bail};
 use fabro_model::Catalog;
 use fabro_sandbox::daytona::detect_repo_info;
 use fabro_workflow::outcome::StageStatus;
-use fabro_workflow::pull_request::maybe_open_pull_request;
-use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
+use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 use tracing::info;
 
 use crate::args::{GlobalArgs, PrCreateArgs};
+use crate::commands::store::rebuild::rebuild_run_store;
 use crate::shared::print_json_pretty;
-use crate::store;
+use crate::server_client;
 use crate::user_config::load_user_settings_with_globals;
 
 pub(super) async fn create_command(
@@ -30,9 +30,12 @@ async fn create_from(
     globals: &GlobalArgs,
 ) -> Result<()> {
     let storage_dir = base.parent().unwrap_or(base);
-    let store = store::build_store(storage_dir)?;
-    let run = resolve_run_combined(store.as_ref(), base, &args.run_id).await?;
-    let run_store = store::open_run_reader(storage_dir, &run.run_id()).await?;
+    let client = server_client::connect_server(storage_dir).await?;
+    let summaries = client.list_store_runs().await?;
+    let run = resolve_run_from_summaries(&summaries, base, &args.run_id)?;
+    let run_id = run.run_id();
+    let events = client.list_run_events(&run_id, None, None).await?;
+    let run_store = rebuild_run_store(&run_id, &events).await?;
     let state = run_store.state().await?;
 
     let record = state.run.context("Failed to load run record from store")?;
@@ -101,7 +104,7 @@ async fn create_from(
         .model
         .unwrap_or_else(|| Catalog::builtin().default_from_env().id.clone());
 
-    let record = maybe_open_pull_request(
+    let record = fabro_workflow::pull_request::maybe_open_pull_request(
         &creds,
         &origin_url,
         base_branch,

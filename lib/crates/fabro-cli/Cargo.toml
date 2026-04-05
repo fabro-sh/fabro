@@ -36,6 +36,7 @@ fabro-graphviz = { path = "../fabro-graphviz" }
 fabro-validate = { path = "../fabro-validate" }
 fabro-workflow = { path = "../fabro-workflow" }
 fabro-server = { path = "../fabro-server" }
+fabro-api = { path = "../fabro-api" }
 fabro-telemetry = { path = "../fabro-telemetry" }
 fabro-store = { path = "../fabro-store" }
 fabro-types = { path = "../fabro-types" }
@@ -60,6 +61,7 @@ futures.workspace = true
 regex.workspace = true
 semver.workspace = true
 reqwest.workspace = true
+progenitor-client = "0.13"
 async-trait.workspace = true
 jsonwebtoken.workspace = true
 base64.workspace = true

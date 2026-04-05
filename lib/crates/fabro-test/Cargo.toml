@@ -15,9 +15,11 @@ workspace = true
 [dependencies]
 assert_cmd = "2"
 axum = { workspace = true }
+fabro-proc = { path = "../fabro-proc" }
 insta = { workspace = true, features = ["filters"] }
 regex = { workspace = true }
 reqwest = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 tempfile = "3"
 tokio = { workspace = true }

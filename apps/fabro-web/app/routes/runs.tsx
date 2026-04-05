@@ -42,7 +42,7 @@ const columnConfig: {
 ];
 
 export async function loader({ request }: any) {
-  const response = await apiJson<PaginatedRunList>("/runs", { request });
+  const response = await apiJson<PaginatedRunList>("/boards/runs", { request });
   const apiRuns = response.data;
 
   const grouped = new Map<ColumnStatus, RunItem[]>();

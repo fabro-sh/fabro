@@ -3,13 +3,13 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use fabro_agent::sandbox::Sandbox;
 use fabro_sandbox::reconnect::reconnect;
-use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
+use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 use tokio::fs;
 use tracing::{debug, info};
 
 use crate::args::{CpArgs, GlobalArgs};
+use crate::server_client;
 use crate::shared::{print_json_pretty, split_run_path};
-use crate::store;
 use crate::user_config::load_user_settings_with_globals;
 
 enum CopyDirection {
@@ -128,11 +128,11 @@ async fn load_sandbox(
     base: &Path,
     run_prefix: &str,
 ) -> Result<Box<dyn Sandbox>> {
-    let store = store::build_store(storage_dir)?;
-    let run = resolve_run_combined(store.as_ref(), base, run_prefix).await?;
-    let run_store = store::open_run_reader(storage_dir, &run.run_id()).await?;
-    let record = run_store
-        .state()
+    let client = server_client::connect_server(storage_dir).await?;
+    let summaries = client.list_store_runs().await?;
+    let run = resolve_run_from_summaries(&summaries, base, run_prefix)?;
+    let record = client
+        .get_run_state(&run.run_id())
         .await?
         .sandbox
         .context("Failed to load sandbox record from store")?;

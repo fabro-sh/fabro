@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use fabro_types::RunId;
 use fabro_test::TestContext;
 macro_rules! fabro_json_snapshot {
     ($context:expr, $value:expr, @$snapshot:literal) => {{
@@ -44,4 +45,8 @@ pub(crate) fn run_output_filters(context: &TestContext) -> Vec<(String, String)>
     let mut filters = context.filters();
     filters.push((r"\b\d+ms\b".to_string(), "[TIME]".to_string()));
     filters
+}
+
+pub(crate) fn unique_run_id() -> String {
+    RunId::new().to_string()
 }

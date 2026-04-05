@@ -157,8 +157,10 @@ models/smoothness-rating.ts
 models/stage-retro.ts
 models/stage-status.ts
 models/stage-turn.ts
+models/start-run-request.ts
 models/status-reason.ts
 models/steer-request.ts
+models/store-run-summary.ts
 models/submit-answer-request.ts
 models/system-stage-turn.ts
 models/tls-settings.ts
