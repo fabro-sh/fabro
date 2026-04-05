@@ -140,7 +140,11 @@ mod mtls_e2e {
         let wrong_client_key = fixture_path("wrong-client.key");
 
         // Client trusts the REAL server CA, but presents a cert from the WRONG CA
-        let client = build_client(&pki.ca_cert, Some(&wrong_client_cert), Some(&wrong_client_key));
+        let client = build_client(
+            &pki.ca_cert,
+            Some(&wrong_client_cert),
+            Some(&wrong_client_key),
+        );
 
         let result = client
             .get(format!("https://127.0.0.1:{}{}", addr.port(), api("/runs")))
