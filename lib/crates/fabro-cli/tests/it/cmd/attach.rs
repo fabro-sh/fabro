@@ -250,14 +250,30 @@ fn attach_json_errors_without_prompting_for_human_input() {
     scopeguard::defer! {
         let _ = context.command().args(["rm", "--force", &cleanup_run_id]).output();
     }
-    let run_dir = context.find_run_dir(&run_id);
-
-    let request_path = run_dir.join("runtime/interview_request.json");
     let deadline = std::time::Instant::now() + SHARED_DAEMON_TIMEOUT;
-    while !request_path.exists() {
+    loop {
+        let logs_output = context
+            .command()
+            .args(["logs", &run_id, "--json"])
+            .output()
+            .expect("logs should execute");
+        assert!(logs_output.status.success(), "logs should succeed");
+        let log_events: Vec<Value> = String::from_utf8(logs_output.stdout)
+            .expect("stdout should be UTF-8")
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| serde_json::from_str(line).expect("log line should be valid JSON"))
+            .collect();
+        if log_events.iter().any(|event| {
+            event["event"] == "stage.started"
+                && event["node_id"] == "approve"
+                && event["properties"]["handler_type"] == "human"
+        }) {
+            break;
+        }
         assert!(
             std::time::Instant::now() < deadline,
-            "timed out waiting for interview request for {run_id}"
+            "timed out waiting for human gate to start for {run_id}"
         );
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
@@ -276,12 +292,34 @@ fn attach_json_errors_without_prompting_for_human_input() {
         !stderr.contains("Approve?"),
         "attach should not prompt on stderr"
     );
+    let logs_output = context
+        .command()
+        .args(["logs", &run_id, "--json"])
+        .output()
+        .expect("logs should execute");
+    assert!(logs_output.status.success(), "logs should succeed");
+    let log_events: Vec<Value> = String::from_utf8(logs_output.stdout)
+        .expect("stdout should be UTF-8")
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str(line).expect("log line should be valid JSON"))
+        .collect();
     assert!(
-        request_path.exists(),
-        "the run should still be waiting on the interview request"
+        log_events.iter().any(|event| {
+            event["event"] == "stage.started"
+                && event["node_id"] == "approve"
+                && event["properties"]["handler_type"] == "human"
+        }),
+        "the run should still be waiting on the human gate"
     );
     assert!(
-        !run_dir.join("runtime/interview_response.json").exists(),
+        !log_events.iter().any(|event| {
+            event["node_id"] == "approve"
+                && matches!(
+                    event["event"].as_str(),
+                    Some("stage.completed" | "stage.failed" | "interview.completed")
+                )
+        }),
         "attach --json should not answer the interview"
     );
 

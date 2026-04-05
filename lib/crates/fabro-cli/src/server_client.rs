@@ -235,6 +235,45 @@ impl ServerStoreClient {
             .collect::<Result<Vec<_>>>()
     }
 
+    pub(crate) async fn list_run_questions(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Vec<types::ApiQuestion>> {
+        let response = self
+            .client
+            .list_run_questions()
+            .id(run_id.to_string())
+            .page_limit(100)
+            .page_offset(0)
+            .send()
+            .await
+            .map_err(map_api_error)?;
+        Ok(response.into_inner().data)
+    }
+
+    pub(crate) async fn submit_run_answer(
+        &self,
+        run_id: &RunId,
+        qid: &str,
+        value: Option<String>,
+        selected_option_key: Option<String>,
+        selected_option_keys: Vec<String>,
+    ) -> Result<()> {
+        self.client
+            .submit_run_answer()
+            .id(run_id.to_string())
+            .qid(qid)
+            .body(types::SubmitAnswerRequest {
+                value,
+                selected_option_key,
+                selected_option_keys,
+            })
+            .send()
+            .await
+            .map_err(map_api_error)?;
+        Ok(())
+    }
+
     pub(crate) async fn append_run_event(&self, run_id: &RunId, event: &RunEvent) -> Result<()> {
         let body: types::RunEvent = convert_type(event)?;
         self.client

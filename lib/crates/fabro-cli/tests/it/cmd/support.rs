@@ -528,8 +528,13 @@ pub(crate) fn run_count_for_test_case(context: &TestContext) -> usize {
 }
 
 fn run_dirs_for_test_case(context: &TestContext) -> Vec<PathBuf> {
-    let runs: Vec<RunSummaryRecord> =
-        block_on(get_server_json_for_storage(&context.storage_dir, "/api/v1/runs"));
+    let runs: Option<Vec<RunSummaryRecord>> = block_on(try_get_server_json_for_storage(
+        &context.storage_dir,
+        "/api/v1/runs",
+    ));
+    let Some(runs) = runs else {
+        return Vec::new();
+    };
     runs.into_iter()
         .filter(|run| {
             run.labels
@@ -621,6 +626,24 @@ async fn get_server_json<T: serde::de::DeserializeOwned>(run_dir: &Path, path: &
     let runs_dir = run_dir.parent().expect("run dir should have parent");
     let storage_dir = runs_dir.parent().expect("runs dir should have parent");
     get_server_json_for_storage(storage_dir, path).await
+}
+
+async fn try_get_server_json_for_storage<T: serde::de::DeserializeOwned>(
+    storage_dir: &Path,
+    path: &str,
+) -> Option<T> {
+    if !storage_dir.join("fabro.sock").exists() {
+        return None;
+    }
+    let response = server_http_client(storage_dir)
+        .get(format!("http://fabro{path}"))
+        .send()
+        .await
+        .ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    response.json::<T>().await.ok()
 }
 
 async fn get_server_json_for_storage<T: serde::de::DeserializeOwned>(
