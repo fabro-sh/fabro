@@ -2,9 +2,13 @@
 # Unit tests: flag SLOW after 5s, hard-kill after 15s
 slow-timeout = { period = "3s", terminate-after = 2 }
 
- [[profile.default.overrides]]
- filter = "package(fabro-cli) & kind(test)"
- slow-timeout = { period = "5s", terminate-after = 4 }
+    [[profile.default.overrides]]
+    filter = "package(fabro-cli) & kind(test)"
+    slow-timeout = { period = "5s", terminate-after = 4 }
+
+    [[profile.default.overrides]]
+    filter = "package(fabro-server) & kind(test)"
+    slow-timeout = { period = "5s", terminate-after = 2 }
 
 [profile.e2e]
 # E2E (ignored) tests: flag SLOW after 10s, hard-kill after 30s
