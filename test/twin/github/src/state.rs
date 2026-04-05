@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+const TEST_RSA_PRIVATE_PEM: &str = include_str!("testdata/rsa_private.pem");
+const TEST_RSA_PUBLIC_PEM: &str = include_str!("testdata/rsa_public.pem");
+
 /// Configuration for a registered GitHub App (user-facing input).
 #[derive(Debug, Clone)]
 pub struct AppOptions {
@@ -248,6 +251,10 @@ pub struct AppState {
 pub fn derive_public_key_pem(private_key_pem: &str) -> String {
     use std::io::Write;
     use std::process::{Command, Stdio};
+
+    if private_key_pem == TEST_RSA_PRIVATE_PEM {
+        return TEST_RSA_PUBLIC_PEM.to_string();
+    }
 
     let mut child = Command::new("openssl")
         .args(["rsa", "-pubout"])
