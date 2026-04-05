@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use fabro_types::RunId;
 use fabro_test::TestContext;
+use fabro_types::RunId;
 macro_rules! fabro_json_snapshot {
     ($context:expr, $value:expr, @$snapshot:literal) => {{
         let mut filters = $context.filters();

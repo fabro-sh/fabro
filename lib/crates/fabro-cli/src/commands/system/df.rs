@@ -10,8 +10,8 @@ use fabro_workflow::run_lookup::{logs_base, runs_base, scan_runs_with_summaries}
 use fabro_workflow::run_status::RunStatus;
 
 use crate::args::{DfArgs, GlobalArgs};
-use crate::shared::{format_size, print_json_pretty};
 use crate::server_client;
+use crate::shared::{format_size, print_json_pretty};
 use crate::user_config::load_user_settings_with_globals;
 
 #[derive(Serialize)]
@@ -59,11 +59,10 @@ pub(super) async fn df_command(args: &DfArgs, globals: &GlobalArgs) -> Result<()
         &logs_base_dir,
         globals,
     )
-    .await
 }
 
 #[allow(clippy::print_stdout)]
-async fn df_from(
+fn df_from(
     args: &DfArgs,
     summaries: &[fabro_store::RunSummary],
     data_dir: &Path,

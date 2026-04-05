@@ -5,11 +5,14 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow};
 use fabro_api::types;
+use fabro_server::bind::Bind;
 use fabro_store::{EventEnvelope, RunSummary, StageId};
 use fabro_types::{
-    Checkpoint, Conclusion, NodeStatusRecord, PullRequestRecord, Retro, RunEvent, RunId,
-    RunRecord, RunStatusRecord, SandboxRecord, Settings, StartRecord,
+    Checkpoint, Conclusion, NodeStatusRecord, PullRequestRecord, Retro, RunEvent, RunId, RunRecord,
+    RunStatusRecord, SandboxRecord, Settings, StartRecord,
 };
+use serde::de::DeserializeOwned;
+use tokio::time::sleep;
 
 use crate::commands::server::start;
 
@@ -98,8 +101,8 @@ pub(crate) async fn connect_server(storage_dir: &Path) -> Result<ServerStoreClie
     let bind = start::ensure_server_running(storage_dir)
         .with_context(|| format!("Failed to start fabro server for {}", storage_dir.display()))?;
     let socket_path = match bind {
-        fabro_server::bind::Bind::Unix(path) => path,
-        fabro_server::bind::Bind::Tcp(addr) => {
+        Bind::Unix(path) => path,
+        Bind::Tcp(addr) => {
             return Err(anyhow!(
                 "Unsupported server bind for store client auto-connect: {addr}"
             ));
@@ -133,7 +136,7 @@ async fn wait_for_server_ready(http_client: &reqwest::Client) -> Result<()> {
             }
             Err(err) => last_error = Some(anyhow!(err)),
         }
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        sleep(Duration::from_millis(50)).await;
     }
 
     Err(last_error.unwrap_or_else(|| anyhow!("server did not become ready in time")))
@@ -327,7 +330,7 @@ where
 fn convert_type<TInput, TOutput>(value: TInput) -> Result<TOutput>
 where
     TInput: serde::Serialize,
-    TOutput: serde::de::DeserializeOwned,
+    TOutput: DeserializeOwned,
 {
     serde_json::from_value(serde_json::to_value(value)?).map_err(Into::into)
 }

@@ -77,7 +77,9 @@ pub fn resolve_auth_mode(api_settings: &ApiSettings, allowed_usernames: &[String
     if api_settings.authentication_strategies.is_empty()
         && std::env::var("FABRO_LOCAL_NO_AUTH").ok().as_deref() == Some("1")
     {
-        warn!("No authentication strategies configured; allowing unauthenticated local daemon access");
+        warn!(
+            "No authentication strategies configured; allowing unauthenticated local daemon access"
+        );
         return AuthMode::Disabled;
     }
 

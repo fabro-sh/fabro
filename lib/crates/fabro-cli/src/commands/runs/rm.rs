@@ -1,16 +1,17 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use tracing::warn;
-
-use crate::args::{GlobalArgs, RunsRemoveArgs};
-use crate::server_client;
-use crate::shared::print_json_pretty;
-use crate::user_config::load_user_settings_with_globals;
 use fabro_sandbox::reconnect::reconnect as reconnect_sandbox;
 use fabro_workflow::event::{Event, to_run_event};
 use fabro_workflow::run_lookup::RunInfo;
 use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
+use tracing::warn;
+
+use crate::args::{GlobalArgs, RunsRemoveArgs};
+use crate::server_client;
+use crate::server_client::RunProjection;
+use crate::shared::print_json_pretty;
+use crate::user_config::load_user_settings_with_globals;
 
 use super::short_run_id;
 
@@ -134,10 +135,7 @@ async fn remove_run_dir_with_cleanup(
     };
     if run_state.is_some() {
         let run_event = to_run_event(&run_id, &Event::RunRemoving { reason: None });
-        if let Err(err) = client
-            .append_run_event(&run_id, &run_event)
-            .await
-        {
+        if let Err(err) = client.append_run_event(&run_id, &run_event).await {
             warn!(
                 run_id = %run_id,
                 error = %err,
@@ -146,7 +144,7 @@ async fn remove_run_dir_with_cleanup(
         }
     }
 
-    if let Some(record) = load_sandbox_record(run_state.as_ref()).await {
+    if let Some(record) = load_sandbox_record(run_state.as_ref()) {
         if record.provider != "local" {
             match reconnect_sandbox(&record).await {
                 Ok(sandbox) => {
@@ -175,9 +173,7 @@ async fn delete_run_store_state(
         .with_context(|| format!("failed to delete store state for {}", run.run_id()))
 }
 
-async fn load_sandbox_record(
-    run_state: Option<&crate::server_client::RunProjection>,
-) -> Option<fabro_sandbox::SandboxRecord> {
+fn load_sandbox_record(run_state: Option<&RunProjection>) -> Option<fabro_sandbox::SandboxRecord> {
     if let Some(run_state) = run_state {
         return run_state.sandbox.clone();
     }

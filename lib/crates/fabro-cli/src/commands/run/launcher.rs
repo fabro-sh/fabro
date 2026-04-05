@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use fabro_types::RunId;
@@ -26,10 +27,7 @@ pub(crate) fn launcher_record_path(storage_dir: &Path, run_id: &RunId) -> PathBu
     launcher_dir(storage_dir).join(format!("{run_id}.json"))
 }
 
-pub(crate) fn launcher_log_path(storage_dir: &Path, run_id: &RunId) -> PathBuf {
-    launcher_dir(storage_dir).join(format!("{run_id}.log"))
-}
-
+#[cfg(test)]
 pub(crate) fn write_launcher_record(path: &Path, record: &LauncherRecord) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -76,6 +74,7 @@ pub(crate) fn launcher_record_for_run(run_dir: &Path) -> Option<LauncherRecord> 
     None
 }
 
+#[cfg(test)]
 pub(crate) fn active_launcher_record(storage_dir: &Path, run_id: &RunId) -> Option<LauncherRecord> {
     let path = launcher_record_path(storage_dir, run_id);
     let launcher = read_launcher_record(&path)?;

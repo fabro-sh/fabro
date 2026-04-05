@@ -9,12 +9,12 @@ use fabro_util::terminal::Styles;
 use fabro_util::text::strip_goal_decoration;
 use fabro_workflow::artifact_snapshot::collect_artifact_paths;
 use fabro_workflow::outcome::{StageStatus, format_cost};
-use fabro_workflow::pipeline::{Persisted, Validated};
+use fabro_workflow::pipeline::Validated;
 use fabro_workflow::records::Conclusion;
 use indicatif::HumanDuration;
 
-use crate::shared::{format_tokens_human, print_diagnostics, relative_path, tilde_path};
 use crate::server_client;
+use crate::shared::{format_tokens_human, print_diagnostics, relative_path, tilde_path};
 
 fn print_workflow_header(
     graph: &Graph,
@@ -56,21 +56,6 @@ pub(crate) fn print_workflow_report(
     print_workflow_header(validated.graph(), validated.diagnostics(), dot_path, styles);
 }
 
-pub(crate) fn print_workflow_report_from_persisted(
-    persisted: &Persisted,
-    dot_path: Option<&Path>,
-    styles: &Styles,
-) {
-    print_workflow_header(persisted.graph(), persisted.diagnostics(), dot_path, styles);
-}
-
-pub(crate) fn print_diagnostics_from_error(
-    diagnostics: &[fabro_validate::Diagnostic],
-    styles: &Styles,
-) {
-    print_diagnostics(diagnostics, styles);
-}
-
 pub(crate) async fn print_run_summary(
     storage_dir: &Path,
     run_dir: &Path,
@@ -104,7 +89,7 @@ pub(crate) async fn print_run_summary(
         pr_url.as_deref(),
         styles,
     );
-    print_final_output(checkpoint.as_ref(), run_dir, styles).await;
+    print_final_output(checkpoint.as_ref(), run_dir, styles);
     print_assets(run_dir, styles);
     Ok(())
 }
@@ -198,7 +183,7 @@ pub(crate) fn print_run_conclusion(
     }
 }
 
-pub(crate) async fn print_final_output(
+pub(crate) fn print_final_output(
     checkpoint: Option<&fabro_types::Checkpoint>,
     _run_dir: &Path,
     styles: &Styles,

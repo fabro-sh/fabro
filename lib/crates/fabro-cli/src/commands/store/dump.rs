@@ -1,5 +1,3 @@
-use std::io::ErrorKind;
-use std::path::Path;
 use anyhow::{Context, Result};
 #[cfg(test)]
 use fabro_store::StageId;
@@ -8,6 +6,8 @@ use fabro_workflow::run_dump::RunDump;
 use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 #[cfg(test)]
 use serde::de::DeserializeOwned;
+use std::io::ErrorKind;
+use std::path::Path;
 
 use crate::args::{GlobalArgs, StoreDumpArgs};
 use crate::commands::store::rebuild::rebuild_run_store;

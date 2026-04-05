@@ -119,7 +119,11 @@ fn dry_run_create_start_attach_works_with_default_run_lookup() {
         .assert()
         .success();
 
-    context.command().args(["start", &run_id]).assert().success();
+    context
+        .command()
+        .args(["start", &run_id])
+        .assert()
+        .success();
     context
         .command()
         .args(["attach", &run_id])

@@ -3,15 +3,13 @@ use anyhow::Result;
 use cli_table::format::{Border, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_checkpoint::git::Store;
+use fabro_types::run_event::{CheckpointCompletedProps, RunRewoundProps, RunStatusTransitionProps};
+use fabro_types::{EventBody, RunEvent};
 use fabro_util::terminal::Styles;
-use fabro_types::run_event::{
-    CheckpointCompletedProps, RunRewoundProps, RunStatusTransitionProps,
-};
 use fabro_workflow::git::MetadataStore;
 use fabro_workflow::operations::{
     RewindInput, RewindTarget, RunTimeline, TimelineEntry, build_timeline_or_rebuild, rewind,
 };
-use fabro_types::{EventBody, RunEvent};
 use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 use git2::Repository;
 use serde::Serialize;
@@ -19,6 +17,7 @@ use serde::Serialize;
 use crate::args::{GlobalArgs, RewindArgs};
 use crate::commands::store::rebuild::rebuild_run_store;
 use crate::server_client;
+use crate::server_client::ServerStoreClient;
 use crate::shared::{color_if, print_json_pretty};
 use crate::user_config::load_user_settings_with_globals;
 
@@ -97,16 +96,15 @@ pub(crate) fn timeline_entries_json(timeline: &RunTimeline) -> Vec<TimelineEntry
 }
 
 async fn reset_rewound_run_state(
-    client: &crate::server_client::ServerStoreClient,
+    client: &ServerStoreClient,
     git_store: &Store,
     run_id: &fabro_types::RunId,
     run_dir: &std::path::Path,
     entry: &TimelineEntry,
 ) -> Result<()> {
-    let state = client
-        .get_run_state(run_id)
-        .await
-        .map_err(|err| anyhow::anyhow!("failed to load durable store state before rewind: {err}"))?;
+    let state = client.get_run_state(run_id).await.map_err(|err| {
+        anyhow::anyhow!("failed to load durable store state before rewind: {err}")
+    })?;
 
     let _run_record = state
         .run
@@ -191,11 +189,7 @@ fn restored_checkpoint_event(
     )
 }
 
-fn run_event(
-    run_id: fabro_types::RunId,
-    node_id: Option<String>,
-    body: EventBody,
-) -> RunEvent {
+fn run_event(run_id: fabro_types::RunId, node_id: Option<String>, body: EventBody) -> RunEvent {
     RunEvent {
         id: ulid::Ulid::new().to_string(),
         ts: chrono::Utc::now(),

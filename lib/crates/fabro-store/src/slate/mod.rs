@@ -108,7 +108,8 @@ impl SlateStore {
         }
 
         SlateRunStore::validate_init(&db, run_id).await?;
-        db.put(keys::init_key(run_id), serde_json::to_vec(run_id)?).await?;
+        db.put(keys::init_key(run_id), serde_json::to_vec(run_id)?)
+            .await?;
         catalog::write_catalog(&db, run_id).await?;
         let run_store = SlateRunStore::open_writer(*run_id, db).await?;
         self.cache_active_run(&run_store).await;
@@ -144,7 +145,7 @@ impl SlateStore {
                     "active run cache mismatch for run_id {run_id:?}"
                 )));
             }
-            return Ok(active.into_read_only());
+            return Ok(active.read_only_clone());
         }
         if !catalog::read_locator(&db, run_id).await? {
             return Err(StoreError::RunNotFound(run_id.to_string()));
@@ -212,10 +213,10 @@ mod tests {
     use super::*;
 
     use chrono::{DateTime, Utc};
-    use futures::TryStreamExt;
-    use object_store::path::Path;
-    use object_store::memory::InMemory;
     use fabro_types::{AttrValue, Graph, RunRecord, RunStatus, Settings, StatusReason};
+    use futures::TryStreamExt;
+    use object_store::memory::InMemory;
+    use object_store::path::Path;
     use std::path::PathBuf;
 
     use crate::EventPayload;

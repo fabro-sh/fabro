@@ -2,9 +2,7 @@ use anyhow::Context;
 use anyhow::Result;
 use fabro_checkpoint::git::Store;
 use fabro_util::terminal::Styles;
-use fabro_workflow::operations::{
-    ForkRunInput, RewindTarget, build_timeline_or_rebuild, fork,
-};
+use fabro_workflow::operations::{ForkRunInput, RewindTarget, build_timeline_or_rebuild, fork};
 use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 use git2::Repository;
 

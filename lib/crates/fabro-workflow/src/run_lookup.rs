@@ -199,7 +199,7 @@ pub async fn scan_runs_combined(store: &SlateStore, base: &Path) -> Result<Vec<R
         .list_runs(&fabro_store::ListRunsQuery::default())
         .await
         .unwrap_or_default();
-    Ok(scan_runs_with_summaries(&store_runs, base)?)
+    scan_runs_with_summaries(&store_runs, base)
 }
 
 pub fn scan_runs_with_summaries(summaries: &[RunSummary], base: &Path) -> Result<Vec<RunInfo>> {

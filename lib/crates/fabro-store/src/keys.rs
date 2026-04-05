@@ -66,7 +66,11 @@ pub(crate) fn parse_event_seq(key: &str) -> Option<u32> {
 }
 
 pub(crate) fn parse_blob_id(key: &str) -> Option<RunBlobId> {
-    key.rsplit('/').next()?.strip_prefix(BLOBS_PREFIX)?.parse().ok()
+    key.rsplit('/')
+        .next()?
+        .strip_prefix(BLOBS_PREFIX)?
+        .parse()
+        .ok()
 }
 
 pub(crate) fn parse_node_artifact_key(key: &str) -> Option<(StageId, String)> {
@@ -119,7 +123,10 @@ mod tests {
         let node = StageId::new("code", 2);
         let run_id = "01JT56VE4Z5NZ814GZN2JZD65A".parse().unwrap();
         let blob_id = RunBlobId::new(&run_id, b"summary");
-        assert_eq!(blob_key(&run_id, &blob_id), format!("runs/{run_id}/blobs#{blob_id}"));
+        assert_eq!(
+            blob_key(&run_id, &blob_id),
+            format!("runs/{run_id}/blobs#{blob_id}")
+        );
         assert_eq!(
             node_artifact(&run_id, &node, "src/main.rs"),
             "runs/01JT56VE4Z5NZ814GZN2JZD65A/artifacts#nodes#code#visit-2#src/main.rs"

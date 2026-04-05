@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use bytes::Bytes;
 use chrono::Utc;
@@ -52,7 +52,8 @@ pub(crate) struct SlateRunStoreInner {
 
 impl SlateRunStore {
     pub(crate) async fn open_writer(run_id: RunId, db: Db) -> Result<Self> {
-        let event_seq = recover_next_seq(&db, &keys::events_prefix(&run_id), keys::parse_event_seq).await?;
+        let event_seq =
+            recover_next_seq(&db, &keys::events_prefix(&run_id), keys::parse_event_seq).await?;
         let (event_tx, _) = broadcast::channel(DEFAULT_EVENT_TAIL_LIMIT.max(16));
         Ok(Self {
             inner: Arc::new(SlateRunStoreInner {
@@ -71,7 +72,8 @@ impl SlateRunStore {
     }
 
     pub(crate) async fn open_reader(run_id: RunId, db: Db) -> Result<Self> {
-        let event_seq = recover_next_seq(&db, &keys::events_prefix(&run_id), keys::parse_event_seq).await?;
+        let event_seq =
+            recover_next_seq(&db, &keys::events_prefix(&run_id), keys::parse_event_seq).await?;
         let (event_tx, _) = broadcast::channel(DEFAULT_EVENT_TAIL_LIMIT.max(16));
         Ok(Self {
             inner: Arc::new(SlateRunStoreInner {
@@ -96,7 +98,7 @@ impl SlateRunStore {
         }
     }
 
-    pub(crate) fn into_read_only(&self) -> Self {
+    pub(crate) fn read_only_clone(&self) -> Self {
         Self {
             inner: Arc::clone(&self.inner),
             read_only: true,
@@ -203,10 +205,13 @@ impl SlateRunStore {
             seq,
             payload: payload.clone(),
         };
-        self.inner.db.put(
-            keys::event_key(&self.inner.run_id, seq, Utc::now().timestamp_millis()),
-            serde_json::to_vec(payload)?,
-        ).await?;
+        self.inner
+            .db
+            .put(
+                keys::event_key(&self.inner.run_id, seq, Utc::now().timestamp_millis()),
+                serde_json::to_vec(payload)?,
+            )
+            .await?;
         self.cache_event(&event).await?;
         Ok(seq)
     }
@@ -293,7 +298,10 @@ impl SlateRunStore {
         }
         self.inner
             .db
-            .put(keys::node_artifact(&self.inner.run_id, node, filename), data)
+            .put(
+                keys::node_artifact(&self.inner.run_id, node, filename),
+                data,
+            )
             .await?;
         Ok(())
     }
@@ -350,7 +358,9 @@ async fn list_events_from<R>(db: &R, run_id: &RunId, start_seq: u32) -> Result<V
 where
     R: DbRead + Sync,
 {
-    let mut iter = db.scan_prefix(keys::events_prefix(run_id).as_bytes()).await?;
+    let mut iter = db
+        .scan_prefix(keys::events_prefix(run_id).as_bytes())
+        .await?;
     let mut events = Vec::new();
     while let Some(entry) = iter.next().await? {
         let key = key_to_string(&entry.key)?;
@@ -387,7 +397,9 @@ async fn list_blobs<R>(db: &R, run_id: &RunId) -> Result<Vec<RunBlobId>>
 where
     R: DbRead + Sync,
 {
-    let mut iter = db.scan_prefix(keys::blobs_prefix(run_id).as_bytes()).await?;
+    let mut iter = db
+        .scan_prefix(keys::blobs_prefix(run_id).as_bytes())
+        .await?;
     let mut blob_ids = Vec::new();
     while let Some(entry) = iter.next().await? {
         let key = key_to_string(&entry.key)?;
@@ -404,9 +416,7 @@ async fn list_all_artifacts<R>(db: &R, run_id: &RunId) -> Result<Vec<NodeArtifac
 where
     R: DbRead + Sync,
 {
-    let mut iter = db
-        .scan_prefix(keys::run_prefix(run_id).as_bytes())
-        .await?;
+    let mut iter = db.scan_prefix(keys::run_prefix(run_id).as_bytes()).await?;
     let mut assets = Vec::new();
     while let Some(entry) = iter.next().await? {
         let key = key_to_string(&entry.key)?;
@@ -419,7 +429,11 @@ where
     Ok(assets)
 }
 
-async fn list_artifacts_for_stage<R>(db: &R, run_id: &RunId, stage_id: &StageId) -> Result<Vec<String>>
+async fn list_artifacts_for_stage<R>(
+    db: &R,
+    run_id: &RunId,
+    stage_id: &StageId,
+) -> Result<Vec<String>>
 where
     R: DbRead + Sync,
 {

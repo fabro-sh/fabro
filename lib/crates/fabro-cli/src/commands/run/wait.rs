@@ -9,8 +9,8 @@ use fabro_workflow::run_status::RunStatus;
 use tracing::info;
 
 use crate::args::{GlobalArgs, WaitArgs};
-use crate::shared::format_duration_ms;
 use crate::server_client;
+use crate::shared::format_duration_ms;
 use crate::user_config::load_user_settings_with_globals;
 
 #[cfg(test)]

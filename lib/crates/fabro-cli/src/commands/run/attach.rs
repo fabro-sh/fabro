@@ -10,7 +10,7 @@ use fabro_types::{EventBody, RunEvent, RunId};
 
 use fabro_api::types;
 use fabro_interview::{AnswerValue, ConsoleInterviewer, Question, QuestionOption, QuestionType};
-use fabro_store::{EventEnvelope, RuntimeState};
+use fabro_store::EventEnvelope;
 use fabro_util::json::normalize_json_value;
 use fabro_util::terminal::Styles;
 use fabro_workflow::outcome::StageStatus;
@@ -97,8 +97,6 @@ async fn attach_run_server(
     engine_child: Option<std::process::Child>,
     json_output: bool,
 ) -> Result<ExitCode> {
-    let runtime_state = RuntimeState::new(run_dir);
-
     let mut engine_guard = engine_child.map(EngineChildGuard::new);
 
     let is_tty = std::io::stderr().is_terminal();
@@ -145,12 +143,17 @@ async fn attach_run_server(
                 }
                 // Wait briefly for a terminal status or conclusion
                 for _ in 0..20 {
-                    if client.get_run_state(run_id).await.ok().is_some_and(|state| {
-                        state.conclusion.is_some()
-                            || state
-                                .status
-                                .is_some_and(|record| record.status.is_terminal())
-                    }) {
+                    if client
+                        .get_run_state(run_id)
+                        .await
+                        .ok()
+                        .is_some_and(|state| {
+                            state.conclusion.is_some()
+                                || state
+                                    .status
+                                    .is_some_and(|record| record.status.is_terminal())
+                        })
+                    {
                         break;
                     }
                     sleep(Duration::from_millis(100)).await;
@@ -201,9 +204,11 @@ async fn attach_run_server(
 
             hide_progress(&mut progress_ui, json_output);
             let interviewer = ConsoleInterviewer::new(styles);
-            let answer =
-                fabro_interview::Interviewer::ask(&interviewer, api_question_to_question(&question))
-                    .await;
+            let answer = fabro_interview::Interviewer::ask(
+                &interviewer,
+                api_question_to_question(&question),
+            )
+            .await;
             show_progress(&mut progress_ui, json_output);
 
             if answer_requires_reattach(&answer) {
@@ -234,14 +239,26 @@ async fn attach_run_server(
 
         if let Some(child_alive) = child_alive_via_handle {
             if !child_alive && !saw_event {
-                flush_remaining_server_events(client, run_id, next_seq, &mut progress_ui, json_output)
-                    .await?;
+                flush_remaining_server_events(
+                    client,
+                    run_id,
+                    next_seq,
+                    &mut progress_ui,
+                    json_output,
+                )
+                .await?;
                 break;
             }
         } else {
             if terminal_status.is_some() && !saw_event {
-                flush_remaining_server_events(client, run_id, next_seq, &mut progress_ui, json_output)
-                    .await?;
+                flush_remaining_server_events(
+                    client,
+                    run_id,
+                    next_seq,
+                    &mut progress_ui,
+                    json_output,
+                )
+                .await?;
                 break;
             }
 
@@ -261,8 +278,14 @@ async fn attach_run_server(
                 }
             };
             if !engine_alive {
-                flush_remaining_server_events(client, run_id, next_seq, &mut progress_ui, json_output)
-                    .await?;
+                flush_remaining_server_events(
+                    client,
+                    run_id,
+                    next_seq,
+                    &mut progress_ui,
+                    json_output,
+                )
+                .await?;
                 break;
             }
         }
@@ -318,7 +341,13 @@ async fn submit_server_interview_answer(
         }
     };
     client
-        .submit_run_answer(run_id, qid, value, selected_option_key, selected_option_keys)
+        .submit_run_answer(
+            run_id,
+            qid,
+            value,
+            selected_option_key,
+            selected_option_keys,
+        )
         .await?;
     Ok(true)
 }
@@ -358,7 +387,8 @@ async fn flush_remaining_server_events(
 }
 
 fn is_run_not_found_error(err: &anyhow::Error) -> bool {
-    err.chain().any(|cause| cause.to_string() == "Run not found.")
+    err.chain()
+        .any(|cause| cause.to_string() == "Run not found.")
 }
 
 fn emit_progress_line(
@@ -407,8 +437,7 @@ fn restore_empty_run_properties(value: &mut serde_json::Value) {
     let Some(event_name) = object.get("event").and_then(serde_json::Value::as_str) else {
         return;
     };
-    if matches!(event_name, "run.submitted" | "run.running") && !object.contains_key("properties")
-    {
+    if matches!(event_name, "run.submitted" | "run.running") && !object.contains_key("properties") {
         let run_id = object.remove("run_id");
         let ts = object.remove("ts");
         object.insert("properties".to_string(), serde_json::json!({}));
@@ -443,28 +472,12 @@ fn infer_run_id(run_dir: &Path) -> Option<RunId> {
         })
 }
 
-#[allow(clippy::struct_field_names)]
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct InterviewPaths {
-    claim_path: PathBuf,
-    request_path: PathBuf,
-    response_path: PathBuf,
-}
-
-impl InterviewPaths {
-    fn from_runtime_state(runtime_state: &RuntimeState) -> Self {
-        Self {
-            claim_path: runtime_state.interview_claim_path(),
-            request_path: runtime_state.interview_request_path(),
-            response_path: runtime_state.interview_response_path(),
-        }
-    }
-}
-
+#[cfg(test)]
 struct InterviewClaimGuard {
     claim_path: PathBuf,
 }
 
+#[cfg(test)]
 impl InterviewClaimGuard {
     fn acquire(claim_path: &Path) -> Option<Self> {
         if try_claim_interview_request(claim_path) {
@@ -477,6 +490,7 @@ impl InterviewClaimGuard {
     }
 }
 
+#[cfg(test)]
 impl Drop for InterviewClaimGuard {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.claim_path);
@@ -516,6 +530,7 @@ impl Drop for EngineChildGuard {
     }
 }
 
+#[cfg(test)]
 fn try_claim_interview_request(claim_path: &Path) -> bool {
     if let Some(parent) = claim_path.parent() {
         if std::fs::create_dir_all(parent).is_err() {
@@ -549,6 +564,7 @@ fn answer_requires_reattach(answer: &fabro_interview::Answer) -> bool {
     matches!(answer.value, AnswerValue::Aborted | AnswerValue::Skipped)
 }
 
+#[cfg(test)]
 fn write_interview_response_atomically(
     response_path: &Path,
     answer: &fabro_interview::Answer,
@@ -611,13 +627,13 @@ fn process_alive(pid: u32) -> bool {
 fn event_exit_code(event: &EventEnvelope) -> Option<ExitCode> {
     let run_event = RunEvent::try_from(&event.payload).ok()?;
     match run_event.body {
-        EventBody::RunCompleted(props) => Some(if props.status == "success"
-            || props.status == "partial_success"
-        {
-            ExitCode::from(0)
-        } else {
-            ExitCode::from(1)
-        }),
+        EventBody::RunCompleted(props) => Some(
+            if props.status == "success" || props.status == "partial_success" {
+                ExitCode::from(0)
+            } else {
+                ExitCode::from(1)
+            },
+        ),
         EventBody::RunFailed(_) => Some(ExitCode::from(1)),
         _ => None,
     }

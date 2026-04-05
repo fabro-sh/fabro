@@ -204,7 +204,7 @@ fn shorten_session_id(id: &str) -> String {
     let trimmed = id.trim();
     let shortened: String = trimmed
         .chars()
-        .filter(|ch| ch.is_ascii_alphanumeric())
+        .filter(char::is_ascii_alphanumeric)
         .take(12)
         .collect();
     if shortened.is_empty() {
@@ -339,7 +339,10 @@ fn reap_stale_session_roots(fabro_bin: &Path, mode: SessionMode) {
         if !root.is_dir() {
             continue;
         }
-        let file_name = root.file_name().and_then(|name| name.to_str()).unwrap_or("");
+        let file_name = root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
         let expected_prefix = match mode {
             SessionMode::Nextest => "n-",
             SessionMode::Process => "p-",
@@ -494,10 +497,7 @@ impl TestContext {
         cmd.env("HOME", &self.home_dir);
         cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
         cmd.env("FABRO_STORAGE_DIR", &self.storage_dir);
-        cmd.env(
-            "FABRO_SERVER_MAX_CONCURRENT_RUNS",
-            "64",
-        );
+        cmd.env("FABRO_SERVER_MAX_CONCURRENT_RUNS", "64");
         cmd
     }
 
@@ -1283,7 +1283,11 @@ mod tests {
         let _guard = EnvGuard::set("NEXTEST_RUN_ID", None);
         let (_, run_id, paths) = session_paths();
         assert_eq!(run_id, format!("process-{}", current_pid()));
-        assert!(paths.root.ends_with(Path::new("fx").join(format!("p-{}", current_pid()))));
+        assert!(
+            paths
+                .root
+                .ends_with(Path::new("fx").join(format!("p-{}", current_pid())))
+        );
         assert_eq!(paths.storage_dir, paths.root.join("storage"));
     }
 
