@@ -10,11 +10,11 @@ use crate::args::{DiffArgs, GlobalArgs};
 use crate::server_client::RunProjection;
 use crate::server_runs::ServerRunLookup;
 use crate::shared::print_json_pretty;
-use crate::user_config::load_user_settings_with_globals;
+use crate::user_config::load_user_settings_with_storage_dir;
 
 pub(crate) async fn run(args: DiffArgs, globals: &GlobalArgs) -> Result<()> {
     info!(run_id = %args.run, "Showing diff");
-    let cli_settings = load_user_settings_with_globals(globals)?;
+    let cli_settings = load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
     let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
     let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();

@@ -16,19 +16,18 @@ fn help() {
     Usage: fabro system prune [OPTIONS]
 
     Options:
-          --before <BEFORE>            Only include runs started before this date (YYYY-MM-DD prefix match)
           --json                       Output as JSON [env: FABRO_JSON=]
+          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+          --before <BEFORE>            Only include runs started before this date (YYYY-MM-DD prefix match)
           --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --workflow <WORKFLOW>        Filter by workflow name (substring match)
           --label <KEY=VALUE>          Filter by label (KEY=VALUE, repeatable, AND semantics)
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --orphans                    Include orphan directories (no run.json)
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --older-than <DURATION>      Only prune runs older than this duration (e.g. 24h, 7d). Default: 24h when no explicit filters are set
+          --orphans                    Include orphan directories (no run.json)
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+          --older-than <DURATION>      Only prune runs older than this duration (e.g. 24h, 7d). Default: 24h when no explicit filters are set
           --yes                        Actually delete (default is dry-run)
-          --server-url <SERVER_URL>    Fabro API server URL (overrides server.base_url from user.toml when supported) [env: FABRO_SERVER_URL=]
       -h, --help                       Print help
     ----- stderr -----
     ");

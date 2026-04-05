@@ -23,34 +23,32 @@ fn help() {
     Usage: fabro server start [OPTIONS]
 
     Options:
-          --foreground
-              Run in the foreground instead of daemonizing
           --json
               Output as JSON [env: FABRO_JSON=]
-          --bind <BIND>
-              Address to bind to (host:port for TCP, or path containing / for Unix socket)
-          --debug
-              Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --model <MODEL>
-              Override default LLM model
-          --no-upgrade-check
-              Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --provider <PROVIDER>
-              Override default LLM provider
-          --quiet
-              Suppress non-essential output [env: FABRO_QUIET=]
-          --dry-run
-              Execute with simulated LLM backend
-          --verbose
-              Enable verbose output [env: FABRO_VERBOSE=]
-          --sandbox <SANDBOX>
-              Sandbox for agent tools
           --storage-dir <STORAGE_DIR>
               Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+          --debug
+              Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --foreground
+              Run in the foreground instead of daemonizing
+          --bind <BIND>
+              Address to bind to (host:port for TCP, or path containing / for Unix socket)
+          --no-upgrade-check
+              Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --model <MODEL>
+              Override default LLM model
+          --quiet
+              Suppress non-essential output [env: FABRO_QUIET=]
+          --provider <PROVIDER>
+              Override default LLM provider
+          --verbose
+              Enable verbose output [env: FABRO_VERBOSE=]
+          --dry-run
+              Execute with simulated LLM backend
+          --sandbox <SANDBOX>
+              Sandbox for agent tools
           --max-concurrent-runs <MAX_CONCURRENT_RUNS>
               Maximum number of concurrent run executions
-          --server-url <SERVER_URL>
-              Fabro API server URL (overrides server.base_url from user.toml when supported) [env: FABRO_SERVER_URL=]
           --config <CONFIG>
               Path to server config file (default: ~/.fabro/server.toml)
       -h, --help

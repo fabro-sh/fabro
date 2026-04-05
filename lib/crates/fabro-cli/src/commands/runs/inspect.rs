@@ -9,7 +9,7 @@ use fabro_workflow::run_status::RunStatus;
 use crate::args::{GlobalArgs, InspectArgs};
 use crate::server_client::RunProjection;
 use crate::server_runs::ServerRunLookup;
-use crate::user_config::load_user_settings_with_globals;
+use crate::user_config::load_user_settings_with_storage_dir;
 
 #[derive(Debug, Serialize)]
 pub(crate) struct InspectOutput {
@@ -23,8 +23,8 @@ pub(crate) struct InspectOutput {
     pub sandbox: Option<serde_json::Value>,
 }
 
-pub(crate) async fn run(args: &InspectArgs, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = load_user_settings_with_globals(globals)?;
+pub(crate) async fn run(args: &InspectArgs, _globals: &GlobalArgs) -> Result<()> {
+    let cli_settings = load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
     let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
     let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();

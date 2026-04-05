@@ -7,7 +7,7 @@ use fabro_util::terminal::Styles;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::args::{GlobalArgs, ModelsCommand};
+use crate::args::{GlobalArgs, ModelListArgs, ModelTestArgs, ModelsCommand};
 use crate::server_client;
 use crate::user_config;
 
@@ -38,8 +38,13 @@ struct ModelTestOutput {
 }
 
 pub(crate) async fn execute(command: Option<ModelsCommand>, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = user_config::load_user_settings_with_globals(globals)?;
-    let client = match user_config::model_server_target(globals, &cli_settings) {
+    let command = command.unwrap_or_default();
+    let target_args = match &command {
+        ModelsCommand::List(args) => &args.target,
+        ModelsCommand::Test(args) => &args.target,
+    };
+    let cli_settings = user_config::load_user_settings_with_storage_dir(target_args.storage_dir())?;
+    let client = match user_config::model_server_target(target_args, &cli_settings) {
         Some(target) => {
             server_client::connect_remote_api_client(&target.server_base_url, target.tls.as_ref())?
         }
@@ -394,19 +399,16 @@ async fn test_models_via_server(
 
 #[allow(clippy::print_stdout)]
 async fn run_models(
-    command: Option<ModelsCommand>,
+    command: ModelsCommand,
     client: fabro_api::Client,
     json_output: bool,
 ) -> Result<()> {
-    let command = command.unwrap_or(ModelsCommand::List {
-        provider: None,
-        query: None,
-    });
-
     let styles = Styles::detect_stdout();
 
     match command {
-        ModelsCommand::List { provider, query } => {
+        ModelsCommand::List(ModelListArgs {
+            provider, query, ..
+        }) => {
             let models =
                 fetch_models_from_server(&client, provider.as_deref(), query.as_deref()).await?;
 
@@ -416,11 +418,12 @@ async fn run_models(
                 print_models_table(&models, &styles);
             }
         }
-        ModelsCommand::Test {
+        ModelsCommand::Test(ModelTestArgs {
             provider,
             model,
             deep,
-        } => {
+            ..
+        }) => {
             test_models_via_server(
                 &client,
                 provider.as_deref(),
@@ -434,6 +437,12 @@ async fn run_models(
     }
 
     Ok(())
+}
+
+impl Default for ModelsCommand {
+    fn default() -> Self {
+        Self::List(ModelListArgs::default())
+    }
 }
 
 #[cfg(test)]

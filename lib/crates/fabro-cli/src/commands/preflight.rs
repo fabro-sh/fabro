@@ -18,12 +18,12 @@ use fabro_workflow::operations::{ValidateInput, WorkflowInput, validate};
 use crate::args::{GlobalArgs, PreflightArgs};
 use crate::shared::github::build_github_app_credentials;
 use crate::shared::print_json_pretty;
-use crate::user_config::{load_user_settings_with_globals, user_layer_with_globals};
+use crate::user_config::{load_user_settings_with_storage_dir, user_layer_with_storage_dir};
 
 pub(crate) async fn execute(mut args: PreflightArgs, globals: &GlobalArgs) -> anyhow::Result<()> {
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-    let cli = user_layer_with_globals(globals)?;
-    let cli_settings: Settings = load_user_settings_with_globals(globals)?;
+    let cli = user_layer_with_storage_dir(args.storage_dir.as_deref())?;
+    let cli_settings: Settings = load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
     args.verbose = args.verbose || cli_settings.verbose_enabled();
 
     let github_app = build_github_app_credentials(cli_settings.app_id())?;

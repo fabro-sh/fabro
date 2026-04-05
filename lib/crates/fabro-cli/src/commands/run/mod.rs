@@ -1,10 +1,10 @@
 use anyhow::Result;
 use fabro_util::terminal::Styles;
 
-use crate::args::{GlobalArgs, RunArgs, RunCommands};
+use crate::args::{AttachArgs, GlobalArgs, RunArgs, RunCommands, RunnerArgs, StartArgs};
 use crate::server_runs::ServerRunLookup;
 use crate::shared::print_json_pretty;
-use crate::user_config::{load_user_settings_with_globals, user_layer_with_globals};
+use crate::user_config::{load_user_settings_with_storage_dir, user_layer_with_storage_dir};
 
 pub(crate) mod attach;
 pub(crate) mod command;
@@ -39,7 +39,7 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
         RunCommands::Create(mut args) => {
             apply_json_defaults(&mut args, globals);
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-            let cli = user_layer_with_globals(globals)?;
+            let cli = user_layer_with_storage_dir(args.storage_dir.as_deref())?;
             let (run_id, _run_dir) = Box::pin(create::create_run(&args, cli, styles, true)).await?;
             if globals.json {
                 print_json_pretty(&serde_json::json!({ "run_id": run_id }))?;
@@ -48,8 +48,8 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             }
             Ok(())
         }
-        RunCommands::Start { run } => {
-            let cli_settings = load_user_settings_with_globals(globals)?;
+        RunCommands::Start(StartArgs { storage_dir, run }) => {
+            let cli_settings = load_user_settings_with_storage_dir(storage_dir.as_deref())?;
             let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
             let run_info = lookup.resolve(&run)?;
             let run_id = run_info.run_id();
@@ -59,9 +59,9 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             }
             Ok(())
         }
-        RunCommands::Attach { run } => {
+        RunCommands::Attach(AttachArgs { storage_dir, run }) => {
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-            let cli_settings = load_user_settings_with_globals(globals)?;
+            let cli_settings = load_user_settings_with_storage_dir(storage_dir.as_deref())?;
             let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
             let run_info = lookup.resolve(&run)?;
             let run_id = run_info.run_id();
@@ -79,9 +79,11 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             }
             Ok(())
         }
-        RunCommands::Runner { run_id, resume } => {
-            runner::execute(run_id, globals.storage_dir.clone(), resume).await
-        }
+        RunCommands::Runner(RunnerArgs {
+            storage_dir,
+            run_id,
+            resume,
+        }) => runner::execute(run_id, storage_dir.clone_path(), resume).await,
         RunCommands::Diff(args) => diff::run(args, globals).await,
         RunCommands::Logs(args) => {
             let styles = Styles::detect_stdout();
@@ -91,7 +93,8 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             #[cfg(feature = "sleep_inhibitor")]
             let _sleep_guard = {
-                let cli_settings = load_user_settings_with_globals(globals)?;
+                let cli_settings =
+                    load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
                 crate::sleep_inhibitor::guard(cli_settings.prevent_idle_sleep_enabled())
             };
             resume::resume_command(args, styles, globals).await

@@ -60,17 +60,16 @@ fn help() {
       <RUN>  Run ID prefix or workflow name (most recent run)
 
     Options:
-      -f, --follow                     Follow log output
           --json                       Output as JSON [env: FABRO_JSON=]
+          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
           --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+      -f, --follow                     Follow log output
+          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --since <SINCE>              Logs since timestamp or relative (e.g. "42m", "2h", "2026-01-02T13:00:00Z")
       -n, --tail <TAIL>                Lines from end (default: all)
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-      -p, --pretty                     Formatted colored output with rendered assistant text
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
+      -p, --pretty                     Formatted colored output with rendered assistant text
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-          --server-url <SERVER_URL>    Fabro API server URL (overrides server.base_url from user.toml when supported) [env: FABRO_SERVER_URL=]
       -h, --help                       Print help
     ----- stderr -----
     "#);

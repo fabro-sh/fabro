@@ -13,20 +13,35 @@ use fabro_types::PullRequestRecord;
 use crate::args::{GlobalArgs, PrCommand, PrNamespace};
 use crate::server_runs::ServerRunLookup;
 use crate::shared::github::build_github_app_credentials;
-use crate::user_config::load_user_settings_with_globals;
+use crate::user_config::load_user_settings_with_storage_dir;
 
 pub(crate) async fn dispatch(ns: PrNamespace, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = load_user_settings_with_globals(globals)?;
-    let github_app = build_github_app_credentials(cli_settings.app_id())?;
-
     match ns.command {
         PrCommand::Create(args) => {
+            let cli_settings = load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
+            let github_app = build_github_app_credentials(cli_settings.app_id())?;
             Box::pin(create::create_command(args, github_app, globals)).await
         }
-        PrCommand::List(args) => list::list_command(args, github_app, globals).await,
-        PrCommand::View(args) => view::view_command(args, github_app, globals).await,
-        PrCommand::Merge(args) => merge::merge_command(args, github_app, globals).await,
-        PrCommand::Close(args) => close::close_command(args, github_app, globals).await,
+        PrCommand::List(args) => {
+            let cli_settings = load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
+            let github_app = build_github_app_credentials(cli_settings.app_id())?;
+            list::list_command(args, github_app, globals).await
+        }
+        PrCommand::View(args) => {
+            let cli_settings = load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
+            let github_app = build_github_app_credentials(cli_settings.app_id())?;
+            view::view_command(args, github_app, globals).await
+        }
+        PrCommand::Merge(args) => {
+            let cli_settings = load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
+            let github_app = build_github_app_credentials(cli_settings.app_id())?;
+            merge::merge_command(args, github_app, globals).await
+        }
+        PrCommand::Close(args) => {
+            let cli_settings = load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
+            let github_app = build_github_app_credentials(cli_settings.app_id())?;
+            close::close_command(args, github_app, globals).await
+        }
     }
 }
 

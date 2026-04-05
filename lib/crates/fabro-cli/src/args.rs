@@ -1,5 +1,5 @@
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::{Args, Subcommand, ValueEnum};
 use fabro_agent::cli::AgentArgs;
@@ -35,25 +35,63 @@ pub(crate) struct GlobalArgs {
     /// Enable verbose output
     #[arg(long, global = true, env = "FABRO_VERBOSE", value_parser = clap::builder::BoolishValueParser::new(), conflicts_with = "quiet")]
     pub verbose: bool,
-
-    /// Local storage directory (default: ~/.fabro)
-    #[arg(long, global = true, env = "FABRO_STORAGE_DIR")]
-    pub storage_dir: Option<PathBuf>,
-
-    /// Fabro API server URL (overrides server.base_url from user.toml when supported)
-    #[arg(
-        long,
-        global = true,
-        env = "FABRO_SERVER_URL",
-        conflicts_with = "storage_dir"
-    )]
-    pub server_url: Option<String>,
 }
 
 impl GlobalArgs {
     pub(crate) fn require_no_json(&self) -> anyhow::Result<()> {
         anyhow::ensure!(!self.json, "--json is not supported for this command");
         Ok(())
+    }
+}
+
+#[derive(Args, Debug, Clone, Default)]
+pub(crate) struct StorageDirArgs {
+    /// Local storage directory (default: ~/.fabro)
+    #[arg(long, env = "FABRO_STORAGE_DIR")]
+    pub(crate) storage_dir: Option<PathBuf>,
+}
+
+impl StorageDirArgs {
+    pub(crate) fn as_deref(&self) -> Option<&Path> {
+        self.storage_dir.as_deref()
+    }
+
+    pub(crate) fn clone_path(&self) -> Option<PathBuf> {
+        self.storage_dir.clone()
+    }
+}
+
+#[derive(Args, Debug, Clone, Default)]
+pub(crate) struct ServerUrlArgs {
+    /// Fabro API server URL (overrides server.base_url from user.toml when supported)
+    #[arg(long, env = "FABRO_SERVER_URL")]
+    pub(crate) server_url: Option<String>,
+}
+
+impl ServerUrlArgs {
+    pub(crate) fn as_deref(&self) -> Option<&str> {
+        self.server_url.as_deref()
+    }
+}
+
+#[derive(Args, Debug, Clone, Default)]
+pub(crate) struct ModelTargetArgs {
+    /// Local storage directory (default: ~/.fabro)
+    #[arg(long, env = "FABRO_STORAGE_DIR", conflicts_with = "server_url")]
+    pub(crate) storage_dir: Option<PathBuf>,
+
+    /// Fabro API server URL (overrides server.base_url from user.toml when supported)
+    #[arg(long, env = "FABRO_SERVER_URL", conflicts_with = "storage_dir")]
+    pub(crate) server_url: Option<String>,
+}
+
+impl ModelTargetArgs {
+    pub(crate) fn storage_dir(&self) -> Option<&Path> {
+        self.storage_dir.as_deref()
+    }
+
+    pub(crate) fn server_url(&self) -> Option<&str> {
+        self.server_url.as_deref()
     }
 }
 
@@ -86,6 +124,9 @@ impl From<fabro_sandbox::SandboxProvider> for CliSandboxProvider {
 
 #[derive(Args)]
 pub(crate) struct RunArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
     /// Path to a .fabro workflow file or .toml task config
     #[arg(required = true)]
     pub(crate) workflow: Option<PathBuf>,
@@ -145,6 +186,9 @@ pub(crate) struct RunArgs {
 
 #[derive(Args)]
 pub(crate) struct PreflightArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
     /// Path to a .fabro workflow file or .toml task config
     pub(crate) workflow: PathBuf,
 
@@ -195,6 +239,9 @@ pub(crate) struct RunFilterArgs {
 #[derive(Args)]
 pub(crate) struct RunsListArgs {
     #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
+    #[command(flatten)]
     pub(crate) filter: RunFilterArgs,
 
     /// Show all runs, not just running (like docker ps -a)
@@ -208,6 +255,9 @@ pub(crate) struct RunsListArgs {
 
 #[derive(Args)]
 pub(crate) struct RunsRemoveArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
     /// Run IDs or workflow names to remove
     #[arg(required = true)]
     pub(crate) runs: Vec<String>,
@@ -219,6 +269,9 @@ pub(crate) struct RunsRemoveArgs {
 
 #[derive(Args)]
 pub(crate) struct LogsArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
     /// Run ID prefix or workflow name (most recent run)
     pub(crate) run: String,
     /// Follow log output
@@ -308,6 +361,9 @@ pub(crate) struct ParseArgs {
 
 #[derive(Args)]
 pub(crate) struct ArtifactListArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
     /// Run ID (or prefix)
     pub(crate) run_id: String,
 
@@ -322,6 +378,9 @@ pub(crate) struct ArtifactListArgs {
 
 #[derive(Args)]
 pub(crate) struct ArtifactCpArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
     /// Source: RUN_ID (all artifacts) or RUN_ID:path (specific artifact)
     pub(crate) source: String,
 
@@ -344,6 +403,9 @@ pub(crate) struct ArtifactCpArgs {
 
 #[derive(Args)]
 pub(crate) struct CpArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
     /// Source: <run-id>:<path> or local path
     pub(crate) src: String,
     /// Destination: <run-id>:<path> or local path
@@ -355,6 +417,9 @@ pub(crate) struct CpArgs {
 
 #[derive(Args)]
 pub(crate) struct PreviewArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
     /// Run ID or prefix
     pub(crate) run: String,
     /// Port number
@@ -372,6 +437,9 @@ pub(crate) struct PreviewArgs {
 
 #[derive(Args)]
 pub(crate) struct SshArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
     /// Run ID or prefix
     pub(crate) run: String,
     /// SSH access expiry in minutes (default 60)
@@ -384,6 +452,9 @@ pub(crate) struct SshArgs {
 
 #[derive(Args)]
 pub(crate) struct DiffArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
     /// Run ID or prefix
     pub(crate) run: String,
     /// Show diff for a specific node
@@ -399,12 +470,18 @@ pub(crate) struct DiffArgs {
 
 #[derive(Args)]
 pub(crate) struct InspectArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
     /// Run ID prefix or workflow name (most recent run)
     pub(crate) run: String,
 }
 
 #[derive(Args)]
 pub(crate) struct StoreDumpArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
     /// Run ID prefix or workflow name
     pub(crate) run: String,
 
@@ -442,6 +519,9 @@ pub(crate) struct SecretSetArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct ResumeArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
     /// Run ID or unambiguous prefix
     pub(crate) run: String,
 
@@ -452,6 +532,9 @@ pub(crate) struct ResumeArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct RewindArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
     /// Run ID (or unambiguous prefix)
     pub(crate) run_id: String,
 
@@ -469,6 +552,9 @@ pub(crate) struct RewindArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct ForkArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
     /// Run ID (or unambiguous prefix)
     pub(crate) run_id: String,
 
@@ -486,6 +572,9 @@ pub(crate) struct ForkArgs {
 
 #[derive(Args)]
 pub(crate) struct WaitArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
     /// Run ID prefix or workflow name (most recent run)
     pub(crate) run: String,
 
@@ -521,6 +610,9 @@ pub(crate) struct ProviderLoginArgs {
 #[derive(Args)]
 pub(crate) struct RunsPruneArgs {
     #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
+    #[command(flatten)]
     pub(crate) filter: RunFilterArgs,
 
     /// Only prune runs older than this duration (e.g. 24h, 7d). Default: 24h when no explicit filters are set.
@@ -538,6 +630,9 @@ pub(crate) struct RunsPruneArgs {
 
 #[derive(Args)]
 pub(crate) struct DfArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
     /// Show per-run breakdown
     #[arg(short, long)]
     pub(crate) verbose: bool,
@@ -545,6 +640,9 @@ pub(crate) struct DfArgs {
 
 #[derive(Args)]
 pub(crate) struct SettingsArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
     /// Optional workflow name, .fabro path, or .toml run config to overlay
     pub(crate) workflow: Option<PathBuf>,
 }
@@ -578,6 +676,9 @@ pub(crate) struct SkillInstallArgs {
 
 #[derive(Args)]
 pub(crate) struct PrCreateArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
     /// Run ID or prefix
     pub(crate) run_id: String,
     /// LLM model for generating PR description
@@ -587,6 +688,9 @@ pub(crate) struct PrCreateArgs {
 
 #[derive(Args)]
 pub(crate) struct PrListArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
     /// Show all PRs (including closed/merged), not just open
     #[arg(long)]
     pub(crate) all: bool,
@@ -594,12 +698,18 @@ pub(crate) struct PrListArgs {
 
 #[derive(Args)]
 pub(crate) struct PrViewArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
     /// Run ID or prefix
     pub(crate) run_id: String,
 }
 
 #[derive(Args)]
 pub(crate) struct PrMergeArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
     /// Run ID or prefix
     pub(crate) run_id: String,
     /// Merge method: merge, squash, or rebase
@@ -609,8 +719,83 @@ pub(crate) struct PrMergeArgs {
 
 #[derive(Args)]
 pub(crate) struct PrCloseArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
     /// Run ID or prefix
     pub(crate) run_id: String,
+}
+
+#[derive(Args)]
+pub(crate) struct StartArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
+    /// Run ID prefix or workflow name
+    pub(crate) run: String,
+}
+
+#[derive(Args)]
+pub(crate) struct AttachArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
+    /// Run ID prefix or workflow name
+    pub(crate) run: String,
+}
+
+#[derive(Args)]
+pub(crate) struct RunnerArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
+    /// Run ID
+    #[arg(long)]
+    pub(crate) run_id: fabro_types::RunId,
+    /// Resume from checkpoint instead of fresh start
+    #[arg(long)]
+    pub(crate) resume: bool,
+}
+
+#[derive(Args, Debug, Clone, Default)]
+pub(crate) struct ModelListArgs {
+    #[command(flatten)]
+    pub(crate) target: ModelTargetArgs,
+
+    /// Filter by provider
+    #[arg(short, long)]
+    pub(crate) provider: Option<String>,
+
+    /// Search for models matching this string
+    #[arg(short, long)]
+    pub(crate) query: Option<String>,
+}
+
+#[derive(Args, Debug, Clone, Default)]
+pub(crate) struct ModelTestArgs {
+    #[command(flatten)]
+    pub(crate) target: ModelTargetArgs,
+
+    /// Filter by provider
+    #[arg(short, long)]
+    pub(crate) provider: Option<String>,
+
+    /// Test a specific model
+    #[arg(short, long)]
+    pub(crate) model: Option<String>,
+
+    /// Run a multi-turn tool-use test (catches reasoning round-trip bugs)
+    #[arg(long)]
+    pub(crate) deep: bool,
+}
+
+#[derive(Args)]
+pub(crate) struct ExecArgs {
+    #[command(flatten)]
+    pub(crate) server_url: ServerUrlArgs,
+
+    #[command(flatten)]
+    pub(crate) agent: AgentArgs,
 }
 
 #[derive(Args)]
@@ -635,25 +820,12 @@ pub(crate) enum RunCommands {
     /// Create a workflow run (allocate run dir, persist spec)
     Create(RunArgs),
     /// Start a created workflow run on the server
-    Start {
-        /// Run ID prefix or workflow name
-        run: String,
-    },
+    Start(StartArgs),
     /// Attach to a running or finished workflow run
-    Attach {
-        /// Run ID prefix or workflow name
-        run: String,
-    },
+    Attach(AttachArgs),
     /// Internal: queue or resume a workflow run via the server
     #[command(name = "__runner", hide = true)]
-    Runner {
-        /// Run ID
-        #[arg(long)]
-        run_id: fabro_types::RunId,
-        /// Resume from checkpoint instead of fresh start
-        #[arg(long)]
-        resume: bool,
-    },
+    Runner(RunnerArgs),
     /// Show the diff of changes from a workflow run
     #[command(hide = true)]
     Diff(DiffArgs),
@@ -674,9 +846,9 @@ impl RunCommands {
         match self {
             Self::Run(_) => "run",
             Self::Create(_) => "create",
-            Self::Start { .. } => "start",
-            Self::Attach { .. } => "attach",
-            Self::Runner { .. } => "__runner",
+            Self::Start(_) => "start",
+            Self::Attach(_) => "attach",
+            Self::Runner(_) => "__runner",
             Self::Diff(_) => "diff",
             Self::Logs(_) => "logs",
             Self::Resume(_) => "resume",
@@ -731,37 +903,17 @@ impl RunsCommands {
 #[derive(Subcommand)]
 pub(crate) enum ModelsCommand {
     /// List available models
-    List {
-        /// Filter by provider
-        #[arg(short, long)]
-        provider: Option<String>,
-
-        /// Search for models matching this string
-        #[arg(short, long)]
-        query: Option<String>,
-    },
+    List(ModelListArgs),
 
     /// Test model availability by sending a simple prompt
-    Test {
-        /// Filter by provider
-        #[arg(short, long)]
-        provider: Option<String>,
-
-        /// Test a specific model
-        #[arg(short, long)]
-        model: Option<String>,
-
-        /// Run a multi-turn tool-use test (catches reasoning round-trip bugs)
-        #[arg(long)]
-        deep: bool,
-    },
+    Test(ModelTestArgs),
 }
 
 #[derive(Subcommand)]
 pub(crate) enum Commands {
     /// Run an agentic coding session
     #[command(hide = true)]
-    Exec(AgentArgs),
+    Exec(ExecArgs),
     #[command(flatten)]
     RunCmd(RunCommands),
     /// Validate run configuration without executing
@@ -871,15 +1023,15 @@ impl Commands {
             Self::Parse(_) => "parse",
             Self::RunsCmd(cmd) => cmd.name(),
             Self::Model { command } => match command {
-                Some(ModelsCommand::List { .. }) => "model list",
-                Some(ModelsCommand::Test { .. }) => "model test",
+                Some(ModelsCommand::List(_)) => "model list",
+                Some(ModelsCommand::Test(_)) => "model test",
                 None => "model",
             },
             Self::Server(ns) => match &ns.command {
-                ServerCommand::Start { .. } => "server start",
-                ServerCommand::Stop { .. } => "server stop",
-                ServerCommand::Status { .. } => "server status",
-                ServerCommand::Serve { .. } => "server __serve",
+                ServerCommand::Start(_) => "server start",
+                ServerCommand::Stop(_) => "server stop",
+                ServerCommand::Status(_) => "server status",
+                ServerCommand::Serve(_) => "server __serve",
             },
             Self::Doctor { .. } => "doctor",
             Self::Repo(ns) => match &ns.command {
@@ -1001,39 +1153,63 @@ pub(crate) struct ServerNamespace {
 
 use fabro_server::serve::ServeArgs;
 
+#[derive(Args)]
+pub(crate) struct ServerStartArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
+    /// Run in the foreground instead of daemonizing
+    #[arg(long)]
+    pub(crate) foreground: bool,
+
+    #[command(flatten)]
+    pub(crate) serve_args: ServeArgs,
+}
+
+#[derive(Args)]
+pub(crate) struct ServerStopArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
+    /// Seconds to wait for graceful shutdown before SIGKILL
+    #[arg(long, default_value = "10")]
+    pub(crate) timeout: u64,
+}
+
+#[derive(Args)]
+pub(crate) struct ServerStatusArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
+    /// Output as JSON
+    #[arg(long)]
+    pub(crate) json: bool,
+}
+
+#[derive(Args)]
+pub(crate) struct ServerServeArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
+    /// Path to the server record file
+    #[arg(long)]
+    pub(crate) record_path: PathBuf,
+
+    #[command(flatten)]
+    pub(crate) serve_args: ServeArgs,
+}
+
 #[derive(Subcommand)]
 pub(crate) enum ServerCommand {
     /// Start the HTTP API server
-    Start {
-        /// Run in the foreground instead of daemonizing
-        #[arg(long)]
-        foreground: bool,
-
-        #[command(flatten)]
-        serve_args: ServeArgs,
-    },
+    Start(ServerStartArgs),
     /// Stop the HTTP API server
-    Stop {
-        /// Seconds to wait for graceful shutdown before SIGKILL
-        #[arg(long, default_value = "10")]
-        timeout: u64,
-    },
+    Stop(ServerStopArgs),
     /// Show server status
-    Status {
-        /// Output as JSON
-        #[arg(long)]
-        json: bool,
-    },
+    Status(ServerStatusArgs),
     /// Internal: run the server process (spawned by `start`)
     #[command(name = "__serve", hide = true)]
-    Serve {
-        /// Path to the server record file
-        #[arg(long)]
-        record_path: PathBuf,
-
-        #[command(flatten)]
-        serve_args: ServeArgs,
-    },
+    Serve(ServerServeArgs),
 }
 
 #[derive(Args)]

@@ -29,16 +29,15 @@ fn help() {
 
     Options:
           --json                           Output as JSON [env: FABRO_JSON=]
+          --server-url <SERVER_URL>        Fabro API server URL (overrides server.base_url from user.toml when supported) [env: FABRO_SERVER_URL=]
           --provider <PROVIDER>            LLM provider (anthropic, openai, gemini, kimi, zai, minimax, inception)
           --model <MODEL>                  Model name (defaults per provider)
           --no-upgrade-check               Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --permissions <PERMISSIONS>      Permission level for tool execution [possible values: read-only, read-write, full]
-          --auto-approve                   Skip interactive prompts; deny tools outside permission level
           --quiet                          Suppress non-essential output [env: FABRO_QUIET=]
+          --auto-approve                   Skip interactive prompts; deny tools outside permission level
           --debug                          Print LLM request/response debug info to stderr
-          --storage-dir <STORAGE_DIR>      Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
           --verbose                        Print full LLM request/response JSON to stderr
-          --server-url <SERVER_URL>        Fabro API server URL (overrides server.base_url from user.toml when supported) [env: FABRO_SERVER_URL=]
           --skills-dir <SKILLS_DIR>        Directory containing skill files (overrides default discovery)
           --output-format <OUTPUT_FORMAT>  Output format (text for human-readable, json for NDJSON event stream) [possible values: text, json]
       -h, --help                           Print help
@@ -74,7 +73,7 @@ fn no_prompt() {
     error: the following required arguments were not provided:
       <PROMPT>
 
-    Usage: fabro exec --no-upgrade-check --storage-dir <STORAGE_DIR> <PROMPT>
+    Usage: fabro exec --no-upgrade-check <PROMPT>
 
     For more information, try '--help'.
     ");

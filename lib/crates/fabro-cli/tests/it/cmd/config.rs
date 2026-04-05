@@ -26,12 +26,11 @@ fn help() {
 
     Options:
           --json                       Output as JSON [env: FABRO_JSON=]
+          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
           --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-          --server-url <SERVER_URL>    Fabro API server URL (overrides server.base_url from user.toml when supported) [env: FABRO_SERVER_URL=]
       -h, --help                       Print help
     ----- stderr -----
     ");
@@ -577,32 +576,14 @@ shared = "legacy"
 }
 
 #[test]
-fn settings_server_url_overrides_cli_defaults() {
+fn settings_rejects_server_url_flag() {
     let context = test_context!();
-    let project = setup_settings_fixture(&context);
-    let user_toml_path = context.home_dir.join(".fabro/user.toml");
-    let existing = std::fs::read_to_string(&user_toml_path).unwrap();
-    context.write_home(
-        ".fabro/user.toml",
-        format!("{existing}\n[server]\nbase_url = \"https://config.example.com\"\n"),
-    );
-
-    let output = context
+    context
         .command()
-        .env_remove("FABRO_STORAGE_DIR")
-        .current_dir(project.path())
         .args(["--server-url", "https://cli.example.com", "settings"])
         .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
-
-    let cfg = parse_settings(&output);
-    assert_eq!(
-        cfg.server
-            .as_ref()
-            .and_then(|server| server.base_url.as_deref()),
-        Some("https://cli.example.com")
-    );
+        .failure()
+        .stderr(predicate::str::contains(
+            "unexpected argument '--server-url' found",
+        ));
 }

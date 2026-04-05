@@ -20,15 +20,14 @@ fn help() {
 
     Options:
           --json                       Output as JSON [env: FABRO_JSON=]
-          --node <NODE>                Show diff for a specific node
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --stat                       Show diffstat instead of full patch (live diffs only)
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --shortstat                  Show only files-changed/insertions/deletions summary (live diffs only)
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
           --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-          --server-url <SERVER_URL>    Fabro API server URL (overrides server.base_url from user.toml when supported) [env: FABRO_SERVER_URL=]
+          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --node <NODE>                Show diff for a specific node
+          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --stat                       Show diffstat instead of full patch (live diffs only)
+          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
+          --shortstat                  Show only files-changed/insertions/deletions summary (live diffs only)
+          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
       -h, --help                       Print help
     ----- stderr -----
     ");

@@ -25,15 +25,13 @@ fn help() {
     Usage: fabro doctor [OPTIONS]
 
     Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-      -v, --verbose                    Show detailed information for each check
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --dry-run                    Skip live service probes (LLM, sandbox, API, web, Brave Search)
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-          --server-url <SERVER_URL>    Fabro API server URL (overrides server.base_url from user.toml when supported) [env: FABRO_SERVER_URL=]
-      -h, --help                       Print help
+          --json              Output as JSON [env: FABRO_JSON=]
+      -v, --verbose           Show detailed information for each check
+          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --dry-run           Skip live service probes (LLM, sandbox, API, web, Brave Search)
+          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
+      -h, --help              Print help
     ----- stderr -----
     ");
 }

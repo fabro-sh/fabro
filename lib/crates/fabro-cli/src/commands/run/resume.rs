@@ -3,7 +3,7 @@ use fabro_util::terminal::Styles;
 use crate::args::{GlobalArgs, ResumeArgs};
 use crate::server_runs::ServerRunLookup;
 use crate::shared::print_json_pretty;
-use crate::user_config::load_user_settings_with_globals;
+use crate::user_config::load_user_settings_with_storage_dir;
 
 /// Resume an interrupted workflow run.
 ///
@@ -15,7 +15,7 @@ pub(crate) async fn resume_command(
     styles: &'static Styles,
     globals: &GlobalArgs,
 ) -> anyhow::Result<()> {
-    let cli_settings = load_user_settings_with_globals(globals)?;
+    let cli_settings = load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
     let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
     let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();

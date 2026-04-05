@@ -21,15 +21,14 @@ fn help() {
 
     Options:
           --json                       Output as JSON [env: FABRO_JSON=]
-          --signed                     Generate a signed URL (embeds auth token, no headers needed)
+          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
           --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --ttl <TTL>                  Signed URL expiry in seconds (default 3600, requires --signed) [default: 3600]
+          --signed                     Generate a signed URL (embeds auth token, no headers needed)
           --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --ttl <TTL>                  Signed URL expiry in seconds (default 3600, requires --signed) [default: 3600]
           --open                       Open URL in browser (implies --signed)
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-          --server-url <SERVER_URL>    Fabro API server URL (overrides server.base_url from user.toml when supported) [env: FABRO_SERVER_URL=]
       -h, --help                       Print help
     ----- stderr -----
     ");

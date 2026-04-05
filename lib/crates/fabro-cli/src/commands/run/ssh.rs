@@ -5,14 +5,14 @@ use tracing::info;
 use crate::args::{GlobalArgs, SshArgs};
 use crate::server_runs::ServerRunLookup;
 use crate::shared::{print_json_pretty, validate_daytona_provider};
-use crate::user_config::load_user_settings_with_globals;
+use crate::user_config::load_user_settings_with_storage_dir;
 
 pub(crate) async fn run(args: SshArgs, globals: &GlobalArgs) -> Result<()> {
     if globals.json && !args.print {
         globals.require_no_json()?;
     }
 
-    let cli_settings = load_user_settings_with_globals(globals)?;
+    let cli_settings = load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
     let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
     let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();

@@ -1,31 +1,36 @@
+use std::path::Path;
+
 pub(crate) use fabro_config::user::*;
 
 use fabro_config::ConfigLayer;
 use fabro_types::Settings;
 use tracing::debug;
 
-use crate::args::GlobalArgs;
+use crate::args::{ModelTargetArgs, ServerUrlArgs};
 
 pub(crate) fn load_user_settings() -> anyhow::Result<Settings> {
     ConfigLayer::user()?.resolve()
 }
 
-pub(crate) fn user_layer_with_globals(globals: &GlobalArgs) -> anyhow::Result<ConfigLayer> {
+pub(crate) fn user_layer_with_storage_dir(
+    storage_dir: Option<&Path>,
+) -> anyhow::Result<ConfigLayer> {
     let layer = ConfigLayer::user()?;
-    Ok(apply_global_overrides(layer, globals))
+    Ok(apply_storage_dir_override(layer, storage_dir))
 }
 
-pub(crate) fn load_user_settings_with_globals(globals: &GlobalArgs) -> anyhow::Result<Settings> {
-    user_layer_with_globals(globals)?.resolve()
+pub(crate) fn load_user_settings_with_storage_dir(
+    storage_dir: Option<&Path>,
+) -> anyhow::Result<Settings> {
+    user_layer_with_storage_dir(storage_dir)?.resolve()
 }
 
-pub(crate) fn apply_global_overrides(mut layer: ConfigLayer, globals: &GlobalArgs) -> ConfigLayer {
-    if let Some(dir) = &globals.storage_dir {
-        layer.storage_dir = Some(dir.clone());
-    }
-
-    if let Some(url) = &globals.server_url {
-        layer.server.get_or_insert_with(Default::default).base_url = Some(url.clone());
+pub(crate) fn apply_storage_dir_override(
+    mut layer: ConfigLayer,
+    storage_dir: Option<&Path>,
+) -> ConfigLayer {
+    if let Some(dir) = storage_dir {
+        layer.storage_dir = Some(dir.to_path_buf());
     }
 
     layer
@@ -47,36 +52,33 @@ fn configured_server_target(settings: &Settings) -> Option<ServerTarget> {
 }
 
 pub(crate) fn exec_server_target(
-    globals: &GlobalArgs,
+    args: &ServerUrlArgs,
     settings: &Settings,
 ) -> Option<ServerTarget> {
-    let target = globals
-        .server_url
-        .as_ref()
-        .map(|server_base_url| ServerTarget {
-            server_base_url: server_base_url.clone(),
-            tls: settings
-                .server
-                .as_ref()
-                .and_then(|server| server.tls.clone()),
-        });
+    let target = args.as_deref().map(|server_base_url| ServerTarget {
+        server_base_url: server_base_url.to_string(),
+        tls: settings
+            .server
+            .as_ref()
+            .and_then(|server| server.tls.clone()),
+    });
     debug!(has_target = target.is_some(), "Resolved exec server target");
     target
 }
 
 pub(crate) fn model_server_target(
-    globals: &GlobalArgs,
+    args: &ModelTargetArgs,
     settings: &Settings,
 ) -> Option<ServerTarget> {
-    let target = if let Some(server_base_url) = globals.server_url.as_ref() {
+    let target = if let Some(server_base_url) = args.server_url() {
         Some(ServerTarget {
-            server_base_url: server_base_url.clone(),
+            server_base_url: server_base_url.to_string(),
             tls: settings
                 .server
                 .as_ref()
                 .and_then(|server| server.tls.clone()),
         })
-    } else if globals.storage_dir.is_some() {
+    } else if args.storage_dir().is_some() {
         None
     } else {
         configured_server_target(settings)
@@ -124,32 +126,32 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use crate::args::{ModelTargetArgs, ServerUrlArgs};
 
-    fn globals() -> GlobalArgs {
-        GlobalArgs {
-            json: false,
-            debug: false,
-            no_upgrade_check: false,
-            quiet: false,
-            verbose: false,
-            storage_dir: None,
-            server_url: None,
+    fn server_url_args(url: Option<&str>) -> ServerUrlArgs {
+        ServerUrlArgs {
+            server_url: url.map(str::to_string),
+        }
+    }
+
+    fn model_target_args(storage_dir: Option<&str>, server_url: Option<&str>) -> ModelTargetArgs {
+        ModelTargetArgs {
+            storage_dir: storage_dir.map(std::path::PathBuf::from),
+            server_url: server_url.map(str::to_string),
         }
     }
 
     #[test]
     fn exec_has_no_server_target_by_default() {
         let settings = Settings::default();
-        assert_eq!(exec_server_target(&globals(), &settings), None);
+        assert_eq!(exec_server_target(&server_url_args(None), &settings), None);
     }
 
     #[test]
     fn exec_uses_cli_server_url() {
         let settings = Settings::default();
-        let mut globals = globals();
-        globals.server_url = Some("https://cli.example.com".to_string());
         assert_eq!(
-            exec_server_target(&globals, &settings),
+            exec_server_target(&server_url_args(Some("https://cli.example.com")), &settings),
             Some(ServerTarget {
                 server_base_url: "https://cli.example.com".to_string(),
                 tls: None,
@@ -166,7 +168,7 @@ mod tests {
             }),
             ..Settings::default()
         };
-        assert_eq!(exec_server_target(&globals(), &settings), None);
+        assert_eq!(exec_server_target(&server_url_args(None), &settings), None);
     }
 
     #[test]
@@ -179,7 +181,7 @@ mod tests {
             ..Settings::default()
         };
         assert_eq!(
-            model_server_target(&globals(), &settings),
+            model_server_target(&model_target_args(None, None), &settings),
             Some(ServerTarget {
                 server_base_url: "https://config.example.com".to_string(),
                 tls: None,
@@ -196,10 +198,11 @@ mod tests {
             }),
             ..Settings::default()
         };
-        let mut globals = globals();
-        globals.server_url = Some("https://cli.example.com".to_string());
         assert_eq!(
-            model_server_target(&globals, &settings),
+            model_server_target(
+                &model_target_args(None, Some("https://cli.example.com")),
+                &settings
+            ),
             Some(ServerTarget {
                 server_base_url: "https://cli.example.com".to_string(),
                 tls: None,
@@ -216,9 +219,10 @@ mod tests {
             }),
             ..Settings::default()
         };
-        let mut globals = globals();
-        globals.storage_dir = Some(PathBuf::from("/tmp/fabro"));
-        assert_eq!(model_server_target(&globals, &settings), None);
+        assert_eq!(
+            model_server_target(&model_target_args(Some("/tmp/fabro"), None), &settings),
+            None
+        );
     }
 
     #[test]
@@ -235,10 +239,8 @@ mod tests {
             }),
             ..Settings::default()
         };
-        let mut globals = globals();
-        globals.server_url = Some("https://cli.example.com".to_string());
         assert_eq!(
-            exec_server_target(&globals, &settings),
+            exec_server_target(&server_url_args(Some("https://cli.example.com")), &settings),
             Some(ServerTarget {
                 server_base_url: "https://cli.example.com".to_string(),
                 tls: Some(tls),

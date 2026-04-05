@@ -10,7 +10,7 @@ use tracing::info;
 use crate::args::{GlobalArgs, WaitArgs};
 use crate::server_runs::ServerRunLookup;
 use crate::shared::format_duration_ms;
-use crate::user_config::load_user_settings_with_globals;
+use crate::user_config::load_user_settings_with_storage_dir;
 
 #[cfg(test)]
 const WAIT_STARTUP_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
@@ -18,7 +18,7 @@ const WAIT_STARTUP_GRACE: std::time::Duration = std::time::Duration::from_millis
 const WAIT_STARTUP_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
 
 pub(crate) async fn run(args: &WaitArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = load_user_settings_with_globals(globals)?;
+    let cli_settings = load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
     let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
     let run_info = lookup.resolve(&args.run)?;
     let client = lookup.client();

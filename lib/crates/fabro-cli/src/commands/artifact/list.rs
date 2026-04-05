@@ -5,10 +5,10 @@ use fabro_workflow::artifacts::scan_artifacts;
 use crate::args::{ArtifactListArgs, GlobalArgs};
 use crate::server_runs::ServerRunLookup;
 use crate::shared::format_size;
-use crate::user_config::load_user_settings_with_globals;
+use crate::user_config::load_user_settings_with_storage_dir;
 
 pub(super) async fn list_command(args: &ArtifactListArgs, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = load_user_settings_with_globals(globals)?;
+    let cli_settings = load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
     let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
     let run = lookup.resolve(&args.run_id)?;
     let runtime_state = RuntimeState::new(&run.path);

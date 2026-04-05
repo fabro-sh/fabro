@@ -108,12 +108,12 @@ async fn main_inner() -> (String, Result<()>) {
     let (config_log_level, upgrade_check_enabled) = {
         if let Commands::Server(ServerNamespace {
             command:
-                ServerCommand::Start {
+                ServerCommand::Start(args::ServerStartArgs {
                     serve_args: args, ..
-                }
-                | ServerCommand::Serve {
+                })
+                | ServerCommand::Serve(args::ServerServeArgs {
                     serve_args: args, ..
-                },
+                }),
         }) = command.as_ref()
         {
             match load_server_settings(args.config.as_deref()) {
@@ -275,7 +275,9 @@ async fn main_inner() -> (String, Result<()>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use args::{ProviderCommand, ProviderNamespace, StoreCommand, StoreNamespace};
+    use args::{
+        Commands, ModelsCommand, ProviderCommand, ProviderNamespace, StoreCommand, StoreNamespace,
+    };
     use clap::Parser;
 
     #[test]
@@ -335,7 +337,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_global_storage_dir_after_subcommand() {
+    fn parse_run_storage_dir_after_subcommand() {
         let cli = Cli::try_parse_from([
             "fabro",
             "run",
@@ -344,12 +346,12 @@ mod tests {
             "/tmp/fabro",
         ])
         .expect("should parse");
-        assert_eq!(
-            cli.globals.storage_dir.as_deref(),
-            Some(std::path::Path::new("/tmp/fabro"))
-        );
         match *cli.command {
             Commands::RunCmd(RunCommands::Run(args)) => {
+                assert_eq!(
+                    args.storage_dir.as_deref(),
+                    Some(std::path::Path::new("/tmp/fabro"))
+                );
                 assert_eq!(
                     args.workflow.as_deref(),
                     Some(std::path::Path::new("test/simple.fabro"))
@@ -360,17 +362,84 @@ mod tests {
     }
 
     #[test]
-    fn parse_server_url_conflicts_with_storage_dir() {
+    fn parse_model_list_server_url_after_subcommand() {
+        let cli = Cli::try_parse_from([
+            "fabro",
+            "model",
+            "list",
+            "--server-url",
+            "http://localhost:3000/api/v1",
+        ])
+        .expect("should parse");
+        match *cli.command {
+            Commands::Model {
+                command: Some(ModelsCommand::List(args)),
+            } => assert_eq!(
+                args.target.server_url(),
+                Some("http://localhost:3000/api/v1")
+            ),
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
+    fn parse_exec_server_url_after_subcommand() {
+        let cli = Cli::try_parse_from([
+            "fabro",
+            "exec",
+            "--server-url",
+            "http://localhost:3000/api/v1",
+            "fix the bug",
+        ])
+        .expect("should parse");
+        match *cli.command {
+            Commands::Exec(args) => assert_eq!(
+                args.server_url.as_deref(),
+                Some("http://localhost:3000/api/v1")
+            ),
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
+    fn parse_model_server_url_conflicts_with_storage_dir() {
         let result = Cli::try_parse_from([
             "fabro",
+            "model",
+            "list",
             "--storage-dir",
             "/tmp/fabro",
             "--server-url",
             "http://localhost:3000",
+        ]);
+        assert!(
+            result.is_err(),
+            "should fail with conflicting model target flags"
+        );
+    }
+
+    #[test]
+    fn parse_global_server_url_before_subcommand_is_rejected() {
+        let result = Cli::try_parse_from([
+            "fabro",
+            "--server-url",
+            "http://localhost:3000/api/v1",
             "model",
             "list",
         ]);
-        assert!(result.is_err(), "should fail with conflicting global flags");
+        assert!(result.is_err(), "should reject top-level --server-url");
+    }
+
+    #[test]
+    fn parse_global_storage_dir_before_subcommand_is_rejected() {
+        let result = Cli::try_parse_from([
+            "fabro",
+            "--storage-dir",
+            "/tmp/fabro",
+            "run",
+            "test/simple.fabro",
+        ]);
+        assert!(result.is_err(), "should reject top-level --storage-dir");
     }
 
     #[test]
@@ -392,8 +461,8 @@ mod tests {
     fn parse_start_command() {
         let cli = Cli::try_parse_from(["fabro", "start", "ABC123"]).expect("should parse");
         match *cli.command {
-            Commands::RunCmd(RunCommands::Start { run }) => {
-                assert_eq!(run, "ABC123");
+            Commands::RunCmd(RunCommands::Start(args)) => {
+                assert_eq!(args.run, "ABC123");
             }
             _ => panic!("unexpected command variant"),
         }
@@ -403,8 +472,8 @@ mod tests {
     fn parse_attach_command() {
         let cli = Cli::try_parse_from(["fabro", "attach", "ABC123"]).expect("should parse");
         match *cli.command {
-            Commands::RunCmd(RunCommands::Attach { run }) => {
-                assert_eq!(run, "ABC123");
+            Commands::RunCmd(RunCommands::Attach(args)) => {
+                assert_eq!(args.run, "ABC123");
             }
             _ => panic!("unexpected command variant"),
         }
@@ -436,9 +505,9 @@ mod tests {
         ])
         .expect("should parse");
         match *cli.command {
-            Commands::RunCmd(RunCommands::Runner { run_id, resume }) => {
-                assert_eq!(run_id, "01ARZ3NDEKTSV4RRFFQ69G5FAV".parse().unwrap());
-                assert!(!resume);
+            Commands::RunCmd(RunCommands::Runner(args)) => {
+                assert_eq!(args.run_id, "01ARZ3NDEKTSV4RRFFQ69G5FAV".parse().unwrap());
+                assert!(!args.resume);
             }
             _ => panic!("unexpected command variant"),
         }
@@ -455,9 +524,9 @@ mod tests {
         ])
         .expect("should parse");
         match *cli.command {
-            Commands::RunCmd(RunCommands::Runner { run_id, resume }) => {
-                assert_eq!(run_id, "01ARZ3NDEKTSV4RRFFQ69G5FAV".parse().unwrap());
-                assert!(resume);
+            Commands::RunCmd(RunCommands::Runner(args)) => {
+                assert_eq!(args.run_id, "01ARZ3NDEKTSV4RRFFQ69G5FAV".parse().unwrap());
+                assert!(args.resume);
             }
             _ => panic!("unexpected command variant"),
         }
