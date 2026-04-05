@@ -1,6 +1,7 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fabro_server::server::create_app_state_with_options;
+use tokio::time::sleep;
 use tower::ServiceExt;
 
 use crate::helpers::{
@@ -35,7 +36,7 @@ async fn aggregate_usage_increments_after_run_completes() {
         if total_runs == 1 {
             break;
         }
-        tokio::time::sleep(POLL_INTERVAL).await;
+        sleep(POLL_INTERVAL).await;
     }
     assert_eq!(total_runs, 1);
 }

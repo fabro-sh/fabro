@@ -36,11 +36,11 @@ pub(crate) struct GlobalArgs {
     #[arg(long, global = true, env = "FABRO_VERBOSE", value_parser = clap::builder::BoolishValueParser::new(), conflicts_with = "quiet")]
     pub verbose: bool,
 
-    /// Storage directory (default: ~/.fabro)
+    /// Local storage directory (default: ~/.fabro)
     #[arg(long, global = true, env = "FABRO_STORAGE_DIR")]
     pub storage_dir: Option<PathBuf>,
 
-    /// Server URL (overrides server.base_url from user.toml)
+    /// Fabro API server URL (overrides server.base_url from user.toml when supported)
     #[arg(
         long,
         global = true,

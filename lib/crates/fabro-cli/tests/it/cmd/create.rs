@@ -34,8 +34,8 @@ fn help() {
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --model <MODEL>              Override default LLM model
           --provider <PROVIDER>        Override default LLM provider
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-          --server-url <SERVER_URL>    Server URL (overrides server.base_url from user.toml) [env: FABRO_SERVER_URL=]
+          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+          --server-url <SERVER_URL>    Fabro API server URL (overrides server.base_url from user.toml when supported) [env: FABRO_SERVER_URL=]
       -v, --verbose                    Enable verbose output
           --sandbox <SANDBOX>          Sandbox for agent tools [possible values: local, docker, daytona]
           --label <KEY=VALUE>          Attach a label to this run (repeatable, format: KEY=VALUE)

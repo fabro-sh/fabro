@@ -1,4 +1,5 @@
 use fabro_test::{fabro_snapshot, test_context};
+use httpmock::MockServer;
 
 #[test]
 fn help() {
@@ -24,8 +25,8 @@ fn help() {
           --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-          --server-url <SERVER_URL>    Server URL (overrides server.base_url from user.toml) [env: FABRO_SERVER_URL=]
+          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+          --server-url <SERVER_URL>    Fabro API server URL (overrides server.base_url from user.toml when supported) [env: FABRO_SERVER_URL=]
       -h, --help                       Print help
     ----- stderr -----
     ");
@@ -174,4 +175,62 @@ fn list_invalid_provider_errors() {
     ----- stderr -----
     error: unknown provider: not-a-provider
     ");
+}
+
+#[test]
+fn list_uses_configured_server_base_url_without_server_url_flag() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method("GET");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "data": [{
+                        "id": "remote-model",
+                        "display_name": "Remote Model",
+                        "provider": "openai",
+                        "family": "test",
+                        "aliases": ["remote"],
+                        "limits": {
+                            "context_window": 131_072,
+                            "max_output": 4096
+                        },
+                        "training": null,
+                        "knowledge_cutoff": null,
+                        "features": {
+                            "tools": true,
+                            "vision": false,
+                            "reasoning": false,
+                            "effort": false
+                        },
+                        "costs": {
+                            "input_cost_per_mtok": 1.0,
+                            "output_cost_per_mtok": 2.0,
+                            "cache_input_cost_per_mtok": null
+                        },
+                        "estimated_output_tps": 42.0,
+                        "default": false
+                    }],
+                    "meta": { "has_more": false }
+                })
+                .to_string(),
+            );
+    });
+    context.write_home(
+        ".fabro/user.toml",
+        format!("[server]\nbase_url = \"{}/api/v1\"\n", server.base_url()),
+    );
+
+    let mut cmd = context.model();
+    cmd.env_remove("FABRO_STORAGE_DIR");
+    cmd.args(["list", "--json"]);
+    let output = cmd.assert().success().get_output().stdout.clone();
+    let models: serde_json::Value =
+        serde_json::from_slice(&output).expect("model list json should parse");
+
+    mock.assert();
+    assert_eq!(models.as_array().map(Vec::len), Some(1));
+    assert_eq!(models[0]["id"].as_str(), Some("remote-model"));
 }

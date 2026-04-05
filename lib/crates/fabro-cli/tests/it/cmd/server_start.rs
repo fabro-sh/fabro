@@ -46,11 +46,11 @@ fn help() {
           --sandbox <SANDBOX>
               Sandbox for agent tools
           --storage-dir <STORAGE_DIR>
-              Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+              Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
           --max-concurrent-runs <MAX_CONCURRENT_RUNS>
               Maximum number of concurrent run executions
           --server-url <SERVER_URL>
-              Server URL (overrides server.base_url from user.toml) [env: FABRO_SERVER_URL=]
+              Fabro API server URL (overrides server.base_url from user.toml when supported) [env: FABRO_SERVER_URL=]
           --config <CONFIG>
               Path to server config file (default: ~/.fabro/server.toml)
       -h, --help

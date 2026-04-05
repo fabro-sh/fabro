@@ -39,13 +39,9 @@ struct ModelTestOutput {
 
 pub(crate) async fn execute(command: Option<ModelsCommand>, globals: &GlobalArgs) -> Result<()> {
     let cli_settings = user_config::load_user_settings_with_globals(globals)?;
-    let client = match globals.server_url.as_deref() {
-        Some(base_url) => {
-            let tls = cli_settings
-                .server
-                .as_ref()
-                .and_then(|server| server.tls.as_ref());
-            server_client::connect_remote_api_client(base_url, tls)?
+    let client = match user_config::model_server_target(globals, &cli_settings) {
+        Some(target) => {
+            server_client::connect_remote_api_client(&target.server_base_url, target.tls.as_ref())?
         }
         None => server_client::connect_api_client(&cli_settings.storage_dir()).await?,
     };

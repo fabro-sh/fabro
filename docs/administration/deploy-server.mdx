@@ -110,11 +110,9 @@ Send the `X-Fabro-Demo: 1` header on any API request to get static mock data wit
 
 ## Pointing the CLI at a server
 
-The CLI can delegate commands to a running Fabro server instead of executing locally. Set `mode = "server"` in `~/.fabro/user.toml`:
+The CLI can target a running Fabro server for commands that support a remote API. Configure `~/.fabro/user.toml`:
 
 ```toml title="user.toml"
-mode = "server"
-
 [server]
 base_url = "https://fabro.example.com:3000/api/v1"
 ```
@@ -125,7 +123,9 @@ Or use the `--server-url` flag:
 fabro --server-url https://fabro.example.com:3000/api/v1 model list
 ```
 
-This applies to commands like `fabro model list`, `fabro model test`, and `fabro exec`. See [User Configuration](/reference/user-configuration#mode) for the full options including mTLS setup.
+`fabro model list` and `fabro model test` honor `[server].base_url` by default unless you explicitly pass `--storage-dir`. `fabro exec` remains a local agent session and only uses the server when you pass `--server-url`.
+
+See [User Configuration](/reference/user-configuration#server-section) for the full connection options, including mTLS setup.
 
 ## Next steps
 

@@ -30,9 +30,7 @@ pub use server::{
     GitProvider, GitSettings, LogSettings, TlsSettings, WebSettings, WebhookSettings,
     WebhookStrategy,
 };
-pub use user::{
-    ClientTlsSettings, ExecSettings, ExecutionMode, OutputFormat, PermissionLevel, ServerSettings,
-};
+pub use user::{ClientTlsSettings, ExecSettings, OutputFormat, PermissionLevel, ServerSettings};
 
 fn is_default_checkpoint(c: &CheckpointSettings) -> bool {
     c.exclude_globs.is_empty()
@@ -72,8 +70,6 @@ pub struct Settings {
     pub mcp_servers: HashMap<String, McpServerEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github: Option<GitHubSettings>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mode: Option<ExecutionMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server: Option<ServerSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

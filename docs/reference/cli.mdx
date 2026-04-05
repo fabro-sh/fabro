@@ -11,8 +11,8 @@ These flags apply to all subcommands:
 |---|---|
 | `--debug` | Enable DEBUG-level logging (default is INFO) |
 | `--no-upgrade-check` | Skip the automatic background upgrade check |
-| `--storage-dir <DIR>` | Storage directory for local run data (default: `~/.fabro`). Implies standalone mode. |
-| `--server-url <URL>` | Fabro API server URL (overrides `server.base_url` from `user.toml`). Implies server mode. |
+| `--storage-dir <DIR>` | Local storage directory for Fabro data (default: `~/.fabro`). |
+| `--server-url <URL>` | Fabro API server URL for commands that support a remote target (overrides `server.base_url` from `user.toml`). |
 | `-h, --help` | Print help |
 | `-V, --version` | Print version |
 
@@ -31,9 +31,14 @@ output_format = "text"
 
 [llm]
 model = "claude-sonnet-4-5"
+
+[server]
+base_url = "https://fabro.example.com:3000/api/v1"
 ```
 
-`[exec]` config applies to `fabro exec`. `[llm]` sets the default workflow model/provider for commands like `fabro run` and `fabro preflight`.
+`[exec]` config applies to `fabro exec`. `[llm]` sets the default workflow model/provider for commands like `fabro run` and `fabro preflight`. `[server]` stores connection info for commands that can target a remote Fabro API.
+
+`fabro model` uses `[server].base_url` by default when no explicit `--storage-dir` is passed. `fabro exec` remains a local session unless you pass `--server-url`, even if `[server].base_url` is configured.
 
 CLI flags always override `user.toml` values, which override hardcoded defaults.
 

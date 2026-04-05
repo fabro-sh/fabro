@@ -1,13 +1,14 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::body::Body;
+use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use fabro_server::jwt_auth::AuthMode;
 use fabro_server::server::{
     AppState, build_router, create_app_state, create_app_state_with_options, spawn_scheduler,
 };
 use fabro_types::Settings;
+use tokio::time::sleep;
 use tower::ServiceExt;
 
 pub(crate) const MINIMAL_DOT: &str = r#"digraph Test {
@@ -47,7 +48,7 @@ pub(crate) fn api(path: &str) -> String {
 }
 
 pub(crate) async fn body_json(body: Body) -> serde_json::Value {
-    let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
+    let bytes = to_bytes(body, usize::MAX).await.unwrap();
     serde_json::from_slice(&bytes).unwrap()
 }
 
@@ -98,7 +99,7 @@ pub(crate) async fn wait_for_run_status(
         if expected.iter().any(|candidate| *candidate == status) {
             return status;
         }
-        tokio::time::sleep(POLL_INTERVAL).await;
+        sleep(POLL_INTERVAL).await;
     }
     panic!("run {run_id} did not reach any of {expected:?}");
 }
@@ -114,7 +115,7 @@ pub(crate) async fn wait_for_run_status_not_in(
         if unexpected.iter().all(|candidate| *candidate != status) {
             return status;
         }
-        tokio::time::sleep(POLL_INTERVAL).await;
+        sleep(POLL_INTERVAL).await;
     }
     panic!("run {run_id} stayed in {unexpected:?}");
 }

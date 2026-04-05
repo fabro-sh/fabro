@@ -1,6 +1,7 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fabro_server::server::create_app_state_with_options;
+use tokio::time::sleep;
 use tower::ServiceExt;
 
 use crate::helpers::{
@@ -27,7 +28,7 @@ async fn attach_run_events_returns_sse_stream() {
     let run_id = create_and_start_run(&app, MINIMAL_DOT).await;
 
     // Wait for scheduler to promote run.
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    sleep(std::time::Duration::from_millis(100)).await;
 
     let req = Request::builder()
         .method("GET")

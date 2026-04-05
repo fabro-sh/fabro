@@ -4,6 +4,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fabro_server::server::create_app_state_with_options;
 use http_body_util::BodyExt;
+use tokio::time::{sleep, timeout};
 use tower::ServiceExt;
 
 use crate::helpers::{
@@ -30,7 +31,7 @@ async fn wait_for_checkpoint(app: &axum::Router, run_id: &str) -> serde_json::Va
         if response.status() == StatusCode::OK {
             return body_json(response.into_body()).await;
         }
-        tokio::time::sleep(POLL_INTERVAL).await;
+        sleep(POLL_INTERVAL).await;
     }
     panic!("checkpoint did not become available for {run_id}");
 }
@@ -72,8 +73,7 @@ async fn sse_stream_contains_expected_event_types() {
     // Collect SSE frames with a timeout
     let mut body = response.into_body();
     let mut sse_data = String::new();
-    while let Ok(Some(Ok(frame))) = tokio::time::timeout(Duration::from_secs(2), body.frame()).await
-    {
+    while let Ok(Some(Ok(frame))) = timeout(Duration::from_secs(2), body.frame()).await {
         if let Some(data) = frame.data_ref() {
             sse_data.push_str(&String::from_utf8_lossy(data));
         }

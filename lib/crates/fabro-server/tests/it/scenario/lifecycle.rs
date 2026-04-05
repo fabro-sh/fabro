@@ -3,12 +3,14 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fabro_interview::Interviewer;
-use fabro_server::server::{build_router, create_app_state_with_registry_factory};
+use fabro_server::jwt_auth::AuthMode;
+use fabro_server::server::{build_router, create_app_state_with_registry_factory, spawn_scheduler};
 use fabro_workflow::handler::HandlerRegistry;
 use fabro_workflow::handler::agent::AgentHandler;
 use fabro_workflow::handler::exit::ExitHandler;
 use fabro_workflow::handler::human::HumanHandler;
 use fabro_workflow::handler::start::StartHandler;
+use tokio::time::sleep;
 use tower::ServiceExt;
 
 use crate::helpers::{
@@ -42,7 +44,7 @@ async fn wait_for_question_id(app: &axum::Router, run_id: &str) -> String {
         {
             return question_id;
         }
-        tokio::time::sleep(POLL_INTERVAL).await;
+        sleep(POLL_INTERVAL).await;
     }
     panic!("question should have appeared");
 }
@@ -66,11 +68,8 @@ const GATE_DOT: &str = r#"digraph GateTest {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn full_http_lifecycle_approve_and_complete() {
     let state = create_app_state_with_registry_factory(gate_registry);
-    fabro_server::server::spawn_scheduler(Arc::clone(&state));
-    let app = build_router(
-        Arc::clone(&state),
-        fabro_server::jwt_auth::AuthMode::Disabled,
-    );
+    spawn_scheduler(Arc::clone(&state));
+    let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
     // 1. Create run
     let req = Request::builder()
@@ -134,11 +133,8 @@ async fn full_http_lifecycle_approve_and_complete() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn full_http_lifecycle_cancel() {
     let state = create_app_state_with_registry_factory(gate_registry);
-    fabro_server::server::spawn_scheduler(Arc::clone(&state));
-    let app = build_router(
-        Arc::clone(&state),
-        fabro_server::jwt_auth::AuthMode::Disabled,
-    );
+    spawn_scheduler(Arc::clone(&state));
+    let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
     // Create and start a run that will block at the human gate
     let req = Request::builder()

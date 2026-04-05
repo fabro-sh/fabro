@@ -12,7 +12,7 @@ use crate::run::{
 };
 use crate::sandbox::SandboxConfig;
 use crate::server::{self, ApiConfig, FeaturesConfig, GitConfig, LogConfig, WebConfig};
-use crate::user::{self, ExecConfig, ExecutionMode, ServerConfig};
+use crate::user::{self, ExecConfig, ServerConfig};
 use fabro_types::Settings;
 
 fn is_default_checkpoint(c: &CheckpointConfig) -> bool {
@@ -77,9 +77,6 @@ pub struct ConfigLayer {
     pub github: Option<GitHubConfig>,
 
     // --- User config fields ---
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mode: Option<ExecutionMode>,
-
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server: Option<ServerConfig>,
 
@@ -161,7 +158,6 @@ impl Combine for ConfigLayer {
             hooks,
             mcp_servers: self.mcp_servers.combine(other.mcp_servers),
             github: self.github.combine(other.github),
-            mode: self.mode.combine(other.mode),
             server: self.server.combine(other.server),
             exec: self.exec.combine(other.exec),
             prevent_idle_sleep: self.prevent_idle_sleep.combine(other.prevent_idle_sleep),

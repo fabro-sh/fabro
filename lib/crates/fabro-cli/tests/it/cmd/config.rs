@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use fabro_config::mcp::McpTransport;
-use fabro_config::user::ExecutionMode;
 use fabro_test::{fabro_snapshot, test_context};
 use fabro_types::Settings;
 use predicates::prelude::*;
@@ -31,8 +30,8 @@ fn help() {
           --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --storage-dir <STORAGE_DIR>  Storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-          --server-url <SERVER_URL>    Server URL (overrides server.base_url from user.toml) [env: FABRO_SERVER_URL=]
+          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+          --server-url <SERVER_URL>    Fabro API server URL (overrides server.base_url from user.toml when supported) [env: FABRO_SERVER_URL=]
       -h, --help                       Print help
     ----- stderr -----
     ");
@@ -585,9 +584,7 @@ fn settings_server_url_overrides_cli_defaults() {
     let existing = std::fs::read_to_string(&user_toml_path).unwrap();
     context.write_home(
         ".fabro/user.toml",
-        format!(
-            "{existing}\nmode = \"standalone\"\n[server]\nbase_url = \"https://config.example.com\"\n"
-        ),
+        format!("{existing}\n[server]\nbase_url = \"https://config.example.com\"\n"),
     );
 
     let output = context
@@ -602,7 +599,6 @@ fn settings_server_url_overrides_cli_defaults() {
         .clone();
 
     let cfg = parse_settings(&output);
-    assert_eq!(cfg.mode, Some(ExecutionMode::Server));
     assert_eq!(
         cfg.server
             .as_ref()

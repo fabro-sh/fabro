@@ -1,5 +1,3 @@
-use std::path::Path;
-
 pub(crate) use fabro_config::user::*;
 
 use fabro_config::ConfigLayer;
@@ -24,55 +22,70 @@ pub(crate) fn load_user_settings_with_globals(globals: &GlobalArgs) -> anyhow::R
 pub(crate) fn apply_global_overrides(mut layer: ConfigLayer, globals: &GlobalArgs) -> ConfigLayer {
     if let Some(dir) = &globals.storage_dir {
         layer.storage_dir = Some(dir.clone());
-        layer.mode = Some(ExecutionMode::Standalone);
     }
 
     if let Some(url) = &globals.server_url {
         layer.server.get_or_insert_with(Default::default).base_url = Some(url.clone());
-        layer.mode = Some(ExecutionMode::Server);
     }
 
     layer
 }
 
-#[derive(Debug, PartialEq)]
-pub(crate) struct ResolvedMode {
-    pub mode: ExecutionMode,
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ServerTarget {
     pub server_base_url: String,
     pub tls: Option<ClientTlsSettings>,
 }
 
-const DEFAULT_SERVER_URL: &str = "http://localhost:3000/api/v1";
+fn configured_server_target(settings: &Settings) -> Option<ServerTarget> {
+    settings.server.as_ref().and_then(|server| {
+        server.base_url.clone().map(|server_base_url| ServerTarget {
+            server_base_url,
+            tls: server.tls.clone(),
+        })
+    })
+}
 
-pub(crate) fn resolve_mode(
-    cli_storage_dir: Option<&Path>,
-    cli_server_url: Option<&str>,
+pub(crate) fn exec_server_target(
+    globals: &GlobalArgs,
     settings: &Settings,
-) -> ResolvedMode {
-    let mode = if cli_server_url.is_some() {
-        ExecutionMode::Server
-    } else if cli_storage_dir.is_some() {
-        ExecutionMode::Standalone
+) -> Option<ServerTarget> {
+    let target = globals
+        .server_url
+        .as_ref()
+        .map(|server_base_url| ServerTarget {
+            server_base_url: server_base_url.clone(),
+            tls: settings
+                .server
+                .as_ref()
+                .and_then(|server| server.tls.clone()),
+        });
+    debug!(has_target = target.is_some(), "Resolved exec server target");
+    target
+}
+
+pub(crate) fn model_server_target(
+    globals: &GlobalArgs,
+    settings: &Settings,
+) -> Option<ServerTarget> {
+    let target = if let Some(server_base_url) = globals.server_url.as_ref() {
+        Some(ServerTarget {
+            server_base_url: server_base_url.clone(),
+            tls: settings
+                .server
+                .as_ref()
+                .and_then(|server| server.tls.clone()),
+        })
+    } else if globals.storage_dir.is_some() {
+        None
     } else {
-        settings.mode.clone().unwrap_or_default()
+        configured_server_target(settings)
     };
-
-    let server_defaults = settings.server.as_ref();
-
-    let server_base_url = cli_server_url
-        .map(String::from)
-        .or_else(|| server_defaults.and_then(|s| s.base_url.clone()))
-        .unwrap_or_else(|| DEFAULT_SERVER_URL.to_string());
-
-    let tls = server_defaults.and_then(|s| s.tls.clone());
-
-    debug!(mode = ?mode, base_url = %server_base_url, tls = tls.is_some(), "CLI mode resolved");
-
-    ResolvedMode {
-        mode,
-        server_base_url,
-        tls,
-    }
+    debug!(
+        has_target = target.is_some(),
+        "Resolved model server target"
+    );
+    target
 }
 
 pub(crate) fn build_server_client(
@@ -108,63 +121,44 @@ pub(crate) fn build_server_client(
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
 
     use super::*;
 
-    // --- resolve_mode precedence ---
+    fn globals() -> GlobalArgs {
+        GlobalArgs {
+            json: false,
+            debug: false,
+            no_upgrade_check: false,
+            quiet: false,
+            verbose: false,
+            storage_dir: None,
+            server_url: None,
+        }
+    }
 
     #[test]
-    fn resolve_mode_defaults_to_standalone() {
+    fn exec_has_no_server_target_by_default() {
         let settings = Settings::default();
-        let resolved = resolve_mode(None, None, &settings);
-        assert_eq!(resolved.mode, ExecutionMode::Standalone);
-        assert_eq!(resolved.server_base_url, DEFAULT_SERVER_URL);
-        assert_eq!(resolved.tls, None);
+        assert_eq!(exec_server_target(&globals(), &settings), None);
     }
 
     #[test]
-    fn resolve_mode_storage_dir_forces_standalone() {
-        let settings = Settings {
-            mode: Some(ExecutionMode::Server),
-            ..Settings::default()
-        };
-        let resolved = resolve_mode(Some(Path::new("/tmp/fabro")), None, &settings);
-        assert_eq!(resolved.mode, ExecutionMode::Standalone);
-    }
-
-    #[test]
-    fn resolve_mode_server_url_forces_server() {
-        let settings = Settings {
-            mode: Some(ExecutionMode::Standalone),
-            server: Some(ServerSettings {
-                base_url: Some("https://config.example.com".to_string()),
+    fn exec_uses_cli_server_url() {
+        let settings = Settings::default();
+        let mut globals = globals();
+        globals.server_url = Some("https://cli.example.com".to_string());
+        assert_eq!(
+            exec_server_target(&globals, &settings),
+            Some(ServerTarget {
+                server_base_url: "https://cli.example.com".to_string(),
                 tls: None,
-            }),
-            ..Settings::default()
-        };
-        let resolved = resolve_mode(None, Some("https://cli.example.com"), &settings);
-        assert_eq!(resolved.mode, ExecutionMode::Server);
-        assert_eq!(resolved.server_base_url, "https://cli.example.com");
+            })
+        );
     }
 
     #[test]
-    fn resolve_mode_config_overrides_default() {
-        let settings = Settings {
-            mode: Some(ExecutionMode::Server),
-            server: Some(ServerSettings {
-                base_url: Some("https://config.example.com".to_string()),
-                tls: None,
-            }),
-            ..Settings::default()
-        };
-        let resolved = resolve_mode(None, None, &settings);
-        assert_eq!(resolved.mode, ExecutionMode::Server);
-        assert_eq!(resolved.server_base_url, "https://config.example.com");
-    }
-
-    #[test]
-    fn resolve_mode_cli_url_overrides_config_url() {
+    fn exec_ignores_configured_server_base_url_without_cli_server_url() {
         let settings = Settings {
             server: Some(ServerSettings {
                 base_url: Some("https://config.example.com".to_string()),
@@ -172,12 +166,63 @@ mod tests {
             }),
             ..Settings::default()
         };
-        let resolved = resolve_mode(None, Some("https://cli.example.com"), &settings);
-        assert_eq!(resolved.server_base_url, "https://cli.example.com");
+        assert_eq!(exec_server_target(&globals(), &settings), None);
     }
 
     #[test]
-    fn resolve_mode_tls_from_config() {
+    fn model_uses_configured_server_base_url() {
+        let settings = Settings {
+            server: Some(ServerSettings {
+                base_url: Some("https://config.example.com".to_string()),
+                tls: None,
+            }),
+            ..Settings::default()
+        };
+        assert_eq!(
+            model_server_target(&globals(), &settings),
+            Some(ServerTarget {
+                server_base_url: "https://config.example.com".to_string(),
+                tls: None,
+            })
+        );
+    }
+
+    #[test]
+    fn model_cli_server_url_overrides_config_url() {
+        let settings = Settings {
+            server: Some(ServerSettings {
+                base_url: Some("https://config.example.com".to_string()),
+                tls: None,
+            }),
+            ..Settings::default()
+        };
+        let mut globals = globals();
+        globals.server_url = Some("https://cli.example.com".to_string());
+        assert_eq!(
+            model_server_target(&globals, &settings),
+            Some(ServerTarget {
+                server_base_url: "https://cli.example.com".to_string(),
+                tls: None,
+            })
+        );
+    }
+
+    #[test]
+    fn model_storage_dir_suppresses_configured_remote_target() {
+        let settings = Settings {
+            server: Some(ServerSettings {
+                base_url: Some("https://config.example.com".to_string()),
+                tls: None,
+            }),
+            ..Settings::default()
+        };
+        let mut globals = globals();
+        globals.storage_dir = Some(PathBuf::from("/tmp/fabro"));
+        assert_eq!(model_server_target(&globals, &settings), None);
+    }
+
+    #[test]
+    fn remote_target_uses_tls_from_config() {
         let tls = ClientTlsSettings {
             cert: PathBuf::from("cert.pem"),
             key: PathBuf::from("key.pem"),
@@ -190,7 +235,14 @@ mod tests {
             }),
             ..Settings::default()
         };
-        let resolved = resolve_mode(None, None, &settings);
-        assert_eq!(resolved.tls, Some(tls));
+        let mut globals = globals();
+        globals.server_url = Some("https://cli.example.com".to_string());
+        assert_eq!(
+            exec_server_target(&globals, &settings),
+            Some(ServerTarget {
+                server_base_url: "https://cli.example.com".to_string(),
+                tls: Some(tls),
+            })
+        );
     }
 }

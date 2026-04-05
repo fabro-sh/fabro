@@ -24,40 +24,33 @@ pub(crate) async fn execute(mut args: AgentArgs, globals: &GlobalArgs) -> Result
     if globals.json {
         args.output_format = Some(OutputFormat::Json);
     }
-    let resolved = user_config::resolve_mode(
-        globals.storage_dir.as_deref(),
-        globals.server_url.as_deref(),
-        &cli_settings,
-    );
+    let server_target = user_config::exec_server_target(globals, &cli_settings);
     let mcp_servers: Vec<McpServerSettings> = cli_settings
         .mcp_servers
         .into_iter()
         .map(|(name, entry): (String, McpServerEntry)| entry.into_config(name))
         .collect();
-    match resolved.mode {
-        user_config::ExecutionMode::Server => {
-            tracing::info!(mode = "server", "Agent session starting");
-            let http_client = user_config::build_server_client(resolved.tls.as_ref())?;
-            let provider_name = args
-                .provider
-                .clone()
-                .unwrap_or_else(|| "anthropic".to_string());
-            let adapter = Arc::new(FabroServerAdapter::new(
-                http_client,
-                &resolved.server_base_url,
-                &provider_name,
-            ));
-            let mut client = Client::new(HashMap::new(), None, vec![]);
-            client
-                .register_provider(adapter)
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to register fabro server adapter: {e}"))?;
-            run_with_args_and_client(args, Some(client), mcp_servers).await?;
-        }
-        user_config::ExecutionMode::Standalone => {
-            tracing::info!(mode = "standalone", "Agent session starting");
-            run_with_args(args, mcp_servers).await?;
-        }
+    if let Some(target) = server_target {
+        tracing::info!(transport = "server", "Agent session starting");
+        let http_client = user_config::build_server_client(target.tls.as_ref())?;
+        let provider_name = args
+            .provider
+            .clone()
+            .unwrap_or_else(|| "anthropic".to_string());
+        let adapter = Arc::new(FabroServerAdapter::new(
+            http_client,
+            &target.server_base_url,
+            &provider_name,
+        ));
+        let mut client = Client::new(HashMap::new(), None, vec![]);
+        client
+            .register_provider(adapter)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to register fabro server adapter: {e}"))?;
+        run_with_args_and_client(args, Some(client), mcp_servers).await?;
+    } else {
+        tracing::info!(transport = "direct", "Agent session starting");
+        run_with_args(args, mcp_servers).await?;
     }
 
     Ok(())

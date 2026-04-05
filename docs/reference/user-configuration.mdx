@@ -22,7 +22,6 @@ CLI flags always take the highest priority:
 ```toml title="user.toml"
 verbose = true
 upgrade_check = true
-mode = "server"
 
 [server]
 base_url = "https://fabro.example.com:3000/api/v1"
@@ -148,30 +147,21 @@ Customize the git author identity used for checkpoint commits. Overrides the ser
 | `name` | Git author name | `"fabro"` |
 | `email` | Git author email | `"fabro@local"` |
 
-## `mode`
-
-Controls the default execution mode when neither `--storage-dir` nor `--server-url` is passed.
-
-| Value | Description |
-|---|---|
-| `"standalone"` | Execute locally (default) |
-| `"server"` | Delegate to an Fabro API server |
-
-For a single invocation, `--storage-dir` implies standalone mode and `--server-url` implies server mode.
-
 ## `[server]` section
 
-Configuration for server mode.
+Connection info for commands that can target a remote Fabro API server.
 
 | Key | Description | Default |
 |---|---|---|
 | `base_url` | Server URL | `"http://localhost:3000/api/v1"` |
 
-Passing `--server-url` implies server mode and overrides `server.base_url`:
+`fabro model` uses `[server].base_url` by default when no explicit `--storage-dir` is passed. `--server-url` overrides `server.base_url`:
 
 ```bash
 fabro --server-url https://fabro.example.com:3000/api/v1 model list
 ```
+
+`fabro exec` does not automatically use `[server].base_url`. It only routes model traffic through a Fabro server when you pass `--server-url` for that invocation.
 
 ### `[server.tls]` section
 

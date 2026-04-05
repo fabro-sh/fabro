@@ -305,7 +305,7 @@ fn stop_session_server(storage_dir: &Path) {
     let Ok(record) = serde_json::from_str::<serde_json::Value>(&content) else {
         return;
     };
-    let Some(pid) = record["pid"].as_u64().map(|p| p as u32) else {
+    let Some(pid) = record["pid"].as_u64().and_then(|p| u32::try_from(p).ok()) else {
         return;
     };
 

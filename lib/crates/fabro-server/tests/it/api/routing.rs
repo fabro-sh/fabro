@@ -1,5 +1,6 @@
-use axum::body::Body;
+use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, StatusCode};
+use fabro_server::jwt_auth::AuthMode;
 use fabro_server::server::{build_router, create_app_state};
 use tower::ServiceExt;
 
@@ -7,10 +8,7 @@ use crate::helpers::body_json;
 
 #[tokio::test]
 async fn old_unversioned_routes_return_404() {
-    let app = build_router(
-        create_app_state(),
-        fabro_server::jwt_auth::AuthMode::Disabled,
-    );
+    let app = build_router(create_app_state(), AuthMode::Disabled);
 
     let cases = [(Method::POST, "/completions")];
 
@@ -27,10 +25,7 @@ async fn old_unversioned_routes_return_404() {
 
 #[tokio::test]
 async fn root_and_health_stay_at_root() {
-    let app = build_router(
-        create_app_state(),
-        fabro_server::jwt_auth::AuthMode::Disabled,
-    );
+    let app = build_router(create_app_state(), AuthMode::Disabled);
 
     let root_req = Request::builder()
         .method("GET")
@@ -39,7 +34,7 @@ async fn root_and_health_stay_at_root() {
         .unwrap();
     let root_response = app.clone().oneshot(root_req).await.unwrap();
     assert_eq!(root_response.status(), StatusCode::OK);
-    let root_body = axum::body::to_bytes(root_response.into_body(), usize::MAX)
+    let root_body = to_bytes(root_response.into_body(), usize::MAX)
         .await
         .unwrap();
     let root_html = String::from_utf8(root_body.to_vec()).unwrap();
@@ -58,10 +53,7 @@ async fn root_and_health_stay_at_root() {
 
 #[tokio::test]
 async fn moved_routes_not_at_root_of_api_prefix() {
-    let app = build_router(
-        create_app_state(),
-        fabro_server::jwt_auth::AuthMode::Disabled,
-    );
+    let app = build_router(create_app_state(), AuthMode::Disabled);
 
     for path in ["/api/v1/health", "/api/v1/"] {
         let req = Request::builder()

@@ -23,7 +23,6 @@ impl TryFrom<ConfigLayer> for Settings {
             hooks: value.hooks,
             mcp_servers: value.mcp_servers,
             github: value.github.map(Into::into),
-            mode: value.mode,
             server: value.server.map(TryInto::try_into).transpose()?,
             exec: value.exec.map(Into::into),
             prevent_idle_sleep: value.prevent_idle_sleep,

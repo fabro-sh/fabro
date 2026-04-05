@@ -62,12 +62,12 @@ fn help() {
               [env: FABRO_VERBOSE=]
 
           --storage-dir <STORAGE_DIR>
-              Storage directory (default: ~/.fabro)
+              Local storage directory (default: ~/.fabro)
               
               [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
 
           --server-url <SERVER_URL>
-              Server URL (overrides server.base_url from user.toml)
+              Fabro API server URL (overrides server.base_url from user.toml when supported)
               
               [env: FABRO_SERVER_URL=]
 

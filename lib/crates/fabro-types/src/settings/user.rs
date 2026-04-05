@@ -19,15 +19,6 @@ pub enum PermissionLevel {
     Full,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
-#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
-#[serde(rename_all = "lowercase")]
-pub enum ExecutionMode {
-    #[default]
-    Standalone,
-    Server,
-}
-
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ClientTlsSettings {
     pub cert: PathBuf,

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::ConfigLayer;
 
 pub use fabro_types::settings::user::{
-    ClientTlsSettings, ExecSettings, ExecutionMode, OutputFormat, PermissionLevel, ServerSettings,
+    ClientTlsSettings, ExecSettings, OutputFormat, PermissionLevel, ServerSettings,
 };
 
 pub const USER_CONFIG_FILENAME: &str = "user.toml";
