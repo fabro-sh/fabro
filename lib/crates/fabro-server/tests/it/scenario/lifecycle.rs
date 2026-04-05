@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fabro_interview::Interviewer;
-use fabro_server::server::{build_router, create_app_state_with_registry_factory};
+use fabro_server::server::{build_router, create_app_state_with_settings_and_registry_factory};
 use fabro_workflow::handler::HandlerRegistry;
 use fabro_workflow::handler::agent::AgentHandler;
 use fabro_workflow::handler::exit::ExitHandler;
@@ -12,7 +12,7 @@ use fabro_workflow::handler::start::StartHandler;
 use tower::ServiceExt;
 
 use crate::helpers::{
-    POLL_ATTEMPTS, POLL_INTERVAL, api, body_json, run_json, wait_for_run_status,
+    POLL_ATTEMPTS, POLL_INTERVAL, api, body_json, run_json, test_settings, wait_for_run_status,
     wait_for_run_status_not_in,
 };
 
@@ -65,7 +65,7 @@ const GATE_DOT: &str = r#"digraph GateTest {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn full_http_lifecycle_approve_and_complete() {
-    let state = create_app_state_with_registry_factory(gate_registry);
+    let state = create_app_state_with_settings_and_registry_factory(test_settings(), gate_registry);
     fabro_server::server::spawn_scheduler(Arc::clone(&state));
     let app = build_router(
         Arc::clone(&state),
@@ -133,7 +133,7 @@ async fn full_http_lifecycle_approve_and_complete() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn full_http_lifecycle_cancel() {
-    let state = create_app_state_with_registry_factory(gate_registry);
+    let state = create_app_state_with_settings_and_registry_factory(test_settings(), gate_registry);
     fabro_server::server::spawn_scheduler(Arc::clone(&state));
     let app = build_router(
         Arc::clone(&state),

@@ -8,6 +8,7 @@ use fabro_server::server::{
     AppState, build_router, create_app_state, create_app_state_with_options, spawn_scheduler,
 };
 use fabro_types::Settings;
+use fabro_types::settings::{LocalSandboxSettings, SandboxSettings, WorktreeMode};
 use tower::ServiceExt;
 
 pub(crate) const MINIMAL_DOT: &str = r#"digraph Test {
@@ -24,10 +25,22 @@ pub(crate) fn test_app_state() -> Arc<AppState> {
     create_app_state()
 }
 
+pub(crate) fn test_settings() -> Settings {
+    Settings {
+        sandbox: Some(SandboxSettings {
+            local: Some(LocalSandboxSettings {
+                worktree_mode: WorktreeMode::Never,
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
 pub(crate) fn dry_run_settings() -> Settings {
     Settings {
         dry_run: Some(true),
-        ..Default::default()
+        ..test_settings()
     }
 }
 
