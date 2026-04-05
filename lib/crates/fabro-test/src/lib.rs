@@ -103,6 +103,7 @@ pub struct TestContext {
     session_root: PathBuf,
     fabro_bin: PathBuf,
     filters: Vec<(String, String)>,
+    managed_storage_dirs: Vec<PathBuf>,
     _context_root: tempfile::TempDir,
 }
 
@@ -440,6 +441,7 @@ impl TestContext {
             session_root: session_paths.root,
             fabro_bin,
             filters,
+            managed_storage_dirs: Vec::new(),
             _context_root: context_root,
         }
     }
@@ -678,6 +680,16 @@ impl TestContext {
         self
     }
 
+    /// Register an additional storage directory that this test may cause to
+    /// auto-start a daemon for, so Drop can stop it.
+    pub fn manage_storage_dir(&mut self, path: impl AsRef<Path>) -> &mut Self {
+        let path = path.as_ref().to_path_buf();
+        if path != self.storage_dir && !self.managed_storage_dirs.contains(&path) {
+            self.managed_storage_dirs.push(path);
+        }
+        self
+    }
+
     /// Find a run directory whose name ends with `run_id_suffix`.
     pub fn find_run_dir(&self, run_id_suffix: &str) -> PathBuf {
         let runs_dir = self.storage_dir.join("runs");
@@ -737,6 +749,10 @@ impl TestContext {
 
 impl Drop for TestContext {
     fn drop(&mut self) {
+        for storage_dir in &self.managed_storage_dirs {
+            stop_session_server(&self.fabro_bin, storage_dir);
+        }
+
         let is_last_ref = {
             let mut refs = session_refs().lock().expect("session refs lock poisoned");
             let Some(count) = refs.get_mut(&self.session_root) else {

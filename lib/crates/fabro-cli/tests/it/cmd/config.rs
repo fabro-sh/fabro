@@ -187,9 +187,10 @@ SHARED = "run"
 /// Set up an external workflow fixture with a custom storage_dir in user.toml.
 /// Returns (project_tempdir, storage_dir_path).
 fn setup_external_workflow_fixture(
-    context: &fabro_test::TestContext,
+    context: &mut fabro_test::TestContext,
 ) -> (tempfile::TempDir, PathBuf) {
     let storage_dir = context.home_dir.join("fabro-data");
+    context.manage_storage_dir(&storage_dir);
 
     context.write_home(
         ".fabro/user.toml",
@@ -369,8 +370,8 @@ fn settings_workflow_name_applies_run_overlay_and_deep_merges() {
 
 #[test]
 fn settings_explicit_workflow_path_uses_workflow_project_layers() {
-    let context = test_context!();
-    let (project, _storage_dir) = setup_external_workflow_fixture(&context);
+    let mut context = test_context!();
+    let (project, _storage_dir) = setup_external_workflow_fixture(&mut context);
     let cwd = tempfile::tempdir().unwrap();
     let workflow = project.path().join("workflow.toml");
 
@@ -404,8 +405,8 @@ fn settings_explicit_workflow_path_uses_workflow_project_layers() {
 
 #[test]
 fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
-    let context = test_context!();
-    let (project, storage_dir) = setup_external_workflow_fixture(&context);
+    let mut context = test_context!();
+    let (project, storage_dir) = setup_external_workflow_fixture(&mut context);
     let cwd = tempfile::tempdir().unwrap();
     let workflow = project.path().join("workflow.toml");
     let run_id = unique_run_id();
