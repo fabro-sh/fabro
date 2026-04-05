@@ -32,6 +32,7 @@ static INSTA_FILTERS: &[(&str, &str)] = &[
         r"\[STORAGE_DIR\]/runs/\d{8}-dry-run-\[ULID\]",
         "[DRY_RUN_DIR]",
     ),
+    (r"\[STORAGE_DIR\]/runs/\d{8}-\[ULID\]", "[RUN_DIR]"),
     (
         r"Duration:\s+\d+\s+(seconds?|minutes?|hours?)",
         "Duration:  [DURATION]",

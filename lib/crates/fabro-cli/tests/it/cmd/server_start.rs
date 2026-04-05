@@ -126,67 +126,75 @@ fn concurrent_autostart_converges_on_one_shared_daemon_and_cleans_up() {
             .count()
     }
 
-    let storage_dir;
-    let socket_path;
-    {
-        let context_a = test_context!();
-        let context_b = test_context!();
-        assert_eq!(context_a.storage_dir, context_b.storage_dir);
-        storage_dir = context_a.storage_dir.clone();
-        socket_path = storage_dir.join("fabro.sock").display().to_string();
+    let storage_root = isolated_storage_dir();
+    let storage_dir = storage_root.path().join("storage");
+    let socket_path = storage_dir.join("fabro.sock").display().to_string();
+    let home_a = tempfile::tempdir_in("/tmp").unwrap();
+    let home_b = tempfile::tempdir_in("/tmp").unwrap();
+    let temp_a = tempfile::tempdir_in("/tmp").unwrap();
+    let temp_b = tempfile::tempdir_in("/tmp").unwrap();
 
-        let barrier = Arc::new(Barrier::new(3));
-        let home_a = context_a.home_dir.clone();
-        let temp_a = context_a.temp_dir.clone();
-        let storage_a = context_a.storage_dir.clone();
-        let barrier_a = Arc::clone(&barrier);
-        let thread_a = std::thread::spawn(move || {
-            barrier_a.wait();
-            run_ps_json(&home_a, &temp_a, &storage_a)
-        });
+    let barrier = Arc::new(Barrier::new(3));
+    let barrier_a = Arc::clone(&barrier);
+    let storage_a = storage_dir.clone();
+    let thread_a = std::thread::spawn(move || {
+        barrier_a.wait();
+        run_ps_json(home_a.path(), temp_a.path(), &storage_a)
+    });
 
-        let home_b = context_b.home_dir.clone();
-        let temp_b = context_b.temp_dir.clone();
-        let storage_b = context_b.storage_dir.clone();
-        let barrier_b = Arc::clone(&barrier);
-        let thread_b = std::thread::spawn(move || {
-            barrier_b.wait();
-            run_ps_json(&home_b, &temp_b, &storage_b)
-        });
+    let barrier_b = Arc::clone(&barrier);
+    let storage_b = storage_dir.clone();
+    let thread_b = std::thread::spawn(move || {
+        barrier_b.wait();
+        run_ps_json(home_b.path(), temp_b.path(), &storage_b)
+    });
 
-        barrier.wait();
-        let output_a = thread_a.join().expect("thread A should join");
-        let output_b = thread_b.join().expect("thread B should join");
-        assert!(
-            output_a.status.success(),
-            "first concurrent ps should succeed:\nstdout:\n{}\nstderr:\n{}",
-            String::from_utf8_lossy(&output_a.stdout),
-            String::from_utf8_lossy(&output_a.stderr)
-        );
-        assert!(
-            output_b.status.success(),
-            "second concurrent ps should succeed:\nstdout:\n{}\nstderr:\n{}",
-            String::from_utf8_lossy(&output_b.stdout),
-            String::from_utf8_lossy(&output_b.stderr)
-        );
+    barrier.wait();
+    let output_a = thread_a.join().expect("thread A should join");
+    let output_b = thread_b.join().expect("thread B should join");
+    assert!(
+        output_a.status.success(),
+        "first concurrent ps should succeed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output_a.stdout),
+        String::from_utf8_lossy(&output_a.stderr)
+    );
+    assert!(
+        output_b.status.success(),
+        "second concurrent ps should succeed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output_b.stdout),
+        String::from_utf8_lossy(&output_b.stderr)
+    );
 
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while Instant::now() < deadline {
-            if storage_dir.join("server.json").exists() && daemon_match_count(&socket_path) == 1 {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(50));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if storage_dir.join("server.json").exists() && daemon_match_count(&socket_path) == 1 {
+            break;
         }
-        assert!(
-            storage_dir.join("server.json").exists(),
-            "shared storage should have an active server record"
-        );
-        assert_eq!(
-            daemon_match_count(&socket_path),
-            1,
-            "concurrent auto-start should converge on one daemon"
-        );
+        std::thread::sleep(Duration::from_millis(50));
     }
+    assert!(
+        storage_dir.join("server.json").exists(),
+        "shared storage should have an active server record"
+    );
+    assert_eq!(
+        daemon_match_count(&socket_path),
+        1,
+        "concurrent auto-start should converge on one daemon"
+    );
+
+    let stop = std::process::Command::new(env!("CARGO_BIN_EXE_fabro"))
+        .env("NO_COLOR", "1")
+        .env("FABRO_NO_UPGRADE_CHECK", "true")
+        .env("FABRO_STORAGE_DIR", &storage_dir)
+        .args(["server", "stop"])
+        .output()
+        .expect("server stop should execute");
+    assert!(
+        stop.status.success(),
+        "server stop should succeed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&stop.stdout),
+        String::from_utf8_lossy(&stop.stderr)
+    );
 
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {

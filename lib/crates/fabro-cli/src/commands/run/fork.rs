@@ -3,23 +3,28 @@ use anyhow::Result;
 use fabro_checkpoint::git::Store;
 use fabro_util::terminal::Styles;
 use fabro_workflow::operations::{
-    ForkRunInput, RewindTarget, build_timeline_or_rebuild, find_run_id_by_prefix_or_store, fork,
+    ForkRunInput, RewindTarget, build_timeline_or_rebuild, fork,
 };
+use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 use git2::Repository;
 
 use crate::args::{ForkArgs, GlobalArgs};
+use crate::commands::store::rebuild::rebuild_run_store;
+use crate::server_client;
 use crate::shared::print_json_pretty;
-use crate::store::{build_store, open_run_reader};
 use crate::user_config::load_user_settings_with_globals;
 
 pub(crate) async fn run(args: &ForkArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
     let repo = Repository::discover(".").context("not in a git repository")?;
     let cli_settings = load_user_settings_with_globals(globals)?;
-    let durable_store = build_store(&cli_settings.storage_dir())?;
-    let run_id =
-        find_run_id_by_prefix_or_store(&repo, durable_store.as_ref(), &args.run_id).await?;
+    let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
+    let base = runs_base(&cli_settings.storage_dir());
+    let summaries = client.list_store_runs().await?;
+    let run = resolve_run_from_summaries(&summaries, &base, &args.run_id)?;
+    let run_id = run.run_id();
     let store = Store::new(repo);
-    let run_store = open_run_reader(&cli_settings.storage_dir(), &run_id).await?;
+    let events = client.list_run_events(&run_id, None, None).await?;
+    let run_store = rebuild_run_store(&run_id, &events).await?;
 
     let timeline = build_timeline_or_rebuild(&store, Some(&run_store), &run_id).await?;
 

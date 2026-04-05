@@ -57,6 +57,12 @@ pub(crate) async fn run(args: &LogsArgs, styles: &Styles, globals: &GlobalArgs) 
     }
 
     if args.follow {
+        if events
+            .iter()
+            .any(|event| matches!(event_name(event), Some("run.completed" | "run.failed")))
+        {
+            return Ok(());
+        }
         follow_store_logs(
             &client,
             &run_id,
@@ -69,6 +75,10 @@ pub(crate) async fn run(args: &LogsArgs, styles: &Styles, globals: &GlobalArgs) 
     }
 
     Ok(())
+}
+
+fn event_name(event: &fabro_store::EventEnvelope) -> Option<&str> {
+    event.payload.as_value().get("event")?.as_str()
 }
 
 fn apply_filters(
@@ -146,18 +156,27 @@ async fn follow_store_logs(
     loop {
         match time::timeout(Duration::from_millis(200), client.list_run_events(run_id, Some(next_seq), None)).await {
             Ok(Ok(events)) => {
+                let saw_terminal = events
+                    .iter()
+                    .any(|event| matches!(event_name(event), Some("run.completed" | "run.failed")));
                 for event in events {
-                let line = event_payload_line(&event)?;
-                if pretty {
-                    if let Some(formatted) = format_event_pretty(&line, styles) {
-                        writeln!(out, "{formatted}")?;
+                    let line = event_payload_line(&event)?;
+                    if pretty {
+                        if let Some(formatted) = format_event_pretty(&line, styles) {
+                            writeln!(out, "{formatted}")?;
+                        }
+                    } else {
+                        writeln!(out, "{line}")?;
                     }
-                } else {
-                    writeln!(out, "{line}")?;
+                    out.flush()?;
+                    next_seq = event.seq.saturating_add(1);
                 }
-                out.flush()?;
-                next_seq = event.seq.saturating_add(1);
-            }
+                if saw_terminal {
+                    flush_remaining_store_events(client, run_id, next_seq, pretty, styles, &mut out)
+                        .await?;
+                    debug!("Observed terminal event while following logs, stopping follow");
+                    break;
+                }
             }
             Err(_) => {
                 if run_concluded(client, run_id).await? {

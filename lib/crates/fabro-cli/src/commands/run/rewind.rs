@@ -4,19 +4,22 @@ use cli_table::format::{Border, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_checkpoint::git::Store;
 use fabro_util::terminal::Styles;
-use fabro_workflow::event::{Event, append_event};
+use fabro_types::run_event::{
+    CheckpointCompletedProps, RunRewoundProps, RunStatusTransitionProps,
+};
 use fabro_workflow::git::MetadataStore;
 use fabro_workflow::operations::{
-    RewindInput, RewindTarget, RunTimeline, TimelineEntry, build_timeline_or_rebuild,
-    find_run_id_by_prefix_or_store, rewind,
+    RewindInput, RewindTarget, RunTimeline, TimelineEntry, build_timeline_or_rebuild, rewind,
 };
-use fabro_workflow::run_lookup::{resolve_run_combined, runs_base};
+use fabro_types::{EventBody, RunEvent};
+use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 use git2::Repository;
 use serde::Serialize;
 
 use crate::args::{GlobalArgs, RewindArgs};
+use crate::commands::store::rebuild::rebuild_run_store;
+use crate::server_client;
 use crate::shared::{color_if, print_json_pretty};
-use crate::store::{build_store, open_run_reader};
 use crate::user_config::load_user_settings_with_globals;
 
 #[derive(Serialize)]
@@ -30,18 +33,14 @@ pub(crate) struct TimelineEntryJson {
 pub(crate) async fn run(args: &RewindArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
     let repo = Repository::discover(".").context("not in a git repository")?;
     let cli_settings = load_user_settings_with_globals(globals)?;
-    let durable_store = build_store(&cli_settings.storage_dir())?;
-    let run_id =
-        find_run_id_by_prefix_or_store(&repo, durable_store.as_ref(), &args.run_id).await?;
+    let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
+    let base = runs_base(&cli_settings.storage_dir());
+    let summaries = client.list_store_runs().await?;
+    let run = resolve_run_from_summaries(&summaries, &base, &args.run_id)?;
+    let run_id = run.run_id();
     let store = Store::new(repo);
-    let run_store = open_run_reader(&cli_settings.storage_dir(), &run_id).await?;
-    let run_info = resolve_run_combined(
-        durable_store.as_ref(),
-        &runs_base(&cli_settings.storage_dir()),
-        &run_id.to_string(),
-    )
-    .await
-    .ok();
+    let events = client.list_run_events(&run_id, None, None).await?;
+    let run_store = rebuild_run_store(&run_id, &events).await?;
 
     let timeline = build_timeline_or_rebuild(&store, Some(&run_store), &run_id).await?;
 
@@ -64,17 +63,8 @@ pub(crate) async fn run(args: &RewindArgs, styles: &Styles, globals: &GlobalArgs
             push: !args.no_push,
         },
     )?;
-    if let Some(run_info) = run_info.as_ref() {
-        let entry = timeline.resolve(&target)?;
-        reset_rewound_run_state(
-            &store,
-            durable_store.as_ref(),
-            &run_id,
-            &run_info.path,
-            entry,
-        )
-        .await?;
-    }
+    let entry = timeline.resolve(&target)?;
+    reset_rewound_run_state(&client, &store, &run_id, &run.path, entry).await?;
 
     let run_id_string = run_id.to_string();
 
@@ -107,19 +97,16 @@ pub(crate) fn timeline_entries_json(timeline: &RunTimeline) -> Vec<TimelineEntry
 }
 
 async fn reset_rewound_run_state(
+    client: &crate::server_client::ServerStoreClient,
     git_store: &Store,
-    durable_store: &fabro_store::SlateStore,
     run_id: &fabro_types::RunId,
     run_dir: &std::path::Path,
     entry: &TimelineEntry,
 ) -> Result<()> {
-    let existing_run_store = durable_store
-        .open_run_reader(run_id)
+    let state = client
+        .get_run_state(run_id)
         .await
-        .map_err(|err| anyhow::anyhow!("failed to open durable store run before rewind: {err}"))?;
-    let state = existing_run_store.state().await.map_err(|err| {
-        anyhow::anyhow!("failed to load durable store state before rewind: {err}")
-    })?;
+        .map_err(|err| anyhow::anyhow!("failed to load durable store state before rewind: {err}"))?;
 
     let _run_record = state
         .run
@@ -130,32 +117,45 @@ async fn reset_rewound_run_state(
 
     let _ = std::fs::remove_file(run_dir.join("detached_failure.json"));
 
-    let run_store = durable_store.open_run(run_id).await.map_err(|err| {
-        anyhow::anyhow!("failed to open durable store run for rewind reset: {err}")
-    })?;
-    append_event(
-        &run_store,
-        run_id,
-        &Event::RunRewound {
-            target_checkpoint_ordinal: entry.ordinal,
-            target_node_id: entry.node_name.clone(),
-            target_visit: entry.visit,
-            previous_status,
-            run_commit_sha: entry.run_commit_sha.clone(),
-        },
-    )
-    .await
-    .map_err(|err| anyhow::anyhow!("failed to append run rewound event: {err}"))?;
-    append_event(&run_store, run_id, &restored_checkpoint_event(&checkpoint))
+    client
+        .append_run_event(
+            run_id,
+            &run_event(
+                *run_id,
+                None,
+                EventBody::RunRewound(RunRewoundProps {
+                    target_checkpoint_ordinal: entry.ordinal,
+                    target_node_id: entry.node_name.clone(),
+                    target_visit: entry.visit,
+                    previous_status,
+                    run_commit_sha: entry.run_commit_sha.clone(),
+                }),
+            ),
+        )
+        .await
+        .map_err(|err| anyhow::anyhow!("failed to append run rewound event: {err}"))?;
+    client
+        .append_run_event(run_id, &restored_checkpoint_event(*run_id, &checkpoint))
         .await
         .map_err(|err| anyhow::anyhow!("failed to append restored checkpoint event: {err}"))?;
-    append_event(&run_store, run_id, &Event::RunSubmitted { reason: None })
+    client
+        .append_run_event(
+            run_id,
+            &run_event(
+                *run_id,
+                None,
+                EventBody::RunSubmitted(RunStatusTransitionProps { reason: None }),
+            ),
+        )
         .await
         .map_err(|err| anyhow::anyhow!("failed to append restored run status event: {err}"))?;
     Ok(())
 }
 
-fn restored_checkpoint_event(checkpoint: &fabro_types::Checkpoint) -> Event {
+fn restored_checkpoint_event(
+    run_id: fabro_types::RunId,
+    checkpoint: &fabro_types::Checkpoint,
+) -> RunEvent {
     let current_status = checkpoint
         .node_outcomes
         .get(&checkpoint.current_node)
@@ -163,28 +163,48 @@ fn restored_checkpoint_event(checkpoint: &fabro_types::Checkpoint) -> Event {
             || "success".to_string(),
             |outcome| outcome.status.to_string(),
         );
-    Event::CheckpointCompleted {
-        node_id: checkpoint.current_node.clone(),
-        status: current_status,
-        current_node: checkpoint.current_node.clone(),
-        completed_nodes: checkpoint.completed_nodes.clone(),
-        node_retries: checkpoint.node_retries.clone().into_iter().collect(),
-        context_values: checkpoint.context_values.clone().into_iter().collect(),
-        node_outcomes: checkpoint.node_outcomes.clone().into_iter().collect(),
-        next_node_id: checkpoint.next_node_id.clone(),
-        git_commit_sha: checkpoint.git_commit_sha.clone(),
-        loop_failure_signatures: checkpoint
-            .loop_failure_signatures
-            .iter()
-            .map(|(sig, count)| (sig.to_string(), *count))
-            .collect(),
-        restart_failure_signatures: checkpoint
-            .restart_failure_signatures
-            .iter()
-            .map(|(sig, count)| (sig.to_string(), *count))
-            .collect(),
-        node_visits: checkpoint.node_visits.clone().into_iter().collect(),
-        diff: None,
+    run_event(
+        run_id,
+        Some(checkpoint.current_node.clone()),
+        EventBody::CheckpointCompleted(CheckpointCompletedProps {
+            status: current_status,
+            current_node: checkpoint.current_node.clone(),
+            completed_nodes: checkpoint.completed_nodes.clone(),
+            node_retries: checkpoint.node_retries.clone().into_iter().collect(),
+            context_values: checkpoint.context_values.clone().into_iter().collect(),
+            node_outcomes: checkpoint.node_outcomes.clone().into_iter().collect(),
+            next_node_id: checkpoint.next_node_id.clone(),
+            git_commit_sha: checkpoint.git_commit_sha.clone(),
+            loop_failure_signatures: checkpoint
+                .loop_failure_signatures
+                .iter()
+                .map(|(sig, count)| (sig.to_string(), *count))
+                .collect(),
+            restart_failure_signatures: checkpoint
+                .restart_failure_signatures
+                .iter()
+                .map(|(sig, count)| (sig.to_string(), *count))
+                .collect(),
+            node_visits: checkpoint.node_visits.clone().into_iter().collect(),
+            diff: None,
+        }),
+    )
+}
+
+fn run_event(
+    run_id: fabro_types::RunId,
+    node_id: Option<String>,
+    body: EventBody,
+) -> RunEvent {
+    RunEvent {
+        id: ulid::Ulid::new().to_string(),
+        ts: chrono::Utc::now(),
+        run_id,
+        node_id,
+        node_label: None,
+        session_id: None,
+        parent_session_id: None,
+        body,
     }
 }
 

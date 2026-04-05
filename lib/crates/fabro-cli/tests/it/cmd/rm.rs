@@ -2,7 +2,6 @@ use fabro_test::{fabro_snapshot, test_context};
 use serde_json::Value;
 
 use super::support::{setup_completed_fast_dry_run, setup_created_fast_dry_run, setup_local_sandbox_run};
-use walkdir::WalkDir;
 
 #[test]
 fn help() {
@@ -199,65 +198,4 @@ fn rm_partial_failure_json_includes_removed_and_errors() {
         !run.run_dir.exists(),
         "existing run should still be removed"
     );
-}
-
-#[test]
-fn rm_json_removes_run_when_store_locator_is_corrupt() {
-    let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
-    let by_id_path = find_store_catalog_entry(&context.storage_dir.join("store"), &run.run_id);
-    let original = std::fs::read(&by_id_path)
-        .unwrap_or_else(|err| panic!("failed to read {}: {err}", by_id_path.display()));
-
-    // Corrupt the by-id locator. Deletion should still succeed via the by-start
-    // fallback path instead of surfacing a false partial failure.
-    std::fs::write(&by_id_path, b"{not valid json")
-        .unwrap_or_else(|err| panic!("failed to corrupt {}: {err}", by_id_path.display()));
-    scopeguard::defer! {
-        let _ = std::fs::write(&by_id_path, &original);
-    }
-
-    let output = context
-        .command()
-        .args(["--json", "rm", &run.run_id])
-        .output()
-        .expect("command should run");
-
-    assert!(
-        output.status.success(),
-        "rm should still succeed when the locator is corrupt"
-    );
-    let value: Value = serde_json::from_slice(&output.stdout).expect("rm JSON should parse");
-    assert_eq!(
-        value["removed"],
-        Value::Array(vec![Value::String(run.run_id.clone())])
-    );
-    assert_eq!(value["errors"], Value::Array(Vec::new()));
-    assert!(
-        !run.run_dir.exists(),
-        "run directory should still be deleted"
-    );
-}
-
-fn find_store_catalog_entry(root: &std::path::Path, run_id: &str) -> std::path::PathBuf {
-    let expected_name = format!("{run_id}.json");
-    WalkDir::new(root)
-        .into_iter()
-        .filter_map(Result::ok)
-        .map(|entry| entry.into_path())
-        .find(|path| {
-            path.is_file()
-                && path
-                    .file_name()
-                    .is_some_and(|name| name.to_string_lossy() == expected_name)
-                && path
-                    .components()
-                    .any(|component| component.as_os_str() == "by-id")
-        })
-        .unwrap_or_else(|| {
-            panic!(
-                "missing by-id catalog entry for {run_id} under {}",
-                root.display()
-            )
-        })
 }

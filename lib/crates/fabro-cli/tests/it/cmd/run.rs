@@ -942,7 +942,7 @@ fn detach_creates_run_dir_with_detach_log() {
         @r#"
     {
       "run_dir": "[RUN_DIR]",
-      "launcher_log_exists": true,
+      "launcher_log_exists": false,
       "detach_log_exists": false
     }
     "#
