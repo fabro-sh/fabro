@@ -77,6 +77,19 @@ impl WebInterviewer {
         };
         sender.is_some_and(|tx| tx.send(answer).is_ok())
     }
+
+    /// Abort all pending questions, unblocking any waiting `ask()` calls.
+    pub fn abort_pending(&self) {
+        let pending = {
+            let mut inner = self.inner.lock().expect("web interviewer lock poisoned");
+            inner.questions.clear();
+            inner.pending.drain().map(|(_, tx)| tx).collect::<Vec<_>>()
+        };
+
+        for sender in pending {
+            let _ = sender.send(Answer::aborted());
+        }
+    }
 }
 
 impl Default for WebInterviewer {
@@ -257,6 +270,24 @@ mod tests {
         let _ = interviewer.submit_answer(&pending[0].id, Answer::yes());
         handle.await.expect("task should complete");
 
+        assert!(interviewer.pending_questions().is_empty());
+    }
+
+    #[tokio::test]
+    async fn abort_pending_unblocks_ask_and_clears_questions() {
+        let interviewer = Arc::new(WebInterviewer::new());
+        let interviewer_clone = Arc::clone(&interviewer);
+
+        let ask_handle = tokio::spawn(async move {
+            let q = Question::new("approve?", QuestionType::YesNo);
+            interviewer_clone.ask(q).await
+        });
+
+        wait_for_pending_count(interviewer.as_ref(), 1).await;
+        interviewer.abort_pending();
+
+        let answer = ask_handle.await.expect("task should complete");
+        assert_eq!(answer.value, AnswerValue::Aborted);
         assert!(interviewer.pending_questions().is_empty());
     }
 
