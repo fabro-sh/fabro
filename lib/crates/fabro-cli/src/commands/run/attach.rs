@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use fabro_types::RunId;
+use fabro_types::{EventBody, RunEvent, RunId};
 
 use fabro_interview::{AnswerValue, ConsoleInterviewer};
 use fabro_store::{EventEnvelope, RuntimeState};
@@ -61,6 +61,7 @@ pub(crate) async fn attach_run(
             .iter()
             .map(event_payload_line)
             .collect::<Result<Vec<_>>>()?;
+        let initial_exit_code = events.iter().rev().find_map(event_exit_code);
         return attach_run_server(
             run_dir,
             &client,
@@ -68,6 +69,7 @@ pub(crate) async fn attach_run(
             verbose,
             event_lines,
             events.last().map_or(0, |event| event.seq),
+            initial_exit_code,
             kill_on_detach,
             styles,
             engine_child,
@@ -88,6 +90,7 @@ async fn attach_run_server(
     verbose: bool,
     existing_events: Vec<String>,
     last_seq: u32,
+    initial_exit_code: Option<ExitCode>,
     kill_on_detach: bool,
     styles: &'static Styles,
     engine_child: Option<std::process::Child>,
@@ -118,6 +121,8 @@ async fn attach_run_server(
     let mut next_seq = if last_seq == 0 { 1 } else { last_seq + 1 };
     let mut cached_pid: Option<u32> = None;
     let attach_started = Instant::now();
+    let mut terminal_exit_code = initial_exit_code;
+    let mut terminal_event_seen_at = initial_exit_code.map(|_| Instant::now());
 
     loop {
         let server_owned = engine_guard.is_none() && read_launcher_pid(run_dir).is_none();
@@ -156,10 +161,24 @@ async fn attach_run_server(
         let mut saw_event = false;
         let events = client.list_run_events(run_id, Some(next_seq), None).await?;
         for event in events {
+            if let Some(exit_code) = event_exit_code(&event) {
+                terminal_exit_code = Some(exit_code);
+                terminal_event_seen_at = Some(Instant::now());
+            }
             let line = event_payload_line(&event)?;
             emit_progress_line(&mut progress_ui, &line, json_output)?;
             next_seq = event.seq.saturating_add(1);
             saw_event = true;
+        }
+
+        if let Some(seen_at) = terminal_event_seen_at {
+            if !saw_event && seen_at.elapsed() >= ATTACH_FINAL_STATUS_GRACE {
+                break;
+            }
+            if !saw_event {
+                sleep(Duration::from_millis(50)).await;
+            }
+            continue;
         }
 
         // Check for interview request
@@ -264,7 +283,10 @@ async fn attach_run_server(
 
     finish_progress(&mut progress_ui, json_output);
 
-    Ok(determine_exit_code_with_server(client, run_id).await)
+    Ok(match terminal_exit_code {
+        Some(exit_code) => exit_code,
+        None => determine_exit_code_with_server(client, run_id).await,
+    })
 }
 
 async fn flush_remaining_server_events(
@@ -542,6 +564,21 @@ fn kill_engine(run_dir: &Path) {
 
 fn process_alive(pid: u32) -> bool {
     fabro_proc::process_alive(pid)
+}
+
+fn event_exit_code(event: &EventEnvelope) -> Option<ExitCode> {
+    let run_event = RunEvent::try_from(&event.payload).ok()?;
+    match run_event.body {
+        EventBody::RunCompleted(props) => Some(if props.status == "success"
+            || props.status == "partial_success"
+        {
+            ExitCode::from(0)
+        } else {
+            ExitCode::from(1)
+        }),
+        EventBody::RunFailed(_) => Some(ExitCode::from(1)),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

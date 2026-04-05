@@ -5,7 +5,7 @@ use fabro_types::RunId;
 use fabro_workflow::event::{Event, append_event};
 use object_store::local::LocalFileSystem;
 
-use super::support::setup_completed_dry_run;
+use super::support::setup_completed_fast_dry_run;
 
 fn with_runtime<T>(f: impl FnOnce(&tokio::runtime::Runtime) -> T) -> T {
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -55,7 +55,7 @@ fn help() {
 #[test]
 fn pr_view_missing_pull_request_json_errors() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_completed_fast_dry_run(&context);
     let mut cmd = context.command();
     cmd.args(["pr", "view", &run.run_id]);
 
@@ -71,7 +71,7 @@ fn pr_view_missing_pull_request_json_errors() {
 #[test]
 fn pr_view_reads_pull_request_from_store_without_pull_request_json() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_completed_fast_dry_run(&context);
     let run_id: RunId = run.run_id.parse().unwrap();
 
     with_runtime(|runtime| {

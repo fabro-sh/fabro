@@ -108,6 +108,7 @@ pub(crate) async fn connect_server(storage_dir: &Path) -> Result<ServerStoreClie
 
     let http_client = reqwest::ClientBuilder::new()
         .unix_socket(socket_path)
+        .no_proxy()
         .build()
         .context("Failed to build Unix-socket HTTP client for fabro server")?;
     wait_for_server_ready(&http_client).await?;

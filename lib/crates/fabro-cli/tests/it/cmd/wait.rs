@@ -1,6 +1,6 @@
 use fabro_test::{fabro_snapshot, test_context};
 
-use super::support::{setup_completed_dry_run, setup_created_dry_run};
+use super::support::{setup_completed_fast_dry_run, setup_created_fast_dry_run};
 
 #[test]
 fn help() {
@@ -36,7 +36,7 @@ fn help() {
 #[test]
 fn wait_completed_run_prints_success_summary() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_completed_fast_dry_run(&context);
     let mut filters = context.filters();
     filters.push((
         r"\b\d+(\.\d+)?(ms|s)\b".to_string(),
@@ -57,7 +57,7 @@ fn wait_completed_run_prints_success_summary() {
 #[test]
 fn wait_completed_run_reads_store_without_status_or_conclusion_files() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_completed_fast_dry_run(&context);
     let _ = std::fs::remove_file(run.run_dir.join("conclusion.json"));
     let mut filters = context.filters();
     filters.push((
@@ -79,7 +79,7 @@ fn wait_completed_run_reads_store_without_status_or_conclusion_files() {
 #[test]
 fn wait_completed_run_json_outputs_status_and_duration() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_completed_fast_dry_run(&context);
     let mut filters = context.filters();
     filters.push((
         r#""duration_ms":\s*\d+"#.to_string(),
@@ -104,7 +104,7 @@ fn wait_completed_run_json_outputs_status_and_duration() {
 #[test]
 fn wait_submitted_run_times_out() {
     let context = test_context!();
-    let run = setup_created_dry_run(&context);
+    let run = setup_created_fast_dry_run(&context);
     let mut cmd = context.command();
     cmd.args(["wait", "--timeout", "1", "--interval", "10", &run.run_id]);
 

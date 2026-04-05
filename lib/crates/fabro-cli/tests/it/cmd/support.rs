@@ -95,6 +95,15 @@ fn run_success_in(context: &TestContext, args: &[&str], cwd: &Path) -> Output {
 
 pub(crate) fn setup_completed_dry_run(context: &TestContext) -> RunSetup {
     let workflow = fixture("simple.fabro");
+    run_completed_dry_run(context, &workflow)
+}
+
+pub(crate) fn setup_completed_fast_dry_run(context: &TestContext) -> RunSetup {
+    let workflow = fast_simple_workflow(context);
+    run_completed_dry_run(context, &workflow)
+}
+
+fn run_completed_dry_run(context: &TestContext, workflow: &Path) -> RunSetup {
     let mut cmd = context.run_cmd();
     cmd.current_dir(&context.temp_dir);
     cmd.timeout(COMMAND_TIMEOUT);
@@ -104,7 +113,7 @@ pub(crate) fn setup_completed_dry_run(context: &TestContext) -> RunSetup {
     if !output.status.success() {
         panic!(
             "command failed: fabro run --dry-run --auto-approve --no-retro --sandbox local {}\nstdout:\n{}\nstderr:\n{}",
-            fixture("simple.fabro").display(),
+            workflow.display(),
             stdout(&output),
             stderr(&output)
         );
@@ -114,6 +123,15 @@ pub(crate) fn setup_completed_dry_run(context: &TestContext) -> RunSetup {
 
 pub(crate) fn setup_created_dry_run(context: &TestContext) -> RunSetup {
     let workflow = fixture("simple.fabro");
+    run_created_dry_run(context, &workflow)
+}
+
+pub(crate) fn setup_created_fast_dry_run(context: &TestContext) -> RunSetup {
+    let workflow = fast_simple_workflow(context);
+    run_created_dry_run(context, &workflow)
+}
+
+fn run_created_dry_run(context: &TestContext, workflow: &Path) -> RunSetup {
     let mut cmd = context.create_cmd();
     cmd.current_dir(&context.temp_dir);
     cmd.timeout(COMMAND_TIMEOUT);
@@ -123,7 +141,7 @@ pub(crate) fn setup_created_dry_run(context: &TestContext) -> RunSetup {
     if !output.status.success() {
         panic!(
             "command failed: fabro create --dry-run --auto-approve --no-retro --sandbox local {}\nstdout:\n{}\nstderr:\n{}",
-            fixture("simple.fabro").display(),
+            workflow.display(),
             stdout(&output),
             stderr(&output)
         );
@@ -135,6 +153,29 @@ pub(crate) fn setup_created_dry_run(context: &TestContext) -> RunSetup {
         .expect("create should print a run ID")
         .to_string();
     resolve_run(context, &run_id)
+}
+
+fn fast_simple_workflow(context: &TestContext) -> PathBuf {
+    let workflow = context.temp_dir.join("simple.fabro");
+    if !workflow.exists() {
+        write_text_file(
+            &workflow,
+            r#"digraph Simple {
+    graph [goal="Run tests and report results"]
+    rankdir=LR
+
+    start [shape=Mdiamond, label="Start"]
+    exit  [shape=Msquare, label="Exit"]
+
+    run_tests [shape=parallelogram, label="Run Tests", script="true"]
+    report    [shape=parallelogram, label="Report", script="true"]
+
+    start -> run_tests -> report -> exit
+}
+"#,
+        );
+    }
+    workflow
 }
 
 pub(crate) fn setup_detached_dry_run(context: &TestContext) -> RunSetup {

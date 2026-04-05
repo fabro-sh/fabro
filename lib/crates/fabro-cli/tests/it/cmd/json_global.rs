@@ -3,7 +3,7 @@ use std::process::Command;
 use fabro_test::test_context;
 use serde_json::Value;
 
-use super::support::{fixture, output_stderr, output_stdout, setup_completed_dry_run};
+use super::support::{fixture, output_stderr, output_stdout, setup_completed_fast_dry_run};
 
 fn dot_is_available() -> bool {
     Command::new("dot")
@@ -46,7 +46,7 @@ fn settings_json_outputs_parseable_json() {
 #[test]
 fn ps_supports_global_flag_and_env_var() {
     let context = test_context!();
-    setup_completed_dry_run(&context);
+    setup_completed_fast_dry_run(&context);
 
     let global_output = context
         .command()
@@ -73,7 +73,7 @@ fn ps_supports_global_flag_and_env_var() {
 #[test]
 fn logs_json_wins_over_pretty() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_completed_fast_dry_run(&context);
 
     let output = context
         .command()

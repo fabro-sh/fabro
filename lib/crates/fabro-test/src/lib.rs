@@ -872,6 +872,10 @@ pub struct TwinGitHub {
     server: twin_github::TestServer,
 }
 
+fn test_http_client() -> reqwest::Client {
+    reqwest::Client::builder().no_proxy().build().unwrap()
+}
+
 impl TwinGitHub {
     pub async fn start(state: twin_github::AppState) -> Self {
         let server = twin_github::TestServer::start(state).await;
@@ -896,7 +900,7 @@ impl TwinOpenAi {
     }
 
     pub async fn reset_namespace(&self, namespace: &str) {
-        let response = reqwest::Client::new()
+        let response = test_http_client()
             .post(format!("{}/__admin/reset", self.admin_url()))
             .bearer_auth(namespace)
             .send()
@@ -934,7 +938,7 @@ impl TwinScenarios {
     pub async fn load(self, twin: &TwinOpenAi) {
         twin.reset_namespace(&self.namespace).await;
 
-        let response = reqwest::Client::new()
+        let response = test_http_client()
             .post(format!("{}/__admin/scenarios", twin.admin_url()))
             .bearer_auth(&self.namespace)
             .json(&json!({
@@ -1155,7 +1159,7 @@ pub async fn twin_openai() -> &'static TwinOpenAi {
             });
 
             // Wait for server readiness
-            let client = reqwest::Client::new();
+            let client = test_http_client();
             let healthz_url = format!("http://127.0.0.1:{}/healthz", addr.port());
             for _ in 0..50 {
                 if let Ok(resp) = client.get(&healthz_url).send().await {

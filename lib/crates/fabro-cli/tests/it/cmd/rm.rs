@@ -1,7 +1,7 @@
 use fabro_test::{fabro_snapshot, test_context};
 use serde_json::Value;
 
-use super::support::{setup_completed_dry_run, setup_created_dry_run, setup_local_sandbox_run};
+use super::support::{setup_completed_fast_dry_run, setup_created_fast_dry_run, setup_local_sandbox_run};
 use walkdir::WalkDir;
 
 #[test]
@@ -37,7 +37,7 @@ fn help() {
 #[test]
 fn rm_deletes_completed_run() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_completed_fast_dry_run(&context);
     let mut filters = context.filters();
     filters.push((
         r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
@@ -69,7 +69,7 @@ fn rm_deletes_completed_run() {
 #[test]
 fn rm_rejects_submitted_run_without_force() {
     let context = test_context!();
-    let run = setup_created_dry_run(&context);
+    let run = setup_created_fast_dry_run(&context);
     let mut filters = context.filters();
     filters.push((
         r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
@@ -90,7 +90,7 @@ fn rm_rejects_submitted_run_without_force() {
 #[test]
 fn rm_force_deletes_submitted_run() {
     let context = test_context!();
-    let run = setup_created_dry_run(&context);
+    let run = setup_created_fast_dry_run(&context);
     let mut filters = context.filters();
     filters.push((
         r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
@@ -149,7 +149,7 @@ fn rm_force_deletes_run_without_sandbox_json_when_store_has_sandbox() {
 #[test]
 fn rm_partial_failure_reports_which_identifiers_failed() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_completed_fast_dry_run(&context);
     let mut filters = context.filters();
     filters.push((
         r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
@@ -175,7 +175,7 @@ fn rm_partial_failure_reports_which_identifiers_failed() {
 #[test]
 fn rm_partial_failure_json_includes_removed_and_errors() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_completed_fast_dry_run(&context);
 
     let output = context
         .command()
@@ -204,7 +204,7 @@ fn rm_partial_failure_json_includes_removed_and_errors() {
 #[test]
 fn rm_json_removes_run_when_store_locator_is_corrupt() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_completed_fast_dry_run(&context);
     let by_id_path = find_store_catalog_entry(&context.storage_dir.join("store"), &run.run_id);
     let original = std::fs::read(&by_id_path)
         .unwrap_or_else(|err| panic!("failed to read {}: {err}", by_id_path.display()));

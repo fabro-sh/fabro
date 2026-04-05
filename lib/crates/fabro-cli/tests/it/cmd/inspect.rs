@@ -3,8 +3,8 @@ use insta::assert_snapshot;
 use fabro_test::{fabro_snapshot, test_context};
 
 use super::support::{
-    compact_git_inspect, compact_inspect, run_success, setup_completed_dry_run,
-    setup_created_dry_run, setup_git_backed_changed_run,
+    compact_git_inspect, compact_inspect, run_success, setup_completed_fast_dry_run,
+    setup_created_fast_dry_run, setup_git_backed_changed_run,
 };
 
 #[test]
@@ -39,7 +39,7 @@ fn help() {
 #[test]
 fn inspect_created_run_shows_run_record_without_start_or_conclusion() {
     let context = test_context!();
-    let run = setup_created_dry_run(&context);
+    let run = setup_created_fast_dry_run(&context);
     let output = run_success(&context, &["inspect", &run.run_id]);
 
     assert_snapshot!(serde_json::to_string_pretty(&compact_inspect(&output)).unwrap(), @r###"
@@ -66,7 +66,7 @@ fn inspect_created_run_shows_run_record_without_start_or_conclusion() {
 #[test]
 fn inspect_completed_run_shows_run_start_conclusion_checkpoint() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_completed_fast_dry_run(&context);
     let output = run_success(&context, &["inspect", &run.run_id]);
 
     assert_snapshot!(serde_json::to_string_pretty(&compact_inspect(&output)).unwrap(), @r#"
@@ -109,7 +109,7 @@ fn inspect_completed_run_shows_run_start_conclusion_checkpoint() {
 #[test]
 fn inspect_completed_run_reads_store_without_disk_metadata_files() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_completed_fast_dry_run(&context);
     for name in [
         "run.json",
         "start.json",

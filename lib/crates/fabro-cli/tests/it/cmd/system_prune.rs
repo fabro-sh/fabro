@@ -1,6 +1,6 @@
 use fabro_test::{fabro_snapshot, test_context};
 
-use super::support::{setup_completed_dry_run, setup_created_dry_run};
+use super::support::{setup_completed_fast_dry_run, setup_created_fast_dry_run};
 
 #[test]
 fn help() {
@@ -37,7 +37,7 @@ fn help() {
 #[test]
 fn system_prune_dry_run_lists_matching_runs_without_deleting() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_completed_fast_dry_run(&context);
     let mut filters = context.filters();
     filters.push((r"\d{8}-dry-run-".to_string(), "[DATE]-dry-run-".to_string()));
     filters.push((
@@ -72,7 +72,7 @@ fn system_prune_dry_run_lists_matching_runs_without_deleting() {
 #[test]
 fn system_prune_yes_deletes_matching_runs() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_completed_fast_dry_run(&context);
     let mut filters = context.filters();
     filters.push((
         r"\b\d+(\.\d+)?\s(?:[KMGT]?B|B)\b".to_string(),
@@ -112,7 +112,7 @@ fn system_prune_yes_deletes_matching_runs() {
 #[test]
 fn system_prune_does_not_delete_active_or_submitted_runs() {
     let context = test_context!();
-    let run = setup_created_dry_run(&context);
+    let run = setup_created_fast_dry_run(&context);
     let mut cmd = context.command();
     cmd.args([
         "system",

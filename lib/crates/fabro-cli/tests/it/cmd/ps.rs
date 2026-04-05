@@ -1,7 +1,7 @@
 use fabro_test::{fabro_snapshot, test_context};
 use serde_json::Value;
 
-use super::support::{fixture, setup_completed_dry_run, setup_created_dry_run};
+use super::support::{fixture, setup_completed_fast_dry_run, setup_created_fast_dry_run};
 
 #[test]
 fn help() {
@@ -37,7 +37,7 @@ fn help() {
 #[test]
 fn ps_default_excludes_non_running_runs() {
     let context = test_context!();
-    setup_completed_dry_run(&context);
+    setup_completed_fast_dry_run(&context);
     let mut cmd = context.ps();
     cmd.args(["--label", &context.test_case_label()]);
 
@@ -53,8 +53,8 @@ fn ps_default_excludes_non_running_runs() {
 #[test]
 fn ps_all_json_lists_created_and_completed_runs() {
     let context = test_context!();
-    setup_completed_dry_run(&context);
-    setup_created_dry_run(&context);
+    setup_completed_fast_dry_run(&context);
+    setup_created_fast_dry_run(&context);
     let output = context
         .ps()
         .args(["-a", "--json", "--label", &context.test_case_label()])
@@ -89,8 +89,8 @@ fn ps_all_json_lists_created_and_completed_runs() {
 #[test]
 fn ps_quiet_outputs_run_ids_only() {
     let context = test_context!();
-    setup_completed_dry_run(&context);
-    setup_created_dry_run(&context);
+    setup_completed_fast_dry_run(&context);
+    setup_created_fast_dry_run(&context);
     let mut cmd = context.ps();
     cmd.args(["-a", "--quiet", "--label", &context.test_case_label()]);
 

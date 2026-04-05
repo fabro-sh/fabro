@@ -1,6 +1,6 @@
 use fabro_test::{fabro_snapshot, test_context};
 
-use super::support::{setup_completed_dry_run, setup_created_dry_run};
+use super::support::{setup_completed_fast_dry_run, setup_created_fast_dry_run};
 
 #[test]
 fn help() {
@@ -35,7 +35,7 @@ fn help() {
 #[test]
 fn pr_create_unfinished_run_errors_before_network() {
     let context = test_context!();
-    let run = setup_created_dry_run(&context);
+    let run = setup_created_fast_dry_run(&context);
     let mut cmd = context.command();
     cmd.args(["pr", "create", &run.run_id]);
 
@@ -51,7 +51,7 @@ fn pr_create_unfinished_run_errors_before_network() {
 #[test]
 fn pr_create_completed_dry_run_without_run_branch_errors() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_completed_fast_dry_run(&context);
     let mut cmd = context.command();
     cmd.args(["pr", "create", &run.run_id]);
 
@@ -67,7 +67,7 @@ fn pr_create_completed_dry_run_without_run_branch_errors() {
 #[test]
 fn pr_create_uses_store_run_record_without_run_json() {
     let context = test_context!();
-    let run = setup_completed_dry_run(&context);
+    let run = setup_completed_fast_dry_run(&context);
     let _ = std::fs::remove_file(run.run_dir.join("run.json"));
     let _ = std::fs::remove_file(run.run_dir.join("start.json"));
     let _ = std::fs::remove_file(run.run_dir.join("conclusion.json"));
