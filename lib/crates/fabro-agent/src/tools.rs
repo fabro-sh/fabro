@@ -481,7 +481,6 @@ fn make_web_search_tool_with_api_key(api_key: Option<String>) -> RegisteredTool 
             }),
         },
         executor: Arc::new(move |args, _ctx| {
-            let client = CLIENT.get_or_init(reqwest::Client::new).clone();
             let api_key = api_key.clone();
             Box::pin(async move {
                 let api_key = api_key.ok_or_else(|| {
@@ -489,6 +488,7 @@ fn make_web_search_tool_with_api_key(api_key: Option<String>) -> RegisteredTool 
                 })?;
 
                 let query = required_str(&args, "query")?;
+                let client = CLIENT.get_or_init(reqwest::Client::new).clone();
                 let count = args
                     .get("max_results")
                     .and_then(serde_json::Value::as_u64)

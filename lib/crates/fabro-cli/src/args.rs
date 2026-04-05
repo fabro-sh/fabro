@@ -819,6 +819,13 @@ pub(crate) enum Commands {
         /// Path to the JSON event file
         path: PathBuf,
     },
+    /// Build a panic event and write JSON to stdout (internal testing)
+    #[cfg(debug_assertions)]
+    #[command(name = "__test_panic", hide = true)]
+    TestPanic {
+        /// Panic message
+        message: String,
+    },
 }
 
 impl Commands {
@@ -894,6 +901,8 @@ impl Commands {
             },
             Self::SendAnalytics { .. } => "__send_analytics",
             Self::SendPanic { .. } => "__send_panic",
+            #[cfg(debug_assertions)]
+            Self::TestPanic { .. } => "__test_panic",
         }
     }
 }

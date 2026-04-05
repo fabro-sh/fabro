@@ -61,6 +61,7 @@ pub(crate) mod support;
 mod system;
 mod system_df;
 mod system_prune;
+mod test_panic;
 mod top_level;
 mod upgrade;
 mod validate;

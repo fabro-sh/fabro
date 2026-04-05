@@ -253,6 +253,12 @@ async fn main_inner() -> (String, Result<()>) {
                 let _ = std::fs::remove_file(&path);
                 result?;
             }
+            #[cfg(debug_assertions)]
+            Commands::TestPanic { message } => {
+                let event = tel_panic::build_event(&message);
+                let json = serde_json::to_string_pretty(&event)?;
+                println!("{json}");
+            }
         }
 
         Ok(())

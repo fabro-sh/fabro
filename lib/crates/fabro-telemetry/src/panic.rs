@@ -131,31 +131,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn build_event_structure() {
-        let event = build_event("test panic message");
-
-        assert_eq!(event.level, sentry::Level::Fatal);
-        assert_eq!(event.exception.values.len(), 1);
-
-        let exc = &event.exception.values[0];
-        assert_eq!(exc.ty, "panic");
-        assert_eq!(exc.value.as_deref(), Some("test panic message"));
-
-        let mech = exc.mechanism.as_ref().unwrap();
-        assert_eq!(mech.ty, "panic");
-        assert_eq!(mech.handled, Some(false));
-
-        // Stacktrace should be present.
-        assert!(exc.stacktrace.is_some());
-
-        // OS context should be present.
-        assert!(event.contexts.contains_key("os"));
-
-        // Release should be set.
-        assert!(event.release.is_some());
-    }
-
-    #[test]
     fn broken_pipe_is_filtered() {
         assert!(is_broken_pipe("Broken pipe (os error 32)"));
         assert!(is_broken_pipe("connection reset: Broken pipe"));
@@ -178,18 +153,5 @@ mod tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("SENTRY_DSN not set"));
-    }
-
-    #[test]
-    fn event_round_trips_through_json() {
-        let event = build_event("roundtrip test");
-        let json = serde_json::to_vec(&event).unwrap();
-        let deserialized: Event<'static> = serde_json::from_slice(&json).unwrap();
-        assert_eq!(deserialized.level, sentry::Level::Fatal);
-        assert_eq!(deserialized.exception.values.len(), 1);
-        assert_eq!(
-            deserialized.exception.values[0].value.as_deref(),
-            Some("roundtrip test")
-        );
     }
 }

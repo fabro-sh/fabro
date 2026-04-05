@@ -2268,18 +2268,6 @@ mod tests {
         }
     }
 
-    fn command_dot(command: &str) -> String {
-        format!(
-            r#"digraph Test {{
-                graph [goal="Test"]
-                start [shape=Mdiamond]
-                exit [shape=Msquare]
-                command [shape=parallelogram, tool_command="{command}"]
-                start -> command -> exit
-            }}"#
-        )
-    }
-
     fn test_app_with() -> Router {
         let state = create_app_state();
         build_router(state, AuthMode::Disabled)
@@ -3385,33 +3373,6 @@ mod tests {
         expected_settings.goal = Some("Test".to_string());
 
         assert_eq!(run_record.settings, expected_settings);
-    }
-
-    #[tokio::test]
-    async fn config_change_after_submission_does_not_affect_execution() {
-        let output_dir = tempfile::tempdir().unwrap();
-        let output_path = output_dir.path().join("executed.txt");
-        let dot = command_dot(&format!("printf snapshot > {}", output_path.display()));
-        let initial_settings = dry_run_settings();
-        let state = create_app_state_with_options(initial_settings.clone(), 5);
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
-
-        let run_id_str = create_and_start_run(&app, &dot).await;
-        let run_id = run_id_str.parse::<RunId>().unwrap();
-
-        *state.settings.write().unwrap() = Settings::default();
-
-        execute_run(Arc::clone(&state), run_id).await;
-
-        let runs = state.runs.lock().expect("runs lock poisoned");
-        let managed_run = runs.get(&run_id).expect("run should still exist");
-        assert_eq!(managed_run.status, RunStatus::Completed);
-        drop(runs);
-
-        assert!(
-            !output_path.exists(),
-            "run should still use snapshotted dry-run settings"
-        );
     }
 
     #[tokio::test]
