@@ -635,15 +635,11 @@ mod server_lifecycle {
         let body = body_json(response.into_body()).await;
         assert_eq!(body["status"], "cancelled");
 
-        // Verify status is cancelled
-        let req = Request::builder()
-            .method("GET")
-            .uri(api(&format!("/runs/{run_id}")))
-            .body(Body::empty())
-            .unwrap();
-        let response = app.clone().oneshot(req).await.unwrap();
-        let body = body_json(response.into_body()).await;
-        assert_eq!(body["status"], "cancelled");
+        // Verify the durable store view converges to cancelled failure.
+        let status = wait_for_run_status(&app, &run_id, &["failed"]).await;
+        assert_eq!(status, "failed");
+        let body = run_json(&app, &run_id).await;
+        assert_eq!(body["status_reason"], "cancelled");
     }
 }
 

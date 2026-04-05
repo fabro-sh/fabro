@@ -47,12 +47,11 @@ use crate::sessions::{SessionStore, new_session_store};
 use crate::static_files;
 use crate::web_auth;
 use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
-use fabro_workflow::event::Emitter;
+use fabro_workflow::event::{self as workflow_event, Emitter};
 use fabro_workflow::operations::{self, CreateRunInput, WorkflowInput};
 use fabro_workflow::pipeline::Persisted;
 use fabro_workflow::records::Checkpoint;
 use fabro_workflow::run_status::RunStatus as WorkflowRunStatus;
-#[cfg(test)]
 use fabro_workflow::run_status::StatusReason as WorkflowStatusReason;
 
 use fabro_api::types::AggregateUsageTotals;
@@ -686,6 +685,21 @@ fn clear_live_run_state(run: &mut ManagedRun) {
     run.cancel_token = None;
 }
 
+async fn persist_cancelled_run_status(state: &AppState, run_id: RunId) -> anyhow::Result<()> {
+    let run_store = state.store.open_run(&run_id).await?;
+    workflow_event::append_event(
+        &run_store,
+        &run_id,
+        &workflow_event::Event::WorkflowRunFailed {
+            error: FabroError::Cancelled,
+            duration_ms: 0,
+            reason: Some(WorkflowStatusReason::Cancelled),
+            git_commit_sha: None,
+        },
+    )
+    .await
+}
+
 fn managed_run(
     dot_source: String,
     status: RunStatus,
@@ -979,18 +993,28 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
     let emitter = Arc::new(emitter);
 
     // Transition to Running, populate interviewer
-    {
+    let cancelled_during_setup = {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         if let Some(managed_run) = runs.get_mut(&run_id) {
             if managed_run.status != RunStatus::Starting {
                 // Was cancelled during setup
                 clear_live_run_state(managed_run);
                 state.scheduler_notify.notify_one();
-                return;
+                true
+            } else {
+                managed_run.status = RunStatus::Running;
+                managed_run.interviewer = Some(Arc::clone(&interviewer));
+                false
             }
-            managed_run.status = RunStatus::Running;
-            managed_run.interviewer = Some(Arc::clone(&interviewer));
+        } else {
+            false
         }
+    };
+    if cancelled_during_setup {
+        if let Err(err) = persist_cancelled_run_status(state.as_ref(), run_id).await {
+            error!(run_id = %run_id, error = %err, "Failed to persist cancelled run status");
+        }
+        return;
     }
 
     let run_store = match state.store.open_run(&run_id).await {
@@ -1660,34 +1684,52 @@ async fn cancel_run(
         Ok(id) => id,
         Err(response) => return response,
     };
-    let mut runs = state.runs.lock().expect("runs lock poisoned");
-    match runs.get_mut(&id) {
-        Some(managed_run) => match managed_run.status {
-            RunStatus::Submitted | RunStatus::Queued | RunStatus::Starting | RunStatus::Running => {
-                if let Some(token) = &managed_run.cancel_token {
-                    token.store(true, Ordering::Relaxed);
+    let (created_at, persist_cancelled_status) = {
+        let mut runs = state.runs.lock().expect("runs lock poisoned");
+        match runs.get_mut(&id) {
+            Some(managed_run) => match managed_run.status {
+                RunStatus::Submitted
+                | RunStatus::Queued
+                | RunStatus::Starting
+                | RunStatus::Running => {
+                    if let Some(token) = &managed_run.cancel_token {
+                        token.store(true, Ordering::Relaxed);
+                    }
+                    if let Some(cancel_tx) = managed_run.cancel_tx.take() {
+                        let _ = cancel_tx.send(());
+                    }
+                    let persist_cancelled_status =
+                        matches!(managed_run.status, RunStatus::Submitted | RunStatus::Queued);
+                    managed_run.status = RunStatus::Cancelled;
+                    (managed_run.created_at, persist_cancelled_status)
                 }
-                if let Some(cancel_tx) = managed_run.cancel_tx.take() {
-                    let _ = cancel_tx.send(());
+                _ => {
+                    return ApiError::new(StatusCode::CONFLICT, "Run is not cancellable.")
+                        .into_response();
                 }
-                managed_run.status = RunStatus::Cancelled;
-                let created_at = managed_run.created_at;
-                (
-                    StatusCode::OK,
-                    Json(RunStatusResponse {
-                        id: id.to_string(),
-                        status: RunStatus::Cancelled,
-                        error: None,
-                        queue_position: None,
-                        created_at,
-                    }),
-                )
-                    .into_response()
-            }
-            _ => ApiError::new(StatusCode::CONFLICT, "Run is not cancellable.").into_response(),
-        },
-        None => ApiError::not_found("Run not found.").into_response(),
+            },
+            None => return ApiError::not_found("Run not found.").into_response(),
+        }
+    };
+
+    if persist_cancelled_status {
+        if let Err(err) = persist_cancelled_run_status(state.as_ref(), id).await {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
     }
+
+    (
+        StatusCode::OK,
+        Json(RunStatusResponse {
+            id: id.to_string(),
+            status: RunStatus::Cancelled,
+            error: None,
+            queue_position: None,
+            created_at,
+        }),
+    )
+        .into_response()
 }
 
 async fn pause_run(
@@ -3348,7 +3390,7 @@ mod tests {
     #[tokio::test]
     async fn cancel_queued_run_succeeds() {
         let state = create_app_state();
-        let app = build_router(state, AuthMode::Disabled);
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Submit a run (no start, stays submitted)
         let req = Request::builder()
@@ -3383,7 +3425,13 @@ mod tests {
 
         let response = app.oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
-        assert_eq!(body["status"].as_str().unwrap(), "cancelled");
+        assert_eq!(body["status"].as_str().unwrap(), "failed");
+        assert_eq!(body["status_reason"].as_str().unwrap(), "cancelled");
+
+        let run_store = state.store.open_run_reader(&run_id).await.unwrap();
+        let status = run_store.state().await.unwrap().status.unwrap();
+        assert_eq!(status.status, WorkflowRunStatus::Failed);
+        assert_eq!(status.reason, Some(WorkflowStatusReason::Cancelled));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3481,30 +3529,30 @@ mod tests {
         let app = build_router(state, AuthMode::Disabled);
 
         // Create and start two runs (no scheduler, both stay queued)
-        let mut run_ids = Vec::new();
-        let id = create_and_start_run(&app, MINIMAL_DOT).await;
-        run_ids.push(id);
-        let id = create_and_start_run(&app, MINIMAL_DOT).await;
-        run_ids.push(id);
+        let first_run_id = create_and_start_run(&app, MINIMAL_DOT).await;
+        let second_run_id = create_and_start_run(&app, MINIMAL_DOT).await;
 
-        // Check queue positions via individual status
+        // Check queue positions via the live board endpoint.
         let req = Request::builder()
             .method("GET")
-            .uri(api(&format!("/runs/{}", run_ids[0])))
+            .uri(api("/boards/runs"))
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
-        assert_eq!(body["queue_position"].as_i64().unwrap(), 1);
+        let items = body["data"].as_array().unwrap();
 
-        let req = Request::builder()
-            .method("GET")
-            .uri(api(&format!("/runs/{}", run_ids[1])))
-            .body(Body::empty())
+        let first = items
+            .iter()
+            .find(|item| item["id"].as_str() == Some(first_run_id.as_str()))
             .unwrap();
-        let response = app.clone().oneshot(req).await.unwrap();
-        let body = body_json(response.into_body()).await;
-        assert_eq!(body["queue_position"].as_i64().unwrap(), 2);
+        assert_eq!(first["queue_position"].as_i64().unwrap(), 1);
+
+        let second = items
+            .iter()
+            .find(|item| item["id"].as_str() == Some(second_run_id.as_str()))
+            .unwrap();
+        assert_eq!(second["queue_position"].as_i64().unwrap(), 2);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -3513,11 +3561,8 @@ mod tests {
         let app = test_app_with_scheduler(state);
 
         // Create and start two runs with max_concurrent_runs=1
-        let mut run_ids = Vec::new();
-        let id = create_and_start_run(&app, MINIMAL_DOT).await;
-        run_ids.push(id);
-        let id = create_and_start_run(&app, MINIMAL_DOT).await;
-        run_ids.push(id);
+        create_and_start_run(&app, MINIMAL_DOT).await;
+        create_and_start_run(&app, MINIMAL_DOT).await;
 
         // Give scheduler time to pick up the first run
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -3525,7 +3570,7 @@ mod tests {
         // Check statuses: at most 1 should be starting/running, the other queued
         let req = Request::builder()
             .method("GET")
-            .uri(api("/runs"))
+            .uri(api("/boards/runs"))
             .body(Body::empty())
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
