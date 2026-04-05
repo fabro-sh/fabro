@@ -4,8 +4,8 @@ use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 use tracing::info;
 
 use crate::args::{GlobalArgs, PreviewArgs};
-use crate::shared::{print_json_pretty, validate_daytona_provider};
 use crate::server_client;
+use crate::shared::{print_json_pretty, validate_daytona_provider};
 use crate::user_config::load_user_settings_with_globals;
 
 pub(crate) async fn run(args: PreviewArgs, globals: &GlobalArgs) -> Result<()> {

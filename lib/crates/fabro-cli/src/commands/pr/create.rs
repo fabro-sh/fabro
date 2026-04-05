@@ -4,13 +4,14 @@ use anyhow::{Context, Result, bail};
 use fabro_model::Catalog;
 use fabro_sandbox::daytona::detect_repo_info;
 use fabro_workflow::outcome::StageStatus;
+use fabro_workflow::pull_request::maybe_open_pull_request;
 use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 use tracing::info;
 
 use crate::args::{GlobalArgs, PrCreateArgs};
 use crate::commands::store::rebuild::rebuild_run_store;
-use crate::shared::print_json_pretty;
 use crate::server_client;
+use crate::shared::print_json_pretty;
 use crate::user_config::load_user_settings_with_globals;
 
 pub(super) async fn create_command(
@@ -104,7 +105,7 @@ async fn create_from(
         .model
         .unwrap_or_else(|| Catalog::builtin().default_from_env().id.clone());
 
-    let record = fabro_workflow::pull_request::maybe_open_pull_request(
+    let record = maybe_open_pull_request(
         &creds,
         &origin_url,
         base_branch,

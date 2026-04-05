@@ -68,7 +68,7 @@ fn dry_run_simple() {
     Run:       [ULID]
     Status:    SUCCESS
     Duration:  [DURATION]
-    Run:       [STORAGE_DIR]/runs/20260404-[ULID]
+    Run:       [RUN_DIR]
 
     === Output ===
     [Simulated] Response for stage: report
@@ -348,8 +348,8 @@ fn json_run_implies_auto_approve_for_human_gates() {
             "goal": "Route through the default approval path",
             "llm": {
               "fallbacks": null,
-              "model": "claude-sonnet-4-6",
-              "provider": "anthropic"
+              "model": "gpt-5.4",
+              "provider": "openai"
             },
             "mode": "standalone",
             "no_retro": true,

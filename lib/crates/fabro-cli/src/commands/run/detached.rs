@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use anyhow::{Result, anyhow};
 use fabro_types::{RunId, RunStatus};
+use tokio::time::sleep;
 
 use crate::server_client;
 use crate::user_config::load_user_settings;
@@ -44,7 +45,7 @@ pub(crate) async fn execute(
             | RunStatus::Running
             | RunStatus::Paused
             | RunStatus::Removing => {
-                tokio::time::sleep(Duration::from_millis(100)).await;
+                sleep(Duration::from_millis(100)).await;
             }
         }
     }

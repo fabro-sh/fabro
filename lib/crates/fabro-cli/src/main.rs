@@ -3,11 +3,10 @@
 mod args;
 mod commands;
 mod logging;
+mod server_client;
 mod shared;
 #[cfg(feature = "sleep_inhibitor")]
 mod sleep_inhibitor;
-mod server_client;
-mod store;
 mod user_config;
 
 use anyhow::Result;

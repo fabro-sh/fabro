@@ -8,8 +8,8 @@ use serde::Serialize;
 use tracing::info;
 
 use crate::args::{GlobalArgs, PrListArgs};
-use crate::shared::print_json_pretty;
 use crate::server_client;
+use crate::shared::print_json_pretty;
 use crate::user_config::load_user_settings_with_globals;
 
 #[derive(Serialize)]

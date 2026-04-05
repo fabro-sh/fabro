@@ -8,8 +8,9 @@ use fabro_workflow::sandbox_git::GIT_REMOTE;
 use tracing::{debug, info};
 
 use crate::args::{DiffArgs, GlobalArgs};
-use crate::shared::print_json_pretty;
 use crate::server_client;
+use crate::server_client::RunProjection;
+use crate::shared::print_json_pretty;
 use crate::user_config::load_user_settings_with_globals;
 
 pub(crate) async fn run(args: DiffArgs, globals: &GlobalArgs) -> Result<()> {
@@ -52,11 +53,7 @@ pub(crate) async fn run(args: DiffArgs, globals: &GlobalArgs) -> Result<()> {
     Ok(())
 }
 
-async fn resolve_diff(
-    _run_dir: &Path,
-    state: &crate::server_client::RunProjection,
-    args: &DiffArgs,
-) -> Result<String> {
+async fn resolve_diff(_run_dir: &Path, state: &RunProjection, args: &DiffArgs) -> Result<String> {
     if let Some(ref node_id) = args.node {
         if let Some(visit) = state.list_node_visits(node_id).into_iter().max() {
             if let Some(node) = state.node(&fabro_store::StageId::new(node_id, visit)) {

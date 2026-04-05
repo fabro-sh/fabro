@@ -69,11 +69,13 @@ fn ps_all_json_lists_created_and_completed_runs() {
         "all runs should belong to the Simple workflow: {runs:#?}"
     );
     assert!(
-        runs.iter().all(|run| run["labels"]["fabro_test_case"] == context.test_case_id()),
+        runs.iter()
+            .all(|run| run["labels"]["fabro_test_case"] == context.test_case_id()),
         "all runs should be scoped to the current test case: {runs:#?}"
     );
     assert!(
-        runs.iter().all(|run| run["labels"]["fabro_test_run"] == context.test_run_id()),
+        runs.iter()
+            .all(|run| run["labels"]["fabro_test_run"] == context.test_run_id()),
         "all runs should be scoped to the current test session: {runs:#?}"
     );
     assert!(
@@ -152,7 +154,11 @@ fn ps_filters_by_workflow_and_label() {
 
     assert!(output.status.success(), "ps should succeed");
     let runs: Vec<Value> = serde_json::from_slice(&output.stdout).expect("ps JSON should parse");
-    assert_eq!(runs.len(), 1, "workflow+label filter should isolate one run");
+    assert_eq!(
+        runs.len(),
+        1,
+        "workflow+label filter should isolate one run"
+    );
     let run = &runs[0];
     assert_eq!(run["workflow_name"], "Simple");
     assert_eq!(run["status"], "succeeded");

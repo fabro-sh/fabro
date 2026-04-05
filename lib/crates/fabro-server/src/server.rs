@@ -51,6 +51,9 @@ use fabro_workflow::event::Emitter;
 use fabro_workflow::operations::{self, CreateRunInput, WorkflowInput};
 use fabro_workflow::pipeline::Persisted;
 use fabro_workflow::records::Checkpoint;
+use fabro_workflow::run_status::RunStatus as WorkflowRunStatus;
+#[cfg(test)]
+use fabro_workflow::run_status::StatusReason as WorkflowStatusReason;
 
 use fabro_api::types::AggregateUsageTotals;
 pub use fabro_api::types::{
@@ -59,8 +62,8 @@ pub use fabro_api::types::{
     CompletionResponse, CompletionToolChoiceMode, CompletionUsage, CreateCompletionRequest,
     CreateRunRequest, EventEnvelope as ApiEventEnvelope, ModelReference, PaginatedEventList,
     PaginatedRunList, PaginationMeta, QuestionType as ApiQuestionType, RunError,
-    RunEvent as ApiRunEvent, RunStatus, RunStatusResponse, StartRunRequest,
-    SubmitAnswerRequest, TokenUsage, UsageByModel, WriteBlobResponse,
+    RunEvent as ApiRunEvent, RunStatus, RunStatusResponse, StartRunRequest, SubmitAnswerRequest,
+    TokenUsage, UsageByModel, WriteBlobResponse,
 };
 
 pub fn default_page_limit() -> u32 {
@@ -183,7 +186,6 @@ impl AppState {
     }
 }
 
-
 /// Build the axum Router with all run endpoints and embedded static assets.
 pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
     let middleware_state = Arc::clone(&state);
@@ -242,7 +244,10 @@ fn demo_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/questions", get(demo::get_questions_stub))
         .route("/runs/{id}/questions/{qid}/answer", post(demo::answer_stub))
         .route("/runs/{id}/state", get(not_implemented))
-        .route("/runs/{id}/events", get(not_implemented).post(not_implemented))
+        .route(
+            "/runs/{id}/events",
+            get(not_implemented).post(not_implemented),
+        )
         .route("/runs/{id}/attach", get(demo::run_events_stub))
         .route("/runs/{id}/blobs", post(not_implemented))
         .route("/runs/{id}/blobs/{blobId}", get(not_implemented))
@@ -331,7 +336,10 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/questions", get(get_questions))
         .route("/runs/{id}/questions/{qid}/answer", post(submit_answer))
         .route("/runs/{id}/state", get(get_run_state))
-        .route("/runs/{id}/events", get(list_run_events).post(append_run_event))
+        .route(
+            "/runs/{id}/events",
+            get(list_run_events).post(append_run_event),
+        )
         .route("/runs/{id}/attach", get(attach_run_events))
         .route("/runs/{id}/blobs", post(write_run_blob))
         .route("/runs/{id}/blobs/{blobId}", get(read_run_blob))
@@ -569,17 +577,16 @@ async fn list_board_runs(
         .into_response()
 }
 
-async fn list_runs(
-    _auth: AuthenticatedService,
-    State(state): State<Arc<AppState>>,
-) -> Response {
+async fn list_runs(_auth: AuthenticatedService, State(state): State<Arc<AppState>>) -> Response {
     match state
         .store
         .list_runs(&fabro_store::ListRunsQuery::default())
         .await
     {
         Ok(runs) => (StatusCode::OK, Json(runs)).into_response(),
-        Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+        Err(err) => {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        }
     }
 }
 
@@ -599,7 +606,9 @@ async fn delete_run(
 
     match state.store.delete_run(&id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+        Err(err) => {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        }
     }
 }
 
@@ -714,7 +723,10 @@ async fn create_run(
     };
     info!(run_id = %run_id, "Run created");
 
-    let using_dot_source = req.dot_source.as_ref().is_some_and(|value| !value.is_empty());
+    let using_dot_source = req
+        .dot_source
+        .as_ref()
+        .is_some_and(|value| !value.is_empty());
     let using_local_workflow = req
         .workflow_path
         .as_ref()
@@ -807,7 +819,7 @@ async fn create_run(
             created_at,
         }),
     )
-    .into_response()
+        .into_response()
 }
 
 async fn start_run(
@@ -820,7 +832,7 @@ async fn start_run(
         Ok(id) => id,
         Err(response) => return response,
     };
-    let resume = body.map(|Json(req)| req.resume).unwrap_or(false);
+    let resume = body.is_some_and(|Json(req)| req.resume);
 
     {
         let runs = state.runs.lock().expect("runs lock poisoned");
@@ -842,9 +854,8 @@ async fn start_run(
         }
     }
 
-    let run_store = match state.store.open_run(&id).await {
-        Ok(run_store) => run_store,
-        Err(_) => return ApiError::not_found("Run not found.").into_response(),
+    let Ok(run_store) = state.store.open_run(&id).await else {
+        return ApiError::not_found("Run not found.").into_response();
     };
     let run_state = match run_store.state().await {
         Ok(state) => state,
@@ -863,19 +874,27 @@ async fn start_run(
                 .into_response();
         }
     } else if let Some(record) = run_state.status.as_ref() {
-        if !matches!(record.status, fabro_workflow::run_status::RunStatus::Submitted | fabro_workflow::run_status::RunStatus::Starting)
-        {
+        if !matches!(
+            record.status,
+            WorkflowRunStatus::Submitted | WorkflowRunStatus::Starting
+        ) {
             return ApiError::new(
                 StatusCode::CONFLICT,
-                format!("cannot start run: status is {:?}, expected submitted", record.status),
+                format!(
+                    "cannot start run: status is {:?}, expected submitted",
+                    record.status
+                ),
             )
             .into_response();
         }
     }
 
     let Some(run_record) = run_state.run.as_ref() else {
-        return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "run record missing from store")
-            .into_response();
+        return ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "run record missing from store",
+        )
+        .into_response();
     };
     let run_dir = operations::make_run_dir(&run_record.settings.storage_dir().join("runs"), &id);
     let dot_source = run_state.graph_source.unwrap_or_default();
@@ -909,7 +928,7 @@ async fn start_run(
             created_at: id.created_at(),
         }),
     )
-    .into_response()
+        .into_response()
 }
 
 /// Execute a single run: transitions queued → starting → running → completed/failed/cancelled.
@@ -1174,7 +1193,9 @@ async fn get_run_status(
             Some(run) => (StatusCode::OK, Json(run)).into_response(),
             None => ApiError::not_found("Run not found.").into_response(),
         },
-        Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+        Err(err) => {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        }
     }
 }
 
@@ -1305,8 +1326,9 @@ async fn get_run_state(
     match state.store.open_run_reader(&id).await {
         Ok(run_store) => match run_store.state().await {
             Ok(run_state) => Json(run_state).into_response(),
-            Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response(),
+            Err(err) => {
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+            }
         },
         Err(_) => ApiError::not_found("Run not found.").into_response(),
     }
@@ -1324,7 +1346,9 @@ async fn append_run_event(
     };
     let event = match RunEvent::from_value(value.clone()) {
         Ok(event) => event,
-        Err(err) => return ApiError::bad_request(format!("Invalid run event: {err}")).into_response(),
+        Err(err) => {
+            return ApiError::bad_request(format!("Invalid run event: {err}")).into_response();
+        }
     };
     if event.run_id != id {
         return ApiError::bad_request("Event run_id does not match path run ID.").into_response();
@@ -1336,9 +1360,13 @@ async fn append_run_event(
 
     match state.store.open_run(&id).await {
         Ok(run_store) => match run_store.append_event(&payload).await {
-            Ok(seq) => Json(AppendEventResponse { seq: i64::from(seq) }).into_response(),
-            Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response(),
+            Ok(seq) => Json(AppendEventResponse {
+                seq: i64::from(seq),
+            })
+            .into_response(),
+            Err(err) => {
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+            }
         },
         Err(_) => ApiError::not_found("Run not found.").into_response(),
     }
@@ -1357,7 +1385,10 @@ async fn list_run_events(
     let since_seq = params.since_seq();
     let limit = params.limit();
     match state.store.open_run_reader(&id).await {
-        Ok(run_store) => match run_store.list_events_from_with_limit(since_seq, limit).await {
+        Ok(run_store) => match run_store
+            .list_events_from_with_limit(since_seq, limit)
+            .await
+        {
             Ok(mut events) => {
                 let has_more = events.len() > limit;
                 events.truncate(limit);
@@ -1375,8 +1406,9 @@ async fn list_run_events(
                 })
                 .into_response()
             }
-            Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response(),
+            Err(err) => {
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+            }
         },
         Err(_) => ApiError::not_found("Run not found.").into_response(),
     }
@@ -1427,18 +1459,16 @@ async fn attach_run_events(
                 .into_response();
         }
     };
-    let stream = stream.filter_map(|result| {
-        match result {
-            Ok(event) => {
-                let event = api_event_envelope_from_store(&event).ok()?;
-                let data = serde_json::to_string(&event).ok()?;
-                let data = redact_jsonl_line(&data);
-                Some(Ok::<Event, std::convert::Infallible>(
-                    Event::default().data(data),
-                ))
-            }
-            Err(_) => None,
+    let stream = stream.filter_map(|result| match result {
+        Ok(event) => {
+            let event = api_event_envelope_from_store(&event).ok()?;
+            let data = serde_json::to_string(&event).ok()?;
+            let data = redact_jsonl_line(&data);
+            Some(Ok::<Event, std::convert::Infallible>(
+                Event::default().data(data),
+            ))
         }
+        Err(_) => None,
     });
 
     Sse::new(stream).into_response()
@@ -1498,8 +1528,9 @@ async fn write_run_blob(
                 id: blob_id.to_string(),
             })
             .into_response(),
-            Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response(),
+            Err(err) => {
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+            }
         },
         Err(_) => ApiError::not_found("Run not found.").into_response(),
     }
@@ -1522,8 +1553,9 @@ async fn read_run_blob(
         Ok(run_store) => match run_store.read_blob(&blob_id).await {
             Ok(Some(bytes)) => octet_stream_response(bytes),
             Ok(None) => ApiError::not_found("Blob not found.").into_response(),
-            Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response(),
+            Err(err) => {
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+            }
         },
         Err(_) => ApiError::not_found("Run not found.").into_response(),
     }
@@ -1551,8 +1583,9 @@ async fn list_stage_artifacts(
                     .collect(),
             })
             .into_response(),
-            Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response(),
+            Err(err) => {
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+            }
         },
         Err(_) => ApiError::not_found("Run not found.").into_response(),
     }
@@ -1580,8 +1613,9 @@ async fn put_stage_artifact(
     match state.store.open_run(&id).await {
         Ok(run_store) => match run_store.put_artifact(&stage_id, &filename, &body).await {
             Ok(()) => StatusCode::NO_CONTENT.into_response(),
-            Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response(),
+            Err(err) => {
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+            }
         },
         Err(_) => ApiError::not_found("Run not found.").into_response(),
     }
@@ -1609,8 +1643,9 @@ async fn get_stage_artifact(
         Ok(run_store) => match run_store.get_artifact(&stage_id, &filename).await {
             Ok(Some(bytes)) => octet_stream_response(bytes),
             Ok(None) => ApiError::not_found("Artifact not found.").into_response(),
-            Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response(),
+            Err(err) => {
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+            }
         },
         Err(_) => ApiError::not_found("Run not found.").into_response(),
     }
@@ -3392,8 +3427,8 @@ mod tests {
         let mut status_record = None;
         for _ in 0..50 {
             if let Some(record) = run_store.state().await.unwrap().status {
-                if record.status == fabro_workflow::run_status::RunStatus::Failed
-                    && record.reason == Some(fabro_workflow::run_status::StatusReason::Cancelled)
+                if record.status == WorkflowRunStatus::Failed
+                    && record.reason == Some(WorkflowStatusReason::Cancelled)
                 {
                     status_record = Some(record);
                     break;
@@ -3403,14 +3438,8 @@ mod tests {
         }
 
         let status_record = status_record.expect("status record should be persisted");
-        assert_eq!(
-            status_record.status,
-            fabro_workflow::run_status::RunStatus::Failed
-        );
-        assert_eq!(
-            status_record.reason,
-            Some(fabro_workflow::run_status::StatusReason::Cancelled)
-        );
+        assert_eq!(status_record.status, WorkflowRunStatus::Failed);
+        assert_eq!(status_record.reason, Some(WorkflowStatusReason::Cancelled));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

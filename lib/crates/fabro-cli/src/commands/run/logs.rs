@@ -154,7 +154,12 @@ async fn follow_store_logs(
     let mut next_seq = seq;
 
     loop {
-        match time::timeout(Duration::from_millis(200), client.list_run_events(run_id, Some(next_seq), None)).await {
+        match time::timeout(
+            Duration::from_millis(200),
+            client.list_run_events(run_id, Some(next_seq), None),
+        )
+        .await
+        {
             Ok(Ok(events)) => {
                 let saw_terminal = events
                     .iter()
@@ -172,16 +177,20 @@ async fn follow_store_logs(
                     next_seq = event.seq.saturating_add(1);
                 }
                 if saw_terminal {
-                    flush_remaining_store_events(client, run_id, next_seq, pretty, styles, &mut out)
-                        .await?;
+                    flush_remaining_store_events(
+                        client, run_id, next_seq, pretty, styles, &mut out,
+                    )
+                    .await?;
                     debug!("Observed terminal event while following logs, stopping follow");
                     break;
                 }
             }
             Err(_) => {
                 if run_concluded(client, run_id).await? {
-                    flush_remaining_store_events(client, run_id, next_seq, pretty, styles, &mut out)
-                        .await?;
+                    flush_remaining_store_events(
+                        client, run_id, next_seq, pretty, styles, &mut out,
+                    )
+                    .await?;
                     debug!("Run reached terminal status, stopping follow");
                     break;
                 }
@@ -248,8 +257,7 @@ fn restore_empty_run_properties(value: &mut serde_json::Value) {
     let Some(event_name) = object.get("event").and_then(serde_json::Value::as_str) else {
         return;
     };
-    if matches!(event_name, "run.submitted" | "run.running") && !object.contains_key("properties")
-    {
+    if matches!(event_name, "run.submitted" | "run.running") && !object.contains_key("properties") {
         let run_id = object.remove("run_id");
         let ts = object.remove("ts");
         object.insert("properties".to_string(), serde_json::json!({}));

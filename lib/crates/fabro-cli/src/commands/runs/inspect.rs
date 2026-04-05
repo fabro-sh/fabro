@@ -9,6 +9,7 @@ use fabro_workflow::run_status::RunStatus;
 
 use crate::args::{GlobalArgs, InspectArgs};
 use crate::server_client;
+use crate::server_client::RunProjection;
 use crate::user_config::load_user_settings_with_globals;
 
 #[derive(Debug, Serialize)]
@@ -41,14 +42,18 @@ fn inspect_run_state(
     run_id: &RunId,
     run_dir: &Path,
     status: RunStatus,
-    state: crate::server_client::RunProjection,
+    state: RunProjection,
 ) -> InspectOutput {
     InspectOutput {
         run_id: run_id.to_string(),
         run_dir: run_dir.to_path_buf(),
         status: state.status.as_ref().map_or(status, |record| record.status),
-        run_record: state.run.and_then(|record| serde_json::to_value(record).ok()),
-        start_record: state.start.and_then(|record| serde_json::to_value(record).ok()),
+        run_record: state
+            .run
+            .and_then(|record| serde_json::to_value(record).ok()),
+        start_record: state
+            .start
+            .and_then(|record| serde_json::to_value(record).ok()),
         conclusion: state
             .conclusion
             .and_then(|record| serde_json::to_value(record).ok()),

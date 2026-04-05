@@ -11,8 +11,8 @@ use fabro_workflow::run_lookup::{StatusFilter, filter_runs, runs_base, scan_runs
 use fabro_workflow::run_status::RunStatus;
 
 use crate::args::{GlobalArgs, RunsListArgs};
-use crate::shared::{color_if, format_duration_ms, tilde_path};
 use crate::server_client;
+use crate::shared::{color_if, format_duration_ms, tilde_path};
 use crate::user_config::load_user_settings_with_globals;
 
 use super::short_run_id;

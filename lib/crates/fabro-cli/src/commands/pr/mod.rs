@@ -12,8 +12,8 @@ use fabro_types::PullRequestRecord;
 use fabro_workflow::run_lookup::resolve_run_from_summaries;
 
 use crate::args::{GlobalArgs, PrCommand, PrNamespace};
-use crate::shared::github::build_github_app_credentials;
 use crate::server_client;
+use crate::shared::github::build_github_app_credentials;
 use crate::user_config::load_user_settings_with_globals;
 
 pub(crate) async fn dispatch(ns: PrNamespace, globals: &GlobalArgs) -> Result<()> {

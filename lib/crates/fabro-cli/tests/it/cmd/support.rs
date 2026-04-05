@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 use fabro_store::EventEnvelope;
 use fabro_test::TestContext;
 use fabro_types::{
-    Checkpoint, Conclusion, NodeStatusRecord, PullRequestRecord, Retro, RunRecord,
-    RunStatusRecord, SandboxRecord, StageId, StartRecord,
+    Checkpoint, Conclusion, NodeStatusRecord, PullRequestRecord, Retro, RunRecord, RunStatusRecord,
+    SandboxRecord, StageId, StartRecord,
 };
 use serde_json::Value;
 use shlex::try_quote;
@@ -185,7 +185,13 @@ fn run_completed_dry_run(context: &TestContext, workflow: &Path) -> RunSetup {
     let mut cmd = context.run_cmd();
     cmd.current_dir(&context.temp_dir);
     cmd.timeout(COMMAND_TIMEOUT);
-    cmd.args(["--dry-run", "--auto-approve", "--no-retro", "--sandbox", "local"]);
+    cmd.args([
+        "--dry-run",
+        "--auto-approve",
+        "--no-retro",
+        "--sandbox",
+        "local",
+    ]);
     cmd.arg(workflow);
     let output = cmd.output().expect("command should execute");
     if !output.status.success() {
@@ -213,7 +219,13 @@ fn run_created_dry_run(context: &TestContext, workflow: &Path) -> RunSetup {
     let mut cmd = context.create_cmd();
     cmd.current_dir(&context.temp_dir);
     cmd.timeout(COMMAND_TIMEOUT);
-    cmd.args(["--dry-run", "--auto-approve", "--no-retro", "--sandbox", "local"]);
+    cmd.args([
+        "--dry-run",
+        "--auto-approve",
+        "--no-retro",
+        "--sandbox",
+        "local",
+    ]);
     cmd.arg(workflow);
     let output = cmd.output().expect("command should execute");
     if !output.status.success() {
@@ -668,13 +680,18 @@ async fn get_server_json_for_storage<T: serde::de::DeserializeOwned>(
 
 pub(crate) fn run_state(run_dir: &Path) -> RunProjection {
     let run_id = infer_run_id(run_dir);
-    block_on(get_server_json(run_dir, &format!("/api/v1/runs/{run_id}/state")))
+    block_on(get_server_json(
+        run_dir,
+        &format!("/api/v1/runs/{run_id}/state"),
+    ))
 }
 
 pub(crate) fn run_events(run_dir: &Path) -> Vec<EventEnvelope> {
     let run_id = infer_run_id(run_dir);
-    let response: serde_json::Value =
-        block_on(get_server_json(run_dir, &format!("/api/v1/runs/{run_id}/events")));
+    let response: serde_json::Value = block_on(get_server_json(
+        run_dir,
+        &format!("/api/v1/runs/{run_id}/events"),
+    ));
     serde_json::from_value(response["data"].clone()).expect("event list should parse")
 }
 

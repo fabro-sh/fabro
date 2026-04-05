@@ -100,7 +100,11 @@ fn start_already_running_exits_with_error() {
 
 #[test]
 fn concurrent_autostart_converges_on_one_shared_daemon_and_cleans_up() {
-    fn run_ps_json(home_dir: &std::path::Path, temp_dir: &std::path::Path, storage_dir: &std::path::Path) -> std::process::Output {
+    fn run_ps_json(
+        home_dir: &std::path::Path,
+        temp_dir: &std::path::Path,
+        storage_dir: &std::path::Path,
+    ) -> std::process::Output {
         std::process::Command::new(env!("CARGO_BIN_EXE_fabro"))
             .current_dir(temp_dir)
             .env("NO_COLOR", "1")

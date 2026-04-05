@@ -25,8 +25,9 @@ pub(crate) async fn list_run_ids(db: &Db, query: &ListRunsQuery) -> Result<Vec<R
     let mut iter = db.scan_prefix(keys::catalog_by_start_prefix()).await?;
     let mut run_ids = Vec::new();
     while let Some(entry) = iter.next().await? {
-        let key = String::from_utf8(entry.key.to_vec())
-            .map_err(|err| crate::StoreError::Other(format!("stored key is not valid UTF-8: {err}")))?;
+        let key = String::from_utf8(entry.key.to_vec()).map_err(|err| {
+            crate::StoreError::Other(format!("stored key is not valid UTF-8: {err}"))
+        })?;
         let Some(run_id) = keys::parse_run_id_from_catalog_key(&key) else {
             continue;
         };

@@ -1,7 +1,9 @@
 use fabro_test::{fabro_snapshot, test_context};
 use serde_json::Value;
 
-use super::support::{setup_completed_fast_dry_run, setup_created_fast_dry_run, setup_local_sandbox_run};
+use super::support::{
+    setup_completed_fast_dry_run, setup_created_fast_dry_run, setup_local_sandbox_run,
+};
 
 #[test]
 fn help() {
