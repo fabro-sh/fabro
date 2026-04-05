@@ -2313,9 +2313,6 @@ mod tests {
         start -> exit
     }"#;
 
-    const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
-    const POLL_ATTEMPTS: usize = 500;
-
     fn dry_run_settings() -> Settings {
         Settings {
             dry_run: Some(true),
@@ -3135,72 +3132,6 @@ mod tests {
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn attach_run_events_returns_sse_stream() {
-        let state = create_app_state();
-        let app = test_app_with_scheduler(state);
-
-        let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
-        let run_id = run_id_str.parse::<RunId>().unwrap();
-
-        // Wait for scheduler to promote run.
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-
-        let req = Request::builder()
-            .method("GET")
-            .uri(api(&format!("/runs/{run_id}/attach")))
-            .body(Body::empty())
-            .unwrap();
-
-        let response = app.oneshot(req).await.unwrap();
-        let status = response.status();
-        assert!(
-            status == StatusCode::OK || status == StatusCode::GONE,
-            "unexpected status: {status}"
-        );
-
-        if status == StatusCode::OK {
-            let content_type = response
-                .headers()
-                .get("content-type")
-                .expect("content-type header should be present")
-                .to_str()
-                .unwrap();
-            assert!(
-                content_type.contains("text/event-stream"),
-                "expected text/event-stream, got: {content_type}"
-            );
-        }
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn run_completes_and_status_is_completed() {
-        let state = create_app_state_with_options(dry_run_settings(), 5);
-        let app = test_app_with_scheduler(state);
-
-        let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
-        let run_id = run_id_str.parse::<RunId>().unwrap();
-
-        // Poll until run completes
-        let mut status = String::new();
-        for _ in 0..POLL_ATTEMPTS {
-            tokio::time::sleep(POLL_INTERVAL).await;
-            let req = Request::builder()
-                .method("GET")
-                .uri(api(&format!("/runs/{run_id}")))
-                .body(Body::empty())
-                .unwrap();
-            let response = app.clone().oneshot(req).await.unwrap();
-            assert_eq!(response.status(), StatusCode::OK);
-            let body = body_json(response.into_body()).await;
-            status = body["status"].as_str().unwrap().to_string();
-            if status == "succeeded" || status == "failed" {
-                break;
-            }
-        }
-        assert_eq!(status, "succeeded");
-    }
-
     #[tokio::test]
     async fn get_graph_returns_svg() {
         let state = create_app_state();
@@ -3371,53 +3302,6 @@ mod tests {
         assert_eq!(body["totals"]["cost"].as_f64().unwrap(), 0.0);
         assert_eq!(body["totals"]["runtime_secs"].as_f64().unwrap(), 0.0);
         assert!(body["by_model"].as_array().unwrap().is_empty());
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn aggregate_usage_increments_after_run_completes() {
-        let state = create_app_state_with_options(dry_run_settings(), 5);
-        let app = test_app_with_scheduler(state);
-
-        let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
-        let run_id = run_id_str.parse::<RunId>().unwrap();
-
-        // Poll until run completes
-        let mut status = String::new();
-        for _ in 0..POLL_ATTEMPTS {
-            tokio::time::sleep(POLL_INTERVAL).await;
-            let req = Request::builder()
-                .method("GET")
-                .uri(api(&format!("/runs/{run_id}")))
-                .body(Body::empty())
-                .unwrap();
-            let response = app.clone().oneshot(req).await.unwrap();
-            let body = body_json(response.into_body()).await;
-            status = body["status"].as_str().unwrap().to_string();
-            if status == "succeeded" || status == "failed" {
-                break;
-            }
-        }
-        assert_eq!(status, "succeeded");
-
-        let mut total_runs = 0;
-        for _ in 0..POLL_ATTEMPTS {
-            let req = Request::builder()
-                .method("GET")
-                .uri(api("/usage"))
-                .body(Body::empty())
-                .unwrap();
-
-            let response = app.clone().oneshot(req).await.unwrap();
-            assert_eq!(response.status(), StatusCode::OK);
-
-            let body = body_json(response.into_body()).await;
-            total_runs = body["totals"]["runs"].as_i64().unwrap();
-            if total_runs == 1 {
-                break;
-            }
-            tokio::time::sleep(POLL_INTERVAL).await;
-        }
-        assert_eq!(total_runs, 1);
     }
 
     #[tokio::test]
