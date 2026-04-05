@@ -1,5 +1,11 @@
 use fabro_test::{fabro_snapshot, test_context};
 
+fn isolated_storage_dir() -> tempfile::TempDir {
+    let root = tempfile::tempdir_in("/tmp").unwrap();
+    std::fs::create_dir_all(root.path().join("storage")).unwrap();
+    root
+}
+
 #[test]
 fn help() {
     let context = test_context!();
@@ -29,7 +35,10 @@ fn help() {
 #[test]
 fn status_when_not_running() {
     let context = test_context!();
+    let storage_root = isolated_storage_dir();
+    let storage_dir = storage_root.path().join("storage");
     let mut cmd = context.command();
+    cmd.env("FABRO_STORAGE_DIR", &storage_dir);
     cmd.args(["server", "status"]);
     fabro_snapshot!(context.filters(), cmd, @"
     success: false

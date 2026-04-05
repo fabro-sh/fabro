@@ -165,7 +165,11 @@ async fn attach_run_server(
         }
 
         let mut saw_event = false;
-        let events = client.list_run_events(run_id, Some(next_seq), None).await?;
+        let events = match client.list_run_events(run_id, Some(next_seq), None).await {
+            Ok(events) => events,
+            Err(err) if terminal_event_seen_at.is_some() && is_run_not_found_error(&err) => break,
+            Err(err) => return Err(err),
+        };
         for event in events {
             if let Some(exit_code) = event_exit_code(&event) {
                 terminal_exit_code = Some(exit_code);
@@ -329,7 +333,11 @@ async fn flush_remaining_server_events(
     let deadline = Instant::now() + ATTACH_FINAL_STATUS_GRACE;
     loop {
         let mut saw_new_event = false;
-        let events = client.list_run_events(run_id, Some(next_seq), None).await?;
+        let events = match client.list_run_events(run_id, Some(next_seq), None).await {
+            Ok(events) => events,
+            Err(err) if is_run_not_found_error(&err) => break,
+            Err(err) => return Err(err),
+        };
         for event in events {
             let line = event_payload_line(&event)?;
             emit_progress_line(progress_ui, &line, json_output)?;
@@ -347,6 +355,10 @@ async fn flush_remaining_server_events(
     }
 
     Ok(())
+}
+
+fn is_run_not_found_error(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| cause.to_string() == "Run not found.")
 }
 
 fn emit_progress_line(

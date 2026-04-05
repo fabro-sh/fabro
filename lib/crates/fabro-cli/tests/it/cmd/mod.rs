@@ -57,7 +57,7 @@ mod server_stop;
 mod start;
 mod store;
 mod store_dump;
-mod support;
+pub(crate) mod support;
 mod system;
 mod system_df;
 mod system_prune;
