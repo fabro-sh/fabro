@@ -1,7 +1,14 @@
 use fabro_test::{fabro_snapshot, test_context};
+use fabro_types::StatusReason;
 use serde_json::Value;
 
+use super::support::{
+    only_run, output_stderr, run_count_for_test_case, run_state, wait_for_status,
+    write_gated_workflow,
+};
 use crate::support::{example_fixture, fabro_json_snapshot, run_output_filters, unique_run_id};
+
+const SHARED_DAEMON_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 #[test]
 fn help() {
@@ -962,5 +969,71 @@ fn detach_creates_run_dir_with_detach_log() {
       "detach_log_exists": false
     }
     "#
+    );
+}
+
+#[test]
+fn ctrl_c_cancels_active_run_via_server() {
+    let context = test_context!();
+    let _gate = write_gated_workflow(&context.temp_dir.join("slow.fabro"), "slow", "Run slowly");
+
+    let mut run_cmd = std::process::Command::new(env!("CARGO_BIN_EXE_fabro"));
+    run_cmd.current_dir(&context.temp_dir);
+    run_cmd.env("NO_COLOR", "1");
+    run_cmd.env("HOME", &context.home_dir);
+    run_cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
+    run_cmd.env("FABRO_STORAGE_DIR", &context.storage_dir);
+    run_cmd.env("FABRO_SERVER_MAX_CONCURRENT_RUNS", "64");
+    run_cmd.env("OPENAI_API_KEY", "test");
+    run_cmd.args([
+        "run",
+        "--label",
+        &context.test_run_label(),
+        "--label",
+        &context.test_case_label(),
+        "--provider",
+        "openai",
+        "--sandbox",
+        "local",
+        "--no-retro",
+        "slow.fabro",
+    ]);
+    let child = run_cmd.spawn().expect("run should spawn");
+
+    let deadline = std::time::Instant::now() + SHARED_DAEMON_TIMEOUT;
+    while run_count_for_test_case(&context) == 0 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for run directory"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    let run = only_run(&context);
+    wait_for_status(&run.run_dir, &["running"]);
+
+    let kill_status = std::process::Command::new("kill")
+        .args(["-INT", &child.id().to_string()])
+        .status()
+        .expect("kill should execute");
+    assert!(kill_status.success(), "kill -INT should succeed");
+
+    let output = child
+        .wait_with_output()
+        .expect("run should exit after SIGINT");
+    assert!(
+        !output.status.success(),
+        "run should exit non-zero after cancellation\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        output_stderr(&output)
+    );
+
+    let final_status = wait_for_status(&run.run_dir, &["failed"]);
+    assert_eq!(final_status, "failed");
+    assert_eq!(
+        run_state(&run.run_dir)
+            .status
+            .and_then(|record| record.reason),
+        Some(StatusReason::Cancelled)
     );
 }

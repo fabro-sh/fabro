@@ -1,3 +1,4 @@
+mod artifacts;
 mod exec;
 mod lifecycle;
 mod recovery;

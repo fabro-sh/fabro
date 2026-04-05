@@ -1,10 +1,9 @@
 use anyhow::{Context, Result, bail};
 use fabro_sandbox::daytona::DaytonaSandbox;
-use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 use tracing::info;
 
 use crate::args::{GlobalArgs, SshArgs};
-use crate::server_client;
+use crate::server_runs::ServerRunLookup;
 use crate::shared::{print_json_pretty, validate_daytona_provider};
 use crate::user_config::load_user_settings_with_globals;
 
@@ -14,12 +13,11 @@ pub(crate) async fn run(args: SshArgs, globals: &GlobalArgs) -> Result<()> {
     }
 
     let cli_settings = load_user_settings_with_globals(globals)?;
-    let base = runs_base(&cli_settings.storage_dir());
-    let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
-    let summaries = client.list_store_runs().await?;
-    let run = resolve_run_from_summaries(&summaries, &base, &args.run)?;
+    let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
+    let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();
-    let record = client
+    let record = lookup
+        .client()
         .get_run_state(&run_id)
         .await?
         .sandbox

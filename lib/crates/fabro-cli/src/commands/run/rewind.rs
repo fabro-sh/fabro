@@ -10,14 +10,13 @@ use fabro_workflow::git::MetadataStore;
 use fabro_workflow::operations::{
     RewindInput, RewindTarget, RunTimeline, TimelineEntry, build_timeline_or_rebuild, rewind,
 };
-use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 use git2::Repository;
 use serde::Serialize;
 
 use crate::args::{GlobalArgs, RewindArgs};
 use crate::commands::store::rebuild::rebuild_run_store;
-use crate::server_client;
 use crate::server_client::ServerStoreClient;
+use crate::server_runs::ServerRunLookup;
 use crate::shared::{color_if, print_json_pretty};
 use crate::user_config::load_user_settings_with_globals;
 
@@ -32,13 +31,11 @@ pub(crate) struct TimelineEntryJson {
 pub(crate) async fn run(args: &RewindArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
     let repo = Repository::discover(".").context("not in a git repository")?;
     let cli_settings = load_user_settings_with_globals(globals)?;
-    let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
-    let base = runs_base(&cli_settings.storage_dir());
-    let summaries = client.list_store_runs().await?;
-    let run = resolve_run_from_summaries(&summaries, &base, &args.run_id)?;
+    let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
+    let run = lookup.resolve(&args.run_id)?;
     let run_id = run.run_id();
     let store = Store::new(repo);
-    let events = client.list_run_events(&run_id, None, None).await?;
+    let events = lookup.client().list_run_events(&run_id, None, None).await?;
     let run_store = rebuild_run_store(&run_id, &events).await?;
 
     let timeline = build_timeline_or_rebuild(&store, Some(&run_store), &run_id).await?;
@@ -63,7 +60,7 @@ pub(crate) async fn run(args: &RewindArgs, styles: &Styles, globals: &GlobalArgs
         },
     )?;
     let entry = timeline.resolve(&target)?;
-    reset_rewound_run_state(&client, &store, &run_id, &run.path, entry).await?;
+    reset_rewound_run_state(lookup.client(), &store, &run_id, &run.path, entry).await?;
 
     let run_id_string = run_id.to_string();
 

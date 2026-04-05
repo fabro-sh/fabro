@@ -4,12 +4,11 @@ use anyhow::{Result, bail};
 use fabro_types::RunId;
 use fabro_util::terminal::Styles;
 use fabro_workflow::records::Conclusion;
-use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 use fabro_workflow::run_status::RunStatus;
 use tracing::info;
 
 use crate::args::{GlobalArgs, WaitArgs};
-use crate::server_client;
+use crate::server_runs::ServerRunLookup;
 use crate::shared::format_duration_ms;
 use crate::user_config::load_user_settings_with_globals;
 
@@ -20,10 +19,9 @@ const WAIT_STARTUP_GRACE: std::time::Duration = std::time::Duration::from_secs(3
 
 pub(crate) async fn run(args: &WaitArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
     let cli_settings = load_user_settings_with_globals(globals)?;
-    let base = runs_base(&cli_settings.storage_dir());
-    let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
-    let summaries = client.list_store_runs().await?;
-    let run_info = resolve_run_from_summaries(&summaries, &base, &args.run)?;
+    let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
+    let run_info = lookup.resolve(&args.run)?;
+    let client = lookup.client();
 
     let run_id = run_info.run_id();
     info!(run_id = %run_id, "Waiting for run to complete");

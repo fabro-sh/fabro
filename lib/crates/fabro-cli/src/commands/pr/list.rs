@@ -9,6 +9,7 @@ use tracing::info;
 
 use crate::args::{GlobalArgs, PrListArgs};
 use crate::server_client;
+use crate::server_runs::ServerRunLookup;
 use crate::shared::print_json_pretty;
 use crate::user_config::load_user_settings_with_globals;
 
@@ -28,9 +29,16 @@ pub(super) async fn list_command(
 ) -> Result<()> {
     let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
-    let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
-    let summaries = client.list_store_runs().await?;
-    list_from(&client, &summaries, &base, args, github_app, globals).await
+    let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
+    list_from(
+        lookup.client(),
+        lookup.summaries(),
+        &base,
+        args,
+        github_app,
+        globals,
+    )
+    .await
 }
 
 async fn list_from(

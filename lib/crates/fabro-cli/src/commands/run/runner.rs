@@ -10,16 +10,10 @@ use crate::user_config::load_user_settings;
 
 pub(crate) async fn execute(
     run_id: RunId,
-    _run_dir: PathBuf,
     storage_dir: Option<PathBuf>,
-    launcher_path: PathBuf,
     resume: bool,
 ) -> Result<()> {
     let _ = fabro_proc::title_init();
-
-    let _launcher_guard = scopeguard::guard(launcher_path.clone(), |path| {
-        super::launcher::remove_launcher_record(&path);
-    });
 
     let storage_dir = match storage_dir {
         Some(storage_dir) => storage_dir,

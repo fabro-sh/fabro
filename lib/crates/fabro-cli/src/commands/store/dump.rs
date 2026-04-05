@@ -3,7 +3,6 @@ use anyhow::{Context, Result};
 use fabro_store::StageId;
 use fabro_store::{RunProjection, SlateRunStore};
 use fabro_workflow::run_dump::RunDump;
-use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 #[cfg(test)]
 use serde::de::DeserializeOwned;
 use std::io::ErrorKind;
@@ -11,18 +10,16 @@ use std::path::Path;
 
 use crate::args::{GlobalArgs, StoreDumpArgs};
 use crate::commands::store::rebuild::rebuild_run_store;
-use crate::server_client;
+use crate::server_runs::ServerRunLookup;
 use crate::shared::{absolute_or_current, print_json_pretty};
 use crate::user_config::load_user_settings_with_globals;
 
 pub(crate) async fn dump_command(args: &StoreDumpArgs, globals: &GlobalArgs) -> Result<()> {
     let cli_settings = load_user_settings_with_globals(globals)?;
-    let base = runs_base(&cli_settings.storage_dir());
-    let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
-    let summaries = client.list_store_runs().await?;
-    let run = resolve_run_from_summaries(&summaries, &base, &args.run)?;
+    let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
+    let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();
-    let events = client.list_run_events(&run_id, None, None).await?;
+    let events = lookup.client().list_run_events(&run_id, None, None).await?;
     let run_store = rebuild_run_store(&run_id, &events).await?;
 
     let file_count = export_run(&run_store, &args.output).await?;

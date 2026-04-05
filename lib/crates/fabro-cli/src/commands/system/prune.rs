@@ -10,6 +10,7 @@ use fabro_workflow::run_lookup::{StatusFilter, filter_runs, runs_base, scan_runs
 use crate::args::{GlobalArgs, RunsPruneArgs};
 use crate::commands::runs::rm::remove_run_with_cleanup;
 use crate::server_client;
+use crate::server_runs::ServerRunLookup;
 use crate::shared::{format_size, print_json_pretty};
 use crate::user_config::load_user_settings_with_globals;
 
@@ -24,9 +25,8 @@ struct PruneRunRow {
 pub(super) async fn prune_command(args: &RunsPruneArgs, globals: &GlobalArgs) -> Result<()> {
     let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
-    let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
-    let summaries = client.list_store_runs().await?;
-    prune_from(args, &client, &summaries, &base, globals).await
+    let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
+    prune_from(args, lookup.client(), lookup.summaries(), &base, globals).await
 }
 
 pub(crate) fn parse_duration(s: &str) -> Result<chrono::Duration> {

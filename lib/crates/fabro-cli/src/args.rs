@@ -635,7 +635,7 @@ pub(crate) enum RunCommands {
     Run(RunArgs),
     /// Create a workflow run (allocate run dir, persist spec)
     Create(RunArgs),
-    /// Start a created workflow run (spawn engine process)
+    /// Start a created workflow run on the server
     Start {
         /// Run ID prefix or workflow name
         run: String,
@@ -645,18 +645,12 @@ pub(crate) enum RunCommands {
         /// Run ID prefix or workflow name
         run: String,
     },
-    /// Internal: run the engine process
-    #[command(name = "__detached", hide = true)]
-    Detached {
+    /// Internal: queue or resume a workflow run via the server
+    #[command(name = "__runner", hide = true)]
+    Runner {
         /// Run ID
         #[arg(long)]
         run_id: fabro_types::RunId,
-        /// Run directory
-        #[arg(long)]
-        run_dir: PathBuf,
-        /// Launcher metadata path
-        #[arg(long)]
-        launcher_path: PathBuf,
         /// Resume from checkpoint instead of fresh start
         #[arg(long)]
         resume: bool,
@@ -683,7 +677,7 @@ impl RunCommands {
             Self::Create(_) => "create",
             Self::Start { .. } => "start",
             Self::Attach { .. } => "attach",
-            Self::Detached { .. } => "__detached",
+            Self::Runner { .. } => "__runner",
             Self::Diff(_) => "diff",
             Self::Logs(_) => "logs",
             Self::Resume(_) => "resume",

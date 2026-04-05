@@ -4,6 +4,7 @@ mod args;
 mod commands;
 mod logging;
 mod server_client;
+mod server_runs;
 mod shared;
 #[cfg(feature = "sleep_inhibitor")]
 mod sleep_inhibitor;
@@ -421,31 +422,17 @@ mod tests {
     }
 
     #[test]
-    fn parse_detached_command() {
+    fn parse_runner_command() {
         let cli = Cli::try_parse_from([
             "fabro",
-            "__detached",
+            "__runner",
             "--run-id",
             "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-            "--run-dir",
-            "/tmp/fabro/runs/01ABC",
-            "--launcher-path",
-            "/tmp/fabro/launchers/01ABC.json",
         ])
         .expect("should parse");
         match *cli.command {
-            Commands::RunCmd(RunCommands::Detached {
-                run_id,
-                run_dir,
-                launcher_path,
-                resume,
-            }) => {
+            Commands::RunCmd(RunCommands::Runner { run_id, resume }) => {
                 assert_eq!(run_id, "01ARZ3NDEKTSV4RRFFQ69G5FAV".parse().unwrap());
-                assert_eq!(run_dir, std::path::PathBuf::from("/tmp/fabro/runs/01ABC"));
-                assert_eq!(
-                    launcher_path,
-                    std::path::PathBuf::from("/tmp/fabro/launchers/01ABC.json")
-                );
                 assert!(!resume);
             }
             _ => panic!("unexpected command variant"),
@@ -453,32 +440,18 @@ mod tests {
     }
 
     #[test]
-    fn parse_detached_with_resume() {
+    fn parse_runner_with_resume() {
         let cli = Cli::try_parse_from([
             "fabro",
-            "__detached",
+            "__runner",
             "--run-id",
             "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-            "--run-dir",
-            "/tmp/fabro/runs/01ABC",
-            "--launcher-path",
-            "/tmp/fabro/launchers/01ABC.json",
             "--resume",
         ])
         .expect("should parse");
         match *cli.command {
-            Commands::RunCmd(RunCommands::Detached {
-                run_id,
-                run_dir,
-                launcher_path,
-                resume,
-            }) => {
+            Commands::RunCmd(RunCommands::Runner { run_id, resume }) => {
                 assert_eq!(run_id, "01ARZ3NDEKTSV4RRFFQ69G5FAV".parse().unwrap());
-                assert_eq!(run_dir, std::path::PathBuf::from("/tmp/fabro/runs/01ABC"));
-                assert_eq!(
-                    launcher_path,
-                    std::path::PathBuf::from("/tmp/fabro/launchers/01ABC.json")
-                );
                 assert!(resume);
             }
             _ => panic!("unexpected command variant"),
