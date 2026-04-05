@@ -1,19 +1,16 @@
 use anyhow::Result;
 use fabro_store::RuntimeState;
 use fabro_workflow::artifacts::scan_artifacts;
-use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 
 use crate::args::{ArtifactListArgs, GlobalArgs};
-use crate::server_client;
+use crate::server_runs::ServerRunLookup;
 use crate::shared::format_size;
 use crate::user_config::load_user_settings_with_globals;
 
 pub(super) async fn list_command(args: &ArtifactListArgs, globals: &GlobalArgs) -> Result<()> {
     let cli_settings = load_user_settings_with_globals(globals)?;
-    let base = runs_base(&cli_settings.storage_dir());
-    let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
-    let summaries = client.list_store_runs().await?;
-    let run = resolve_run_from_summaries(&summaries, &base, &args.run_id)?;
+    let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
+    let run = lookup.resolve(&args.run_id)?;
     let runtime_state = RuntimeState::new(&run.path);
     let entries = scan_artifacts(
         &runtime_state.artifacts_dir(),

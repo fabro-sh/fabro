@@ -3,12 +3,11 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use fabro_agent::sandbox::Sandbox;
 use fabro_sandbox::reconnect::reconnect;
-use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 use tokio::fs;
 use tracing::{debug, info};
 
 use crate::args::{CpArgs, GlobalArgs};
-use crate::server_client;
+use crate::server_runs::ServerRunLookup;
 use crate::shared::{print_json_pretty, split_run_path};
 use crate::user_config::load_user_settings_with_globals;
 
@@ -28,7 +27,6 @@ enum CopyDirection {
 pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs) -> Result<()> {
     let direction = parse_direction(&args.src, &args.dst)?;
     let cli_settings = load_user_settings_with_globals(globals)?;
-    let base = runs_base(&cli_settings.storage_dir());
 
     match direction {
         CopyDirection::Download {
@@ -36,7 +34,7 @@ pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs) -> Result<()>
             remote_path,
             local_path,
         } => {
-            let sandbox = load_sandbox(&cli_settings.storage_dir(), &base, &run_prefix).await?;
+            let sandbox = load_sandbox(&cli_settings.storage_dir(), &run_prefix).await?;
 
             let file_count = if args.recursive {
                 Some(download_recursive(&*sandbox, &remote_path, &local_path).await?)
@@ -69,7 +67,7 @@ pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs) -> Result<()>
             run_prefix,
             remote_path,
         } => {
-            let sandbox = load_sandbox(&cli_settings.storage_dir(), &base, &run_prefix).await?;
+            let sandbox = load_sandbox(&cli_settings.storage_dir(), &run_prefix).await?;
 
             let file_count = if args.recursive {
                 Some(upload_recursive(&*sandbox, &local_path, &remote_path).await?)
@@ -123,15 +121,11 @@ fn parse_direction(src: &str, dst: &str) -> Result<CopyDirection> {
     }
 }
 
-async fn load_sandbox(
-    storage_dir: &Path,
-    base: &Path,
-    run_prefix: &str,
-) -> Result<Box<dyn Sandbox>> {
-    let client = server_client::connect_server(storage_dir).await?;
-    let summaries = client.list_store_runs().await?;
-    let run = resolve_run_from_summaries(&summaries, base, run_prefix)?;
-    let record = client
+async fn load_sandbox(storage_dir: &Path, run_prefix: &str) -> Result<Box<dyn Sandbox>> {
+    let lookup = ServerRunLookup::connect(storage_dir).await?;
+    let run = lookup.resolve(run_prefix)?;
+    let record = lookup
+        .client()
         .get_run_state(&run.run_id())
         .await?
         .sandbox

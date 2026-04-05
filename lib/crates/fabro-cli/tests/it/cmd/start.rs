@@ -15,7 +15,7 @@ fn help() {
     success: true
     exit_code: 0
     ----- stdout -----
-    Start a created workflow run (spawn engine process)
+    Start a created workflow run on the server
 
     Usage: fabro start [OPTIONS] <RUN>
 

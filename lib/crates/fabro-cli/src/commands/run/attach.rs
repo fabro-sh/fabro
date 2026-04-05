@@ -21,10 +21,6 @@ use tokio::time::sleep;
 use super::run_progress;
 use crate::server_client;
 
-#[cfg(test)]
-const ATTACH_STARTUP_GRACE: Duration = Duration::from_millis(200);
-#[cfg(not(test))]
-const ATTACH_STARTUP_GRACE: Duration = Duration::from_secs(3);
 const INTERVIEW_UNANSWERED_MESSAGE: &str =
     "Interview ended without an answer. The run is still waiting for input; reattach to answer it.";
 const JSON_INTERVIEW_MESSAGE: &str = "This run is waiting for human input, but --json is non-interactive. Reattach without --json to answer it.";
@@ -42,7 +38,6 @@ pub(crate) async fn attach_run(
     run_id: Option<&RunId>,
     kill_on_detach: bool,
     styles: &'static Styles,
-    engine_child: Option<std::process::Child>,
     json_output: bool,
 ) -> Result<ExitCode> {
     let inferred_storage_dir = infer_storage_dir(run_dir);
@@ -64,7 +59,6 @@ pub(crate) async fn attach_run(
             .collect::<Result<Vec<_>>>()?;
         let initial_exit_code = events.iter().rev().find_map(event_exit_code);
         return attach_run_server(
-            run_dir,
             &client,
             run_id,
             verbose,
@@ -73,7 +67,6 @@ pub(crate) async fn attach_run(
             initial_exit_code,
             kill_on_detach,
             styles,
-            engine_child,
             json_output,
         )
         .await;
@@ -85,7 +78,6 @@ pub(crate) async fn attach_run(
 }
 
 async fn attach_run_server(
-    run_dir: &Path,
     client: &server_client::ServerStoreClient,
     run_id: &RunId,
     verbose: bool,
@@ -94,11 +86,8 @@ async fn attach_run_server(
     initial_exit_code: Option<ExitCode>,
     kill_on_detach: bool,
     styles: &'static Styles,
-    engine_child: Option<std::process::Child>,
     json_output: bool,
 ) -> Result<ExitCode> {
-    let mut engine_guard = engine_child.map(EngineChildGuard::new);
-
     let is_tty = std::io::stderr().is_terminal();
     let mut progress_ui = run_progress::ProgressUI::new(is_tty, verbose);
 
@@ -117,30 +106,18 @@ async fn attach_run_server(
     }
 
     if json_output && !client.list_run_questions(run_id).await?.is_empty() {
-        defuse_engine_child(&mut engine_guard);
         eprintln!("{JSON_INTERVIEW_MESSAGE}");
         return Ok(ExitCode::from(1));
     }
 
     let mut next_seq = if last_seq == 0 { 1 } else { last_seq + 1 };
-    let mut cached_pid: Option<u32> = None;
-    let attach_started = Instant::now();
     let mut terminal_exit_code = initial_exit_code;
     let mut terminal_event_seen_at = initial_exit_code.map(|_| Instant::now());
 
     loop {
-        let server_owned = engine_guard.is_none() && read_launcher_pid(run_dir).is_none();
         if cancelled.load(Ordering::Relaxed) {
             if kill_on_detach {
-                if let Some(guard) = engine_guard.as_mut() {
-                    if let Some(child) = guard.inner() {
-                        let _ = child.kill();
-                    }
-                } else if server_owned {
-                    let _ = client.cancel_run(run_id).await;
-                } else {
-                    kill_engine(run_dir);
-                }
+                let _ = client.cancel_run(run_id).await;
                 // Wait briefly for a terminal status or conclusion
                 for _ in 0..20 {
                     if client
@@ -159,9 +136,6 @@ async fn attach_run_server(
                     sleep(Duration::from_millis(100)).await;
                 }
             } else {
-                if let Some(guard) = engine_guard.as_mut() {
-                    guard.defuse();
-                }
                 eprintln!("Detached from run (engine continues in background)");
             }
             break;
@@ -197,7 +171,6 @@ async fn attach_run_server(
         // Check for server-backed interview request
         if let Some(question) = client.list_run_questions(run_id).await?.into_iter().next() {
             if json_output {
-                defuse_engine_child(&mut engine_guard);
                 eprintln!("{JSON_INTERVIEW_MESSAGE}");
                 return Ok(ExitCode::from(1));
             }
@@ -212,9 +185,6 @@ async fn attach_run_server(
             show_progress(&mut progress_ui, json_output);
 
             if answer_requires_reattach(&answer) {
-                if let Some(guard) = engine_guard.as_mut() {
-                    guard.defuse();
-                }
                 eprintln!("{INTERVIEW_UNANSWERED_MESSAGE}");
                 return Ok(ExitCode::from(1));
             }
@@ -230,64 +200,10 @@ async fn attach_run_server(
             .and_then(|state| state.status.map(|record| record.status))
             .filter(|status| status.is_terminal());
 
-        let child_alive_via_handle = engine_guard.as_mut().and_then(|guard| {
-            guard.inner().map(|child| match child.try_wait() {
-                Ok(None) => true,              // still running
-                Ok(Some(_)) | Err(_) => false, // exited or error
-            })
-        });
-
-        if let Some(child_alive) = child_alive_via_handle {
-            if !child_alive && !saw_event {
-                flush_remaining_server_events(
-                    client,
-                    run_id,
-                    next_seq,
-                    &mut progress_ui,
-                    json_output,
-                )
+        if terminal_status.is_some() && !saw_event {
+            flush_remaining_server_events(client, run_id, next_seq, &mut progress_ui, json_output)
                 .await?;
-                break;
-            }
-        } else {
-            if terminal_status.is_some() && !saw_event {
-                flush_remaining_server_events(
-                    client,
-                    run_id,
-                    next_seq,
-                    &mut progress_ui,
-                    json_output,
-                )
-                .await?;
-                break;
-            }
-
-            let engine_alive = if server_owned {
-                true
-            } else {
-                match cached_pid {
-                    Some(pid) => process_alive(pid),
-                    None => {
-                        if let Some(pid) = read_launcher_pid(run_dir) {
-                            cached_pid = Some(pid);
-                            process_alive(pid)
-                        } else {
-                            attach_started.elapsed() < ATTACH_STARTUP_GRACE
-                        }
-                    }
-                }
-            };
-            if !engine_alive {
-                flush_remaining_server_events(
-                    client,
-                    run_id,
-                    next_seq,
-                    &mut progress_ui,
-                    json_output,
-                )
-                .await?;
-                break;
-            }
+            break;
         }
 
         if !saw_event {
@@ -450,10 +366,6 @@ fn restore_empty_run_properties(value: &mut serde_json::Value) {
     }
 }
 
-fn read_launcher_pid(run_dir: &Path) -> Option<u32> {
-    super::launcher::active_launcher_record_for_run(run_dir).map(|record| record.pid)
-}
-
 fn infer_storage_dir(run_dir: &Path) -> Option<PathBuf> {
     let runs_dir = run_dir.parent()?;
     let storage_dir = runs_dir.parent()?;
@@ -461,122 +373,15 @@ fn infer_storage_dir(run_dir: &Path) -> Option<PathBuf> {
 }
 
 fn infer_run_id(run_dir: &Path) -> Option<RunId> {
-    super::launcher::launcher_record_for_run(run_dir)
-        .map(|record| record.run_id)
-        .or_else(|| {
-            std::fs::read_to_string(run_dir.join("id.txt"))
-                .ok()
-                .map(|run_id| run_id.trim().to_string())
-                .filter(|run_id| !run_id.is_empty())
-                .and_then(|run_id| run_id.parse().ok())
-        })
-}
-
-#[cfg(test)]
-struct InterviewClaimGuard {
-    claim_path: PathBuf,
-}
-
-#[cfg(test)]
-impl InterviewClaimGuard {
-    fn acquire(claim_path: &Path) -> Option<Self> {
-        if try_claim_interview_request(claim_path) {
-            Some(Self {
-                claim_path: claim_path.to_path_buf(),
-            })
-        } else {
-            None
-        }
-    }
-}
-
-#[cfg(test)]
-impl Drop for InterviewClaimGuard {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.claim_path);
-    }
-}
-
-struct EngineChildGuard {
-    child: Option<std::process::Child>,
-}
-
-impl EngineChildGuard {
-    fn new(child: std::process::Child) -> Self {
-        Self { child: Some(child) }
-    }
-
-    fn inner(&mut self) -> Option<&mut std::process::Child> {
-        self.child.as_mut()
-    }
-
-    fn defuse(&mut self) {
-        self.child.take();
-    }
-}
-
-fn defuse_engine_child(engine_guard: &mut Option<EngineChildGuard>) {
-    if let Some(guard) = engine_guard.as_mut() {
-        guard.defuse();
-    }
-}
-
-impl Drop for EngineChildGuard {
-    fn drop(&mut self) {
-        if let Some(mut child) = self.child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
-}
-
-#[cfg(test)]
-fn try_claim_interview_request(claim_path: &Path) -> bool {
-    if let Some(parent) = claim_path.parent() {
-        if std::fs::create_dir_all(parent).is_err() {
-            return false;
-        }
-    }
-
-    if let Ok(existing) = std::fs::read_to_string(claim_path) {
-        if let Ok(pid) = existing.trim().parse::<u32>() {
-            if process_alive(pid) {
-                return pid == std::process::id();
-            }
-        }
-        let _ = std::fs::remove_file(claim_path);
-    }
-
-    match std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(claim_path)
-    {
-        Ok(mut file) => {
-            let _ = writeln!(file, "{}", std::process::id());
-            true
-        }
-        Err(_) => false,
-    }
+    std::fs::read_to_string(run_dir.join("id.txt"))
+        .ok()
+        .map(|run_id| run_id.trim().to_string())
+        .filter(|run_id| !run_id.is_empty())
+        .and_then(|run_id| run_id.parse().ok())
 }
 
 fn answer_requires_reattach(answer: &fabro_interview::Answer) -> bool {
     matches!(answer.value, AnswerValue::Aborted | AnswerValue::Skipped)
-}
-
-#[cfg(test)]
-fn write_interview_response_atomically(
-    response_path: &Path,
-    answer: &fabro_interview::Answer,
-) -> Result<()> {
-    let response_json = serde_json::to_string_pretty(answer)?;
-    if let Some(parent) = response_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let temp_path = response_path.with_extension("json.tmp");
-    std::fs::write(&temp_path, response_json)?;
-    std::fs::rename(temp_path, response_path)?;
-    Ok(())
 }
 
 async fn determine_exit_code_with_server(
@@ -614,16 +419,6 @@ async fn determine_exit_code_with_server(
     }
 }
 
-fn kill_engine(run_dir: &Path) {
-    if let Some(pid) = read_launcher_pid(run_dir) {
-        fabro_proc::sigterm(pid);
-    }
-}
-
-fn process_alive(pid: u32) -> bool {
-    fabro_proc::process_alive(pid)
-}
-
 fn event_exit_code(event: &EventEnvelope) -> Option<ExitCode> {
     let run_event = RunEvent::try_from(&event.payload).ok()?;
     match run_event.body {
@@ -642,8 +437,6 @@ fn event_exit_code(event: &EventEnvelope) -> Option<ExitCode> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::run::launcher;
-    use chrono::Utc;
     use fabro_interview::{Answer, AnswerValue};
     use fabro_util::terminal::Styles;
 
@@ -655,17 +448,9 @@ mod tests {
     async fn attach_errors_without_store_context() {
         let dir = tempfile::tempdir().unwrap();
 
-        let err = attach_run(
-            dir.path(),
-            None,
-            None,
-            false,
-            no_color_styles(),
-            None,
-            false,
-        )
-        .await
-        .unwrap_err();
+        let err = attach_run(dir.path(), None, None, false, no_color_styles(), false)
+            .await
+            .unwrap_err();
 
         assert!(
             err.to_string()
@@ -690,53 +475,18 @@ mod tests {
     }
 
     #[test]
-    fn infer_run_id_uses_launcher_record_without_run_json() {
+    fn infer_run_id_reads_id_txt() {
         let dir = tempfile::tempdir().unwrap();
         let storage_dir = dir.path().join("storage");
         let run_dir = storage_dir.join("runs").join("20260401-test");
         std::fs::create_dir_all(&run_dir).unwrap();
-
-        launcher::write_launcher_record(
-            &launcher::launcher_record_path(&storage_dir, &fabro_types::fixtures::RUN_1),
-            &launcher::LauncherRecord {
-                run_id: fabro_types::fixtures::RUN_1,
-                run_dir: run_dir.clone(),
-                pid: u32::MAX,
-                resume: false,
-                log_path: dir.path().join("launcher.log"),
-                started_at: Utc::now(),
-            },
+        std::fs::write(
+            run_dir.join("id.txt"),
+            format!("{}\n", fabro_types::fixtures::RUN_1),
         )
         .unwrap();
 
         assert_eq!(infer_run_id(&run_dir), Some(fabro_types::fixtures::RUN_1));
-    }
-
-    #[test]
-    fn try_claim_interview_request_reclaims_stale_claim() {
-        let dir = tempfile::tempdir().unwrap();
-        let claim_path = dir.path().join("runtime").join("interview_request.claim");
-        std::fs::create_dir_all(claim_path.parent().unwrap()).unwrap();
-        std::fs::write(&claim_path, "999999\n").unwrap();
-
-        assert!(try_claim_interview_request(&claim_path));
-        assert_eq!(
-            std::fs::read_to_string(claim_path).unwrap(),
-            format!("{}\n", std::process::id())
-        );
-    }
-
-    #[test]
-    fn interview_claim_guard_releases_claim_on_drop() {
-        let dir = tempfile::tempdir().unwrap();
-        let claim_path = dir.path().join("runtime").join("interview_request.claim");
-
-        {
-            let _guard = InterviewClaimGuard::acquire(&claim_path).unwrap();
-            assert!(claim_path.exists());
-        }
-
-        assert!(!claim_path.exists());
     }
 
     #[test]
@@ -756,66 +506,5 @@ mod tests {
         assert!(answer_requires_reattach(&aborted));
         assert!(answer_requires_reattach(&skipped));
         assert!(!answer_requires_reattach(&answered));
-    }
-
-    #[test]
-    fn engine_child_guard_kills_on_drop() {
-        let child = std::process::Command::new("sleep")
-            .arg("60")
-            .spawn()
-            .unwrap();
-        let pid = child.id();
-
-        {
-            let _guard = EngineChildGuard::new(child);
-        }
-
-        // Process should be dead after guard is dropped
-        assert!(
-            !process_alive(pid),
-            "process should be dead after guard drop"
-        );
-    }
-
-    #[test]
-    fn engine_child_guard_defuse_keeps_alive() {
-        let child = std::process::Command::new("sleep")
-            .arg("60")
-            .spawn()
-            .unwrap();
-        let pid = child.id();
-
-        {
-            let mut guard = EngineChildGuard::new(child);
-            guard.defuse();
-        }
-
-        // Process should still be alive after defused guard is dropped
-        assert!(
-            process_alive(pid),
-            "process should still be alive after defused guard drop"
-        );
-
-        // Clean up
-        #[cfg(unix)]
-        fabro_proc::sigkill(pid);
-    }
-
-    #[test]
-    fn write_interview_response_atomically_persists_answer() {
-        let dir = tempfile::tempdir().unwrap();
-        let response_path = dir.path().join("interview_response.json");
-        let answer = Answer {
-            value: AnswerValue::Text("ship it".to_string()),
-            selected_option: None,
-            text: Some("ship it".to_string()),
-        };
-
-        write_interview_response_atomically(&response_path, &answer).unwrap();
-
-        let saved: Answer =
-            serde_json::from_str(&std::fs::read_to_string(&response_path).unwrap()).unwrap();
-        assert_eq!(saved.text.as_deref(), Some("ship it"));
-        assert!(!response_path.with_extension("json.tmp").exists());
     }
 }

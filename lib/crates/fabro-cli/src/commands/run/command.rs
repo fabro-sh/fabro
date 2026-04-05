@@ -36,7 +36,6 @@ pub(crate) async fn execute(mut args: RunArgs, globals: &GlobalArgs) -> Result<(
             Some(&run_id),
             true,
             styles,
-            None,
             globals.json,
         )
         .await?;

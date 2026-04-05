@@ -4,12 +4,11 @@ use anyhow::Result;
 use fabro_types::RunId;
 use serde::Serialize;
 
-use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 use fabro_workflow::run_status::RunStatus;
 
 use crate::args::{GlobalArgs, InspectArgs};
-use crate::server_client;
 use crate::server_client::RunProjection;
+use crate::server_runs::ServerRunLookup;
 use crate::user_config::load_user_settings_with_globals;
 
 #[derive(Debug, Serialize)]
@@ -26,12 +25,10 @@ pub(crate) struct InspectOutput {
 
 pub(crate) async fn run(args: &InspectArgs, globals: &GlobalArgs) -> Result<()> {
     let cli_settings = load_user_settings_with_globals(globals)?;
-    let base = runs_base(&cli_settings.storage_dir());
-    let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
-    let summaries = client.list_store_runs().await?;
-    let run = resolve_run_from_summaries(&summaries, &base, &args.run)?;
+    let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
+    let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();
-    let state = client.get_run_state(&run_id).await?;
+    let state = lookup.client().get_run_state(&run_id).await?;
     let output = inspect_run_state(&run_id, &run.path, run.status(), state);
     let json = serde_json::to_string_pretty(&[output])?;
     println!("{json}");
