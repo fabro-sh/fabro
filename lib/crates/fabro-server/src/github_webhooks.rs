@@ -286,6 +286,10 @@ mod tests {
     use axum::http::Request;
     use tower::ServiceExt;
 
+    fn test_http_client() -> reqwest::Client {
+        reqwest::Client::builder().no_proxy().build().unwrap()
+    }
+
     // -----------------------------------------------------------------------
     // verify_signature
     // -----------------------------------------------------------------------
@@ -407,7 +411,7 @@ mod tests {
         let body = b"{}";
         let sig = compute_signature(secret, body);
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let resp = client
             .post(format!("http://127.0.0.1:{port}/webhooks/github"))
             .header("x-hub-signature-256", sig)

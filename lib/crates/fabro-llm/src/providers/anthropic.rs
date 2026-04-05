@@ -2201,7 +2201,6 @@ mod tests {
             "beta header should contain fast-mode header, got: {beta}"
         );
     }
-
     #[test]
     fn beta_header_includes_both_cache_and_fast_mode() {
         let result = build_beta_header(None, true, true, false);

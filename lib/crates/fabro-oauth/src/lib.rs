@@ -224,7 +224,7 @@ fn validate_callback_path(path: &str) -> Result<(), String> {
 }
 
 fn build_redirect_uri(port: u16, path: &str) -> String {
-    format!("http://localhost:{port}{path}")
+    format!("http://127.0.0.1:{port}{path}")
 }
 
 pub async fn start_callback_server(
@@ -234,7 +234,7 @@ pub async fn start_callback_server(
 ) -> Result<(u16, oneshot::Receiver<Result<String, String>>), String> {
     validate_callback_path(path)?;
 
-    let listener = TcpListener::bind(format!("localhost:{port}"))
+    let listener = TcpListener::bind(("127.0.0.1", port))
         .await
         .map_err(|e| format!("Failed to bind callback server: {e}"))?;
     let actual_port = listener
@@ -414,6 +414,10 @@ pub async fn run_browser_flow(
 mod tests {
     use super::*;
 
+    fn test_http_client() -> reqwest::Client {
+        reqwest::Client::builder().no_proxy().build().unwrap()
+    }
+
     // -----------------------------------------------------------------------
     // Phase 1: PKCE
     // -----------------------------------------------------------------------
@@ -554,13 +558,13 @@ mod tests {
     fn build_redirect_uri_constructs_expected_uri() {
         assert_eq!(
             build_redirect_uri(1455, "/auth/callback"),
-            "http://localhost:1455/auth/callback"
+            "http://127.0.0.1:1455/auth/callback"
         );
         assert_eq!(
             build_redirect_uri(8080, "/oauth/done"),
-            "http://localhost:8080/oauth/done"
+            "http://127.0.0.1:8080/oauth/done"
         );
-        assert_eq!(build_redirect_uri(1, "/"), "http://localhost:1/");
+        assert_eq!(build_redirect_uri(1, "/"), "http://127.0.0.1:1/");
     }
 
     // -----------------------------------------------------------------------
@@ -595,7 +599,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let tokens = exchange_code_for_tokens(
             &client,
             &server.url(""),
@@ -633,7 +637,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let tokens = exchange_code_for_tokens(
             &client,
             &server.url(""),
@@ -662,7 +666,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let err = exchange_code_for_tokens(
             &client,
             &server.url(""),
@@ -706,7 +710,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let tokens =
             refresh_access_token(&client, &server.url(""), "test-client", "old-refresh-tok")
                 .await
@@ -731,7 +735,7 @@ mod tests {
             })
             .await;
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let err = refresh_access_token(&client, &server.url(""), "test-client", "expired-tok")
             .await
             .unwrap_err();
@@ -752,10 +756,10 @@ mod tests {
 
         assert_ne!(port, 0);
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         client
             .get(format!(
-                "http://localhost:{port}{callback_path}?code=abc&state=test-state"
+                "http://127.0.0.1:{port}{callback_path}?code=abc&state=test-state"
             ))
             .send()
             .await
@@ -772,10 +776,10 @@ mod tests {
             .await
             .unwrap();
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let resp = client
             .get(format!(
-                "http://localhost:{port}{callback_path}?code=abc&state=test-state"
+                "http://127.0.0.1:{port}{callback_path}?code=abc&state=test-state"
             ))
             .send()
             .await
@@ -791,10 +795,10 @@ mod tests {
             .await
             .unwrap();
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let resp = client
             .get(format!(
-                "http://localhost:{port}{callback_path}?code=abc&state=wrong-state"
+                "http://127.0.0.1:{port}{callback_path}?code=abc&state=wrong-state"
             ))
             .send()
             .await
@@ -810,10 +814,10 @@ mod tests {
             .await
             .unwrap();
 
-        let client = reqwest::Client::new();
+        let client = test_http_client();
         let resp = client
             .get(format!(
-                "http://localhost:{port}{callback_path}?code=abc&state=test-state"
+                "http://127.0.0.1:{port}{callback_path}?code=abc&state=test-state"
             ))
             .send()
             .await

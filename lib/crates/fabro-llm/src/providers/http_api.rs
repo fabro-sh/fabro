@@ -18,13 +18,28 @@ pub struct HttpApi {
 }
 
 impl HttpApi {
+    fn build_client(timeout: AdapterTimeout) -> reqwest::Client {
+        #[cfg(test)]
+        {
+            return reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs_f64(timeout.connect))
+                .no_proxy()
+                .build()
+                .unwrap_or_default();
+        }
+        #[cfg(not(test))]
+        {
+            reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs_f64(timeout.connect))
+                .build()
+                .unwrap_or_default()
+        }
+    }
+
     #[must_use]
     pub fn new(api_key: impl Into<String>, base_url: impl Into<String>) -> Self {
         let timeout = AdapterTimeout::default();
-        let client = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs_f64(timeout.connect))
-            .build()
-            .unwrap_or_default();
+        let client = Self::build_client(timeout);
         Self {
             api_key: api_key.into(),
             base_url: base_url.into(),
@@ -37,10 +52,7 @@ impl HttpApi {
 
     #[must_use]
     pub fn with_timeout(mut self, timeout: AdapterTimeout) -> Self {
-        self.client = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs_f64(timeout.connect))
-            .build()
-            .unwrap_or_default();
+        self.client = Self::build_client(timeout);
         self.request_timeout = timeout.request.map(Duration::from_secs_f64);
         self.stream_read_timeout = timeout.stream_read.map(Duration::from_secs_f64);
         self

@@ -229,6 +229,10 @@ mod tests {
     use futures::StreamExt;
     use httpmock::prelude::*;
 
+    fn test_http_client() -> reqwest::Client {
+        reqwest::Client::builder().no_proxy().build().unwrap()
+    }
+
     fn make_request() -> Request {
         Request {
             model: "test-model".to_string(),
@@ -270,7 +274,7 @@ data: {\"type\":\"text_delta\",\"delta\":\" world\",\"text_id\":null}\n\
                 .body(sse_body);
         });
 
-        let adapter = Adapter::new(reqwest::Client::new(), server.base_url(), "test-provider");
+        let adapter = Adapter::new(test_http_client(), server.base_url(), "test-provider");
 
         let mut stream = adapter.stream(&make_request()).await.unwrap();
 
@@ -323,7 +327,7 @@ data: {\"type\":\"text_delta\",\"delta\":\" world\",\"text_id\":null}\n\
                 .json_body(response_json);
         });
 
-        let adapter = Adapter::new(reqwest::Client::new(), server.base_url(), "test-provider");
+        let adapter = Adapter::new(test_http_client(), server.base_url(), "test-provider");
 
         let response = adapter.complete(&make_request()).await.unwrap();
 
@@ -346,7 +350,7 @@ data: {\"type\":\"text_delta\",\"delta\":\" world\",\"text_id\":null}\n\
             then.status(502).body("Bad Gateway");
         });
 
-        let adapter = Adapter::new(reqwest::Client::new(), server.base_url(), "test-provider");
+        let adapter = Adapter::new(test_http_client(), server.base_url(), "test-provider");
 
         let err = adapter.complete(&make_request()).await.unwrap_err();
         match &err {
@@ -367,7 +371,7 @@ data: {\"type\":\"text_delta\",\"delta\":\" world\",\"text_id\":null}\n\
             then.status(502).body("Bad Gateway");
         });
 
-        let adapter = Adapter::new(reqwest::Client::new(), server.base_url(), "test-provider");
+        let adapter = Adapter::new(test_http_client(), server.base_url(), "test-provider");
 
         let result = adapter.stream(&make_request()).await;
         let Err(err) = result else {
@@ -401,7 +405,7 @@ data: {\"type\":\"stream_start\"}\n\
                 .body(sse_body);
         });
 
-        let adapter = Adapter::new(reqwest::Client::new(), server.base_url(), "test-provider");
+        let adapter = Adapter::new(test_http_client(), server.base_url(), "test-provider");
 
         let mut stream = adapter.stream(&make_request()).await.unwrap();
 
@@ -447,7 +451,7 @@ data: {\"type\":\"stream_start\"}\n\
 
     #[test]
     fn adapter_name() {
-        let adapter = Adapter::new(reqwest::Client::new(), "http://localhost", "anthropic");
+        let adapter = Adapter::new(test_http_client(), "http://localhost", "anthropic");
         assert_eq!(adapter.name(), "anthropic");
     }
 }
