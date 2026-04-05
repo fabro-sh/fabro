@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[cfg(test)]
 use axum::body::to_bytes;
@@ -127,6 +127,7 @@ struct ManagedRun {
     status: RunStatus,
     error: Option<String>,
     created_at: chrono::DateTime<chrono::Utc>,
+    enqueued_at: Instant,
     // Populated when running:
     interviewer: Option<Arc<WebInterviewer>>,
     event_tx: Option<broadcast::Sender<RunEvent>>,
@@ -181,6 +182,7 @@ impl AppState {
         self.settings.read().unwrap().dry_run_enabled()
     }
 }
+
 
 /// Build the axum Router with all run endpoints and embedded static assets.
 pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
@@ -687,6 +689,7 @@ fn managed_run(
         status,
         error: None,
         created_at,
+        enqueued_at: Instant::now(),
         interviewer: None,
         event_tx: None,
         checkpoint: None,
@@ -912,7 +915,7 @@ async fn start_run(
 /// Execute a single run: transitions queued → starting → running → completed/failed/cancelled.
 async fn execute_run(state: Arc<AppState>, run_id: RunId) {
     // Transition to Starting and set up cancel infrastructure
-    let (cancel_rx, run_dir, event_tx, cancel_token, execution_mode) = {
+    let (cancel_rx, run_dir, event_tx, cancel_token, execution_mode, queued_for) = {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         let managed_run = match runs.get_mut(&run_id) {
             Some(r) if r.status == RunStatus::Queued => r,
@@ -937,8 +940,10 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
             managed_run.event_tx.clone(),
             cancel_token,
             managed_run.execution_mode,
+            managed_run.enqueued_at.elapsed(),
         )
     };
+    let _ = queued_for;
 
     // Create interviewer and event plumbing (this is the "provisioning" phase)
     let interviewer = Arc::new(WebInterviewer::new());
@@ -1351,7 +1356,6 @@ async fn list_run_events(
     };
     let since_seq = params.since_seq();
     let limit = params.limit();
-
     match state.store.open_run_reader(&id).await {
         Ok(run_store) => match run_store.list_events_from_with_limit(since_seq, limit).await {
             Ok(mut events) => {

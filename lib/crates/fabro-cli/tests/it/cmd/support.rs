@@ -1,17 +1,95 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Output;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use fabro_store::{EventEnvelope, RunProjection, SlateRunStore, SlateStore};
+use fabro_store::EventEnvelope;
 use fabro_test::TestContext;
-use fabro_types::RunId;
-use object_store::local::LocalFileSystem;
+use fabro_types::{
+    Checkpoint, Conclusion, NodeStatusRecord, PullRequestRecord, Retro, RunRecord,
+    RunStatusRecord, SandboxRecord, StageId, StartRecord,
+};
 use serde_json::Value;
 use shlex::try_quote;
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(crate) struct RunProjection {
+    #[serde(default)]
+    pub run: Option<RunRecord>,
+    #[serde(default)]
+    pub graph_source: Option<String>,
+    #[serde(default)]
+    pub start: Option<StartRecord>,
+    #[serde(default)]
+    pub status: Option<RunStatusRecord>,
+    #[serde(default)]
+    pub checkpoint: Option<Checkpoint>,
+    #[serde(default)]
+    pub checkpoints: Vec<(u32, Checkpoint)>,
+    #[serde(default)]
+    pub conclusion: Option<Conclusion>,
+    #[serde(default)]
+    pub retro: Option<Retro>,
+    #[serde(default)]
+    pub retro_prompt: Option<String>,
+    #[serde(default)]
+    pub retro_response: Option<String>,
+    #[serde(default)]
+    pub sandbox: Option<SandboxRecord>,
+    #[serde(default)]
+    pub final_patch: Option<String>,
+    #[serde(default)]
+    pub pull_request: Option<PullRequestRecord>,
+    #[serde(default)]
+    pub nodes: std::collections::HashMap<String, NodeState>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub(crate) struct NodeState {
+    #[serde(default)]
+    pub prompt: Option<String>,
+    #[serde(default)]
+    pub response: Option<String>,
+    #[serde(default)]
+    pub status: Option<NodeStatusRecord>,
+    #[serde(default)]
+    pub provider_used: Option<serde_json::Value>,
+    #[serde(default)]
+    pub diff: Option<String>,
+    #[serde(default)]
+    pub script_invocation: Option<serde_json::Value>,
+    #[serde(default)]
+    pub script_timing: Option<serde_json::Value>,
+    #[serde(default)]
+    pub parallel_results: Option<serde_json::Value>,
+    #[serde(default)]
+    pub stdout: Option<String>,
+    #[serde(default)]
+    pub stderr: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct RunSummaryRecord {
+    run_id: String,
+    #[serde(default)]
+    labels: std::collections::HashMap<String, String>,
+}
+
+impl RunProjection {
+    pub(crate) fn iter_nodes(&self) -> impl Iterator<Item = (StageId, &NodeState)> {
+        self.nodes
+            .iter()
+            .filter_map(|(stage_id, state)| stage_id.parse::<StageId>().ok().map(|id| (id, state)))
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+}
 
 pub(crate) struct RunSetup {
     pub(crate) run_id: String,
@@ -209,12 +287,7 @@ pub(crate) fn setup_detached_dry_run(context: &TestContext) -> RunSetup {
         .to_string();
     let run = resolve_run(context, &run_id);
     let deadline = Instant::now() + COMMAND_TIMEOUT;
-    while {
-        let store = run_store(&run.run_dir);
-        block_on(store.list_events())
-            .ok()
-            .is_none_or(|events| events.is_empty())
-    } {
+    while run_events(&run.run_dir).is_empty() {
         assert!(
             Instant::now() < deadline,
             "timed out waiting for store events for {run_id}"
@@ -332,13 +405,7 @@ worktree_mode = "never"
     );
 
     let run = run_local_workflow(context, &workspace_dir, "run.toml");
-    let store = run_store(&run.run_dir);
-    assert!(
-        block_on(store.state())
-            .ok()
-            .and_then(|state| state.sandbox)
-            .is_some()
-    );
+    assert!(run_state(&run.run_dir).sandbox.is_some());
 
     WorkspaceRunSetup { run, workspace_dir }
 }
@@ -423,9 +490,9 @@ pub(crate) fn write_gated_workflow(path: &Path, name: &str, goal: &str) -> Workf
 pub(crate) fn wait_for_status(run_dir: &Path, expected: &[&str]) -> String {
     let deadline = Instant::now() + COMMAND_TIMEOUT;
     loop {
-        if let Some(status) = block_on(run_store(run_dir).state())
-            .ok()
-            .and_then(|state| state.status.map(|record| record.status.to_string()))
+        if let Some(status) = run_state(run_dir)
+            .status
+            .map(|record| record.status.to_string())
         {
             if expected.iter().any(|candidate| *candidate == status) {
                 return status;
@@ -461,23 +528,15 @@ pub(crate) fn run_count_for_test_case(context: &TestContext) -> usize {
 }
 
 fn run_dirs_for_test_case(context: &TestContext) -> Vec<PathBuf> {
-    let runs_dir = context.storage_dir.join("runs");
-    let entries = match std::fs::read_dir(&runs_dir) {
-        Ok(entries) => entries,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
-        Err(err) => panic!("failed to read {}: {err}", runs_dir.display()),
-    };
-    entries
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.is_dir())
-        .filter(|path| {
-            std::panic::catch_unwind(|| run_state(path)).ok().and_then(|state| state.run).is_some_and(|run| {
-                run.labels
-                    .get("fabro_test_case")
-                    .is_some_and(|value| value == context.test_case_id())
-            })
+    let runs: Vec<RunSummaryRecord> =
+        block_on(get_server_json_for_storage(&context.storage_dir, "/api/v1/runs"));
+    runs.into_iter()
+        .filter(|run| {
+            run.labels
+                .get("fabro_test_case")
+                .is_some_and(|value| value == context.test_case_id())
         })
+        .filter_map(|run| find_run_dir(&context.storage_dir, &run.run_id))
         .collect()
 }
 
@@ -550,28 +609,50 @@ fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
         .block_on(future)
 }
 
-fn run_store(run_dir: &Path) -> SlateRunStore {
+fn server_http_client(storage_dir: &Path) -> reqwest::Client {
+    reqwest::ClientBuilder::new()
+        .unix_socket(storage_dir.join("fabro.sock"))
+        .no_proxy()
+        .build()
+        .expect("test HTTP client should build")
+}
+
+async fn get_server_json<T: serde::de::DeserializeOwned>(run_dir: &Path, path: &str) -> T {
     let runs_dir = run_dir.parent().expect("run dir should have parent");
     let storage_dir = runs_dir.parent().expect("runs dir should have parent");
-    let run_id: RunId = infer_run_id(run_dir).parse().expect("run id should parse");
-    let object_store = Arc::new(
-        LocalFileSystem::new_with_prefix(storage_dir.join("store"))
-            .expect("test store path should be accessible"),
+    get_server_json_for_storage(storage_dir, path).await
+}
+
+async fn get_server_json_for_storage<T: serde::de::DeserializeOwned>(
+    storage_dir: &Path,
+    path: &str,
+) -> T {
+    let response = server_http_client(storage_dir)
+        .get(format!("http://fabro{path}"))
+        .send()
+        .await
+        .expect("server request should succeed");
+    assert!(
+        response.status().is_success(),
+        "server request failed for {path}: {}",
+        response.status()
     );
-    let store = Arc::new(SlateStore::new(object_store, "", Duration::from_millis(1)));
-    block_on(store.open_run_reader(&run_id)).expect("run store should exist")
+    response
+        .json::<T>()
+        .await
+        .expect("server response should parse")
 }
 
 pub(crate) fn run_state(run_dir: &Path) -> RunProjection {
-    let store = run_store(run_dir);
-    block_on(store.state()).expect("run store state should exist")
+    let run_id = infer_run_id(run_dir);
+    block_on(get_server_json(run_dir, &format!("/api/v1/runs/{run_id}/state")))
 }
 
 pub(crate) fn run_events(run_dir: &Path) -> Vec<EventEnvelope> {
-    let store = run_store(run_dir);
-    block_on(store.list_events())
-        .ok()
-        .expect("run store events should exist")
+    let run_id = infer_run_id(run_dir);
+    let response: serde_json::Value =
+        block_on(get_server_json(run_dir, &format!("/api/v1/runs/{run_id}/events")));
+    serde_json::from_value(response["data"].clone()).expect("event list should parse")
 }
 
 pub(crate) fn git_stdout(repo_dir: &Path, args: &[&str]) -> String {
