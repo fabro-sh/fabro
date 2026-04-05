@@ -4,7 +4,9 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fabro_interview::Interviewer;
 use fabro_server::jwt_auth::AuthMode;
-use fabro_server::server::{build_router, create_app_state_with_settings_and_registry_factory};
+use fabro_server::server::{
+    build_router, create_app_state_with_settings_and_registry_factory, spawn_scheduler,
+};
 use fabro_workflow::handler::HandlerRegistry;
 use fabro_workflow::handler::agent::AgentHandler;
 use fabro_workflow::handler::exit::ExitHandler;
@@ -68,7 +70,7 @@ const GATE_DOT: &str = r#"digraph GateTest {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn full_http_lifecycle_approve_and_complete() {
     let state = create_app_state_with_settings_and_registry_factory(test_settings(), gate_registry);
-    fabro_server::server::spawn_scheduler(Arc::clone(&state));
+    spawn_scheduler(Arc::clone(&state));
     let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
     // 1. Create run
@@ -133,7 +135,7 @@ async fn full_http_lifecycle_approve_and_complete() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn full_http_lifecycle_cancel() {
     let state = create_app_state_with_settings_and_registry_factory(test_settings(), gate_registry);
-    fabro_server::server::spawn_scheduler(Arc::clone(&state));
+    spawn_scheduler(Arc::clone(&state));
     let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
     // Create and start a run that will block at the human gate
