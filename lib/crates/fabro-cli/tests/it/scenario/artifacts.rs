@@ -165,7 +165,12 @@ fn artifact_commands_share_populated_run_fixture() {
 
     let flat_dest = context.temp_dir.join("artifact-flat");
     let mut cp_flat = context.command();
-    cp_flat.args(["artifact", "cp", &setup.run.run_id, flat_dest.to_str().unwrap()]);
+    cp_flat.args([
+        "artifact",
+        "cp",
+        &setup.run.run_id,
+        flat_dest.to_str().unwrap(),
+    ]);
     fabro_snapshot!(context.filters(), cp_flat, @"
     success: false
     exit_code: 1

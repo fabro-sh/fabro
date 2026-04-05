@@ -1,9 +1,8 @@
 use anyhow::Result;
 use fabro_util::terminal::Styles;
-use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 
 use crate::args::{GlobalArgs, RunArgs, RunCommands};
-use crate::server_client;
+use crate::server_runs::ServerRunLookup;
 use crate::shared::print_json_pretty;
 use crate::user_config::{load_user_settings_with_globals, user_layer_with_globals};
 
@@ -11,10 +10,8 @@ pub(crate) mod attach;
 pub(crate) mod command;
 pub(crate) mod cp;
 pub(crate) mod create;
-pub(crate) mod detached;
 pub(crate) mod diff;
 pub(crate) mod fork;
-pub(crate) mod launcher;
 pub(crate) mod logs;
 pub(crate) mod output;
 pub(crate) mod overrides;
@@ -22,13 +19,10 @@ pub(crate) mod preview;
 pub(crate) mod resume;
 pub(crate) mod rewind;
 pub(crate) mod run_progress;
+pub(crate) mod runner;
 pub(crate) mod ssh;
 pub(crate) mod start;
 pub(crate) mod wait;
-
-pub(super) fn short_run_id(id: &str) -> &str {
-    if id.len() > 12 { &id[..12] } else { id }
-}
 
 fn apply_json_defaults(args: &mut RunArgs, globals: &GlobalArgs) {
     if globals.json {
@@ -56,10 +50,8 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
         }
         RunCommands::Start { run } => {
             let cli_settings = load_user_settings_with_globals(globals)?;
-            let base = runs_base(&cli_settings.storage_dir());
-            let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
-            let summaries = client.list_store_runs().await?;
-            let run_info = resolve_run_from_summaries(&summaries, &base, &run)?;
+            let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
+            let run_info = lookup.resolve(&run)?;
             let run_id = run_info.run_id();
             start::start_run(&run_id, &cli_settings.storage_dir(), false).await?;
             if globals.json {
@@ -70,10 +62,8 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
         RunCommands::Attach { run } => {
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             let cli_settings = load_user_settings_with_globals(globals)?;
-            let base = runs_base(&cli_settings.storage_dir());
-            let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
-            let summaries = client.list_store_runs().await?;
-            let run_info = resolve_run_from_summaries(&summaries, &base, &run)?;
+            let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
+            let run_info = lookup.resolve(&run)?;
             let run_id = run_info.run_id();
             let exit_code = attach::attach_run(
                 &run_info.path,
@@ -81,7 +71,6 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
                 Some(&run_id),
                 false,
                 styles,
-                None,
                 globals.json,
             )
             .await?;
@@ -90,20 +79,8 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             }
             Ok(())
         }
-        RunCommands::Detached {
-            run_id,
-            run_dir,
-            launcher_path,
-            resume,
-        } => {
-            detached::execute(
-                run_id,
-                run_dir,
-                globals.storage_dir.clone(),
-                launcher_path,
-                resume,
-            )
-            .await
+        RunCommands::Runner { run_id, resume } => {
+            runner::execute(run_id, globals.storage_dir.clone(), resume).await
         }
         RunCommands::Diff(args) => diff::run(args, globals).await,
         RunCommands::Logs(args) => {

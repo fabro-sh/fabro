@@ -3,25 +3,22 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use fabro_sandbox::reconnect::reconnect;
-use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 use fabro_workflow::sandbox_git::GIT_REMOTE;
 use tracing::{debug, info};
 
 use crate::args::{DiffArgs, GlobalArgs};
-use crate::server_client;
 use crate::server_client::RunProjection;
+use crate::server_runs::ServerRunLookup;
 use crate::shared::print_json_pretty;
 use crate::user_config::load_user_settings_with_globals;
 
 pub(crate) async fn run(args: DiffArgs, globals: &GlobalArgs) -> Result<()> {
     info!(run_id = %args.run, "Showing diff");
     let cli_settings = load_user_settings_with_globals(globals)?;
-    let base = runs_base(&cli_settings.storage_dir());
-    let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
-    let summaries = client.list_store_runs().await?;
-    let run = resolve_run_from_summaries(&summaries, &base, &args.run)?;
+    let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
+    let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();
-    let state = client.get_run_state(&run_id).await?;
+    let state = lookup.client().get_run_state(&run_id).await?;
 
     let patch = resolve_diff(&run.path, &state, &args).await?;
 

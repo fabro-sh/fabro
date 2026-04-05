@@ -5,12 +5,12 @@ use fabro_model::Catalog;
 use fabro_sandbox::daytona::detect_repo_info;
 use fabro_workflow::outcome::StageStatus;
 use fabro_workflow::pull_request::maybe_open_pull_request;
-use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
+use fabro_workflow::run_lookup::runs_base;
 use tracing::info;
 
 use crate::args::{GlobalArgs, PrCreateArgs};
 use crate::commands::store::rebuild::rebuild_run_store;
-use crate::server_client;
+use crate::server_runs::ServerRunLookup;
 use crate::shared::print_json_pretty;
 use crate::user_config::load_user_settings_with_globals;
 
@@ -30,12 +30,10 @@ async fn create_from(
     github_app: Option<fabro_github::GitHubAppCredentials>,
     globals: &GlobalArgs,
 ) -> Result<()> {
-    let storage_dir = base.parent().unwrap_or(base);
-    let client = server_client::connect_server(storage_dir).await?;
-    let summaries = client.list_store_runs().await?;
-    let run = resolve_run_from_summaries(&summaries, base, &args.run_id)?;
+    let lookup = ServerRunLookup::connect_from_runs_base(base).await?;
+    let run = lookup.resolve(&args.run_id)?;
     let run_id = run.run_id();
-    let events = client.list_run_events(&run_id, None, None).await?;
+    let events = lookup.client().list_run_events(&run_id, None, None).await?;
     let run_store = rebuild_run_store(&run_id, &events).await?;
     let state = run_store.state().await?;
 

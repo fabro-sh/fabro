@@ -4,12 +4,13 @@ use anyhow::{Context, Result, bail};
 use fabro_sandbox::reconnect::reconnect as reconnect_sandbox;
 use fabro_workflow::event::{Event, to_run_event};
 use fabro_workflow::run_lookup::RunInfo;
-use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
+use fabro_workflow::run_lookup::resolve_run_from_summaries;
 use tracing::warn;
 
 use crate::args::{GlobalArgs, RunsRemoveArgs};
 use crate::server_client;
 use crate::server_client::RunProjection;
+use crate::server_runs::ServerRunLookup;
 use crate::shared::print_json_pretty;
 use crate::user_config::load_user_settings_with_globals;
 
@@ -17,10 +18,15 @@ use super::short_run_id;
 
 pub(crate) async fn remove_command(args: &RunsRemoveArgs, globals: &GlobalArgs) -> Result<()> {
     let cli_settings = load_user_settings_with_globals(globals)?;
-    let base = runs_base(&cli_settings.storage_dir());
-    let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
-    let summaries = client.list_store_runs().await?;
-    remove_from(args, &client, &summaries, &base, globals).await
+    let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
+    remove_from(
+        args,
+        lookup.client(),
+        lookup.summaries(),
+        lookup.runs_base(),
+        globals,
+    )
+    .await
 }
 
 async fn remove_from(

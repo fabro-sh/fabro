@@ -10,7 +10,7 @@ use fabro_workflow::run_lookup::{logs_base, runs_base, scan_runs_with_summaries}
 use fabro_workflow::run_status::RunStatus;
 
 use crate::args::{DfArgs, GlobalArgs};
-use crate::server_client;
+use crate::server_runs::ServerRunLookup;
 use crate::shared::{format_size, print_json_pretty};
 use crate::user_config::load_user_settings_with_globals;
 
@@ -49,11 +49,10 @@ pub(super) async fn df_command(args: &DfArgs, globals: &GlobalArgs) -> Result<()
     let data_dir = cli_settings.storage_dir();
     let runs_base_dir = runs_base(&data_dir);
     let logs_base_dir = logs_base(&data_dir);
-    let client = server_client::connect_server(&data_dir).await?;
-    let summaries = client.list_store_runs().await?;
+    let lookup = ServerRunLookup::connect(&data_dir).await?;
     df_from(
         args,
-        &summaries,
+        lookup.summaries(),
         &data_dir,
         &runs_base_dir,
         &logs_base_dir,

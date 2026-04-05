@@ -1,15 +1,14 @@
 use fabro_util::terminal::Styles;
-use fabro_workflow::run_lookup::{resolve_run_from_summaries, runs_base};
 
 use crate::args::{GlobalArgs, ResumeArgs};
-use crate::server_client;
+use crate::server_runs::ServerRunLookup;
 use crate::shared::print_json_pretty;
 use crate::user_config::load_user_settings_with_globals;
 
 /// Resume an interrupted workflow run.
 ///
 /// Looks up the run by ID prefix, validates a checkpoint exists, cleans stale
-/// artifacts from the previous execution, then spawns an engine subprocess
+/// artifacts from the previous execution, then asks the server to resume it
 /// (identical to `fabro run`'s create→start→attach flow).
 pub(crate) async fn resume_command(
     args: ResumeArgs,
@@ -17,10 +16,8 @@ pub(crate) async fn resume_command(
     globals: &GlobalArgs,
 ) -> anyhow::Result<()> {
     let cli_settings = load_user_settings_with_globals(globals)?;
-    let base = runs_base(&cli_settings.storage_dir());
-    let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
-    let summaries = client.list_store_runs().await?;
-    let run = resolve_run_from_summaries(&summaries, &base, &args.run)?;
+    let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
+    let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();
     let run_dir = run.path;
 
@@ -39,7 +36,6 @@ pub(crate) async fn resume_command(
             Some(&run_id),
             true,
             styles,
-            None,
             globals.json,
         )
         .await?;

@@ -2,6 +2,8 @@ use fabro_test::{fabro_snapshot, test_context};
 
 use super::support::{git_stdout, output_stderr, setup_git_backed_changed_run};
 
+const SHARED_DAEMON_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 #[test]
 fn help() {
     let context = test_context!();
@@ -114,4 +116,45 @@ fn resume_rewound_run_succeeds() {
         &["rev-parse", &format!("fabro/run/{}", setup.run.run_id)],
     );
     assert_ne!(resumed_head.trim(), rewound_head.trim());
+}
+
+#[test]
+fn resume_detached_does_not_create_launcher_record() {
+    let context = test_context!();
+    let setup = setup_git_backed_changed_run(&context);
+
+    context
+        .command()
+        .current_dir(&setup.repo_dir)
+        .args(["rewind", &setup.run.run_id, "@1", "--no-push"])
+        .assert()
+        .success();
+
+    let mut resume_cmd = context.command();
+    resume_cmd.current_dir(&setup.repo_dir);
+    resume_cmd.env("OPENAI_API_KEY", "test");
+    resume_cmd.args(["resume", "--detach", &setup.run.run_id]);
+    let resume_output = resume_cmd.output().expect("resume should execute");
+    assert!(
+        resume_output.status.success(),
+        "resume should succeed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&resume_output.stdout),
+        output_stderr(&resume_output)
+    );
+
+    assert!(
+        !context
+            .storage_dir
+            .join("launchers")
+            .join(format!("{}.json", setup.run.run_id))
+            .exists(),
+        "server-owned resume should not create a launcher record"
+    );
+
+    context
+        .command()
+        .args(["wait", &setup.run.run_id])
+        .timeout(SHARED_DAEMON_TIMEOUT)
+        .assert()
+        .success();
 }

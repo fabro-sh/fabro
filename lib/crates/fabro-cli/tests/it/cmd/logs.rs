@@ -8,7 +8,9 @@ fn parse_ndjson(stdout: &[u8]) -> Vec<Value> {
         .expect("stdout should be valid UTF-8")
         .lines()
         .filter(|line| !line.trim().is_empty())
-        .map(|line| serde_json::from_str::<Value>(line).expect("logs output should be valid NDJSON"))
+        .map(|line| {
+            serde_json::from_str::<Value>(line).expect("logs output should be valid NDJSON")
+        })
         .collect()
 }
 
@@ -22,7 +24,8 @@ fn assert_event_sequence_contains(events: &[Value], expected: &[&str]) {
     for expected_name in expected {
         let Some(found_at) = event_names[cursor..]
             .iter()
-            .position(|name| name == expected_name) else {
+            .position(|name| name == expected_name)
+        else {
             panic!("missing event {expected_name} in sequence: {event_names:?}");
         };
         cursor += found_at + 1;

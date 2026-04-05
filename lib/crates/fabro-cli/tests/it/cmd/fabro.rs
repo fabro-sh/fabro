@@ -14,7 +14,7 @@ fn help() {
     Commands:
       run         Launch a workflow run
       create      Create a workflow run (allocate run dir, persist spec)
-      start       Start a created workflow run (spawn engine process)
+      start       Start a created workflow run on the server
       attach      Attach to a running or finished workflow run
       logs        View the event log of a workflow run
       resume      Resume an interrupted workflow run

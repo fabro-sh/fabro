@@ -11,7 +11,7 @@ use fabro_workflow::run_lookup::{StatusFilter, filter_runs, runs_base, scan_runs
 use fabro_workflow::run_status::RunStatus;
 
 use crate::args::{GlobalArgs, RunsListArgs};
-use crate::server_client;
+use crate::server_runs::ServerRunLookup;
 use crate::shared::{color_if, format_duration_ms, tilde_path};
 use crate::user_config::load_user_settings_with_globals;
 
@@ -25,9 +25,8 @@ pub(crate) async fn list_command(
 ) -> Result<()> {
     let cli_settings = load_user_settings_with_globals(globals)?;
     let base = runs_base(&cli_settings.storage_dir());
-    let client = server_client::connect_server(&cli_settings.storage_dir()).await?;
-    let summaries = client.list_store_runs().await?;
-    let runs = scan_runs_with_summaries(&summaries, &base)?;
+    let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
+    let runs = scan_runs_with_summaries(lookup.summaries(), &base)?;
     let label_filters = parse_label_filters(&args.filter.label);
     let filtered = filter_runs(
         &runs,
