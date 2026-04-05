@@ -229,12 +229,25 @@ fn json_run_implies_auto_approve_for_human_gates() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let progress: Vec<Value> = String::from_utf8(output.stdout)
+    let mut progress: Vec<Value> = String::from_utf8(output.stdout)
         .expect("stdout should be UTF-8")
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| serde_json::from_str(line).expect("run JSON output should be JSONL"))
         .collect();
+    for event in &mut progress {
+        let Some(llm) = event.pointer_mut("/properties/settings/llm") else {
+            continue;
+        };
+        let Some(llm) = llm.as_object_mut() else {
+            continue;
+        };
+        llm.insert("model".to_string(), Value::String("[LLM_MODEL]".to_string()));
+        llm.insert(
+            "provider".to_string(),
+            Value::String("[LLM_PROVIDER]".to_string()),
+        );
+    }
     fabro_json_snapshot!(context, &progress, @r#"
     [
       {
@@ -348,8 +361,8 @@ fn json_run_implies_auto_approve_for_human_gates() {
             "goal": "Route through the default approval path",
             "llm": {
               "fallbacks": null,
-              "model": "gpt-5.4",
-              "provider": "openai"
+              "model": "[LLM_MODEL]",
+              "provider": "[LLM_PROVIDER]"
             },
             "mode": "standalone",
             "no_retro": true,
