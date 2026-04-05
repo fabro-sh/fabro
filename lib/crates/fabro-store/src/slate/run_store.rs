@@ -6,7 +6,7 @@ use bytes::Bytes;
 use chrono::Utc;
 use futures::Stream;
 use serde::de::DeserializeOwned;
-use slatedb::{CloseReason, Db, DbRead, ErrorKind};
+use slatedb::{Db, DbRead};
 use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -117,15 +117,7 @@ impl SlateRunStore {
 
     pub(crate) async fn close(&self) -> Result<()> {
         let _guard = self.inner.close_lock.lock().await;
-        if Arc::strong_count(&self.inner) <= 1 {
-            match self.inner.db.close().await {
-                Ok(()) => Ok(()),
-                Err(err) if matches!(err.kind(), ErrorKind::Closed(CloseReason::Clean)) => Ok(()),
-                Err(err) => Err(err.into()),
-            }
-        } else {
-            Ok(())
-        }
+        Ok(())
     }
 
     pub(crate) async fn validate_init<R>(db: &R, run_id: &RunId) -> Result<bool>
