@@ -614,43 +614,7 @@ fn extract_unquoted_value(s: &str, key: &str) -> Option<String> {
 mod tests {
     use crate::server::TestServer;
     use crate::state::{AppOptions, AppState, PullRequest};
-
-    fn test_rsa_key() -> String {
-        use std::process::Command;
-        let output = Command::new("openssl")
-            .args([
-                "genpkey",
-                "-algorithm",
-                "RSA",
-                "-pkeyopt",
-                "rsa_keygen_bits:2048",
-            ])
-            .output()
-            .expect("openssl should be available");
-        assert!(output.status.success());
-        String::from_utf8(output.stdout).unwrap()
-    }
-
-    fn sign_test_jwt(app_id: &str, private_key_pem: &str) -> String {
-        use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-        use serde::Serialize;
-
-        #[derive(Serialize)]
-        struct Claims {
-            iss: String,
-            iat: i64,
-            exp: i64,
-        }
-
-        let now = chrono::Utc::now().timestamp();
-        let claims = Claims {
-            iss: app_id.to_string(),
-            iat: now - 60,
-            exp: now + 600,
-        };
-        let key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes()).unwrap();
-        encode(&Header::new(Algorithm::RS256), &claims, &key).unwrap()
-    }
+    use crate::test_support::{sign_test_jwt, test_rsa_private_key};
 
     async fn get_installation_token(
         client: &reqwest::Client,
@@ -718,10 +682,10 @@ mod tests {
 
     #[tokio::test]
     async fn viewer_query_returns_id() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
         state.viewer_id = "U_testviewer".to_string();
-        let (server, client, token) = setup_with_token(&mut state, &pem).await;
+        let (server, client, token) = setup_with_token(&mut state, pem).await;
 
         let resp = client
             .post(&format!("{}/graphql", server.url()))
@@ -742,7 +706,7 @@ mod tests {
 
     #[tokio::test]
     async fn enable_auto_merge_mutation() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
         // Pre-seed a PR
         state
@@ -768,7 +732,7 @@ mod tests {
                 updated_at: "2026-01-01T00:00:00Z".to_string(),
                 auto_merge: None,
             });
-        let (server, client, token) = setup_with_token(&mut state, &pem).await;
+        let (server, client, token) = setup_with_token(&mut state, pem).await;
 
         let query = r#"mutation {
             enablePullRequestAutoMerge(input: {pullRequestId: "PR_test123", mergeMethod: SQUASH}) {
@@ -824,7 +788,7 @@ mod tests {
 
     #[tokio::test]
     async fn org_project_query_returns_node_id() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
         state.projects.push(crate::state::Project {
             node_id: "PVT_org123".to_string(),
@@ -862,7 +826,7 @@ mod tests {
                 },
             }],
         });
-        let (server, client, token) = setup_with_token(&mut state, &pem).await;
+        let (server, client, token) = setup_with_token(&mut state, pem).await;
 
         // Query org project
         let query = r#"
@@ -894,7 +858,7 @@ mod tests {
 
     #[tokio::test]
     async fn project_items_query_returns_paginated() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
         state.projects.push(crate::state::Project {
             node_id: "PVT_test".to_string(),
@@ -919,7 +883,7 @@ mod tests {
                 },
             }],
         });
-        let (server, client, token) = setup_with_token(&mut state, &pem).await;
+        let (server, client, token) = setup_with_token(&mut state, pem).await;
 
         let query = r#"
             query($projectId: ID!, $cursor: String) {
@@ -978,7 +942,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_project_item_field_value() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
         state.projects.push(crate::state::Project {
             node_id: "PVT_test".to_string(),
@@ -1012,7 +976,7 @@ mod tests {
                 },
             }],
         });
-        let (server, client, token) = setup_with_token(&mut state, &pem).await;
+        let (server, client, token) = setup_with_token(&mut state, pem).await;
 
         let query = r#"
             mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {

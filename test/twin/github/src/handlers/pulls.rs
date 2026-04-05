@@ -303,43 +303,7 @@ fn pr_to_json(pr: &PullRequest) -> serde_json::Value {
 mod tests {
     use crate::server::TestServer;
     use crate::state::{AppOptions, AppState};
-
-    fn test_rsa_key() -> String {
-        use std::process::Command;
-        let output = Command::new("openssl")
-            .args([
-                "genpkey",
-                "-algorithm",
-                "RSA",
-                "-pkeyopt",
-                "rsa_keygen_bits:2048",
-            ])
-            .output()
-            .expect("openssl should be available");
-        assert!(output.status.success());
-        String::from_utf8(output.stdout).unwrap()
-    }
-
-    fn sign_test_jwt(app_id: &str, private_key_pem: &str) -> String {
-        use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-        use serde::Serialize;
-
-        #[derive(Serialize)]
-        struct Claims {
-            iss: String,
-            iat: i64,
-            exp: i64,
-        }
-
-        let now = chrono::Utc::now().timestamp();
-        let claims = Claims {
-            iss: app_id.to_string(),
-            iat: now - 60,
-            exp: now + 600,
-        };
-        let key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes()).unwrap();
-        encode(&Header::new(Algorithm::RS256), &claims, &key).unwrap()
-    }
+    use crate::test_support::{sign_test_jwt, test_rsa_private_key};
 
     async fn get_installation_token(
         client: &reqwest::Client,
@@ -405,9 +369,9 @@ mod tests {
 
     #[tokio::test]
     async fn create_pr_returns_201() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
-        let (server, client, token) = setup_and_get_token(&mut state, &pem).await;
+        let (server, client, token) = setup_and_get_token(&mut state, pem).await;
 
         let resp = client
             .post(&format!("{}/repos/owner/repo/pulls", server.url()))
@@ -435,9 +399,9 @@ mod tests {
 
     #[tokio::test]
     async fn get_pr_returns_detail() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
-        let (server, client, token) = setup_and_get_token(&mut state, &pem).await;
+        let (server, client, token) = setup_and_get_token(&mut state, pem).await;
 
         // Create a PR first
         let create_resp = client
@@ -485,9 +449,9 @@ mod tests {
 
     #[tokio::test]
     async fn merge_pr_returns_200() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
-        let (server, client, token) = setup_and_get_token(&mut state, &pem).await;
+        let (server, client, token) = setup_and_get_token(&mut state, pem).await;
 
         // Create a PR
         let create_resp = client
@@ -530,9 +494,9 @@ mod tests {
 
     #[tokio::test]
     async fn close_pr_returns_200() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
-        let (server, client, token) = setup_and_get_token(&mut state, &pem).await;
+        let (server, client, token) = setup_and_get_token(&mut state, pem).await;
 
         // Create a PR
         let create_resp = client
@@ -562,9 +526,9 @@ mod tests {
 
     #[tokio::test]
     async fn merge_nonexistent_pr_returns_404() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
-        let (server, client, token) = setup_and_get_token(&mut state, &pem).await;
+        let (server, client, token) = setup_and_get_token(&mut state, pem).await;
 
         let resp = client
             .put(&format!(

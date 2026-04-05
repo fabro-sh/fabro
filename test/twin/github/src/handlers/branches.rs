@@ -93,43 +93,7 @@ pub async fn get_branch(
 mod tests {
     use crate::server::TestServer;
     use crate::state::{AppOptions, AppState};
-
-    fn test_rsa_key() -> String {
-        use std::process::Command;
-        let output = Command::new("openssl")
-            .args([
-                "genpkey",
-                "-algorithm",
-                "RSA",
-                "-pkeyopt",
-                "rsa_keygen_bits:2048",
-            ])
-            .output()
-            .expect("openssl should be available");
-        assert!(output.status.success());
-        String::from_utf8(output.stdout).unwrap()
-    }
-
-    fn sign_test_jwt(app_id: &str, private_key_pem: &str) -> String {
-        use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-        use serde::Serialize;
-
-        #[derive(Serialize)]
-        struct Claims {
-            iss: String,
-            iat: i64,
-            exp: i64,
-        }
-
-        let now = chrono::Utc::now().timestamp();
-        let claims = Claims {
-            iss: app_id.to_string(),
-            iat: now - 60,
-            exp: now + 600,
-        };
-        let key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes()).unwrap();
-        encode(&Header::new(Algorithm::RS256), &claims, &key).unwrap()
-    }
+    use crate::test_support::{sign_test_jwt, test_rsa_private_key};
 
     async fn get_installation_token(
         client: &reqwest::Client,
@@ -167,14 +131,14 @@ mod tests {
 
     #[tokio::test]
     async fn branch_exists_returns_200() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
         state.register_app(AppOptions {
             app_id: "100".to_string(),
             slug: "test-app".to_string(),
             owner_login: "owner".to_string(),
             public: true,
-            private_key_pem: pem.clone(),
+            private_key_pem: pem.to_string(),
             webhook_secret: None,
         });
         state.add_installation("100", "owner", vec!["repo".to_string()], false);
@@ -186,7 +150,7 @@ mod tests {
         );
         let server = TestServer::start(state).await;
 
-        let jwt = sign_test_jwt("100", &pem);
+        let jwt = sign_test_jwt("100", pem);
         let client = reqwest::Client::new();
         let token = get_installation_token(&client, &jwt, "owner", "repo", server.url()).await;
 
@@ -210,21 +174,21 @@ mod tests {
 
     #[tokio::test]
     async fn branch_not_found_returns_404() {
-        let pem = test_rsa_key();
+        let pem = test_rsa_private_key();
         let mut state = AppState::new();
         state.register_app(AppOptions {
             app_id: "100".to_string(),
             slug: "test-app".to_string(),
             owner_login: "owner".to_string(),
             public: true,
-            private_key_pem: pem.clone(),
+            private_key_pem: pem.to_string(),
             webhook_secret: None,
         });
         state.add_installation("100", "owner", vec!["repo".to_string()], false);
         state.add_repository("owner", "repo", vec!["main".to_string()], false);
         let server = TestServer::start(state).await;
 
-        let jwt = sign_test_jwt("100", &pem);
+        let jwt = sign_test_jwt("100", pem);
         let client = reqwest::Client::new();
         let token = get_installation_token(&client, &jwt, "owner", "repo", server.url()).await;
 

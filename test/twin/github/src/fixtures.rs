@@ -372,21 +372,8 @@ fn next_pr_number(pull_requests: &HashMap<(String, String), Vec<PullRequest>>) -
 }
 
 #[cfg(test)]
-fn test_rsa_key() -> String {
-    use std::process::Command;
-
-    let output = Command::new("openssl")
-        .args([
-            "genpkey",
-            "-algorithm",
-            "RSA",
-            "-pkeyopt",
-            "rsa_keygen_bits:2048",
-        ])
-        .output()
-        .expect("openssl should be available");
-    assert!(output.status.success());
-    String::from_utf8(output.stdout).unwrap()
+fn test_rsa_key() -> &'static str {
+    crate::test_support::test_rsa_private_key()
 }
 
 #[cfg(test)]
@@ -548,7 +535,7 @@ impl FixtureState {
                 slug: "fixture-app".to_string(),
                 owner_login: "acme".to_string(),
                 public: true,
-                private_key_pem: test_rsa_key(),
+                private_key_pem: test_rsa_key().to_string(),
                 webhook_secret: Some("whsec".to_string()),
             }],
             ..Self::default()

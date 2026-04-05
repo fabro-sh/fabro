@@ -429,27 +429,12 @@ pub fn init_git_repos(state: &mut AppState, git_root: &std::path::Path) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::{test_rsa_private_key, test_rsa_public_key};
 
     #[test]
     fn empty_state_has_no_apps() {
         let state = AppState::new();
         assert!(state.apps.is_empty());
-    }
-
-    fn test_rsa_key() -> String {
-        use std::process::Command;
-        let output = Command::new("openssl")
-            .args([
-                "genpkey",
-                "-algorithm",
-                "RSA",
-                "-pkeyopt",
-                "rsa_keygen_bits:2048",
-            ])
-            .output()
-            .expect("openssl should be available");
-        assert!(output.status.success());
-        String::from_utf8(output.stdout).unwrap()
     }
 
     #[test]
@@ -475,19 +460,17 @@ mod tests {
 
     #[test]
     fn can_register_app() {
-        let pem = test_rsa_key();
         let mut state = AppState::new();
         state.register_app(AppOptions {
             app_id: "12345".to_string(),
             slug: "test-app".to_string(),
             owner_login: "test-owner".to_string(),
             public: true,
-            private_key_pem: pem,
+            private_key_pem: test_rsa_private_key().to_string(),
             webhook_secret: Some("secret".to_string()),
         });
         assert_eq!(state.apps.len(), 1);
         assert_eq!(state.apps["12345"].config.slug, "test-app");
-        // Verify public key was derived
-        assert!(state.apps["12345"].public_key_pem.contains("PUBLIC KEY"));
+        assert_eq!(state.apps["12345"].public_key_pem, test_rsa_public_key());
     }
 }
