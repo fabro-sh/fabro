@@ -146,6 +146,11 @@ enum RunExecutionMode {
     Resume,
 }
 
+enum ExecutionResult {
+    Completed(Result<operations::Started, FabroError>),
+    CancelledBySignal,
+}
+
 /// Per-model usage totals.
 #[derive(Default)]
 struct ModelUsageTotals {
@@ -1080,12 +1085,18 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
     };
 
     let result = tokio::select! {
-        result = execution => result,
+        result = execution => ExecutionResult::Completed(result),
         _ = cancel_rx => {
             cancel_token.store(true, Ordering::SeqCst);
-            Err(FabroError::Cancelled)
+            ExecutionResult::CancelledBySignal
         }
     };
+
+    if matches!(result, ExecutionResult::CancelledBySignal) {
+        if let Err(err) = persist_cancelled_run_status(state.as_ref(), run_id).await {
+            error!(run_id = %run_id, error = %err, "Failed to persist cancelled run status");
+        }
+    }
 
     // Save final checkpoint
     let checkpoint = match run_store.state().await {
@@ -1128,7 +1139,7 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
     let mut runs = state.runs.lock().expect("runs lock poisoned");
     if let Some(managed_run) = runs.get_mut(&run_id) {
         match &result {
-            Ok(started) => match &started.finalized.outcome {
+            ExecutionResult::Completed(Ok(started)) => match &started.finalized.outcome {
                 Ok(_) => {
                     info!(run_id = %run_id, "Run completed");
                     managed_run.status = RunStatus::Completed;
@@ -1143,11 +1154,12 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
                     managed_run.error = Some(e.to_string());
                 }
             },
-            Err(FabroError::Cancelled) => {
+            ExecutionResult::Completed(Err(FabroError::Cancelled))
+            | ExecutionResult::CancelledBySignal => {
                 info!(run_id = %run_id, "Run cancelled");
                 managed_run.status = RunStatus::Cancelled;
             }
-            Err(e) => {
+            ExecutionResult::Completed(Err(e)) => {
                 error!(run_id = %run_id, error = %e, "Run failed");
                 managed_run.status = RunStatus::Failed;
                 managed_run.error = Some(e.to_string());
@@ -1694,6 +1706,9 @@ async fn cancel_run(
                 | RunStatus::Running => {
                     if let Some(token) = &managed_run.cancel_token {
                         token.store(true, Ordering::Relaxed);
+                    }
+                    if let Some(interviewer) = &managed_run.interviewer {
+                        interviewer.abort_pending();
                     }
                     if let Some(cancel_tx) = managed_run.cancel_tx.take() {
                         let _ = cancel_tx.send(());
@@ -3027,11 +3042,11 @@ mod tests {
             assert_eq!(response.status(), StatusCode::OK);
             let body = body_json(response.into_body()).await;
             status = body["status"].as_str().unwrap().to_string();
-            if status == "completed" || status == "failed" {
+            if status == "succeeded" || status == "failed" {
                 break;
             }
         }
-        assert_eq!(status, "completed");
+        assert_eq!(status, "succeeded");
     }
 
     #[tokio::test]
@@ -3226,24 +3241,31 @@ mod tests {
             let response = app.clone().oneshot(req).await.unwrap();
             let body = body_json(response.into_body()).await;
             status = body["status"].as_str().unwrap().to_string();
-            if status == "completed" || status == "failed" {
+            if status == "succeeded" || status == "failed" {
                 break;
             }
         }
-        assert_eq!(status, "completed");
+        assert_eq!(status, "succeeded");
 
-        // Check aggregate usage
-        let req = Request::builder()
-            .method("GET")
-            .uri(api("/usage"))
-            .body(Body::empty())
-            .unwrap();
+        let mut total_runs = 0;
+        for _ in 0..POLL_ATTEMPTS {
+            let req = Request::builder()
+                .method("GET")
+                .uri(api("/usage"))
+                .body(Body::empty())
+                .unwrap();
 
-        let response = app.oneshot(req).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
+            let response = app.clone().oneshot(req).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
 
-        let body = body_json(response.into_body()).await;
-        assert_eq!(body["totals"]["runs"].as_i64().unwrap(), 1);
+            let body = body_json(response.into_body()).await;
+            total_runs = body["totals"]["runs"].as_i64().unwrap();
+            if total_runs == 1 {
+                break;
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+        assert_eq!(total_runs, 1);
     }
 
     #[tokio::test]

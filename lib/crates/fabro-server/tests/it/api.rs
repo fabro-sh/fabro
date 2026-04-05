@@ -572,9 +572,9 @@ mod server_lifecycle {
         let response = app.clone().oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-        // 4. Poll until completed
-        let final_status = wait_for_run_status(&app, &run_id, &["completed", "failed"]).await;
-        assert_eq!(final_status, "completed");
+        // 4. Poll until the run reaches a terminal success or failure state.
+        let final_status = wait_for_run_status(&app, &run_id, &["succeeded", "failed"]).await;
+        assert_eq!(final_status, "succeeded");
 
         // 5. Verify no pending questions
         let req = Request::builder()
@@ -917,8 +917,8 @@ mod serve_dry_run {
         let response = app.clone().oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
 
-        let status = wait_for_run_status(&app, &run_id, &["completed", "failed"]).await;
-        assert_eq!(status, "completed");
+        let status = wait_for_run_status(&app, &run_id, &["succeeded", "failed"]).await;
+        assert_eq!(status, "succeeded");
     }
 
     #[tokio::test]
