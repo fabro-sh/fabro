@@ -147,7 +147,7 @@ enum RunExecutionMode {
 }
 
 enum ExecutionResult {
-    Completed(Result<operations::Started, FabroError>),
+    Completed(Box<Result<operations::Started, FabroError>>),
     CancelledBySignal,
 }
 
@@ -1001,15 +1001,15 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
     let cancelled_during_setup = {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
         if let Some(managed_run) = runs.get_mut(&run_id) {
-            if managed_run.status != RunStatus::Starting {
+            if managed_run.status == RunStatus::Starting {
+                managed_run.status = RunStatus::Running;
+                managed_run.interviewer = Some(Arc::clone(&interviewer));
+                false
+            } else {
                 // Was cancelled during setup
                 clear_live_run_state(managed_run);
                 state.scheduler_notify.notify_one();
                 true
-            } else {
-                managed_run.status = RunStatus::Running;
-                managed_run.interviewer = Some(Arc::clone(&interviewer));
-                false
             }
         } else {
             false
@@ -1085,14 +1085,14 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
     };
 
     let result = tokio::select! {
-        result = execution => ExecutionResult::Completed(result),
+        result = execution => ExecutionResult::Completed(Box::new(result)),
         _ = cancel_rx => {
             cancel_token.store(true, Ordering::SeqCst);
             ExecutionResult::CancelledBySignal
         }
     };
 
-    if matches!(result, ExecutionResult::CancelledBySignal) {
+    if matches!(&result, ExecutionResult::CancelledBySignal) {
         if let Err(err) = persist_cancelled_run_status(state.as_ref(), run_id).await {
             error!(run_id = %run_id, error = %err, "Failed to persist cancelled run status");
         }
@@ -1139,11 +1139,22 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
     let mut runs = state.runs.lock().expect("runs lock poisoned");
     if let Some(managed_run) = runs.get_mut(&run_id) {
         match &result {
-            ExecutionResult::Completed(Ok(started)) => match &started.finalized.outcome {
-                Ok(_) => {
-                    info!(run_id = %run_id, "Run completed");
-                    managed_run.status = RunStatus::Completed;
-                }
+            ExecutionResult::Completed(result) => match result.as_ref() {
+                Ok(started) => match &started.finalized.outcome {
+                    Ok(_) => {
+                        info!(run_id = %run_id, "Run completed");
+                        managed_run.status = RunStatus::Completed;
+                    }
+                    Err(FabroError::Cancelled) => {
+                        info!(run_id = %run_id, "Run cancelled");
+                        managed_run.status = RunStatus::Cancelled;
+                    }
+                    Err(e) => {
+                        error!(run_id = %run_id, error = %e, "Run failed");
+                        managed_run.status = RunStatus::Failed;
+                        managed_run.error = Some(e.to_string());
+                    }
+                },
                 Err(FabroError::Cancelled) => {
                     info!(run_id = %run_id, "Run cancelled");
                     managed_run.status = RunStatus::Cancelled;
@@ -1154,15 +1165,9 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
                     managed_run.error = Some(e.to_string());
                 }
             },
-            ExecutionResult::Completed(Err(FabroError::Cancelled))
-            | ExecutionResult::CancelledBySignal => {
+            ExecutionResult::CancelledBySignal => {
                 info!(run_id = %run_id, "Run cancelled");
                 managed_run.status = RunStatus::Cancelled;
-            }
-            ExecutionResult::Completed(Err(e)) => {
-                error!(run_id = %run_id, error = %e, "Run failed");
-                managed_run.status = RunStatus::Failed;
-                managed_run.error = Some(e.to_string());
             }
         }
         managed_run.checkpoint = checkpoint;
