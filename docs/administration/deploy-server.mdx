@@ -1,19 +1,19 @@
 ---
-title: "Server Mode"
+title: "Running the Fabro Server"
 description: "Run Fabro as an API server with a web UI, concurrent runs, and team access"
 ---
 
 <Warning>
-  Server mode is in private early access. Contact [bryan@qlty.sh](mailto:bryan@qlty.sh) if you're interested in trying it.
+  The server interface is in private early access. Contact [bryan@qlty.sh](mailto:bryan@qlty.sh) if you're interested in trying it.
 </Warning>
 
-Fabro has two modes: **standalone** and **server**. Standalone mode (`fabro run`) executes a single workflow synchronously in your terminal. Server mode (`fabro server start`) starts an HTTP API that queues runs, streams events, and serves a web UI — so you can close your laptop and let workflows run.
+Fabro has two interfaces to the same workflow engine. You can run a workflow directly in the CLI with `fabro run`, or start the HTTP server with `fabro server start` to queue runs, stream events, and serve the web UI.
 
-Both modes use the same workflow engine, the same Graphviz files, and the same sandbox providers. The difference is how you interact with them.
+Both interfaces use the same workflow engine, the same Graphviz files, and the same sandbox providers. The difference is how you interact with them.
 
-## Standalone vs. server mode
+## Direct CLI Runs vs. Server Interface
 
-| | Standalone | Server |
+| | Direct CLI runs | Server interface |
 |---|---|---|
 | **Command** | `fabro run workflow.fabro` | `fabro server start` |
 | **Best for** | Local development, one-off runs, CI/CD | Production, team use, running at scale |
@@ -51,12 +51,10 @@ See [Server Configuration](/administration/server-configuration) for the full `s
 
 ## Submitting runs
 
-In server mode, workflows are submitted via the REST API and executed in the background:
+In the server interface, workflows are submitted via the REST API and executed in the background. The exact request body is documented in the API reference:
 
 ```bash
-curl -X POST http://localhost:3000/api/v1/runs \
-  -H "Content-Type: application/json" \
-  -d '{"workflow": "implement-feature", "goal": "Add user authentication"}'
+curl -X POST http://localhost:3000/api/v1/runs
 ```
 
 The server returns immediately with a run ID. A background scheduler promotes queued runs to `Running` in FIFO order, up to the concurrency limit.
@@ -93,11 +91,11 @@ The API streams run events via [Server-Sent Events (SSE)](/api-reference/runs/st
 
 ## Human-in-the-loop
 
-In server mode, human-in-the-loop questions are served over HTTP instead of terminal prompts. The engine blocks the current stage until an answer is submitted, then continues execution. See the [list questions](/api-reference/human-in-the-loop/list-run-questions) and [submit answer](/api-reference/human-in-the-loop/submit-run-answer) API reference pages.
+In the server interface, human-in-the-loop questions are served over HTTP instead of terminal prompts. The engine blocks the current stage until an answer is submitted, then continues execution. See the [list questions](/api-reference/human-in-the-loop/list-run-questions) and [submit answer](/api-reference/human-in-the-loop/submit-run-answer) API reference pages.
 
 ## Authentication
 
-Server mode supports two authentication strategies, configurable in `server.toml`:
+The server supports two authentication strategies, configurable in `server.toml`:
 
 - **JWT** — EdDSA-signed bearer tokens. Used by the web UI. See [API Overview](/api-reference/overview#jwt-bearer-token) for token format.
 - **mTLS** — Mutual TLS with client certificates. Used for service-to-service communication. See [API Overview](/api-reference/overview#mtls-mutual-tls) for setup.
@@ -140,6 +138,6 @@ See [User Configuration](/reference/user-configuration#server-section) for the f
     REST API for submitting runs, streaming events, and managing resources.
   </Card>
   <Card title="How Fabro Works" icon="lightbulb" href="/core-concepts/how-fabro-works">
-    The workflow engine that powers both modes.
+    The workflow engine that powers both interfaces.
   </Card>
 </Columns>

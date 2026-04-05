@@ -2,8 +2,8 @@ extern crate self as fabro_config;
 
 pub mod combine;
 pub mod config;
-pub mod dotenv;
 pub mod hook;
+pub mod legacy_env;
 pub mod mcp;
 pub mod project;
 pub mod run;

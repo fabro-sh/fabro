@@ -40,7 +40,7 @@ pub(crate) fn apply_storage_dir_override(
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ServerTarget {
     HttpUrl {
-        base_url: String,
+        api_url: String,
         tls: Option<ClientTlsSettings>,
     },
     UnixSocket(PathBuf),
@@ -72,7 +72,7 @@ fn configured_server_target(settings: &Settings) -> Result<Option<ServerTarget>>
 fn parse_server_target(value: &str, tls: Option<ClientTlsSettings>) -> Result<ServerTarget> {
     if value.starts_with("http://") || value.starts_with("https://") {
         return Ok(ServerTarget::HttpUrl {
-            base_url: value.to_string(),
+            api_url: value.to_string(),
             tls,
         });
     }
@@ -229,7 +229,7 @@ mod tests {
             )
             .unwrap(),
             Some(ServerTarget::HttpUrl {
-                base_url: "https://cli.example.com".to_string(),
+                api_url: "https://cli.example.com".to_string(),
                 tls: None,
             })
         );
@@ -271,7 +271,7 @@ mod tests {
         assert_eq!(
             model_server_connection(&server_connection_args(None, None), &settings).unwrap(),
             ServerConnection::Target(ServerTarget::HttpUrl {
-                base_url: "https://config.example.com".to_string(),
+                api_url: "https://config.example.com".to_string(),
                 tls: None,
             })
         );
@@ -293,7 +293,7 @@ mod tests {
             )
             .unwrap(),
             ServerConnection::Target(ServerTarget::HttpUrl {
-                base_url: "https://cli.example.com".to_string(),
+                api_url: "https://cli.example.com".to_string(),
                 tls: None,
             })
         );
@@ -338,7 +338,7 @@ mod tests {
             )
             .unwrap(),
             Some(ServerTarget::HttpUrl {
-                base_url: "https://cli.example.com".to_string(),
+                api_url: "https://cli.example.com".to_string(),
                 tls: Some(tls),
             })
         );

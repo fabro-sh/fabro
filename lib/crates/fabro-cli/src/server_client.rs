@@ -124,9 +124,9 @@ pub(crate) async fn connect_resolved_api_client(
             connect_api_client(storage_dir).await
         }
         user_config::ServerConnection::Target(user_config::ServerTarget::HttpUrl {
-            base_url,
+            api_url,
             tls,
-        }) => connect_remote_api_client(base_url, tls.as_ref()),
+        }) => connect_remote_api_client(api_url, tls.as_ref()),
         user_config::ServerConnection::Target(user_config::ServerTarget::UnixSocket(path)) => {
             connect_unix_socket_api_client(path).await
         }
@@ -142,11 +142,11 @@ pub(crate) async fn connect_server_backed_api_client(
 }
 
 pub(crate) fn connect_remote_api_client(
-    base_url: &str,
+    api_url: &str,
     tls: Option<&user_config::ClientTlsSettings>,
 ) -> Result<fabro_api::Client> {
     let http_client = user_config::build_server_client(tls)?;
-    Ok(fabro_api::Client::new_with_client(base_url, http_client))
+    Ok(fabro_api::Client::new_with_client(api_url, http_client))
 }
 
 pub(crate) async fn connect_unix_socket_api_client(path: &Path) -> Result<fabro_api::Client> {

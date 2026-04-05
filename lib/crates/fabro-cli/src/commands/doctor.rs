@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 
 use anyhow::Result;
 use fabro_api::types as api_types;
-use fabro_config::dotenv;
+use fabro_config::legacy_env;
 use fabro_config::user::{default_user_config_path, legacy_user_config_path};
 pub(crate) use fabro_util::check_report::{
     CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus,
@@ -306,7 +306,9 @@ pub(crate) async fn run_doctor(
 
     let user_config_path = default_user_config_path();
     let legacy_config_path = legacy_user_config_path();
-    let legacy_env_path = dotenv::env_file_path().ok().filter(|path| path.exists());
+    let legacy_env_path = legacy_env::legacy_env_file_path()
+        .ok()
+        .filter(|path| path.exists());
 
     let mut report = CheckReport {
         title: "Fabro Doctor".to_string(),

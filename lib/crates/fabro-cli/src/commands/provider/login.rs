@@ -1,6 +1,6 @@
 use anyhow::Result;
 use fabro_api::types;
-use fabro_config::dotenv;
+use fabro_config::legacy_env;
 use fabro_model::Provider;
 use fabro_util::terminal::Styles;
 use tokio::task::spawn_blocking;
@@ -25,7 +25,7 @@ pub(super) async fn login_command(args: ProviderLoginArgs, globals: &GlobalArgs)
         vec![(env_var, key)]
     };
 
-    if let Ok(path) = dotenv::env_file_path() {
+    if let Ok(path) = legacy_env::legacy_env_file_path() {
         if path.exists() {
             eprintln!(
                 "  Warning: {} is no longer read by fabro server. Re-enter credentials with `fabro provider login` or `fabro secret set`.",

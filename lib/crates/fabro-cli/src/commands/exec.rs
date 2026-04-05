@@ -37,9 +37,9 @@ pub(crate) async fn execute(mut args: ExecArgs, globals: &GlobalArgs) -> Result<
             .provider
             .clone()
             .unwrap_or_else(|| "anthropic".to_string());
-        let (base_url, http_client) = match &target {
-            user_config::ServerTarget::HttpUrl { base_url, tls } => (
-                base_url.clone(),
+        let (api_url, http_client) = match &target {
+            user_config::ServerTarget::HttpUrl { api_url, tls } => (
+                api_url.clone(),
                 user_config::build_server_client(tls.as_ref())?,
             ),
             user_config::ServerTarget::UnixSocket(path) => {
@@ -52,7 +52,7 @@ pub(crate) async fn execute(mut args: ExecArgs, globals: &GlobalArgs) -> Result<
         };
         let adapter = Arc::new(FabroServerAdapter::new(
             http_client,
-            &base_url,
+            &api_url,
             &provider_name,
         ));
         let mut client = Client::new(HashMap::new(), None, vec![]);

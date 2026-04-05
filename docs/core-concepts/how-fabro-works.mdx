@@ -9,14 +9,14 @@ Fabro is a workflow engine that reads a graph definition, executes nodes one at 
   <img src="/images/how-fabro-works.svg" alt="How Fabro works: author-time inputs flow into the workflow engine, which dispatches to handlers that interact with LLMs, sandboxes, and humans" />
 </Frame>
 
-## Two ways to run Fabro
+## Two ways to use Fabro
 
 Fabro has two interfaces, both backed by the same workflow engine:
 
-- **Standalone mode** (`fabro run`) — Run a single workflow synchronously in your terminal. Best for local development, one-off runs, and CI/CD.
-- **Server mode** (`fabro server start`) — Start an HTTP API server with a web UI, concurrent run scheduling, and team access. Best for production use and running at scale.
+- **Direct CLI runs** (`fabro run`) — Run a single workflow synchronously in your terminal. Best for local development, one-off runs, and CI/CD.
+- **Server interface** (`fabro server start`) — Start an HTTP API server with a web UI, concurrent run scheduling, and team access. Best for production use and running at scale.
 
-Both modes parse the same Graphviz files, use the same execution engine, and support the same sandbox providers. See [Server Mode](/administration/deploy-server) for a detailed comparison and setup guide, or [Architecture](/reference/architecture) for internals.
+Both interfaces parse the same Graphviz files, use the same execution engine, and support the same sandbox providers. See [Running the Fabro Server](/administration/deploy-server) for a detailed comparison and setup guide, or [Architecture](/reference/architecture) for internals.
 
 ## Author time
 
@@ -28,7 +28,7 @@ You provide three inputs:
 
 ## Parse and validate
 
-When you run `fabro run`, Fabro:
+When you run `fabro run` or submit a run to the server, Fabro:
 
 1. Parses the Graphviz file into an in-memory graph of nodes and edges
 2. Validates the graph structure (exactly one start node, one exit node, all edges point to valid nodes)

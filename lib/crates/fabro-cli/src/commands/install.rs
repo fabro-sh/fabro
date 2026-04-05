@@ -13,7 +13,7 @@ use dialoguer::console::Term;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{MultiSelect, Select};
 use fabro_api::types::SetSecretRequest;
-use fabro_config::dotenv;
+use fabro_config::legacy_env;
 use fabro_config::user::USER_CONFIG_FILENAME;
 use fabro_model::Provider;
 use fabro_server::secret_store::SecretStore;
@@ -197,6 +197,7 @@ provider = "github"
 allowed_usernames = ["{username}"]
 
 [api]
+# Public API base URL advertised by the server itself.
 base_url = "https://localhost:3000/api/v1"
 authentication_strategies = ["jwt", "mtls"]
 
@@ -279,7 +280,7 @@ fn build_github_app_manifest(app_name: &str, port: u16, web_url: &str) -> serde_
 /// Run the GitHub App manifest registration flow via a temporary local server.
 /// Returns secret pairs `(key, value)` to persist for the local server.
 async fn setup_github_app(
-    arc_dir: &Path,
+    fabro_dir: &Path,
     s: &Styles,
     web_url: &str,
 ) -> Result<Vec<(String, String)>> {
@@ -290,7 +291,7 @@ async fn setup_github_app(
         let _ = write!(s, "{:x}", rng.gen::<u8>() % 16);
         s
     });
-    let app_name = format!("Arc-{suffix}");
+    let app_name = format!("Fabro-{suffix}");
 
     // Bind to random port
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -439,7 +440,7 @@ async fn setup_github_app(
         .to_string();
 
     // Write non-secret config to user.toml
-    let user_toml_path = arc_dir.join(USER_CONFIG_FILENAME);
+    let user_toml_path = fabro_dir.join(USER_CONFIG_FILENAME);
     let existing = std::fs::read_to_string(&user_toml_path).unwrap_or_default();
     let mut doc: toml::Value = if existing.is_empty() {
         toml::Value::Table(toml::Table::default())
@@ -536,12 +537,12 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
     eprintln!("  {}", s.dim.apply_to("LLM providers and GitHub App."));
     eprintln!();
 
-    let arc_dir = dirs::home_dir()
+    let fabro_dir = dirs::home_dir()
         .context("could not determine home directory")?
         .join(".fabro");
-    std::fs::create_dir_all(&arc_dir)?;
+    std::fs::create_dir_all(&fabro_dir)?;
 
-    if let Ok(env_path) = dotenv::env_file_path() {
+    if let Ok(env_path) = legacy_env::legacy_env_file_path() {
         if env_path.exists() {
             eprintln!(
                 "  Warning: {} is no longer read by fabro server. This install will persist credentials in the server secret store instead.",
@@ -690,9 +691,9 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
             spawn_blocking(|| prompt_confirm("Set up a GitHub App? (Recommended)", true)).await??;
 
         if setup_github {
-            let github_env_pairs = setup_github_app(&arc_dir, &s, web_url).await?;
+            let github_env_pairs = setup_github_app(&fabro_dir, &s, web_url).await?;
             let slug = {
-                let user_toml_path = arc_dir.join(USER_CONFIG_FILENAME);
+                let user_toml_path = fabro_dir.join(USER_CONFIG_FILENAME);
                 let toml_content = std::fs::read_to_string(&user_toml_path).unwrap_or_default();
                 let doc: toml::Value = toml::from_str(&toml_content)
                     .unwrap_or(toml::Value::Table(toml::Table::default()));
@@ -720,7 +721,7 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
         eprintln!("  {}", s.dim.apply_to("─────────────────────"));
         eprintln!();
 
-        let config_path = arc_dir.join("server.toml");
+        let config_path = fabro_dir.join("server.toml");
         let write_config = if config_path.exists() {
             spawn_blocking(|| {
                 prompt_confirm("~/.fabro/server.toml already exists. Overwrite?", false)
@@ -759,7 +760,7 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
         let (jwt_private_pem, jwt_public_pem) = generate_jwt_keypair()?;
         eprintln!("  {} Ed25519 JWT keypair generated", s.green.apply_to("✔"));
 
-        let certs_dir = arc_dir.join("certs");
+        let certs_dir = fabro_dir.join("certs");
         generate_mtls_certs(&certs_dir)?;
         eprintln!(
             "  {} mTLS CA + server certificates generated",
@@ -777,7 +778,7 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
         secret_pairs.extend(server_env_pairs);
         eprintln!();
 
-        eprintln!("  To start Arc, run these commands:");
+        eprintln!("  To start Fabro, run these commands:");
         eprintln!();
         eprintln!("    fabro server start");
         eprintln!();
@@ -1008,7 +1009,7 @@ mod tests {
     #[test]
     fn manifest_includes_callback_urls_and_setup_url() {
         let web_url = "https://app.example.com";
-        let manifest = build_github_app_manifest("Arc-test", 12345, web_url);
+        let manifest = build_github_app_manifest("Fabro-test", 12345, web_url);
 
         assert_eq!(
             manifest["callback_urls"],
