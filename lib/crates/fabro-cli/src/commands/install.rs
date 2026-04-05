@@ -782,6 +782,8 @@ mod hex {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::absolute_paths)]
+
     use super::*;
 
     // -- Binary detection --

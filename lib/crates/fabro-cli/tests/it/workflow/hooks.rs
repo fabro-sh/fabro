@@ -1,3 +1,9 @@
+#![allow(
+    clippy::absolute_paths,
+    clippy::needless_borrow,
+    clippy::needless_borrows_for_generic_args
+)]
+
 use std::process::Output;
 
 use fabro_test::{TestMode, TwinScenario, TwinScenarios, TwinToolCall, test_context, twin_openai};
@@ -87,11 +93,11 @@ model = "{model}"
     let workflow = write_workflow(
         &context,
         "hook_prompt_proceed.fabro",
-        r#"digraph HookTest {
+        r"digraph HookTest {
             start [shape=Mdiamond]
             exit [shape=Msquare]
             start -> exit
-        }"#,
+        }",
     );
 
     if TestMode::from_env().is_twin() {
@@ -136,11 +142,11 @@ model = "{model}"
     let workflow = write_workflow(
         &context,
         "hook_prompt_block.fabro",
-        r#"digraph HookTest {
+        r"digraph HookTest {
             start [shape=Mdiamond]
             exit [shape=Msquare]
             start -> exit
-        }"#,
+        }",
     );
 
     let output = if TestMode::from_env().is_twin() {
@@ -193,11 +199,11 @@ max_tool_rounds = 1
     let workflow = write_workflow(
         &context,
         "hook_agent_proceed.fabro",
-        r#"digraph HookTest {
+        r"digraph HookTest {
             start [shape=Mdiamond]
             exit [shape=Msquare]
             start -> exit
-        }"#,
+        }",
     );
 
     if TestMode::from_env().is_twin() {
@@ -246,11 +252,11 @@ max_tool_rounds = 5
     let workflow = write_workflow(
         &context,
         "hook_agent_tools.fabro",
-        r#"digraph HookTest {
+        r"digraph HookTest {
             start [shape=Mdiamond]
             exit [shape=Msquare]
             start -> exit
-        }"#,
+        }",
     );
 
     if TestMode::from_env().is_twin() {

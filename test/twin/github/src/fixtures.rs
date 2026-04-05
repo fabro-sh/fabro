@@ -372,6 +372,23 @@ fn next_pr_number(pull_requests: &HashMap<(String, String), Vec<PullRequest>>) -
 }
 
 #[cfg(test)]
+impl FixtureState {
+    fn single_app_fixture_for_test() -> Self {
+        Self {
+            apps: vec![FixtureApp {
+                app_id: "100".to_string(),
+                slug: "fixture-app".to_string(),
+                owner_login: "acme".to_string(),
+                public: true,
+                private_key_pem: test_rsa_key().to_string(),
+                webhook_secret: Some("whsec".to_string()),
+            }],
+            ..Self::default()
+        }
+    }
+}
+
+#[cfg(test)]
 fn test_rsa_key() -> &'static str {
     crate::test_support::test_rsa_private_key()
 }
@@ -523,22 +540,5 @@ mod tests {
         let fixture = FixtureState::single_app_fixture_for_test();
         let state = fixture.into_app_state().unwrap();
         assert!(state.apps["100"].public_key_pem.contains("PUBLIC KEY"));
-    }
-}
-
-#[cfg(test)]
-impl FixtureState {
-    fn single_app_fixture_for_test() -> Self {
-        Self {
-            apps: vec![FixtureApp {
-                app_id: "100".to_string(),
-                slug: "fixture-app".to_string(),
-                owner_login: "acme".to_string(),
-                public: true,
-                private_key_pem: test_rsa_key().to_string(),
-                webhook_secret: Some("whsec".to_string()),
-            }],
-            ..Self::default()
-        }
     }
 }

@@ -128,6 +128,7 @@ pub async fn sync_artifacts_to_env(
 
 #[cfg(test)]
 mod tests {
+    use std::hash::{Hash, Hasher};
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -138,7 +139,6 @@ mod tests {
 
     fn test_run_id(label: &str) -> fabro_types::RunId {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        use std::hash::{Hash, Hasher};
         label.hash(&mut hasher);
         fabro_types::RunId::from(Ulid(u128::from(hasher.finish())))
     }

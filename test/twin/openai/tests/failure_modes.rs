@@ -2,6 +2,7 @@ mod common;
 
 use std::time::Duration;
 
+use reqwest::header::AUTHORIZATION;
 use serde_json::json;
 
 #[tokio::test]
@@ -110,7 +111,7 @@ async fn scripted_hang_times_out_client_side() {
         .timeout(Duration::from_millis(150))
         .default_headers(
             [(
-                reqwest::header::AUTHORIZATION,
+                AUTHORIZATION,
                 server
                     .authorization_header_value()
                     .parse()

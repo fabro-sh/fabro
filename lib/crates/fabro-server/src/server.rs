@@ -2505,6 +2505,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::field_reassign_with_default)]
     async fn auth_login_github_redirects_to_github() {
         let mut settings = Settings::default();
         settings.web = Some(WebSettings {

@@ -313,7 +313,7 @@ mod tests {
         base_url: &str,
     ) -> String {
         let resp = client
-            .get(&format!("{base_url}/repos/{owner}/{repo}/installation"))
+            .get(format!("{base_url}/repos/{owner}/{repo}/installation"))
             .header("Authorization", format!("Bearer {jwt}"))
             .send()
             .await
@@ -323,7 +323,7 @@ mod tests {
         let install_id = body["id"].as_u64().unwrap();
 
         let resp = client
-            .post(&format!(
+            .post(format!(
                 "{base_url}/app/installations/{install_id}/access_tokens"
             ))
             .header("Authorization", format!("Bearer {jwt}"))
@@ -374,7 +374,7 @@ mod tests {
         let (server, client, token) = setup_and_get_token(&mut state, pem).await;
 
         let resp = client
-            .post(&format!("{}/repos/owner/repo/pulls", server.url()))
+            .post(format!("{}/repos/owner/repo/pulls", server.url()))
             .header("Authorization", format!("Bearer {token}"))
             .header("Accept", "application/vnd.github+json")
             .json(&serde_json::json!({
@@ -405,7 +405,7 @@ mod tests {
 
         // Create a PR first
         let create_resp = client
-            .post(&format!("{}/repos/owner/repo/pulls", server.url()))
+            .post(format!("{}/repos/owner/repo/pulls", server.url()))
             .header("Authorization", format!("Bearer {token}"))
             .json(&serde_json::json!({
                 "title": "Test PR",
@@ -422,7 +422,7 @@ mod tests {
 
         // Now get it
         let resp = client
-            .get(&format!("{}/repos/owner/repo/pulls/{number}", server.url()))
+            .get(format!("{}/repos/owner/repo/pulls/{number}", server.url()))
             .header("Authorization", format!("Bearer {token}"))
             .send()
             .await
@@ -455,7 +455,7 @@ mod tests {
 
         // Create a PR
         let create_resp = client
-            .post(&format!("{}/repos/owner/repo/pulls", server.url()))
+            .post(format!("{}/repos/owner/repo/pulls", server.url()))
             .header("Authorization", format!("Bearer {token}"))
             .json(&serde_json::json!({
                 "title": "Test PR", "head": "feature", "base": "main", "body": "", "draft": false,
@@ -468,7 +468,7 @@ mod tests {
 
         // Merge it
         let merge_resp = client
-            .put(&format!(
+            .put(format!(
                 "{}/repos/owner/repo/pulls/{number}/merge",
                 server.url()
             ))
@@ -481,7 +481,7 @@ mod tests {
 
         // Verify state changed
         let get_resp = client
-            .get(&format!("{}/repos/owner/repo/pulls/{number}", server.url()))
+            .get(format!("{}/repos/owner/repo/pulls/{number}", server.url()))
             .header("Authorization", format!("Bearer {token}"))
             .send()
             .await
@@ -500,7 +500,7 @@ mod tests {
 
         // Create a PR
         let create_resp = client
-            .post(&format!("{}/repos/owner/repo/pulls", server.url()))
+            .post(format!("{}/repos/owner/repo/pulls", server.url()))
             .header("Authorization", format!("Bearer {token}"))
             .json(&serde_json::json!({
                 "title": "Test PR", "head": "feature", "base": "main", "body": "", "draft": false,
@@ -513,7 +513,7 @@ mod tests {
 
         // Close it
         let close_resp = client
-            .patch(&format!("{}/repos/owner/repo/pulls/{number}", server.url()))
+            .patch(format!("{}/repos/owner/repo/pulls/{number}", server.url()))
             .header("Authorization", format!("Bearer {token}"))
             .json(&serde_json::json!({ "state": "closed" }))
             .send()
@@ -531,10 +531,7 @@ mod tests {
         let (server, client, token) = setup_and_get_token(&mut state, pem).await;
 
         let resp = client
-            .put(&format!(
-                "{}/repos/owner/repo/pulls/999/merge",
-                server.url()
-            ))
+            .put(format!("{}/repos/owner/repo/pulls/999/merge", server.url()))
             .header("Authorization", format!("Bearer {token}"))
             .json(&serde_json::json!({ "merge_method": "squash" }))
             .send()

@@ -132,7 +132,7 @@ mod tests {
         let jwt = sign_test_jwt("12345", pem);
         let client = test_http_client();
         let resp = client
-            .get(&format!("{}/app", server.url()))
+            .get(format!("{}/app", server.url()))
             .header("Authorization", format!("Bearer {jwt}"))
             .header("Accept", "application/vnd.github+json")
             .send()
@@ -163,7 +163,7 @@ mod tests {
 
         let client = test_http_client();
         let resp = client
-            .get(&format!("{}/app", server.url()))
+            .get(format!("{}/app", server.url()))
             .header("Authorization", "Bearer invalid-jwt")
             .send()
             .await

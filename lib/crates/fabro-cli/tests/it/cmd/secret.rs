@@ -1,5 +1,6 @@
+#![allow(clippy::absolute_paths, clippy::single_char_pattern)]
+
 use fabro_test::{fabro_snapshot, test_context};
-use predicates;
 
 #[test]
 fn help() {

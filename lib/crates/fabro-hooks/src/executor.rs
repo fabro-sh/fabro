@@ -396,11 +396,11 @@ impl HookExecutorImpl {
         let accept_invalid = matches!(tls, TlsMode::NoVerify | TlsMode::Off);
         #[cfg(test)]
         {
-            return reqwest::Client::builder()
+            reqwest::Client::builder()
                 .danger_accept_invalid_certs(accept_invalid)
                 .no_proxy()
                 .build()
-                .unwrap_or_default();
+                .unwrap_or_default()
         }
         #[cfg(not(test))]
         {

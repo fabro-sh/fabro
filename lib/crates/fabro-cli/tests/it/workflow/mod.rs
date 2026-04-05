@@ -1,3 +1,5 @@
+#![allow(clippy::absolute_paths)]
+
 mod agent_linear;
 mod command_agent_mixed;
 mod command_pipeline;

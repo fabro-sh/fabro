@@ -58,7 +58,7 @@ mod tests {
 
         let client = crate::test_support::test_http_client();
         let resp = client
-            .post(&format!(
+            .post(format!(
                 "{}/app-manifests/test-code/conversions",
                 server.url()
             ))
@@ -84,7 +84,7 @@ mod tests {
 
         let client = crate::test_support::test_http_client();
         let resp = client
-            .post(&format!(
+            .post(format!(
                 "{}/app-manifests/unknown/conversions",
                 server.url()
             ))

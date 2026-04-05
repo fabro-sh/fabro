@@ -700,7 +700,7 @@ mod serve_dry_run {
     }"#;
 
     /// Build the router exactly as `serve_command` does in dry-run mode.
-    async fn dry_run_app() -> axum::Router {
+    fn dry_run_app() -> axum::Router {
         let state = create_app_state_with_options(
             fabro_types::Settings {
                 dry_run: Some(true),
@@ -742,7 +742,7 @@ mod serve_dry_run {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn dry_run_serve_starts_and_runs_workflow() {
-        let app = dry_run_app().await;
+        let app = dry_run_app();
 
         // POST /runs to create a run
         let req = Request::builder()
@@ -776,7 +776,7 @@ mod serve_dry_run {
 
     #[tokio::test]
     async fn test_model_known_via_full_router() {
-        let app = dry_run_app().await;
+        let app = dry_run_app();
 
         let req = Request::builder()
             .method("POST")
@@ -796,7 +796,7 @@ mod serve_dry_run {
 
     #[tokio::test]
     async fn test_model_unknown_via_full_router() {
-        let app = dry_run_app().await;
+        let app = dry_run_app();
 
         let req = Request::builder()
             .method("POST")
@@ -811,7 +811,7 @@ mod serve_dry_run {
 
     #[tokio::test]
     async fn dry_run_serve_rejects_invalid_dot() {
-        let app = dry_run_app().await;
+        let app = dry_run_app();
 
         let req = Request::builder()
             .method("POST")

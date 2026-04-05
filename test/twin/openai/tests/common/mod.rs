@@ -7,10 +7,11 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use futures_util::StreamExt;
-use reqwest::Client;
+use reqwest::{Client, header::AUTHORIZATION};
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
+use twin_openai::config::Config;
 
 pub struct TestServer {
     pub base_url: String,
@@ -68,7 +69,7 @@ pub fn test_http_client() -> Result<Client> {
 pub async fn spawn_server() -> Result<TestServer> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let addr: SocketAddr = listener.local_addr()?;
-    let app = twin_openai::build_app_with_config(twin_openai::config::Config {
+    let app = twin_openai::build_app_with_config(Config {
         bind_addr: "127.0.0.1:0".parse().expect("valid addr"),
         require_auth: true,
         enable_admin: true,
@@ -97,7 +98,7 @@ fn build_authenticated_client(bearer_token: &str) -> Result<Client> {
         .no_proxy()
         .default_headers(
             [(
-                reqwest::header::AUTHORIZATION,
+                AUTHORIZATION,
                 authorization_header_value(bearer_token)
                     .parse()
                     .expect("valid header"),
@@ -216,7 +217,7 @@ impl TestServer {
         )
     }
 
-    pub fn fork_namespace(&self) -> Result<TestServer> {
+    pub fn fork_namespace(&self) -> Result<Self> {
         Self::new(self.base_url.clone(), next_bearer_token())
     }
 }
@@ -312,7 +313,7 @@ impl TestServer {
             .post(format!("{}/v1/chat/completions", self.base_url));
 
         if let Some(value) = authorization {
-            request = request.header(reqwest::header::AUTHORIZATION, value);
+            request = request.header(AUTHORIZATION, value);
         }
 
         request
@@ -403,7 +404,7 @@ impl TestServer {
             .base_url
             .strip_prefix("http://")
             .expect("http base url");
-        let mut stream = tokio::net::TcpStream::connect(authority)
+        let mut stream = TcpStream::connect(authority)
             .await
             .expect("socket should connect");
         let body = serde_json::to_vec(body).expect("json body");
