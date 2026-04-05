@@ -825,8 +825,19 @@ pub fn create_app_state() -> Arc<AppState> {
 pub fn create_app_state_with_registry_factory(
     registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
+    create_app_state_with_settings_and_registry_factory(
+        Settings::default(),
+        registry_factory_override,
+    )
+}
+
+#[doc(hidden)]
+pub fn create_app_state_with_settings_and_registry_factory(
+    settings: Settings,
+    registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
+) -> Arc<AppState> {
     build_app_state_with_path(
-        Arc::new(RwLock::new(Settings::default())),
+        Arc::new(RwLock::new(settings)),
         Some(Box::new(registry_factory_override)),
         5,
         test_store(),
