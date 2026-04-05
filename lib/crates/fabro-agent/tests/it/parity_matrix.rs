@@ -139,13 +139,13 @@ async fn make_session_with_config(
 
 async fn make_client(provider: Provider, twin: Option<&OpenAiTwinOptions>) -> Client {
     if provider == Provider::OpenAi && fabro_test::TestMode::from_env().is_twin() {
-        return make_twin_client(twin.expect("openai twin config should be provided")).await;
+        return make_twin_client(twin.expect("openai twin config should be provided"));
     }
 
     Client::from_env().await.expect("Client::from_env failed")
 }
 
-async fn make_twin_client(twin: &OpenAiTwinOptions) -> Client {
+fn make_twin_client(twin: &OpenAiTwinOptions) -> Client {
     let adapter: Arc<dyn ProviderAdapter> =
         Arc::new(OpenAiAdapter::new(twin.api_key.clone()).with_base_url(twin.base_url.clone()));
     let mut providers: HashMap<String, Arc<dyn ProviderAdapter>> = HashMap::new();

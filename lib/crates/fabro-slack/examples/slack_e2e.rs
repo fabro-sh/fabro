@@ -1,3 +1,5 @@
+#![allow(clippy::print_stderr, clippy::absolute_paths, clippy::exit)]
+
 use std::sync::Arc;
 
 use fabro_interview::{

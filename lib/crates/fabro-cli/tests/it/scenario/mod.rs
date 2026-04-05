@@ -1,3 +1,5 @@
+#![allow(clippy::absolute_paths)]
+
 mod artifacts;
 mod exec;
 mod lifecycle;

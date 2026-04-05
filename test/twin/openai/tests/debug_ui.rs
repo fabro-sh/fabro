@@ -1,6 +1,8 @@
 mod common;
 
 use serde_json::json;
+use tokio::net::TcpListener;
+use twin_openai::config::Config;
 
 #[tokio::test]
 async fn debug_html_page_serves_valid_html_on_empty_state() {
@@ -209,11 +211,11 @@ async fn debug_html_page_reflects_loaded_scenarios_and_request_logs() {
 
 #[tokio::test]
 async fn debug_routes_not_accessible_when_admin_disabled() {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+    let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind should succeed");
     let addr = listener.local_addr().expect("should have addr");
-    let app = twin_openai::build_app_with_config(twin_openai::config::Config {
+    let app = twin_openai::build_app_with_config(Config {
         bind_addr: "127.0.0.1:0".parse().expect("valid addr"),
         require_auth: false,
         enable_admin: false,
@@ -262,12 +264,8 @@ async fn debug_page_renders_in_headless_chrome() {
                 .unwrap_or(false)
         });
 
-    let chrome_binary = match chrome_binary {
-        Some(name) => *name,
-        None => {
-            eprintln!("SKIPPED: no Chrome/Chromium binary found on PATH");
-            return;
-        }
+    let Some(chrome_binary) = chrome_binary.copied() else {
+        return;
     };
 
     let server = common::spawn_server().await.expect("server should start");

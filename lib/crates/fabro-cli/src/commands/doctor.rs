@@ -1162,6 +1162,8 @@ pub(crate) async fn run_doctor(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::absolute_paths)]
+
     use super::*;
 
     // -- check_config --

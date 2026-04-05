@@ -1,3 +1,5 @@
+#![allow(clippy::absolute_paths)]
+
 use std::process::Output;
 
 use fabro_test::{fabro_snapshot, test_context, twin_openai};

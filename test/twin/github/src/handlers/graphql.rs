@@ -625,7 +625,7 @@ mod tests {
     ) -> String {
         // Step 1: GET /repos/{owner}/{repo}/installation to get installation ID
         let resp = client
-            .get(&format!("{base_url}/repos/{owner}/{repo}/installation"))
+            .get(format!("{base_url}/repos/{owner}/{repo}/installation"))
             .header("Authorization", format!("Bearer {jwt}"))
             .send()
             .await
@@ -636,7 +636,7 @@ mod tests {
 
         // Step 2: POST /app/installations/{id}/access_tokens
         let resp = client
-            .post(&format!(
+            .post(format!(
                 "{base_url}/app/installations/{install_id}/access_tokens"
             ))
             .header("Authorization", format!("Bearer {jwt}"))
@@ -688,7 +688,7 @@ mod tests {
         let (server, client, token) = setup_with_token(&mut state, pem).await;
 
         let resp = client
-            .post(&format!("{}/graphql", server.url()))
+            .post(format!("{}/graphql", server.url()))
             .header("Authorization", format!("Bearer {token}"))
             .json(&serde_json::json!({
                 "query": "query { viewer { id } }",
@@ -717,7 +717,7 @@ mod tests {
                 number: 1,
                 node_id: "PR_test123".to_string(),
                 title: "Test".to_string(),
-                body: "".to_string(),
+                body: String::new(),
                 state: "open".to_string(),
                 draft: false,
                 mergeable: true,
@@ -746,7 +746,7 @@ mod tests {
         }"#;
 
         let resp = client
-            .post(&format!("{}/graphql", server.url()))
+            .post(format!("{}/graphql", server.url()))
             .header("Authorization", format!("Bearer {token}"))
             .json(&serde_json::json!({ "query": query }))
             .send()
@@ -772,7 +772,7 @@ mod tests {
 
         let client = test_http_client();
         let resp = client
-            .post(&format!("{}/graphql", server.url()))
+            .post(format!("{}/graphql", server.url()))
             .header("Authorization", "Bearer invalid-token")
             .json(&serde_json::json!({
                 "query": "query { viewer { id } }",
@@ -829,15 +829,15 @@ mod tests {
         let (server, client, token) = setup_with_token(&mut state, pem).await;
 
         // Query org project
-        let query = r#"
+        let query = r"
             query($owner: String!, $number: Int!) {
                 organization(login: $owner) {
                     projectV2(number: $number) { id }
                 }
             }
-        "#;
+        ";
         let resp = client
-            .post(&format!("{}/graphql", server.url()))
+            .post(format!("{}/graphql", server.url()))
             .header("Authorization", format!("Bearer {token}"))
             .json(&serde_json::json!({
                 "query": query,
@@ -910,7 +910,7 @@ mod tests {
             }
         "#;
         let resp = client
-            .post(&format!("{}/graphql", server.url()))
+            .post(format!("{}/graphql", server.url()))
             .header("Authorization", format!("Bearer {token}"))
             .json(&serde_json::json!({
                 "query": query,
@@ -967,7 +967,7 @@ mod tests {
                     id: "I_1".to_string(),
                     number: 1,
                     title: "Issue 1".to_string(),
-                    body: "".to_string(),
+                    body: String::new(),
                     url: "https://github.com/owner/repo/issues/1".to_string(),
                     created_at: "2026-01-01T00:00:00Z".to_string(),
                     updated_at: "2026-01-01T00:00:00Z".to_string(),
@@ -978,7 +978,7 @@ mod tests {
         });
         let (server, client, token) = setup_with_token(&mut state, pem).await;
 
-        let query = r#"
+        let query = r"
             mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
                 updateProjectV2ItemFieldValue(input: {
                     projectId: $projectId
@@ -989,9 +989,9 @@ mod tests {
                     projectV2Item { id }
                 }
             }
-        "#;
+        ";
         let resp = client
-            .post(&format!("{}/graphql", server.url()))
+            .post(format!("{}/graphql", server.url()))
             .header("Authorization", format!("Bearer {token}"))
             .json(&serde_json::json!({
                 "query": query,

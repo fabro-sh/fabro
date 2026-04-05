@@ -1,3 +1,7 @@
-pub(crate) fn test_app_state() -> std::sync::Arc<fabro_server::server::AppState> {
-    fabro_server::server::create_app_state()
+use std::sync::Arc;
+
+use fabro_server::server::{AppState, create_app_state};
+
+pub(crate) fn test_app_state() -> Arc<AppState> {
+    create_app_state()
 }

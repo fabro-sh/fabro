@@ -1,5 +1,6 @@
 mod common;
 
+use reqwest::header::AUTHORIZATION;
 use serde_json::json;
 
 #[tokio::test]
@@ -244,7 +245,7 @@ async fn admin_routes_accept_no_auth_but_reject_invalid_authorization_headers() 
         let response = server
             .client
             .get(format!("{}/__admin/requests", server.base_url))
-            .header(reqwest::header::AUTHORIZATION, authorization)
+            .header(AUTHORIZATION, authorization)
             .send()
             .await
             .expect("admin logs should complete");

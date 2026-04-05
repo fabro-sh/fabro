@@ -432,7 +432,7 @@ mod tests {
     use crate::jwt_auth::AuthMode;
     use crate::server::{build_router, create_app_state_with_options};
 
-    async fn dry_run_app() -> axum::Router {
+    fn dry_run_app() -> axum::Router {
         let state = create_app_state_with_options(
             fabro_types::Settings {
                 dry_run: Some(true),
@@ -472,7 +472,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_session_returns_201() {
-        let app = dry_run_app().await;
+        let app = dry_run_app();
         let body = create_test_session(&app).await;
 
         assert!(body["id"].is_string());
@@ -484,7 +484,7 @@ mod tests {
 
     #[tokio::test]
     async fn retrieve_session_after_create() {
-        let app = dry_run_app().await;
+        let app = dry_run_app();
         let create_body = create_test_session(&app).await;
         let session_id = create_body["id"].as_str().unwrap();
 
@@ -510,7 +510,7 @@ mod tests {
 
     #[tokio::test]
     async fn retrieve_session_not_found() {
-        let app = dry_run_app().await;
+        let app = dry_run_app();
 
         let req = Request::builder()
             .method("GET")
@@ -524,7 +524,7 @@ mod tests {
 
     #[tokio::test]
     async fn send_message_returns_202() {
-        let app = dry_run_app().await;
+        let app = dry_run_app();
         let create_body = create_test_session(&app).await;
         let session_id = create_body["id"].as_str().unwrap();
 
@@ -549,7 +549,7 @@ mod tests {
 
     #[tokio::test]
     async fn send_message_not_found() {
-        let app = dry_run_app().await;
+        let app = dry_run_app();
 
         let req = Request::builder()
             .method("POST")
@@ -571,7 +571,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_sessions_empty() {
-        let app = dry_run_app().await;
+        let app = dry_run_app();
 
         let req = Request::builder()
             .method("GET")
@@ -589,7 +589,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_sessions_after_create() {
-        let app = dry_run_app().await;
+        let app = dry_run_app();
         let _create_body = create_test_session(&app).await;
 
         let req = Request::builder()
@@ -607,7 +607,7 @@ mod tests {
 
     #[tokio::test]
     async fn stream_events_dry_run() {
-        let app = dry_run_app().await;
+        let app = dry_run_app();
         let create_body = create_test_session(&app).await;
         let session_id = create_body["id"].as_str().unwrap();
 

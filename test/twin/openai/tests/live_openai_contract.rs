@@ -1,3 +1,5 @@
+#![allow(clippy::print_stderr)]
+
 mod common;
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
@@ -1463,7 +1465,7 @@ fn normalize_chat_stream(
         match choice.get("finish_reason").and_then(Value::as_str) {
             Some("stop") => push_chat_milestone(&mut milestones, ChatStreamMilestone::FinishStop),
             Some("tool_calls") => {
-                push_chat_milestone(&mut milestones, ChatStreamMilestone::FinishToolCalls)
+                push_chat_milestone(&mut milestones, ChatStreamMilestone::FinishToolCalls);
             }
             _ => {}
         }
@@ -1816,16 +1818,14 @@ fn truncate_for_display(input: &str, max_chars: usize) -> String {
     }
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn ensure_eq<T>(left: Option<T>, right: Option<T>, label: &str) -> Result<()>
 where
     T: PartialEq + std::fmt::Debug,
 {
     ensure!(
         left == right,
-        "{} mismatch: local={:?} live={:?}",
-        label,
-        left,
-        right
+        "{label} mismatch: local={left:?} live={right:?}"
     );
     Ok(())
 }

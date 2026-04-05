@@ -436,6 +436,8 @@ fn event_exit_code(event: &EventEnvelope) -> Option<ExitCode> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::absolute_paths)]
+
     use super::*;
     use fabro_interview::{Answer, AnswerValue};
     use fabro_util::terminal::Styles;

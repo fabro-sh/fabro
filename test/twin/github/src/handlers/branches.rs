@@ -103,7 +103,7 @@ mod tests {
         base_url: &str,
     ) -> String {
         let resp = client
-            .get(&format!("{base_url}/repos/{owner}/{repo}/installation"))
+            .get(format!("{base_url}/repos/{owner}/{repo}/installation"))
             .header("Authorization", format!("Bearer {jwt}"))
             .send()
             .await
@@ -113,7 +113,7 @@ mod tests {
         let install_id = body["id"].as_u64().unwrap();
 
         let resp = client
-            .post(&format!(
+            .post(format!(
                 "{base_url}/app/installations/{install_id}/access_tokens"
             ))
             .header("Authorization", format!("Bearer {jwt}"))
@@ -155,7 +155,7 @@ mod tests {
         let token = get_installation_token(&client, &jwt, "owner", "repo", server.url()).await;
 
         let resp = client
-            .get(&format!(
+            .get(format!(
                 "{}/repos/owner/repo/branches/feature",
                 server.url()
             ))
@@ -193,7 +193,7 @@ mod tests {
         let token = get_installation_token(&client, &jwt, "owner", "repo", server.url()).await;
 
         let resp = client
-            .get(&format!(
+            .get(format!(
                 "{}/repos/owner/repo/branches/nonexistent",
                 server.url()
             ))

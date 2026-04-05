@@ -1,3 +1,5 @@
+#![allow(clippy::absolute_paths)]
+
 use fabro_test::{fabro_snapshot, test_context};
 use fabro_types::run_event::PullRequestCreatedProps;
 use fabro_types::{EventBody, RunEvent, RunId};

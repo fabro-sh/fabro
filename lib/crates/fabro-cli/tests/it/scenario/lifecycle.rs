@@ -1,3 +1,5 @@
+#![allow(clippy::absolute_paths)]
+
 use fabro_test::test_context;
 use serde_json::Value;
 

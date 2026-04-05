@@ -1,3 +1,9 @@
+#![allow(
+    clippy::absolute_paths,
+    clippy::manual_assert,
+    clippy::redundant_closure_for_method_calls
+)]
+
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Output;

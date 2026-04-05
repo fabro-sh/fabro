@@ -411,6 +411,8 @@ impl ProgressUI {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::absolute_paths, clippy::needless_pass_by_value)]
+
     use std::io::{self, Write};
     use std::sync::{Arc, Mutex};
 

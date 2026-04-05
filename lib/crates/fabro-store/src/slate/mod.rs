@@ -227,8 +227,18 @@ mod tests {
 
     fn test_run_id(label: &str) -> RunId {
         let (timestamp_ms, random) = match label {
-            "run-1" => (dt("2026-03-27T12:00:00Z").timestamp_millis() as u64, 1),
-            "run-2" => (dt("2026-03-27T12:00:10Z").timestamp_millis() as u64, 2),
+            "run-1" => (
+                dt("2026-03-27T12:00:00Z")
+                    .timestamp_millis()
+                    .cast_unsigned(),
+                1,
+            ),
+            "run-2" => (
+                dt("2026-03-27T12:00:10Z")
+                    .timestamp_millis()
+                    .cast_unsigned(),
+                2,
+            ),
             _ => panic!("unknown test run id: {label}"),
         };
         RunId::from(ulid::Ulid::from_parts(timestamp_ms, random))
@@ -262,7 +272,7 @@ mod tests {
         run_id: &str,
         ts: &str,
         event: &str,
-        properties: serde_json::Value,
+        properties: &serde_json::Value,
     ) -> EventPayload {
         EventPayload::new(
             serde_json::json!({
@@ -283,7 +293,7 @@ mod tests {
             label,
             &created_at.to_rfc3339(),
             "run.created",
-            serde_json::json!({
+            &serde_json::json!({
                 "settings": run_record.settings,
                 "graph": run_record.graph,
                 "workflow_slug": run_record.workflow_slug,
@@ -304,7 +314,7 @@ mod tests {
             label,
             "2026-03-27T12:00:02Z",
             "run.completed",
-            serde_json::json!({
+            &serde_json::json!({
                 "duration_ms": 3210,
                 "artifact_count": 1,
                 "status": "success",
@@ -368,7 +378,7 @@ mod tests {
                 "run-1",
                 "2026-03-27T12:00:01Z",
                 "run.completed",
-                serde_json::json!({ "reason": "completed" }),
+                &serde_json::json!({ "reason": "completed" }),
             ))
             .await
             .unwrap_err();
@@ -389,7 +399,7 @@ mod tests {
             "run-1",
             "2026-03-27T12:00:02Z",
             "run.completed",
-            serde_json::json!({
+            &serde_json::json!({
                 "duration_ms": 3210,
                 "artifact_count": 1,
                 "status": "success",

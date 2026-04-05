@@ -1117,9 +1117,6 @@ mod tests {
     #[ignore = "requires oras"]
     async fn fetch_feature_oci_integration() {
         if std::env::var_os("FABRO_ENABLE_FETCH_FEATURE_OCI_INTEGRATION").is_none() {
-            eprintln!(
-                "temporarily disabled: fetch_feature_oci_integration depends on live oras/ghcr.io access and is timing out under current nextest ignored-test settings; returning early until the root cause is addressed"
-            );
             return;
         }
 

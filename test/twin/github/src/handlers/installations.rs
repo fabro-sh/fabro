@@ -199,7 +199,7 @@ mod tests {
         let jwt = sign_test_jwt("100", pem);
         let client = test_http_client();
         let resp = client
-            .get(&format!("{}/repos/owner/repo/installation", server.url()))
+            .get(format!("{}/repos/owner/repo/installation", server.url()))
             .header("Authorization", format!("Bearer {jwt}"))
             .header("Accept", "application/vnd.github+json")
             .header("User-Agent", "test-agent")
@@ -230,7 +230,7 @@ mod tests {
         let jwt = sign_test_jwt("100", pem);
         let client = test_http_client();
         let resp = client
-            .get(&format!("{}/repos/owner/repo/installation", server.url()))
+            .get(format!("{}/repos/owner/repo/installation", server.url()))
             .header("Authorization", format!("Bearer {jwt}"))
             .send()
             .await
@@ -258,7 +258,7 @@ mod tests {
         let jwt = sign_test_jwt("100", pem);
         let client = test_http_client();
         let resp = client
-            .get(&format!("{}/repos/owner/repo/installation", server.url()))
+            .get(format!("{}/repos/owner/repo/installation", server.url()))
             .header("Authorization", format!("Bearer {jwt}"))
             .send()
             .await
@@ -286,7 +286,7 @@ mod tests {
         let jwt = sign_test_jwt("100", pem);
         let client = test_http_client();
         let resp = client
-            .post(&format!(
+            .post(format!(
                 "{}/app/installations/{install_id}/access_tokens",
                 server.url()
             ))
@@ -324,7 +324,7 @@ mod tests {
         let jwt = sign_test_jwt("100", pem);
         let client = test_http_client();
         let resp = client
-            .post(&format!(
+            .post(format!(
                 "{}/app/installations/{install_id}/access_tokens",
                 server.url()
             ))

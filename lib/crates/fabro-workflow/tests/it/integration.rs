@@ -7305,14 +7305,16 @@ impl HookTestRunner {
         graph: &Graph,
         run_options: &RunOptions,
     ) -> Result<(Outcome, fabro_store::RunProjection), FabroError> {
-        fabro_workflow::test_support::run_graph_with_hooks_and_state(
-            make_linear_registry(),
-            Arc::clone(&self.emitter),
-            local_env(),
-            graph,
-            run_options,
-            Arc::clone(&self.hook_runner),
-            None,
+        Box::pin(
+            fabro_workflow::test_support::run_graph_with_hooks_and_state(
+                make_linear_registry(),
+                Arc::clone(&self.emitter),
+                local_env(),
+                graph,
+                run_options,
+                Arc::clone(&self.hook_runner),
+                None,
+            ),
         )
         .await
     }
@@ -7420,7 +7422,9 @@ async fn hook_run_start_proceed_allows_run() {
     let dir = tempfile::tempdir().unwrap();
     let run_options = make_run_options(dir.path());
 
-    let (outcome, _state) = engine.run_with_state(&graph, &run_options).await.unwrap();
+    let (outcome, _state) = Box::pin(engine.run_with_state(&graph, &run_options))
+        .await
+        .unwrap();
     assert_eq!(outcome.status, StageStatus::Success);
 }
 
@@ -7485,7 +7489,9 @@ async fn hook_stage_start_proceed_allows_execution() {
     let dir = tempfile::tempdir().unwrap();
     let run_options = make_run_options(dir.path());
 
-    let (outcome, state) = engine.run_with_state(&graph, &run_options).await.unwrap();
+    let (outcome, state) = Box::pin(engine.run_with_state(&graph, &run_options))
+        .await
+        .unwrap();
     assert_eq!(outcome.status, StageStatus::Success);
 
     assert!(
@@ -7509,7 +7515,9 @@ async fn hook_stage_start_skip_bypasses_node() {
     let dir = tempfile::tempdir().unwrap();
     let run_options = make_run_options(dir.path());
 
-    let (outcome, state) = engine.run_with_state(&graph, &run_options).await.unwrap();
+    let (outcome, state) = Box::pin(engine.run_with_state(&graph, &run_options))
+        .await
+        .unwrap();
     // Pipeline reached exit with goal gates satisfied — per spec, SUCCESS.
     assert_eq!(outcome.status, StageStatus::Success);
 
@@ -7570,7 +7578,9 @@ async fn hook_stage_start_matcher_filters_by_node_id() {
     let dir = tempfile::tempdir().unwrap();
     let run_options = make_run_options(dir.path());
 
-    let (outcome, state) = engine.run_with_state(&graph, &run_options).await.unwrap();
+    let (outcome, state) = Box::pin(engine.run_with_state(&graph, &run_options))
+        .await
+        .unwrap();
     // Pipeline reached exit with goal gates satisfied — per spec, SUCCESS.
     assert_eq!(outcome.status, StageStatus::Success);
 
@@ -7603,7 +7613,9 @@ async fn hook_stage_start_matcher_no_match_proceeds() {
     let dir = tempfile::tempdir().unwrap();
     let run_options = make_run_options(dir.path());
 
-    let (outcome, _state) = engine.run_with_state(&graph, &run_options).await.unwrap();
+    let (outcome, _state) = Box::pin(engine.run_with_state(&graph, &run_options))
+        .await
+        .unwrap();
     assert_eq!(outcome.status, StageStatus::Success);
 }
 
@@ -8097,7 +8109,9 @@ async fn hook_matcher_regex_pattern() {
     let dir = tempfile::tempdir().unwrap();
     let run_options = make_run_options(dir.path());
 
-    let (outcome, state) = engine.run_with_state(&graph, &run_options).await.unwrap();
+    let (outcome, state) = Box::pin(engine.run_with_state(&graph, &run_options))
+        .await
+        .unwrap();
     // Pipeline reached exit with goal gates satisfied — per spec, SUCCESS.
     assert_eq!(outcome.status, StageStatus::Success);
 
@@ -8130,7 +8144,9 @@ async fn hook_json_proceed_explicit() {
     let dir = tempfile::tempdir().unwrap();
     let run_options = make_run_options(dir.path());
 
-    let (outcome, _state) = engine.run_with_state(&graph, &run_options).await.unwrap();
+    let (outcome, _state) = Box::pin(engine.run_with_state(&graph, &run_options))
+        .await
+        .unwrap();
     assert_eq!(outcome.status, StageStatus::Success);
 }
 
