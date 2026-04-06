@@ -1,126 +1,70 @@
-use std::path::Path;
-
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Style, Table};
-use serde::Serialize;
-
-use fabro_config::Storage;
-use fabro_workflow::run_lookup::{scan_runs_with_summaries, scratch_base};
-use fabro_workflow::run_status::RunStatus;
+use fabro_api::types;
 
 use crate::args::{DfArgs, GlobalArgs};
-use crate::server_runs::ServerRunLookup;
+use crate::server_client;
 use crate::shared::{format_size, print_json_pretty};
-use crate::user_config::load_settings_with_storage_dir;
-
-#[derive(Serialize)]
-struct SummaryRow {
-    r#type: String,
-    count: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    active: Option<u64>,
-    size_bytes: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    reclaimable_bytes: Option<u64>,
-}
-
-#[derive(Serialize)]
-struct RunSizeRow {
-    run_id: String,
-    workflow_name: String,
-    status: RunStatus,
-    start_time: String,
-    size_bytes: u64,
-    reclaimable: bool,
-}
-
-#[derive(Serialize)]
-struct DfOutput {
-    summary: Vec<SummaryRow>,
-    total_size_bytes: u64,
-    total_reclaimable_bytes: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    runs: Option<Vec<RunSizeRow>>,
-}
 
 pub(super) async fn df_command(args: &DfArgs, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = load_settings_with_storage_dir(args.storage_dir.as_deref())?;
-    let data_dir = cli_settings.storage_dir();
-    let scratch_base_dir = scratch_base(&data_dir);
-    let logs_base_dir = Storage::new(&data_dir).logs_dir();
-    let lookup = ServerRunLookup::connect(&data_dir).await?;
-    df_from(
-        args,
-        lookup.summaries(),
-        &data_dir,
-        &scratch_base_dir,
-        &logs_base_dir,
-        globals,
+    let client = server_client::connect_server_backed_api_client_with_storage_dir(
+        &args.connection.target,
+        args.connection.storage_dir.as_deref(),
     )
+    .await?;
+    let output = client
+        .get_system_disk_usage()
+        .verbose(args.verbose)
+        .send()
+        .await
+        .map_err(server_client::map_api_error)?
+        .into_inner();
+
+    let storage_dir = if globals.json {
+        None
+    } else {
+        client
+            .get_system_info()
+            .send()
+            .await
+            .map_err(server_client::map_api_error)?
+            .into_inner()
+            .storage_dir
+    };
+
+    df_from(&output, storage_dir.as_deref(), globals)
 }
 
 #[allow(clippy::print_stdout)]
 fn df_from(
-    args: &DfArgs,
-    summaries: &[fabro_store::RunSummary],
-    data_dir: &Path,
-    scratch_base: &Path,
-    logs_base: &Path,
+    output: &types::DiskUsageResponse,
+    storage_dir: Option<&str>,
     globals: &GlobalArgs,
 ) -> Result<()> {
-    struct RunSizeInfo {
-        run_id: String,
-        workflow_name: String,
-        status: RunStatus,
-        start_time: String,
-        start_time_dt: Option<DateTime<Utc>>,
-        size: u64,
-    }
+    let runs_summary = output
+        .summary
+        .iter()
+        .find(|row| row.type_.as_deref() == Some("runs"));
+    let logs_summary = output
+        .summary
+        .iter()
+        .find(|row| row.type_.as_deref() == Some("logs"));
 
-    let runs = scan_runs_with_summaries(summaries, scratch_base)?;
-    let mut active_count = 0u64;
-    let mut total_run_size = 0u64;
-    let mut reclaimable_run_size = 0u64;
+    let run_count = runs_summary.and_then(|row| row.count).map_or(0, as_u64);
+    let active_count = runs_summary.and_then(|row| row.active).map_or(0, as_u64);
+    let total_run_size = runs_summary
+        .and_then(|row| row.size_bytes)
+        .map_or(0, as_u64);
+    let reclaimable_run_size = runs_summary
+        .and_then(|row| row.reclaimable_bytes)
+        .map_or(0, as_u64);
 
-    let mut run_details = Vec::new();
-    for run in &runs {
-        let size = dir_size(&run.path);
-        total_run_size += size;
-        if run.status().is_active() {
-            active_count += 1;
-        } else {
-            reclaimable_run_size += size;
-        }
-        if args.verbose {
-            run_details.push(RunSizeInfo {
-                run_id: run.run_id().to_string(),
-                workflow_name: run.workflow_name(),
-                status: run.status(),
-                start_time: run.start_time(),
-                start_time_dt: run.start_time_dt,
-                size,
-            });
-        }
-    }
-
-    let mut log_count = 0u64;
-    let mut total_log_size = 0u64;
-    if let Ok(entries) = std::fs::read_dir(logs_base) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_file() {
-                continue;
-            }
-            if path.extension().is_some_and(|ext| ext == "log") {
-                if let Ok(meta) = path.metadata() {
-                    log_count += 1;
-                    total_log_size += meta.len();
-                }
-            }
-        }
-    }
+    let log_count = logs_summary.and_then(|row| row.count).map_or(0, as_u64);
+    let total_log_size = logs_summary
+        .and_then(|row| row.size_bytes)
+        .map_or(0, as_u64);
 
     let run_reclaim_pct = if total_run_size > 0 {
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -134,41 +78,7 @@ fn df_from(
     let log_reclaim_pct = if total_log_size > 0 { 100 } else { 0 };
 
     if globals.json {
-        let summary = vec![
-            SummaryRow {
-                r#type: "runs".to_string(),
-                count: runs.len().try_into().unwrap(),
-                active: Some(active_count),
-                size_bytes: total_run_size,
-                reclaimable_bytes: Some(reclaimable_run_size),
-            },
-            SummaryRow {
-                r#type: "logs".to_string(),
-                count: log_count,
-                active: None,
-                size_bytes: total_log_size,
-                reclaimable_bytes: Some(total_log_size),
-            },
-        ];
-        let runs = args.verbose.then(|| {
-            run_details
-                .iter()
-                .map(|detail| RunSizeRow {
-                    run_id: detail.run_id.clone(),
-                    workflow_name: detail.workflow_name.clone(),
-                    status: detail.status,
-                    start_time: detail.start_time.clone(),
-                    size_bytes: detail.size,
-                    reclaimable: !detail.status.is_active(),
-                })
-                .collect::<Vec<_>>()
-        });
-        print_json_pretty(&DfOutput {
-            summary,
-            total_size_bytes: total_run_size + total_log_size,
-            total_reclaimable_bytes: reclaimable_run_size + total_log_size,
-            runs,
-        })?;
+        print_json_pretty(output)?;
         return Ok(());
     }
 
@@ -189,7 +99,7 @@ fn df_from(
     let summary_rows: Vec<Vec<CellStruct>> = vec![
         vec![
             "Runs".cell(),
-            runs.len().cell().justify(Justify::Right),
+            run_count.cell().justify(Justify::Right),
             active_count.cell().justify(Justify::Right),
             format_size(total_run_size).cell().justify(Justify::Right),
             format!("{} ({run_reclaim_pct}%)", format_size(reclaimable_run_size))
@@ -214,12 +124,14 @@ fn df_from(
         .separator(Separator::builder().build());
     println!("{}", summary_table.display()?);
 
-    println!();
-    println!("Data directory: {}", data_dir.display());
-
-    if !args.verbose {
-        return Ok(());
+    if let Some(storage_dir) = storage_dir {
+        println!();
+        println!("Data directory: {storage_dir}");
     }
+
+    let Some(run_rows) = output.runs.as_ref() else {
+        return Ok(());
+    };
 
     println!();
     let verbose_title = vec![
@@ -231,30 +143,36 @@ fn df_from(
     ];
 
     let now = Utc::now();
-    let verbose_rows: Vec<Vec<CellStruct>> = run_details
+    let verbose_rows: Vec<Vec<CellStruct>> = run_rows
         .iter()
         .map(|detail| {
-            let age = if let Some(dt) = detail.start_time_dt {
-                let dur = now.signed_duration_since(dt);
-                if dur.num_days() > 0 {
-                    format!("{}d", dur.num_days())
-                } else if dur.num_hours() > 0 {
-                    format!("{}h", dur.num_hours())
-                } else {
-                    format!("{}m", dur.num_minutes().max(1))
-                }
+            let age = detail
+                .start_time
+                .as_deref()
+                .and_then(parse_start_time)
+                .map_or_else(
+                    || "-".to_string(),
+                    |dt| {
+                        let dur = now.signed_duration_since(dt);
+                        if dur.num_days() > 0 {
+                            format!("{}d", dur.num_days())
+                        } else if dur.num_hours() > 0 {
+                            format!("{}h", dur.num_hours())
+                        } else {
+                            format!("{}m", dur.num_minutes().max(1))
+                        }
+                    },
+                );
+            let size = detail.size_bytes.map_or(0, as_u64);
+            let size_display = if detail.reclaimable.unwrap_or(false) {
+                format!("{} *", format_size(size))
             } else {
-                "-".to_string()
-            };
-            let size_display = if detail.status.is_active() {
-                format_size(detail.size)
-            } else {
-                format!("{} *", format_size(detail.size))
+                format_size(size)
             };
             vec![
-                short_run_id(&detail.run_id).cell(),
-                truncate_str(&detail.workflow_name, 16).cell(),
-                detail.status.to_string().cell(),
+                short_run_id(detail.run_id.as_deref().unwrap_or("-")).cell(),
+                truncate_str(detail.workflow_name.as_deref().unwrap_or("-"), 16).cell(),
+                detail.status.as_deref().unwrap_or("-").cell(),
                 age.cell().justify(Justify::Right),
                 size_display.cell().justify(Justify::Right),
             ]
@@ -277,6 +195,16 @@ fn short_run_id(id: &str) -> &str {
     if id.len() > 12 { &id[..12] } else { id }
 }
 
+fn as_u64(value: i64) -> u64 {
+    value.try_into().unwrap_or_default()
+}
+
+fn parse_start_time(value: &str) -> Option<DateTime<Utc>> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .ok()
+        .map(|dt| dt.with_timezone(&Utc))
+}
+
 fn truncate_str(s: &str, max_len: usize) -> String {
     let char_count = s.chars().count();
     if char_count <= max_len {
@@ -284,14 +212,4 @@ fn truncate_str(s: &str, max_len: usize) -> String {
     }
     let truncated: String = s.chars().take(max_len - 3).collect();
     format!("{truncated}...")
-}
-
-fn dir_size(path: &Path) -> u64 {
-    walkdir::WalkDir::new(path)
-        .into_iter()
-        .filter_map(std::result::Result::ok)
-        .filter_map(|entry| entry.metadata().ok())
-        .filter(std::fs::Metadata::is_file)
-        .map(|metadata| metadata.len())
-        .sum()
 }

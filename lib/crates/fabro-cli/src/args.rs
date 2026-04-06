@@ -74,6 +74,15 @@ impl ServerTargetArgs {
     }
 }
 
+#[derive(Args, Debug, Clone, Default)]
+pub(crate) struct ServerConnectionArgs {
+    #[command(flatten)]
+    pub(crate) storage_dir: StorageDirArgs,
+
+    #[command(flatten)]
+    pub(crate) target: ServerTargetArgs,
+}
+
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub(crate) enum CliSandboxProvider {
     Local,
@@ -580,9 +589,15 @@ pub(crate) struct ProviderLoginArgs {
 }
 
 #[derive(Args)]
+pub(crate) struct SystemInfoArgs {
+    #[command(flatten)]
+    pub(crate) connection: ServerConnectionArgs,
+}
+
+#[derive(Args)]
 pub(crate) struct RunsPruneArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) connection: ServerConnectionArgs,
 
     #[command(flatten)]
     pub(crate) filter: RunFilterArgs,
@@ -603,11 +618,21 @@ pub(crate) struct RunsPruneArgs {
 #[derive(Args)]
 pub(crate) struct DfArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) connection: ServerConnectionArgs,
 
     /// Show per-run breakdown
     #[arg(short, long)]
     pub(crate) verbose: bool,
+}
+
+#[derive(Args)]
+pub(crate) struct SystemEventsArgs {
+    #[command(flatten)]
+    pub(crate) connection: ServerConnectionArgs,
+
+    /// Filter by run ID (repeatable)
+    #[arg(long = "run-id")]
+    pub(crate) run_ids: Vec<String>,
 }
 
 #[derive(Args)]
@@ -1032,8 +1057,10 @@ impl Commands {
             Self::Sandbox { command } => command.name(),
             Self::Completion(_) => "completion",
             Self::System(ns) => match &ns.command {
+                SystemCommand::Info(_) => "system info",
                 SystemCommand::Prune(_) => "system prune",
                 SystemCommand::Df(_) => "system df",
+                SystemCommand::Events(_) => "system events",
             },
             Self::SendAnalytics { .. } => "__send_analytics",
             Self::SendPanic { .. } => "__send_panic",
@@ -1184,10 +1211,14 @@ pub(crate) struct SystemNamespace {
 
 #[derive(Subcommand)]
 pub(crate) enum SystemCommand {
+    /// Show server runtime information
+    Info(SystemInfoArgs),
     /// Delete old workflow runs
     Prune(RunsPruneArgs),
     /// Show disk usage
     Df(DfArgs),
+    /// Stream run events from the server
+    Events(SystemEventsArgs),
 }
 
 #[derive(Args)]

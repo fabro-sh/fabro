@@ -7,6 +7,7 @@ use std::sync::Arc;
 use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
+use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
 use fabro_api::types::{
     RunArtifactListResponse, RunStatus, RunStatusResponse, SessionTurn, SmoothnessRating,
@@ -739,6 +740,136 @@ pub(crate) async fn get_server_settings(
     State(_state): State<Arc<AppState>>,
 ) -> Response {
     (StatusCode::OK, Json(settings::server_settings())).into_response()
+}
+
+// ── System ────────────────────────────────────────────────────────────
+
+pub(crate) async fn attach_events_stub(
+    _auth: AuthenticatedService,
+    State(_state): State<Arc<AppState>>,
+) -> Response {
+    let events = vec![
+        Ok::<_, std::convert::Infallible>(
+            Event::default().data(
+                json!({
+                    "seq": 1,
+                    "payload": {
+                        "id": "evt_demo_1",
+                        "ts": "2026-04-06T15:00:00Z",
+                        "run_id": "01JQ0000000000000000000001",
+                        "event": "run.started"
+                    }
+                })
+                .to_string(),
+            ),
+        ),
+        Ok::<_, std::convert::Infallible>(
+            Event::default().data(
+                json!({
+                    "seq": 2,
+                    "payload": {
+                        "id": "evt_demo_2",
+                        "ts": "2026-04-06T15:00:01Z",
+                        "run_id": "01JQ0000000000000000000001",
+                        "event": "stage.started"
+                    }
+                })
+                .to_string(),
+            ),
+        ),
+    ];
+    Sse::new(tokio_stream::iter(events)).into_response()
+}
+
+pub(crate) async fn get_system_info(
+    _auth: AuthenticatedService,
+    State(_state): State<Arc<AppState>>,
+) -> Response {
+    (
+        StatusCode::OK,
+        Json(json!({
+            "version": env!("CARGO_PKG_VERSION"),
+            "git_sha": option_env!("FABRO_GIT_SHA"),
+            "build_date": option_env!("FABRO_BUILD_DATE"),
+            "os": std::env::consts::OS,
+            "arch": std::env::consts::ARCH,
+            "storage_engine": "slatedb",
+            "storage_dir": "/demo/fabro/storage",
+            "uptime_secs": 42,
+            "runs": { "total": 3, "active": 1 },
+            "sandbox_provider": "local"
+        })),
+    )
+        .into_response()
+}
+
+pub(crate) async fn get_system_disk_usage(
+    _auth: AuthenticatedService,
+    State(_state): State<Arc<AppState>>,
+    Query(params): Query<crate::server::DfParams>,
+) -> Response {
+    let runs = params.verbose.then(|| {
+        json!([
+            {
+                "run_id": "01JQ0000000000000000000001",
+                "workflow_name": "Demo Workflow",
+                "status": "succeeded",
+                "start_time": "2026-04-06T15:00:00Z",
+                "size_bytes": 1024,
+                "reclaimable": true
+            }
+        ])
+    });
+    (
+        StatusCode::OK,
+        Json(json!({
+            "summary": [
+                {
+                    "type": "runs",
+                    "count": 1,
+                    "active": 0,
+                    "size_bytes": 1024,
+                    "reclaimable_bytes": 1024
+                },
+                {
+                    "type": "logs",
+                    "count": 1,
+                    "active": null,
+                    "size_bytes": 256,
+                    "reclaimable_bytes": 256
+                }
+            ],
+            "total_size_bytes": 1280,
+            "total_reclaimable_bytes": 1280,
+            "runs": runs
+        })),
+    )
+        .into_response()
+}
+
+pub(crate) async fn prune_runs(
+    _auth: AuthenticatedService,
+    State(_state): State<Arc<AppState>>,
+) -> Response {
+    (
+        StatusCode::OK,
+        Json(json!({
+            "dry_run": true,
+            "runs": [
+                {
+                    "run_id": "01JQ0000000000000000000001",
+                    "dir_name": "20260406-01JQ0000000000000000000001",
+                    "workflow_name": "Demo Workflow",
+                    "size_bytes": 1024
+                }
+            ],
+            "total_count": 1,
+            "total_size_bytes": 1024,
+            "deleted_count": 0,
+            "freed_bytes": 0
+        })),
+    )
+        .into_response()
 }
 
 // ── Usage ──────────────────────────────────────────────────────────────

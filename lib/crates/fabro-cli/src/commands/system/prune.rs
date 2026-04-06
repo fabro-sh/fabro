@@ -1,34 +1,35 @@
-use std::path::Path;
+use std::collections::HashMap;
 
 use anyhow::{Context, Result, bail};
-use chrono::Utc;
-use serde::Serialize;
 use tracing::{debug, info};
 
-use fabro_workflow::run_lookup::{
-    StatusFilter, filter_runs, scan_runs_with_summaries, scratch_base,
-};
+use fabro_api::types;
 
 use crate::args::{GlobalArgs, RunsPruneArgs};
-use crate::commands::runs::rm::remove_run_with_cleanup;
 use crate::server_client;
-use crate::server_runs::ServerRunLookup;
 use crate::shared::{format_size, print_json_pretty};
-use crate::user_config::load_settings_with_storage_dir;
-
-#[derive(Serialize)]
-struct PruneRunRow {
-    run_id: String,
-    dir_name: String,
-    workflow_name: String,
-    size_bytes: u64,
-}
 
 pub(super) async fn prune_command(args: &RunsPruneArgs, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = load_settings_with_storage_dir(args.storage_dir.as_deref())?;
-    let base = scratch_base(&cli_settings.storage_dir());
-    let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
-    prune_from(args, lookup.client(), lookup.summaries(), &base, globals).await
+    let client = server_client::connect_server_backed_api_client_with_storage_dir(
+        &args.connection.target,
+        args.connection.storage_dir.as_deref(),
+    )
+    .await?;
+    let response = client
+        .prune_runs()
+        .body(types::PruneRunsRequest {
+            before: args.filter.before.clone(),
+            dry_run: !args.yes,
+            labels: parse_label_filters(&args.filter.label),
+            older_than: args.older_than.map(format_duration),
+            orphans: args.filter.orphans,
+            workflow: args.filter.workflow.clone(),
+        })
+        .send()
+        .await
+        .map_err(server_client::map_api_error)?
+        .into_inner();
+    prune_from(&response, globals)
 }
 
 pub(crate) fn parse_duration(s: &str) -> Result<chrono::Duration> {
@@ -47,123 +48,56 @@ pub(crate) fn parse_duration(s: &str) -> Result<chrono::Duration> {
     }
 }
 
-async fn prune_from(
-    args: &RunsPruneArgs,
-    client: &server_client::ServerStoreClient,
-    summaries: &[fabro_store::RunSummary],
-    base: &Path,
-    globals: &GlobalArgs,
-) -> Result<()> {
-    let runs = scan_runs_with_summaries(summaries, base)?;
-    let label_filters = parse_label_filters(&args.filter.label);
-    let mut filtered = filter_runs(
-        &runs,
-        args.filter.before.as_deref(),
-        args.filter.workflow.as_deref(),
-        &label_filters,
-        args.filter.orphans,
-        StatusFilter::All,
+fn prune_from(response: &types::PruneRunsResponse, globals: &GlobalArgs) -> Result<()> {
+    let total_count = response.total_count.unwrap_or_default();
+    let total_size_bytes = response.total_size_bytes.unwrap_or_default();
+
+    info!(
+        count = total_count,
+        bytes = total_size_bytes,
+        dry_run = response.dry_run.unwrap_or(true),
+        "pruning runs"
     );
 
-    let has_explicit_filters =
-        args.filter.before.is_some() || args.filter.workflow.is_some() || !label_filters.is_empty();
-    let staleness_threshold = if let Some(duration) = args.older_than {
-        Some(duration)
-    } else if !has_explicit_filters {
-        Some(chrono::Duration::hours(24))
-    } else {
-        None
-    };
-
-    if let Some(threshold) = staleness_threshold {
-        let cutoff = Utc::now() - threshold;
-        filtered.retain(|run| {
-            run.end_time
-                .or(run.start_time_dt)
-                .is_some_and(|time| time < cutoff)
-        });
-    }
-
-    filtered.retain(|run| !run.status().is_active());
-
-    if filtered.is_empty() {
-        if globals.json {
-            if args.yes {
-                print_json_pretty(&serde_json::json!({
-                    "dry_run": false,
-                    "deleted_count": 0,
-                    "freed_bytes": 0,
-                }))?;
-            } else {
-                print_json_pretty(&serde_json::json!({
-                    "dry_run": true,
-                    "runs": Vec::<PruneRunRow>::new(),
-                    "total_count": 0,
-                    "total_size_bytes": 0,
-                }))?;
-            }
-        } else {
-            eprintln!("No matching runs to prune.");
-        }
+    if globals.json {
+        print_json_pretty(response)?;
         return Ok(());
     }
 
-    let rows: Vec<PruneRunRow> = filtered
-        .iter()
-        .map(|run| PruneRunRow {
-            run_id: run.run_id().to_string(),
-            dir_name: run.dir_name.clone(),
-            workflow_name: run.workflow_name(),
-            size_bytes: dir_size(&run.path),
-        })
-        .collect();
-    let total_bytes: u64 = rows.iter().map(|row| row.size_bytes).sum();
-    info!(count = filtered.len(), bytes = total_bytes, "pruning runs");
+    if total_count == 0 {
+        eprintln!("No matching runs to prune.");
+        return Ok(());
+    }
 
-    if args.yes {
-        for run in &filtered {
-            info!(run_id = %run.run_id(), path = %run.path.display(), "deleting run");
-            remove_run_with_cleanup(client, run).await?;
-        }
-        if globals.json {
-            print_json_pretty(&serde_json::json!({
-                "dry_run": false,
-                "deleted_count": filtered.len(),
-                "freed_bytes": total_bytes,
-            }))?;
-        } else {
-            eprintln!(
-                "{} run(s) deleted ({} freed).",
-                filtered.len(),
-                format_size(total_bytes)
+    if response.dry_run.unwrap_or(true) {
+        for run in response.runs.as_deref().unwrap_or(&[]) {
+            debug!(
+                run_id = run.run_id.as_deref().unwrap_or("-"),
+                "would delete run (dry-run)"
+            );
+            println!(
+                "would delete: {} ({})",
+                run.dir_name.as_deref().unwrap_or("-"),
+                run.workflow_name.as_deref().unwrap_or("-")
             );
         }
+        eprintln!(
+            "\n{} run(s) would be deleted ({} freed). Pass --yes to confirm.",
+            total_count,
+            format_size(as_u64(total_size_bytes))
+        );
         return Ok(());
     }
 
-    if globals.json {
-        print_json_pretty(&serde_json::json!({
-            "dry_run": true,
-            "runs": rows,
-            "total_count": filtered.len(),
-            "total_size_bytes": total_bytes,
-        }))?;
-        return Ok(());
-    }
-
-    for run in &filtered {
-        debug!(run_id = %run.run_id(), "would delete run (dry-run)");
-        println!("would delete: {} ({})", run.dir_name, run.workflow_name());
-    }
     eprintln!(
-        "\n{} run(s) would be deleted ({} freed). Pass --yes to confirm.",
-        filtered.len(),
-        format_size(total_bytes)
+        "{} run(s) deleted ({} freed).",
+        response.deleted_count.unwrap_or(total_count),
+        format_size(as_u64(response.freed_bytes.unwrap_or(total_size_bytes)))
     );
     Ok(())
 }
 
-fn parse_label_filters(label_args: &[String]) -> Vec<(String, String)> {
+fn parse_label_filters(label_args: &[String]) -> HashMap<String, String> {
     label_args
         .iter()
         .filter_map(|s| s.split_once('='))
@@ -171,12 +105,14 @@ fn parse_label_filters(label_args: &[String]) -> Vec<(String, String)> {
         .collect()
 }
 
-fn dir_size(path: &Path) -> u64 {
-    walkdir::WalkDir::new(path)
-        .into_iter()
-        .filter_map(std::result::Result::ok)
-        .filter_map(|entry| entry.metadata().ok())
-        .filter(std::fs::Metadata::is_file)
-        .map(|metadata| metadata.len())
-        .sum()
+fn format_duration(duration: chrono::Duration) -> String {
+    if duration.num_hours() % 24 == 0 {
+        format!("{}d", duration.num_days())
+    } else {
+        format!("{}h", duration.num_hours())
+    }
+}
+
+fn as_u64(value: i64) -> u64 {
+    value.try_into().unwrap_or_default()
 }

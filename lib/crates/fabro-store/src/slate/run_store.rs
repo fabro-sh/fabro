@@ -114,6 +114,10 @@ impl RunDatabase {
         self.inner.run_id
     }
 
+    pub fn subscribe(&self) -> broadcast::Receiver<EventEnvelope> {
+        self.inner.event_tx.subscribe()
+    }
+
     pub(crate) fn matches_run(&self, run_id: &RunId) -> bool {
         self.inner.run_id == *run_id
     }

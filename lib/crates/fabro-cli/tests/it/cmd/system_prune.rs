@@ -18,14 +18,15 @@ fn help() {
     Options:
           --json                       Output as JSON [env: FABRO_JSON=]
           --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro/storage) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-          --before <BEFORE>            Only include runs started before this date (YYYY-MM-DD prefix match)
           --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --server <SERVER>            Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --before <BEFORE>            Only include runs started before this date (YYYY-MM-DD prefix match)
           --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
           --workflow <WORKFLOW>        Filter by workflow name (substring match)
           --label <KEY=VALUE>          Filter by label (KEY=VALUE, repeatable, AND semantics)
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --orphans                    Include orphan directories (no run.json)
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
+          --orphans                    Include orphan directories (no run.json)
           --older-than <DURATION>      Only prune runs older than this duration (e.g. 24h, 7d). Default: 24h when no explicit filters are set
           --yes                        Actually delete (default is dry-run)
       -h, --help                       Print help

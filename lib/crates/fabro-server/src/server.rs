@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -40,10 +40,12 @@ use tokio::fs;
 use tokio::sync::Notify;
 use tokio::sync::RwLock as AsyncRwLock;
 use tokio::sync::broadcast;
+use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::oneshot;
 use tokio::task::spawn_blocking;
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::BroadcastStream;
 use tower::{ServiceExt, service_fn};
 use ulid::Ulid;
 
@@ -67,6 +69,9 @@ use fabro_workflow::event::{self as workflow_event, Emitter};
 use fabro_workflow::operations::{self};
 use fabro_workflow::pipeline::Persisted;
 use fabro_workflow::records::Checkpoint;
+use fabro_workflow::run_lookup::{
+    RunInfo, StatusFilter, filter_runs, scan_runs_with_summaries, scratch_base,
+};
 use fabro_workflow::run_status::RunStatus as WorkflowRunStatus;
 use fabro_workflow::run_status::StatusReason as WorkflowStatusReason;
 
@@ -75,13 +80,15 @@ pub use fabro_api::types::{
     AggregateUsage, ApiQuestion, ApiQuestionOption, AppendEventResponse, ArtifactEntry,
     ArtifactListResponse, CompletionContentPart, CompletionMessage, CompletionMessageRole,
     CompletionResponse, CompletionToolChoiceMode, CompletionUsage, CreateCompletionRequest,
-    EventEnvelope as ApiEventEnvelope, ModelReference, PaginatedEventList, PaginatedRunList,
-    PaginationMeta, PreflightResponse, PreviewUrlRequest, PreviewUrlResponse,
+    DiskUsageResponse, DiskUsageRunRow, DiskUsageSummaryRow, EventEnvelope as ApiEventEnvelope,
+    ModelReference, PaginatedEventList, PaginatedRunList, PaginationMeta, PreflightResponse,
+    PreviewUrlRequest, PreviewUrlResponse, PruneRunEntry, PruneRunsRequest, PruneRunsResponse,
     QuestionType as ApiQuestionType, RenderWorkflowGraphDirection, RenderWorkflowGraphFormat,
     RenderWorkflowGraphRequest, RunArtifactEntry, RunArtifactListResponse, RunError,
     RunEvent as ApiRunEvent, RunManifest, RunStatus, RunStatusResponse, SandboxFileEntry,
     SandboxFileListResponse, ServerSettings, SetSecretRequest, SshAccessRequest, SshAccessResponse,
-    StartRunRequest, SubmitAnswerRequest, TokenUsage, UsageByModel, WriteBlobResponse,
+    StartRunRequest, SubmitAnswerRequest, SystemInfoResponse, SystemRunCounts, TokenUsage,
+    UsageByModel, WriteBlobResponse,
 };
 use fabro_graphviz::render::GraphFormat;
 
@@ -137,6 +144,18 @@ impl EventListParams {
 struct AttachParams {
     #[serde(default)]
     since_seq: Option<u32>,
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct DfParams {
+    #[serde(default)]
+    pub(crate) verbose: bool,
+}
+
+#[derive(serde::Deserialize)]
+struct GlobalAttachParams {
+    #[serde(default)]
+    run_id: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -226,8 +245,10 @@ pub struct AppState {
     aggregate_usage: Mutex<UsageAccumulator>,
     store: Arc<Database>,
     artifact_store: ArtifactStore,
+    started_at: Instant,
     max_concurrent_runs: usize,
     scheduler_notify: Notify,
+    global_event_tx: broadcast::Sender<EventEnvelope>,
     pub sessions: SessionStore,
     pub(crate) secret_store: AsyncRwLock<SecretStore>,
     pub(crate) settings: Arc<RwLock<Settings>>,
@@ -365,6 +386,7 @@ fn demo_routes() -> Router<Arc<AppState>> {
         .route("/runs", get(demo::list_runs).post(demo::create_run_stub))
         .route("/preflight", post(run_preflight))
         .route("/graph/render", post(render_graph_from_manifest))
+        .route("/attach", get(demo::attach_events_stub))
         .route("/runs/{id}", get(demo::get_run_status))
         .route("/runs/{id}/questions", get(demo::get_questions_stub))
         .route("/runs/{id}/questions/{qid}/answer", post(demo::answer_stub))
@@ -466,6 +488,9 @@ fn demo_routes() -> Router<Arc<AppState>> {
         .route("/health/diagnostics", post(demo::run_diagnostics))
         .route("/completions", post(create_completion))
         .route("/settings", get(demo::get_server_settings))
+        .route("/system/info", get(demo::get_system_info))
+        .route("/system/df", get(demo::get_system_disk_usage))
+        .route("/system/prune/runs", post(demo::prune_runs))
         .route("/usage", get(demo::get_aggregate_usage))
 }
 
@@ -474,6 +499,7 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/runs", get(list_runs).post(create_run))
         .route("/preflight", post(run_preflight))
         .route("/graph/render", post(render_graph_from_manifest))
+        .route("/attach", get(attach_events))
         .route("/boards/runs", get(list_board_runs))
         .route("/runs/{id}", get(get_run_status).delete(delete_run))
         .route("/runs/{id}/questions", get(get_questions))
@@ -558,6 +584,9 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/health/diagnostics", post(run_diagnostics))
         .route("/completions", post(create_completion))
         .route("/settings", get(get_server_settings))
+        .route("/system/info", get(get_system_info))
+        .route("/system/df", get(get_system_df))
+        .route("/system/prune/runs", post(prune_runs))
         .route("/usage", get(get_aggregate_usage))
 }
 
@@ -609,6 +638,412 @@ fn strip_nulls(value: &mut serde_json::Value) {
         }
         _ => {}
     }
+}
+
+async fn get_system_info(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let settings = state.settings.read().unwrap().clone();
+    let (total_runs, active_runs) = {
+        let runs = state.runs.lock().expect("runs lock poisoned");
+        let active = runs
+            .values()
+            .filter(|run| {
+                matches!(
+                    run.status,
+                    RunStatus::Queued
+                        | RunStatus::Starting
+                        | RunStatus::Running
+                        | RunStatus::Paused
+                )
+            })
+            .count();
+        (runs.len(), active)
+    };
+
+    let response = SystemInfoResponse {
+        version: Some(FABRO_VERSION.to_string()),
+        git_sha: option_env!("FABRO_GIT_SHA").map(str::to_string),
+        build_date: option_env!("FABRO_BUILD_DATE").map(str::to_string),
+        os: Some(std::env::consts::OS.to_string()),
+        arch: Some(std::env::consts::ARCH.to_string()),
+        storage_engine: Some("slatedb".to_string()),
+        storage_dir: Some(settings.storage_dir().display().to_string()),
+        uptime_secs: Some(to_i64(state.started_at.elapsed().as_secs())),
+        runs: Some(SystemRunCounts {
+            total: Some(to_i64(total_runs)),
+            active: Some(to_i64(active_runs)),
+        }),
+        sandbox_provider: Some(system_sandbox_provider(&settings)),
+    };
+    (StatusCode::OK, Json(response)).into_response()
+}
+
+async fn get_system_df(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<DfParams>,
+) -> Response {
+    let storage_dir = state.settings.read().unwrap().storage_dir();
+    let summaries = match state
+        .store
+        .list_runs(&fabro_store::ListRunsQuery::default())
+        .await
+    {
+        Ok(summaries) => summaries,
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+
+    let response = match spawn_blocking(move || {
+        build_disk_usage_response(&summaries, &storage_dir, params.verbose)
+    })
+    .await
+    {
+        Ok(Ok(response)) => response,
+        Ok(Err(err)) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+
+    (StatusCode::OK, Json(response)).into_response()
+}
+
+async fn prune_runs(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<PruneRunsRequest>,
+) -> Response {
+    let storage_dir = state.settings.read().unwrap().storage_dir();
+    let summaries = match state
+        .store
+        .list_runs(&fabro_store::ListRunsQuery::default())
+        .await
+    {
+        Ok(summaries) => summaries,
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+
+    let dry_run = body.dry_run;
+    let body_for_plan = body.clone();
+    let prune_plan =
+        match spawn_blocking(move || build_prune_plan(&body_for_plan, &summaries, &storage_dir))
+            .await
+        {
+            Ok(Ok(plan)) => plan,
+            Ok(Err(err)) => {
+                return ApiError::new(StatusCode::BAD_REQUEST, err.to_string()).into_response();
+            }
+            Err(err) => {
+                return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                    .into_response();
+            }
+        };
+
+    if dry_run {
+        return (
+            StatusCode::OK,
+            Json(PruneRunsResponse {
+                dry_run: Some(true),
+                runs: Some(prune_plan.rows),
+                total_count: Some(to_i64(prune_plan.run_ids.len())),
+                total_size_bytes: Some(to_i64(prune_plan.total_size_bytes)),
+                deleted_count: Some(0),
+                freed_bytes: Some(0),
+            }),
+        )
+            .into_response();
+    }
+
+    for run_id in &prune_plan.run_ids {
+        if let Err(response) = delete_run_internal(&state, *run_id).await {
+            return response;
+        }
+    }
+
+    (
+        StatusCode::OK,
+        Json(PruneRunsResponse {
+            dry_run: Some(false),
+            runs: None,
+            total_count: Some(to_i64(prune_plan.run_ids.len())),
+            total_size_bytes: Some(to_i64(prune_plan.total_size_bytes)),
+            deleted_count: Some(to_i64(prune_plan.run_ids.len())),
+            freed_bytes: Some(to_i64(prune_plan.total_size_bytes)),
+        }),
+    )
+        .into_response()
+}
+
+async fn attach_events(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<GlobalAttachParams>,
+) -> Response {
+    let run_filter = match parse_global_run_filter(params.run_id.as_deref()) {
+        Ok(filter) => filter,
+        Err(err) => return ApiError::new(StatusCode::BAD_REQUEST, err).into_response(),
+    };
+
+    let stream =
+        BroadcastStream::new(state.global_event_tx.subscribe()).filter_map(move |result| {
+            match result {
+                Ok(event) => {
+                    if !event_matches_run_filter(&event, run_filter.as_ref()) {
+                        return None;
+                    }
+                    sse_event_from_store(&event).map(Ok::<Event, std::convert::Infallible>)
+                }
+                Err(_) => None,
+            }
+        });
+
+    Sse::new(stream)
+        .keep_alive(KeepAlive::default())
+        .into_response()
+}
+
+struct PrunePlan {
+    run_ids: Vec<RunId>,
+    rows: Vec<PruneRunEntry>,
+    total_size_bytes: u64,
+}
+
+fn build_disk_usage_response(
+    summaries: &[fabro_store::RunSummary],
+    storage_dir: &std::path::Path,
+    verbose: bool,
+) -> anyhow::Result<DiskUsageResponse> {
+    let scratch_base_dir = scratch_base(storage_dir);
+    let logs_base_dir = Storage::new(storage_dir).logs_dir();
+    let runs = scan_runs_with_summaries(summaries, &scratch_base_dir)?;
+
+    let mut active_count = 0u64;
+    let mut total_run_size = 0u64;
+    let mut reclaimable_run_size = 0u64;
+    let mut run_rows = Vec::new();
+
+    for run in &runs {
+        let size = dir_size(&run.path);
+        total_run_size += size;
+        if run.status().is_active() {
+            active_count += 1;
+        } else {
+            reclaimable_run_size += size;
+        }
+        if verbose {
+            run_rows.push(DiskUsageRunRow {
+                run_id: Some(run.run_id().to_string()),
+                workflow_name: Some(run.workflow_name()),
+                status: Some(run.status().to_string()),
+                start_time: Some(run.start_time()),
+                size_bytes: Some(to_i64(size)),
+                reclaimable: Some(!run.status().is_active()),
+            });
+        }
+    }
+
+    let mut log_count = 0u64;
+    let mut total_log_size = 0u64;
+    if let Ok(entries) = std::fs::read_dir(logs_base_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() || path.extension().is_none_or(|ext| ext != "log") {
+                continue;
+            }
+            if let Ok(metadata) = path.metadata() {
+                log_count += 1;
+                total_log_size += metadata.len();
+            }
+        }
+    }
+
+    Ok(DiskUsageResponse {
+        summary: vec![
+            DiskUsageSummaryRow {
+                type_: Some("runs".to_string()),
+                count: Some(to_i64(runs.len())),
+                active: Some(to_i64(active_count)),
+                size_bytes: Some(to_i64(total_run_size)),
+                reclaimable_bytes: Some(to_i64(reclaimable_run_size)),
+            },
+            DiskUsageSummaryRow {
+                type_: Some("logs".to_string()),
+                count: Some(to_i64(log_count)),
+                active: None,
+                size_bytes: Some(to_i64(total_log_size)),
+                reclaimable_bytes: Some(to_i64(total_log_size)),
+            },
+        ],
+        total_size_bytes: Some(to_i64(total_run_size + total_log_size)),
+        total_reclaimable_bytes: Some(to_i64(reclaimable_run_size + total_log_size)),
+        runs: verbose.then_some(run_rows),
+    })
+}
+
+fn build_prune_plan(
+    request: &PruneRunsRequest,
+    summaries: &[fabro_store::RunSummary],
+    storage_dir: &std::path::Path,
+) -> anyhow::Result<PrunePlan> {
+    let scratch_base_dir = scratch_base(storage_dir);
+    let runs = scan_runs_with_summaries(summaries, &scratch_base_dir)?;
+    let label_filters = request
+        .labels
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect::<Vec<_>>();
+
+    let mut filtered = filter_runs(
+        &runs,
+        request.before.as_deref(),
+        request.workflow.as_deref(),
+        &label_filters,
+        request.orphans,
+        StatusFilter::All,
+    );
+
+    let has_explicit_filters =
+        request.before.is_some() || request.workflow.is_some() || !label_filters.is_empty();
+    let staleness_threshold = if let Some(duration) = request.older_than.as_deref() {
+        Some(parse_system_duration(duration)?)
+    } else if !has_explicit_filters {
+        Some(chrono::Duration::hours(24))
+    } else {
+        None
+    };
+
+    if let Some(threshold) = staleness_threshold {
+        let cutoff = chrono::Utc::now() - threshold;
+        filtered.retain(|run| {
+            run.end_time
+                .or(run.start_time_dt)
+                .is_some_and(|time| time < cutoff)
+        });
+    }
+
+    filtered.retain(|run| !run.status().is_active());
+
+    let rows = filtered
+        .iter()
+        .map(|run| PruneRunEntry {
+            run_id: Some(run.run_id().to_string()),
+            dir_name: Some(run.dir_name.clone()),
+            workflow_name: Some(run.workflow_name()),
+            size_bytes: Some(to_i64(dir_size(&run.path))),
+        })
+        .collect::<Vec<_>>();
+    let total_size_bytes = rows
+        .iter()
+        .map(|row| row.size_bytes.unwrap_or_default())
+        .sum::<i64>()
+        .max(0)
+        .try_into()
+        .unwrap_or_default();
+
+    Ok(PrunePlan {
+        run_ids: filtered.iter().map(RunInfo::run_id).collect(),
+        rows,
+        total_size_bytes,
+    })
+}
+
+fn system_sandbox_provider(settings: &Settings) -> String {
+    settings
+        .sandbox_settings()
+        .and_then(|sandbox| sandbox.provider.clone())
+        .unwrap_or_else(|| SandboxProvider::default().to_string())
+}
+
+fn parse_system_duration(raw: &str) -> anyhow::Result<chrono::Duration> {
+    let raw = raw.trim();
+    anyhow::ensure!(!raw.is_empty(), "empty duration string");
+    let (num_str, unit) = raw.split_at(raw.len().saturating_sub(1));
+    let amount = num_str.parse::<u64>()?;
+    match unit {
+        "h" => Ok(chrono::Duration::hours(
+            i64::try_from(amount).unwrap_or(i64::MAX),
+        )),
+        "d" => Ok(chrono::Duration::days(
+            i64::try_from(amount).unwrap_or(i64::MAX),
+        )),
+        _ => anyhow::bail!("invalid duration unit '{unit}' in '{raw}' (expected 'h' or 'd')"),
+    }
+}
+
+fn parse_global_run_filter(raw: Option<&str>) -> Result<Option<HashSet<RunId>>, String> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+
+    let mut run_ids = HashSet::new();
+    for part in raw
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+    {
+        let run_id = part
+            .parse::<RunId>()
+            .map_err(|err| format!("invalid run_id '{part}': {err}"))?;
+        run_ids.insert(run_id);
+    }
+
+    if run_ids.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(run_ids))
+    }
+}
+
+fn event_matches_run_filter(event: &EventEnvelope, run_filter: Option<&HashSet<RunId>>) -> bool {
+    let Some(run_filter) = run_filter else {
+        return true;
+    };
+    let Some(run_id) = event
+        .payload
+        .as_value()
+        .get("run_id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|value| value.parse::<RunId>().ok())
+    else {
+        return false;
+    };
+    run_filter.contains(&run_id)
+}
+
+fn sse_event_from_store(event: &EventEnvelope) -> Option<Event> {
+    let event = api_event_envelope_from_store(event).ok()?;
+    let data = serde_json::to_string(&event).ok()?;
+    let data = redact_jsonl_line(&data);
+    Some(Event::default().data(data))
+}
+
+fn dir_size(path: &std::path::Path) -> u64 {
+    walkdir::WalkDir::new(path)
+        .into_iter()
+        .filter_map(std::result::Result::ok)
+        .filter_map(|entry| entry.metadata().ok())
+        .filter(std::fs::Metadata::is_file)
+        .map(|metadata| metadata.len())
+        .sum()
+}
+
+fn to_i64<T>(value: T) -> i64
+where
+    i64: TryFrom<T>,
+{
+    i64::try_from(value).unwrap_or(i64::MAX)
 }
 
 async fn list_secrets(_auth: AuthenticatedService, State(state): State<Arc<AppState>>) -> Response {
@@ -989,13 +1424,16 @@ pub(crate) fn build_app_state_with_path(
     local_daemon_mode: bool,
 ) -> anyhow::Result<Arc<AppState>> {
     let secret_store = SecretStore::load(secret_store_path)?;
+    let (global_event_tx, _) = broadcast::channel(4096);
     Ok(Arc::new(AppState {
         runs: Mutex::new(HashMap::new()),
         aggregate_usage: Mutex::new(UsageAccumulator::default()),
         store,
         artifact_store,
+        started_at: Instant::now(),
         max_concurrent_runs,
         scheduler_notify: Notify::new(),
+        global_event_tx,
         sessions: new_session_store(),
         secret_store: AsyncRwLock::new(secret_store),
         settings,
@@ -1070,6 +1508,13 @@ async fn delete_run(
         Err(response) => return response,
     };
 
+    match delete_run_internal(&state, id).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(response) => response,
+    }
+}
+
+async fn delete_run_internal(state: &Arc<AppState>, id: RunId) -> Result<(), Response> {
     let managed_run = if let Ok(mut runs) = state.runs.lock() {
         runs.remove(&id)
     } else {
@@ -1087,31 +1532,29 @@ async fn delete_run(
             let _ = cancel_tx.send(());
         }
         if let Some(run_dir) = managed_run.run_dir.take() {
-            if let Err(err) = remove_run_dir(&run_dir) {
-                return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                    .into_response();
-            }
+            remove_run_dir(&run_dir).map_err(|err| {
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+            })?;
         }
     } else {
         let storage = Storage::new(state.settings.read().unwrap().storage_dir());
         let run_dir = storage.run_scratch(&id).root().to_path_buf();
-        if let Err(err) = remove_run_dir(&run_dir) {
-            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response();
-        }
+        remove_run_dir(&run_dir).map_err(|err| {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        })?;
     }
 
-    match state.store.delete_run(&id).await {
-        Ok(()) => match state.artifact_store.delete_for_run(&id).await {
-            Ok(()) => StatusCode::NO_CONTENT.into_response(),
-            Err(err) => {
-                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
-            }
-        },
-        Err(err) => {
+    state.store.delete_run(&id).await.map_err(|err| {
+        ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+    })?;
+    state
+        .artifact_store
+        .delete_for_run(&id)
+        .await
+        .map_err(|err| {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
-        }
-    }
+        })?;
+    Ok(())
 }
 
 fn remove_run_dir(run_dir: &std::path::Path) -> std::io::Result<()> {
@@ -1250,6 +1693,21 @@ async fn persist_cancelled_run_status(state: &AppState, run_id: RunId) -> anyhow
         },
     )
     .await
+}
+
+async fn forward_run_events_to_global(
+    mut run_events: broadcast::Receiver<EventEnvelope>,
+    global_event_tx: broadcast::Sender<EventEnvelope>,
+) {
+    loop {
+        match run_events.recv().await {
+            Ok(event) => {
+                let _ = global_event_tx.send(event);
+            }
+            Err(RecvError::Lagged(_)) => {}
+            Err(RecvError::Closed) => break,
+        }
+    }
 }
 
 fn managed_run(
@@ -1597,6 +2055,10 @@ async fn execute_run(state: Arc<AppState>, run_id: RunId) {
             return;
         }
     };
+    tokio::spawn(forward_run_events_to_global(
+        run_store.subscribe(),
+        state.global_event_tx.clone(),
+    ));
     let persisted = match Persisted::load_from_store(&run_store, &run_dir).await {
         Ok(persisted) => persisted,
         Err(e) => {
@@ -2063,14 +2525,7 @@ async fn attach_run_events(
         }
     };
     let stream = stream.filter_map(|result| match result {
-        Ok(event) => {
-            let event = api_event_envelope_from_store(&event).ok()?;
-            let data = serde_json::to_string(&event).ok()?;
-            let data = redact_jsonl_line(&data);
-            Some(Ok::<Event, std::convert::Infallible>(
-                Event::default().data(data),
-            ))
-        }
+        Ok(event) => sse_event_from_store(&event).map(Ok::<Event, std::convert::Infallible>),
         Err(_) => None,
     });
 

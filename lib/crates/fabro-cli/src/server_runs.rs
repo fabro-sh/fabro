@@ -37,10 +37,6 @@ impl ServerRunLookup {
         &self.client
     }
 
-    pub(crate) fn summaries(&self) -> &[RunSummary] {
-        &self.summaries
-    }
-
     pub(crate) fn resolve(&self, selector: &str) -> Result<RunInfo> {
         resolve_run_from_summaries(&self.summaries, &self.scratch_base, selector)
     }

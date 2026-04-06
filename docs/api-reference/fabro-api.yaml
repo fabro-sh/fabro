@@ -33,6 +33,8 @@ tags:
     description: Single-turn LLM completions
   - name: Settings
     description: Platform configuration
+  - name: System
+    description: Server runtime, maintenance, and event streaming
 
 security:
   - BearerAuth: []
@@ -1648,6 +1650,91 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AggregateUsage"
+
+  # ── System ───────────────────────────────────────────────────────────
+
+  /api/v1/attach:
+    get:
+      operationId: attachEvents
+      tags: [System]
+      summary: Attach Global Events
+      description: Opens a server-sent event stream for live run events across the server.
+      parameters:
+        - name: run_id
+          in: query
+          required: false
+          description: Optional comma-separated list of run IDs to include.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Server-sent event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /api/v1/system/info:
+    get:
+      operationId: getSystemInfo
+      tags: [System]
+      summary: Retrieve System Info
+      description: Returns runtime details about the active Fabro server process.
+      responses:
+        "200":
+          description: System information
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemInfoResponse"
+
+  /api/v1/system/df:
+    get:
+      operationId: getSystemDiskUsage
+      tags: [System]
+      summary: Retrieve System Disk Usage
+      description: Returns disk usage for the server storage directory.
+      parameters:
+        - name: verbose
+          in: query
+          required: false
+          description: Include per-run disk usage rows.
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Disk usage summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiskUsageResponse"
+
+  /api/v1/system/prune/runs:
+    post:
+      operationId: pruneRuns
+      tags: [System]
+      summary: Prune Runs
+      description: Deletes completed runs matching the provided filters, or previews the deletion set when dry-run is enabled.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PruneRunsRequest"
+      responses:
+        "200":
+          description: Prune result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PruneRunsResponse"
+        "400":
+          description: Invalid prune request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   # ── Secrets ──────────────────────────────────────────────────────────
 
@@ -5807,6 +5894,204 @@ components:
             root:
               type: string
               description: Project fabro root directory.
+
+    SystemInfoResponse:
+      description: Runtime information for the active Fabro server process.
+      type: object
+      properties:
+        version:
+          type: string
+          description: Server version string.
+        git_sha:
+          type: string
+          nullable: true
+          description: Build git SHA when available.
+        build_date:
+          type: string
+          nullable: true
+          description: Build date when available.
+        os:
+          type: string
+          description: Target operating system.
+        arch:
+          type: string
+          description: Target CPU architecture.
+        storage_engine:
+          type: string
+          description: Backing run storage engine.
+        storage_dir:
+          type: string
+          description: Configured storage directory.
+        uptime_secs:
+          type: integer
+          format: int64
+          description: Seconds since this server process started.
+        runs:
+          $ref: "#/components/schemas/SystemRunCounts"
+        sandbox_provider:
+          type: string
+          description: Effective sandbox provider for launched runs.
+
+    SystemRunCounts:
+      description: Counts of known runs in the active server process.
+      type: object
+      properties:
+        total:
+          type: integer
+          format: int64
+          description: Total runs tracked by the server process.
+        active:
+          type: integer
+          format: int64
+          description: Runs currently queued or executing.
+
+    DiskUsageResponse:
+      description: Disk usage summary for server-managed data.
+      type: object
+      properties:
+        summary:
+          type: array
+          items:
+            $ref: "#/components/schemas/DiskUsageSummaryRow"
+        total_size_bytes:
+          type: integer
+          format: int64
+          description: Total size of all tracked system data.
+        total_reclaimable_bytes:
+          type: integer
+          format: int64
+          description: Total bytes reclaimable by deleting inactive runs and logs.
+        runs:
+          type: array
+          nullable: true
+          description: Per-run usage rows when verbose output is requested.
+          items:
+            $ref: "#/components/schemas/DiskUsageRunRow"
+
+    DiskUsageSummaryRow:
+      description: One top-level disk usage category.
+      type: object
+      properties:
+        type:
+          type: string
+          description: Category name, such as runs or logs.
+        count:
+          type: integer
+          format: int64
+          description: Number of items in the category.
+        active:
+          type: integer
+          format: int64
+          nullable: true
+          description: Number of active items when applicable.
+        size_bytes:
+          type: integer
+          format: int64
+          description: Total bytes used by the category.
+        reclaimable_bytes:
+          type: integer
+          format: int64
+          nullable: true
+          description: Bytes reclaimable by pruning the category.
+
+    DiskUsageRunRow:
+      description: Per-run disk usage information.
+      type: object
+      properties:
+        run_id:
+          type: string
+          description: Run identifier.
+        workflow_name:
+          type: string
+          description: Workflow display name.
+        status:
+          type: string
+          description: Current run status.
+        start_time:
+          type: string
+          description: Human-readable start timestamp.
+        size_bytes:
+          type: integer
+          format: int64
+          description: Size used by the run scratch directory.
+        reclaimable:
+          type: boolean
+          description: Whether the run is inactive and reclaimable.
+
+    PruneRunsRequest:
+      description: Filters for system run pruning.
+      type: object
+      properties:
+        dry_run:
+          type: boolean
+          description: Preview matching runs without deleting them.
+          default: true
+        before:
+          type: string
+          description: Include runs started before this YYYY-MM-DD prefix.
+        workflow:
+          type: string
+          description: Filter by workflow name substring.
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+          description: Label filters applied with AND semantics.
+        orphans:
+          type: boolean
+          description: Include orphan run directories without run metadata.
+          default: false
+        older_than:
+          type: string
+          description: Include only runs older than this duration, such as 24h or 7d.
+
+    PruneRunsResponse:
+      description: Result of a prune preview or deletion.
+      type: object
+      properties:
+        dry_run:
+          type: boolean
+          description: Whether this response is a dry-run preview.
+        runs:
+          type: array
+          nullable: true
+          description: Matched runs when dry-run is enabled.
+          items:
+            $ref: "#/components/schemas/PruneRunEntry"
+        total_count:
+          type: integer
+          format: int64
+          description: Count of runs matching the prune filters.
+        total_size_bytes:
+          type: integer
+          format: int64
+          description: Total bytes of the matching runs.
+        deleted_count:
+          type: integer
+          format: int64
+          description: Number of runs deleted when dry-run is false.
+        freed_bytes:
+          type: integer
+          format: int64
+          description: Estimated freed bytes when deletion occurs.
+
+    PruneRunEntry:
+      description: One run matched by a prune preview.
+      type: object
+      properties:
+        run_id:
+          type: string
+          description: Run identifier.
+        dir_name:
+          type: string
+          description: Scratch directory name for the run.
+        workflow_name:
+          type: string
+          description: Workflow display name.
+        size_bytes:
+          type: integer
+          format: int64
+          description: Bytes used by the run scratch directory.
 
     GitHubSettings:
       description: GitHub App token injection configuration.

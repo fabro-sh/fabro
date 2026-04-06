@@ -164,7 +164,14 @@ async fn connect_target_api_client(
 pub(crate) async fn connect_server_backed_api_client(
     args: &ServerTargetArgs,
 ) -> Result<fabro_api::Client> {
-    let settings = user_config::load_settings()?;
+    connect_server_backed_api_client_with_storage_dir(args, None).await
+}
+
+pub(crate) async fn connect_server_backed_api_client_with_storage_dir(
+    args: &ServerTargetArgs,
+    storage_dir: Option<&Path>,
+) -> Result<fabro_api::Client> {
+    let settings = user_config::load_settings_with_storage_dir(storage_dir)?;
     let target = user_config::resolve_server_target(args, &settings)?;
     let runtime = LocalServerRuntime {
         active_config_path: user_config::active_settings_path(None),
@@ -552,7 +559,7 @@ impl ServerStoreClient {
     }
 }
 
-fn map_api_error<E>(err: progenitor_client::Error<E>) -> anyhow::Error
+pub(crate) fn map_api_error<E>(err: progenitor_client::Error<E>) -> anyhow::Error
 where
     E: serde::Serialize + std::fmt::Debug,
 {

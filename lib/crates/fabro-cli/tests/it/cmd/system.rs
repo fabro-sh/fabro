@@ -14,9 +14,11 @@ fn help() {
     Usage: fabro system [OPTIONS] <COMMAND>
 
     Commands:
-      prune  Delete old workflow runs
-      df     Show disk usage
-      help   Print this message or the help of the given subcommand(s)
+      info    Show server runtime information
+      prune   Delete old workflow runs
+      df      Show disk usage
+      events  Stream run events from the server
+      help    Print this message or the help of the given subcommand(s)
 
     Options:
           --json              Output as JSON [env: FABRO_JSON=]

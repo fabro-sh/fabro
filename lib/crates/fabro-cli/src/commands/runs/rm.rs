@@ -1,12 +1,7 @@
 use anyhow::{Context, Result, bail};
-use fabro_sandbox::reconnect::reconnect as reconnect_sandbox;
-use fabro_workflow::event::{Event, to_run_event};
-use fabro_workflow::run_lookup::RunInfo;
-use tracing::warn;
 
 use crate::args::{GlobalArgs, RunsRemoveArgs};
 use crate::server_client;
-use crate::server_client::RunProjection;
 use crate::server_runs::{
     ServerRunSummaryInfo, ServerSummaryLookup, resolve_server_run_from_summaries,
 };
@@ -94,70 +89,6 @@ async fn remove_from(
     Ok(())
 }
 
-pub(crate) async fn remove_run_with_cleanup(
-    client: &server_client::ServerStoreClient,
-    run: &RunInfo,
-) -> Result<()> {
-    remove_run_dir_with_cleanup(client, run).await?;
-    delete_run_store_state(client, run).await
-}
-
-async fn remove_run_dir_with_cleanup(
-    client: &server_client::ServerStoreClient,
-    run: &RunInfo,
-) -> Result<()> {
-    let run_id = run.run_id();
-    let run_state = match client.get_run_state(&run_id).await {
-        Ok(run_state) => Some(run_state),
-        Err(err) => {
-            warn!(
-                run_id = %run_id,
-                error = %err,
-                "failed to open run store during removal"
-            );
-            None
-        }
-    };
-    if run_state.is_some() {
-        let run_event = to_run_event(&run_id, &Event::RunRemoving { reason: None });
-        if let Err(err) = client.append_run_event(&run_id, &run_event).await {
-            warn!(
-                run_id = %run_id,
-                error = %err,
-                "failed to append removing status event"
-            );
-        }
-    }
-
-    if let Some(record) = load_sandbox_record(run_state.as_ref()) {
-        if record.provider != "local" {
-            match reconnect_sandbox(&record).await {
-                Ok(sandbox) => {
-                    if let Err(err) = sandbox.cleanup().await {
-                        warn!(run_id = %run_id, error = %err, "sandbox cleanup failed");
-                    }
-                }
-                Err(err) => {
-                    warn!(run_id = %run_id, error = %err, "sandbox reconnect failed");
-                }
-            }
-        }
-    }
-
-    std::fs::remove_dir_all(&run.path)
-        .with_context(|| format!("failed to delete {}", run.path.display()))
-}
-
-async fn delete_run_store_state(
-    client: &server_client::ServerStoreClient,
-    run: &RunInfo,
-) -> Result<()> {
-    client
-        .delete_store_run(&run.run_id())
-        .await
-        .with_context(|| format!("failed to delete store state for {}", run.run_id()))
-}
-
 async fn delete_server_run(
     client: &server_client::ServerStoreClient,
     run: &ServerRunSummaryInfo,
@@ -166,11 +97,4 @@ async fn delete_server_run(
         .delete_store_run(&run.run_id())
         .await
         .with_context(|| format!("failed to delete store state for {}", run.run_id()))
-}
-
-fn load_sandbox_record(run_state: Option<&RunProjection>) -> Option<fabro_sandbox::SandboxRecord> {
-    if let Some(run_state) = run_state {
-        return run_state.sandbox.clone();
-    }
-    None
 }

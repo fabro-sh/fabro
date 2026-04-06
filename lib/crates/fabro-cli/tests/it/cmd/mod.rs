@@ -57,6 +57,8 @@ mod store_dump;
 pub(crate) mod support;
 mod system;
 mod system_df;
+mod system_events;
+mod system_info;
 mod system_prune;
 mod test_panic;
 mod top_level;

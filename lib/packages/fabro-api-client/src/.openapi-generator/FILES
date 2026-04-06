@@ -12,6 +12,7 @@ api/runs-api.ts
 api/secrets-api.ts
 api/sessions-api.ts
 api/settings-api.ts
+api/system-api.ts
 api/usage-api.ts
 api/verification-api.ts
 api/workflows-api.ts
@@ -61,6 +62,9 @@ models/diagnostics-report.ts
 models/diagnostics-section.ts
 models/diff-file.ts
 models/diff-stats.ts
+models/disk-usage-response.ts
+models/disk-usage-run-row.ts
+models/disk-usage-summary-row.ts
 models/error-response-entry.ts
 models/error-response.ts
 models/event-envelope.ts
@@ -132,6 +136,9 @@ models/preflight-response.ts
 models/preflight-workflow-summary.ts
 models/preview-url-request.ts
 models/preview-url-response.ts
+models/prune-run-entry.ts
+models/prune-runs-request.ts
+models/prune-runs-response.ts
 models/pull-request-settings.ts
 models/question-type.ts
 models/recent-control-result.ts
@@ -202,6 +209,8 @@ models/status-reason.ts
 models/steer-request.ts
 models/store-run-summary.ts
 models/submit-answer-request.ts
+models/system-info-response.ts
+models/system-run-counts.ts
 models/system-stage-turn.ts
 models/tls-settings.ts
 models/token-usage.ts

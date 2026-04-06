@@ -1907,6 +1907,7 @@ dependencies = [
  "tracing",
  "ulid",
  "uuid",
+ "walkdir",
  "x509-parser",
 ]
 
