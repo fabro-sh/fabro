@@ -493,24 +493,6 @@ fabro graph run.toml --format svg
 | `-o, --output <FILE>` | Output file path. Defaults to stdout. |
 | `-d, --direction <DIR>` | Graph direction: `lr` or `tb`. If omitted, uses the Graphviz file's own `rankdir`. |
 
-## `fabro skill install`
-
-Install the built-in `fabro-create-workflow` skill for AI assistants (Claude Code, Codex). The skill teaches AI assistants Fabro's Graphviz syntax, node types, and run configuration format.
-
-```bash
-# Install into the current project (.claude/skills/ or .agents/skills/)
-fabro skill install --for project --dir claude
-
-# Install for all projects (user-level, ~/.claude/skills/)
-fabro skill install --for user --dir claude
-```
-
-| Flag | Description |
-|---|---|
-| `--for <SCOPE>` | `user` (default) — installs to `~/<dir>/skills/`. `project` — installs to `./<dir>/skills/`. |
-| `--dir <DIR>` | Directory convention: `claude` (`.claude/skills/`) or `agents` (`.agents/skills/`). Required. |
-| `--force` | Overwrite an existing installation without prompting. |
-
 ## `fabro rewind`
 
 Rewind a workflow run to an earlier checkpoint. This resets both the run branch and metadata branch refs so that `fabro resume` continues from the target checkpoint.

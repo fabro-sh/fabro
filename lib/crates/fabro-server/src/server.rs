@@ -420,7 +420,6 @@ fn demo_routes() -> Router<Arc<AppState>> {
             get(not_implemented),
         )
         .route("/runs/{id}/usage", get(demo::get_run_usage))
-        .route("/runs/{id}/verification", get(demo::get_run_verification))
         .route("/runs/{id}/settings", get(demo::get_run_settings))
         .route("/runs/{id}/steer", post(demo::steer_run_stub))
         .route("/runs/{id}/preview", post(demo::generate_preview_url_stub))
@@ -531,7 +530,6 @@ fn real_routes() -> Router<Arc<AppState>> {
             get(get_stage_artifact),
         )
         .route("/runs/{id}/usage", get(not_implemented))
-        .route("/runs/{id}/verification", get(not_implemented))
         .route("/runs/{id}/settings", get(not_implemented))
         .route("/runs/{id}/steer", post(not_implemented))
         .route("/runs/{id}/preview", post(generate_preview_url))

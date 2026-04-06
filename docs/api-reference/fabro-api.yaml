@@ -12,7 +12,7 @@ tags:
   - name: Human-in-the-Loop
     description: Questions, answers, and steering for runs
   - name: Run Outputs
-    description: Files and verifications produced by runs
+    description: Files produced by runs
   - name: Run Internals
     description: Internal run details (stages, turns, context, configuration)
   - name: Workflows
@@ -868,30 +868,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RunUsage"
-        "404":
-          description: Run not found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-
-  /api/v1/runs/{id}/verification:
-    get:
-      operationId: retrieveRunVerification
-      tags: [Run Outputs]
-      summary: Retrieve Run Verification
-      description: Returns verification results for a run, organized by criterion with individual control statuses.
-      parameters:
-        - $ref: "#/components/parameters/RunId"
-        - $ref: "#/components/parameters/PageLimit"
-        - $ref: "#/components/parameters/PageOffset"
-      responses:
-        "200":
-          description: Array of verification criteria with controls
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PaginatedRunVerificationList"
         "404":
           description: Run not found
           content:
@@ -2638,20 +2614,6 @@ components:
         meta:
           $ref: "#/components/schemas/PaginationMeta"
 
-    PaginatedRunVerificationList:
-      description: Paginated list of run verification categories.
-      type: object
-      required:
-        - data
-        - meta
-      properties:
-        data:
-          type: array
-          items:
-            $ref: "#/components/schemas/RunVerification"
-        meta:
-          $ref: "#/components/schemas/PaginationMeta"
-
     PaginatedVerificationCriterionList:
       description: Paginated list of verification criteria.
       type: object
@@ -4282,58 +4244,6 @@ components:
         - automated
         - analysis
         - ai-analysis
-
-    RunVerificationControl:
-      description: A verification control result within a run.
-      type: object
-      required:
-        - name
-        - slug
-        - description
-        - type
-        - status
-      properties:
-        name:
-          type: string
-          description: Human-readable control name.
-          example: Motivation
-        slug:
-          type: string
-          description: URL-safe slug for linking to verification detail page.
-          example: motivation
-        description:
-          type: string
-          description: Short description of what the control verifies.
-          example: Origin of proposal identified
-        type:
-          $ref: "#/components/schemas/VerificationType"
-        status:
-          $ref: "#/components/schemas/VerificationResult"
-
-    RunVerification:
-      description: Verification results for a category within a run.
-      type: object
-      required:
-        - name
-        - question
-        - status
-        - controls
-      properties:
-        name:
-          type: string
-          description: Category name.
-          example: Traceability
-        question:
-          type: string
-          description: The guiding question for this verification category.
-          example: Do we understand what this change is and why we're making it?
-        status:
-          $ref: "#/components/schemas/VerificationResult"
-        controls:
-          type: array
-          description: Individual control results within this category.
-          items:
-            $ref: "#/components/schemas/RunVerificationControl"
 
     SteerRequest:
       description: Request body for sending inline steering guidance to a running agent.

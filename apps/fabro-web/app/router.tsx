@@ -25,7 +25,6 @@ import * as RunStages from "./routes/run-stages";
 import * as RunSettings from "./routes/run-settings";
 import * as RunGraph from "./routes/run-graph";
 import * as RunFiles from "./routes/run-files";
-import * as RunVerification from "./routes/run-verification";
 import * as RunUsage from "./routes/run-usage";
 import * as RunRetro from "./routes/run-retro";
 import * as VerificationCriteria from "./routes/verification-criteria";
@@ -115,7 +114,6 @@ export const routes: RouteObject[] = [
               route("settings", RunSettings),
               route("graph", RunGraph),
               route("files", RunFiles),
-              route("verification", RunVerification),
               route("usage", RunUsage),
               route("retro", RunRetro),
             ],
