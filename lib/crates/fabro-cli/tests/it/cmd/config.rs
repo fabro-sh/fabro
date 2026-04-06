@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use fabro_config::mcp::McpTransport;
 use fabro_test::{fabro_snapshot, test_context};
 use fabro_types::Settings;
+use httpmock::MockServer;
 use predicates::prelude::*;
 
 use super::support::run_state;
@@ -17,7 +18,7 @@ fn help() {
     success: true
     exit_code: 0
     ----- stdout -----
-    Inspect merged configuration
+    Inspect effective settings
 
     Usage: fabro settings [OPTIONS] [WORKFLOW]
 
@@ -25,13 +26,14 @@ fn help() {
       [WORKFLOW]  Optional workflow name, .fabro path, or .toml run config to overlay
 
     Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro/storage) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-      -h, --help                       Print help
+          --json              Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --local             Show only locally resolved settings and skip the server call
+          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose           Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help              Print help
     ----- stderr -----
     ");
 }
@@ -60,6 +62,47 @@ fn old_config_show_command_is_rejected() {
 
 fn parse_settings(stdout: &[u8]) -> Settings {
     serde_yaml::from_slice(stdout).expect("stdout should be valid YAML Settings")
+}
+
+fn server_settings_fixture() -> Settings {
+    toml::from_str(
+        r#"
+storage_dir = "/srv/fabro-server"
+verbose = false
+
+[llm]
+model = "server-model"
+provider = "openai"
+
+[vars]
+server_only = "1"
+shared = "server"
+"#,
+    )
+    .expect("server settings fixture should parse")
+}
+
+fn server_settings_body(settings: &Settings) -> String {
+    fn strip_nulls(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                for child in map.values_mut() {
+                    strip_nulls(child);
+                }
+                map.retain(|_, child| !child.is_null());
+            }
+            serde_json::Value::Array(values) => {
+                for child in values {
+                    strip_nulls(child);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut value = serde_json::to_value(settings).expect("settings fixture should serialize");
+    strip_nulls(&mut value);
+    serde_json::to_string(&value).expect("settings payload should serialize")
 }
 
 /// Set up home config and project config for settings command tests.
@@ -255,12 +298,13 @@ commands = ["workflow-setup"]
 // ---------------------------------------------------------------------------
 
 #[test]
-fn settings_merges_cli_and_project_defaults() {
+fn settings_local_merges_cli_and_project_defaults() {
     let context = test_context!();
     let project = setup_settings_fixture(&context);
 
     let output = context
         .settings()
+        .arg("--local")
         .current_dir(project.path())
         .assert()
         .success()
@@ -291,14 +335,14 @@ fn settings_merges_cli_and_project_defaults() {
 }
 
 #[test]
-fn settings_workflow_name_applies_run_overlay_and_deep_merges() {
+fn settings_local_workflow_name_applies_run_overlay_and_deep_merges() {
     let context = test_context!();
     let project = setup_settings_fixture(&context);
 
     let output = context
         .settings()
         .current_dir(project.path())
-        .args(["demo"])
+        .args(["--local", "demo"])
         .assert()
         .success()
         .get_output()
@@ -367,7 +411,7 @@ fn settings_workflow_name_applies_run_overlay_and_deep_merges() {
 }
 
 #[test]
-fn settings_explicit_workflow_path_uses_workflow_project_layers() {
+fn settings_local_explicit_workflow_path_uses_workflow_project_layers() {
     let mut context = test_context!();
     let (project, _storage_dir) = setup_external_workflow_fixture(&mut context);
     let cwd = tempfile::tempdir().unwrap();
@@ -378,7 +422,7 @@ fn settings_explicit_workflow_path_uses_workflow_project_layers() {
         .settings()
         .env_remove("FABRO_STORAGE_DIR")
         .current_dir(cwd.path())
-        .args([workflow.to_str().unwrap()])
+        .args(["--local", workflow.to_str().unwrap()])
         .assert()
         .success()
         .get_output()
@@ -473,6 +517,7 @@ fn settings_fabro_path_matches_ambient_defaults() {
 
     let ambient = context
         .settings()
+        .arg("--local")
         .current_dir(project.path())
         .assert()
         .success()
@@ -482,7 +527,7 @@ fn settings_fabro_path_matches_ambient_defaults() {
     let graph = context
         .settings()
         .current_dir(project.path())
-        .args(["standalone.fabro"])
+        .args(["--local", "standalone.fabro"])
         .assert()
         .success()
         .get_output()
@@ -499,7 +544,7 @@ fn settings_missing_run_config_errors() {
 
     let mut cmd = context.settings();
     cmd.current_dir(project.path());
-    cmd.args(["missing.toml"]);
+    cmd.args(["--local", "missing.toml"]);
     let output = cmd.output().expect("command should execute");
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).trim().is_empty());
@@ -531,6 +576,7 @@ model = "legacy-model"
 
     let assert = context
         .settings()
+        .arg("--local")
         .current_dir(project.path())
         .assert()
         .success()
@@ -559,6 +605,7 @@ shared = "legacy"
 
     let assert = context
         .settings()
+        .arg("--local")
         .current_dir(project.path())
         .assert()
         .success()
@@ -593,7 +640,7 @@ model = "from-fabro-home"
 
     let output = context
         .settings()
-        .arg("--json")
+        .args(["--local", "--json"])
         .env("FABRO_HOME", fabro_home.path())
         .env_remove("FABRO_STORAGE_DIR")
         .output()
@@ -622,4 +669,148 @@ fn settings_rejects_server_url_flag() {
         .stderr(predicate::str::contains(
             "unexpected argument '--server-url' found",
         ));
+}
+
+#[test]
+fn settings_rejects_storage_dir_flag() {
+    let context = test_context!();
+    context
+        .settings()
+        .args(["--storage-dir", "/tmp/fabro-settings"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "unexpected argument '--storage-dir' found",
+        ));
+}
+
+#[test]
+fn settings_rejects_local_and_server_combination() {
+    let context = test_context!();
+    context
+        .settings()
+        .args(["--local", "--server", "https://cli.example.com"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "the argument '--local' cannot be used with '--server <SERVER>'",
+        ));
+}
+
+#[test]
+fn settings_fetches_server_settings_and_merges_with_local_config() {
+    let context = test_context!();
+    let project = setup_settings_fixture(&context);
+    let server = MockServer::start();
+    let server_settings = server_settings_fixture();
+    let mock = server.mock(|when, then| {
+        when.method("GET").path("/api/v1/settings");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(server_settings_body(&server_settings));
+    });
+    context.write_home(
+        ".fabro/settings.toml",
+        format!(
+            r#"
+server = {{ target = "{}/api/v1" }}
+verbose = true
+
+[llm]
+model = "cli-model"
+provider = "openai"
+
+[vars]
+cli_only = "1"
+shared = "cli"
+"#,
+            server.base_url()
+        ),
+    );
+
+    let output = context
+        .settings()
+        .current_dir(project.path())
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    mock.assert();
+    let cfg = parse_settings(&output);
+    let llm = cfg.llm.as_ref().expect("llm config");
+    assert_eq!(llm.model.as_deref(), Some("project-model"));
+    assert_eq!(llm.provider.as_deref(), Some("openai"));
+    assert_eq!(cfg.storage_dir, Some(PathBuf::from("/srv/fabro-server")));
+    assert_eq!(cfg.verbose, Some(true));
+
+    let vars = cfg.vars.as_ref().expect("vars");
+    assert_eq!(vars.get("server_only").map(String::as_str), Some("1"));
+    assert_eq!(vars.get("project_only").map(String::as_str), Some("1"));
+    assert_eq!(vars.get("shared").map(String::as_str), Some("project"));
+}
+
+#[test]
+fn settings_cli_server_target_overrides_configured_server_target() {
+    let context = test_context!();
+    let project = setup_settings_fixture(&context);
+    let configured_server = MockServer::start();
+    let configured_mock = configured_server.mock(|when, then| {
+        when.method("GET").path("/api/v1/settings");
+        then.status(500)
+            .body("configured-server-should-not-be-used");
+    });
+    let cli_server = MockServer::start();
+    let cli_server_settings = server_settings_fixture();
+    let cli_mock = cli_server.mock(|when, then| {
+        when.method("GET").path("/api/v1/settings");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(server_settings_body(&cli_server_settings));
+    });
+    context.write_home(
+        ".fabro/settings.toml",
+        format!(
+            r#"
+[server]
+target = "{}/api/v1"
+
+verbose = true
+"#,
+            configured_server.base_url()
+        ),
+    );
+
+    let output = context
+        .settings()
+        .current_dir(project.path())
+        .args(["--server", &format!("{}/api/v1", cli_server.base_url())])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    cli_mock.assert();
+    configured_mock.assert_calls(0);
+    let cfg = parse_settings(&output);
+    assert_eq!(cfg.storage_dir, Some(PathBuf::from("/srv/fabro-server")));
+}
+
+#[test]
+fn settings_unreachable_http_target_fails_clearly() {
+    let context = test_context!();
+    let project = setup_settings_fixture(&context);
+
+    context
+        .settings()
+        .current_dir(project.path())
+        .args(["--server", "http://127.0.0.1:9"])
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("retrieve_server_settings")
+                .or(predicate::str::contains("error sending request")),
+        );
 }

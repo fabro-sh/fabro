@@ -5684,6 +5684,76 @@ components:
       description: Structured server settings mirroring fabro_types::Settings.
       type: object
       properties:
+        version:
+          type: integer
+          description: Settings schema version.
+        goal:
+          type: string
+          description: Default goal description.
+        goal_file:
+          type: string
+          description: Path to a goal file.
+        graph:
+          type: string
+          description: Default Graphviz graph path.
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+          description: Default label map.
+        server:
+          type: object
+          properties:
+            target:
+              type: string
+              description: Default server target for CLI commands.
+            tls:
+              type: object
+              properties:
+                cert:
+                  type: string
+                  description: Client certificate path.
+                key:
+                  type: string
+                  description: Client key path.
+                ca:
+                  type: string
+                  description: Certificate authority path.
+        exec:
+          type: object
+          properties:
+            provider:
+              type: string
+              description: Default exec provider.
+            model:
+              type: string
+              description: Default exec model.
+            permissions:
+              type: string
+              enum: [read-only, read-write, full]
+              description: Exec permission level.
+            output_format:
+              type: string
+              enum: [text, json]
+              description: Exec output format.
+        prevent_idle_sleep:
+          type: boolean
+          description: Prevent system idle sleep while running.
+        verbose:
+          type: boolean
+          description: Enable verbose output by default.
+        upgrade_check:
+          type: boolean
+          description: Whether upgrade checks are enabled.
+        dry_run:
+          type: boolean
+          description: Default dry-run mode.
+        auto_approve:
+          type: boolean
+          description: Default auto-approve mode.
+        no_retro:
+          type: boolean
+          description: Skip retro generation by default.
         storage_dir:
           type: string
           description: Storage directory path.
@@ -5731,6 +5801,12 @@ components:
           description: Default MCP server configurations.
         github:
           $ref: "#/components/schemas/GitHubSettings"
+        fabro:
+          type: object
+          properties:
+            root:
+              type: string
+              description: Project fabro root directory.
 
     GitHubSettings:
       description: GitHub App token injection configuration.

@@ -5,6 +5,8 @@ use std::sync::Arc;
 use anyhow::{Result, anyhow, bail};
 use fabro_api::types;
 use fabro_config::ConfigLayer;
+use fabro_config::effective_settings;
+use fabro_config::effective_settings::{EffectiveSettingsLayers, EffectiveSettingsMode};
 use fabro_config::project::resolve_working_directory;
 use fabro_config::run::{LlmConfig, parse_run_config};
 use fabro_config::sandbox::{DockerfileSource, SandboxConfig};
@@ -71,21 +73,15 @@ pub(crate) fn prepare_manifest_with_mode(
         .try_fold(ConfigLayer::default(), |layer, config| {
             Ok::<_, anyhow::Error>(parse_manifest_config(config)?.combine(layer))
         })?;
-    let server_defaults = if local_daemon_mode {
-        local_daemon_server_overrides_layer(server_settings)?
-    } else {
-        server_defaults_layer(server_settings)?
-    };
-
-    let mut settings = args_layer
-        .combine(workflow_layer)
-        .combine(project_layer)
-        .combine(user_layer)
-        .combine(server_defaults)
-        .resolve()?;
-    settings
-        .storage_dir
-        .clone_from(&server_settings.storage_dir);
+    let mut settings = effective_settings::resolve_settings(
+        EffectiveSettingsLayers::new(args_layer, workflow_layer, project_layer, user_layer),
+        Some(server_settings),
+        if local_daemon_mode {
+            EffectiveSettingsMode::LocalDaemon
+        } else {
+            EffectiveSettingsMode::RemoteServer
+        },
+    )?;
     if let Some(goal) = manifest.goal.as_ref() {
         settings.goal = Some(goal.text.clone());
         settings.goal_file = None;
@@ -195,7 +191,6 @@ fn root_workflow_config_layer(
 
     let mut layer = parse_run_config(&config.source)?;
     resolve_manifest_dockerfile(&mut layer, Path::new(&config.path), &workflow.files)?;
-    strip_server_owned_fields(&mut layer);
     Ok(layer)
 }
 
@@ -203,66 +198,7 @@ fn parse_manifest_config(config: &types::ManifestConfig) -> Result<ConfigLayer> 
     let Some(source) = config.source.as_deref() else {
         return Ok(ConfigLayer::default());
     };
-    let mut layer: ConfigLayer = toml::from_str(source)?;
-    strip_server_owned_fields(&mut layer);
-    Ok(layer)
-}
-
-fn resolve_manifest_dockerfile(
-    layer: &mut ConfigLayer,
-    config_path: &Path,
-    files: &HashMap<PathBuf, String>,
-) -> Result<()> {
-    let source = layer
-        .sandbox
-        .as_mut()
-        .and_then(|sandbox| sandbox.daytona.as_mut())
-        .and_then(|daytona| daytona.snapshot.as_mut())
-        .and_then(|snapshot| snapshot.dockerfile.as_mut());
-    let Some(DockerfileSource::Path { path }) = source else {
-        return Ok(());
-    };
-    let logical_path =
-        normalize_logical_path(config_path.parent().unwrap_or_else(|| Path::new(".")), path)
-            .ok_or_else(|| anyhow!("unsupported dockerfile reference: {path}"))?;
-    let content = files
-        .get(&logical_path)
-        .cloned()
-        .ok_or_else(|| anyhow!("missing bundled dockerfile: {}", logical_path.display()))?;
-    *source.unwrap() = DockerfileSource::Inline(content);
-    Ok(())
-}
-
-fn server_defaults_layer(settings: &Settings) -> Result<ConfigLayer> {
-    let mut layer: ConfigLayer = serde_json::from_value(serde_json::to_value(settings)?)?;
-    // Run manifests carry their own dry-run intent. Do not let a daemon's
-    // startup-time fallback mode silently force every submitted run/preflight
-    // into simulation.
-    layer.dry_run = None;
-    Ok(layer)
-}
-
-fn local_daemon_server_overrides_layer(settings: &Settings) -> Result<ConfigLayer> {
-    let layer = server_defaults_layer(settings)?;
-    Ok(ConfigLayer {
-        storage_dir: layer.storage_dir,
-        max_concurrent_runs: layer.max_concurrent_runs,
-        web: layer.web,
-        api: layer.api,
-        features: layer.features,
-        ..Default::default()
-    })
-}
-
-fn strip_server_owned_fields(layer: &mut ConfigLayer) {
-    layer.server = None;
-    layer.exec = None;
-    layer.storage_dir = None;
-    layer.max_concurrent_runs = None;
-    layer.web = None;
-    layer.api = None;
-    layer.features = None;
-    layer.log = None;
+    toml::from_str(source).map_err(Into::into)
 }
 
 fn manifest_args_layer(args: Option<&types::ManifestArgs>) -> ConfigLayer {
@@ -300,6 +236,31 @@ fn parse_labels(labels: &[String]) -> HashMap<String, String> {
         .filter_map(|label| label.split_once('='))
         .map(|(key, value)| (key.to_string(), value.to_string()))
         .collect()
+}
+
+fn resolve_manifest_dockerfile(
+    layer: &mut ConfigLayer,
+    config_path: &Path,
+    files: &HashMap<PathBuf, String>,
+) -> Result<()> {
+    let source = layer
+        .sandbox
+        .as_mut()
+        .and_then(|sandbox| sandbox.daytona.as_mut())
+        .and_then(|daytona| daytona.snapshot.as_mut())
+        .and_then(|snapshot| snapshot.dockerfile.as_mut());
+    let Some(DockerfileSource::Path { path }) = source else {
+        return Ok(());
+    };
+    let logical_path =
+        normalize_logical_path(config_path.parent().unwrap_or_else(|| Path::new(".")), path)
+            .ok_or_else(|| anyhow!("unsupported dockerfile reference: {path}"))?;
+    let content = files
+        .get(&logical_path)
+        .cloned()
+        .ok_or_else(|| anyhow!("missing bundled dockerfile: {}", logical_path.display()))?;
+    *source.unwrap() = DockerfileSource::Inline(content);
+    Ok(())
 }
 
 fn normalize_logical_path(current_dir: &Path, reference: &str) -> Option<PathBuf> {

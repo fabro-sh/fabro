@@ -557,7 +557,7 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/repos/github/{owner}/{name}", get(get_github_repo))
         .route("/health/diagnostics", post(run_diagnostics))
         .route("/completions", post(create_completion))
-        .route("/settings", get(not_implemented))
+        .route("/settings", get(get_server_settings))
         .route("/usage", get(get_aggregate_usage))
 }
 
@@ -571,6 +571,44 @@ async fn health() -> Response {
         "version": FABRO_VERSION,
     }))
     .into_response()
+}
+
+async fn get_server_settings(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+) -> Response {
+    let settings = state.settings.read().unwrap().clone();
+    let response = match api_server_settings(&settings) {
+        Ok(response) => response,
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+    (StatusCode::OK, Json(response)).into_response()
+}
+
+fn api_server_settings(settings: &Settings) -> anyhow::Result<fabro_api::types::ServerSettings> {
+    let mut value = serde_json::to_value(settings)?;
+    strip_nulls(&mut value);
+    serde_json::from_value(value).map_err(Into::into)
+}
+
+fn strip_nulls(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for child in map.values_mut() {
+                strip_nulls(child);
+            }
+            map.retain(|_, child| !child.is_null());
+        }
+        serde_json::Value::Array(values) => {
+            for child in values {
+                strip_nulls(child);
+            }
+        }
+        _ => {}
+    }
 }
 
 async fn list_secrets(_auth: AuthenticatedService, State(state): State<Arc<AppState>>) -> Response {

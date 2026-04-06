@@ -34,7 +34,7 @@ fn help() {
       install     Set up the Fabro environment (LLMs, certs, GitHub)
       pr          Pull request operations
       secret      Manage server-owned secrets
-      settings    Inspect merged configuration
+      settings    Inspect effective settings
       workflow    Workflow operations
       discord     Open the Discord community in the browser
       docs        Open the docs website in the browser

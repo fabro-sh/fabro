@@ -225,7 +225,7 @@ async fn main_inner() -> (String, Result<()>) {
             }
             Commands::Pr(ns) => Box::pin(commands::pr::dispatch(ns, &globals)).await?,
             Commands::Secret(ns) => commands::secret::dispatch(ns, &globals).await?,
-            Commands::Settings(args) => commands::config::execute(&args, &globals)?,
+            Commands::Settings(args) => commands::config::execute(&args, &globals).await?,
             Commands::Workflow(ns) => commands::workflow::dispatch(ns, &globals)?,
             Commands::Skill(ns) => commands::skill::dispatch(ns, &globals)?,
             Commands::Upgrade(args) => {
@@ -534,6 +534,8 @@ mod tests {
         assert_eq!(cli.command.name(), "settings");
         match *cli.command {
             Commands::Settings(args) => {
+                assert!(!args.local);
+                assert!(args.target.server.is_none());
                 assert!(args.workflow.is_none());
             }
             _ => panic!("unexpected command variant"),
@@ -545,6 +547,19 @@ mod tests {
         let cli = Cli::try_parse_from(["fabro", "settings", "demo"]).expect("should parse");
         match *cli.command {
             Commands::Settings(args) => {
+                assert_eq!(args.workflow, Some(std::path::PathBuf::from("demo")));
+            }
+            _ => panic!("unexpected command variant"),
+        }
+    }
+
+    #[test]
+    fn parse_settings_local_mode() {
+        let cli =
+            Cli::try_parse_from(["fabro", "settings", "--local", "demo"]).expect("should parse");
+        match *cli.command {
+            Commands::Settings(args) => {
+                assert!(args.local);
                 assert_eq!(args.workflow, Some(std::path::PathBuf::from("demo")));
             }
             _ => panic!("unexpected command variant"),

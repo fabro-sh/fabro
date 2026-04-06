@@ -9,7 +9,7 @@ use fabro_server::bind::Bind;
 use fabro_store::{EventEnvelope, RunSummary, StageId};
 use fabro_types::{
     Checkpoint, Conclusion, NodeStatusRecord, PullRequestRecord, Retro, RunEvent, RunId, RunRecord,
-    RunStatusRecord, SandboxRecord, StartRecord,
+    RunStatusRecord, SandboxRecord, Settings, StartRecord,
 };
 use futures::StreamExt;
 use serde::de::DeserializeOwned;
@@ -231,6 +231,16 @@ async fn wait_for_server_ready(http_client: &reqwest::Client) -> Result<()> {
 impl ServerStoreClient {
     pub(crate) fn clone_for_reuse(&self) -> Self {
         self.clone()
+    }
+
+    pub(crate) async fn retrieve_server_settings(&self) -> Result<Settings> {
+        let response = self
+            .client
+            .retrieve_server_settings()
+            .send()
+            .await
+            .map_err(map_api_error)?;
+        convert_type(response.into_inner())
     }
 
     pub(crate) async fn create_run_from_manifest(
