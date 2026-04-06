@@ -57,8 +57,6 @@ use crate::error::ApiError;
 use crate::jwt_auth::{AuthMode, AuthenticatedService};
 use crate::run_manifest;
 use crate::secret_store::{SecretStore, SecretStoreError};
-use crate::sessions as sessions_mod;
-use crate::sessions::{SessionStore, new_session_store};
 use crate::static_files;
 use crate::web_auth;
 use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
@@ -249,7 +247,7 @@ pub struct AppState {
     max_concurrent_runs: usize,
     scheduler_notify: Notify,
     global_event_tx: broadcast::Sender<EventEnvelope>,
-    pub sessions: SessionStore,
+
     pub(crate) secret_store: AsyncRwLock<SecretStore>,
     pub(crate) settings: Arc<RwLock<Settings>>,
     pub(crate) config_path: PathBuf,
@@ -404,7 +402,6 @@ fn demo_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/pause", post(demo::pause_stub))
         .route("/runs/{id}/unpause", post(demo::unpause_stub))
         .route("/runs/{id}/graph", get(demo::get_run_graph))
-        .route("/runs/{id}/retro", get(demo::get_run_retro))
         .route("/runs/{id}/stages", get(demo::get_run_stages))
         .route("/runs/{id}/artifacts", get(demo::list_run_artifacts_stub))
         .route(
@@ -435,35 +432,6 @@ fn demo_routes() -> Router<Arc<AppState>> {
         .route("/workflows", get(demo::list_workflows))
         .route("/workflows/{name}", get(demo::get_workflow))
         .route("/workflows/{name}/runs", get(demo::list_workflow_runs))
-        .route(
-            "/verification/criteria",
-            get(demo::list_verification_criteria),
-        )
-        .route(
-            "/verification/criteria/{id}",
-            get(demo::get_verification_criterion),
-        )
-        .route(
-            "/verification/controls",
-            get(demo::list_verification_controls),
-        )
-        .route(
-            "/verification/controls/{id}",
-            get(demo::get_verification_control),
-        )
-        .route(
-            "/verification/signoffs",
-            get(demo::list_signoffs).post(demo::create_signoff_stub),
-        )
-        .route("/verification/signoffs/{id}", get(demo::get_signoff))
-        .route("/retros", get(demo::list_retros))
-        .route(
-            "/sessions",
-            get(demo::list_sessions).post(demo::create_session_stub),
-        )
-        .route("/sessions/{id}", get(demo::get_session))
-        .route("/sessions/{id}/messages", post(demo::send_message_stub))
-        .route("/sessions/{id}/events", get(demo::session_events_stub))
         .route(
             "/insights/queries",
             get(demo::list_saved_queries).post(demo::save_query_stub),
@@ -517,7 +485,6 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/pause", post(pause_run))
         .route("/runs/{id}/unpause", post(unpause_run))
         .route("/runs/{id}/graph", get(get_graph))
-        .route("/runs/{id}/retro", get(get_retro))
         .route("/runs/{id}/stages", get(not_implemented))
         .route("/runs/{id}/artifacts", get(list_run_artifacts))
         .route("/runs/{id}/stages/{stageId}/turns", get(not_implemented))
@@ -542,26 +509,6 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/workflows", get(not_implemented))
         .route("/workflows/{name}", get(not_implemented))
         .route("/workflows/{name}/runs", get(not_implemented))
-        .route("/verification/criteria", get(not_implemented))
-        .route("/verification/criteria/{id}", get(not_implemented))
-        .route("/verification/controls", get(not_implemented))
-        .route("/verification/controls/{id}", get(not_implemented))
-        .route(
-            "/verification/signoffs",
-            get(not_implemented).post(not_implemented),
-        )
-        .route("/verification/signoffs/{id}", get(not_implemented))
-        .route("/retros", get(not_implemented))
-        .route(
-            "/sessions",
-            get(sessions_mod::list_sessions).post(sessions_mod::create_session),
-        )
-        .route("/sessions/{id}", get(sessions_mod::retrieve_session))
-        .route("/sessions/{id}/messages", post(sessions_mod::send_message))
-        .route(
-            "/sessions/{id}/events",
-            get(sessions_mod::stream_session_events),
-        )
         .route(
             "/insights/queries",
             get(not_implemented).post(not_implemented),
@@ -1432,7 +1379,6 @@ pub(crate) fn build_app_state_with_path(
         max_concurrent_runs,
         scheduler_notify: Notify::new(),
         global_event_tx,
-        sessions: new_session_store(),
         secret_store: AsyncRwLock::new(secret_store),
         settings,
         config_path,
@@ -3550,40 +3496,6 @@ async fn create_completion(
                 Err(e) => ApiError::new(StatusCode::BAD_GATEWAY, format!("LLM error: {e}"))
                     .into_response(),
             }
-        }
-    }
-}
-
-async fn get_retro(
-    _auth: AuthenticatedService,
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Response {
-    let id = match parse_run_id_path(&id) {
-        Ok(id) => id,
-        Err(response) => return response,
-    };
-    {
-        let runs = state.runs.lock().expect("runs lock poisoned");
-        if !runs.contains_key(&id) {
-            return ApiError::not_found("Run not found.").into_response();
-        }
-    }
-
-    match state.store.open_run_reader(&id).await {
-        Ok(run_store) => match run_store.state().await {
-            Ok(run_state) => match run_state.retro {
-                Some(retro) => (StatusCode::OK, Json(retro)).into_response(),
-                None => (StatusCode::OK, Json(serde_json::json!(null))).into_response(),
-            },
-            Err(err) => {
-                tracing::warn!(run_id = %id, error = %err, "Failed to load retro state from store");
-                (StatusCode::OK, Json(serde_json::json!(null))).into_response()
-            }
-        },
-        Err(err) => {
-            tracing::warn!(run_id = %id, error = %err, "Failed to open run store reader");
-            ApiError::not_found("Run not found.").into_response()
         }
     }
 }

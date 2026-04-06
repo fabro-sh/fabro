@@ -20,15 +20,12 @@ export * from './api/human-in-the-loop-api';
 export * from './api/insights-api';
 export * from './api/models-api';
 export * from './api/repos-api';
-export * from './api/retros-api';
 export * from './api/run-internals-api';
 export * from './api/run-outputs-api';
 export * from './api/runs-api';
 export * from './api/secrets-api';
-export * from './api/sessions-api';
 export * from './api/settings-api';
 export * from './api/system-api';
 export * from './api/usage-api';
-export * from './api/verification-api';
 export * from './api/workflows-api';
 

@@ -11,18 +11,12 @@ import {
   FolderIcon,
 } from "@heroicons/react/16/solid";
 import {
-  BoltIcon,
   BugAntIcon,
   CodeBracketIcon,
   MagnifyingGlassIcon,
-  PencilSquareIcon,
-  ShieldCheckIcon,
   XMarkIcon,
 } from "@heroicons/react/24/outline";
-import { Link } from "react-router";
-import { apiJson, getAuthMe } from "../api";
-import { timeAgo, groupSessionsByDate } from "../lib/time";
-import type { PaginatedSessionList } from "@qltysh/fabro-api-client";
+import { getAuthMe } from "../api";
 
 export const handle = { hideHeader: true, wide: true };
 
@@ -32,11 +26,7 @@ export function meta({}: any) {
 
 export async function loader({ request }: any) {
   const { features } = await getAuthMe();
-  const { data: apiSessions } = await apiJson<PaginatedSessionList>("/sessions", { request });
-  const sessionGroups = groupSessionsByDate(
-    apiSessions.map((s) => ({ id: s.id, title: s.title, created_at: s.created_at }))
-  );
-  return { sessionGroups, features };
+  return { features };
 }
 
 const projects = [
@@ -59,45 +49,8 @@ function BranchIcon({ className }: { className?: string }) {
   );
 }
 
-function SessionSidebar({ groups }: { groups: { label: string; sessions: { id: string; title: string; created_at: string }[] }[] }) {
-  return (
-    <aside className="w-64 shrink-0 border-r border-line flex flex-col h-[calc(100vh-4rem)]">
-      <div className="p-3">
-        <div className="flex w-full items-center gap-2 rounded-lg border border-teal-500/20 bg-panel/60 px-3 py-2 text-sm text-fg-2">
-          <PencilSquareIcon className="size-4 text-teal-500" />
-          New session
-        </div>
-      </div>
-      <nav className="flex-1 overflow-y-auto px-3 pb-4">
-        {groups.map((group) => (
-          <div key={group.label} className="mt-4 first:mt-1">
-            <p className="px-2 mb-1.5 text-[11px] font-medium uppercase tracking-wider text-fg-muted">
-              {group.label}
-            </p>
-            <ul className="space-y-0.5">
-              {group.sessions.map((session) => (
-                <li key={session.id}>
-                  <Link
-                    to={`/sessions/${session.id}`}
-                    className="flex w-full flex-col rounded-lg px-2.5 py-2 text-left transition-colors text-fg-3 hover:bg-overlay"
-                  >
-                    <span className="truncate text-sm">{session.title}</span>
-                    <span className="flex items-center gap-1.5 mt-0.5">
-                      <span className="text-[11px] text-fg-muted">{timeAgo(session.created_at)}</span>
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </nav>
-    </aside>
-  );
-}
-
 export default function Start({ loaderData }: any) {
-  const { sessionGroups, features } = loaderData;
+  const { features } = loaderData;
   const [prompt, setPrompt] = useState("");
   const [project, setProject] = useState(projects[0]);
   const [branch, setBranch] = useState(branches[0]);
@@ -129,8 +82,6 @@ export default function Start({ loaderData }: any) {
 
   return (
     <div className="flex -mx-4 sm:-mx-6 lg:-mx-8 -my-6">
-      <SessionSidebar groups={sessionGroups} />
-
       <div className="flex-1 flex flex-col items-center pt-[12vh] px-4">
         <div className="w-full max-w-2xl">
           <h1 className="flex items-center justify-center gap-3 text-[2rem] font-medium tracking-tight text-fg-2 text-center mb-8">

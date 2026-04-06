@@ -12,7 +12,6 @@ import * as Setup from "./routes/setup";
 import * as SetupComplete from "./routes/setup-complete";
 import * as AuthLogin from "./routes/auth-login";
 import * as Start from "./routes/start";
-import * as SessionDetail from "./routes/session-detail";
 import * as Workflows from "./routes/workflows";
 import * as WorkflowDetail from "./routes/workflow-detail";
 import * as WorkflowDefinition from "./routes/workflow-definition";
@@ -26,12 +25,6 @@ import * as RunSettings from "./routes/run-settings";
 import * as RunGraph from "./routes/run-graph";
 import * as RunFiles from "./routes/run-files";
 import * as RunUsage from "./routes/run-usage";
-import * as RunRetro from "./routes/run-retro";
-import * as VerificationCriteria from "./routes/verification-criteria";
-import * as VerificationCriterion from "./routes/verification-criterion";
-import * as VerificationControls from "./routes/verification-controls";
-import * as VerificationControl from "./routes/verification-control";
-import * as Retros from "./routes/retros";
 import * as Insights from "./routes/insights";
 import * as InsightsEditor from "./routes/insights-editor";
 import * as InsightsNew from "./routes/insights-new";
@@ -97,7 +90,6 @@ export const routes: RouteObject[] = [
         }),
         children: [
           route("start", Start),
-          route("sessions/:sessionId", SessionDetail),
           route("workflows", Workflows),
           route("workflows/:name", WorkflowDetail, {
             children: [
@@ -115,14 +107,8 @@ export const routes: RouteObject[] = [
               route("graph", RunGraph),
               route("files", RunFiles),
               route("usage", RunUsage),
-              route("retro", RunRetro),
             ],
           }),
-          route("verification/criteria", VerificationCriteria),
-          route("verification/criteria/:id", VerificationCriterion),
-          route("verification/controls", VerificationControls),
-          route("verification/controls/:id", VerificationControl),
-          route("retros", Retros),
           route("insights", Insights, {
             children: [
               indexRoute(InsightsEditor),

@@ -11,7 +11,6 @@ const tabs = [
   { name: "Overview", path: "", count: null },
   { name: "Stages", path: "/stages/detect-drift", count: null },
   { name: "Files Changed", path: "/files", count: null },
-  { name: "Retro", path: "/retro", count: null },
   { name: "Usage", path: "/usage", count: null },
 ];
 
