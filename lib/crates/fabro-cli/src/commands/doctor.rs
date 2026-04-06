@@ -324,9 +324,10 @@ pub(crate) async fn run_doctor(
     .flatten()
     .filter(|path| path.exists())
     .collect::<Vec<_>>();
-    let legacy_env_path = legacy_env::legacy_env_file_path()
-        .ok()
-        .filter(|path| path.exists());
+    let legacy_env_path = {
+        let p = legacy_env::legacy_env_file_path();
+        p.exists().then_some(p)
+    };
 
     let mut report = CheckReport {
         title: "Fabro Doctor".to_string(),

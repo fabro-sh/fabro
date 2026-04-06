@@ -16,8 +16,7 @@ pub(crate) fn init_tracing(
     let filter =
         EnvFilter::try_from_env("FABRO_LOG").unwrap_or_else(|_| EnvFilter::new(default_level));
 
-    let log_dir =
-        dirs::home_dir().map_or_else(|| ".fabro/logs".into(), |h| h.join(".fabro").join("logs"));
+    let log_dir = fabro_util::Home::from_env().logs_dir();
 
     std::fs::create_dir_all(&log_dir)
         .with_context(|| format!("Failed to create log directory: {}", log_dir.display()))?;

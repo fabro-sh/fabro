@@ -205,11 +205,11 @@ pub fn format_skills_prompt_section(skills: &[Skill]) -> String {
     lines.join("\n")
 }
 
-pub fn default_skill_dirs(home_dir: Option<&str>, git_root: Option<&str>) -> Vec<String> {
+pub fn default_skill_dirs(fabro_skills_dir: Option<&str>, git_root: Option<&str>) -> Vec<String> {
     let mut dirs = Vec::new();
 
-    if let Some(home) = home_dir {
-        dirs.push(format!("{home}/.fabro/skills"));
+    if let Some(skills_dir) = fabro_skills_dir {
+        dirs.push(skills_dir.to_string());
     }
 
     if let Some(root) = git_root {
@@ -517,7 +517,7 @@ name: trimmed
 
     #[test]
     fn default_dirs_with_git_root() {
-        let dirs = default_skill_dirs(Some("/home/user"), Some("/repo"));
+        let dirs = default_skill_dirs(Some("/home/user/.fabro/skills"), Some("/repo"));
         assert_eq!(
             dirs,
             vec![
@@ -530,7 +530,7 @@ name: trimmed
 
     #[test]
     fn default_dirs_without_git_root() {
-        let dirs = default_skill_dirs(Some("/home/user"), None);
+        let dirs = default_skill_dirs(Some("/home/user/.fabro/skills"), None);
         assert_eq!(dirs, vec!["/home/user/.fabro/skills"]);
     }
 

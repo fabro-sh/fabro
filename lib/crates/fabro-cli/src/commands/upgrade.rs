@@ -384,10 +384,7 @@ pub(crate) fn spawn_upgrade_check(
 }
 
 async fn check_and_print_notice() -> Result<()> {
-    let Some(home) = dirs::home_dir() else {
-        return Ok(());
-    };
-    let state_path = home.join(".fabro").join(LAST_CHECK_FILE);
+    let state_path = fabro_util::Home::from_env().root().join(LAST_CHECK_FILE);
 
     let current = Version::parse(env!("CARGO_PKG_VERSION"))?;
 

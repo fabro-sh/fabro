@@ -154,7 +154,7 @@ pub fn resolve_working_directory(settings: &Settings, caller_cwd: &Path) -> Path
 }
 
 fn resolve_workflow_arg_from(arg: &Path, start_dir: &Path) -> anyhow::Result<PathBuf> {
-    resolve_workflow_arg_impl(arg, start_dir, user_workflows_dir().as_deref())
+    resolve_workflow_arg_impl(arg, start_dir, Some(&user_workflows_dir()))
 }
 
 fn resolve_workflow_arg_impl(
@@ -237,8 +237,8 @@ fn resolve_user_workflow(user_workflows: Option<&Path>, name: &str, arg: &Path) 
 }
 
 /// Return the user-level workflows directory (`~/.fabro/workflows/`).
-fn user_workflows_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".fabro").join("workflows"))
+fn user_workflows_dir() -> PathBuf {
+    crate::Home::from_env().workflows_dir()
 }
 
 /// Metadata about a discovered workflow.

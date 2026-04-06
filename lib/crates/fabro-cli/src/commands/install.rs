@@ -232,17 +232,18 @@ fn merge_server_settings(doc: &mut toml::Value, username: &str) -> Result<()> {
     );
 
     let tls = ensure_table(api, "tls")?;
+    let certs_dir = fabro_util::Home::from_env().certs_dir();
     tls.insert(
         "cert".to_string(),
-        toml::Value::String("~/.fabro/certs/server.crt".to_string()),
+        toml::Value::String(certs_dir.join("server.crt").to_string_lossy().to_string()),
     );
     tls.insert(
         "key".to_string(),
-        toml::Value::String("~/.fabro/certs/server.key".to_string()),
+        toml::Value::String(certs_dir.join("server.key").to_string_lossy().to_string()),
     );
     tls.insert(
         "ca".to_string(),
-        toml::Value::String("~/.fabro/certs/ca.crt".to_string()),
+        toml::Value::String(certs_dir.join("ca.crt").to_string_lossy().to_string()),
     );
 
     Ok(())
@@ -582,12 +583,11 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
     eprintln!("  {}", s.dim.apply_to("LLM providers and GitHub App."));
     eprintln!();
 
-    let fabro_dir = dirs::home_dir()
-        .context("could not determine home directory")?
-        .join(".fabro");
+    let fabro_dir = fabro_util::Home::from_env().root().to_path_buf();
     std::fs::create_dir_all(&fabro_dir)?;
 
-    if let Ok(env_path) = legacy_env::legacy_env_file_path() {
+    {
+        let env_path = legacy_env::legacy_env_file_path();
         if env_path.exists() {
             eprintln!(
                 "  Warning: {} is no longer read by fabro server. This install will persist credentials in the server secret store instead.",
@@ -1043,13 +1043,13 @@ mod tests {
 
     #[test]
     fn config_toml_has_tls_paths() {
-        use std::path::PathBuf;
         let toml_str = format_config_toml("bob");
         let settings: fabro_types::Settings = toml::from_str(&toml_str).unwrap();
         let tls = settings.api.unwrap().tls.expect("tls should be set");
-        assert_eq!(tls.cert, PathBuf::from("~/.fabro/certs/server.crt"));
-        assert_eq!(tls.key, PathBuf::from("~/.fabro/certs/server.key"));
-        assert_eq!(tls.ca, PathBuf::from("~/.fabro/certs/ca.crt"));
+        let certs_dir = fabro_util::Home::from_env().certs_dir();
+        assert_eq!(tls.cert, certs_dir.join("server.crt"));
+        assert_eq!(tls.key, certs_dir.join("server.key"));
+        assert_eq!(tls.ca, certs_dir.join("ca.crt"));
     }
 
     #[test]

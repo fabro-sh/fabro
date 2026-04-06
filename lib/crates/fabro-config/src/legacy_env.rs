@@ -6,10 +6,7 @@
 
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
-
 /// Return the path to the legacy `~/.fabro/.env` file.
-pub fn legacy_env_file_path() -> Result<PathBuf> {
-    let home = dirs::home_dir().context("could not determine home directory")?;
-    Ok(home.join(".fabro").join(".env"))
+pub fn legacy_env_file_path() -> PathBuf {
+    crate::Home::from_env().root().join(".env")
 }

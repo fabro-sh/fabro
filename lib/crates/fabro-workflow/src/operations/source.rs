@@ -102,9 +102,9 @@ pub(crate) fn resolve_workflow(request: ResolveWorkflowInput) -> anyhow::Result<
                 workflow_toml_path: resolution.workflow_toml_path,
                 dot_path: Some(resolution.dot_path.clone()),
                 current_dir: Some(current_dir),
-                file_resolver: Some(Arc::new(FilesystemFileResolver::new(
-                    dirs::home_dir().map(|home| home.join(".fabro")),
-                ))),
+                file_resolver: Some(Arc::new(FilesystemFileResolver::new(Some(
+                    fabro_util::Home::from_env().root().to_path_buf(),
+                )))),
                 goal_override,
                 working_directory,
             })
@@ -126,9 +126,9 @@ pub(crate) fn resolve_workflow(request: ResolveWorkflowInput) -> anyhow::Result<
                 dot_path: None,
                 current_dir: base_dir,
                 file_resolver: has_base_dir.then(|| {
-                    Arc::new(FilesystemFileResolver::new(
-                        dirs::home_dir().map(|home| home.join(".fabro")),
-                    )) as Arc<dyn FileResolver>
+                    Arc::new(FilesystemFileResolver::new(Some(
+                        fabro_util::Home::from_env().root().to_path_buf(),
+                    ))) as Arc<dyn FileResolver>
                 }),
                 goal_override,
                 working_directory,

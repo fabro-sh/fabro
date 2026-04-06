@@ -24,7 +24,7 @@ pub(super) fn list_command(_args: &WorkflowListArgs, globals: &GlobalArgs) -> Re
 
     let fabro_root = resolve_fabro_root(&config_path, &config);
     let project_wf_dir = fabro_root.join("workflows");
-    let user_wf_dir = dirs::home_dir().map(|h| h.join(".fabro").join("workflows"));
+    let user_wf_dir = Some(fabro_util::Home::from_env().workflows_dir());
 
     let workflows = list_workflows_detailed(Some(&project_wf_dir), user_wf_dir.as_deref());
 

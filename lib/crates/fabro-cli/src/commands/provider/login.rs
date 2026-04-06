@@ -25,7 +25,8 @@ pub(super) async fn login_command(args: ProviderLoginArgs, globals: &GlobalArgs)
         vec![(env_var, key)]
     };
 
-    if let Ok(path) = legacy_env::legacy_env_file_path() {
+    {
+        let path = legacy_env::legacy_env_file_path();
         if path.exists() {
             eprintln!(
                 "  Warning: {} is no longer read by fabro server. Re-enter credentials with `fabro provider login` or `fabro secret set`.",

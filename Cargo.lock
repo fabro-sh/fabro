@@ -1960,6 +1960,7 @@ dependencies = [
  "chrono",
  "dirs",
  "exec",
+ "fabro-util",
  "fork",
  "git2",
  "insta",

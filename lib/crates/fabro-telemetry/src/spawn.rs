@@ -106,10 +106,7 @@ fn spawn_detached_windows(args: &[&str], env: &[(&str, &str)], env_remove: &[&st
 /// This is the shared pattern used by both analytics and panic senders.
 /// No-ops silently if the exe path can't be resolved or the temp file can't be written.
 pub fn spawn_fabro_subcommand(subcommand: &str, filename: &str, json: &[u8]) {
-    let Some(home) = dirs::home_dir() else {
-        return;
-    };
-    let tmp_dir = home.join(".fabro").join("tmp");
+    let tmp_dir = fabro_util::Home::from_env().tmp_dir();
     if std::fs::create_dir_all(&tmp_dir).is_err() {
         return;
     }
