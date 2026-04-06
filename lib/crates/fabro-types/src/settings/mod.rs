@@ -185,8 +185,10 @@ impl Settings {
             std::env::var_os("FABRO_HOME")
                 .map(|root| PathBuf::from(root).join("storage"))
                 .or_else(|| dirs::home_dir().map(|home| home.join(".fabro")))
-                .map(|root| root.join("storage"))
-                .unwrap_or_else(|| PathBuf::from(".fabro/storage"))
+                .map_or_else(
+                    || PathBuf::from(".fabro/storage"),
+                    |root| root.join("storage"),
+                )
         })
     }
 }
