@@ -71,7 +71,7 @@ struct Cli {
 pub use fabro_config::user::{OutputFormat, PermissionLevel};
 
 impl AgentArgs {
-    /// Fill `None` fields from user.toml values, then hardcoded defaults.
+    /// Fill `None` fields from settings.toml values, then hardcoded defaults.
     pub fn apply_cli_defaults(
         &mut self,
         provider: Option<&str>,

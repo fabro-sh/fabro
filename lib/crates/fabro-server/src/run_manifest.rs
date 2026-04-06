@@ -37,9 +37,10 @@ pub(crate) struct PreparedManifest {
     pub working_directory: PathBuf,
 }
 
-pub(crate) fn prepare_manifest(
+pub(crate) fn prepare_manifest_with_mode(
     server_settings: &Settings,
     manifest: &types::RunManifest,
+    local_daemon_mode: bool,
 ) -> Result<PreparedManifest> {
     if manifest.version != 1 {
         bail!("unsupported manifest version {}", manifest.version);
@@ -70,7 +71,11 @@ pub(crate) fn prepare_manifest(
         .try_fold(ConfigLayer::default(), |layer, config| {
             Ok::<_, anyhow::Error>(parse_manifest_config(config)?.combine(layer))
         })?;
-    let server_defaults = server_defaults_layer(server_settings)?;
+    let server_defaults = if local_daemon_mode {
+        local_daemon_server_overrides_layer(server_settings)?
+    } else {
+        server_defaults_layer(server_settings)?
+    };
 
     let mut settings = args_layer
         .combine(workflow_layer)
@@ -231,6 +236,18 @@ fn server_defaults_layer(settings: &Settings) -> Result<ConfigLayer> {
     // into simulation.
     layer.dry_run = None;
     Ok(layer)
+}
+
+fn local_daemon_server_overrides_layer(settings: &Settings) -> Result<ConfigLayer> {
+    let layer = server_defaults_layer(settings)?;
+    Ok(ConfigLayer {
+        storage_dir: layer.storage_dir,
+        max_concurrent_runs: layer.max_concurrent_runs,
+        web: layer.web,
+        api: layer.api,
+        features: layer.features,
+        ..Default::default()
+    })
 }
 
 fn strip_server_owned_fields(layer: &mut ConfigLayer) {
@@ -790,7 +807,8 @@ mod tests {
             ..Default::default()
         };
 
-        let prepared = prepare_manifest(&server_settings, &minimal_manifest()).unwrap();
+        let prepared =
+            prepare_manifest_with_mode(&server_settings, &minimal_manifest(), false).unwrap();
 
         assert_eq!(prepared.settings.dry_run, None);
         assert_eq!(
@@ -819,8 +837,67 @@ mod tests {
             verbose: None,
         });
 
-        let prepared = prepare_manifest(&server_settings, &manifest).unwrap();
+        let prepared = prepare_manifest_with_mode(&server_settings, &manifest, false).unwrap();
 
         assert_eq!(prepared.settings.dry_run, Some(true));
+    }
+
+    #[test]
+    fn prepare_manifest_local_daemon_prefers_bundled_settings_without_duplication() {
+        let server_settings: Settings = toml::from_str(
+            r#"
+storage_dir = "/srv/fabro"
+
+[setup]
+commands = ["cli-setup"]
+
+[git]
+app_id = "snapshotted-app-id"
+"#,
+        )
+        .unwrap();
+
+        let mut manifest = minimal_manifest();
+        manifest.workflows.get_mut("workflow.fabro").unwrap().config =
+            Some(types::ManifestWorkflowConfig {
+                path: "workflow.toml".to_string(),
+                source: r#"
+version = 1
+
+[setup]
+commands = ["workflow-setup"]
+"#
+                .to_string(),
+            });
+        manifest.configs.push(types::ManifestConfig {
+            path: Some("/tmp/home/.fabro/settings.toml".to_string()),
+            source: Some(
+                r#"
+[setup]
+commands = ["cli-setup"]
+
+[git]
+app_id = "snapshotted-app-id"
+"#
+                .to_string(),
+            ),
+            type_: types::ManifestConfigType::User,
+        });
+
+        let prepared = prepare_manifest_with_mode(&server_settings, &manifest, true).unwrap();
+
+        assert_eq!(
+            prepared
+                .settings
+                .setup
+                .as_ref()
+                .map(|setup| setup.commands.clone()),
+            Some(vec!["workflow-setup".to_string(), "cli-setup".to_string(),])
+        );
+        assert_eq!(prepared.settings.app_id(), Some("snapshotted-app-id"));
+        assert_eq!(
+            prepared.settings.storage_dir,
+            Some(PathBuf::from("/srv/fabro"))
+        );
     }
 }

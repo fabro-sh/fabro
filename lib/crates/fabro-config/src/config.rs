@@ -11,7 +11,7 @@ use crate::run::{
     ArtifactsConfig, CheckpointConfig, GitHubConfig, LlmConfig, PullRequestConfig, SetupConfig,
 };
 use crate::sandbox::SandboxConfig;
-use crate::server::{self, ApiConfig, FeaturesConfig, GitConfig, LogConfig, WebConfig};
+use crate::server::{ApiConfig, FeaturesConfig, GitConfig, LogConfig, WebConfig};
 use crate::user::{self, ExecConfig, ServerConfig};
 use fabro_types::Settings;
 
@@ -21,7 +21,7 @@ fn is_default_checkpoint(c: &CheckpointConfig) -> bool {
 
 /// Unified sparse configuration type for all Fabro config sources.
 ///
-/// Loading functions (`load_user_config`, `load_server_config`, `load_run_config`,
+/// Loading functions (`load_settings_config`, `load_run_config`,
 /// `parse_project_config`) all return this type. Fields irrelevant to a
 /// particular source are left unset (`None` / empty).
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -218,14 +218,9 @@ impl ConfigLayer {
             .unwrap_or_default())
     }
 
-    /// Load user defaults from `~/.fabro/user.toml`.
-    pub fn user() -> anyhow::Result<Self> {
-        user::load_user_config(None)
-    }
-
-    /// Load server defaults from `~/.fabro/server.toml`.
-    pub fn server() -> anyhow::Result<Self> {
-        server::load_server_config(None)
+    /// Load machine-level defaults from `~/.fabro/settings.toml`.
+    pub fn settings() -> anyhow::Result<Self> {
+        user::load_settings_config(None)
     }
 
     /// Convert this combined config layer into final resolved settings.

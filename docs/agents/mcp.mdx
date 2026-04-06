@@ -30,7 +30,7 @@ For example, a server named `filesystem` exposing a `read_file` tool becomes `mc
 
 MCP servers can be configured in two places:
 
-- **`~/.fabro/user.toml`** — applies to `fabro exec` sessions. See [User Configuration](/reference/user-configuration#mcp_servers-section).
+- **`~/.fabro/settings.toml`** — applies to `fabro exec` sessions. See [User Configuration](/reference/user-configuration#mcp_servers-section).
 - **Run config TOML** — applies to workflow runs (`fabro run`). See [Run Configuration](/execution/run-configuration#mcp_servers).
 
 Each server entry specifies a transport type and optional timeouts. The server name is the TOML table key and is used in qualified tool names.

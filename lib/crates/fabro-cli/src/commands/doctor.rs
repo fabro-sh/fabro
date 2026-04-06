@@ -5,7 +5,10 @@ use std::sync::LazyLock;
 use anyhow::Result;
 use fabro_api::types as api_types;
 use fabro_config::legacy_env;
-use fabro_config::user::{default_user_config_path, legacy_user_config_path};
+use fabro_config::user::{
+    default_settings_path, legacy_old_user_config_path, legacy_server_config_path,
+    legacy_user_config_path,
+};
 pub(crate) use fabro_util::check_report::{
     CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus,
 };
@@ -148,45 +151,52 @@ pub(crate) fn check_system_deps(specs: &[DepSpec], outcomes: &[ProbeOutcome]) ->
 }
 
 pub(crate) fn check_config(
-    user_path: Option<PathBuf>,
-    legacy_path: Option<PathBuf>,
+    settings_path: Option<PathBuf>,
+    legacy_paths: &[PathBuf],
 ) -> CheckResult {
-    match (user_path, legacy_path) {
-        (Some(path), None) => CheckResult {
+    match (settings_path, legacy_paths.is_empty()) {
+        (Some(path), true) => CheckResult {
             name: "Configuration".to_string(),
             status: CheckStatus::Pass,
             summary: path.display().to_string(),
             details: vec![CheckDetail::new(format!("Loaded from {}", path.display()))],
             remediation: None,
         },
-        (Some(path), Some(legacy)) => CheckResult {
+        (Some(path), false) => CheckResult {
             name: "Configuration".to_string(),
             status: CheckStatus::Warning,
             summary: path.display().to_string(),
-            details: vec![
-                CheckDetail::new(format!("Loaded from {}", path.display())),
-                CheckDetail::new(format!("Ignoring legacy config file {}", legacy.display())),
-            ],
-            remediation: Some(format!("Delete or rename {}", legacy.display())),
+            details: std::iter::once(CheckDetail::new(format!("Loaded from {}", path.display())))
+                .chain(legacy_paths.iter().map(|legacy| {
+                    CheckDetail::new(format!("Ignoring legacy config file {}", legacy.display()))
+                }))
+                .collect(),
+            remediation: Some("Delete or rename legacy config files".to_string()),
         },
-        (None, Some(legacy)) => CheckResult {
+        (None, false) => CheckResult {
             name: "Configuration".to_string(),
             status: CheckStatus::Warning,
-            summary: "legacy config file ignored".to_string(),
-            details: vec![
-                CheckDetail::new(format!("Found legacy config file {}", legacy.display())),
-                CheckDetail::new("Rename it to ~/.fabro/user.toml".to_string()),
-            ],
-            remediation: Some(format!("Rename {} to ~/.fabro/user.toml", legacy.display())),
+            summary: "legacy config files ignored".to_string(),
+            details: legacy_paths
+                .iter()
+                .map(|legacy| {
+                    CheckDetail::new(format!("Found legacy config file {}", legacy.display()))
+                })
+                .chain(std::iter::once(CheckDetail::new(
+                    "Rename one to ~/.fabro/settings.toml or create a new settings.toml"
+                        .to_string(),
+                )))
+                .collect(),
+            remediation: Some("Create ~/.fabro/settings.toml".to_string()),
         },
-        (None, None) => CheckResult {
+        (None, true) => CheckResult {
             name: "Configuration".to_string(),
             status: CheckStatus::Warning,
-            summary: "no user config file found".to_string(),
+            summary: "no settings config file found".to_string(),
             details: vec![CheckDetail::new(
-                "Create ~/.fabro/user.toml to configure Fabro".to_string(),
+                "Create ~/.fabro/settings.toml to configure Fabro".to_string(),
             )],
-            remediation: Some("Create ~/.fabro/user.toml".to_string()),
+            remediation: Some("Create ~/.fabro/settings.toml".to_string()),
         },
     }
 }
@@ -304,8 +314,16 @@ pub(crate) async fn run_doctor(
         Some(spinner)
     };
 
-    let user_config_path = default_user_config_path();
-    let legacy_config_path = legacy_user_config_path();
+    let settings_config_path = default_settings_path();
+    let legacy_config_paths = [
+        legacy_user_config_path(),
+        legacy_old_user_config_path(),
+        legacy_server_config_path(),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|path| path.exists())
+    .collect::<Vec<_>>();
     let legacy_env_path = legacy_env::legacy_env_file_path()
         .ok()
         .filter(|path| path.exists());
@@ -316,8 +334,8 @@ pub(crate) async fn run_doctor(
             title: "Local".to_string(),
             checks: vec![
                 check_config(
-                    user_config_path.filter(|path| path.exists()),
-                    legacy_config_path.filter(|path| path.exists()),
+                    settings_config_path.filter(|path| path.exists()),
+                    &legacy_config_paths,
                 ),
                 check_legacy_env(legacy_env_path),
             ],
@@ -430,21 +448,21 @@ mod tests {
 
     #[test]
     fn check_config_pass_with_path() {
-        let result = check_config(Some(PathBuf::from("/home/user/.fabro/user.toml")), None);
+        let result = check_config(Some(PathBuf::from("/home/user/.fabro/settings.toml")), &[]);
         assert_eq!(result.status, CheckStatus::Pass);
-        assert!(result.summary.contains(".fabro/user.toml"));
+        assert!(result.summary.contains(".fabro/settings.toml"));
     }
 
     #[test]
     fn check_config_warning_without_path() {
-        let result = check_config(None, None);
+        let result = check_config(None, &[]);
         assert_eq!(result.status, CheckStatus::Warning);
         assert!(result.remediation.is_some());
     }
 
     #[test]
     fn check_config_warning_for_legacy_only_path() {
-        let result = check_config(None, Some(PathBuf::from("/home/user/.fabro/cli.toml")));
+        let result = check_config(None, &[PathBuf::from("/home/user/.fabro/cli.toml")]);
         assert_eq!(result.status, CheckStatus::Warning);
         assert!(result.summary.contains("legacy"));
     }

@@ -6,7 +6,7 @@ use fabro_types::{RunId, RunStatus};
 use tokio::time::sleep;
 
 use crate::server_client;
-use crate::user_config::load_user_settings;
+use crate::user_config::load_settings;
 
 pub(crate) async fn execute(
     run_id: RunId,
@@ -17,7 +17,7 @@ pub(crate) async fn execute(
 
     let storage_dir = match storage_dir {
         Some(storage_dir) => storage_dir,
-        None => load_user_settings()?.storage_dir(),
+        None => load_settings()?.storage_dir(),
     };
 
     let client = server_client::connect_server(&storage_dir).await?;

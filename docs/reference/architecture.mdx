@@ -32,7 +32,7 @@ fabro server start
 
 ### Configuration
 
-The server reads `~/.fabro/server.toml` for default settings (model, sandbox, variables, authentication). This file is live-reloaded — changes take effect within seconds without restarting the server.
+The server reads `~/.fabro/settings.toml` for default settings (model, sandbox, variables, authentication). This file is live-reloaded — changes take effect within seconds without restarting the server.
 
 Key server config options:
 
@@ -61,7 +61,7 @@ In API mode, human-in-the-loop questions are served over HTTP instead of termina
 
 ### Authentication
 
-API mode supports two authentication strategies, configurable in `server.toml`:
+API mode supports two authentication strategies, configurable in `settings.toml`:
 
 - **JWT** — EdDSA-signed tokens (used by the web UI)
 - **mTLS** — Mutual TLS with client certificates (used for service-to-service communication)

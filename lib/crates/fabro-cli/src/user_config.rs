@@ -9,21 +9,21 @@ use tracing::debug;
 
 use crate::args::{ServerConnectionArgs, ServerTargetArgs};
 
-pub(crate) fn load_user_settings() -> anyhow::Result<Settings> {
-    ConfigLayer::user()?.resolve()
+pub(crate) fn load_settings() -> anyhow::Result<Settings> {
+    ConfigLayer::settings()?.resolve()
 }
 
-pub(crate) fn user_layer_with_storage_dir(
+pub(crate) fn settings_layer_with_storage_dir(
     storage_dir: Option<&Path>,
 ) -> anyhow::Result<ConfigLayer> {
-    let layer = ConfigLayer::user()?;
+    let layer = ConfigLayer::settings()?;
     Ok(apply_storage_dir_override(layer, storage_dir))
 }
 
-pub(crate) fn load_user_settings_with_storage_dir(
+pub(crate) fn load_settings_with_storage_dir(
     storage_dir: Option<&Path>,
 ) -> anyhow::Result<Settings> {
-    user_layer_with_storage_dir(storage_dir)?.resolve()
+    settings_layer_with_storage_dir(storage_dir)?.resolve()
 }
 
 pub(crate) fn apply_storage_dir_override(

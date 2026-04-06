@@ -51,7 +51,6 @@ pub(crate) async fn create_run(
         args: run_manifest_args(args),
         run_id,
     })?;
-
     let connection = user_config::server_backed_command_connection(&args.target, &settings)?;
     let client = server_client::connect_server_connection(&connection).await?;
     if !quiet {

@@ -29,9 +29,9 @@ Fabro is single-tenant software designed for small, trusted teams. The following
 ### Authentication
 
 - **Enable authentication.** Fabro supports GitHub OAuth and Tailscale header-based auth for the web app. Do not use `insecure_disabled` outside of local development.
-- **Configure a username allowlist.** Both GitHub and Tailscale auth support `allowed_usernames` in `server.toml`. An empty allowlist rejects all requests.
+- **Configure a username allowlist.** Both GitHub and Tailscale auth support `allowed_usernames` in `settings.toml`. An empty allowlist rejects all requests.
 - **Use JWT to connect the web app to the API.** Configure `FABRO_JWT_PRIVATE_KEY` on the web app and `FABRO_JWT_PUBLIC_KEY` on the API server. JWT tokens are Ed25519-signed and short-lived (30 seconds).
-- **Use mTLS for machine-to-machine API access.** Configure `[api.tls]` in `server.toml` with server cert, key, and CA. Set client auth to `Required` for programmatic clients (CI, scripts).
+- **Use mTLS for machine-to-machine API access.** Configure `[api.tls]` in `settings.toml` with server cert, key, and CA. Set client auth to `Required` for programmatic clients (CI, scripts).
 
 ### Secrets
 

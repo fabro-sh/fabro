@@ -9,12 +9,13 @@ use crate::commands::run::output::{
 use crate::manifest_builder::{ManifestBuildInput, build_run_manifest, preflight_manifest_args};
 use crate::server_client;
 use crate::shared::print_json_pretty;
-use crate::user_config::load_user_settings_with_storage_dir;
+use crate::user_config::{self, load_settings_with_storage_dir};
 
 pub(crate) async fn execute(mut args: PreflightArgs, globals: &GlobalArgs) -> anyhow::Result<()> {
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-    let cli_settings = load_user_settings_with_storage_dir(args.target.storage_dir())?;
+    let cli_settings = load_settings_with_storage_dir(args.target.storage_dir())?;
     args.verbose = args.verbose || cli_settings.verbose_enabled();
+    let connection = user_config::server_backed_command_connection(&args.target, &cli_settings)?;
 
     let cwd = std::env::current_dir()?;
     let manifest = build_run_manifest(ManifestBuildInput {
@@ -24,7 +25,7 @@ pub(crate) async fn execute(mut args: PreflightArgs, globals: &GlobalArgs) -> an
         args: preflight_manifest_args(&args),
         run_id: None,
     })?;
-    let client = server_client::connect_server_backed(&args.target).await?;
+    let client = server_client::connect_server_connection(&connection).await?;
     let response = client.run_preflight(manifest.manifest).await?;
     let diagnostics = api_diagnostics_to_local(&response.workflow.diagnostics);
 

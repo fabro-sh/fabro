@@ -9,7 +9,7 @@ use tracing::{debug, info};
 use crate::args::{CpArgs, GlobalArgs};
 use crate::server_runs::ServerRunLookup;
 use crate::shared::{print_json_pretty, split_run_path};
-use crate::user_config::load_user_settings_with_storage_dir;
+use crate::user_config::load_settings_with_storage_dir;
 
 enum CopyDirection {
     Download {
@@ -26,7 +26,7 @@ enum CopyDirection {
 
 pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs) -> Result<()> {
     let direction = parse_direction(&args.src, &args.dst)?;
-    let cli_settings = load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
+    let cli_settings = load_settings_with_storage_dir(args.storage_dir.as_deref())?;
 
     match direction {
         CopyDirection::Download {

@@ -7,10 +7,10 @@ use fabro_workflow::artifacts::{ArtifactEntry, scan_artifacts};
 use crate::args::{ArtifactCpArgs, GlobalArgs};
 use crate::server_runs::ServerRunLookup;
 use crate::shared::{print_json_pretty, split_run_path};
-use crate::user_config::load_user_settings_with_storage_dir;
+use crate::user_config::load_settings_with_storage_dir;
 
 pub(super) async fn cp_command(args: &ArtifactCpArgs, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
+    let cli_settings = load_settings_with_storage_dir(args.storage_dir.as_deref())?;
     let (run_id, asset_path) = parse_source(&args.source);
     let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
     let run = lookup.resolve(run_id)?;

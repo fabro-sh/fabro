@@ -23,8 +23,7 @@ pub(crate) async fn dispatch(command: ServerCommand, _globals: &GlobalArgs) -> R
             foreground,
             serve_args,
         }) => {
-            let settings =
-                user_config::load_user_settings_with_storage_dir(storage_dir.as_deref())?;
+            let settings = user_config::load_settings_with_storage_dir(storage_dir.as_deref())?;
             let storage_dir = settings.storage_dir();
             let bind_addr = match serve_args.bind.as_deref() {
                 Some(s) => bind::parse_bind(s)?,
@@ -37,15 +36,13 @@ pub(crate) async fn dispatch(command: ServerCommand, _globals: &GlobalArgs) -> R
             storage_dir,
             timeout,
         }) => {
-            let settings =
-                user_config::load_user_settings_with_storage_dir(storage_dir.as_deref())?;
+            let settings = user_config::load_settings_with_storage_dir(storage_dir.as_deref())?;
             let storage_dir = settings.storage_dir();
             stop::execute(&storage_dir, Duration::from_secs(timeout));
             Ok(())
         }
         ServerCommand::Status(ServerStatusArgs { storage_dir, json }) => {
-            let settings =
-                user_config::load_user_settings_with_storage_dir(storage_dir.as_deref())?;
+            let settings = user_config::load_settings_with_storage_dir(storage_dir.as_deref())?;
             let storage_dir = settings.storage_dir();
             status::execute(&storage_dir, json)
         }
@@ -59,8 +56,7 @@ pub(crate) async fn dispatch(command: ServerCommand, _globals: &GlobalArgs) -> R
             } else {
                 // __serve should always receive an explicit --bind from the parent,
                 // but fall back to the storage dir default if missing.
-                let settings =
-                    user_config::load_user_settings_with_storage_dir(storage_dir.as_deref())?;
+                let settings = user_config::load_settings_with_storage_dir(storage_dir.as_deref())?;
                 Bind::Unix(settings.storage_dir().join("fabro.sock"))
             };
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));

@@ -42,7 +42,7 @@ Fabro uses a [GitHub App](https://docs.github.com/en/apps/overview) to authentic
 
 4. GitHub redirects back to Fabro, which automatically:
    - Exchanges the temporary code for permanent app credentials
-   - Writes `app_id`, `client_id`, and `slug` to `~/.fabro/server.toml`
+   - Writes `app_id`, `client_id`, and `slug` to `~/.fabro/settings.toml`
    - Stores `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_WEBHOOK_SECRET`, and `GITHUB_APP_PRIVATE_KEY` in the server secret store
    - Generates a `SESSION_SECRET` for web app sessions
    - Redirects you to the login page
@@ -61,8 +61,8 @@ The GitHub App check verifies five fields:
 
 | Field | Source |
 |---|---|
-| `git.app_id` | `~/.fabro/server.toml` |
-| `git.client_id` | `~/.fabro/server.toml` |
+| `git.app_id` | `~/.fabro/settings.toml` |
+| `git.client_id` | `~/.fabro/settings.toml` |
 | `GITHUB_APP_CLIENT_SECRET` | Server secret store |
 | `GITHUB_APP_WEBHOOK_SECRET` | Server secret store |
 | `GITHUB_APP_PRIVATE_KEY` | Server secret store |
@@ -73,9 +73,9 @@ If all five are set, the check passes. If none are set, it warns (GitHub integra
 
 The GitHub App configuration lives in two places:
 
-### `~/.fabro/server.toml`
+### `~/.fabro/settings.toml`
 
-```toml title="server.toml"
+```toml title="settings.toml"
 [git]
 provider = "github"
 app_id = "123456"
@@ -111,11 +111,11 @@ The web app uses the GitHub App's OAuth credentials to authenticate users:
 3. User authorizes the app on GitHub
 4. GitHub redirects back with an authorization code
 5. Fabro exchanges the code for an access token and fetches the user's profile and verified email
-6. Fabro checks the username against the `allowed_usernames` list in `server.toml`
+6. Fabro checks the username against the `allowed_usernames` list in `settings.toml`
 
-Configure allowed users in `server.toml`:
+Configure allowed users in `settings.toml`:
 
-```toml title="server.toml"
+```toml title="settings.toml"
 [web.auth]
 provider = "github"
 allowed_usernames = ["alice", "bob"]
@@ -191,7 +191,7 @@ The app is installed but doesn't have access to this specific repository. Update
 
 ### "GitHub App authentication failed"
 
-The `app_id` in `server.toml` or the `GITHUB_APP_PRIVATE_KEY` environment variable is incorrect. Re-run the setup flow or verify the values match your GitHub App.
+The `app_id` in `settings.toml` or the `GITHUB_APP_PRIVATE_KEY` environment variable is incorrect. Re-run the setup flow or verify the values match your GitHub App.
 
 ### Clone fails for private repositories
 

@@ -14,7 +14,7 @@ mod user_config;
 use anyhow::Result;
 use args::{Commands, GlobalArgs, LONG_VERSION, RunCommands, ServerCommand, ServerNamespace};
 use clap::{CommandFactory, FromArgMatches, Parser, error::ErrorKind, parser::ValueSource};
-use fabro_config::server::load_server_settings;
+use fabro_config::user::load_settings_config;
 use fabro_telemetry::{git, panic as tel_panic, sanitize, sender};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
@@ -229,7 +229,9 @@ async fn main_inner() -> (String, Result<()>) {
                 }),
         }) = command.as_ref()
         {
-            match load_server_settings(args.config.as_deref()) {
+            match load_settings_config(args.config.as_deref())
+                .and_then(fabro_types::Settings::try_from)
+            {
                 Ok(server_settings) => (
                     server_settings.log.as_ref().and_then(|l| l.level.clone()),
                     false,
@@ -237,7 +239,7 @@ async fn main_inner() -> (String, Result<()>) {
                 Err(err) => return (command_name, Err(err)),
             }
         } else {
-            match user_config::load_user_settings() {
+            match user_config::load_settings() {
                 Ok(cli_settings) => (
                     cli_settings.log.as_ref().and_then(|l| l.level.clone()),
                     cli_settings.upgrade_check_enabled(),
@@ -295,7 +297,7 @@ async fn main_inner() -> (String, Result<()>) {
                 commands::server::dispatch(ns.command, &globals).await?;
             }
             Commands::Doctor(args) => {
-                let cli_settings = user_config::load_user_settings()?;
+                let cli_settings = user_config::load_settings()?;
                 let verbose = args.verbose || cli_settings.verbose_enabled();
                 let exit_code = commands::doctor::run_doctor(&args, verbose, &globals).await?;
                 std::process::exit(exit_code);

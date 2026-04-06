@@ -11,7 +11,7 @@ use crate::args::{GlobalArgs, PrListArgs};
 use crate::server_client;
 use crate::server_runs::ServerRunLookup;
 use crate::shared::print_json_pretty;
-use crate::user_config::load_user_settings_with_storage_dir;
+use crate::user_config::load_settings_with_storage_dir;
 
 #[derive(Serialize)]
 struct PrRow {
@@ -27,7 +27,7 @@ pub(super) async fn list_command(
     github_app: Option<fabro_github::GitHubAppCredentials>,
     globals: &GlobalArgs,
 ) -> Result<()> {
-    let cli_settings = load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
+    let cli_settings = load_settings_with_storage_dir(args.storage_dir.as_deref())?;
     let base = runs_base(&cli_settings.storage_dir());
     let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
     list_from(

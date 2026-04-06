@@ -1,25 +1,49 @@
 ---
-title: "User Configuration"
-description: "Configure default user settings for Fabro with user.toml"
+title: "Settings Configuration"
+description: "Configure CLI and shared machine defaults with settings.toml"
 ---
 
-Fabro loads user defaults from `~/.fabro/user.toml` so you don't have to pass common flags every time. The file is optional — if it doesn't exist, built-in defaults are used.
+Fabro loads machine defaults from `~/.fabro/settings.toml`. The file is optional. If it does not exist, Fabro falls back to built-in defaults.
+
+On a same-machine setup, the CLI and server both read this file. On a remote setup, each machine has its own `settings.toml` and reads the sections relevant to that process.
+
+<Note>
+Legacy `cli.toml`, `user.toml`, and `server.toml` are ignored with a warning. Rename them to `settings.toml`.
+</Note>
 
 ## File location
 
-The default path is `~/.fabro/user.toml`. Fabro silently skips loading if the file is missing.
+The default path is `~/.fabro/settings.toml`.
+
+Use `fabro server start --config /path/to/settings.toml` if the server should read a different file.
+
+## Who reads what
+
+`settings.toml` uses the same schema as `fabro.toml` and `workflow.toml`, but each process only reads the fields it understands.
+
+| Scope | Examples |
+|---|---|
+| CLI-only | `verbose`, `upgrade_check`, `[server]`, `[exec]`, `[mcp_servers]` |
+| Shared defaults | `[llm]`, `[log]`, `[git]`, `[pull_request]`, plus run-default sections like `[setup]`, `[sandbox]`, `[checkpoint]`, and `[vars]` |
+| Server-only | `storage_dir`, `max_concurrent_runs`, `[web]`, `[api]`, `[features]` |
+
+See [Server Configuration](/administration/server-configuration) for the server-owned sections.
 
 ## Precedence
 
-CLI flags always take the highest priority:
+For CLI commands running on the local machine, precedence is:
 
 1. **CLI flags** — always win
-2. **`user.toml`** — used when no flag is provided
-3. **Built-in defaults** — used when neither flag nor config is set
+2. **`workflow.toml` / `run.toml`** — per-run overrides
+3. **`fabro.toml`** — project defaults
+4. **`settings.toml`** — machine defaults
+5. **Built-in defaults**
+
+On a same-machine setup, the server reads the same `settings.toml`. On a remote setup, the CLI machine and server machine each use their own local `settings.toml`.
 
 ## Full example
 
-```toml title="user.toml"
+```toml title="settings.toml"
 verbose = true
 upgrade_check = true
 
@@ -67,7 +91,7 @@ url = "https://mcp.sentry.dev/mcp"
 Authorization = "Bearer sk-xxx"
 ```
 
-All fields are optional. You can include just the sections and keys you want to override.
+All fields are optional. Include only the sections and keys you want to override. On a same-machine install, this same file can also include server sections such as `[web]` and `[api]`.
 
 ## `upgrade_check`
 
@@ -140,7 +164,7 @@ Configure the default log level. Precedence: `FABRO_LOG` env var > `--debug` fla
 
 ### `[git.author]`
 
-Customize the git author identity used for checkpoint commits. Overrides the server default when set.
+Customize the git author identity used for checkpoint commits. On same-machine setups, the CLI and server read the same `[git.author]` value. On remote setups, each machine uses its own local `settings.toml`.
 
 | Key | Description | Default |
 |---|---|---|
@@ -149,7 +173,7 @@ Customize the git author identity used for checkpoint commits. Overrides the ser
 
 ## `[server]` section
 
-Connection info for commands that can target a remote Fabro server.
+Connection info for commands that target a remote Fabro server.
 
 | Key | Description | Default |
 |---|---|---|
@@ -175,7 +199,7 @@ Optional mTLS configuration for authenticating with the server. When present, th
 
 Paths support `~/` expansion. Example:
 
-```toml title="user.toml"
+```toml title="settings.toml"
 [server.tls]
 cert = "~/.fabro/tls/client.crt"
 key = "~/.fabro/tls/client.key"
@@ -184,9 +208,9 @@ ca = "~/.fabro/tls/ca.crt"
 
 ## `[pull_request]`
 
-Enable auto-PR globally so workflows open a GitHub pull request on successful completion — even when running with a `.fabro` file instead of a `run.toml`.
+Enable auto-PR globally so workflows open a GitHub pull request on successful completion, even when running with a `.fabro` file instead of a `run.toml`.
 
-```toml title="user.toml"
+```toml title="settings.toml"
 [pull_request]
 enabled = true
 ```
@@ -195,7 +219,7 @@ enabled = true
 |---|---|---|
 | `enabled` | Automatically create a PR after successful runs | `false` |
 
-Precedence: `run.toml` > `fabro.toml` (project config) > `user.toml` > `server.toml` > built-in default (`false`).
+Precedence: `run.toml` > `fabro.toml` > `settings.toml` > built-in default (`false`).
 
 ## `[mcp_servers]` section
 
@@ -205,7 +229,7 @@ Configure [MCP servers](/agents/mcp) to connect to during `fabro exec` sessions.
 
 Spawn a local process and communicate over stdin/stdout:
 
-```toml title="user.toml"
+```toml title="settings.toml"
 [mcp_servers.filesystem]
 type = "stdio"
 command = ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
@@ -228,7 +252,7 @@ NODE_ENV = "production"
 
 Connect to a remote MCP server over Streamable HTTP:
 
-```toml title="user.toml"
+```toml title="settings.toml"
 [mcp_servers.sentry]
 type = "http"
 url = "https://mcp.sentry.dev/mcp"
@@ -241,13 +265,13 @@ Authorization = "Bearer sk-xxx"
 |---|---|---|
 | `type` | Must be `"http"` | — |
 | `url` | The MCP server endpoint URL | — |
-| `headers` | Optional HTTP headers (e.g., for authentication) | `{}` |
+| `headers` | Optional HTTP headers (for example, for authentication) | `{}` |
 | `startup_timeout_secs` | Max seconds for the MCP handshake | `10` |
 | `tool_timeout_secs` | Max seconds for a single tool call | `60` |
 
 ### Sandbox transport
 
-Run an MCP server inside the workflow's sandbox and connect via preview URL. Only available with remote sandbox providers ([Daytona](/integrations/daytona)) that support port previews. Typically configured in [run config TOML](/execution/run-configuration#mcp_servers) rather than `user.toml`.
+Run an MCP server inside the workflow's sandbox and connect via preview URL. Only available with remote sandbox providers ([Daytona](/integrations/daytona)) that support port previews. Typically configure this in [run config TOML](/execution/run-configuration#mcp_servers) rather than `settings.toml`.
 
 ```toml title="run.toml"
 [mcp_servers.playwright]

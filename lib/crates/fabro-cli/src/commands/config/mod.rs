@@ -13,7 +13,7 @@ fn merged_config(workflow: Option<&Path>, args: &SettingsArgs) -> anyhow::Result
         Some(path) => ConfigLayer::for_workflow(path, &cwd)?,
         None => ConfigLayer::project(&cwd)?,
     };
-    let cli = user_config::user_layer_with_storage_dir(args.storage_dir.as_deref())?;
+    let cli = user_config::settings_layer_with_storage_dir(args.storage_dir.as_deref())?;
 
     base.combine(cli).resolve()
 }

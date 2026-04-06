@@ -12,7 +12,7 @@ use fabro_workflow::run_status::RunStatus;
 use crate::args::{DfArgs, GlobalArgs};
 use crate::server_runs::ServerRunLookup;
 use crate::shared::{format_size, print_json_pretty};
-use crate::user_config::load_user_settings_with_storage_dir;
+use crate::user_config::load_settings_with_storage_dir;
 
 #[derive(Serialize)]
 struct SummaryRow {
@@ -45,7 +45,7 @@ struct DfOutput {
 }
 
 pub(super) async fn df_command(args: &DfArgs, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
+    let cli_settings = load_settings_with_storage_dir(args.storage_dir.as_deref())?;
     let data_dir = cli_settings.storage_dir();
     let runs_base_dir = runs_base(&data_dir);
     let logs_base_dir = logs_base(&data_dir);

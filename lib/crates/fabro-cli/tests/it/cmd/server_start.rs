@@ -50,7 +50,7 @@ fn help() {
           --max-concurrent-runs <MAX_CONCURRENT_RUNS>
               Maximum number of concurrent run executions
           --config <CONFIG>
-              Path to server config file (default: ~/.fabro/server.toml)
+              Path to server config file (default: ~/.fabro/settings.toml)
       -h, --help
               Print help
     ----- stderr -----

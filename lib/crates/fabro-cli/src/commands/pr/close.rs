@@ -6,14 +6,14 @@ use tracing::info;
 
 use crate::args::{GlobalArgs, PrCloseArgs};
 use crate::shared::print_json_pretty;
-use crate::user_config::load_user_settings_with_storage_dir;
+use crate::user_config::load_settings_with_storage_dir;
 
 pub(super) async fn close_command(
     args: PrCloseArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
     globals: &GlobalArgs,
 ) -> Result<()> {
-    let cli_settings = load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
+    let cli_settings = load_settings_with_storage_dir(args.storage_dir.as_deref())?;
     let base = runs_base(&cli_settings.storage_dir());
     close_from(&base, args, github_app, globals).await
 }

@@ -217,7 +217,7 @@ fn list_uses_configured_server_target_without_server_flag() {
             );
     });
     context.write_home(
-        ".fabro/user.toml",
+        ".fabro/settings.toml",
         format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
     );
 

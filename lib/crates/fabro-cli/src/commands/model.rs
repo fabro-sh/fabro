@@ -43,7 +43,7 @@ pub(crate) async fn execute(command: Option<ModelsCommand>, globals: &GlobalArgs
         ModelsCommand::List(args) => &args.target,
         ModelsCommand::Test(args) => &args.target,
     };
-    let cli_settings = user_config::load_user_settings_with_storage_dir(target_args.storage_dir())?;
+    let cli_settings = user_config::load_settings_with_storage_dir(target_args.storage_dir())?;
     let connection = user_config::model_server_connection(target_args, &cli_settings)?;
     let client = server_client::connect_resolved_api_client(&connection).await?;
 
