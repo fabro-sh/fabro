@@ -169,14 +169,11 @@ fn execute_daemon(
         return Ok(());
     }
 
-    // Rotate logs
     let server_state = Storage::new(storage_dir).server_state();
     let log_path = server_state.log_path();
     if let Some(parent) = log_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let prev_path = log_path.with_extension("log.prev");
-    let _ = std::fs::rename(&log_path, &prev_path);
 
     let record_path = server_state.record_path();
     let log_file = std::fs::File::create(&log_path)?;
