@@ -216,6 +216,11 @@ mod tests {
         panic!("{} should exist", path.display());
     }
 
+    async fn wait_for_claim_observation() {
+        // Full-workspace test load can delay the poller enough that a 2ms wait is flaky.
+        time::sleep(Duration::from_millis(25)).await;
+    }
+
     #[tokio::test]
     async fn write_request_poll_response() {
         let dir = tempfile::tempdir().unwrap();
@@ -287,7 +292,7 @@ mod tests {
         std::fs::write(&claim_path, "12345\n").unwrap();
 
         // Let the poll loop see the claim
-        time::sleep(TEST_POLL_INTERVAL * 2).await;
+        wait_for_claim_observation().await;
 
         // Simulate attacher departing (deletes claim without writing response)
         std::fs::remove_file(&claim_path).unwrap();
@@ -323,7 +328,7 @@ mod tests {
 
         // Simulate attacher creating then deleting claim
         std::fs::write(&claim_path, "12345\n").unwrap();
-        time::sleep(TEST_POLL_INTERVAL * 2).await;
+        wait_for_claim_observation().await;
         std::fs::remove_file(&claim_path).unwrap();
 
         let answer = time::timeout(Duration::from_millis(250), ask_handle)
@@ -354,7 +359,7 @@ mod tests {
 
         // First attacher creates then releases claim
         std::fs::write(&claim_path, "12345\n").unwrap();
-        time::sleep(TEST_POLL_INTERVAL * 2).await;
+        wait_for_claim_observation().await;
         std::fs::remove_file(&claim_path).unwrap();
 
         // Second attacher picks up and answers before reattach window expires
