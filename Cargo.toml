@@ -46,7 +46,6 @@ walkdir = "2"
 regex = "1"
 semver = "1"
 aho-corasick = "1"
-sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "chrono"] }
 dirs = "6"
 mac_address = "1"
 md5 = "0.7"

@@ -20,7 +20,7 @@ Both interfaces use the same workflow engine, the same Graphviz files, and the s
 | **Execution** | Synchronous, one run per process | Asynchronous, queued with configurable concurrency |
 | **Human-in-the-loop** | Terminal prompts | Web UI or HTTP endpoints |
 | **Events** | Printed to stderr | Streamed via SSE |
-| **Persistence** | Checkpoint files only | SQLite database + checkpoint files |
+| **Persistence** | Checkpoint files only | Persistent run store + checkpoint files |
 | **Web UI** | Not available | Full React interface |
 | **Authentication** | None | JWT and/or mTLS |
 
