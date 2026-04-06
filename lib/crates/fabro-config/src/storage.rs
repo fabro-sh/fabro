@@ -46,11 +46,7 @@ impl Storage {
 
     #[must_use]
     pub fn run_scratch(&self, run_id: &RunId) -> RunScratch {
-        let local_dt = run_id.created_at().with_timezone(&Local);
-        RunScratch::new(
-            self.scratch_dir()
-                .join(format!("{}-{run_id}", local_dt.format("%Y%m%d"))),
-        )
+        RunScratch::for_run(&self.scratch_dir(), run_id)
     }
 
     #[must_use]
@@ -90,6 +86,13 @@ impl RunScratch {
     #[must_use]
     pub fn new(root: impl Into<PathBuf>) -> Self {
         Self { root: root.into() }
+    }
+
+    /// Create a `RunScratch` for a given run under a scratch directory.
+    #[must_use]
+    pub fn for_run(scratch_dir: &Path, run_id: &RunId) -> Self {
+        let local_dt = run_id.created_at().with_timezone(&Local);
+        Self::new(scratch_dir.join(format!("{}-{run_id}", local_dt.format("%Y%m%d"))))
     }
 
     #[must_use]

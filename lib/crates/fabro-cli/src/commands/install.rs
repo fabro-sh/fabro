@@ -13,6 +13,7 @@ use dialoguer::console::Term;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{MultiSelect, Select};
 use fabro_api::types::SetSecretRequest;
+use fabro_config::Storage;
 use fabro_config::legacy_env;
 use fabro_config::user::SETTINGS_CONFIG_FILENAME;
 use fabro_model::Provider;
@@ -556,7 +557,7 @@ async fn persist_install_secrets(
         return Ok(());
     }
 
-    let mut store = SecretStore::load(storage_dir.join("secrets.json"))?;
+    let mut store = SecretStore::load(Storage::new(storage_dir).secrets_path())?;
     for (name, value) in secrets {
         store.set(name, value)?;
     }
@@ -840,7 +841,7 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
         "  {} Saved {} secrets to {}",
         s.green.apply_to("✔"),
         secret_pairs.len(),
-        storage_dir.join("secrets.json").display()
+        Storage::new(&storage_dir).secrets_path().display()
     );
     if server_was_running {
         eprintln!(

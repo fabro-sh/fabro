@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use fabro_agent::Sandbox;
+use fabro_config::RunScratch;
 use fabro_graphviz::graph;
 use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
 use fabro_llm::client::Client;
@@ -74,7 +75,7 @@ async fn resolve_worktree_plan(
                 return Ok(Some(WorktreePlan {
                     branch_name: run_branch.clone(),
                     base_sha: base_sha.clone(),
-                    worktree_path: options.run_options.run_dir.join("worktree"),
+                    worktree_path: RunScratch::new(&options.run_options.run_dir).worktree_dir(),
                     skip_branch_creation: true,
                 }));
             }
@@ -173,7 +174,7 @@ async fn resolve_worktree_plan(
                     Ok(Some(WorktreePlan {
                         branch_name: format!("{}{}", git::RUN_BRANCH_PREFIX, options.run_id),
                         base_sha,
-                        worktree_path: options.run_options.run_dir.join("worktree"),
+                        worktree_path: RunScratch::new(&options.run_options.run_dir).worktree_dir(),
                         skip_branch_creation: false,
                     }))
                 }

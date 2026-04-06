@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use fabro_config::RunScratch;
 use fabro_store::RunDatabase;
 use fabro_types::RunId;
 use tokio::fs;
@@ -311,7 +312,9 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                 match git_diff(&*self.sandbox, &base_sha).await {
                     Ok(patch) if !patch.is_empty() => {
                         *self.final_patch.lock().unwrap() = Some(patch.clone());
-                        if let Err(err) = fs::write(self.run_dir.join("final.patch"), patch).await {
+                        if let Err(err) =
+                            fs::write(RunScratch::new(&self.run_dir).final_patch(), patch).await
+                        {
                             self.emitter.emit(&Event::RunNotice {
                                 level: RunNoticeLevel::Warn,
                                 code: "final_patch_write_failed".to_string(),

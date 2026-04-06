@@ -1,4 +1,3 @@
-use chrono::Local;
 use fabro_config::Storage;
 use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, Provider};
@@ -393,14 +392,15 @@ pub(crate) fn default_run_dir(run_id: &RunId) -> PathBuf {
 }
 
 pub fn make_run_dir(scratch_base: &Path, run_id: &RunId) -> PathBuf {
-    let local_dt = run_id.created_at().with_timezone(&Local);
-    scratch_base.join(format!("{}-{run_id}", local_dt.format("%Y%m%d")))
+    fabro_config::RunScratch::for_run(scratch_base, run_id)
+        .root()
+        .to_path_buf()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{TimeZone, Utc};
+    use chrono::{Local, TimeZone, Utc};
     use fabro_graphviz::graph::AttrValue;
     use fabro_store::Database;
     use fabro_types::fixtures;
