@@ -15,16 +15,12 @@
 
 
 /**
- * Response containing the generated preview URL.
+ * Request body for creating SSH access for a sandbox-backed run.
  */
-export interface PreviewUrlResponse {
+export interface SshAccessRequest {
     /**
-     * Preview URL.
+     * Time-to-live for the SSH command in minutes.
      */
-    'url': string;
-    /**
-     * Preview token header value for unsigned preview URLs.
-     */
-    'token'?: string;
+    'ttl_minutes': number;
 }
 

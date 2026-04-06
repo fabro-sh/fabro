@@ -5,30 +5,24 @@ use crate::keys;
 use crate::{ListRunsQuery, Result};
 use fabro_types::RunId;
 
-pub(crate) async fn write_catalog(db: &Db, run_id: &RunId) -> Result<()> {
-    db.put(keys::catalog_by_id_key(run_id), []).await?;
-    db.put(keys::catalog_by_start_key(run_id), []).await?;
+pub(crate) async fn write_index(db: &Db, run_id: &RunId) -> Result<()> {
+    db.put(keys::runs_index_by_start_key(run_id), []).await?;
     Ok(())
 }
 
-pub(crate) async fn read_locator(db: &Db, run_id: &RunId) -> Result<bool> {
-    Ok(db.get(keys::catalog_by_id_key(run_id)).await?.is_some())
-}
-
-pub(crate) async fn delete_catalog(db: &Db, run_id: &RunId) -> Result<()> {
-    db.delete(keys::catalog_by_id_key(run_id)).await?;
-    db.delete(keys::catalog_by_start_key(run_id)).await?;
+pub(crate) async fn delete_index(db: &Db, run_id: &RunId) -> Result<()> {
+    db.delete(keys::runs_index_by_start_key(run_id)).await?;
     Ok(())
 }
 
 pub(crate) async fn list_run_ids(db: &Db, query: &ListRunsQuery) -> Result<Vec<RunId>> {
-    let mut iter = db.scan_prefix(keys::catalog_by_start_prefix()).await?;
+    let mut iter = db.scan_prefix(keys::runs_index_by_start_prefix()).await?;
     let mut run_ids = Vec::new();
     while let Some(entry) = iter.next().await? {
         let key = String::from_utf8(entry.key.to_vec()).map_err(|err| {
             crate::StoreError::Other(format!("stored key is not valid UTF-8: {err}"))
         })?;
-        let Some(run_id) = keys::parse_run_id_from_catalog_key(&key) else {
+        let Some(run_id) = keys::parse_run_id_from_index_key(&key) else {
             continue;
         };
         let created_at = run_id.created_at();

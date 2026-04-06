@@ -7,7 +7,7 @@ use crate::cmd::support::{read_text, setup_artifact_run, text_tree};
 fn artifact_filters(context: &fabro_test::TestContext) -> Vec<(String, String)> {
     let mut filters = context.filters();
     filters.push((
-        r"\[STORAGE_DIR\]/runs/\d{8}-\[ULID\]".to_string(),
+        r"\[STORAGE_DIR\]/scratch/\d{8}-\[ULID\]".to_string(),
         "[RUN_DIR]".to_string(),
     ));
     filters

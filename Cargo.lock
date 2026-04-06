@@ -1494,6 +1494,7 @@ dependencies = [
  "prettyplease",
  "progenitor",
  "progenitor-client",
+ "regress",
  "reqwest 0.13.2",
  "serde",
  "serde_json",
@@ -1599,6 +1600,7 @@ name = "fabro-config"
 version = "0.176.2"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "dirs",
  "fabro-types",
@@ -1937,6 +1939,7 @@ dependencies = [
  "fabro-types",
  "futures",
  "object_store",
+ "percent-encoding",
  "serde",
  "serde_json",
  "slatedb",
@@ -2011,11 +2014,11 @@ dependencies = [
  "clap",
  "dirs",
  "fabro-macros",
+ "hex",
  "serde",
  "serde_json",
  "sha2",
  "ulid",
- "uuid",
 ]
 
 [[package]]

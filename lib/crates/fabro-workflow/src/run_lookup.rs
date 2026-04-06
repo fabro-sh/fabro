@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
-use fabro_store::{RunSummary, SlateStore};
+use fabro_config::{Home, Storage};
+use fabro_store::{Database, RunSummary};
 use fabro_types::RunId;
 use serde::Serialize;
 
@@ -126,22 +127,12 @@ fn empty_labels() -> &'static HashMap<String, String> {
     EMPTY.get_or_init(HashMap::new)
 }
 
-pub fn default_storage_dir() -> PathBuf {
-    dirs::home_dir()
-        .expect("could not determine home directory")
-        .join(".fabro")
+pub fn scratch_base(storage_dir: &Path) -> PathBuf {
+    Storage::new(storage_dir).scratch_dir()
 }
 
-pub fn logs_base(storage_dir: &Path) -> PathBuf {
-    storage_dir.join("logs")
-}
-
-pub fn runs_base(storage_dir: &Path) -> PathBuf {
-    storage_dir.join("runs")
-}
-
-pub fn default_runs_base() -> PathBuf {
-    runs_base(&default_storage_dir())
+pub fn default_scratch_base() -> PathBuf {
+    scratch_base(Home::from_env().root())
 }
 
 fn scan_orphan_runs(base: &Path) -> Result<Vec<RunInfo>> {
@@ -194,7 +185,7 @@ fn scan_orphan_runs(base: &Path) -> Result<Vec<RunInfo>> {
     Ok(runs)
 }
 
-pub async fn scan_runs_combined(store: &SlateStore, base: &Path) -> Result<Vec<RunInfo>> {
+pub async fn scan_runs_combined(store: &Database, base: &Path) -> Result<Vec<RunInfo>> {
     let store_runs = store
         .list_runs(&fabro_store::ListRunsQuery::default())
         .await
@@ -232,8 +223,8 @@ pub fn scan_runs_with_summaries(summaries: &[RunSummary], base: &Path) -> Result
     Ok(runs)
 }
 
-fn run_info_from_summary(summary: &RunSummary, runs_base: &Path) -> Option<RunInfo> {
-    let path = make_run_dir(runs_base, &summary.run_id);
+fn run_info_from_summary(summary: &RunSummary, scratch_base: &Path) -> Option<RunInfo> {
+    let path = make_run_dir(scratch_base, &summary.run_id);
     if !path.exists() {
         return None;
     }
@@ -305,7 +296,7 @@ pub fn filter_runs(
 }
 
 pub async fn resolve_run_combined(
-    store: &SlateStore,
+    store: &Database,
     base: &Path,
     identifier: &str,
 ) -> Result<RunInfo> {
@@ -399,7 +390,7 @@ mod tests {
     use std::time::Duration;
 
     use fabro_graphviz::graph::Graph;
-    use fabro_store::{SlateStore, StoreHandle};
+    use fabro_store::Database;
     use fabro_types::{RunStatus, Settings, fixtures};
     use object_store::memory::InMemory;
 
@@ -408,8 +399,8 @@ mod tests {
     use crate::operations::make_run_dir;
     use crate::records::RunRecord;
 
-    fn memory_store() -> StoreHandle {
-        Arc::new(SlateStore::new(
+    fn memory_store() -> Arc<Database> {
+        Arc::new(Database::new(
             Arc::new(InMemory::new()),
             "",
             Duration::from_millis(1),

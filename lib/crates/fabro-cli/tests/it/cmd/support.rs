@@ -528,7 +528,7 @@ pub(crate) fn wait_for_status(run_dir: &Path, expected: &[&str]) -> String {
 
 pub(crate) fn only_run(context: &TestContext) -> RunSetup {
     let entries = run_dirs_for_test_case(context);
-    let runs_dir = context.storage_dir.join("runs");
+    let runs_dir = context.storage_dir.join("scratch");
     assert_eq!(
         entries.len(),
         1,
@@ -599,7 +599,7 @@ pub(crate) fn resolve_run(context: &TestContext, run_id: &str) -> RunSetup {
 }
 
 pub(crate) fn find_run_dir(storage_dir: &Path, run_id: &str) -> Option<PathBuf> {
-    let runs_dir = storage_dir.join("runs");
+    let runs_dir = storage_dir.join("scratch");
     let entries = std::fs::read_dir(&runs_dir).ok()?;
     entries
         .filter_map(Result::ok)

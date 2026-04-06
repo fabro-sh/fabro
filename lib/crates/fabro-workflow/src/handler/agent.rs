@@ -395,7 +395,7 @@ mod tests {
     use super::*;
     use crate::event::Emitter;
     use fabro_graphviz::graph::AttrValue;
-    use fabro_store::{SlateRunStore, SlateStore, StageId};
+    use fabro_store::{Database, RunDatabase, StageId};
     use fabro_types::fixtures;
     use object_store::memory::InMemory;
     use std::sync::Arc;
@@ -406,8 +406,8 @@ mod tests {
         EngineServices::test_default()
     }
 
-    fn test_store() -> Arc<SlateStore> {
-        Arc::new(SlateStore::new(
+    fn test_store() -> Arc<Database> {
+        Arc::new(Database::new(
             Arc::new(InMemory::new()),
             "",
             Duration::from_millis(1),
@@ -416,7 +416,7 @@ mod tests {
 
     async fn make_services_with_run_store() -> (
         EngineServices,
-        SlateRunStore,
+        RunDatabase,
         crate::event::StoreProgressLogger,
     ) {
         let store = test_store();

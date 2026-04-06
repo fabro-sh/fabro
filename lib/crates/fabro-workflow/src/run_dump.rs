@@ -2,7 +2,7 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use fabro_store::{RunProjection, SlateRunStore};
+use fabro_store::{ArtifactStore, RunDatabase, RunProjection};
 
 use crate::git::MetadataStore;
 
@@ -116,10 +116,15 @@ impl RunDump {
         dump
     }
 
-    pub async fn store_export(run_store: &SlateRunStore, state: &RunProjection) -> Result<Self> {
+    pub async fn store_export(
+        run_store: &RunDatabase,
+        artifact_store: &ArtifactStore,
+        state: &RunProjection,
+    ) -> Result<Self> {
         let mut entries = Vec::new();
 
-        if let Some(record) = state.run.as_ref() {
+        let run_record = state.run.as_ref();
+        if let Some(record) = run_record {
             push_json_entry(&mut entries, "run.json", record);
         }
         if let Some(record) = state.start.as_ref() {
@@ -218,28 +223,31 @@ impl RunDump {
             ));
         }
 
-        for asset in run_store.list_all_artifacts().await? {
-            let node_id_segment = validate_single_path_segment("node id", asset.node.node_id())?;
-            let filename_path = validate_relative_path("artifact filename", &asset.filename)?;
-            let data = run_store
-                .get_artifact(&asset.node, &asset.filename)
-                .await?
-                .with_context(|| {
-                    format!(
-                        "asset {:?} for node {:?} visit {} is missing from the store",
-                        asset.filename,
-                        asset.node.node_id(),
-                        asset.node.visit()
-                    )
-                })?;
-            entries.push(RunDumpEntry::bytes_path(
-                &PathBuf::from("artifacts")
-                    .join("nodes")
-                    .join(node_id_segment)
-                    .join(format!("visit-{}", asset.node.visit()))
-                    .join(filename_path),
-                data.to_vec(),
-            ));
+        if let Some(run_record) = run_record {
+            for asset in artifact_store.list_for_run(&run_record.run_id).await? {
+                let node_id_segment =
+                    validate_single_path_segment("node id", asset.node.node_id())?;
+                let filename_path = validate_relative_path("artifact filename", &asset.filename)?;
+                let data = artifact_store
+                    .get(&run_record.run_id, &asset.node, &asset.filename)
+                    .await?
+                    .with_context(|| {
+                        format!(
+                            "asset {:?} for node {:?} visit {} is missing from the store",
+                            asset.filename,
+                            asset.node.node_id(),
+                            asset.node.visit()
+                        )
+                    })?;
+                entries.push(RunDumpEntry::bytes_path(
+                    &PathBuf::from("artifacts")
+                        .join("nodes")
+                        .join(node_id_segment)
+                        .join(format!("visit-{}", asset.node.visit()))
+                        .join(filename_path),
+                    data.to_vec(),
+                ));
+            }
         }
 
         Ok(Self { entries })

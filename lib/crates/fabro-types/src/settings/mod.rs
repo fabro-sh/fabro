@@ -182,9 +182,10 @@ impl Settings {
 
     pub fn storage_dir(&self) -> PathBuf {
         self.storage_dir.clone().unwrap_or_else(|| {
-            dirs::home_dir()
-                .expect("could not determine home directory")
-                .join(".fabro")
+            std::env::var_os("FABRO_HOME")
+                .map(PathBuf::from)
+                .or_else(|| dirs::home_dir().map(|home| home.join(".fabro")))
+                .unwrap_or_else(|| PathBuf::from(".fabro"))
         })
     }
 }

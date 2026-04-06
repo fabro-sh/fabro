@@ -310,7 +310,7 @@ pub fn sanitize_ref_component(s: &str) -> String {
 mod tests {
     use super::*;
     use crate::run_dump::RunDump;
-    use fabro_store::SlateStore;
+    use fabro_store::Database;
     use fabro_types::fixtures;
     use object_store::memory::InMemory;
     use std::fs;
@@ -340,8 +340,8 @@ mod tests {
             .unwrap();
     }
 
-    fn test_store() -> Arc<SlateStore> {
-        Arc::new(SlateStore::new(
+    fn test_store() -> Arc<Database> {
+        Arc::new(Database::new(
             Arc::new(InMemory::new()),
             "",
             Duration::from_millis(1),

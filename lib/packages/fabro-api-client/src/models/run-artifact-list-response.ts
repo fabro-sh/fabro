@@ -13,18 +13,14 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { RunArtifactEntry } from './run-artifact-entry';
 
 /**
- * Response containing the generated preview URL.
+ * List of captured artifact files for a run.
  */
-export interface PreviewUrlResponse {
-    /**
-     * Preview URL.
-     */
-    'url': string;
-    /**
-     * Preview token header value for unsigned preview URLs.
-     */
-    'token'?: string;
+export interface RunArtifactListResponse {
+    'data': Array<RunArtifactEntry>;
 }
 

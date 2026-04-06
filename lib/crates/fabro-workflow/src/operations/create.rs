@@ -1,8 +1,9 @@
 use chrono::Local;
+use fabro_config::Storage;
 use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, Provider};
 use fabro_sandbox::SandboxProvider;
-use fabro_store::SlateStore;
+use fabro_store::Database;
 use fabro_types::{RunId, Settings};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -14,7 +15,7 @@ use crate::file_resolver::FileResolver;
 use crate::pipeline::types::PersistOptions;
 use crate::pipeline::{self, Persisted, TransformOptions, Validated};
 use crate::records::RunRecord;
-use crate::run_lookup::default_runs_base;
+use crate::run_lookup::default_scratch_base;
 use crate::transforms::{Transform, expand_vars};
 use crate::workflow_bundle::{StoredWorkflowBundle, WorkflowBundle};
 use fabro_sandbox::daytona::detect_repo_info;
@@ -58,7 +59,7 @@ struct PersistCreateOptions {
 }
 
 /// Resolve workflow inputs, normalize settings, and persist a run directory.
-pub async fn create(store: &SlateStore, request: CreateRunInput) -> Result<CreatedRun, FabroError> {
+pub async fn create(store: &Database, request: CreateRunInput) -> Result<CreatedRun, FabroError> {
     let resolved = resolve_workflow(ResolveWorkflowInput {
         workflow: request.workflow,
         settings: request.settings,
@@ -85,8 +86,8 @@ pub async fn create(store: &SlateStore, request: CreateRunInput) -> Result<Creat
 
     let settings = resolved.settings.clone();
     let run_id = run_id.unwrap_or_else(RunId::new);
-    let storage_dir = settings.storage_dir();
-    let run_dir = make_run_dir(&storage_dir.join("runs"), &run_id);
+    let storage = Storage::new(settings.storage_dir());
+    let run_dir = storage.run_scratch(&run_id).root().to_path_buf();
     let working_directory = resolved.working_directory.clone();
     let host_repo_path =
         host_repo_path.or_else(|| Some(working_directory.to_string_lossy().to_string()));
@@ -142,7 +143,7 @@ pub async fn create(store: &SlateStore, request: CreateRunInput) -> Result<Creat
 }
 
 async fn persist_created_run(
-    store: &SlateStore,
+    store: &Database,
     persisted: &Persisted,
     workflow_source: &str,
     workflow_config: Option<String>,
@@ -388,12 +389,12 @@ pub(crate) fn resolve_run_settings(mut settings: Settings, graph: &Graph) -> Set
 }
 
 pub(crate) fn default_run_dir(run_id: &RunId) -> PathBuf {
-    make_run_dir(&default_runs_base(), run_id)
+    make_run_dir(&default_scratch_base(), run_id)
 }
 
-pub fn make_run_dir(runs_base: &Path, run_id: &RunId) -> PathBuf {
+pub fn make_run_dir(scratch_base: &Path, run_id: &RunId) -> PathBuf {
     let local_dt = run_id.created_at().with_timezone(&Local);
-    runs_base.join(format!("{}-{run_id}", local_dt.format("%Y%m%d")))
+    scratch_base.join(format!("{}-{run_id}", local_dt.format("%Y%m%d")))
 }
 
 #[cfg(test)]
@@ -401,7 +402,7 @@ mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
     use fabro_graphviz::graph::AttrValue;
-    use fabro_store::{SlateStore, StoreHandle};
+    use fabro_store::Database;
     use fabro_types::fixtures;
     use object_store::local::LocalFileSystem;
     use object_store::memory::InMemory;
@@ -410,8 +411,8 @@ mod tests {
 
     use crate::operations::{ValidateInput, validate};
     use crate::workflow_bundle::BundledWorkflow;
-    fn memory_store() -> StoreHandle {
-        Arc::new(SlateStore::new(
+    fn memory_store() -> Arc<Database> {
+        Arc::new(Database::new(
             Arc::new(InMemory::new()),
             "",
             Duration::from_millis(1),
@@ -470,7 +471,7 @@ mod tests {
 
     #[test]
     fn make_run_dir_uses_run_id_timestamp_in_local_time() {
-        let runs_base = Path::new("/tmp/runs");
+        let scratch_base = Path::new("/tmp/scratch");
         let run_id = RunId::from(ulid::Ulid::from_datetime(
             Utc.with_ymd_and_hms(2026, 3, 27, 12, 0, 0).unwrap().into(),
         ));
@@ -481,8 +482,8 @@ mod tests {
             .to_string();
 
         assert_eq!(
-            make_run_dir(runs_base, &run_id),
-            runs_base.join(format!("{expected_date}-{run_id}"))
+            make_run_dir(scratch_base, &run_id),
+            scratch_base.join(format!("{expected_date}-{run_id}"))
         );
     }
 
@@ -874,11 +875,7 @@ mod tests {
         std::fs::create_dir_all(storage_dir.join("store")).unwrap();
         let object_store =
             Arc::new(LocalFileSystem::new_with_prefix(storage_dir.join("store")).unwrap());
-        let store = StoreHandle::from(Arc::new(SlateStore::new(
-            object_store,
-            "",
-            Duration::from_millis(1),
-        )));
+        let store = Arc::new(Database::new(object_store, "", Duration::from_millis(1)));
         let created = create(
             store.as_ref(),
             CreateRunInput {

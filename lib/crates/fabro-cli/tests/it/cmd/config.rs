@@ -426,7 +426,7 @@ fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
         .assert()
         .success();
 
-    let runs_dir = storage_dir.join("runs");
+    let runs_dir = storage_dir.join("scratch");
     let run_dir = std::fs::read_dir(&runs_dir)
         .unwrap()
         .flatten()
@@ -573,6 +573,42 @@ shared = "legacy"
             .and_then(|vars| vars.get("shared").map(String::as_str)),
         Some("project")
     );
+}
+
+#[test]
+fn settings_uses_fabro_home_for_home_config_resolution() {
+    let context = test_context!();
+    let fabro_home = tempfile::tempdir().unwrap();
+
+    std::fs::write(
+        fabro_home.path().join("settings.toml"),
+        r#"
+verbose = true
+
+[llm]
+model = "from-fabro-home"
+"#,
+    )
+    .unwrap();
+
+    let output = context
+        .settings()
+        .arg("--json")
+        .env("FABRO_HOME", fabro_home.path())
+        .env_remove("FABRO_STORAGE_DIR")
+        .output()
+        .expect("command should execute");
+
+    assert!(
+        output.status.success(),
+        "settings command failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    let cfg: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(cfg["verbose"].as_bool(), Some(true));
+    assert_eq!(cfg["llm"]["model"].as_str(), Some("from-fabro-home"));
 }
 
 #[test]

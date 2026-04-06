@@ -5,7 +5,9 @@ use chrono::Utc;
 use serde::Serialize;
 use tracing::{debug, info};
 
-use fabro_workflow::run_lookup::{StatusFilter, filter_runs, runs_base, scan_runs_with_summaries};
+use fabro_workflow::run_lookup::{
+    StatusFilter, filter_runs, scan_runs_with_summaries, scratch_base,
+};
 
 use crate::args::{GlobalArgs, RunsPruneArgs};
 use crate::commands::runs::rm::remove_run_with_cleanup;
@@ -24,7 +26,7 @@ struct PruneRunRow {
 
 pub(super) async fn prune_command(args: &RunsPruneArgs, globals: &GlobalArgs) -> Result<()> {
     let cli_settings = load_settings_with_storage_dir(args.storage_dir.as_deref())?;
-    let base = runs_base(&cli_settings.storage_dir());
+    let base = scratch_base(&cli_settings.storage_dir());
     let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
     prune_from(args, lookup.client(), lookup.summaries(), &base, globals).await
 }

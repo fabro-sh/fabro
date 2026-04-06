@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use fabro_store::SlateRunStore;
+use fabro_store::RunDatabase;
 use fabro_types::RunId;
 use tokio::fs;
 
@@ -66,7 +66,7 @@ pub(crate) struct GitLifecycle {
     pub emitter: Arc<Emitter>,
     pub run_dir: PathBuf,
     pub run_id: RunId,
-    pub run_store: SlateRunStore,
+    pub run_store: RunDatabase,
     pub run_options: Arc<RunOptions>,
     pub start_node_id: Option<String>,
     // Cross-lifecycle data (shared with EventLifecycle)

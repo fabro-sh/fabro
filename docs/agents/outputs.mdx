@@ -150,7 +150,7 @@ Values under 100KB remain in the context as-is.
 Offloaded artifacts are written to the run's directory:
 
 ```
-~/.fabro/runs/{run_id}/
+~/.fabro/scratch/{run_id}/
   cache/
     artifacts/
       values/
@@ -207,7 +207,7 @@ For each pointer in the context updates:
 
 ```
 # Before sync (host path)
-file:///home/user/.fabro/runs/01JK.../cache/artifacts/values/response.plan.json
+file:///home/user/.fabro/scratch/01JK.../cache/artifacts/values/response.plan.json
 
 # After sync (sandbox path)
 file:///workspace/.fabro/artifacts/response.plan.json
@@ -256,7 +256,7 @@ Tool caches and dependency directories (`node_modules`, `.cache/ms-playwright`, 
 Collected assets are written to the run's directory, organized by node and retry attempt:
 
 ```
-~/.fabro/runs/{run_id}/
+~/.fabro/scratch/{run_id}/
   cache/
     artifacts/
       assets/

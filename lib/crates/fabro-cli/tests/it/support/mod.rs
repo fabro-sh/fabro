@@ -18,7 +18,7 @@ macro_rules! fabro_json_snapshot {
             r#""duration_ms": "[DURATION_MS]""#.to_string(),
         ));
         filters.push((
-            r#""run_dir":\s*"\[STORAGE_DIR\]/runs/\d{8}-\[ULID\]""#.to_string(),
+            r#""run_dir":\s*"\[STORAGE_DIR\]/scratch/\d{8}-\[ULID\]""#.to_string(),
             r#""run_dir": "[RUN_DIR]""#.to_string(),
         ));
         let filters: Vec<(&str, &str)> = filters

@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+use fabro_config::Storage;
 use fabro_server::bind::Bind;
 use serde::{Deserialize, Serialize};
 
@@ -11,18 +12,6 @@ pub(crate) struct ServerRecord {
     pub bind: Bind,
     pub log_path: PathBuf,
     pub started_at: DateTime<Utc>,
-}
-
-pub(crate) fn server_record_path(storage_dir: &Path) -> PathBuf {
-    storage_dir.join("server.json")
-}
-
-pub(crate) fn server_lock_path(storage_dir: &Path) -> PathBuf {
-    storage_dir.join("server.lock")
-}
-
-pub(crate) fn server_log_path(storage_dir: &Path) -> PathBuf {
-    storage_dir.join("server.log")
 }
 
 pub(crate) fn write_server_record(path: &Path, record: &ServerRecord) -> Result<()> {
@@ -47,7 +36,7 @@ pub(crate) fn server_record_is_running(record: &ServerRecord) -> bool {
 }
 
 pub(crate) fn active_server_record(storage_dir: &Path) -> Option<ServerRecord> {
-    let path = server_record_path(storage_dir);
+    let path = Storage::new(storage_dir).server_state().record_path();
     let record = read_server_record(&path)?;
     if server_record_is_running(&record) {
         Some(record)
@@ -91,7 +80,7 @@ mod tests {
     #[test]
     fn write_and_read_round_trip() {
         let dir = tempfile::tempdir().unwrap();
-        let path = server_record_path(dir.path());
+        let path = Storage::new(dir.path()).server_state().record_path();
         let record = test_record(Bind::Tcp("127.0.0.1:3000".parse().unwrap()));
         write_server_record(&path, &record).unwrap();
 
@@ -109,7 +98,7 @@ mod tests {
     #[test]
     fn active_server_record_cleans_stale_dead_pid() {
         let dir = tempfile::tempdir().unwrap();
-        let path = server_record_path(dir.path());
+        let path = Storage::new(dir.path()).server_state().record_path();
         let mut record = test_record(Bind::Tcp("127.0.0.1:3000".parse().unwrap()));
         record.pid = u32::MAX; // definitely not alive
         write_server_record(&path, &record).unwrap();

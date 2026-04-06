@@ -18,6 +18,7 @@ use axum_extra::extract::cookie::Key;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use bytes::Bytes;
+use fabro_config::Storage;
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate_object};
 use fabro_llm::model_test::{ModelTestMode, run_model_test_with_client};
@@ -25,7 +26,7 @@ use fabro_llm::types::{
     ContentPart, FinishReason, Message as LlmMessage, Request as LlmRequest,
     Response as LlmResponse, Role, StreamEvent, ToolChoice, ToolDefinition, Usage,
 };
-use fabro_store::{EventEnvelope, EventPayload, StageId, StoreHandle};
+use fabro_store::{ArtifactStore, Database, EventEnvelope, EventPayload, StageId};
 use fabro_types::{RunBlobId, RunEvent, RunId, Settings};
 use fabro_util::redact::redact_jsonl_line;
 use fabro_util::version::FABRO_VERSION;
@@ -223,7 +224,8 @@ type RegistryFactoryOverride = dyn Fn(Arc<dyn Interviewer>) -> HandlerRegistry +
 pub struct AppState {
     runs: Mutex<HashMap<RunId, ManagedRun>>,
     aggregate_usage: Mutex<UsageAccumulator>,
-    store: StoreHandle,
+    store: Arc<Database>,
+    artifact_store: ArtifactStore,
     max_concurrent_runs: usize,
     scheduler_notify: Notify,
     pub sessions: SessionStore,
@@ -880,11 +882,13 @@ pub fn create_app_state_with_settings_and_registry_factory(
     settings: Settings,
     registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
+    let (store, artifact_store) = test_store_bundle();
     build_app_state_with_path(
         Arc::new(RwLock::new(settings)),
         Some(Box::new(registry_factory_override)),
         5,
-        test_store(),
+        store,
+        artifact_store,
         test_secret_store_path(),
         test_config_path(),
         false,
@@ -897,31 +901,38 @@ pub fn create_app_state_with_options(
     settings: Settings,
     max_concurrent_runs: usize,
 ) -> Arc<AppState> {
+    let (store, artifact_store) = test_store_bundle();
     create_app_state_with_store(
         Arc::new(RwLock::new(settings)),
         max_concurrent_runs,
-        test_store(),
+        store,
+        artifact_store,
     )
 }
 
-fn test_store() -> StoreHandle {
-    Arc::new(fabro_store::SlateStore::new(
-        Arc::new(MemoryObjectStore::new()),
+fn test_store_bundle() -> (Arc<Database>, ArtifactStore) {
+    let object_store: Arc<dyn object_store::ObjectStore> = Arc::new(MemoryObjectStore::new());
+    let store = Arc::new(fabro_store::Database::new(
+        Arc::clone(&object_store),
         "",
         Duration::from_millis(1),
-    ))
+    ));
+    let artifact_store = ArtifactStore::new(object_store, "artifacts");
+    (store, artifact_store)
 }
 
 pub fn create_app_state_with_store(
     settings: Arc<RwLock<Settings>>,
     max_concurrent_runs: usize,
-    store: StoreHandle,
+    store: Arc<Database>,
+    artifact_store: ArtifactStore,
 ) -> Arc<AppState> {
     build_app_state_with_path(
         settings,
         None,
         max_concurrent_runs,
         store,
+        artifact_store,
         test_secret_store_path(),
         test_config_path(),
         false,
@@ -933,7 +944,8 @@ pub(crate) fn build_app_state_with_path(
     settings: Arc<RwLock<Settings>>,
     registry_factory_override: Option<Box<RegistryFactoryOverride>>,
     max_concurrent_runs: usize,
-    store: StoreHandle,
+    store: Arc<Database>,
+    artifact_store: ArtifactStore,
     secret_store_path: PathBuf,
     config_path: PathBuf,
     local_daemon_mode: bool,
@@ -943,6 +955,7 @@ pub(crate) fn build_app_state_with_path(
         runs: Mutex::new(HashMap::new()),
         aggregate_usage: Mutex::new(UsageAccumulator::default()),
         store,
+        artifact_store,
         max_concurrent_runs,
         scheduler_notify: Notify::new(),
         sessions: new_session_store(),
@@ -1042,8 +1055,8 @@ async fn delete_run(
             }
         }
     } else {
-        let storage_dir = state.settings.read().unwrap().storage_dir();
-        let run_dir = operations::make_run_dir(&storage_dir.join("runs"), &id);
+        let storage = Storage::new(state.settings.read().unwrap().storage_dir());
+        let run_dir = storage.run_scratch(&id).root().to_path_buf();
         if let Err(err) = remove_run_dir(&run_dir) {
             return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
                 .into_response();
@@ -1051,7 +1064,12 @@ async fn delete_run(
     }
 
     match state.store.delete_run(&id).await {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Ok(()) => match state.artifact_store.delete_for_run(&id).await {
+            Ok(()) => StatusCode::NO_CONTENT.into_response(),
+            Err(err) => {
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+            }
+        },
         Err(err) => {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         }
@@ -1128,8 +1146,9 @@ fn validate_relative_artifact_path(kind: &str, value: &str) -> Result<PathBuf, R
 
 #[allow(clippy::result_large_err)]
 fn run_artifacts_dir(run: &fabro_types::RunRecord, run_id: &RunId) -> PathBuf {
-    operations::make_run_dir(&run.settings.storage_dir().join("runs"), run_id)
-        .join("cache/artifacts/files")
+    Storage::new(run.settings.storage_dir())
+        .run_scratch(run_id)
+        .artifact_files_dir()
 }
 
 #[allow(clippy::result_large_err)]
@@ -1416,7 +1435,10 @@ async fn start_run(
         )
         .into_response();
     };
-    let run_dir = operations::make_run_dir(&run_record.settings.storage_dir().join("runs"), &id);
+    let run_dir = Storage::new(run_record.settings.storage_dir())
+        .run_scratch(&id)
+        .root()
+        .to_path_buf();
     let dot_source = run_state.graph_source.unwrap_or_default();
 
     {
@@ -2172,7 +2194,7 @@ async fn list_stage_artifacts(
                     )
                     .into_response();
                 };
-                match run_store.list_artifacts_for_stage(&stage_id).await {
+                match state.artifact_store.list_for_node(&id, &stage_id).await {
                     Ok(filenames) if !filenames.is_empty() => Json(ArtifactListResponse {
                         data: filenames
                             .into_iter()
@@ -2228,8 +2250,12 @@ async fn put_stage_artifact(
         Ok(filename) => filename,
         Err(response) => return response,
     };
-    match state.store.open_run(&id).await {
-        Ok(run_store) => match run_store.put_artifact(&stage_id, &filename, &body).await {
+    match state.store.open_run_reader(&id).await {
+        Ok(_) => match state
+            .artifact_store
+            .put(&id, &stage_id, &filename, &body)
+            .await
+        {
             Ok(()) => StatusCode::NO_CONTENT.into_response(),
             Err(err) => {
                 ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
@@ -2267,7 +2293,7 @@ async fn get_stage_artifact(
                     )
                     .into_response();
                 };
-                match run_store.get_artifact(&stage_id, &filename).await {
+                match state.artifact_store.get(&id, &stage_id, &filename).await {
                     Ok(Some(bytes)) => octet_stream_response(bytes),
                     Ok(None) => {
                         let relative_path =

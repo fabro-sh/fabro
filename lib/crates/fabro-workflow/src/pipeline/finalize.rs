@@ -10,7 +10,7 @@ use crate::run_options::RunOptions;
 use crate::run_status::{RunStatus, StatusReason};
 use crate::sandbox_git::git_push_host;
 use fabro_hooks::{HookContext, HookEvent, HookRunner};
-use fabro_store::SlateRunStore;
+use fabro_store::RunDatabase;
 
 use super::types::{Concluded, FinalizeOptions, Retroed};
 
@@ -63,7 +63,7 @@ pub fn classify_engine_result(
 }
 
 pub(crate) async fn build_conclusion_from_store(
-    run_store: &SlateRunStore,
+    run_store: &RunDatabase,
     status: StageStatus,
     failure_reason: Option<String>,
     run_duration_ms: u64,
@@ -169,7 +169,7 @@ fn build_conclusion_from_parts(
 ///
 /// This captures the last diff.patch (written after the final checkpoint) and retro.json.
 /// Best-effort: errors are logged as warnings.
-pub async fn write_finalize_commit(run_options: &RunOptions, run_store: &SlateRunStore) {
+pub async fn write_finalize_commit(run_options: &RunOptions, run_store: &RunDatabase) {
     let (Some(meta_branch), Some(repo_path)) = (
         run_options
             .git
@@ -321,7 +321,7 @@ mod tests {
     use std::time::Duration;
 
     use fabro_graphviz::graph::Graph;
-    use fabro_store::SlateStore;
+    use fabro_store::Database;
     use fabro_types::{RunId, Settings, fixtures};
     use object_store::memory::InMemory;
 
@@ -350,8 +350,8 @@ mod tests {
         }
     }
 
-    fn test_store() -> Arc<SlateStore> {
-        Arc::new(SlateStore::new(
+    fn test_store() -> Arc<Database> {
+        Arc::new(Database::new(
             Arc::new(InMemory::new()),
             "",
             Duration::from_millis(1),

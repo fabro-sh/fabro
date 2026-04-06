@@ -1919,14 +1919,14 @@ components:
       description: Content-addressed blob identifier.
       schema:
         type: string
-        format: uuid
-      example: 550e8400-e29b-41d4-a716-446655440000
+        pattern: '^[0-9a-f]{64}$'
+      example: 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
 
     ArtifactFilename:
       name: filename
       in: query
       required: true
-      description: Artifact filename. May contain path separators.
+      description: Relative artifact path. `/` is allowed as a path separator. Backslash, empty segments, and traversal segments (`.` and `..`) are invalid.
       schema:
         type: string
       example: src/lib.rs

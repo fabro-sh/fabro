@@ -15,16 +15,12 @@
 
 
 /**
- * Response containing the generated preview URL.
+ * Response containing an SSH command for the sandbox.
  */
-export interface PreviewUrlResponse {
+export interface SshAccessResponse {
     /**
-     * Preview URL.
+     * SSH command to connect to the sandbox.
      */
-    'url': string;
-    /**
-     * Preview token header value for unsigned preview URLs.
-     */
-    'token'?: string;
+    'command': string;
 }
 

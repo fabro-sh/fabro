@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::Graph as GvGraph;
-use fabro_store::{RunProjection, SlateStore};
+use fabro_store::{Database, RunProjection};
 use object_store::local::LocalFileSystem;
 
 use crate::error::{FabroError, Result};
@@ -51,7 +51,7 @@ async fn initialized(
         run_options.run_id.to_string(),
     )
     .expect("failed to write run id marker");
-    let store = Arc::new(SlateStore::new(
+    let store = Arc::new(Database::new(
         Arc::new(
             LocalFileSystem::new_with_prefix(run_options.run_dir.join("store"))
                 .expect("failed to create local test run store"),

@@ -2,14 +2,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use fabro_store::{EventEnvelope, EventPayload, SlateRunStore, SlateStore};
+use fabro_store::{Database, EventEnvelope, EventPayload, RunDatabase};
 use object_store::memory::InMemory;
 
 pub(crate) async fn rebuild_run_store(
     run_id: &fabro_types::RunId,
     events: &[EventEnvelope],
-) -> Result<SlateRunStore> {
-    let store = Arc::new(SlateStore::new(
+) -> Result<RunDatabase> {
+    let store = Arc::new(Database::new(
         Arc::new(InMemory::new()),
         "",
         Duration::from_millis(1),

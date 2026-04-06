@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use fabro_store::SlateRunStore;
+use fabro_store::RunDatabase;
 
 use crate::error::FabroError;
 
@@ -26,7 +26,7 @@ pub(crate) fn persist(
 }
 
 pub(crate) async fn load_from_store(
-    run_store: &SlateRunStore,
+    run_store: &RunDatabase,
     run_dir: &Path,
 ) -> Result<Persisted, FabroError> {
     let state = run_store
@@ -54,7 +54,7 @@ mod tests {
     use std::path::PathBuf;
 
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
-    use fabro_store::{SlateRunStore, SlateStore, StoreHandle};
+    use fabro_store::{Database, RunDatabase};
     use fabro_types::{Settings, fixtures};
     use object_store::memory::InMemory;
     use std::sync::Arc;
@@ -64,8 +64,8 @@ mod tests {
     use crate::event::{Event, append_event};
     use crate::records::RunRecord;
 
-    fn memory_store() -> StoreHandle {
-        Arc::new(SlateStore::new(
+    fn memory_store() -> Arc<Database> {
+        Arc::new(Database::new(
             Arc::new(InMemory::new()),
             "",
             Duration::from_millis(1),
@@ -137,11 +137,7 @@ mod tests {
         }
     }
 
-    async fn seeded_store(
-        run_dir: &Path,
-        record: &RunRecord,
-        source: Option<&str>,
-    ) -> SlateRunStore {
+    async fn seeded_store(run_dir: &Path, record: &RunRecord, source: Option<&str>) -> RunDatabase {
         let store = memory_store();
         let run_store = store.create_run(&record.run_id).await.unwrap();
         append_event(

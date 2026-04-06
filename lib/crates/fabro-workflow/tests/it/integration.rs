@@ -17,6 +17,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use fabro_config::RunScratch;
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_graphviz::parser::parse;
 use fabro_interview::{
@@ -24,7 +25,7 @@ use fabro_interview::{
     QueueInterviewer, RecordingInterviewer,
 };
 use fabro_llm::provider::Provider;
-use fabro_store::{RuntimeState, SlateStore};
+use fabro_store::Database;
 use fabro_types::{RunEvent, RunId, Settings};
 use fabro_validate::{Severity, validate, validate_or_raise};
 use fabro_workflow::context::Context;
@@ -90,7 +91,7 @@ fn load_checkpoint(path: &Path) -> Result<Checkpoint, Box<dyn std::error::Error>
                 (storage_dir.join("store"), run_id)
             };
         let object_store = Arc::new(LocalFileSystem::new_with_prefix(store_dir)?);
-        let store = Arc::new(SlateStore::new(object_store, "", Duration::from_millis(1)));
+        let store = Arc::new(Database::new(object_store, "", Duration::from_millis(1)));
         let state = if tokio::runtime::Handle::try_current().is_ok() {
             std::thread::spawn(
                 move || -> Result<_, Box<dyn std::error::Error + Send + Sync>> {
@@ -8599,14 +8600,13 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
     );
 
     let expected_blob_id = fabro_types::RunBlobId::new(
-        &run_options.run_id,
         &serde_json::to_vec(&serde_json::json!("x".repeat(150 * 1024)))
             .expect("large value should serialize"),
     );
 
     // The artifact file should exist on disk
-    let artifact_file = RuntimeState::new(dir.path())
-        .artifact_values_dir()
+    let artifact_file = RunScratch::new(dir.path())
+        .blob_cache_dir()
         .join(format!("{expected_blob_id}.json"));
     assert!(
         artifact_file.exists(),
@@ -12453,7 +12453,7 @@ async fn asset_collection_local_sandbox_success() {
     assert_eq!(outcome.status, StageStatus::Success);
 
     // Check that artifact files were collected into the stage directory
-    let artifacts_dir = RuntimeState::new(run_dir.path()).artifact_stage_dir("create_assets", 1);
+    let artifacts_dir = RunScratch::new(run_dir.path()).artifact_stage_dir("create_assets", 1);
 
     let report_path = artifacts_dir.join("test-results/report.xml");
     assert!(
@@ -12573,7 +12573,7 @@ async fn asset_collection_local_sandbox_on_failure() {
     // Assets should still be collected regardless of intermediate node failures.
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let artifacts_dir = RuntimeState::new(run_dir.path()).artifact_stage_dir("create_assets", 1);
+    let artifacts_dir = RunScratch::new(run_dir.path()).artifact_stage_dir("create_assets", 1);
 
     let report_path = artifacts_dir.join("test-results/report.xml");
     assert!(
@@ -12662,7 +12662,7 @@ async fn asset_collection_docker_sandbox() {
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let artifacts_dir = RuntimeState::new(run_dir.path()).artifact_stage_dir("create_assets", 1);
+    let artifacts_dir = RunScratch::new(run_dir.path()).artifact_stage_dir("create_assets", 1);
 
     let report_path = artifacts_dir.join("test-results/report.xml");
     assert!(
