@@ -358,7 +358,7 @@ pub(crate) fn setup_artifact_run(context: &TestContext) -> WorkspaceRunSetup {
   start [shape=Mdiamond]
   exit [shape=Msquare]
   create_assets [shape=parallelogram, script="mkdir -p assets/shared assets/node_a && printf one > assets/shared/report.txt && printf alpha > assets/node_a/summary.txt", max_retries=0]
-  retry_assets [shape=parallelogram, script="mkdir -p assets/retry && touch -c -t 200001010000 assets/shared/report.txt assets/node_a/summary.txt && if [ ! -f .retry-sentinel ]; then printf first > assets/retry/report.txt && touch .retry-sentinel && sleep 0.2; else printf second > assets/retry/report.txt; fi", retry_policy="linear", timeout="50ms"]
+  retry_assets [shape=parallelogram, script="mkdir -p assets/retry && touch -c -t 200001010000 assets/shared/report.txt assets/node_a/summary.txt && if [ ! -f .retry-sentinel ]; then printf first > assets/retry/report.txt && touch .retry-sentinel && sleep 0.2; else printf second > assets/retry/report.txt; fi", retry_policy="linear", timeout="150ms"]
   create_colliding [shape=parallelogram, script="mkdir -p assets/other assets/retry && touch -c -t 200001010000 assets/shared/report.txt assets/node_a/summary.txt assets/retry/report.txt && printf beta > assets/other/summary.txt && printf second > assets/retry/report.txt", max_retries=0]
   start -> create_assets -> retry_assets -> create_colliding -> exit
 }

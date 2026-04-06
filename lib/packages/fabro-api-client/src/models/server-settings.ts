@@ -51,6 +51,15 @@ import type { PullRequestSettings } from './pull-request-settings';
 import type { SandboxSettings } from './sandbox-settings';
 // May contain unused imports in some cases
 // @ts-ignore
+import type { ServerSettingsExec } from './server-settings-exec';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { ServerSettingsFabro } from './server-settings-fabro';
+// May contain unused imports in some cases
+// @ts-ignore
+import type { ServerSettingsServer } from './server-settings-server';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { SetupSettings } from './setup-settings';
 // May contain unused imports in some cases
 // @ts-ignore
@@ -60,6 +69,52 @@ import type { WebSettings } from './web-settings';
  * Structured server settings mirroring fabro_types::Settings.
  */
 export interface ServerSettings {
+    /**
+     * Settings schema version.
+     */
+    'version'?: number;
+    /**
+     * Default goal description.
+     */
+    'goal'?: string;
+    /**
+     * Path to a goal file.
+     */
+    'goal_file'?: string;
+    /**
+     * Default Graphviz graph path.
+     */
+    'graph'?: string;
+    /**
+     * Default label map.
+     */
+    'labels'?: { [key: string]: string; };
+    'server'?: ServerSettingsServer;
+    'exec'?: ServerSettingsExec;
+    /**
+     * Prevent system idle sleep while running.
+     */
+    'prevent_idle_sleep'?: boolean;
+    /**
+     * Enable verbose output by default.
+     */
+    'verbose'?: boolean;
+    /**
+     * Whether upgrade checks are enabled.
+     */
+    'upgrade_check'?: boolean;
+    /**
+     * Default dry-run mode.
+     */
+    'dry_run'?: boolean;
+    /**
+     * Default auto-approve mode.
+     */
+    'auto_approve'?: boolean;
+    /**
+     * Skip retro generation by default.
+     */
+    'no_retro'?: boolean;
     /**
      * Storage directory path.
      */
@@ -93,5 +148,6 @@ export interface ServerSettings {
      */
     'mcp_servers'?: { [key: string]: McpServerEntry; };
     'github'?: GitHubSettings;
+    'fabro'?: ServerSettingsFabro;
 }
 

@@ -19,6 +19,10 @@ use fabro_sandbox::daytona::*;
 use fabro_server::jwt_auth::AuthMode;
 use fabro_server::server::build_router;
 use fabro_server::server_config::*;
+use fabro_types::settings::{
+    ClientTlsSettings, ExecSettings, OutputFormat, PermissionLevel, ProjectSettings,
+    ServerSettings as UserServerSettings,
+};
 use tower::ServiceExt;
 
 fn load_spec() -> openapiv3::OpenAPI {
@@ -230,6 +234,31 @@ fn compare_schema(
 /// in the serialized JSON.
 fn fully_populated_server_config() -> Settings {
     Settings {
+        version: Some(1),
+        goal: Some("default goal".into()),
+        goal_file: Some("/tmp/goal.txt".into()),
+        graph: Some("workflow.fabro".into()),
+        labels: std::collections::HashMap::from([("scope".into(), "server".into())]),
+        server: Some(UserServerSettings {
+            target: Some("https://server.example.com".into()),
+            tls: Some(ClientTlsSettings {
+                cert: "client-cert.pem".into(),
+                key: "client-key.pem".into(),
+                ca: "ca.pem".into(),
+            }),
+        }),
+        exec: Some(ExecSettings {
+            provider: Some("openai".into()),
+            model: Some("gpt-5.4".into()),
+            permissions: Some(PermissionLevel::ReadWrite),
+            output_format: Some(OutputFormat::Json),
+        }),
+        prevent_idle_sleep: Some(true),
+        verbose: Some(true),
+        upgrade_check: Some(false),
+        dry_run: Some(true),
+        auto_approve: Some(true),
+        no_retro: Some(true),
         storage_dir: Some("/data".into()),
         max_concurrent_runs: Some(10),
         web: Some(WebSettings {
@@ -379,6 +408,9 @@ fn fully_populated_server_config() -> Settings {
         )]),
         github: Some(GitHubSettings {
             permissions: std::collections::HashMap::from([("contents".into(), "read".into())]),
+        }),
+        fabro: Some(ProjectSettings {
+            root: "fabro".into(),
         }),
         ..Default::default()
     }

@@ -613,7 +613,11 @@ pub(crate) struct DfArgs {
 #[derive(Args)]
 pub(crate) struct SettingsArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) target: ServerTargetArgs,
+
+    /// Show only locally resolved settings and skip the server call
+    #[arg(long, conflicts_with = "server")]
+    pub(crate) local: bool,
 
     /// Optional workflow name, .fabro path, or .toml run config to overlay
     pub(crate) workflow: Option<PathBuf>,
@@ -921,7 +925,7 @@ pub(crate) enum Commands {
     Skill(SkillNamespace),
     /// Manage server-owned secrets
     Secret(SecretNamespace),
-    /// Inspect merged configuration
+    /// Inspect effective settings
     Settings(SettingsArgs),
     /// Workflow operations
     Workflow(WorkflowNamespace),
