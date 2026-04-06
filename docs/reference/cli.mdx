@@ -217,19 +217,42 @@ fabro rm my-workflow --force
 | `<RUN>...` | Run IDs or workflow names to remove (required, repeatable) |
 | `-f, --force` | Force removal of active runs |
 
+## `fabro system info`
+
+Show server runtime information including version, uptime, and run counts.
+
+```bash
+fabro system info
+fabro system info --json
+```
+
+## `fabro system events`
+
+Stream run events from the server in real time.
+
+```bash
+fabro system events
+fabro system events --run-id abc123
+```
+
+| Flag | Description |
+|---|---|
+| `--run-id <ID>` | Filter by run ID (repeatable) |
+
 ## `fabro system prune`
 
 Delete old workflow runs. Dry-run by default — pass `--yes` to actually delete.
 
 ```bash
 fabro system prune --before 2026-01-01
-fabro system prune --before 2026-01-01 --yes
+fabro system prune --older-than 7d --yes
 fabro system prune --orphans --yes
 ```
 
 | Flag | Description |
 |---|---|
 | `--before <DATE>` | Only prune runs started before this date (YYYY-MM-DD prefix match) |
+| `--older-than <DURATION>` | Only prune runs older than this duration (e.g. `24h`, `7d`). Default when no explicit filters are set: `24h` |
 | `--workflow <NAME>` | Filter by workflow name (substring match) |
 | `--label <KEY=VALUE>` | Filter by label (repeatable, AND semantics) |
 | `--orphans` | Include orphan directories (no `run.json`) |
@@ -299,18 +322,19 @@ fabro model test -m claude-sonnet-4-5
 
 ## `fabro server start`
 
-Start the HTTP API server that exposes the [REST API](/api-reference) for launching and managing workflow runs.
+Start the Fabro server daemon. By default, the server launches as a background process listening on a Unix socket. Use `--foreground` for the previous blocking behavior.
 
 ```bash
-fabro server start
-fabro server start --port 8080 --host 0.0.0.0
+fabro server start                                # background daemon on Unix socket
+fabro server start --bind 127.0.0.1:8080          # TCP on a specific port
+fabro server start --foreground                   # blocking foreground mode
 fabro server start --sandbox daytona --max-concurrent-runs 4
 ```
 
 | Flag | Description | Default |
 |---|---|---|
-| `--port <PORT>` | Port to listen on | `3000` |
-| `--host <HOST>` | Host address to bind to | `127.0.0.1` |
+| `--bind <ADDR>` | Address to bind: `host:port` for TCP, or a path for Unix socket | `~/.fabro/fabro.sock` |
+| `--foreground` | Run in the foreground instead of daemonizing | — |
 | `--model <MODEL>` | Override default LLM model | — |
 | `--provider <PROVIDER>` | Override default LLM provider | — |
 | `--dry-run` | Execute with simulated LLM backend | — |
@@ -320,7 +344,31 @@ fabro server start --sandbox daytona --max-concurrent-runs 4
 
 Demo mode is per-request: send the `X-Fabro-Demo: 1` header to get static demo data with auth disabled.
 
-If no LLM provider API keys are configured, the server automatically falls back to dry-run mode.
+## `fabro server stop`
+
+Stop the running server daemon. Sends SIGTERM and waits for graceful shutdown, escalating to SIGKILL after the timeout.
+
+```bash
+fabro server stop
+fabro server stop --timeout 30
+```
+
+| Flag | Description | Default |
+|---|---|---|
+| `--timeout <SECONDS>` | Seconds to wait for graceful shutdown before SIGKILL | `10` |
+
+## `fabro server status`
+
+Show whether the server daemon is running, along with PID, bind address, and uptime.
+
+```bash
+fabro server status
+fabro server status --json
+```
+
+| Flag | Description |
+|---|---|
+| `--json` | Output as JSON |
 
 ---
 

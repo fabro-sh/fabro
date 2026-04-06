@@ -1,0 +1,46 @@
+---
+title: "CLI restructuring, shell completions, and API versioning"
+date: "2026-03-30"
+---
+
+## CLI command restructuring
+
+The CLI command tree has been reorganized for consistency and discoverability. Sandbox-related commands (`cp`, `ssh`, `preview`) now live under `fabro sandbox`, the server command is now `fabro server start`, settings are shown with `fabro settings`, and the deprecated `fabro init` command has been removed.
+
+<Warning>
+**Breaking CLI changes.** Several commands have moved or been renamed:
+
+- `fabro serve` → `fabro server start`
+- `fabro config show` → `fabro settings`
+- `fabro cp` → `fabro sandbox cp`
+- `fabro ssh` → `fabro sandbox ssh`
+- `fabro preview` → `fabro sandbox preview`
+- `fabro init` has been removed
+</Warning>
+
+## Shell completions
+
+You can now generate shell completions for Bash, Zsh, Fish, Elvish, and PowerShell using the new `fabro completion` subcommand.
+
+```bash
+fabro completion zsh > ~/.zfunc/_fabro
+```
+
+<Warning>
+**API routes versioned.** All REST API routes are now prefixed with `/api/v1`. Update any direct API integrations accordingly.
+</Warning>
+
+## More
+
+<Accordion title="CLI">
+- Added `fabro completion` subcommand for Bash, Zsh, Fish, Elvish, and PowerShell
+- Added help text snapshots for all subcommands
+</Accordion>
+
+<Accordion title="Improvements">
+- Typed `RunId` used consistently across the codebase
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed cli-table ignoring `NO_COLOR` environment variable
+</Accordion>

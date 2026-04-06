@@ -1,0 +1,24 @@
+---
+title: "Background server daemon"
+date: "2026-04-02"
+---
+
+## Background server daemon
+
+The Fabro server now runs as a managed background daemon instead of requiring a dedicated terminal tab. `fabro server start` launches the daemon in the background with file-lock-based lifecycle management, and `fabro server stop` shuts it down gracefully. The daemon listens on a Unix socket by default for fast local communication.
+
+```bash
+fabro server start          # launch background daemon
+fabro server status         # check running state, PID, uptime
+fabro server status --json  # machine-readable status
+fabro server stop           # graceful shutdown
+fabro server start --foreground  # old blocking behavior
+```
+
+The `--bind` flag replaces the previous `--host`/`--port` flags and supports both Unix sockets and TCP addresses.
+
+## More
+
+<Accordion title="Improvements">
+- Workflow state is now fully derivable from events, making run replay and debugging more reliable
+</Accordion>

@@ -102,8 +102,8 @@ Several `settings.toml` settings can be overridden via `fabro server start` flag
 
 | Flag | Default | Description |
 |---|---|---|
-| `--port` | `3000` | Port to listen on |
-| `--host` | `127.0.0.1` | Host address to bind to |
+| `--bind` | `~/.fabro/fabro.sock` | Address to bind: `host:port` for TCP, or a path for Unix socket |
+| `--foreground` | — | Run in the foreground instead of daemonizing |
 | `--model` | — | Override default LLM model |
 | `--provider` | — | Override default LLM provider |
 | `--sandbox` | — | Override default sandbox provider |
