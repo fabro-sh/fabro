@@ -148,19 +148,16 @@ async fn connect_target_api_client(
             Ok(connect_remote_api_client(api_url, tls.as_ref())?)
         }
         user_config::ServerTarget::UnixSocket(path) => {
-            match connect_unix_socket_api_client(path).await {
-                Ok(client) => Ok(client),
-                Err(_) => {
-                    start::ensure_server_running_on_socket(
-                        path,
-                        &runtime.active_config_path,
-                        &runtime.storage_dir,
-                    )
-                    .with_context(|| {
-                        format!("Failed to start fabro server for {}", path.display())
-                    })?;
-                    connect_unix_socket_api_client(path).await
-                }
+            if let Ok(client) = connect_unix_socket_api_client(path).await {
+                Ok(client)
+            } else {
+                start::ensure_server_running_on_socket(
+                    path,
+                    &runtime.active_config_path,
+                    &runtime.storage_dir,
+                )
+                .with_context(|| format!("Failed to start fabro server for {}", path.display()))?;
+                connect_unix_socket_api_client(path).await
             }
         }
     }

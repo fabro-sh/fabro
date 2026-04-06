@@ -70,9 +70,8 @@ fn active_server_record_at_path(path: PathBuf) -> Option<ActiveServerRecord> {
 
 pub(crate) fn active_server_record_details(storage_dir: &Path) -> Option<ActiveServerRecord> {
     let primary_path = server_record_path(storage_dir);
-    active_server_record_at_path(primary_path).or_else(|| {
-        legacy_record_path(storage_dir).and_then(|path| active_server_record_at_path(path))
-    })
+    active_server_record_at_path(primary_path)
+        .or_else(|| legacy_record_path(storage_dir).and_then(active_server_record_at_path))
 }
 
 pub(crate) fn active_server_record(storage_dir: &Path) -> Option<ServerRecord> {
