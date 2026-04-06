@@ -90,18 +90,23 @@ fn parse_child_graph(
         .or_else(|| node.attrs.get("stack.child_dotfile"))
         .and_then(|v| v.as_str())
     {
-        let workflow = if let (Some(bundle), Some(current_workflow_path)) =
-            (&services.workflow_bundle, &services.workflow_path)
-        {
-            bundle
-                .resolve_child(current_workflow_path, path)
-                .cloned()
-                .map_or_else(
-                    || WorkflowInput::Path(PathBuf::from(path)),
-                    WorkflowInput::Bundled,
-                )
-        } else {
-            WorkflowInput::Path(PathBuf::from(path))
+        let workflow = match (&services.workflow_bundle, &services.workflow_path) {
+            (Some(bundle), Some(current_workflow_path)) => WorkflowInput::Bundled(
+                bundle
+                    .resolve_child(current_workflow_path, path)
+                    .cloned()
+                    .ok_or_else(|| {
+                        FabroError::handler(format!(
+                            "child workflow is not present in the persisted bundle: {path}"
+                        ))
+                    })?,
+            ),
+            (Some(_), None) => {
+                return Err(FabroError::engine(
+                    "workflow bundle is missing the current workflow path".to_string(),
+                ));
+            }
+            (None, _) => WorkflowInput::Path(PathBuf::from(path)),
         };
         let workflow_path = match &workflow {
             WorkflowInput::Bundled(workflow) => Some(workflow.logical_path.clone()),
@@ -593,6 +598,45 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);
+    }
+
+    #[tokio::test]
+    async fn child_workflow_missing_from_bundle_does_not_fall_back_to_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let dot_path = dir.path().join("child.fabro");
+        std::fs::write(&dot_path, child_dot_succeeds()).unwrap();
+
+        let handler = SubWorkflowHandler;
+        let mut node = Node::new("manager");
+        node.attrs.insert(
+            "stack.child_workflow".to_string(),
+            AttrValue::String(dot_path.to_string_lossy().to_string()),
+        );
+        node.attrs
+            .insert("manager.max_cycles".to_string(), AttrValue::Integer(100));
+        node.attrs.insert(
+            "manager.poll_interval".to_string(),
+            AttrValue::Duration(Duration::from_millis(10)),
+        );
+
+        let mut services = make_services();
+        services.workflow_path = Some(PathBuf::from("workflow.fabro"));
+        services.workflow_bundle = Some(Arc::new(WorkflowBundle::new(HashMap::new())));
+
+        let context = Context::new();
+        let graph = Graph::new("test");
+
+        let outcome = handler
+            .execute(&node, &context, &graph, dir.path(), &services)
+            .await
+            .unwrap();
+        assert_eq!(outcome.status, StageStatus::Fail);
+        assert!(
+            outcome
+                .failure_reason()
+                .unwrap()
+                .contains("child workflow is not present in the persisted bundle")
+        );
     }
 
     #[tokio::test]
