@@ -335,7 +335,9 @@ pub(crate) async fn run_doctor(
             title: "Local".to_string(),
             checks: vec![
                 check_config(
-                    settings_config_path.filter(|path| path.exists()),
+                    settings_config_path
+                        .exists()
+                        .then_some(settings_config_path),
                     &legacy_config_paths,
                 ),
                 check_legacy_env(legacy_env_path),

@@ -86,7 +86,9 @@ pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManif
             type_: types::ManifestConfigType::Project,
         });
     }
-    if let Some(path) = active_settings_path(None).filter(|path| path.is_file()) {
+    let settings_path = active_settings_path(None);
+    if settings_path.is_file() {
+        let path = settings_path;
         let source = std::fs::read_to_string(&path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
         configs.push(types::ManifestConfig {

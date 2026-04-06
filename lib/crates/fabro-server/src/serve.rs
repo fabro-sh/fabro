@@ -61,7 +61,7 @@ fn load_settings(path: Option<&Path>) -> anyhow::Result<Settings> {
 }
 
 fn resolved_config_path(path: Option<&Path>) -> PathBuf {
-    active_settings_path(path).unwrap_or_else(|| PathBuf::from(".fabro/settings.toml"))
+    active_settings_path(path)
 }
 
 fn apply_serve_overrides(base: &Settings, args: &ServeArgs, dry_run_mode: bool) -> Settings {

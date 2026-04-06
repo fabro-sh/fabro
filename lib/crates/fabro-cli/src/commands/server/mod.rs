@@ -55,10 +55,12 @@ pub(crate) async fn dispatch(command: ServerCommand, _globals: &GlobalArgs) -> R
             record_path,
             serve_args,
         }) => {
-            let active_config_path = serve_args
-                .config
-                .clone()
-                .or_else(|| user_config::active_settings_path(None));
+            let active_config_path = Some(
+                serve_args
+                    .config
+                    .clone()
+                    .unwrap_or_else(|| user_config::active_settings_path(None)),
+            );
             let bind_addr = if let Some(s) = serve_args.bind.as_deref() {
                 bind::parse_bind(s)?
             } else {

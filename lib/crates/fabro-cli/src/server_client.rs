@@ -117,8 +117,7 @@ pub(crate) async fn connect_server_only(args: &ServerTargetArgs) -> Result<Serve
     let settings = user_config::load_settings()?;
     let target = user_config::resolve_server_target(args, &settings)?;
     let runtime = LocalServerRuntime {
-        active_config_path: user_config::active_settings_path(None)
-            .unwrap_or_else(|| PathBuf::from(".fabro/settings.toml")),
+        active_config_path: user_config::active_settings_path(None),
         storage_dir: settings.storage_dir(),
     };
     Ok(ServerStoreClient {
@@ -127,8 +126,7 @@ pub(crate) async fn connect_server_only(args: &ServerTargetArgs) -> Result<Serve
 }
 
 pub(crate) async fn connect_api_client(storage_dir: &Path) -> Result<fabro_api::Client> {
-    let config_path = user_config::active_settings_path(None)
-        .unwrap_or_else(|| PathBuf::from(".fabro/settings.toml"));
+    let config_path = user_config::active_settings_path(None);
     let bind = start::ensure_server_running_for_storage(storage_dir, &config_path)
         .with_context(|| format!("Failed to start fabro server for {}", storage_dir.display()))?;
     match bind {
@@ -169,8 +167,7 @@ pub(crate) async fn connect_server_backed_api_client(
     let settings = user_config::load_settings()?;
     let target = user_config::resolve_server_target(args, &settings)?;
     let runtime = LocalServerRuntime {
-        active_config_path: user_config::active_settings_path(None)
-            .unwrap_or_else(|| PathBuf::from(".fabro/settings.toml")),
+        active_config_path: user_config::active_settings_path(None),
         storage_dir: settings.storage_dir(),
     };
     connect_target_api_client(&target, &runtime).await

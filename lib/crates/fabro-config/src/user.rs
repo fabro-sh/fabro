@@ -81,8 +81,8 @@ impl From<ExecConfig> for ExecSettings {
     }
 }
 
-pub fn default_settings_path() -> Option<PathBuf> {
-    Some(Home::from_env().user_config())
+pub fn default_settings_path() -> PathBuf {
+    Home::from_env().user_config()
 }
 
 pub fn default_socket_path() -> PathBuf {
@@ -93,10 +93,10 @@ pub fn legacy_default_storage_root() -> PathBuf {
     Home::from_env().root().to_path_buf()
 }
 
-pub fn active_settings_path(path: Option<&Path>) -> Option<PathBuf> {
+pub fn active_settings_path(path: Option<&Path>) -> PathBuf {
     path.map(Path::to_path_buf)
         .or_else(|| std::env::var_os(FABRO_CONFIG_ENV).map(PathBuf::from))
-        .or_else(default_settings_path)
+        .unwrap_or_else(default_settings_path)
 }
 
 pub fn legacy_user_config_path() -> Option<PathBuf> {
@@ -146,8 +146,7 @@ pub fn load_settings_config(path: Option<&Path>) -> anyhow::Result<ConfigLayer> 
     .flatten()
     {
         if legacy_path.is_file() && should_warn_about_legacy_user_config(&legacy_path) {
-            let target = default_settings_path()
-                .unwrap_or_else(|| PathBuf::from(format!("~/.fabro/{SETTINGS_CONFIG_FILENAME}")));
+            let target = default_settings_path();
             eprintln!(
                 "Warning: ignoring legacy config file {}. Rename it to {}.",
                 legacy_path.display(),
@@ -210,7 +209,7 @@ mod tests {
 
         assert_eq!(
             default_settings_path(),
-            Some(home.join(".fabro").join(SETTINGS_CONFIG_FILENAME))
+            home.join(".fabro").join(SETTINGS_CONFIG_FILENAME)
         );
         assert_eq!(default_socket_path(), home.join(".fabro/fabro.sock"));
         assert_eq!(
@@ -247,6 +246,6 @@ mod tests {
         let custom_path = dir.path().join("custom-settings.toml");
         let _guard = EnvGuard::set(FABRO_CONFIG_ENV, Some(&custom_path));
 
-        assert_eq!(active_settings_path(None), Some(custom_path));
+        assert_eq!(active_settings_path(None), custom_path);
     }
 }
