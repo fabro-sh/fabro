@@ -54,14 +54,6 @@ const ENDPOINTS: &[PaginatedEndpoint] = &[
         name: "listWorkflowRuns",
     },
     PaginatedEndpoint {
-        path: "/api/v1/retros",
-        name: "listRetros",
-    },
-    PaginatedEndpoint {
-        path: "/api/v1/sessions",
-        name: "listSessions",
-    },
-    PaginatedEndpoint {
         path: "/api/v1/insights/queries",
         name: "listSavedQueries",
     },

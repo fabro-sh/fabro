@@ -11,8 +11,6 @@ import {
   Bars3Icon,
   BeakerIcon,
   ChartBarIcon,
-  CheckBadgeIcon,
-  LightBulbIcon,
   MoonIcon,
   PlayIcon,
   RectangleStackIcon,
@@ -30,8 +28,6 @@ export async function loader() {
 const navigation = [
   { name: "Workflows", href: "/workflows", icon: RectangleStackIcon },
   { name: "Runs", href: "/runs", icon: PlayIcon },
-  { name: "Verification", href: "/verification/criteria", icon: CheckBadgeIcon },
-  { name: "Retros", href: "/retros", icon: LightBulbIcon },
   { name: "Insights", href: "/insights", icon: ChartBarIcon },
 ];
 

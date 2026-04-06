@@ -19,6 +19,5 @@ pub mod server_config {
     pub use fabro_config::server::*;
     pub use fabro_types::Settings;
 }
-pub mod sessions;
 pub mod tls;
 pub mod web_auth;
