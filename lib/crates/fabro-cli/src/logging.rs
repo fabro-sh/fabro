@@ -21,9 +21,7 @@ pub(crate) fn init_tracing(
     std::fs::create_dir_all(&log_dir)
         .with_context(|| format!("Failed to create log directory: {}", log_dir.display()))?;
 
-    let filename = chrono::Local::now()
-        .format(&format!("{log_prefix}-%Y-%m-%d.log"))
-        .to_string();
+    let filename = format!("{log_prefix}.log");
     let file_appender = rolling::never(&log_dir, &filename);
 
     let run_log_writer = run_log::init();

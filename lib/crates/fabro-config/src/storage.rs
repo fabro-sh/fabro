@@ -78,7 +78,7 @@ impl ServerState {
 
     #[must_use]
     pub fn log_path(&self) -> PathBuf {
-        self.root.join("server.log")
+        self.root.join("logs").join("server.log")
     }
 }
 
@@ -203,7 +203,7 @@ mod tests {
         );
         assert_eq!(
             storage.server_state().log_path(),
-            std::path::Path::new("/tmp/fabro-data/server.log")
+            std::path::Path::new("/tmp/fabro-data/logs/server.log")
         );
     }
 
