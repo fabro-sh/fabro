@@ -104,13 +104,13 @@ impl ArtifactStore {
     }
 
     fn run_prefix(&self, run_id: &RunId) -> Result<ObjectPath> {
-        parse_object_path(self.prefixed_raw(&run_id.to_string()))
+        parse_object_path(&self.prefixed_raw(&run_id.to_string()))
     }
 
     fn node_prefix(&self, run_id: &RunId, node: &StageId) -> Result<ObjectPath> {
         let encoded_node = encode_path_segment(node.node_id());
         parse_object_path(
-            self.prefixed_raw(&format!("{run_id}/{encoded_node}@{:04}", node.visit())),
+            &self.prefixed_raw(&format!("{run_id}/{encoded_node}@{:04}", node.visit())),
         )
     }
 
@@ -120,7 +120,7 @@ impl ArtifactStore {
             raw.push('/');
             raw.push_str(&encode_path_segment(segment));
         }
-        parse_object_path(raw)
+        parse_object_path(&raw)
     }
 
     fn prefixed_raw(&self, suffix: &str) -> String {
@@ -162,7 +162,7 @@ fn encode_path_segment(segment: &str) -> String {
 fn decode_path_segment(kind: &str, value: &str) -> Result<String> {
     percent_decode_str(value)
         .decode_utf8()
-        .map(|decoded| decoded.into_owned())
+        .map(std::borrow::Cow::into_owned)
         .map_err(|err| StoreError::Other(format!("invalid {kind}: {err}")))
 }
 
@@ -220,8 +220,8 @@ fn decode_filename(prefix: &ObjectPath, location: &ObjectPath) -> Result<String>
     Ok(filename_segments.join("/"))
 }
 
-fn parse_object_path(raw: String) -> Result<ObjectPath> {
-    ObjectPath::parse(&raw)
+fn parse_object_path(raw: &str) -> Result<ObjectPath> {
+    ObjectPath::parse(raw)
         .map_err(|err| StoreError::Other(format!("invalid artifact object path {raw:?}: {err}")))
 }
 

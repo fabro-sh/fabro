@@ -17,9 +17,8 @@ impl Home {
             return Self::new(root);
         }
 
-        let root = dirs::home_dir()
-            .map(|home| home.join(".fabro"))
-            .unwrap_or_else(|| PathBuf::from(".fabro"));
+        let root =
+            dirs::home_dir().map_or_else(|| PathBuf::from(".fabro"), |home| home.join(".fabro"));
         Self::new(root)
     }
 
