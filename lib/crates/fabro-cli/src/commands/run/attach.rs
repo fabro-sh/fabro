@@ -47,34 +47,44 @@ pub(crate) async fn attach_run(
 
     if let (Some(storage_dir), Some(run_id)) = (storage_dir.as_deref(), run_id.as_ref()) {
         let client = server_client::connect_server(storage_dir).await?;
-        let state = client.get_run_state(run_id).await?;
-        let verbose = state
-            .run
-            .as_ref()
-            .is_some_and(|record| record.settings.verbose_enabled());
-        let events = client.list_run_events(run_id, None, None).await?;
-        let event_lines = events
-            .iter()
-            .map(event_payload_line)
-            .collect::<Result<Vec<_>>>()?;
-        let initial_exit_code = events.iter().rev().find_map(event_exit_code);
-        return attach_run_server(
-            &client,
-            run_id,
-            verbose,
-            event_lines,
-            events.last().map_or(0, |event| event.seq),
-            initial_exit_code,
-            kill_on_detach,
-            styles,
-            json_output,
-        )
-        .await;
+        return attach_run_with_client(&client, run_id, kill_on_detach, styles, json_output).await;
     }
 
     Err(anyhow::anyhow!(
         "Could not infer SlateDB storage location and run id for attach"
     ))
+}
+
+pub(crate) async fn attach_run_with_client(
+    client: &server_client::ServerStoreClient,
+    run_id: &RunId,
+    kill_on_detach: bool,
+    styles: &'static Styles,
+    json_output: bool,
+) -> Result<ExitCode> {
+    let state = client.get_run_state(run_id).await?;
+    let verbose = state
+        .run
+        .as_ref()
+        .is_some_and(|record| record.settings.verbose_enabled());
+    let events = client.list_run_events(run_id, None, None).await?;
+    let event_lines = events
+        .iter()
+        .map(event_payload_line)
+        .collect::<Result<Vec<_>>>()?;
+    let initial_exit_code = events.iter().rev().find_map(event_exit_code);
+    attach_run_server(
+        client,
+        run_id,
+        verbose,
+        event_lines,
+        events.last().map_or(0, |event| event.seq),
+        initial_exit_code,
+        kill_on_detach,
+        styles,
+        json_output,
+    )
+    .await
 }
 
 async fn attach_run_server(

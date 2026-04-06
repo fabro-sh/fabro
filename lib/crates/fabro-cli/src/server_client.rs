@@ -114,6 +114,14 @@ pub(crate) async fn connect_server_backed(
     })
 }
 
+pub(crate) async fn connect_server_connection(
+    connection: &user_config::ServerConnection,
+) -> Result<ServerStoreClient> {
+    Ok(ServerStoreClient {
+        client: connect_resolved_api_client(connection).await?,
+    })
+}
+
 pub(crate) async fn connect_api_client(storage_dir: &Path) -> Result<fabro_api::Client> {
     let bind = start::ensure_server_running(storage_dir)
         .with_context(|| format!("Failed to start fabro server for {}", storage_dir.display()))?;
@@ -155,7 +163,16 @@ pub(crate) fn connect_remote_api_client(
     tls: Option<&user_config::ClientTlsSettings>,
 ) -> Result<fabro_api::Client> {
     let http_client = user_config::build_server_client(tls)?;
-    Ok(fabro_api::Client::new_with_client(api_url, http_client))
+    let normalized = normalize_remote_server_target(api_url);
+    Ok(fabro_api::Client::new_with_client(&normalized, http_client))
+}
+
+fn normalize_remote_server_target(api_url: &str) -> String {
+    api_url
+        .trim_end_matches('/')
+        .strip_suffix("/api/v1")
+        .unwrap_or(api_url.trim_end_matches('/'))
+        .to_string()
 }
 
 pub(crate) async fn connect_unix_socket_api_client(path: &Path) -> Result<fabro_api::Client> {

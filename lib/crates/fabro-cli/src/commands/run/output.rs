@@ -128,42 +128,50 @@ pub(crate) async fn print_run_summary(
     run_id: impl std::fmt::Display,
     styles: &Styles,
 ) -> Result<()> {
-    let run_id = run_id.to_string();
-    let (checkpoint, conclusion, pr_url) = match run_id.parse() {
-        Ok(parsed_run_id) => {
-            let client = server_client::connect_server(storage_dir).await?;
-            let run_state = client.get_run_state(&parsed_run_id).await?;
-            let checkpoint = run_state.checkpoint.clone();
-            let conclusion = run_state.conclusion.clone();
-            let pr_url = run_state
-                .pull_request
-                .as_ref()
-                .map(|record: &PullRequestRecord| record.html_url.clone());
-            (checkpoint, conclusion, pr_url)
-        }
-        Err(_) => (None, None, None),
-    };
+    let run_id = run_id
+        .to_string()
+        .parse()
+        .map_err(|err| anyhow::anyhow!("invalid run ID: {err}"))?;
+    let client = server_client::connect_server(storage_dir).await?;
+    print_run_summary_with_client(&client, &run_id, Some(run_dir), styles).await
+}
+
+pub(crate) async fn print_run_summary_with_client(
+    client: &server_client::ServerStoreClient,
+    run_id: &fabro_types::RunId,
+    local_run_dir: Option<&Path>,
+    styles: &Styles,
+) -> Result<()> {
+    let run_state = client.get_run_state(run_id).await?;
+    let checkpoint = run_state.checkpoint.clone();
+    let conclusion = run_state.conclusion.clone();
+    let pr_url = run_state
+        .pull_request
+        .as_ref()
+        .map(|record: &PullRequestRecord| record.html_url.clone());
     let Some(conclusion) = conclusion else {
         return Ok(());
     };
 
     print_run_conclusion(
         &conclusion,
-        &run_id,
-        run_dir,
+        run_id,
+        local_run_dir,
         None,
         pr_url.as_deref(),
         styles,
     );
-    print_final_output(checkpoint.as_ref(), run_dir, styles);
-    print_assets(run_dir, styles);
+    print_final_output(checkpoint.as_ref(), styles);
+    if let Some(run_dir) = local_run_dir {
+        print_assets(run_dir, styles);
+    }
     Ok(())
 }
 
 pub(crate) fn print_run_conclusion(
     conclusion: &Conclusion,
     run_id: impl std::fmt::Display,
-    run_dir: &Path,
+    run_dir: Option<&Path>,
     pushed_branch: Option<&str>,
     pr_url: Option<&str>,
     styles: &Styles,
@@ -227,12 +235,14 @@ pub(crate) fn print_run_conclusion(
         }
     }
 
-    eprintln!(
-        "{}",
-        styles
-            .dim
-            .apply_to(format!("Run:       {}", tilde_path(run_dir)))
-    );
+    if let Some(run_dir) = run_dir {
+        eprintln!(
+            "{}",
+            styles
+                .dim
+                .apply_to(format!("Run:       {}", tilde_path(run_dir)))
+        );
+    }
 
     if let Some(ref failure) = conclusion.failure_reason {
         eprintln!("Failure:   {}", styles.red.apply_to(failure));
@@ -249,11 +259,7 @@ pub(crate) fn print_run_conclusion(
     }
 }
 
-pub(crate) fn print_final_output(
-    checkpoint: Option<&fabro_types::Checkpoint>,
-    _run_dir: &Path,
-    styles: &Styles,
-) {
+pub(crate) fn print_final_output(checkpoint: Option<&fabro_types::Checkpoint>, styles: &Styles) {
     let Some(checkpoint) = checkpoint else {
         return;
     };

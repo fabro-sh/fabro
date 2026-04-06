@@ -39,12 +39,12 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
         RunCommands::Create(mut args) => {
             apply_json_defaults(&mut args, globals);
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-            let cli = user_layer_with_storage_dir(args.storage_dir.as_deref())?;
-            let (run_id, _run_dir) = Box::pin(create::create_run(&args, cli, styles, true)).await?;
+            let cli = user_layer_with_storage_dir(args.target.storage_dir())?;
+            let created_run = Box::pin(create::create_run(&args, cli, styles, true)).await?;
             if globals.json {
-                print_json_pretty(&serde_json::json!({ "run_id": run_id }))?;
+                print_json_pretty(&serde_json::json!({ "run_id": created_run.run_id }))?;
             } else {
-                println!("{run_id}");
+                println!("{}", created_run.run_id);
             }
             Ok(())
         }

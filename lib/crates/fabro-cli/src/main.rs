@@ -13,12 +13,13 @@ mod user_config;
 
 use anyhow::Result;
 use args::{Commands, GlobalArgs, LONG_VERSION, RunCommands, ServerCommand, ServerNamespace};
-use clap::{CommandFactory, Parser};
+use clap::{CommandFactory, FromArgMatches, Parser, error::ErrorKind, parser::ValueSource};
 use fabro_config::server::load_server_settings;
 use fabro_telemetry::{git, panic as tel_panic, sanitize, sender};
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use rustls::crypto::ring::default_provider;
+use std::ffi::OsString;
 use tracing::debug;
 
 #[derive(Parser)]
@@ -29,6 +30,123 @@ struct Cli {
 
     #[command(subcommand)]
     command: Box<Commands>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct ServerConnectionValueSources {
+    storage_dir: Option<ValueSource>,
+    server: Option<ValueSource>,
+}
+
+impl ServerConnectionValueSources {
+    fn command_line_conflict(self) -> bool {
+        self.storage_dir == Some(ValueSource::CommandLine)
+            && self.server == Some(ValueSource::CommandLine)
+    }
+
+    fn storage_dir_is_explicit(self) -> bool {
+        self.storage_dir == Some(ValueSource::CommandLine)
+    }
+}
+
+impl Cli {
+    fn parse() -> Self {
+        Self::try_parse_from(std::env::args_os()).unwrap_or_else(|err| err.exit())
+    }
+
+    fn try_parse_from<I, T>(args: I) -> Result<Self, clap::Error>
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<OsString> + Clone,
+    {
+        let args: Vec<OsString> = args.into_iter().map(Into::into).collect();
+        let mut command = Self::command();
+        let mut matches = command.try_get_matches_from_mut(args)?;
+        let sources = server_connection_value_sources(&matches);
+        if sources.command_line_conflict() {
+            return Err(command.error(
+                ErrorKind::ArgumentConflict,
+                "the argument '--server <SERVER>' cannot be used with '--storage-dir <STORAGE_DIR>'",
+            ));
+        }
+
+        let mut cli = <Self as FromArgMatches>::from_arg_matches_mut(&mut matches)?;
+        cli.apply_server_connection_value_sources(sources);
+        Ok(cli)
+    }
+
+    fn apply_server_connection_value_sources(&mut self, sources: ServerConnectionValueSources) {
+        self.command.apply_server_connection_value_sources(sources);
+    }
+}
+
+impl Commands {
+    fn apply_server_connection_value_sources(&mut self, sources: ServerConnectionValueSources) {
+        match self {
+            Self::RunCmd(RunCommands::Run(args) | RunCommands::Create(args)) => {
+                args.target.storage_dir_explicit = sources.storage_dir_is_explicit();
+            }
+            Self::Preflight(args) => {
+                args.target.storage_dir_explicit = sources.storage_dir_is_explicit();
+            }
+            Self::Validate(args) => {
+                args.target.storage_dir_explicit = sources.storage_dir_is_explicit();
+            }
+            Self::Graph(args) => {
+                args.target.storage_dir_explicit = sources.storage_dir_is_explicit();
+            }
+            Self::Model {
+                command: Some(args::ModelsCommand::List(args)),
+            } => {
+                args.target.storage_dir_explicit = sources.storage_dir_is_explicit();
+            }
+            Self::Model {
+                command: Some(args::ModelsCommand::Test(args)),
+            } => {
+                args.target.storage_dir_explicit = sources.storage_dir_is_explicit();
+            }
+            Self::Doctor(args) => {
+                args.target.storage_dir_explicit = sources.storage_dir_is_explicit();
+            }
+            Self::Repo(args::RepoNamespace {
+                command: args::RepoCommand::Init(args),
+            }) => {
+                args.target.storage_dir_explicit = sources.storage_dir_is_explicit();
+            }
+            Self::Provider(args::ProviderNamespace {
+                command: args::ProviderCommand::Login(args),
+            }) => {
+                args.target.storage_dir_explicit = sources.storage_dir_is_explicit();
+            }
+            Self::Secret(args::SecretNamespace { target, .. }) => {
+                target.storage_dir_explicit = sources.storage_dir_is_explicit();
+            }
+            _ => {}
+        }
+    }
+}
+
+fn server_connection_value_sources(matches: &clap::ArgMatches) -> ServerConnectionValueSources {
+    let sources = ServerConnectionValueSources {
+        storage_dir: matches
+            .try_contains_id("storage_dir")
+            .ok()
+            .and_then(|present| present.then(|| matches.value_source("storage_dir")))
+            .flatten(),
+        server: matches
+            .try_contains_id("server")
+            .ok()
+            .and_then(|present| present.then(|| matches.value_source("server")))
+            .flatten(),
+    };
+    if sources.storage_dir.is_some() || sources.server.is_some() {
+        return sources;
+    }
+
+    matches
+        .subcommand()
+        .map(|(_, subcommand_matches)| server_connection_value_sources(subcommand_matches))
+        .unwrap_or_default()
 }
 
 #[tokio::main]
@@ -273,7 +391,6 @@ mod tests {
     use args::{
         Commands, ModelsCommand, ProviderCommand, ProviderNamespace, StoreCommand, StoreNamespace,
     };
-    use clap::Parser;
 
     #[test]
     fn parse_provider_login_openai() {
@@ -344,7 +461,7 @@ mod tests {
         match *cli.command {
             Commands::RunCmd(RunCommands::Run(args)) => {
                 assert_eq!(
-                    args.storage_dir.as_deref(),
+                    args.target.storage_dir(),
                     Some(std::path::Path::new("/tmp/fabro"))
                 );
                 assert_eq!(

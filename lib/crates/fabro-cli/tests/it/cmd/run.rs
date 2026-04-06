@@ -1,5 +1,6 @@
 use fabro_test::{fabro_snapshot, test_context};
 use fabro_types::StatusReason;
+use httpmock::MockServer;
 use serde_json::Value;
 
 use super::support::{
@@ -9,6 +10,95 @@ use super::support::{
 use crate::support::{example_fixture, fabro_json_snapshot, run_output_filters, unique_run_id};
 
 const SHARED_DAEMON_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+fn run_status_response(run_id: &str, status: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": run_id,
+        "status": status,
+        "created_at": "2026-04-05T12:00:00Z"
+    })
+}
+
+fn preflight_response() -> serde_json::Value {
+    serde_json::json!({
+        "ok": true,
+        "workflow": {
+            "name": "Simple",
+            "graph_path": null,
+            "nodes": 4,
+            "edges": 3,
+            "goal": "Run tests and report results",
+            "diagnostics": []
+        },
+        "checks": {
+            "title": "Preflight",
+            "sections": []
+        }
+    })
+}
+
+fn remote_run_state_response() -> serde_json::Value {
+    serde_json::json!({
+        "run": null,
+        "graph_source": null,
+        "start": null,
+        "status": null,
+        "checkpoint": {
+            "timestamp": "2026-04-05T12:00:01Z",
+            "current_node": "exit",
+            "completed_nodes": ["report"],
+            "node_retries": {},
+            "context_values": {
+                "response.report": "Remote output"
+            },
+            "node_outcomes": {},
+            "next_node_id": null,
+            "git_commit_sha": null,
+            "loop_failure_signatures": {},
+            "restart_failure_signatures": {},
+            "node_visits": {}
+        },
+        "checkpoints": [],
+        "conclusion": {
+            "timestamp": "2026-04-05T12:00:01Z",
+            "status": "success",
+            "duration_ms": 12,
+            "stages": [],
+            "total_cost": null,
+            "total_retries": 0,
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "total_cache_read_tokens": 0,
+            "total_cache_write_tokens": 0,
+            "total_reasoning_tokens": 0,
+            "has_pricing": false
+        },
+        "retro": null,
+        "retro_prompt": null,
+        "retro_response": null,
+        "sandbox": null,
+        "final_patch": null,
+        "pull_request": null,
+        "nodes": {}
+    })
+}
+
+fn run_completed_event(run_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "seq": 1,
+        "payload": {
+            "event": "run.completed",
+            "id": "evt-run-completed",
+            "run_id": run_id,
+            "ts": "2026-04-05T12:00:01Z",
+            "properties": {
+                "duration_ms": 12,
+                "artifact_count": 0,
+                "status": "success"
+            }
+        }
+    })
+}
 
 #[test]
 fn help() {
@@ -30,11 +120,12 @@ fn help() {
           --json                       Output as JSON [env: FABRO_JSON=]
           --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
           --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --server <SERVER>            Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
           --dry-run                    Execute with simulated LLM backend
-          --auto-approve               Auto-approve all human gates
           --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --goal <GOAL>                Override the workflow goal (exposed as $goal in prompts)
+          --auto-approve               Auto-approve all human gates
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
+          --goal <GOAL>                Override the workflow goal (exposed as $goal in prompts)
           --goal-file <GOAL_FILE>      Read the workflow goal from a file
           --model <MODEL>              Override default LLM model
           --provider <PROVIDER>        Override default LLM provider
@@ -47,6 +138,321 @@ fn help() {
       -h, --help                       Print help
     ----- stderr -----
     ");
+}
+
+#[test]
+fn detach_uses_explicit_server_target_and_prints_remote_run_id() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let run_id = unique_run_id();
+    let create_mock = server.mock(|when, then| {
+        when.method("POST").path("/api/v1/runs");
+        then.status(201)
+            .header("Content-Type", "application/json")
+            .body(run_status_response(run_id.as_str(), "submitted").to_string());
+    });
+    let start_mock = server.mock(|when, then| {
+        when.method("POST")
+            .path(format!("/api/v1/runs/{run_id}/start"));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(run_status_response(run_id.as_str(), "queued").to_string());
+    });
+
+    let output = context
+        .run_cmd()
+        .args([
+            "--server",
+            &format!("{}/api/v1", server.base_url()),
+            "--detach",
+            "--dry-run",
+            "--auto-approve",
+            example_fixture("simple.fabro").to_str().unwrap(),
+        ])
+        .output()
+        .expect("command should execute");
+
+    assert!(
+        output.status.success(),
+        "command failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    create_mock.assert();
+    start_mock.assert();
+    assert_eq!(output_stderr(&output), "");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        run_id.as_str()
+    );
+}
+
+#[test]
+fn detach_uses_configured_server_target_without_server_flag() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let run_id = unique_run_id();
+    let create_mock = server.mock(|when, then| {
+        when.method("POST").path("/api/v1/runs");
+        then.status(201)
+            .header("Content-Type", "application/json")
+            .body(run_status_response(run_id.as_str(), "submitted").to_string());
+    });
+    let start_mock = server.mock(|when, then| {
+        when.method("POST")
+            .path(format!("/api/v1/runs/{run_id}/start"));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(run_status_response(run_id.as_str(), "queued").to_string());
+    });
+    context.write_home(
+        ".fabro/user.toml",
+        format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
+    );
+
+    let output = context
+        .run_cmd()
+        .args([
+            "--detach",
+            "--dry-run",
+            "--auto-approve",
+            example_fixture("simple.fabro").to_str().unwrap(),
+        ])
+        .output()
+        .expect("command should execute");
+
+    assert!(
+        output.status.success(),
+        "command failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    create_mock.assert();
+    start_mock.assert();
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        run_id.as_str()
+    );
+}
+
+#[test]
+fn detach_storage_dir_suppresses_configured_server_target() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let create_mock = server.mock(|when, then| {
+        when.method("POST").path("/api/v1/runs");
+        then.status(500)
+            .body("configured-server-should-not-be-used");
+    });
+    let start_mock = server.mock(|when, then| {
+        when.method("POST").path_includes("/api/v1/runs/");
+        then.status(500)
+            .body("configured-server-should-not-be-used");
+    });
+    let local_storage =
+        std::path::PathBuf::from(format!("/tmp/fabro-run-{}", &context.test_case_id()[..8]));
+    context.write_home(
+        ".fabro/user.toml",
+        format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
+    );
+
+    let output = context
+        .run_cmd()
+        .args([
+            "--storage-dir",
+            local_storage.to_str().unwrap(),
+            "--detach",
+            "--dry-run",
+            "--auto-approve",
+            "--no-retro",
+            example_fixture("simple.fabro").to_str().unwrap(),
+        ])
+        .output()
+        .expect("command should execute");
+
+    assert!(
+        output.status.success(),
+        "command failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    create_mock.assert_calls(0);
+    start_mock.assert_calls(0);
+    assert!(!String::from_utf8_lossy(&output.stdout).trim().is_empty());
+}
+
+#[test]
+fn detach_cli_server_target_overrides_configured_server_target() {
+    let context = test_context!();
+    let config_server = MockServer::start();
+    let config_create = config_server.mock(|when, then| {
+        when.method("POST").path("/api/v1/runs");
+        then.status(500)
+            .body("configured-server-should-not-be-used");
+    });
+    let config_start = config_server.mock(|when, then| {
+        when.method("POST").path_includes("/api/v1/runs/");
+        then.status(500)
+            .body("configured-server-should-not-be-used");
+    });
+    let cli_server = MockServer::start();
+    let run_id = unique_run_id();
+    let cli_create = cli_server.mock(|when, then| {
+        when.method("POST").path("/api/v1/runs");
+        then.status(201)
+            .header("Content-Type", "application/json")
+            .body(run_status_response(run_id.as_str(), "submitted").to_string());
+    });
+    let cli_start = cli_server.mock(|when, then| {
+        when.method("POST")
+            .path(format!("/api/v1/runs/{run_id}/start"));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(run_status_response(run_id.as_str(), "queued").to_string());
+    });
+    context.write_home(
+        ".fabro/user.toml",
+        format!(
+            "[server]\ntarget = \"{}/api/v1\"\n",
+            config_server.base_url()
+        ),
+    );
+
+    let output = context
+        .run_cmd()
+        .args([
+            "--server",
+            &format!("{}/api/v1", cli_server.base_url()),
+            "--detach",
+            "--dry-run",
+            "--auto-approve",
+            example_fixture("simple.fabro").to_str().unwrap(),
+        ])
+        .output()
+        .expect("command should execute");
+
+    assert!(
+        output.status.success(),
+        "command failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    cli_create.assert();
+    cli_start.assert();
+    config_create.assert_calls(0);
+    config_start.assert_calls(0);
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        run_id.as_str()
+    );
+}
+
+#[test]
+fn remote_foreground_run_prints_server_backed_summary_without_local_run_dir() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let run_id = unique_run_id();
+    server.mock(|when, then| {
+        when.method("POST").path("/api/v1/preflight");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(preflight_response().to_string());
+    });
+    server.mock(|when, then| {
+        when.method("POST").path("/api/v1/runs");
+        then.status(201)
+            .header("Content-Type", "application/json")
+            .body(run_status_response(run_id.as_str(), "submitted").to_string());
+    });
+    server.mock(|when, then| {
+        when.method("POST")
+            .path(format!("/api/v1/runs/{run_id}/start"));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(run_status_response(run_id.as_str(), "queued").to_string());
+    });
+    server.mock(|when, then| {
+        when.method("GET")
+            .path(format!("/api/v1/runs/{run_id}/events"))
+            .query_param_missing("since_seq");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "data": [run_completed_event(run_id.as_str())],
+                    "meta": { "has_more": false }
+                })
+                .to_string(),
+            );
+    });
+    server.mock(|when, then| {
+        when.method("GET")
+            .path(format!("/api/v1/runs/{run_id}/events"))
+            .query_param("since_seq", "2");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "data": [],
+                    "meta": { "has_more": false }
+                })
+                .to_string(),
+            );
+    });
+    server.mock(|when, then| {
+        when.method("GET")
+            .path(format!("/api/v1/runs/{run_id}/questions"))
+            .query_param("page[limit]", "100")
+            .query_param("page[offset]", "0");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "data": [],
+                    "meta": { "has_more": false }
+                })
+                .to_string(),
+            );
+    });
+    server.mock(|when, then| {
+        when.method("GET")
+            .path(format!("/api/v1/runs/{run_id}/state"));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(remote_run_state_response().to_string());
+    });
+
+    let output = context
+        .run_cmd()
+        .args([
+            "--server",
+            &format!("{}/api/v1", server.base_url()),
+            "--dry-run",
+            "--auto-approve",
+            example_fixture("simple.fabro").to_str().unwrap(),
+        ])
+        .output()
+        .expect("command should execute");
+
+    assert!(
+        output.status.success(),
+        "command failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = output_stderr(&output);
+    assert!(stderr.contains("=== Run Result ==="), "{stderr}");
+    assert!(stderr.contains("Remote output"), "{stderr}");
+    assert_eq!(
+        stderr
+            .lines()
+            .filter(|line| line.trim_start().starts_with("Run:"))
+            .count(),
+        1,
+        "{stderr}"
+    );
+    assert!(!stderr.contains("=== Artifacts ==="), "{stderr}");
 }
 
 #[test]

@@ -77,12 +77,15 @@ impl ServerTargetArgs {
 #[derive(Args, Debug, Clone, Default)]
 pub(crate) struct ServerConnectionArgs {
     /// Local storage directory (default: ~/.fabro)
-    #[arg(long, env = "FABRO_STORAGE_DIR", conflicts_with = "server")]
+    #[arg(long, env = "FABRO_STORAGE_DIR")]
     pub(crate) storage_dir: Option<PathBuf>,
 
     /// Fabro server target: http(s) URL or absolute Unix socket path
-    #[arg(long = "server", env = "FABRO_SERVER", conflicts_with = "storage_dir")]
+    #[arg(long = "server", env = "FABRO_SERVER")]
     pub(crate) server: Option<String>,
+
+    #[arg(skip)]
+    pub(crate) storage_dir_explicit: bool,
 }
 
 impl ServerConnectionArgs {
@@ -92,6 +95,10 @@ impl ServerConnectionArgs {
 
     pub(crate) fn server(&self) -> Option<&str> {
         self.server.as_deref()
+    }
+
+    pub(crate) fn storage_dir_is_explicit(&self) -> bool {
+        self.storage_dir_explicit
     }
 }
 
@@ -125,7 +132,7 @@ impl From<fabro_sandbox::SandboxProvider> for CliSandboxProvider {
 #[derive(Args)]
 pub(crate) struct RunArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) target: ServerConnectionArgs,
 
     /// Path to a .fabro workflow file or .toml task config
     #[arg(required = true)]

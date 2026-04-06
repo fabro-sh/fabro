@@ -1,3 +1,4 @@
+use httpmock::MockServer;
 use insta::assert_snapshot;
 use serde_json::json;
 
@@ -6,6 +7,14 @@ use fabro_test::{fabro_snapshot, test_context};
 use crate::support::{fabro_json_snapshot, unique_run_id};
 
 use super::support::{fixture, output_stdout, resolve_run, run_count_for_test_case, run_state};
+
+fn run_status_response(run_id: &str, status: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": run_id,
+        "status": status,
+        "created_at": "2026-04-05T12:00:00Z"
+    })
+}
 
 #[test]
 fn help() {
@@ -27,11 +36,12 @@ fn help() {
           --json                       Output as JSON [env: FABRO_JSON=]
           --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
           --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --server <SERVER>            Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
           --dry-run                    Execute with simulated LLM backend
-          --auto-approve               Auto-approve all human gates
           --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --goal <GOAL>                Override the workflow goal (exposed as $goal in prompts)
+          --auto-approve               Auto-approve all human gates
           --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
+          --goal <GOAL>                Override the workflow goal (exposed as $goal in prompts)
           --goal-file <GOAL_FILE>      Read the workflow goal from a file
           --model <MODEL>              Override default LLM model
           --provider <PROVIDER>        Override default LLM provider
@@ -44,6 +54,157 @@ fn help() {
       -h, --help                       Print help
     ----- stderr -----
     ");
+}
+
+#[test]
+fn create_uses_explicit_server_target_and_prints_remote_run_id() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let run_id = unique_run_id();
+    let mock = server.mock(|when, then| {
+        when.method("POST").path("/api/v1/runs");
+        then.status(201)
+            .header("Content-Type", "application/json")
+            .body(run_status_response(run_id.as_str(), "submitted").to_string());
+    });
+
+    let output = context
+        .create_cmd()
+        .args([
+            "--server",
+            &format!("{}/api/v1", server.base_url()),
+            "--dry-run",
+            fixture("simple.fabro").to_str().unwrap(),
+        ])
+        .output()
+        .expect("command should execute");
+
+    assert!(
+        output.status.success(),
+        "command failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    mock.assert();
+    assert_eq!(output_stdout(&output).trim(), run_id.as_str());
+}
+
+#[test]
+fn create_uses_configured_server_target_without_server_flag() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let run_id = unique_run_id();
+    let mock = server.mock(|when, then| {
+        when.method("POST").path("/api/v1/runs");
+        then.status(201)
+            .header("Content-Type", "application/json")
+            .body(run_status_response(run_id.as_str(), "submitted").to_string());
+    });
+    context.write_home(
+        ".fabro/user.toml",
+        format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
+    );
+
+    let output = context
+        .create_cmd()
+        .args(["--dry-run", fixture("simple.fabro").to_str().unwrap()])
+        .output()
+        .expect("command should execute");
+
+    assert!(
+        output.status.success(),
+        "command failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    mock.assert();
+    assert_eq!(output_stdout(&output).trim(), run_id.as_str());
+}
+
+#[test]
+fn create_storage_dir_suppresses_configured_server_target() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method("POST").path("/api/v1/runs");
+        then.status(500)
+            .body("configured-server-should-not-be-used");
+    });
+    let local_storage = std::path::PathBuf::from(format!(
+        "/tmp/fabro-create-{}",
+        &context.test_case_id()[..8]
+    ));
+    context.write_home(
+        ".fabro/user.toml",
+        format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
+    );
+
+    let output = context
+        .create_cmd()
+        .args([
+            "--storage-dir",
+            local_storage.to_str().unwrap(),
+            "--dry-run",
+            fixture("simple.fabro").to_str().unwrap(),
+        ])
+        .output()
+        .expect("command should execute");
+
+    assert!(
+        output.status.success(),
+        "command failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    mock.assert_calls(0);
+    assert!(!output_stdout(&output).trim().is_empty());
+}
+
+#[test]
+fn create_cli_server_target_overrides_configured_server_target() {
+    let context = test_context!();
+    let config_server = MockServer::start();
+    let config_mock = config_server.mock(|when, then| {
+        when.method("POST").path("/api/v1/runs");
+        then.status(500)
+            .body("configured-server-should-not-be-used");
+    });
+    let cli_server = MockServer::start();
+    let run_id = unique_run_id();
+    let cli_mock = cli_server.mock(|when, then| {
+        when.method("POST").path("/api/v1/runs");
+        then.status(201)
+            .header("Content-Type", "application/json")
+            .body(run_status_response(run_id.as_str(), "submitted").to_string());
+    });
+    context.write_home(
+        ".fabro/user.toml",
+        format!(
+            "[server]\ntarget = \"{}/api/v1\"\n",
+            config_server.base_url()
+        ),
+    );
+
+    let output = context
+        .create_cmd()
+        .args([
+            "--server",
+            &format!("{}/api/v1", cli_server.base_url()),
+            "--dry-run",
+            fixture("simple.fabro").to_str().unwrap(),
+        ])
+        .output()
+        .expect("command should execute");
+
+    assert!(
+        output.status.success(),
+        "command failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    cli_mock.assert();
+    config_mock.assert_calls(0);
+    assert_eq!(output_stdout(&output).trim(), run_id.as_str());
 }
 
 #[test]

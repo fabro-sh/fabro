@@ -9,6 +9,13 @@ use fabro_workflow::operations::make_run_dir;
 use super::output::{api_diagnostics_to_local, print_preflight_workflow_summary};
 use crate::manifest_builder::{ManifestBuildInput, build_run_manifest, run_manifest_args};
 use crate::server_client;
+use crate::user_config::{self, ServerConnection};
+
+pub(crate) struct CreatedRun {
+    pub(crate) run_id: RunId,
+    pub(crate) local_run_dir: Option<PathBuf>,
+    pub(crate) connection: ServerConnection,
+}
 
 /// Create a workflow run: allocate run directory, persist RunRecord, return (run_id, run_dir).
 ///
@@ -18,7 +25,7 @@ pub(crate) async fn create_run(
     cli_defaults: ConfigLayer,
     styles: &Styles,
     quiet: bool,
-) -> anyhow::Result<(RunId, PathBuf)> {
+) -> anyhow::Result<CreatedRun> {
     let workflow_path = args
         .workflow
         .as_ref()
@@ -45,7 +52,8 @@ pub(crate) async fn create_run(
         run_id,
     })?;
 
-    let client = server_client::connect_server(settings.storage_dir().as_path()).await?;
+    let connection = user_config::server_backed_command_connection(&args.target, &settings)?;
+    let client = server_client::connect_server_connection(&connection).await?;
     if !quiet {
         let preflight = client.run_preflight(built.manifest.clone()).await?;
         let diagnostics = api_diagnostics_to_local(&preflight.workflow.diagnostics);
@@ -58,7 +66,16 @@ pub(crate) async fn create_run(
     }
 
     let created_run_id = client.create_run_from_manifest(built.manifest).await?;
-    let run_dir = make_run_dir(&settings.storage_dir().join("runs"), &created_run_id);
+    let local_run_dir = match &connection {
+        ServerConnection::Local { storage_dir } => {
+            Some(make_run_dir(&storage_dir.join("runs"), &created_run_id))
+        }
+        ServerConnection::Target(_) => None,
+    };
 
-    Ok((created_run_id, run_dir))
+    Ok(CreatedRun {
+        run_id: created_run_id,
+        local_run_dir,
+        connection,
+    })
 }

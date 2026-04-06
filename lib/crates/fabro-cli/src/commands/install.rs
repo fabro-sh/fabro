@@ -808,6 +808,7 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
             target: ServerConnectionArgs {
                 storage_dir: Some(storage_dir.clone()),
                 server: None,
+                storage_dir_explicit: true,
             },
             verbose: true,
         };

@@ -115,7 +115,10 @@ fn resolve_server_connection(
                 .as_ref()
                 .and_then(|server| server.tls.clone()),
         )?)
-    } else if let Some(storage_dir) = args.storage_dir() {
+    } else if args.storage_dir_is_explicit() {
+        let storage_dir = args.storage_dir().ok_or_else(|| {
+            anyhow::anyhow!("--storage-dir flag was present but no value was parsed")
+        })?;
         ServerConnection::Local {
             storage_dir: storage_dir.to_path_buf(),
         }
@@ -207,6 +210,7 @@ mod tests {
         ServerConnectionArgs {
             storage_dir: storage_dir.map(PathBuf::from),
             server: server.map(str::to_string),
+            storage_dir_explicit: storage_dir.is_some(),
         }
     }
 
