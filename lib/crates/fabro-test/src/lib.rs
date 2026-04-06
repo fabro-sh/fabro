@@ -29,10 +29,10 @@ static INSTA_FILTERS: &[(&str, &str)] = &[
     (r"\b[0-9A-HJKMNP-TV-Z]{26}\b", "[ULID]"),
     (r"in \d+(\.\d+)?(ms|s)", "in [TIME]"),
     (
-        r"\[STORAGE_DIR\]/runs/\d{8}-dry-run-\[ULID\]",
+        r"\[STORAGE_DIR\]/scratch/\d{8}-dry-run-\[ULID\]",
         "[DRY_RUN_DIR]",
     ),
-    (r"\[STORAGE_DIR\]/runs/\d{8}-\[ULID\]", "[RUN_DIR]"),
+    (r"\[STORAGE_DIR\]/scratch/\d{8}-\[ULID\]", "[RUN_DIR]"),
     (
         r"Duration:\s+\d+\s+(seconds?|minutes?|hours?)",
         "Duration:  [DURATION]",
@@ -706,9 +706,9 @@ impl TestContext {
 
     /// Find a run directory whose name ends with `run_id_suffix`.
     pub fn find_run_dir(&self, run_id_suffix: &str) -> PathBuf {
-        let runs_dir = self.storage_dir.join("runs");
-        std::fs::read_dir(&runs_dir)
-            .expect("runs directory should exist")
+        let scratch_dir = self.storage_dir.join("scratch");
+        std::fs::read_dir(&scratch_dir)
+            .expect("scratch directory should exist")
             .flatten()
             .map(|entry| entry.path())
             .find(|path| {
@@ -720,16 +720,16 @@ impl TestContext {
             .unwrap_or_else(|| {
                 panic!(
                     "expected run directory for {run_id_suffix} under {}",
-                    runs_dir.display()
+                    scratch_dir.display()
                 )
             })
     }
 
     /// Return the only run directory currently present under storage.
     pub fn single_run_dir(&self) -> PathBuf {
-        let runs_dir = self.storage_dir.join("runs");
-        let entries: Vec<_> = std::fs::read_dir(&runs_dir)
-            .expect("runs directory should exist")
+        let scratch_dir = self.storage_dir.join("scratch");
+        let entries: Vec<_> = std::fs::read_dir(&scratch_dir)
+            .expect("scratch directory should exist")
             .flatten()
             .map(|entry| entry.path())
             .filter(|path| path.is_dir())
@@ -755,7 +755,7 @@ impl TestContext {
             1,
             "expected exactly one run directory for fabro_test_case={} under {}",
             self.test_case_id(),
-            runs_dir.display()
+            scratch_dir.display()
         );
         entries.into_iter().next().unwrap()
     }

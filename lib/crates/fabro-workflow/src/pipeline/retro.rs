@@ -169,7 +169,7 @@ mod tests {
     use std::time::Duration;
 
     use fabro_graphviz::graph::Graph;
-    use fabro_store::SlateStore;
+    use fabro_store::Database;
     use fabro_types::{RunId, Settings, fixtures};
     use object_store::memory::InMemory;
 
@@ -203,8 +203,8 @@ mod tests {
         )
     }
 
-    fn test_store() -> Arc<SlateStore> {
-        Arc::new(SlateStore::new(
+    fn test_store() -> Arc<Database> {
+        Arc::new(Database::new(
             Arc::new(InMemory::new()),
             "",
             Duration::from_millis(1),
@@ -214,7 +214,7 @@ mod tests {
     async fn test_run_store(
         run_dir: &std::path::Path,
         checkpoint: &Checkpoint,
-    ) -> fabro_store::SlateRunStore {
+    ) -> fabro_store::RunDatabase {
         let inner = test_store().create_run(&test_run_id()).await.unwrap();
         let run_store = inner;
         let run_record = RunRecord {

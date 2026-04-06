@@ -124,7 +124,7 @@ fn logs_completed_run_reads_store_without_progress_jsonl() {
         r#""id":"[EVENT_ID]""#.to_string(),
     ));
     filters.push((
-        r#""run_dir":"(?:\[DRY_RUN_DIR\]|\[STORAGE_DIR\]/runs/REDACTED)""#.to_string(),
+        r#""run_dir":"(?:\[DRY_RUN_DIR\]|\[STORAGE_DIR\]/scratch/REDACTED)""#.to_string(),
         r#""run_dir":"[RUN_DIR]""#.to_string(),
     ));
 
@@ -159,7 +159,7 @@ fn logs_tail_limits_output() {
         r#""id":"[EVENT_ID]""#.to_string(),
     ));
     filters.push((
-        r#""run_dir":"(?:\[DRY_RUN_DIR\]|\[STORAGE_DIR\]/runs/REDACTED)""#.to_string(),
+        r#""run_dir":"(?:\[DRY_RUN_DIR\]|\[STORAGE_DIR\]/scratch/REDACTED)""#.to_string(),
         r#""run_dir":"[RUN_DIR]""#.to_string(),
     ));
     let mut cmd = context.command();

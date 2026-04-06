@@ -584,7 +584,7 @@ fn find_join_node(results: &[BranchResult], graph: &Graph) -> Option<String> {
 mod tests {
     use super::*;
     use fabro_graphviz::graph::{AttrValue, Edge};
-    use fabro_store::{SlateStore, StageId};
+    use fabro_store::{Database, StageId};
     use fabro_types::fixtures;
     use object_store::memory::InMemory;
     use std::sync::Arc;
@@ -594,8 +594,8 @@ mod tests {
         EngineServices::test_default()
     }
 
-    fn test_store() -> Arc<SlateStore> {
-        Arc::new(SlateStore::new(
+    fn test_store() -> Arc<Database> {
+        Arc::new(Database::new(
             Arc::new(InMemory::new()),
             "",
             Duration::from_millis(1),

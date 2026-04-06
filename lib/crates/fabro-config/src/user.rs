@@ -6,6 +6,7 @@ use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
 use crate::config::ConfigLayer;
+use crate::home::Home;
 
 pub use fabro_types::settings::user::{
     ClientTlsSettings, ExecSettings, OutputFormat, PermissionLevel, ServerSettings,
@@ -80,19 +81,23 @@ impl From<ExecConfig> for ExecSettings {
 }
 
 pub fn default_settings_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|home| home.join(".fabro").join(SETTINGS_CONFIG_FILENAME))
+    Some(Home::from_env().user_config())
 }
 
 pub fn legacy_user_config_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|home| home.join(".fabro").join(LEGACY_USER_CONFIG_FILENAME))
+    Some(Home::from_env().root().join(LEGACY_USER_CONFIG_FILENAME))
 }
 
 pub fn legacy_old_user_config_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|home| home.join(".fabro").join(LEGACY_OLD_USER_CONFIG_FILENAME))
+    Some(
+        Home::from_env()
+            .root()
+            .join(LEGACY_OLD_USER_CONFIG_FILENAME),
+    )
 }
 
 pub fn legacy_server_config_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|home| home.join(".fabro").join(LEGACY_SERVER_CONFIG_FILENAME))
+    Some(Home::from_env().root().join(LEGACY_SERVER_CONFIG_FILENAME))
 }
 
 fn warned_legacy_user_configs() -> &'static Mutex<HashSet<PathBuf>> {

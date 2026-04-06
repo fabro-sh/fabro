@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use fabro_api::types;
-use fabro_store::RuntimeState;
+use fabro_config::RunScratch;
 use fabro_types::PullRequestRecord;
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_util::terminal::Styles;
@@ -264,8 +264,8 @@ pub(crate) fn print_final_output(checkpoint: Option<&fabro_types::Checkpoint>, s
 }
 
 pub(crate) fn print_assets(run_dir: &Path, styles: &Styles) {
-    let runtime_state = RuntimeState::new(run_dir);
-    let paths = collect_artifact_paths(&runtime_state.artifacts_dir());
+    let run_scratch = RunScratch::new(run_dir);
+    let paths = collect_artifact_paths(&run_scratch.artifact_files_dir());
     if paths.is_empty() {
         return;
     }

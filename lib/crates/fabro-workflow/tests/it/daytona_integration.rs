@@ -18,10 +18,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use fabro_agent::Sandbox;
+use fabro_config::RunScratch;
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_llm::provider::Provider;
 use fabro_sandbox::daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
-use fabro_store::{RuntimeState, SlateStore};
+use fabro_store::Database;
 use fabro_types::{RunId, Settings};
 use fabro_workflow::artifact::sync_artifacts_to_env;
 use fabro_workflow::context::Context;
@@ -70,7 +71,7 @@ fn load_checkpoint(path: &Path) -> Result<Checkpoint, Box<dyn std::error::Error>
                 (storage_dir.join("store"), run_id)
             };
         let object_store = Arc::new(LocalFileSystem::new_with_prefix(store_dir)?);
-        let store = Arc::new(SlateStore::new(
+        let store = Arc::new(Database::new(
             object_store,
             "",
             std::time::Duration::from_millis(1),
@@ -1346,7 +1347,7 @@ async fn daytona_asset_collection() {
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let artifacts_dir = RuntimeState::new(dir.path()).artifact_stage_dir("create_assets", 1);
+    let artifacts_dir = RunScratch::new(dir.path()).artifact_stage_dir("create_assets", 1);
 
     let report_path = artifacts_dir.join("test-results/report.xml");
     assert!(

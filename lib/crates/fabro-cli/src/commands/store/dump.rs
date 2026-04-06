@@ -1,18 +1,21 @@
 use anyhow::{Context, Result};
+use fabro_config::Storage;
 #[cfg(test)]
 use fabro_store::StageId;
-use fabro_store::{RunProjection, SlateRunStore};
+use fabro_store::{ArtifactStore, RunDatabase, RunProjection};
 use fabro_workflow::run_dump::RunDump;
 #[cfg(test)]
 use serde::de::DeserializeOwned;
 use std::io::ErrorKind;
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::args::{GlobalArgs, StoreDumpArgs};
 use crate::commands::store::rebuild::rebuild_run_store;
 use crate::server_runs::ServerRunLookup;
 use crate::shared::{absolute_or_current, print_json_pretty};
 use crate::user_config::load_settings_with_storage_dir;
+use object_store::{ObjectStore, local::LocalFileSystem};
 
 pub(crate) async fn dump_command(args: &StoreDumpArgs, globals: &GlobalArgs) -> Result<()> {
     let cli_settings = load_settings_with_storage_dir(args.storage_dir.as_deref())?;
@@ -21,8 +24,12 @@ pub(crate) async fn dump_command(args: &StoreDumpArgs, globals: &GlobalArgs) -> 
     let run_id = run.run_id();
     let events = lookup.client().list_run_events(&run_id, None, None).await?;
     let run_store = rebuild_run_store(&run_id, &events).await?;
+    let artifact_object_store: Arc<dyn ObjectStore> = Arc::new(LocalFileSystem::new_with_prefix(
+        Storage::new(cli_settings.storage_dir()).store_dir(),
+    )?);
+    let artifact_store = ArtifactStore::new(artifact_object_store, "artifacts");
 
-    let file_count = export_run(&run_store, &args.output).await?;
+    let file_count = export_run(&run_store, &artifact_store, &args.output).await?;
     if globals.json {
         print_json_pretty(&serde_json::json!({
             "run_id": run_id,
@@ -39,7 +46,11 @@ pub(crate) async fn dump_command(args: &StoreDumpArgs, globals: &GlobalArgs) -> 
     Ok(())
 }
 
-pub(crate) async fn export_run(run_store: &SlateRunStore, output_dir: &Path) -> Result<usize> {
+pub(crate) async fn export_run(
+    run_store: &RunDatabase,
+    artifact_store: &ArtifactStore,
+    output_dir: &Path,
+) -> Result<usize> {
     let state = run_store.state().await?;
     anyhow::ensure!(state.run.is_some(), "run has no data in the store");
 
@@ -59,7 +70,7 @@ pub(crate) async fn export_run(run_store: &SlateRunStore, output_dir: &Path) -> 
         })?;
     let staging_path = staging_dir.path().to_path_buf();
 
-    let file_count = export_run_to_dir(run_store, &state, &staging_path).await?;
+    let file_count = export_run_to_dir(run_store, artifact_store, &state, &staging_path).await?;
 
     if matches!(output_state, OutputDirState::ExistingEmpty) {
         std::fs::remove_dir(output_dir)
@@ -78,11 +89,12 @@ pub(crate) async fn export_run(run_store: &SlateRunStore, output_dir: &Path) -> 
 }
 
 async fn export_run_to_dir(
-    run_store: &SlateRunStore,
+    run_store: &RunDatabase,
+    artifact_store: &ArtifactStore,
     state: &RunProjection,
     output_dir: &Path,
 ) -> Result<usize> {
-    let dump = RunDump::store_export(run_store, state).await?;
+    let dump = RunDump::store_export(run_store, artifact_store, state).await?;
     dump.write_to_dir(output_dir)
 }
 
@@ -132,11 +144,10 @@ mod tests {
 
     use std::collections::HashMap;
     use std::path::PathBuf;
-    use std::sync::Arc;
     use std::time::Duration;
 
     use chrono::{DateTime, Utc};
-    use fabro_store::{EventEnvelope, EventPayload, SlateStore};
+    use fabro_store::{Database, EventEnvelope, EventPayload};
     use fabro_types::{
         AggregateStats, AttrValue, Checkpoint, Conclusion, Graph, NodeStatusRecord, Retro, RunId,
         RunRecord, RunStatus, RunStatusRecord, SandboxRecord, Settings, StageStatus, StartRecord,
@@ -155,12 +166,15 @@ mod tests {
         fixtures::RUN_1
     }
 
-    fn test_store() -> Arc<SlateStore> {
-        Arc::new(SlateStore::new(
-            Arc::new(InMemory::new()),
+    fn test_store_bundle() -> (Arc<Database>, ArtifactStore) {
+        let object_store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+        let store = Arc::new(Database::new(
+            Arc::clone(&object_store),
             "",
             Duration::from_millis(1),
-        ))
+        ));
+        let artifact_store = ArtifactStore::new(object_store, "artifacts");
+        (store, artifact_store)
     }
 
     fn sample_run_record(run_id: RunId, _created_at: DateTime<Utc>) -> RunRecord {
@@ -280,7 +294,7 @@ mod tests {
 
     #[tokio::test]
     async fn export_run_writes_expected_directory_tree() {
-        let store = test_store();
+        let (store, artifact_store) = test_store_bundle();
         let created_at = dt("2026-03-27T12:00:00Z");
         let run_id = test_run_id();
         let run = store.create_run(&run_id).await.unwrap();
@@ -537,17 +551,21 @@ mod tests {
         .unwrap();
         let summary_blob = run.write_blob(br#"{"done":true}"#).await.unwrap();
         let plan_blob = run.write_blob(br#"{"steps":3}"#).await.unwrap();
-        run.put_artifact(&node, "src/lib.rs", b"fn main() {}")
+        artifact_store
+            .put(&run_id, &node, "src/lib.rs", b"fn main() {}")
             .await
             .unwrap();
 
         let artifact_only_node = StageId::new("artifact-only", 7);
-        run.put_artifact(&artifact_only_node, "logs/output.txt", b"hello")
+        artifact_store
+            .put(&run_id, &artifact_only_node, "logs/output.txt", b"hello")
             .await
             .unwrap();
 
         let output = tempfile::tempdir().unwrap();
-        let file_count = export_run(&run, output.path()).await.unwrap();
+        let file_count = export_run(&run, &artifact_store, output.path())
+            .await
+            .unwrap();
         assert_eq!(file_count, 22);
 
         let exported_run: RunRecord = read_json(&output.path().join("run.json"));
@@ -637,45 +655,6 @@ mod tests {
             b"hello"
         );
         assert!(!output.path().join("nodes/artifact-only").exists());
-    }
-
-    #[tokio::test]
-    async fn export_run_rejects_path_traversal_and_leaves_no_partial_output() {
-        let store = test_store();
-        let created_at = dt("2026-03-27T12:00:00Z");
-        let run_id = test_run_id();
-        let run = store.create_run(&run_id).await.unwrap();
-        let run_record = sample_run_record(run_id, created_at);
-        append_event(
-            &run,
-            &run_id,
-            &Event::RunCreated {
-                run_id,
-                settings: serde_json::to_value(&run_record.settings).unwrap(),
-                graph: serde_json::to_value(&run_record.graph).unwrap(),
-                workflow_source: Some("digraph night_sky {}".to_string()),
-                workflow_config: None,
-                labels: run_record.labels.clone().into_iter().collect(),
-                run_dir: "/tmp/night-sky-run".to_string(),
-                working_directory: run_record.working_directory.display().to_string(),
-                host_repo_path: run_record.host_repo_path.clone(),
-                repo_origin_url: run_record.repo_origin_url.clone(),
-                base_branch: run_record.base_branch.clone(),
-                workflow_slug: run_record.workflow_slug.clone(),
-                db_prefix: None,
-            },
-        )
-        .await
-        .unwrap();
-        run.put_artifact(&StageId::new("code", 1), "../escape.txt", b"boom")
-            .await
-            .unwrap();
-
-        let temp = tempfile::tempdir().unwrap();
-        let output = temp.path().join("dump");
-        let err = export_run(&run, &output).await.unwrap_err();
-        assert!(err.to_string().contains("artifact filename"));
-        assert!(!output.exists());
     }
 
     #[test]

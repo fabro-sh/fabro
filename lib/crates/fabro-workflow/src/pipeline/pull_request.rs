@@ -1,5 +1,5 @@
 use fabro_config::run::MergeStrategy;
-use fabro_store::{RunProjection, SlateRunStore};
+use fabro_store::{RunDatabase, RunProjection};
 use fabro_types::PullRequestRecord;
 use tracing::{debug, info};
 
@@ -280,7 +280,7 @@ fn emit_run_notice(
     });
 }
 
-async fn load_pull_request_diff(run_store: &SlateRunStore) -> String {
+async fn load_pull_request_diff(run_store: &RunDatabase) -> String {
     run_store
         .state()
         .await
@@ -298,7 +298,7 @@ pub async fn build_pr_body(
     diff: &str,
     goal: &str,
     model: &str,
-    run_store: &SlateRunStore,
+    run_store: &RunDatabase,
     conclusion: Option<&Conclusion>,
 ) -> Result<String, String> {
     debug!("Building PR body");
@@ -406,7 +406,7 @@ pub async fn maybe_open_pull_request(
     model: &str,
     draft: bool,
     auto_merge: Option<AutoMergeOptions>,
-    run_store: &SlateRunStore,
+    run_store: &RunDatabase,
     conclusion: Option<&Conclusion>,
 ) -> Result<Option<PullRequestRecord>, String> {
     if diff.is_empty() {
@@ -591,7 +591,7 @@ mod tests {
     use fabro_retro::retro::{
         AggregateStats, FrictionKind, FrictionPoint, OpenItem, OpenItemKind, StageRetro,
     };
-    use fabro_store::SlateStore;
+    use fabro_store::Database;
     use fabro_types::{RunRecord, Settings, fixtures};
     use futures::stream;
     use object_store::memory::InMemory;
@@ -668,8 +668,8 @@ mod tests {
         }
     }
 
-    fn test_store() -> Arc<SlateStore> {
-        Arc::new(SlateStore::new(
+    fn test_store() -> Arc<Database> {
+        Arc::new(Database::new(
             Arc::new(InMemory::new()),
             "",
             Duration::from_millis(1),

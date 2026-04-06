@@ -1,44 +1,36 @@
 use std::fmt;
 use std::str::FromStr;
 
+use hex::FromHexError;
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
-use ulid::Ulid;
-use uuid::Uuid;
-
-use crate::RunId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct RunBlobId(Uuid);
+pub struct RunBlobId([u8; 32]);
 
 impl RunBlobId {
-    pub fn new(run_id: &RunId, content: &[u8]) -> Self {
-        let ulid: Ulid = (*run_id).into();
-        let ulid_bytes = ulid.to_bytes();
+    pub fn new(content: &[u8]) -> Self {
         let hash = Sha256::digest(content);
-        let mut buf = [0_u8; 16];
-        buf[..8].copy_from_slice(&ulid_bytes[..8]);
-        buf[8..].copy_from_slice(&hash[..8]);
-        Self(Uuid::new_v8(buf))
-    }
-
-    pub fn uuid(&self) -> &Uuid {
-        &self.0
+        let mut bytes = [0_u8; 32];
+        bytes.copy_from_slice(&hash);
+        Self(bytes)
     }
 }
 
 impl fmt::Display for RunBlobId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.hyphenated().fmt(f)
+        f.write_str(&hex::encode(self.0))
     }
 }
 
 impl FromStr for RunBlobId {
-    type Err = uuid::Error;
+    type Err = FromHexError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(Uuid::parse_str(s)?))
+        let mut bytes = [0_u8; 32];
+        hex::decode_to_slice(s, &mut bytes)?;
+        Ok(Self(bytes))
     }
 }
 
@@ -63,46 +55,44 @@ impl<'de> Deserialize<'de> for RunBlobId {
 
 #[cfg(test)]
 mod tests {
-    use crate::{RunBlobId, RunId};
+    use crate::RunBlobId;
 
     #[test]
-    fn same_content_and_run_id_produce_same_blob_id() {
-        let run_id = RunId::new();
-        assert_eq!(
-            RunBlobId::new(&run_id, b"hello"),
-            RunBlobId::new(&run_id, b"hello")
-        );
+    fn same_content_produces_same_blob_id() {
+        assert_eq!(RunBlobId::new(b"hello"), RunBlobId::new(b"hello"));
     }
 
     #[test]
-    fn different_run_ids_produce_different_blob_ids() {
-        assert_ne!(
-            RunBlobId::new(&RunId::new(), b"hello"),
-            RunBlobId::new(&RunId::new(), b"hello")
+    fn display_is_lowercase_sha256_hex() {
+        assert_eq!(
+            RunBlobId::new(b"hello").to_string(),
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
         );
     }
 
     #[test]
     fn different_content_produces_different_blob_ids() {
-        let run_id = RunId::new();
-        assert_ne!(
-            RunBlobId::new(&run_id, b"hello"),
-            RunBlobId::new(&run_id, b"world")
-        );
+        assert_ne!(RunBlobId::new(b"hello"), RunBlobId::new(b"world"));
     }
 
     #[test]
     fn display_and_parse_round_trip() {
-        let blob_id = RunBlobId::new(&RunId::new(), b"hello");
+        let blob_id = RunBlobId::new(b"hello");
         let parsed: RunBlobId = blob_id.to_string().parse().unwrap();
         assert_eq!(parsed, blob_id);
     }
 
     #[test]
     fn serde_round_trip() {
-        let blob_id = RunBlobId::new(&RunId::new(), b"hello");
+        let blob_id = RunBlobId::new(b"hello");
         let value = serde_json::to_value(blob_id).unwrap();
         let parsed: RunBlobId = serde_json::from_value(value).unwrap();
         assert_eq!(parsed, blob_id);
+    }
+
+    #[test]
+    fn parse_rejects_non_hex_blob_ids() {
+        let parsed = "not-a-blob-id".parse::<RunBlobId>();
+        assert!(parsed.is_err());
     }
 }

@@ -7,13 +7,13 @@ description: "Structure of Fabro's per-run directory"
   The run directory structure and file formats described here are internal implementation details and subject to change without notice. Do not build tooling that relies on them.
 </Warning>
 
-Each `fabro run` invocation creates a timestamped directory under `~/.fabro/runs/`:
+Each `fabro run` invocation creates a timestamped directory under `~/.fabro/scratch/`:
 
 ```
-~/.fabro/runs/20260307-01JQXYZ123ABC456DEF789/
+~/.fabro/scratch/20260307-01JQXYZ123ABC456DEF789/
 ```
 
-The naming format is `YYYYMMDD-{run_id}`, where `run_id` is the ULID assigned to the run. You can override the base storage directory with the global `--storage-dir` flag (the runs directory will be `<storage-dir>/runs/`).
+The naming format is `YYYYMMDD-{run_id}`, where `run_id` is the ULID assigned to the run. You can override the base storage directory with the global `--storage-dir` flag (the scratch directory will be `<storage-dir>/scratch/`).
 
 ## Root-level files
 
@@ -78,7 +78,7 @@ Manager nodes that run sub-workflows write a nested `child/` directory containin
 
 ## Browsing runs
 
-Use `fabro ps` to scan the runs directory and display a table of all runs with their status, workflow name, and timestamps. Pass `--json` for machine-readable output.
+Use `fabro ps` to scan the scratch directory and display a table of all runs with their status, workflow name, and timestamps. Pass `--json` for machine-readable output.
 
 ```bash
 fabro ps
@@ -89,7 +89,7 @@ fabro ps --filter workflow=my-workflow
 ## Full directory tree
 
 ```
-~/.fabro/runs/
+~/.fabro/scratch/
 ├── 20260307-01JQXYZ123ABC456DEF789/  # One directory per run
 │   ├── run.json
 │   ├── start.json
@@ -112,7 +112,7 @@ fabro ps --filter workflow=my-workflow
 │   │       ├── values/
 │   │       │   ├── response.plan.json
 │   │       │   └── command.output.json
-│   │       └── assets/
+│   │       └── files/
 │   │           └── test/
 │   │               └── retry_1/
 │   │                   ├── test-results/

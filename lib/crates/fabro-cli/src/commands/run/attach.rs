@@ -382,9 +382,9 @@ fn restore_empty_run_properties(value: &mut serde_json::Value) {
 
 #[cfg(test)]
 fn infer_storage_dir(run_dir: &Path) -> Option<PathBuf> {
-    let runs_dir = run_dir.parent()?;
-    let storage_dir = runs_dir.parent()?;
-    (runs_dir.file_name()? == "runs").then(|| storage_dir.to_path_buf())
+    let scratch_dir = run_dir.parent()?;
+    let storage_dir = scratch_dir.parent()?;
+    (scratch_dir.file_name()? == "scratch").then(|| storage_dir.to_path_buf())
 }
 
 #[cfg(test)]
@@ -482,7 +482,7 @@ mod tests {
         let run_dir = dir
             .path()
             .join("storage")
-            .join("runs")
+            .join("scratch")
             .join("20260401-test");
         std::fs::create_dir_all(&run_dir).unwrap();
 
@@ -496,7 +496,7 @@ mod tests {
     fn infer_run_id_reads_id_txt() {
         let dir = tempfile::tempdir().unwrap();
         let storage_dir = dir.path().join("storage");
-        let run_dir = storage_dir.join("runs").join("20260401-test");
+        let run_dir = storage_dir.join("scratch").join("20260401-test");
         std::fs::create_dir_all(&run_dir).unwrap();
         std::fs::write(
             run_dir.join("id.txt"),

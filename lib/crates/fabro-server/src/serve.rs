@@ -2,9 +2,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
+use fabro_config::Storage;
 use fabro_config::server::resolve_storage_dir;
 use fabro_config::user::{default_settings_path, load_settings_config};
 use fabro_util::terminal::Styles;
+use object_store::ObjectStore;
 use object_store::local::LocalFileSystem;
 use tokio::net::{TcpListener, UnixListener};
 use tokio::time::interval;
@@ -107,7 +109,8 @@ pub async fn serve_command(
     let disk_settings = load_settings(config_path.as_deref())?;
     let active_config_path = resolved_config_path(config_path.as_deref());
     let data_dir = storage_dir_override.unwrap_or_else(|| resolve_storage_dir(&disk_settings));
-    let secret_store_path = data_dir.join("secrets.json");
+    let storage = Storage::new(&data_dir);
+    let secret_store_path = storage.secrets_path();
     let secret_store = SecretStore::load(secret_store_path.clone())?;
     let secret_snapshot = secret_store.snapshot();
 
@@ -167,19 +170,22 @@ pub async fn serve_command(
         (auth_mode, client_auth, max_concurrent_runs)
     };
 
-    let store_path = data_dir.join("store");
+    let store_path = storage.store_dir();
     std::fs::create_dir_all(&store_path)?;
-    let object_store = Arc::new(LocalFileSystem::new_with_prefix(&store_path)?);
-    let store = Arc::new(fabro_store::SlateStore::new(
-        object_store,
+    let object_store: Arc<dyn ObjectStore> =
+        Arc::new(LocalFileSystem::new_with_prefix(&store_path)?);
+    let store = Arc::new(fabro_store::Database::new(
+        Arc::clone(&object_store),
         "",
         Duration::from_millis(1),
     ));
+    let artifact_store = fabro_store::ArtifactStore::new(object_store, "artifacts");
     let state = build_app_state_with_path(
         Arc::clone(&shared_settings),
         None,
         max_concurrent_runs,
         store,
+        artifact_store,
         secret_store_path,
         active_config_path,
         matches!(&auth_mode, AuthMode::Disabled),

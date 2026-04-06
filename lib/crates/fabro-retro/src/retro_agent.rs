@@ -10,7 +10,7 @@ use fabro_agent::{
 use fabro_llm::client::Client;
 use fabro_llm::provider::Provider;
 use fabro_llm::types::ToolDefinition;
-use fabro_store::SlateRunStore;
+use fabro_store::RunDatabase;
 use tokio::task::JoinHandle;
 
 use crate::retro::{RetroNarrative, SmoothnessRating};
@@ -135,7 +135,7 @@ pub fn build_retro_prompt(retro_data_dir: &str) -> String {
 /// files via tool access, then calls `submit_retro` with its analysis.
 pub async fn run_retro_agent(
     sandbox: &Arc<dyn Sandbox>,
-    run_store: &SlateRunStore,
+    run_store: &RunDatabase,
     run_dir: &Path,
     llm_client: &Client,
     provider: Provider,
@@ -292,7 +292,7 @@ fn build_profile(provider: Provider, model: &str) -> Box<dyn AgentProfile> {
 
 async fn upload_data_files(
     sandbox: &Arc<dyn Sandbox>,
-    run_store: &SlateRunStore,
+    run_store: &RunDatabase,
     _run_dir: &Path,
     target_dir: &str,
 ) -> anyhow::Result<()> {

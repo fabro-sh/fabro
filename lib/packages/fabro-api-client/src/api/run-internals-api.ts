@@ -34,6 +34,8 @@ import type { PaginatedRunStageList } from '../models';
 // @ts-ignore
 import type { PaginatedStageTurnList } from '../models';
 // @ts-ignore
+import type { RunArtifactListResponse } from '../models';
+// @ts-ignore
 import type { RunCheckpoint } from '../models';
 // @ts-ignore
 import type { RunEvent } from '../models';
@@ -186,7 +188,7 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
          * @summary Get Stage Artifact
          * @param {string} id Unique run identifier (ULID).
          * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
-         * @param {string} filename Artifact filename. May contain path separators.
+         * @param {string} filename Relative artifact path. &#x60;/&#x60; is allowed as a path separator. Backslash, empty segments, and traversal segments (&#x60;.&#x60; and &#x60;..&#x60;) are invalid.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -223,6 +225,47 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             }
 
             localVarHeaderParameter['Accept'] = 'application/octet-stream,application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Lists captured artifact files for a run.
+         * @summary List Run Artifacts
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listRunArtifacts: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'id' is not null or undefined
+            assertParamExists('listRunArtifacts', 'id', id)
+            const localVarPath = `/api/v1/runs/{id}/artifacts`
+                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -440,7 +483,7 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
          * @summary Put Stage Artifact
          * @param {string} id Unique run identifier (ULID).
          * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
-         * @param {string} filename Artifact filename. May contain path separators.
+         * @param {string} filename Relative artifact path. &#x60;/&#x60; is allowed as a path separator. Backslash, empty segments, and traversal segments (&#x60;.&#x60; and &#x60;..&#x60;) are invalid.
          * @param {File} body 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -720,7 +763,7 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
          * @summary Get Stage Artifact
          * @param {string} id Unique run identifier (ULID).
          * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
-         * @param {string} filename Artifact filename. May contain path separators.
+         * @param {string} filename Relative artifact path. &#x60;/&#x60; is allowed as a path separator. Backslash, empty segments, and traversal segments (&#x60;.&#x60; and &#x60;..&#x60;) are invalid.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -728,6 +771,19 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.getStageArtifact(id, stageId, filename, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.getStageArtifact']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Lists captured artifact files for a run.
+         * @summary List Run Artifacts
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async listRunArtifacts(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunArtifactListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.listRunArtifacts(id, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.listRunArtifacts']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -795,7 +851,7 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
          * @summary Put Stage Artifact
          * @param {string} id Unique run identifier (ULID).
          * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
-         * @param {string} filename Artifact filename. May contain path separators.
+         * @param {string} filename Relative artifact path. &#x60;/&#x60; is allowed as a path separator. Backslash, empty segments, and traversal segments (&#x60;.&#x60; and &#x60;..&#x60;) are invalid.
          * @param {File} body 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -906,12 +962,22 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
          * @summary Get Stage Artifact
          * @param {string} id Unique run identifier (ULID).
          * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
-         * @param {string} filename Artifact filename. May contain path separators.
+         * @param {string} filename Relative artifact path. &#x60;/&#x60; is allowed as a path separator. Backslash, empty segments, and traversal segments (&#x60;.&#x60; and &#x60;..&#x60;) are invalid.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
         getStageArtifact(id: string, stageId: string, filename: string, options?: RawAxiosRequestConfig): AxiosPromise<File> {
             return localVarFp.getStageArtifact(id, stageId, filename, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Lists captured artifact files for a run.
+         * @summary List Run Artifacts
+         * @param {string} id Unique run identifier (ULID).
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        listRunArtifacts(id: string, options?: RawAxiosRequestConfig): AxiosPromise<RunArtifactListResponse> {
+            return localVarFp.listRunArtifacts(id, options).then((request) => request(axios, basePath));
         },
         /**
          * Returns a paginated JSON list of stored run events.
@@ -966,7 +1032,7 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
          * @summary Put Stage Artifact
          * @param {string} id Unique run identifier (ULID).
          * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
-         * @param {string} filename Artifact filename. May contain path separators.
+         * @param {string} filename Relative artifact path. &#x60;/&#x60; is allowed as a path separator. Backslash, empty segments, and traversal segments (&#x60;.&#x60; and &#x60;..&#x60;) are invalid.
          * @param {File} body 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -1063,12 +1129,23 @@ export class RunInternalsApi extends BaseAPI {
      * @summary Get Stage Artifact
      * @param {string} id Unique run identifier (ULID).
      * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
-     * @param {string} filename Artifact filename. May contain path separators.
+     * @param {string} filename Relative artifact path. &#x60;/&#x60; is allowed as a path separator. Backslash, empty segments, and traversal segments (&#x60;.&#x60; and &#x60;..&#x60;) are invalid.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public getStageArtifact(id: string, stageId: string, filename: string, options?: RawAxiosRequestConfig) {
         return RunInternalsApiFp(this.configuration).getStageArtifact(id, stageId, filename, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Lists captured artifact files for a run.
+     * @summary List Run Artifacts
+     * @param {string} id Unique run identifier (ULID).
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public listRunArtifacts(id: string, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).listRunArtifacts(id, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -1128,7 +1205,7 @@ export class RunInternalsApi extends BaseAPI {
      * @summary Put Stage Artifact
      * @param {string} id Unique run identifier (ULID).
      * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
-     * @param {string} filename Artifact filename. May contain path separators.
+     * @param {string} filename Relative artifact path. &#x60;/&#x60; is allowed as a path separator. Backslash, empty segments, and traversal segments (&#x60;.&#x60; and &#x60;..&#x60;) are invalid.
      * @param {File} body 
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}

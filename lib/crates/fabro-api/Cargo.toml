@@ -16,6 +16,7 @@ wildcard_imports = "warn"
 [dependencies]
 chrono = { workspace = true, features = ["serde"] }
 progenitor-client = "0.13"
+regress = "0.10"
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -6,7 +6,8 @@ use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Style, Table};
 use serde::Serialize;
 
-use fabro_workflow::run_lookup::{logs_base, runs_base, scan_runs_with_summaries};
+use fabro_config::Storage;
+use fabro_workflow::run_lookup::{scan_runs_with_summaries, scratch_base};
 use fabro_workflow::run_status::RunStatus;
 
 use crate::args::{DfArgs, GlobalArgs};
@@ -47,14 +48,14 @@ struct DfOutput {
 pub(super) async fn df_command(args: &DfArgs, globals: &GlobalArgs) -> Result<()> {
     let cli_settings = load_settings_with_storage_dir(args.storage_dir.as_deref())?;
     let data_dir = cli_settings.storage_dir();
-    let runs_base_dir = runs_base(&data_dir);
-    let logs_base_dir = logs_base(&data_dir);
+    let scratch_base_dir = scratch_base(&data_dir);
+    let logs_base_dir = Storage::new(&data_dir).logs_dir();
     let lookup = ServerRunLookup::connect(&data_dir).await?;
     df_from(
         args,
         lookup.summaries(),
         &data_dir,
-        &runs_base_dir,
+        &scratch_base_dir,
         &logs_base_dir,
         globals,
     )
@@ -65,7 +66,7 @@ fn df_from(
     args: &DfArgs,
     summaries: &[fabro_store::RunSummary],
     data_dir: &Path,
-    runs_base: &Path,
+    scratch_base: &Path,
     logs_base: &Path,
     globals: &GlobalArgs,
 ) -> Result<()> {
@@ -78,7 +79,7 @@ fn df_from(
         size: u64,
     }
 
-    let runs = scan_runs_with_summaries(summaries, runs_base)?;
+    let runs = scan_runs_with_summaries(summaries, scratch_base)?;
     let mut active_count = 0u64;
     let mut total_run_size = 0u64;
     let mut reclaimable_run_size = 0u64;

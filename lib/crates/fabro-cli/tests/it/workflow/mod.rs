@@ -72,7 +72,7 @@ pub(super) fn store_dump_export(context: &TestContext, run_id: &str) -> PathBuf 
 
 /// Find the single run directory for this test context.
 pub(super) fn find_run_dir(context: &TestContext) -> PathBuf {
-    let runs_base = context.storage_dir.join("runs");
+    let runs_base = context.storage_dir.join("scratch");
     let runs: Vec<RunSummaryRecord> = block_on(get_server_json_for_storage(
         &context.storage_dir,
         "/api/v1/runs",
@@ -152,7 +152,7 @@ async fn get_server_json_for_storage<T: serde::de::DeserializeOwned>(
 }
 
 fn find_run_dir_for_id(storage_dir: &Path, run_id: &str) -> Option<PathBuf> {
-    let runs_dir = storage_dir.join("runs");
+    let runs_dir = storage_dir.join("scratch");
     let entries = std::fs::read_dir(&runs_dir).ok()?;
     entries
         .filter_map(Result::ok)

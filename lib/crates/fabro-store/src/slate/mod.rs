@@ -12,28 +12,28 @@ use tokio::sync::{Mutex, OnceCell};
 use crate::keys;
 use crate::{ListRunsQuery, Result, RunSummary, StoreError};
 use fabro_types::RunId;
-use run_store::SlateRunStoreInner;
-pub use run_store::{NodeArtifact, SlateRunStore};
+pub use run_store::RunDatabase;
+use run_store::RunDatabaseInner;
 
 #[derive(Clone)]
-pub struct SlateStore {
+pub struct Database {
     object_store: Arc<dyn ObjectStore>,
     base_prefix: String,
     flush_interval: Duration,
     db: Arc<OnceCell<slatedb::Db>>,
-    active_runs: Arc<Mutex<HashMap<RunId, Arc<SlateRunStoreInner>>>>,
+    active_runs: Arc<Mutex<HashMap<RunId, Arc<RunDatabaseInner>>>>,
 }
 
-impl std::fmt::Debug for SlateStore {
+impl std::fmt::Debug for Database {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SlateStore")
+        f.debug_struct("Database")
             .field("base_prefix", &self.base_prefix)
             .field("flush_interval", &self.flush_interval)
             .finish_non_exhaustive()
     }
 }
 
-impl SlateStore {
+impl Database {
     pub fn new(
         object_store: Arc<dyn ObjectStore>,
         base_prefix: impl Into<String>,
@@ -68,55 +68,52 @@ impl SlateStore {
         Ok(db.clone())
     }
 
-    async fn get_active_run(&self, run_id: &RunId) -> Option<SlateRunStore> {
+    async fn get_active_run(&self, run_id: &RunId) -> Option<RunDatabase> {
         let active_runs = self.active_runs.lock().await;
         active_runs
             .get(run_id)
             .cloned()
-            .map(SlateRunStore::from_inner)
+            .map(RunDatabase::from_inner)
     }
 
-    async fn cache_active_run(&self, run_store: &SlateRunStore) {
+    async fn cache_active_run(&self, run_store: &RunDatabase) {
         self.active_runs
             .lock()
             .await
             .insert(run_store.run_id(), run_store.inner_arc());
     }
 
-    async fn remove_active_run(&self, run_id: &RunId) -> Option<SlateRunStore> {
+    async fn remove_active_run(&self, run_id: &RunId) -> Option<RunDatabase> {
         self.active_runs
             .lock()
             .await
             .remove(run_id)
-            .map(SlateRunStore::from_inner)
+            .map(RunDatabase::from_inner)
     }
 
-    pub async fn create_run(&self, run_id: &RunId) -> Result<SlateRunStore> {
+    pub async fn create_run(&self, run_id: &RunId) -> Result<RunDatabase> {
         let db = self.open_db().await?;
-        let locator_exists = catalog::read_locator(&db, run_id).await?;
+        let run_exists = RunDatabase::has_any_events(&db, run_id).await?;
 
         if let Some(active) = self.get_active_run(run_id).await {
-            if locator_exists && !active.matches_run(run_id) {
+            if run_exists && !active.matches_run(run_id) {
                 return Err(StoreError::RunAlreadyExists(run_id.to_string()));
             }
-            catalog::write_catalog(&db, run_id).await?;
+            catalog::write_index(&db, run_id).await?;
             return Ok(active);
         }
 
-        if locator_exists {
+        if run_exists {
             return Err(StoreError::RunAlreadyExists(run_id.to_string()));
         }
 
-        SlateRunStore::validate_init(&db, run_id).await?;
-        db.put(keys::init_key(run_id), serde_json::to_vec(run_id)?)
-            .await?;
-        catalog::write_catalog(&db, run_id).await?;
-        let run_store = SlateRunStore::open_writer(*run_id, db).await?;
+        catalog::write_index(&db, run_id).await?;
+        let run_store = RunDatabase::open_writer(*run_id, db).await?;
         self.cache_active_run(&run_store).await;
         Ok(run_store)
     }
 
-    pub async fn open_run(&self, run_id: &RunId) -> Result<SlateRunStore> {
+    pub async fn open_run(&self, run_id: &RunId) -> Result<RunDatabase> {
         let db = self.open_db().await?;
         if let Some(active) = self.get_active_run(run_id).await {
             if !active.matches_run(run_id) {
@@ -126,18 +123,15 @@ impl SlateStore {
             }
             return Ok(active);
         }
-        if !catalog::read_locator(&db, run_id).await? {
+        if !RunDatabase::has_any_events(&db, run_id).await? {
             return Err(StoreError::RunNotFound(run_id.to_string()));
         }
-        if !SlateRunStore::validate_init(&db, run_id).await? {
-            return Err(StoreError::RunNotFound(run_id.to_string()));
-        }
-        let run_store = SlateRunStore::open_writer(*run_id, db).await?;
+        let run_store = RunDatabase::open_writer(*run_id, db).await?;
         self.cache_active_run(&run_store).await;
         Ok(run_store)
     }
 
-    pub async fn open_run_reader(&self, run_id: &RunId) -> Result<SlateRunStore> {
+    pub async fn open_run_reader(&self, run_id: &RunId) -> Result<RunDatabase> {
         let db = self.open_db().await?;
         if let Some(active) = self.get_active_run(run_id).await {
             if !active.matches_run(run_id) {
@@ -147,13 +141,10 @@ impl SlateStore {
             }
             return Ok(active.read_only_clone());
         }
-        if !catalog::read_locator(&db, run_id).await? {
+        if !RunDatabase::has_any_events(&db, run_id).await? {
             return Err(StoreError::RunNotFound(run_id.to_string()));
         }
-        if !SlateRunStore::validate_init(&db, run_id).await? {
-            return Err(StoreError::RunNotFound(run_id.to_string()));
-        }
-        SlateRunStore::open_reader(*run_id, db).await
+        RunDatabase::open_reader(*run_id, db).await
     }
 
     pub async fn list_runs(&self, query: &ListRunsQuery) -> Result<Vec<RunSummary>> {
@@ -165,10 +156,10 @@ impl SlateStore {
                 summaries.push(active.state().await?.build_summary(&run_id));
                 continue;
             }
-            if !SlateRunStore::validate_init(&db, &run_id).await? {
+            if !RunDatabase::has_any_events(&db, &run_id).await? {
                 continue;
             }
-            summaries.push(SlateRunStore::build_summary(&db, &run_id).await?);
+            summaries.push(RunDatabase::build_summary(&db, &run_id).await?);
         }
         summaries.sort_by(|a, b| b.run_id.created_at().cmp(&a.run_id.created_at()));
         Ok(summaries)
@@ -181,19 +172,48 @@ impl SlateStore {
         }
 
         let db = self.open_db().await?;
-        let prefix = keys::run_prefix(run_id);
-        let mut iter = db.scan_prefix(prefix.as_bytes()).await?;
         let mut keys_to_delete = Vec::new();
-        while let Some(entry) = iter.next().await? {
-            keys_to_delete.push(String::from_utf8(entry.key.to_vec()).map_err(|err| {
-                StoreError::Other(format!("stored key is not valid UTF-8: {err}"))
-            })?);
+        for prefix in [keys::run_data_prefix(run_id), keys::blobs_prefix(run_id)] {
+            let mut iter = db.scan_prefix(prefix.as_bytes()).await?;
+            while let Some(entry) = iter.next().await? {
+                keys_to_delete.push(String::from_utf8(entry.key.to_vec()).map_err(|err| {
+                    StoreError::Other(format!("stored key is not valid UTF-8: {err}"))
+                })?);
+            }
         }
         for key in keys_to_delete {
             db.delete(key).await?;
         }
-        catalog::delete_catalog(&db, run_id).await?;
+        catalog::delete_index(&db, run_id).await?;
         Ok(())
+    }
+
+    #[must_use]
+    pub fn runs(&self) -> Runs {
+        Runs { db: self.clone() }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Runs {
+    db: Database,
+}
+
+impl Runs {
+    pub async fn get(&self, run_id: &RunId) -> Result<RunDatabase> {
+        self.db.open_run(run_id).await
+    }
+
+    pub async fn find(&self, run_id: &RunId) -> Result<Option<RunSummary>> {
+        match self.db.open_run_reader(run_id).await {
+            Ok(run_db) => Ok(Some(run_db.state().await?.build_summary(run_id))),
+            Err(StoreError::RunNotFound(_)) => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
+    pub async fn list(&self, query: &ListRunsQuery) -> Result<Vec<RunSummary>> {
+        self.db.list_runs(query).await
     }
 }
 
@@ -244,9 +264,9 @@ mod tests {
         RunId::from(ulid::Ulid::from_parts(timestamp_ms, random))
     }
 
-    fn make_store() -> (Arc<dyn ObjectStore>, SlateStore) {
+    fn make_store() -> (Arc<dyn ObjectStore>, Database) {
         let object_store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
-        let store = SlateStore::new(object_store.clone(), "runs/", Duration::from_millis(1));
+        let store = Database::new(object_store.clone(), "runs/", Duration::from_millis(1));
         (object_store, store)
     }
 
@@ -288,7 +308,7 @@ mod tests {
         .unwrap()
     }
 
-    async fn append_created(run: &SlateRunStore, label: &str, created_at: DateTime<Utc>) {
+    async fn append_created(run: &RunDatabase, label: &str, created_at: DateTime<Utc>) {
         let run_record = sample_run_record(label);
         run.append_event(&event_payload(
             label,
@@ -309,7 +329,7 @@ mod tests {
         .unwrap();
     }
 
-    async fn append_completed(run: &SlateRunStore, label: &str, created_at: DateTime<Utc>) {
+    async fn append_completed(run: &RunDatabase, label: &str, created_at: DateTime<Utc>) {
         append_created(run, label, created_at).await;
         run.append_event(&event_payload(
             label,
@@ -422,7 +442,7 @@ mod tests {
         let run = store.create_run(&test_run_id("run-1")).await.unwrap();
         append_completed(&run, "run-1", dt("2026-03-27T12:00:00Z")).await;
 
-        let reopened = SlateStore::new(object_store, "runs", Duration::from_millis(1));
+        let reopened = Database::new(object_store, "runs", Duration::from_millis(1));
         let summary = reopened.list_runs(&ListRunsQuery::default()).await.unwrap();
         assert_eq!(summary.len(), 1);
         assert_eq!(summary[0].run_id, test_run_id("run-1"));

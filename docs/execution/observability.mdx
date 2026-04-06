@@ -71,15 +71,15 @@ Because event payload lives in `properties`, most shell queries should look ther
 ```bash
 # Count tool calls in a run
 jq -r 'select(.event == "agent.tool.started") | .properties.tool_name' \
-  ~/.fabro/runs/01JKXYZ.../progress.jsonl | wc -l
+  ~/.fabro/scratch/01JKXYZ.../progress.jsonl | wc -l
 
 # Find stage failures
 jq 'select(.event == "stage.failed")' \
-  ~/.fabro/runs/01JKXYZ.../progress.jsonl
+  ~/.fabro/scratch/01JKXYZ.../progress.jsonl
 
 # See which edges were taken
 jq '{from: .properties.from_node, to: .properties.to_node, label: .properties.label}' \
-  ~/.fabro/runs/01JKXYZ.../progress.jsonl | head
+  ~/.fabro/scratch/01JKXYZ.../progress.jsonl | head
 ```
 
 `live.json` is still a pretty-printed copy of the most recent event envelope.

@@ -146,6 +146,8 @@ models/retro-list-item.ts
 models/retro-stats.ts
 models/root-response-urls.ts
 models/root-response.ts
+models/run-artifact-entry.ts
+models/run-artifact-list-response.ts
 models/run-checkpoint.ts
 models/run-error.ts
 models/run-event.ts
@@ -166,6 +168,8 @@ models/run-timings.ts
 models/run-usage.ts
 models/run-verification-control.ts
 models/run-verification.ts
+models/sandbox-file-entry.ts
+models/sandbox-file-list-response.ts
 models/sandbox-resources.ts
 models/sandbox-settings.ts
 models/save-query-request.ts
@@ -184,6 +188,8 @@ models/sibling-control.ts
 models/signoff-status.ts
 models/signoff.ts
 models/smoothness-rating.ts
+models/ssh-access-request.ts
+models/ssh-access-response.ts
 models/stage-retro.ts
 models/stage-status.ts
 models/stage-turn.ts

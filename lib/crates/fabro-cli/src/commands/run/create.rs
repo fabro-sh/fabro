@@ -2,9 +2,9 @@ use std::path::PathBuf;
 
 use crate::args::RunArgs;
 use fabro_config::ConfigLayer;
+use fabro_config::Storage;
 use fabro_types::{RunId, Settings};
 use fabro_util::terminal::Styles;
-use fabro_workflow::operations::make_run_dir;
 
 use super::output::{api_diagnostics_to_local, print_preflight_workflow_summary};
 use crate::manifest_builder::{ManifestBuildInput, build_run_manifest, run_manifest_args};
@@ -66,9 +66,12 @@ pub(crate) async fn create_run(
 
     let created_run_id = client.create_run_from_manifest(built.manifest).await?;
     let local_run_dir = match &connection {
-        ServerConnection::Local { storage_dir } => {
-            Some(make_run_dir(&storage_dir.join("runs"), &created_run_id))
-        }
+        ServerConnection::Local { storage_dir } => Some(
+            Storage::new(storage_dir)
+                .run_scratch(&created_run_id)
+                .root()
+                .to_path_buf(),
+        ),
         ServerConnection::Target(_) => None,
     };
 

@@ -4,7 +4,7 @@ use std::path::Path;
 use serde_json::Value;
 
 use fabro_agent::Sandbox;
-use fabro_store::SlateRunStore;
+use fabro_store::RunDatabase;
 
 use crate::error::{FabroError, Result};
 
@@ -26,7 +26,7 @@ const ARTIFACT_POINTER_PREFIX: &str = "file://";
 /// Returns an error if blob persistence or cache materialization fails.
 pub async fn offload_large_values(
     updates: &mut HashMap<String, Value>,
-    run_store: &SlateRunStore,
+    run_store: &RunDatabase,
     cache_dir: &Path,
 ) -> Result<()> {
     std::fs::create_dir_all(cache_dir)?;
@@ -133,7 +133,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use fabro_store::SlateStore;
+    use fabro_store::Database;
     use object_store::memory::InMemory;
     use ulid::Ulid;
 
@@ -143,9 +143,9 @@ mod tests {
         fabro_types::RunId::from(Ulid(u128::from(hasher.finish())))
     }
 
-    async fn make_run_store(label: &str) -> fabro_store::SlateRunStore {
+    async fn make_run_store(label: &str) -> fabro_store::RunDatabase {
         let object_store = Arc::new(InMemory::new());
-        let store = SlateStore::new(object_store, "runs/", Duration::from_millis(1));
+        let store = Database::new(object_store, "runs/", Duration::from_millis(1));
         store.create_run(&test_run_id(label)).await.unwrap()
     }
 
@@ -156,8 +156,7 @@ mod tests {
 
         let large_string = "x".repeat(BLOB_OFFLOAD_THRESHOLD + 1);
         let serialized = serde_json::to_vec(&serde_json::json!(large_string.clone())).unwrap();
-        let expected_blob_id =
-            fabro_types::RunBlobId::new(&test_run_id("artifact-offload"), &serialized);
+        let expected_blob_id = fabro_types::RunBlobId::new(&serialized);
 
         let mut updates = HashMap::new();
         updates.insert("response.plan".to_string(), serde_json::json!(large_string));

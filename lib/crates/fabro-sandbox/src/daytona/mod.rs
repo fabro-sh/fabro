@@ -748,7 +748,7 @@ impl Sandbox for DaytonaSandbox {
         key: &str,
     ) -> String {
         format!(
-            "{}/.fabro/runs/{}/parallel/{}/{}",
+            "{}/.fabro/scratch/{}/parallel/{}/{}",
             self.working_directory(),
             run_id,
             node_id,

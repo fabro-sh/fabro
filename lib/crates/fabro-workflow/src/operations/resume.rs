@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use fabro_store::RuntimeState;
+use fabro_config::RunScratch;
 
 use crate::error::FabroError;
 use crate::event::{Event, append_event};
@@ -52,11 +52,11 @@ pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, 
 }
 
 fn cleanup_resume_artifacts(run_dir: &Path) {
-    let runtime_state = RuntimeState::new(run_dir);
+    let run_scratch = RunScratch::new(run_dir);
     for path in [
-        runtime_state.interview_request_path(),
-        runtime_state.interview_response_path(),
-        runtime_state.interview_claim_path(),
+        run_scratch.interview_request_path(),
+        run_scratch.interview_response_path(),
+        run_scratch.interview_claim_path(),
     ] {
         let _ = std::fs::remove_file(path);
     }

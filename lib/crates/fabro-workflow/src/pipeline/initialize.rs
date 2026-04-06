@@ -668,7 +668,7 @@ mod tests {
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
     use fabro_interview::AutoApproveInterviewer;
     use fabro_sandbox::SandboxSpec;
-    use fabro_store::{SlateStore, StoreHandle};
+    use fabro_store::Database;
     use fabro_types::{RunId, Settings, fixtures};
     use object_store::memory::InMemory;
 
@@ -682,8 +682,8 @@ mod tests {
         fixtures::RUN_1
     }
 
-    fn memory_store() -> StoreHandle {
-        Arc::new(SlateStore::new(
+    fn memory_store() -> Arc<Database> {
+        Arc::new(Database::new(
             Arc::new(InMemory::new()),
             "",
             Duration::from_millis(1),

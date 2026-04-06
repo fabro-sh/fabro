@@ -20,9 +20,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
-use fabro_store::SlateRunStore;
 #[cfg(test)]
-use fabro_store::SlateStore;
+use fabro_store::Database;
+use fabro_store::RunDatabase;
 #[cfg(test)]
 use object_store::memory::InMemory;
 
@@ -41,7 +41,7 @@ pub struct EngineServices {
     pub registry: Arc<HandlerRegistry>,
     pub emitter: Arc<Emitter>,
     pub sandbox: Arc<dyn Sandbox>,
-    pub run_store: SlateRunStore,
+    pub run_store: RunDatabase,
     /// Git state for the current run. Set via `set_git_state` at the start of
     /// `run_via_core` and read by parallel/fan-in handlers.
     pub(crate) git_state: std::sync::RwLock<Option<Arc<GitState>>>,
@@ -80,7 +80,7 @@ impl EngineServices {
     /// Test-only default: empty registry, no hooks, local sandbox at cwd.
     #[cfg(test)]
     pub fn test_default() -> Self {
-        let store = Arc::new(SlateStore::new(
+        let store = Arc::new(Database::new(
             Arc::new(InMemory::new()),
             "",
             Duration::from_millis(1),

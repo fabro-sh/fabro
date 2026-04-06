@@ -9,7 +9,7 @@ use fabro_config::{project as project_config, run as run_config, sandbox as sand
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_model::{Catalog, FallbackTarget, Provider};
 use fabro_sandbox::{SandboxProvider, SandboxSpec};
-use fabro_store::SlateRunStore;
+use fabro_store::RunDatabase;
 use fabro_types::{RunId, Settings};
 
 use crate::context::Context;
@@ -48,7 +48,7 @@ struct RunSession {
     sandbox_env: SandboxEnvSpec,
     devcontainer: Option<DevcontainerSpec>,
     seed_context: Option<Context>,
-    run_store: SlateRunStore,
+    run_store: RunDatabase,
     git: Option<GitCheckpointOptions>,
     github_app: Option<fabro_github::GitHubAppCredentials>,
     worktree_mode: Option<WorktreeMode>,
@@ -68,7 +68,7 @@ pub struct StartServices {
     pub cancel_token: Option<Arc<AtomicBool>>,
     pub emitter: Arc<Emitter>,
     pub interviewer: Arc<dyn Interviewer>,
-    pub run_store: SlateRunStore,
+    pub run_store: RunDatabase,
     pub github_app: Option<fabro_github::GitHubAppCredentials>,
     pub on_node: crate::OnNodeCallback,
     pub registry_override: Option<Arc<HandlerRegistry>>,
@@ -209,7 +209,7 @@ pub(super) async fn execute_persisted_run(
 
 async fn persist_terminal_engine_failure(
     run_id: RunId,
-    run_store: &SlateRunStore,
+    run_store: &RunDatabase,
     _run_dir: &Path,
     error: &FabroError,
     duration: Duration,
@@ -590,7 +590,7 @@ impl RunSession {
 
 struct DetachedRunBootstrapGuard {
     run_id: RunId,
-    run_store: SlateRunStore,
+    run_store: RunDatabase,
     cancel_token: Option<Arc<AtomicBool>>,
     active: bool,
 }
@@ -599,7 +599,7 @@ impl DetachedRunBootstrapGuard {
     fn arm(
         run_id: RunId,
         _run_dir: &Path,
-        run_store: SlateRunStore,
+        run_store: RunDatabase,
         cancel_token: Option<Arc<AtomicBool>>,
     ) -> Self {
         Self {
@@ -652,14 +652,14 @@ const POSTRUN_ABORTED_MESSAGE: &str = "Run aborted before post-run finalization 
 const POSTRUN_CANCELLED_MESSAGE: &str = "Run cancelled before post-run finalization completed.";
 
 struct DetachedRunCompletionGuard {
-    run_store: SlateRunStore,
+    run_store: RunDatabase,
     run_id: RunId,
     cancel_token: Option<Arc<AtomicBool>>,
     active: bool,
 }
 
 impl DetachedRunCompletionGuard {
-    fn arm(run_id: RunId, run_store: SlateRunStore, cancel_token: Option<Arc<AtomicBool>>) -> Self {
+    fn arm(run_id: RunId, run_store: RunDatabase, cancel_token: Option<Arc<AtomicBool>>) -> Self {
         Self {
             run_store,
             run_id,
@@ -766,7 +766,7 @@ impl Drop for DetachedRunCompletionGuard {
 
 async fn persist_detached_failure(
     run_id: RunId,
-    run_store: &SlateRunStore,
+    run_store: &RunDatabase,
     _run_dir: &Path,
     phase: &'static str,
     reason: StatusReason,
@@ -818,7 +818,7 @@ mod tests {
     use std::time::Duration;
 
     use chrono::Utc;
-    use fabro_store::{SlateStore, StoreHandle};
+    use fabro_store::Database;
     use fabro_types::{Settings, fixtures};
     use object_store::memory::InMemory;
 
@@ -838,15 +838,15 @@ mod tests {
         start -> exit
     }"#;
 
-    fn memory_store() -> StoreHandle {
-        Arc::new(SlateStore::new(
+    fn memory_store() -> Arc<Database> {
+        Arc::new(Database::new(
             Arc::new(InMemory::new()),
             "",
             Duration::from_millis(1),
         ))
     }
 
-    async fn persisted_workflow(dot: &str, run_dir: &Path) -> (Persisted, StoreHandle) {
+    async fn persisted_workflow(dot: &str, run_dir: &Path) -> (Persisted, Arc<Database>) {
         let store = memory_store();
         let created = crate::operations::create(
             &store,
@@ -885,7 +885,7 @@ mod tests {
     }
 
     async fn test_start_services(
-        store: &SlateStore,
+        store: &Database,
         _run_dir: &Path,
         emitter: Arc<Emitter>,
         registry: Arc<HandlerRegistry>,

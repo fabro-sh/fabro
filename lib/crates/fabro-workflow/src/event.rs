@@ -5,7 +5,7 @@ use ::fabro_types::run_event as fabro_types;
 use ::fabro_types::{RunEvent, RunId, StageStatus, StatusReason};
 use anyhow::{Context, Result};
 use chrono::Utc;
-use fabro_store::{EventPayload, SlateRunStore};
+use fabro_store::{EventPayload, RunDatabase};
 use fabro_util::json::normalize_json_value;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -2301,7 +2301,7 @@ pub fn event_payload_from_redacted_json(line: &str, run_id: &RunId) -> Result<Ev
     EventPayload::new(value, run_id).map_err(anyhow::Error::from)
 }
 
-pub async fn append_event(run_store: &SlateRunStore, run_id: &RunId, event: &Event) -> Result<()> {
+pub async fn append_event(run_store: &RunDatabase, run_id: &RunId, event: &Event) -> Result<()> {
     let stored = to_run_event(run_id, event);
     let payload = build_redacted_event_payload(&stored, run_id)?;
     run_store
@@ -2323,7 +2323,7 @@ pub struct StoreProgressLogger {
 
 impl StoreProgressLogger {
     #[must_use]
-    pub fn new(run_store: SlateRunStore) -> Self {
+    pub fn new(run_store: RunDatabase) -> Self {
         let (tx, mut rx) = mpsc::unbounded_channel();
 
         tokio::spawn(async move {
@@ -2697,7 +2697,7 @@ mod tests {
 
     #[tokio::test]
     async fn append_event_writes_store_event_shape() {
-        let store = fabro_store::SlateStore::new(
+        let store = fabro_store::Database::new(
             std::sync::Arc::new(object_store::memory::InMemory::new()),
             "",
             std::time::Duration::from_millis(1),

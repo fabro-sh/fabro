@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 use fabro_checkpoint::branch::BranchStore;
 use fabro_checkpoint::git::Store as GitStore;
-use fabro_store::{SlateRunStore as DurableRunStore, SlateStore as DurableStore};
+use fabro_store::{Database as DurableStore, RunDatabase as DurableRunStore};
 use fabro_types::{RunId, StageId};
 use git2::{Repository, Signature};
 use ulid::Ulid;
@@ -334,7 +334,7 @@ fn resolve_prefix_matches(prefix: &str, matches: Vec<RunId>) -> Result<RunId> {
 mod tests {
     use chrono::{TimeZone, Utc};
     use fabro_graphviz::graph::Graph;
-    use fabro_store::{SlateStore, StageId, StoreHandle};
+    use fabro_store::{Database, StageId};
     use fabro_types::{RunId, RunRecord, SandboxRecord, Settings, StartRecord, fixtures};
     use object_store::memory::InMemory;
     use std::collections::HashMap;
@@ -359,8 +359,8 @@ mod tests {
         fixtures::RUN_1
     }
 
-    fn memory_store() -> StoreHandle {
-        Arc::new(SlateStore::new(
+    fn memory_store() -> Arc<Database> {
+        Arc::new(Database::new(
             Arc::new(InMemory::new()),
             "",
             Duration::from_millis(1),
@@ -428,7 +428,7 @@ mod tests {
     }
 
     async fn create_run_store(
-        store: &SlateStore,
+        store: &Database,
         run_id: RunId,
         host_repo_path: Option<&str>,
     ) -> DurableRunStore {

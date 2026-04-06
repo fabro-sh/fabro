@@ -13,18 +13,14 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { SandboxFileEntry } from './sandbox-file-entry';
 
 /**
- * Response containing the generated preview URL.
+ * Non-paginated list of sandbox directory entries.
  */
-export interface PreviewUrlResponse {
-    /**
-     * Preview URL.
-     */
-    'url': string;
-    /**
-     * Preview token header value for unsigned preview URLs.
-     */
-    'token'?: string;
+export interface SandboxFileListResponse {
+    'data': Array<SandboxFileEntry>;
 }
 

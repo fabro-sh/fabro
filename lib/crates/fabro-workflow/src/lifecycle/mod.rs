@@ -13,8 +13,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use async_trait::async_trait;
-use fabro_store::RuntimeState;
-use fabro_store::SlateRunStore;
+use fabro_config::RunScratch;
+use fabro_store::RunDatabase;
 use fabro_types::RunId;
 
 use fabro_core::error::Result as CoreResult;
@@ -81,12 +81,12 @@ impl WorkflowLifecycle {
         sandbox: &Arc<dyn Sandbox>,
         graph: Arc<GvGraph>,
         run_dir: &PathBuf,
-        run_store: &SlateRunStore,
+        run_store: &RunDatabase,
         run_options: &Arc<RunOptions>,
         is_resume: bool,
         on_node: crate::OnNodeCallback,
     ) -> Self {
-        let runtime_state = RuntimeState::new(run_dir);
+        let run_scratch = RunScratch::new(run_dir);
         let restarted_from: Arc<Mutex<Option<(String, String)>>> = Arc::new(Mutex::new(None));
         let loop_restart_signature_limit = graph.loop_restart_signature_limit();
         let checkpoint_git_result: Arc<Mutex<Option<GitCheckpointResult>>> =
@@ -155,9 +155,9 @@ impl WorkflowLifecycle {
         let artifact = ArtifactLifecycle::new(
             Arc::clone(sandbox),
             run_store.clone(),
-            runtime_state.blob_cache_dir(),
+            run_scratch.blob_cache_dir(),
             Arc::clone(emitter),
-            runtime_state.artifacts_dir(),
+            run_scratch.artifact_files_dir(),
             run_options.artifact_globs().to_vec(),
             captured_artifact_count,
         );

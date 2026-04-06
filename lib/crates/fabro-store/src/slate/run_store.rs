@@ -5,40 +5,33 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use bytes::Bytes;
 use chrono::Utc;
 use futures::Stream;
-use serde::de::DeserializeOwned;
 use slatedb::{Db, DbRead};
 use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::keys;
 use crate::run_state::EventProjectionCache;
-use crate::{EventEnvelope, EventPayload, Result, RunProjection, RunSummary, StageId, StoreError};
+use crate::{EventEnvelope, EventPayload, Result, RunProjection, RunSummary, StoreError};
 use fabro_types::{RunBlobId, RunId};
 
 const DEFAULT_EVENT_TAIL_LIMIT: usize = 1024;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct NodeArtifact {
-    pub node: StageId,
-    pub filename: String,
-}
-
 #[derive(Clone)]
-pub struct SlateRunStore {
-    inner: Arc<SlateRunStoreInner>,
+pub struct RunDatabase {
+    inner: Arc<RunDatabaseInner>,
     read_only: bool,
 }
 
-impl std::fmt::Debug for SlateRunStore {
+impl std::fmt::Debug for RunDatabase {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SlateRunStore")
+        f.debug_struct("RunDatabase")
             .field("run_id", &self.inner.run_id)
             .field("read_only", &self.read_only)
             .finish_non_exhaustive()
     }
 }
 
-pub(crate) struct SlateRunStoreInner {
+pub(crate) struct RunDatabaseInner {
     run_id: RunId,
     db: Db,
     event_seq: AtomicU32,
@@ -50,13 +43,17 @@ pub(crate) struct SlateRunStoreInner {
     event_tx: broadcast::Sender<EventEnvelope>,
 }
 
-impl SlateRunStore {
+impl RunDatabase {
     pub(crate) async fn open_writer(run_id: RunId, db: Db) -> Result<Self> {
-        let event_seq =
-            recover_next_seq(&db, &keys::events_prefix(&run_id), keys::parse_event_seq).await?;
+        let event_seq = recover_next_seq(
+            &db,
+            &keys::run_events_prefix(&run_id),
+            keys::parse_event_seq,
+        )
+        .await?;
         let (event_tx, _) = broadcast::channel(DEFAULT_EVENT_TAIL_LIMIT.max(16));
         Ok(Self {
-            inner: Arc::new(SlateRunStoreInner {
+            inner: Arc::new(RunDatabaseInner {
                 run_id,
                 db,
                 event_seq: AtomicU32::new(event_seq),
@@ -72,11 +69,15 @@ impl SlateRunStore {
     }
 
     pub(crate) async fn open_reader(run_id: RunId, db: Db) -> Result<Self> {
-        let event_seq =
-            recover_next_seq(&db, &keys::events_prefix(&run_id), keys::parse_event_seq).await?;
+        let event_seq = recover_next_seq(
+            &db,
+            &keys::run_events_prefix(&run_id),
+            keys::parse_event_seq,
+        )
+        .await?;
         let (event_tx, _) = broadcast::channel(DEFAULT_EVENT_TAIL_LIMIT.max(16));
         Ok(Self {
-            inner: Arc::new(SlateRunStoreInner {
+            inner: Arc::new(RunDatabaseInner {
                 run_id,
                 db,
                 event_seq: AtomicU32::new(event_seq),
@@ -91,7 +92,7 @@ impl SlateRunStore {
         })
     }
 
-    pub(crate) fn from_inner(inner: Arc<SlateRunStoreInner>) -> Self {
+    pub(crate) fn from_inner(inner: Arc<RunDatabaseInner>) -> Self {
         Self {
             inner,
             read_only: false,
@@ -105,7 +106,7 @@ impl SlateRunStore {
         }
     }
 
-    pub(crate) fn inner_arc(&self) -> Arc<SlateRunStoreInner> {
+    pub(crate) fn inner_arc(&self) -> Arc<RunDatabaseInner> {
         Arc::clone(&self.inner)
     }
 
@@ -122,17 +123,14 @@ impl SlateRunStore {
         Ok(())
     }
 
-    pub(crate) async fn validate_init<R>(db: &R, run_id: &RunId) -> Result<bool>
+    pub(crate) async fn has_any_events<R>(db: &R, run_id: &RunId) -> Result<bool>
     where
         R: DbRead + Sync,
     {
-        match get_json::<R, RunId>(db, &keys::init_key(run_id)).await? {
-            Some(existing) if existing == *run_id => Ok(true),
-            Some(existing) => Err(StoreError::Other(format!(
-                "existing init record {existing:?} does not match requested run_id {run_id:?}"
-            ))),
-            None => Ok(false),
-        }
+        let mut iter = db
+            .scan_prefix(keys::run_events_prefix(run_id).as_bytes())
+            .await?;
+        Ok(iter.next().await?.is_some())
     }
 
     pub(crate) async fn build_summary<R>(db: &R, run_id: &RunId) -> Result<RunSummary>
@@ -193,7 +191,7 @@ impl SlateRunStore {
     }
 }
 
-impl SlateRunStore {
+impl RunDatabase {
     pub async fn append_event(&self, payload: &EventPayload) -> Result<u32> {
         if self.read_only {
             return Err(StoreError::ReadOnly);
@@ -208,7 +206,7 @@ impl SlateRunStore {
         self.inner
             .db
             .put(
-                keys::event_key(&self.inner.run_id, seq, Utc::now().timestamp_millis()),
+                keys::run_event_key(&self.inner.run_id, seq, Utc::now().timestamp_millis()),
                 serde_json::to_vec(payload)?,
             )
             .await?;
@@ -272,7 +270,7 @@ impl SlateRunStore {
         if self.read_only {
             return Err(StoreError::ReadOnly);
         }
-        let id = RunBlobId::new(&self.inner.run_id, data);
+        let id = RunBlobId::new(data);
         self.inner
             .db
             .put(keys::blob_key(&self.inner.run_id, &id), data)
@@ -292,51 +290,9 @@ impl SlateRunStore {
         list_blobs(&self.inner.db, &self.inner.run_id).await
     }
 
-    pub async fn put_artifact(&self, node: &StageId, filename: &str, data: &[u8]) -> Result<()> {
-        if self.read_only {
-            return Err(StoreError::ReadOnly);
-        }
-        self.inner
-            .db
-            .put(
-                keys::node_artifact(&self.inner.run_id, node, filename),
-                data,
-            )
-            .await?;
-        Ok(())
-    }
-
-    pub async fn get_artifact(&self, node: &StageId, filename: &str) -> Result<Option<Bytes>> {
-        Ok(self
-            .inner
-            .db
-            .get(keys::node_artifact(&self.inner.run_id, node, filename))
-            .await?)
-    }
-
-    pub async fn list_all_artifacts(&self) -> Result<Vec<NodeArtifact>> {
-        list_all_artifacts(&self.inner.db, &self.inner.run_id).await
-    }
-
-    pub async fn list_artifacts_for_stage(&self, stage_id: &StageId) -> Result<Vec<String>> {
-        list_artifacts_for_stage(&self.inner.db, &self.inner.run_id, stage_id).await
-    }
-
     pub async fn state(&self) -> Result<RunProjection> {
         self.projected_state().await
     }
-}
-
-async fn get_json<R, T>(db: &R, key: &str) -> Result<Option<T>>
-where
-    R: DbRead + Sync,
-    T: DeserializeOwned,
-{
-    db.get(key)
-        .await?
-        .map(|value| serde_json::from_slice(&value))
-        .transpose()
-        .map_err(Into::into)
 }
 
 async fn recover_next_seq<R>(db: &R, prefix: &str, parse: fn(&str) -> Option<u32>) -> Result<u32>
@@ -359,7 +315,7 @@ where
     R: DbRead + Sync,
 {
     let mut iter = db
-        .scan_prefix(keys::events_prefix(run_id).as_bytes())
+        .scan_prefix(keys::run_events_prefix(run_id).as_bytes())
         .await?;
     let mut events = Vec::new();
     while let Some(entry) = iter.next().await? {
@@ -410,47 +366,6 @@ where
     }
     blob_ids.sort();
     Ok(blob_ids)
-}
-
-async fn list_all_artifacts<R>(db: &R, run_id: &RunId) -> Result<Vec<NodeArtifact>>
-where
-    R: DbRead + Sync,
-{
-    let mut iter = db.scan_prefix(keys::run_prefix(run_id).as_bytes()).await?;
-    let mut assets = Vec::new();
-    while let Some(entry) = iter.next().await? {
-        let key = key_to_string(&entry.key)?;
-        let Some((node, filename)) = keys::parse_node_artifact_key(&key) else {
-            continue;
-        };
-        assets.push(NodeArtifact { node, filename });
-    }
-    assets.sort();
-    Ok(assets)
-}
-
-async fn list_artifacts_for_stage<R>(
-    db: &R,
-    run_id: &RunId,
-    stage_id: &StageId,
-) -> Result<Vec<String>>
-where
-    R: DbRead + Sync,
-{
-    let prefix = keys::node_artifact_prefix(run_id, stage_id);
-    let mut iter = db.scan_prefix(prefix.as_bytes()).await?;
-    let mut filenames = Vec::new();
-    while let Some(entry) = iter.next().await? {
-        let key = key_to_string(&entry.key)?;
-        let Some((node, filename)) = keys::parse_node_artifact_key(&key) else {
-            continue;
-        };
-        if &node == stage_id {
-            filenames.push(filename);
-        }
-    }
-    filenames.sort();
-    Ok(filenames)
 }
 
 fn key_to_string(key: &Bytes) -> Result<String> {

@@ -15,20 +15,20 @@
 
 
 /**
- * Request body for generating a preview URL from a sandbox port.
+ * A directory entry in a run sandbox.
  */
-export interface PreviewUrlRequest {
+export interface SandboxFileEntry {
     /**
-     * Port number exposed by the sandbox.
+     * Basename of the entry.
      */
-    'port': number;
+    'name': string;
     /**
-     * Time-to-live for the preview URL in seconds.
+     * Whether the entry is a directory.
      */
-    'expires_in_secs': number;
+    'is_dir': boolean;
     /**
-     * When true, return a signed URL that does not require a preview token header.
+     * File size in bytes when known.
      */
-    'signed'?: boolean;
+    'size'?: number;
 }
 

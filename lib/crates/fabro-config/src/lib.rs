@@ -2,6 +2,7 @@ extern crate self as fabro_config;
 
 pub mod combine;
 pub mod config;
+pub mod home;
 pub mod hook;
 pub mod legacy_env;
 pub mod mcp;
@@ -10,11 +11,14 @@ pub mod run;
 pub mod sandbox;
 pub mod server;
 pub mod settings;
+pub mod storage;
 pub mod user;
 
 pub use config::ConfigLayer;
 pub use fabro_types::Combine;
 pub use fabro_util::path::expand_tilde;
+pub use home::Home;
+pub use storage::{RunScratch, ServerState, Storage};
 
 use std::path::Path;
 
@@ -34,11 +38,7 @@ where
         return Ok(toml::from_str(&contents)?);
     }
 
-    let Some(home) = dirs::home_dir() else {
-        tracing::debug!("No home directory found, using default config");
-        return Ok(T::default());
-    };
-    let default_path = home.join(".fabro").join(filename);
+    let default_path = Home::from_env().root().join(filename);
     tracing::debug!(path = %default_path.display(), "Loading config");
     match std::fs::read_to_string(&default_path) {
         Ok(contents) => Ok(toml::from_str(&contents)?),

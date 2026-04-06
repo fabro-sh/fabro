@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use anyhow::{Result, bail};
 use chrono::Utc;
+use fabro_config::Storage;
 use fabro_server::bind::Bind;
 use fabro_server::serve;
 use fabro_server::serve::ServeArgs;
@@ -83,13 +84,14 @@ async fn execute_foreground(
         );
     }
 
-    let record_path = record::server_record_path(&storage_dir);
+    let server_state = Storage::new(&storage_dir).server_state();
+    let record_path = server_state.record_path();
     record::write_server_record(
         &record_path,
         &record::ServerRecord {
             pid: std::process::id(),
             bind: bind.clone(),
-            log_path: record::server_log_path(&storage_dir),
+            log_path: server_state.log_path(),
             started_at: Utc::now(),
         },
     )?;
@@ -135,11 +137,12 @@ fn execute_daemon(
     }
 
     // Rotate logs
-    let log_path = record::server_log_path(storage_dir);
+    let server_state = Storage::new(storage_dir).server_state();
+    let log_path = server_state.log_path();
     let prev_path = log_path.with_extension("log.prev");
     let _ = std::fs::rename(&log_path, &prev_path);
 
-    let record_path = record::server_record_path(storage_dir);
+    let record_path = server_state.record_path();
     let log_file = std::fs::File::create(&log_path)?;
     let stdout_log = log_file.try_clone()?;
     let exe = std::env::current_exe()?;
@@ -250,7 +253,7 @@ fn execute_daemon(
 // ---------------------------------------------------------------------------
 
 fn acquire_lock(storage_dir: &Path) -> Result<std::fs::File> {
-    let lock_path = record::server_lock_path(storage_dir);
+    let lock_path = Storage::new(storage_dir).server_state().lock_path();
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent)?;
     }

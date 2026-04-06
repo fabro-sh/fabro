@@ -12,7 +12,7 @@ use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_hooks::HookSettings;
 use fabro_interview::AutoApproveInterviewer;
 use fabro_sandbox::SandboxSpec;
-use fabro_store::{SlateStore, StoreHandle};
+use fabro_store::Database;
 use fabro_types::{RunId, Settings, fixtures};
 use object_store::memory::InMemory;
 
@@ -156,8 +156,8 @@ fn test_lifecycle(setup_commands: Vec<String>) -> LifecycleOptions {
     }
 }
 
-async fn test_run_store(run_id: &RunId) -> fabro_store::SlateRunStore {
-    let store: StoreHandle = Arc::new(SlateStore::new(
+async fn test_run_store(run_id: &RunId) -> fabro_store::RunDatabase {
+    let store: Arc<Database> = Arc::new(Database::new(
         Arc::new(InMemory::new()),
         "",
         Duration::from_millis(1),
