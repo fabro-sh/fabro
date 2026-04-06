@@ -209,6 +209,8 @@ pub struct AppState {
     pub sessions: SessionStore,
     pub(crate) secret_store: AsyncRwLock<SecretStore>,
     pub(crate) settings: Arc<RwLock<Settings>>,
+    pub(crate) config_path: PathBuf,
+    pub(crate) local_daemon_mode: bool,
     registry_factory_override: Option<Box<RegistryFactoryOverride>>,
 }
 
@@ -849,6 +851,8 @@ pub fn create_app_state_with_settings_and_registry_factory(
         5,
         test_store(),
         test_secret_store_path(),
+        test_config_path(),
+        false,
     )
     .expect("test app state should build")
 }
@@ -884,6 +888,8 @@ pub fn create_app_state_with_store(
         max_concurrent_runs,
         store,
         test_secret_store_path(),
+        test_config_path(),
+        false,
     )
     .expect("test app state should build")
 }
@@ -894,6 +900,8 @@ pub(crate) fn build_app_state_with_path(
     max_concurrent_runs: usize,
     store: StoreHandle,
     secret_store_path: PathBuf,
+    config_path: PathBuf,
+    local_daemon_mode: bool,
 ) -> anyhow::Result<Arc<AppState>> {
     let secret_store = SecretStore::load(secret_store_path)?;
     Ok(Arc::new(AppState {
@@ -905,12 +913,18 @@ pub(crate) fn build_app_state_with_path(
         sessions: new_session_store(),
         secret_store: AsyncRwLock::new(secret_store),
         settings,
+        config_path,
+        local_daemon_mode,
         registry_factory_override,
     }))
 }
 
 fn test_secret_store_path() -> PathBuf {
     std::env::temp_dir().join(format!("fabro-test-secrets-{}.json", Ulid::new()))
+}
+
+fn test_config_path() -> PathBuf {
+    std::env::temp_dir().join(format!("fabro-test-settings-{}.toml", Ulid::new()))
 }
 
 async fn list_board_runs(
@@ -1134,7 +1148,11 @@ async fn create_run(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RunManifest>,
 ) -> Response {
-    let prepared = match run_manifest::prepare_manifest(&state.settings.read().unwrap(), &req) {
+    let prepared = match run_manifest::prepare_manifest_with_mode(
+        &state.settings.read().unwrap(),
+        &req,
+        state.local_daemon_mode,
+    ) {
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
@@ -1191,7 +1209,11 @@ async fn run_preflight(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RunManifest>,
 ) -> Response {
-    let prepared = match run_manifest::prepare_manifest(&state.settings.read().unwrap(), &req) {
+    let prepared = match run_manifest::prepare_manifest_with_mode(
+        &state.settings.read().unwrap(),
+        &req,
+        state.local_daemon_mode,
+    ) {
         Ok(prepared) => prepared,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
@@ -1217,11 +1239,14 @@ async fn render_graph_from_manifest(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RenderWorkflowGraphRequest>,
 ) -> Response {
-    let prepared =
-        match run_manifest::prepare_manifest(&state.settings.read().unwrap(), &req.manifest) {
-            Ok(prepared) => prepared,
-            Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
-        };
+    let prepared = match run_manifest::prepare_manifest_with_mode(
+        &state.settings.read().unwrap(),
+        &req.manifest,
+        state.local_daemon_mode,
+    ) {
+        Ok(prepared) => prepared,
+        Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
+    };
     let validated = match run_manifest::validate_prepared_manifest(&prepared) {
         Ok(validated) => validated,
         Err(err) => return ApiError::bad_request(err.to_string()).into_response(),

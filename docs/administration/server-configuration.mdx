@@ -1,17 +1,30 @@
 ---
 title: "Server Configuration"
-description: "Server config file, CLI overrides, and environment variables"
+description: "Server-owned settings.toml sections, CLI overrides, and environment variables"
 ---
 
 ## Config file
 
-The server config file at `~/.fabro/server.toml` controls how `fabro server start` behaves — API binding, authentication, run defaults, and more. The [Quick Start](/getting-started/quick-start) doesn't require one, but production deployments should configure it explicitly.
+`fabro server start` reads `~/.fabro/settings.toml` by default. This is the same file schema used by the CLI.
 
-This file configures the server process itself. It is separate from `[server].target` in `~/.fabro/user.toml`, which tells CLI commands how to connect to a server.
+On a same-machine setup, the CLI and server share one `settings.toml`. On a remote deployment, the server machine has its own `settings.toml`, and the client machine keeps a separate local `settings.toml` for CLI-only values such as `[server].target`.
+
+<Note>
+Legacy `server.toml`, `user.toml`, and `cli.toml` are ignored with a warning. Rename them to `settings.toml`.
+</Note>
+
+### Which sections are server-owned
+
+| Scope | Examples |
+|---|---|
+| Server-owned | `storage_dir`, `max_concurrent_runs`, `[web]`, `[api]`, `[features]` |
+| Shared with CLI and workflow defaults | `[llm]`, `[log]`, `[git]`, `[setup]`, `[sandbox]`, `[checkpoint]`, `[vars]`, `[pull_request]` |
+
+The CLI-only `[server]` section still belongs in the client machine's `settings.toml`. It tells CLI commands where to find a server. The server process does not read `[server].target` for its own binding or routing.
 
 ### Full reference
 
-```toml title="server.toml"
+```toml title="settings.toml"
 # Maximum concurrent workflow runs (default: 5)
 max_concurrent_runs = 8
 
@@ -52,7 +65,7 @@ email = "fabro-bot@company.com"
 [git.webhooks]
 strategy = "tailscale_funnel"
 
-# Run defaults — applied to every run unless overridden by the run config
+# Run defaults — applied to every run unless overridden by workflow/project config
 [llm]
 model = "claude-sonnet-4-5"
 provider = "anthropic"
@@ -85,7 +98,7 @@ default_branch = "main"
 
 ### CLI overrides
 
-Several `server.toml` settings can be overridden via `fabro server start` flags:
+Several `settings.toml` settings can be overridden via `fabro server start` flags:
 
 | Flag | Default | Description |
 |---|---|---|
@@ -95,14 +108,20 @@ Several `server.toml` settings can be overridden via `fabro server start` flags:
 | `--provider` | — | Override default LLM provider |
 | `--sandbox` | — | Override default sandbox provider |
 | `--max-concurrent-runs` | `5` | Maximum concurrent run executions |
-| `--config` | `~/.fabro/server.toml` | Path to server config file |
+| `--config` | `~/.fabro/settings.toml` | Path to server config file |
 | `--dry-run` | — | Execute with simulated LLM backend |
 
-CLI flags take precedence over `server.toml` values. See [Run Configuration — Precedence](/execution/run-configuration#precedence) for the full resolution order.
+CLI flags take precedence over `settings.toml` values. See [Run Configuration — Precedence](/execution/run-configuration#precedence) for the full resolution order.
 
 ### Run defaults
 
-The `[llm]`, `[setup]`, `[sandbox]`, `[checkpoint]`, and `[vars]` sections in `server.toml` act as defaults for every run. A run config TOML can override any of these. For `[vars]`, Daytona labels, and checkpoint exclude globs, values are **merged** — the run config wins on key collisions. All other fields use "first non-empty wins" precedence.
+The `[llm]`, `[setup]`, `[sandbox]`, `[checkpoint]`, and `[vars]` sections in `settings.toml` act as defaults for every run.
+
+On a same-machine setup, `settings.toml` is the shared machine-default layer under `workflow.toml` / `run.toml` and `fabro.toml`.
+
+On a remote setup, the client bundles workflow, project, and user config into the run manifest. The server then layers those bundled client configs over its own local defaults for run-shaped fields. Server-owned values like `storage_dir`, `[api]`, `[web]`, `[features]`, and `max_concurrent_runs` always come from the server machine's own `settings.toml` or `fabro server start` flags.
+
+For `[vars]`, Daytona labels, and checkpoint exclude globs, values are **merged** and the more specific layer wins on key collisions. All other fields use "first non-empty wins" precedence.
 
 ### `[log]` section
 
@@ -121,7 +140,7 @@ Customize the git author identity used for checkpoint commits. When not set, def
 | `name` | Git author name | `"fabro"` |
 | `email` | Git author email | `"fabro@local"` |
 
-The CLI can also set `[git.author]` in `user.toml` to override the server default.
+On same-machine setups, the CLI and server read the same `[git.author]`. On remote setups, the server uses its local `settings.toml`.
 
 ### `[git.webhooks]` section
 
@@ -139,9 +158,9 @@ Configure checkpoint behavior for all runs.
 
 | Key | Description |
 |---|---|
-| `exclude_globs` | Glob patterns for files to exclude from checkpoint commits (e.g. `["**/node_modules/**"]`) |
+| `exclude_globs` | Glob patterns for files to exclude from checkpoint commits (for example, `["**/node_modules/**"]`) |
 
-Exclude globs from `server.toml` and run configs are merged (union, deduplicated). See [Run Configuration — Checkpoint](/execution/run-configuration#checkpoint) for per-run configuration.
+Exclude globs from `settings.toml` and run configs are merged (union, deduplicated). See [Run Configuration — Checkpoint](/execution/run-configuration#checkpoint) for per-run configuration.
 
 ### `[features]` section
 

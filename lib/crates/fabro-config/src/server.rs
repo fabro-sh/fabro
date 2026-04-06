@@ -1,9 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
-use crate::config::ConfigLayer;
 use fabro_types::Settings;
 pub use fabro_types::settings::server::{
     ApiAuthStrategy, ApiSettings, AuthProvider, AuthSettings, FeaturesSettings, GitAuthorSettings,
@@ -177,16 +176,6 @@ impl From<LogConfig> for LogSettings {
     fn from(value: LogConfig) -> Self {
         Self { level: value.level }
     }
-}
-
-/// Load server config from an explicit path or `~/.fabro/server.toml`, returning defaults if the
-/// default file doesn't exist. An explicit path that doesn't exist is an error.
-pub fn load_server_config(path: Option<&Path>) -> anyhow::Result<ConfigLayer> {
-    crate::load_config_file(path, "server.toml")
-}
-
-pub fn load_server_settings(path: Option<&Path>) -> anyhow::Result<Settings> {
-    load_server_config(path)?.try_into()
 }
 
 /// Resolve the storage directory: config value > default `~/.fabro`.

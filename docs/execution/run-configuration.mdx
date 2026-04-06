@@ -218,7 +218,7 @@ NODE_ENV = "production"
 | `"literal"` | Static value passed as-is |
 | `"${env.VARNAME}"` | Resolved from the host environment at load time. Missing vars produce a hard error. |
 
-Host env references must be whole-value only — partial interpolation like `"prefix-${env.X}"` is not supported. Sandbox env vars from `server.toml` defaults and the run config are merged, with the run config winning on key collisions.
+Host env references must be whole-value only — partial interpolation like `"prefix-${env.X}"` is not supported. Sandbox env vars from `settings.toml` defaults and the run config are merged, with the run config winning on key collisions.
 
 ### `[checkpoint]`
 
@@ -233,7 +233,7 @@ exclude_globs = ["**/node_modules/**", "**/.cache/**", "**/dist/**"]
 |---|---|
 | `exclude_globs` | Glob patterns for files to exclude from checkpoint commits. Uses git pathspec `:(glob,exclude)` syntax. |
 
-Exclude globs from `server.toml` defaults and the run config are merged (union, deduplicated).
+Exclude globs from `settings.toml` defaults and the run config are merged (union, deduplicated).
 
 ### `[vars]`
 
@@ -391,7 +391,7 @@ Settings can come from multiple sources. Fabro resolves them in this order (firs
 | Run config TOML | |
 | CLI flags (`--model`, `--provider`, `--sandbox`) | |
 | Project defaults (`fabro.toml`) | |
-| Server defaults (`~/.fabro/server.toml`) | |
+| Server defaults (`~/.fabro/settings.toml`) | |
 | Graphviz graph attributes (`default_model`, `default_provider`) | |
 | Built-in defaults | Lowest |
 
@@ -423,12 +423,12 @@ Project defaults are merged with run config values using the same rules as serve
 
 ### Server defaults
 
-When running via `fabro server start`, the server config at `~/.fabro/server.toml` can set default values for `[llm]`, `[setup]`, `[sandbox]`, and `[vars]`. These defaults are applied to every run unless the run config overrides them.
+When running via `fabro server start`, the server config at `~/.fabro/settings.toml` can set default values for `[llm]`, `[setup]`, `[sandbox]`, and `[vars]`. These defaults are applied to every run unless the run config overrides them.
 
 For variables, defaults and run config are **merged** — the run config wins on key collisions:
 
 ```toml
-# ~/.fabro/server.toml
+# ~/.fabro/settings.toml
 [vars]
 default_key = "from_server"
 shared = "from_server"

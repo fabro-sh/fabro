@@ -9,11 +9,11 @@ use crate::args::{ForkArgs, GlobalArgs};
 use crate::commands::store::rebuild::rebuild_run_store;
 use crate::server_runs::ServerRunLookup;
 use crate::shared::print_json_pretty;
-use crate::user_config::load_user_settings_with_storage_dir;
+use crate::user_config::load_settings_with_storage_dir;
 
 pub(crate) async fn run(args: &ForkArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
     let repo = Repository::discover(".").context("not in a git repository")?;
-    let cli_settings = load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
+    let cli_settings = load_settings_with_storage_dir(args.storage_dir.as_deref())?;
     let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
     let run = lookup.resolve(&args.run_id)?;
     let run_id = run.run_id();

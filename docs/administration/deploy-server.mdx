@@ -47,7 +47,7 @@ Common flags:
 | `--sandbox` | — | Override default sandbox provider |
 | `--max-concurrent-runs` | `5` | Maximum concurrent run executions |
 
-See [Server Configuration](/administration/server-configuration) for the full `server.toml` reference.
+See [Server Configuration](/administration/server-configuration) for the full `settings.toml` reference.
 
 ## Submitting runs
 
@@ -95,7 +95,7 @@ In the server interface, human-in-the-loop questions are served over HTTP instea
 
 ## Authentication
 
-The server supports two authentication strategies, configurable in `server.toml`:
+The server supports two authentication strategies, configurable in `settings.toml`:
 
 - **JWT** — EdDSA-signed bearer tokens. Used by the web UI. See [API Overview](/api-reference/overview#jwt-bearer-token) for token format.
 - **mTLS** — Mutual TLS with client certificates. Used for service-to-service communication. See [API Overview](/api-reference/overview#mtls-mutual-tls) for setup.
@@ -108,9 +108,9 @@ Send the `X-Fabro-Demo: 1` header on any API request to get static mock data wit
 
 ## Pointing the CLI at a server
 
-The CLI can target a running Fabro server for commands that support a remote API. Configure `~/.fabro/user.toml`:
+The CLI can target a running Fabro server for commands that support a remote API. Configure `~/.fabro/settings.toml`:
 
-```toml title="user.toml"
+```toml title="settings.toml"
 [server]
 target = "https://fabro.example.com:3000/api/v1"
 ```
@@ -129,7 +129,7 @@ See [User Configuration](/reference/user-configuration#server-section) for the f
 
 <Columns cols={2}>
   <Card title="Server Configuration" icon="gear" href="/administration/server-configuration">
-    Full server.toml reference — authentication, TLS, run defaults, and more.
+    Full settings.toml reference — authentication, TLS, run defaults, and more.
   </Card>
   <Card title="Deploy to Railway" icon="train" href="/administration/deploy-railway">
     Step-by-step guide for deploying Fabro on Railway.

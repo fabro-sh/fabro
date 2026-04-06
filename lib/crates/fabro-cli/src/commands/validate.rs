@@ -7,12 +7,15 @@ use crate::commands::run::output::api_diagnostics_to_local;
 use crate::manifest_builder::{ManifestBuildInput, build_run_manifest};
 use crate::server_client;
 use crate::shared::{print_diagnostics, print_json_pretty, relative_path};
+use crate::user_config::{self, load_settings_with_storage_dir};
 
 pub(crate) async fn run(
     args: &ValidateArgs,
     styles: &Styles,
     globals: &GlobalArgs,
 ) -> anyhow::Result<()> {
+    let settings = load_settings_with_storage_dir(args.target.storage_dir())?;
+    let connection = user_config::server_backed_command_connection(&args.target, &settings)?;
     let cwd = std::env::current_dir()?;
     let built = build_run_manifest(ManifestBuildInput {
         workflow: args.workflow.clone(),
@@ -21,7 +24,7 @@ pub(crate) async fn run(
         args: None,
         run_id: None,
     })?;
-    let client = server_client::connect_server_backed(&args.target).await?;
+    let client = server_client::connect_server_connection(&connection).await?;
     let response = client.run_preflight(built.manifest).await?;
     let diagnostics = api_diagnostics_to_local(&response.workflow.diagnostics);
 

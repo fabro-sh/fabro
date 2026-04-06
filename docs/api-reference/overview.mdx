@@ -17,18 +17,18 @@ The versioned API is served by `fabro server start`, which defaults to:
 http://localhost:3000/api/v1
 ```
 
-The base URL is configurable via `server.toml`:
+The base URL is configurable via `settings.toml`:
 
-```toml title="server.toml"
+```toml title="settings.toml"
 [api]
 base_url = "https://fabro.example.com/api/v1"
 ```
 
 ## Authentication
 
-The API supports two authentication strategies, configured in `server.toml`:
+The API supports two authentication strategies, configured in `settings.toml`:
 
-```toml title="server.toml"
+```toml title="settings.toml"
 [api]
 authentication_strategies = ["jwt"]
 ```
@@ -58,7 +58,7 @@ Set the verification key via the `FABRO_JWT_PUBLIC_KEY` environment variable (PE
 
 With mTLS, the client authenticates using a TLS client certificate. Configure both the strategy and TLS paths:
 
-```toml title="server.toml"
+```toml title="settings.toml"
 [api]
 authentication_strategies = ["mtls"]
 
@@ -74,7 +74,7 @@ The Common Name (CN) from the client certificate identifies the user.
 
 You can configure both strategies. They are tried in order — the first successful match wins:
 
-```toml title="server.toml"
+```toml title="settings.toml"
 [api]
 authentication_strategies = ["jwt", "mtls"]
 ```

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use anyhow::{Context, anyhow};
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -488,10 +489,7 @@ async fn setup_register(
         );
     };
 
-    let settings_path = dirs::home_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join(".fabro")
-        .join("server.toml");
+    let settings_path = state.config_path.clone();
 
     let mut settings = state
         .settings
@@ -508,11 +506,33 @@ async fn setup_register(
     if let Some(parent) = settings_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let toml = build_server_toml(&settings, &git);
-    if let Err(error) = std::fs::write(&settings_path, toml) {
+    let existing = std::fs::read_to_string(&settings_path).unwrap_or_default();
+    let mut doc: toml::Value = if existing.is_empty() {
+        toml::Value::Table(toml::Table::default())
+    } else {
+        match toml::from_str(&existing).context("failed to parse existing settings config") {
+            Ok(doc) => doc,
+            Err(error) => {
+                return json_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    json!({"error": format!("Failed to parse settings config: {error}")}),
+                );
+            }
+        }
+    };
+    if let Err(error) = merge_settings_keys(&mut doc, &settings, &git) {
         return json_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            json!({"error": format!("Failed to write server config: {error}")}),
+            json!({"error": format!("Failed to update settings config: {error}")}),
+        );
+    }
+    if let Err(error) = std::fs::write(
+        &settings_path,
+        toml::to_string_pretty(&doc).unwrap_or_default(),
+    ) {
+        return json_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            json!({"error": format!("Failed to write settings config: {error}")}),
         );
     }
 
@@ -544,7 +564,24 @@ async fn setup_register(
     Json(json!({"ok": true, "restart_required": true})).into_response()
 }
 
-fn build_server_toml(settings: &Settings, git: &GitSettings) -> String {
+fn root_table_mut(doc: &mut toml::Value) -> anyhow::Result<&mut toml::Table> {
+    doc.as_table_mut()
+        .ok_or_else(|| anyhow!("settings config root is not a table"))
+}
+
+fn ensure_table<'a>(table: &'a mut toml::Table, key: &str) -> anyhow::Result<&'a mut toml::Table> {
+    table
+        .entry(key.to_string())
+        .or_insert_with(|| toml::Value::Table(toml::Table::default()))
+        .as_table_mut()
+        .ok_or_else(|| anyhow!("settings config [{key}] is not a table"))
+}
+
+fn merge_settings_keys(
+    doc: &mut toml::Value,
+    settings: &Settings,
+    git: &GitSettings,
+) -> anyhow::Result<()> {
     let web_url = settings.web.as_ref().map_or_else(
         || "http://localhost:3000".to_string(),
         |web| web.url.clone(),
@@ -556,73 +593,136 @@ fn build_server_toml(settings: &Settings, git: &GitSettings) -> String {
         .unwrap_or_default();
     let api = settings.api.clone().unwrap_or_default();
 
-    let mut value = toml::Table::new();
-    value.insert(
-        "web".to_string(),
-        toml::Value::Table({
-            let mut web = toml::Table::new();
-            web.insert("url".to_string(), toml::Value::String(web_url));
-            web.insert(
-                "auth".to_string(),
-                toml::Value::Table({
-                    let mut auth = toml::Table::new();
-                    auth.insert(
-                        "provider".to_string(),
-                        toml::Value::String("github".to_string()),
-                    );
-                    auth.insert(
-                        "allowed_usernames".to_string(),
-                        toml::Value::Array(allowed.into_iter().map(toml::Value::String).collect()),
-                    );
-                    auth
-                }),
-            );
-            web
-        }),
+    let root = root_table_mut(doc)?;
+    let web = ensure_table(root, "web")?;
+    web.insert("url".to_string(), toml::Value::String(web_url));
+    let auth = ensure_table(web, "auth")?;
+    auth.insert(
+        "provider".to_string(),
+        toml::Value::String("github".to_string()),
     );
-    value.insert(
-        "api".to_string(),
-        toml::Value::Table({
-            let mut api_table = toml::Table::new();
-            api_table.insert("base_url".to_string(), toml::Value::String(api.base_url));
-            api_table.insert(
-                "authentication_strategies".to_string(),
-                toml::Value::Array(
-                    api.authentication_strategies
-                        .iter()
-                        .map(|strategy| match strategy {
-                            ApiAuthStrategy::Jwt => "jwt",
-                            ApiAuthStrategy::Mtls => "mtls",
-                        })
-                        .map(|value| toml::Value::String(value.to_string()))
-                        .collect(),
-                ),
-            );
-            api_table
-        }),
+    auth.insert(
+        "allowed_usernames".to_string(),
+        toml::Value::Array(allowed.into_iter().map(toml::Value::String).collect()),
     );
-    value.insert(
-        "git".to_string(),
-        toml::Value::Table({
-            let mut git_table = toml::Table::new();
-            git_table.insert(
-                "provider".to_string(),
-                toml::Value::String("github".to_string()),
-            );
-            git_table.insert(
-                "app_id".to_string(),
-                toml::Value::String(git.app_id.clone().unwrap_or_default()),
-            );
-            git_table.insert(
-                "client_id".to_string(),
-                toml::Value::String(git.client_id.clone().unwrap_or_default()),
-            );
-            git_table.insert(
-                "slug".to_string(),
-                toml::Value::String(git.slug.clone().unwrap_or_default()),
-            );
-            git_table
-        }),
+
+    let api_table = ensure_table(root, "api")?;
+    api_table.insert("base_url".to_string(), toml::Value::String(api.base_url));
+    api_table.insert(
+        "authentication_strategies".to_string(),
+        toml::Value::Array(
+            api.authentication_strategies
+                .iter()
+                .map(|strategy| match strategy {
+                    ApiAuthStrategy::Jwt => "jwt",
+                    ApiAuthStrategy::Mtls => "mtls",
+                })
+                .map(|value| toml::Value::String(value.to_string()))
+                .collect(),
+        ),
     );
-    toml::to_string(&value).unwrap_or_default()
+
+    let git_table = ensure_table(root, "git")?;
+    git_table.insert(
+        "provider".to_string(),
+        toml::Value::String("github".to_string()),
+    );
+    git_table.insert(
+        "app_id".to_string(),
+        toml::Value::String(git.app_id.clone().unwrap_or_default()),
+    );
+    git_table.insert(
+        "client_id".to_string(),
+        toml::Value::String(git.client_id.clone().unwrap_or_default()),
+    );
+    git_table.insert(
+        "slug".to_string(),
+        toml::Value::String(git.slug.clone().unwrap_or_default()),
+    );
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::merge_settings_keys;
+    use fabro_types::Settings;
+
+    #[test]
+    fn merge_settings_keys_preserves_unrelated_git_nested_keys() {
+        let mut doc: toml::Value = toml::from_str(
+            r#"
+[git]
+provider = "github"
+
+[git.author]
+name = "fabro"
+email = "fabro@example.com"
+
+[git.webhooks]
+strategy = "tailscale_funnel"
+"#,
+        )
+        .unwrap();
+
+        let mut settings = Settings::default();
+        settings.web.get_or_insert_default().auth.allowed_usernames = vec!["alice".to_string()];
+        settings.git.get_or_insert_default().provider = fabro_config::server::GitProvider::Github;
+        settings.git.get_or_insert_default().app_id = Some("123".to_string());
+        settings.git.get_or_insert_default().client_id = Some("abc".to_string());
+        settings.git.get_or_insert_default().slug = Some("fabro".to_string());
+
+        merge_settings_keys(&mut doc, &settings, settings.git.as_ref().unwrap()).unwrap();
+
+        let git = doc.get("git").and_then(toml::Value::as_table).unwrap();
+        assert_eq!(git.get("app_id").and_then(toml::Value::as_str), Some("123"));
+        let author = git.get("author").and_then(toml::Value::as_table).unwrap();
+        assert_eq!(
+            author.get("name").and_then(toml::Value::as_str),
+            Some("fabro")
+        );
+        let webhooks = git.get("webhooks").and_then(toml::Value::as_table).unwrap();
+        assert_eq!(
+            webhooks.get("strategy").and_then(toml::Value::as_str),
+            Some("tailscale_funnel")
+        );
+    }
+
+    #[test]
+    fn merge_settings_keys_preserves_unrelated_top_level_sections() {
+        let mut doc: toml::Value = toml::from_str(
+            r#"
+[exec]
+provider = "anthropic"
+
+[server]
+target = "https://fabro.example.com/api/v1"
+"#,
+        )
+        .unwrap();
+
+        let mut settings = Settings::default();
+        settings.web.get_or_insert_default().auth.allowed_usernames = vec!["alice".to_string()];
+        settings.git.get_or_insert_default().provider = fabro_config::server::GitProvider::Github;
+        settings.git.get_or_insert_default().app_id = Some("123".to_string());
+        settings.git.get_or_insert_default().client_id = Some("abc".to_string());
+        settings.git.get_or_insert_default().slug = Some("fabro".to_string());
+
+        merge_settings_keys(&mut doc, &settings, settings.git.as_ref().unwrap()).unwrap();
+
+        assert_eq!(
+            doc.get("exec")
+                .and_then(toml::Value::as_table)
+                .and_then(|exec| exec.get("provider"))
+                .and_then(toml::Value::as_str),
+            Some("anthropic")
+        );
+        assert_eq!(
+            doc.get("server")
+                .and_then(toml::Value::as_table)
+                .and_then(|server| server.get("target"))
+                .and_then(toml::Value::as_str),
+            Some("https://fabro.example.com/api/v1")
+        );
+    }
 }

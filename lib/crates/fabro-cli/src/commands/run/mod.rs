@@ -4,7 +4,7 @@ use fabro_util::terminal::Styles;
 use crate::args::{AttachArgs, GlobalArgs, RunArgs, RunCommands, RunnerArgs, StartArgs};
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
-use crate::user_config::user_layer_with_storage_dir;
+use crate::user_config::settings_layer_with_storage_dir;
 
 pub(crate) mod attach;
 pub(crate) mod command;
@@ -39,7 +39,7 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
         RunCommands::Create(mut args) => {
             apply_json_defaults(&mut args, globals);
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-            let cli = user_layer_with_storage_dir(args.target.storage_dir())?;
+            let cli = settings_layer_with_storage_dir(args.target.storage_dir())?;
             let created_run = Box::pin(create::create_run(&args, cli, styles, true)).await?;
             if globals.json {
                 print_json_pretty(&serde_json::json!({ "run_id": created_run.run_id }))?;
@@ -90,8 +90,9 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             #[cfg(feature = "sleep_inhibitor")]
             let _sleep_guard = {
-                let cli_settings =
-                    load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
+                let cli_settings = crate::user_config::load_settings_with_storage_dir(
+                    args.storage_dir.as_deref(),
+                )?;
                 crate::sleep_inhibitor::guard(cli_settings.prevent_idle_sleep_enabled())
             };
             resume::resume_command(args, styles, globals).await

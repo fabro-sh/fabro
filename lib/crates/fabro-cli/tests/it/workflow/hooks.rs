@@ -77,7 +77,7 @@ fn conclusion_status(context: &fabro_test::TestContext) -> String {
 async fn hook_prompt_proceed_allows_run() {
     let context = test_context!();
     context.write_home(
-        ".fabro/user.toml",
+        ".fabro/settings.toml",
         &format!(
             r#"
 [[hooks]]
@@ -126,7 +126,7 @@ model = "{model}"
 async fn hook_prompt_block_prevents_run() {
     let context = test_context!();
     context.write_home(
-        ".fabro/user.toml",
+        ".fabro/settings.toml",
         &format!(
             r#"
 [[hooks]]
@@ -182,7 +182,7 @@ model = "{model}"
 async fn hook_agent_proceed_allows_run() {
     let context = test_context!();
     context.write_home(
-        ".fabro/user.toml",
+        ".fabro/settings.toml",
         &format!(
             r#"
 [[hooks]]
@@ -234,7 +234,7 @@ async fn hook_agent_with_tool_use() {
     let marker = context.temp_dir.join("hook_check.txt");
     std::fs::write(&marker, "READY").unwrap();
     context.write_home(
-        ".fabro/user.toml",
+        ".fabro/settings.toml",
         &format!(
             r#"
 [[hooks]]

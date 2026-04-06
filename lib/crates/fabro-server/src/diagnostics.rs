@@ -322,7 +322,7 @@ async fn check_github_app(state: &AppState) -> CheckResult {
             status: CheckStatus::Error,
             summary: "missing app_id".to_string(),
             details: Vec::new(),
-            remediation: Some("Set git.app_id in server.toml".to_string()),
+            remediation: Some("Set git.app_id in settings.toml".to_string()),
         };
     };
     let Some(private_key_raw) = private_key_raw else {

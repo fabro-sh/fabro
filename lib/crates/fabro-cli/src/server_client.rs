@@ -106,14 +106,6 @@ pub(crate) async fn connect_server(storage_dir: &Path) -> Result<ServerStoreClie
     })
 }
 
-pub(crate) async fn connect_server_backed(
-    args: &ServerConnectionArgs,
-) -> Result<ServerStoreClient> {
-    Ok(ServerStoreClient {
-        client: connect_server_backed_api_client(args).await?,
-    })
-}
-
 pub(crate) async fn connect_server_connection(
     connection: &user_config::ServerConnection,
 ) -> Result<ServerStoreClient> {
@@ -124,7 +116,7 @@ pub(crate) async fn connect_server_connection(
 
 pub(crate) async fn connect_server_only(args: &ServerTargetArgs) -> Result<ServerStoreClient> {
     let storage_dir = std::env::var_os("FABRO_STORAGE_DIR").map(std::path::PathBuf::from);
-    let settings = user_config::load_user_settings_with_storage_dir(storage_dir.as_deref())?;
+    let settings = user_config::load_settings_with_storage_dir(storage_dir.as_deref())?;
     let connection = user_config::server_only_command_connection(args, &settings)?;
     connect_server_connection(&connection).await
 }
@@ -160,7 +152,7 @@ pub(crate) async fn connect_resolved_api_client(
 pub(crate) async fn connect_server_backed_api_client(
     args: &ServerConnectionArgs,
 ) -> Result<fabro_api::Client> {
-    let settings = user_config::load_user_settings_with_storage_dir(args.storage_dir())?;
+    let settings = user_config::load_settings_with_storage_dir(args.storage_dir())?;
     let connection = user_config::server_backed_command_connection(args, &settings)?;
     connect_resolved_api_client(&connection).await
 }

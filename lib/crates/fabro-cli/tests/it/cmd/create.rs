@@ -101,7 +101,7 @@ fn create_uses_configured_server_target_without_server_flag() {
             .body(run_status_response(run_id.as_str(), "submitted").to_string());
     });
     context.write_home(
-        ".fabro/user.toml",
+        ".fabro/settings.toml",
         format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
     );
 
@@ -135,7 +135,7 @@ fn create_storage_dir_suppresses_configured_server_target() {
         &context.test_case_id()[..8]
     ));
     context.write_home(
-        ".fabro/user.toml",
+        ".fabro/settings.toml",
         format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
     );
 
@@ -178,7 +178,7 @@ fn create_cli_server_target_overrides_configured_server_target() {
             .body(run_status_response(run_id.as_str(), "submitted").to_string());
     });
     context.write_home(
-        ".fabro/user.toml",
+        ".fabro/settings.toml",
         format!(
             "[server]\ntarget = \"{}/api/v1\"\n",
             config_server.base_url()

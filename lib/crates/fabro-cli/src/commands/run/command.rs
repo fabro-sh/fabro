@@ -4,12 +4,12 @@ use fabro_util::terminal::Styles;
 use crate::args::{GlobalArgs, RunArgs};
 use crate::server_client;
 use crate::shared::print_json_pretty;
-use crate::user_config::{self, user_layer_with_storage_dir};
+use crate::user_config::{self, settings_layer_with_storage_dir};
 
 pub(crate) async fn execute(mut args: RunArgs, globals: &GlobalArgs) -> Result<()> {
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-    let cli_settings = user_config::load_user_settings_with_storage_dir(args.target.storage_dir())?;
-    let cli = user_layer_with_storage_dir(args.target.storage_dir())?;
+    let cli_settings = user_config::load_settings_with_storage_dir(args.target.storage_dir())?;
+    let cli = settings_layer_with_storage_dir(args.target.storage_dir())?;
     args.verbose = args.verbose || cli_settings.verbose_enabled();
 
     let quiet = args.detach;

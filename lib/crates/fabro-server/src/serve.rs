@@ -2,7 +2,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use fabro_config::server::{load_server_settings, resolve_storage_dir};
+use fabro_config::server::resolve_storage_dir;
+use fabro_config::user::{default_settings_path, load_settings_config};
 use fabro_util::terminal::Styles;
 use object_store::local::LocalFileSystem;
 use tokio::net::{TcpListener, UnixListener};
@@ -48,9 +49,19 @@ pub struct ServeArgs {
     #[arg(long)]
     pub max_concurrent_runs: Option<usize>,
 
-    /// Path to server config file (default: ~/.fabro/server.toml)
+    /// Path to server config file (default: ~/.fabro/settings.toml)
     #[arg(long)]
     pub config: Option<PathBuf>,
+}
+
+fn load_settings(path: Option<&Path>) -> anyhow::Result<Settings> {
+    load_settings_config(path)?.try_into()
+}
+
+fn resolved_config_path(path: Option<&Path>) -> PathBuf {
+    path.map(Path::to_path_buf)
+        .or_else(default_settings_path)
+        .unwrap_or_else(|| PathBuf::from(".fabro/settings.toml"))
 }
 
 fn apply_serve_overrides(base: &Settings, args: &ServeArgs, dry_run_mode: bool) -> Settings {
@@ -93,7 +104,8 @@ pub async fn serve_command(
     storage_dir_override: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     let config_path = args.config.clone();
-    let disk_settings = load_server_settings(config_path.as_deref())?;
+    let disk_settings = load_settings(config_path.as_deref())?;
+    let active_config_path = resolved_config_path(config_path.as_deref());
     let data_dir = storage_dir_override.unwrap_or_else(|| resolve_storage_dir(&disk_settings));
     let secret_store_path = data_dir.join("secrets.json");
     let secret_store = SecretStore::load(secret_store_path.clone())?;
@@ -169,6 +181,8 @@ pub async fn serve_command(
         max_concurrent_runs,
         store,
         secret_store_path,
+        active_config_path,
+        matches!(&auth_mode, AuthMode::Disabled),
     )?;
     spawn_scheduler(Arc::clone(&state));
     let router = build_router(Arc::clone(&state), auth_mode);
@@ -249,7 +263,7 @@ pub async fn serve_command(
         interval.tick().await; // skip first immediate tick
         loop {
             interval.tick().await;
-            match load_server_settings(config_path_for_poll.as_deref()) {
+            match load_settings(config_path_for_poll.as_deref()) {
                 Ok(new_disk_settings) => {
                     let effective = apply_runtime_settings(
                         &new_disk_settings,

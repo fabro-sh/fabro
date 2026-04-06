@@ -98,7 +98,7 @@ fn runner_uses_snapshotted_app_id_for_github_credentials() {
     let workflow_path = context.temp_dir.join("workflow.fabro");
 
     context.write_home(
-        ".fabro/user.toml",
+        ".fabro/settings.toml",
         "\
 version = 1
 
@@ -145,7 +145,7 @@ digraph GitHubApp {
         "#
     );
 
-    context.write_home(".fabro/user.toml", "version = 1\n");
+    context.write_home(".fabro/settings.toml", "version = 1\n");
 
     let mut cmd = context.command();
     cmd.env("GITHUB_APP_PRIVATE_KEY", "%%%not-base64%%%");

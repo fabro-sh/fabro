@@ -66,7 +66,7 @@ fn parse_settings(stdout: &[u8]) -> Settings {
 /// Uses `context.home_dir` for the home directory. Returns project tempdir.
 fn setup_settings_fixture(context: &fabro_test::TestContext) -> tempfile::TempDir {
     context.write_home(
-        ".fabro/user.toml",
+        ".fabro/settings.toml",
         r#"
 verbose = true
 
@@ -182,7 +182,7 @@ SHARED = "run"
     project
 }
 
-/// Set up an external workflow fixture with a custom storage_dir in user.toml.
+/// Set up an external workflow fixture with a custom storage_dir in settings.toml.
 /// Returns (project_tempdir, storage_dir_path).
 fn setup_external_workflow_fixture(
     context: &mut fabro_test::TestContext,
@@ -191,7 +191,7 @@ fn setup_external_workflow_fixture(
     context.manage_storage_dir(&storage_dir);
 
     context.write_home(
-        ".fabro/user.toml",
+        ".fabro/settings.toml",
         format!(
             r#"
 storage_dir = "{}"
@@ -373,7 +373,7 @@ fn settings_explicit_workflow_path_uses_workflow_project_layers() {
     let cwd = tempfile::tempdir().unwrap();
     let workflow = project.path().join("workflow.toml");
 
-    // Remove FABRO_STORAGE_DIR so the CLI uses storage_dir from user.toml
+    // Remove FABRO_STORAGE_DIR so the CLI uses storage_dir from settings.toml
     let output = context
         .settings()
         .env_remove("FABRO_STORAGE_DIR")
@@ -409,7 +409,7 @@ fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
     let workflow = project.path().join("workflow.toml");
     let run_id = unique_run_id();
 
-    // Remove FABRO_STORAGE_DIR so the CLI uses storage_dir from user.toml
+    // Remove FABRO_STORAGE_DIR so the CLI uses storage_dir from settings.toml
     context
         .command()
         .env_remove("FABRO_STORAGE_DIR")

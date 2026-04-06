@@ -12,10 +12,10 @@ use crate::args::{GlobalArgs, StoreDumpArgs};
 use crate::commands::store::rebuild::rebuild_run_store;
 use crate::server_runs::ServerRunLookup;
 use crate::shared::{absolute_or_current, print_json_pretty};
-use crate::user_config::load_user_settings_with_storage_dir;
+use crate::user_config::load_settings_with_storage_dir;
 
 pub(crate) async fn dump_command(args: &StoreDumpArgs, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
+    let cli_settings = load_settings_with_storage_dir(args.storage_dir.as_deref())?;
     let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
     let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();

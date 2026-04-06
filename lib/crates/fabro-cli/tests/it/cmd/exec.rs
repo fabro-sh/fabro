@@ -99,7 +99,7 @@ fn exec_missing_api_key_exits_with_error() {
 fn exec_uses_user_config_defaults() {
     let context = test_context!();
     context.write_home(
-        ".fabro/user.toml",
+        ".fabro/settings.toml",
         "[exec]\nprovider = \"openai\"\nmodel = \"gpt-4.1-mini\"\npermissions = \"read-only\"\noutput_format = \"json\"\n",
     );
 
@@ -163,7 +163,7 @@ fn exec_configured_server_target_alone_does_not_reroute_exec() {
         then.status(500).body("config-should-not-be-used");
     });
     context.write_home(
-        ".fabro/user.toml",
+        ".fabro/settings.toml",
         format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
     );
 
@@ -205,7 +205,7 @@ fn exec_cli_server_target_overrides_configured_server_target() {
         then.status(500).body("cli-override-marker");
     });
     context.write_home(
-        ".fabro/user.toml",
+        ".fabro/settings.toml",
         format!(
             "[server]\ntarget = \"{}/api/v1\"\n",
             config_server.base_url()

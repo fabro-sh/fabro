@@ -14,7 +14,7 @@ use dialoguer::theme::ColorfulTheme;
 use dialoguer::{MultiSelect, Select};
 use fabro_api::types::SetSecretRequest;
 use fabro_config::legacy_env;
-use fabro_config::user::USER_CONFIG_FILENAME;
+use fabro_config::user::SETTINGS_CONFIG_FILENAME;
 use fabro_model::Provider;
 use fabro_server::secret_store::SecretStore;
 use fabro_util::terminal::Styles;
@@ -187,26 +187,72 @@ fn generate_mtls_certs(dir: &Path) -> Result<()> {
 // Config TOML generation
 // ---------------------------------------------------------------------------
 
+fn root_table_mut(doc: &mut toml::Value) -> Result<&mut toml::Table> {
+    doc.as_table_mut()
+        .context("settings.toml root is not a table")
+}
+
+fn ensure_table<'a>(table: &'a mut toml::Table, key: &str) -> Result<&'a mut toml::Table> {
+    table
+        .entry(key.to_string())
+        .or_insert_with(|| toml::Value::Table(toml::Table::default()))
+        .as_table_mut()
+        .with_context(|| format!("settings.toml [{key}] is not a table"))
+}
+
+fn merge_server_settings(doc: &mut toml::Value, username: &str) -> Result<()> {
+    let root = root_table_mut(doc)?;
+    let web = ensure_table(root, "web")?;
+    web.insert(
+        "url".to_string(),
+        toml::Value::String("http://localhost:3000".to_string()),
+    );
+
+    let auth = ensure_table(web, "auth")?;
+    auth.insert(
+        "provider".to_string(),
+        toml::Value::String("github".to_string()),
+    );
+    auth.insert(
+        "allowed_usernames".to_string(),
+        toml::Value::Array(vec![toml::Value::String(username.to_string())]),
+    );
+
+    let api = ensure_table(root, "api")?;
+    api.insert(
+        "base_url".to_string(),
+        toml::Value::String("https://localhost:3000/api/v1".to_string()),
+    );
+    api.insert(
+        "authentication_strategies".to_string(),
+        toml::Value::Array(vec![
+            toml::Value::String("jwt".to_string()),
+            toml::Value::String("mtls".to_string()),
+        ]),
+    );
+
+    let tls = ensure_table(api, "tls")?;
+    tls.insert(
+        "cert".to_string(),
+        toml::Value::String("~/.fabro/certs/server.crt".to_string()),
+    );
+    tls.insert(
+        "key".to_string(),
+        toml::Value::String("~/.fabro/certs/server.key".to_string()),
+    );
+    tls.insert(
+        "ca".to_string(),
+        toml::Value::String("~/.fabro/certs/ca.crt".to_string()),
+    );
+
+    Ok(())
+}
+
+#[cfg(test)]
 fn format_config_toml(username: &str) -> String {
-    format!(
-        r#"[web]
-url = "http://localhost:3000"
-
-[web.auth]
-provider = "github"
-allowed_usernames = ["{username}"]
-
-[api]
-# Public API base URL advertised by the server itself.
-base_url = "https://localhost:3000/api/v1"
-authentication_strategies = ["jwt", "mtls"]
-
-[api.tls]
-cert = "~/.fabro/certs/server.crt"
-key = "~/.fabro/certs/server.key"
-ca = "~/.fabro/certs/ca.crt"
-"#
-    )
+    let mut doc = toml::Value::Table(toml::Table::default());
+    merge_server_settings(&mut doc, username).expect("default server config should be valid");
+    toml::to_string_pretty(&doc).expect("default server config should serialize")
 }
 
 // ---------------------------------------------------------------------------
@@ -439,23 +485,23 @@ async fn setup_github_app(
         .context("missing 'pem' in GitHub response")?
         .to_string();
 
-    // Write non-secret config to user.toml
-    let user_toml_path = fabro_dir.join(USER_CONFIG_FILENAME);
+    // Write non-secret config to settings.toml
+    let user_toml_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);
     let existing = std::fs::read_to_string(&user_toml_path).unwrap_or_default();
     let mut doc: toml::Value = if existing.is_empty() {
         toml::Value::Table(toml::Table::default())
     } else {
-        toml::from_str(&existing).context("failed to parse existing user.toml")?
+        toml::from_str(&existing).context("failed to parse existing settings.toml")?
     };
     let table = doc
         .as_table_mut()
-        .context("user.toml root is not a table")?;
+        .context("settings.toml root is not a table")?;
     let git = table
         .entry("git")
         .or_insert(toml::Value::Table(toml::Table::default()));
     let git_table = git
         .as_table_mut()
-        .context("user.toml [git] is not a table")?;
+        .context("settings.toml [git] is not a table")?;
     git_table.insert("app_id".into(), toml::Value::String(app_id));
     git_table.insert("slug".into(), toml::Value::String(slug.clone()));
     git_table.insert("client_id".into(), toml::Value::String(client_id));
@@ -521,8 +567,7 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
     let web_url = &args.web_url;
     let s = Styles::detect_stderr();
     let emoji = console::Emoji("⚒️  ", "");
-    let cli_settings =
-        user_config::load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
+    let cli_settings = user_config::load_settings_with_storage_dir(args.storage_dir.as_deref())?;
     let storage_dir = cli_settings.storage_dir();
     let server_was_running = record::active_server_record(&storage_dir).is_some();
 
@@ -693,7 +738,7 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
         if setup_github {
             let github_env_pairs = setup_github_app(&fabro_dir, &s, web_url).await?;
             let slug = {
-                let user_toml_path = fabro_dir.join(USER_CONFIG_FILENAME);
+                let user_toml_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);
                 let toml_content = std::fs::read_to_string(&user_toml_path).unwrap_or_default();
                 let doc: toml::Value = toml::from_str(&toml_content)
                     .unwrap_or(toml::Value::Table(toml::Table::default()));
@@ -721,10 +766,10 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
         eprintln!("  {}", s.dim.apply_to("─────────────────────"));
         eprintln!();
 
-        let config_path = fabro_dir.join("server.toml");
+        let config_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);
         let write_config = if config_path.exists() {
             spawn_blocking(|| {
-                prompt_confirm("~/.fabro/server.toml already exists. Overwrite?", false)
+                prompt_confirm("~/.fabro/settings.toml already exists. Overwrite?", false)
             })
             .await??
         } else {
@@ -735,14 +780,20 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
             let username: String =
                 spawn_blocking(|| prompt_input("GitHub username for allowed access")).await??;
 
-            let toml_content = format_config_toml(&username);
-            std::fs::write(&config_path, &toml_content)?;
+            let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
+            let mut doc: toml::Value = if existing.is_empty() {
+                toml::Value::Table(toml::Table::default())
+            } else {
+                toml::from_str(&existing).context("failed to parse existing settings.toml")?
+            };
+            merge_server_settings(&mut doc, &username)?;
+            std::fs::write(&config_path, toml::to_string_pretty(&doc)?)?;
             eprintln!(
                 "  {}",
                 s.dim.apply_to(format!("Wrote {}", config_path.display()))
             );
         } else {
-            eprintln!("  {}", s.dim.apply_to("Keeping existing server.toml"));
+            eprintln!("  {}", s.dim.apply_to("Keeping existing settings.toml"));
         }
         eprintln!();
     }
@@ -1003,6 +1054,69 @@ mod tests {
         assert_eq!(tls.cert, PathBuf::from("~/.fabro/certs/server.crt"));
         assert_eq!(tls.key, PathBuf::from("~/.fabro/certs/server.key"));
         assert_eq!(tls.ca, PathBuf::from("~/.fabro/certs/ca.crt"));
+    }
+
+    #[test]
+    fn merge_server_settings_preserves_existing_git_table() {
+        let mut doc: toml::Value = toml::from_str(
+            r#"
+[git]
+app_id = "123"
+
+[git.author]
+name = "fabro"
+email = "fabro@example.com"
+"#,
+        )
+        .unwrap();
+
+        merge_server_settings(&mut doc, "alice").unwrap();
+
+        let git = doc.get("git").and_then(toml::Value::as_table).unwrap();
+        assert_eq!(git.get("app_id").and_then(toml::Value::as_str), Some("123"));
+        let author = git.get("author").and_then(toml::Value::as_table).unwrap();
+        assert_eq!(
+            author.get("name").and_then(toml::Value::as_str),
+            Some("fabro")
+        );
+        assert_eq!(
+            author.get("email").and_then(toml::Value::as_str),
+            Some("fabro@example.com")
+        );
+        assert_eq!(
+            doc.get("web")
+                .and_then(toml::Value::as_table)
+                .and_then(|web| web.get("auth"))
+                .and_then(toml::Value::as_table)
+                .and_then(|auth| auth.get("allowed_usernames"))
+                .and_then(toml::Value::as_array)
+                .and_then(|allowed| allowed.first())
+                .and_then(toml::Value::as_str),
+            Some("alice")
+        );
+    }
+
+    #[test]
+    fn merge_server_settings_preserves_existing_api_nested_keys() {
+        let mut doc: toml::Value = toml::from_str(
+            r#"
+[api]
+base_url = "https://example.com/api/v1"
+
+[api.extra]
+mode = "keep-me"
+"#,
+        )
+        .unwrap();
+
+        merge_server_settings(&mut doc, "alice").unwrap();
+
+        let api = doc.get("api").and_then(toml::Value::as_table).unwrap();
+        let extra = api.get("extra").and_then(toml::Value::as_table).unwrap();
+        assert_eq!(
+            extra.get("mode").and_then(toml::Value::as_str),
+            Some("keep-me")
+        );
     }
 
     // -- GitHub App manifest --

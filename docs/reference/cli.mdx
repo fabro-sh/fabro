@@ -21,9 +21,9 @@ Connection-target flags like `--storage-dir` and `--server` are command-specific
 
 ## Configuration
 
-CLI defaults can be set in `~/.fabro/user.toml` so you don't have to pass common flags every time:
+CLI defaults can be set in `~/.fabro/settings.toml` so you don't have to pass common flags every time:
 
-```toml title="user.toml"
+```toml title="settings.toml"
 [exec]
 provider = "anthropic"
 model = "claude-opus-4-6"
@@ -41,7 +41,7 @@ target = "https://fabro.example.com:3000/api/v1"
 
 `fabro model` uses `[server].target` by default when no explicit `--storage-dir` is passed. `fabro exec` remains a local session unless you pass `--server`, even if `[server].target` is configured.
 
-CLI flags always override `user.toml` values, which override hardcoded defaults.
+CLI flags always override `settings.toml` values, which override hardcoded defaults.
 
 ---
 
@@ -55,7 +55,7 @@ fabro settings demo
 fabro settings run.toml
 ```
 
-With no argument, Fabro prints the merged ambient defaults from `~/.fabro/user.toml` and the nearest `fabro.toml`.
+With no argument, Fabro prints the merged ambient defaults from `~/.fabro/settings.toml` and the nearest `fabro.toml`.
 
 When you pass a workflow name or path:
 
@@ -316,7 +316,7 @@ fabro server start --sandbox daytona --max-concurrent-runs 4
 | `--dry-run` | Execute with simulated LLM backend | — |
 | `--sandbox <SANDBOX>` | Sandbox for agent tools: `local`, `docker`, or `daytona` | — |
 | `--max-concurrent-runs <N>` | Maximum number of concurrent run executions | — |
-| `--config <PATH>` | Path to server config file | `~/.fabro/server.toml` |
+| `--config <PATH>` | Path to server config file | `~/.fabro/settings.toml` |
 
 Demo mode is per-request: send the `X-Fabro-Demo: 1` header to get static demo data with auth disabled.
 
@@ -715,7 +715,7 @@ fabro upgrade --version 0.6.0
 | `--force` | Upgrade even if already on the target version |
 | `--dry-run` | Preview what would happen without making changes |
 
-Fabro refuses to downgrade unless you specify an explicit `--version`. A daily background check notifies you when a new version is available — disable it with `upgrade_check = false` in [`user.toml`](/reference/user-configuration#upgrade_check) or the `--no-upgrade-check` global flag.
+Fabro refuses to downgrade unless you specify an explicit `--version`. A daily background check notifies you when a new version is available — disable it with `upgrade_check = false` in [`settings.toml`](/reference/user-configuration#upgrade_check) or the `--no-upgrade-check` global flag.
 
 ## `fabro artifact list`
 

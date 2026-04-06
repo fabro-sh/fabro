@@ -136,9 +136,9 @@ async fn create_env_with_github_app(
 }
 
 fn load_github_app_credentials() -> fabro_github::GitHubAppCredentials {
-    // Read app_id from ~/.fabro/server.toml
+    // Read app_id from ~/.fabro/settings.toml
     let home = dirs::home_dir().expect("No home directory");
-    let config_path = home.join(".fabro/server.toml");
+    let config_path = home.join(".fabro/settings.toml");
     let config_str = std::fs::read_to_string(&config_path)
         .unwrap_or_else(|e| panic!("Failed to read {}: {e}", config_path.display()));
 
@@ -152,11 +152,11 @@ fn load_github_app_credentials() -> fabro_github::GitHubAppCredentials {
         app_id: Option<String>,
     }
 
-    let config: Config = toml::from_str(&config_str).expect("Failed to parse server.toml");
+    let config: Config = toml::from_str(&config_str).expect("Failed to parse settings.toml");
     let app_id = config
         .git
         .app_id
-        .expect("app_id not set in server.toml [git] section");
+        .expect("app_id not set in settings.toml [git] section");
 
     let raw = std::env::var("GITHUB_APP_PRIVATE_KEY").expect("GITHUB_APP_PRIVATE_KEY not set");
     let private_key_pem = if raw.starts_with("-----") {

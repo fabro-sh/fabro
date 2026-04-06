@@ -11,7 +11,7 @@ use crate::args::{ExecArgs, GlobalArgs};
 use crate::user_config;
 
 pub(crate) async fn execute(mut args: ExecArgs, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = user_config::load_user_settings()?;
+    let cli_settings = user_config::load_settings()?;
     #[cfg(feature = "sleep_inhibitor")]
     let _sleep_guard = crate::sleep_inhibitor::guard(cli_settings.prevent_idle_sleep_enabled());
     let exec_defaults = cli_settings.exec.as_ref();
