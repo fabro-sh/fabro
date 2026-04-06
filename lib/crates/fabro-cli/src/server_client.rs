@@ -9,8 +9,9 @@ use fabro_server::bind::Bind;
 use fabro_store::{EventEnvelope, RunSummary, StageId};
 use fabro_types::{
     Checkpoint, Conclusion, NodeStatusRecord, PullRequestRecord, Retro, RunEvent, RunId, RunRecord,
-    RunStatusRecord, SandboxRecord, Settings, StartRecord,
+    RunStatusRecord, SandboxRecord, StartRecord,
 };
+use futures::StreamExt;
 use serde::de::DeserializeOwned;
 use tokio::time::sleep;
 
@@ -105,6 +106,14 @@ pub(crate) async fn connect_server(storage_dir: &Path) -> Result<ServerStoreClie
     })
 }
 
+pub(crate) async fn connect_server_backed(
+    args: &ServerConnectionArgs,
+) -> Result<ServerStoreClient> {
+    Ok(ServerStoreClient {
+        client: connect_server_backed_api_client(args).await?,
+    })
+}
+
 pub(crate) async fn connect_api_client(storage_dir: &Path) -> Result<fabro_api::Client> {
     let bind = start::ensure_server_running(storage_dir)
         .with_context(|| format!("Failed to start fabro server for {}", storage_dir.display()))?;
@@ -185,23 +194,14 @@ async fn wait_for_server_ready(http_client: &reqwest::Client) -> Result<()> {
 }
 
 impl ServerStoreClient {
-    pub(crate) async fn create_run_from_workflow_path(
+    pub(crate) async fn create_run_from_manifest(
         &self,
-        workflow_path: &Path,
-        cwd: &Path,
-        settings: &Settings,
-        run_id: Option<&RunId>,
+        manifest: types::RunManifest,
     ) -> Result<RunId> {
         let response = self
             .client
             .create_run()
-            .body(types::CreateRunRequest {
-                dot_source: None,
-                workflow_path: Some(workflow_path.display().to_string()),
-                cwd: Some(cwd.display().to_string()),
-                settings_json: Some(serde_json::to_string(settings)?),
-                run_id: run_id.map(ToString::to_string),
-            })
+            .body(manifest)
             .send()
             .await
             .map_err(map_api_error)?;
@@ -210,6 +210,39 @@ impl ServerStoreClient {
             .id
             .parse()
             .map_err(|err| anyhow!("invalid run ID from server: {err}"))
+    }
+
+    pub(crate) async fn run_preflight(
+        &self,
+        manifest: types::RunManifest,
+    ) -> Result<types::PreflightResponse> {
+        self.client
+            .run_preflight()
+            .body(manifest)
+            .send()
+            .await
+            .map(progenitor_client::ResponseValue::into_inner)
+            .map_err(map_api_error)
+    }
+
+    pub(crate) async fn render_workflow_graph(
+        &self,
+        request: types::RenderWorkflowGraphRequest,
+    ) -> Result<Vec<u8>> {
+        let response = self
+            .client
+            .render_workflow_graph()
+            .body(request)
+            .send()
+            .await
+            .map_err(map_api_error)?;
+        let mut stream = response.into_inner();
+        let mut bytes = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|err| anyhow!("{err}"))?;
+            bytes.extend_from_slice(&chunk);
+        }
+        Ok(bytes)
     }
 
     pub(crate) async fn start_run(&self, run_id: &RunId, resume: bool) -> Result<()> {

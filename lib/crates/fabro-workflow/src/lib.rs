@@ -118,6 +118,7 @@ pub mod context;
 pub mod devcontainer_bridge;
 pub mod error;
 pub mod event;
+pub mod file_resolver;
 pub mod git;
 pub(crate) mod graph;
 pub mod handler;
@@ -141,3 +142,4 @@ pub mod sandbox_git;
 pub mod test_support;
 #[doc(hidden)]
 pub mod transforms;
+pub mod workflow_bundle;

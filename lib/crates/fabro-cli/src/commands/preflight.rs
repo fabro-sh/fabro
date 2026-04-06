@@ -1,484 +1,57 @@
-use std::path::Path;
-use std::sync::Arc;
-
 use anyhow::bail;
 use fabro_config::ConfigLayer;
-use fabro_config::project::{resolve_workflow_path, resolve_working_directory};
-use fabro_graphviz::graph::{Graph, is_llm_handler_type};
-use fabro_llm::client::Client as LlmClient;
-use fabro_model::{Catalog, Provider};
-use fabro_sandbox::daytona::{DaytonaConfig, detect_repo_info};
-use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxProvider, SandboxSpec};
-use fabro_types::Settings;
-use fabro_util::check_report::CheckReport;
 use fabro_util::terminal::Styles;
-use fabro_workflow::git::{GitSyncStatus, sync_status};
-use fabro_workflow::operations::{ValidateInput, WorkflowInput, validate};
 
 use crate::args::{GlobalArgs, PreflightArgs};
-use crate::shared::github::build_github_app_credentials;
+use crate::commands::run::output::{
+    api_check_report_to_local, api_diagnostics_to_local, print_preflight_workflow_summary,
+};
+use crate::manifest_builder::{ManifestBuildInput, build_run_manifest, preflight_manifest_args};
+use crate::server_client;
 use crate::shared::print_json_pretty;
-use crate::user_config::{load_user_settings_with_storage_dir, user_layer_with_storage_dir};
+use crate::user_config::load_user_settings_with_storage_dir;
 
 pub(crate) async fn execute(mut args: PreflightArgs, globals: &GlobalArgs) -> anyhow::Result<()> {
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-    let cli = user_layer_with_storage_dir(args.storage_dir.as_deref())?;
-    let cli_settings: Settings = load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
+    let cli_settings = load_user_settings_with_storage_dir(args.target.storage_dir())?;
     args.verbose = args.verbose || cli_settings.verbose_enabled();
 
-    let github_app = build_github_app_credentials(cli_settings.app_id())?;
-    let cli_args_config = ConfigLayer::try_from(&args)?;
     let cwd = std::env::current_dir()?;
-    let settings = cli_args_config
-        .combine(ConfigLayer::for_workflow(&args.workflow, &cwd)?)
-        .combine(cli)
-        .resolve()?;
-    let resolution = resolve_workflow_path(&args.workflow, &cwd)?;
-    let working_directory = resolve_working_directory(&settings, &cwd);
-
-    let (origin_url, detected_base_branch) = detect_repo_info(&working_directory)
-        .map(|(url, branch)| (Some(url), branch))
-        .unwrap_or((None, None));
-    let git_status = sync_status(
-        &working_directory,
-        "origin",
-        detected_base_branch.as_deref(),
-    );
-
-    let sandbox_provider = resolve_sandbox_provider(args.sandbox.map(Into::into), &settings)?;
-
-    let validated = validate(ValidateInput {
-        workflow: WorkflowInput::Path(args.workflow.clone()),
-        settings: settings.clone(),
+    let manifest = build_run_manifest(ManifestBuildInput {
+        workflow: args.workflow.clone(),
         cwd,
-        custom_transforms: Vec::new(),
+        args_layer: ConfigLayer::try_from(&args)?,
+        args: preflight_manifest_args(&args),
+        run_id: None,
     })?;
-    if !globals.json {
-        super::run::output::print_workflow_report(&validated, Some(&resolution.dot_path), styles);
-        if validated.has_errors() {
-            bail!("Validation failed");
-        }
-    }
-
-    let (report, preflight_ok) = run_preflight(
-        validated.graph(),
-        &settings,
-        args.model.as_deref(),
-        args.provider.as_deref(),
-        git_status,
-        sandbox_provider,
-        &working_directory,
-        styles,
-        github_app,
-        origin_url.as_deref(),
-        !globals.json,
-    )
-    .await?;
+    let client = server_client::connect_server_backed(&args.target).await?;
+    let response = client.run_preflight(manifest.manifest).await?;
+    let diagnostics = api_diagnostics_to_local(&response.workflow.diagnostics);
 
     if globals.json {
-        print_json_pretty(&serde_json::json!({
-            "workflow": {
-                "name": validated.graph().name,
-                "graph_path": resolution.dot_path,
-                "nodes": validated.graph().nodes.len(),
-                "edges": validated.graph().edges.len(),
-                "goal": validated.graph().goal(),
-                "diagnostics": validated.diagnostics(),
-            },
-            "checks": report,
-        }))?;
+        print_json_pretty(&response)?;
     } else {
+        print_preflight_workflow_summary(&response.workflow, Some(&manifest.target_path), styles);
+        if diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == fabro_validate::Severity::Error)
+        {
+            bail!("Validation failed");
+        }
+        let report = api_check_report_to_local(&response.checks);
         let term_width = console::Term::stderr().size().1;
         print!("{}", report.render(styles, true, None, Some(term_width)));
     }
 
-    if validated.has_errors() {
+    if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == fabro_validate::Severity::Error)
+    {
         bail!("Validation failed");
     }
-
-    if !preflight_ok {
+    if !response.ok {
         std::process::exit(1);
     }
 
     Ok(())
-}
-
-fn resolve_model_provider(
-    cli_model: Option<&str>,
-    cli_provider: Option<&str>,
-    settings: &Settings,
-    graph: &Graph,
-) -> (String, Option<String>) {
-    let configured_model = settings.llm.as_ref().and_then(|llm| llm.model.as_deref());
-    let configured_provider = settings
-        .llm
-        .as_ref()
-        .and_then(|llm| llm.provider.as_deref());
-
-    let provider = cli_provider
-        .or(configured_provider)
-        .or_else(|| graph.attrs.get("default_provider").and_then(|v| v.as_str()))
-        .map(String::from);
-
-    let model = cli_model
-        .or(configured_model)
-        .or_else(|| graph.attrs.get("default_model").and_then(|v| v.as_str()))
-        .map_or_else(
-            || {
-                let catalog = Catalog::builtin();
-                let info = provider
-                    .as_deref()
-                    .and_then(|s| s.parse::<Provider>().ok())
-                    .and_then(|p| catalog.default_for_provider(p))
-                    .unwrap_or_else(|| catalog.default_from_env());
-                info.id.clone()
-            },
-            String::from,
-        );
-
-    match Catalog::builtin().get(&model) {
-        Some(info) => (
-            info.id.clone(),
-            provider.or(Some(info.provider.to_string())),
-        ),
-        None => (model, provider),
-    }
-}
-
-fn parse_sandbox_provider(settings: &Settings) -> anyhow::Result<Option<SandboxProvider>> {
-    settings
-        .sandbox_settings()
-        .and_then(|s| s.provider.as_deref())
-        .map(str::parse::<SandboxProvider>)
-        .transpose()
-        .map_err(|e| anyhow::anyhow!("Invalid sandbox provider: {e}"))
-}
-
-fn resolve_sandbox_provider(
-    cli: Option<SandboxProvider>,
-    settings: &Settings,
-) -> anyhow::Result<SandboxProvider> {
-    Ok(cli
-        .or(parse_sandbox_provider(settings)?)
-        .unwrap_or_default())
-}
-
-fn resolve_daytona_config(settings: &Settings) -> Option<DaytonaConfig> {
-    settings
-        .sandbox_settings()
-        .and_then(|sandbox| sandbox.daytona.clone())
-}
-
-async fn mint_github_token(
-    creds: &fabro_github::GitHubAppCredentials,
-    origin_url: &str,
-    permissions: &std::collections::HashMap<String, String>,
-) -> anyhow::Result<String> {
-    let https_url = fabro_github::ssh_url_to_https(origin_url);
-    let (owner, repo) =
-        fabro_github::parse_github_owner_repo(&https_url).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let jwt = fabro_github::sign_app_jwt(&creds.app_id, &creds.private_key_pem)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let client = reqwest::Client::new();
-    let perms_json = serde_json::to_value(permissions)?;
-    let token = fabro_github::create_installation_access_token_with_permissions(
-        &client,
-        &jwt,
-        &owner,
-        &repo,
-        &fabro_github::github_api_base_url(),
-        perms_json,
-    )
-    .await
-    .map_err(|e| anyhow::anyhow!("{e}"))?;
-    Ok(token)
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn run_preflight(
-    graph: &Graph,
-    settings: &Settings,
-    cli_model: Option<&str>,
-    cli_provider: Option<&str>,
-    git_status: GitSyncStatus,
-    sandbox_provider: SandboxProvider,
-    working_directory: &Path,
-    styles: &'static Styles,
-    github_app: Option<fabro_github::GitHubAppCredentials>,
-    origin_url: Option<&str>,
-    show_progress: bool,
-) -> anyhow::Result<(CheckReport, bool)> {
-    use fabro_util::check_report::{
-        CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus,
-    };
-
-    let spinner = show_progress.then(|| {
-        let spinner = indicatif::ProgressBar::new_spinner();
-        spinner.set_style(
-            indicatif::ProgressStyle::with_template("{spinner:.cyan} {msg}")
-                .expect("valid template")
-                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", ""]),
-        );
-        spinner.set_message("Running preflight checks...");
-        spinner.enable_steady_tick(std::time::Duration::from_millis(80));
-        spinner
-    });
-
-    let mut checks: Vec<CheckResult> = Vec::new();
-
-    let setup_command_count = settings.setup_commands().len();
-    let repo_summary = origin_url.map_or_else(
-        || "unknown".into(),
-        |url| {
-            let https = fabro_github::ssh_url_to_https(url);
-            fabro_github::parse_github_owner_repo(&https).map_or_else(
-                |_| url.to_string(),
-                |(owner, repo)| format!("{owner}/{repo}"),
-            )
-        },
-    );
-
-    checks.push(CheckResult {
-        name: "Repository".into(),
-        status: CheckStatus::Pass,
-        summary: repo_summary,
-        details: vec![
-            CheckDetail::new(format!("Setup commands: {setup_command_count}")),
-            CheckDetail {
-                text: format!("Git: {git_status}"),
-                warn: git_status != GitSyncStatus::Synced,
-            },
-        ],
-        remediation: None,
-    });
-
-    let (model, provider) = resolve_model_provider(cli_model, cli_provider, settings, graph);
-    checks.push(CheckResult {
-        name: "Workflow".into(),
-        status: CheckStatus::Pass,
-        summary: graph.name.clone(),
-        details: vec![
-            CheckDetail::new(format!("Nodes: {}", graph.nodes.len())),
-            CheckDetail::new(format!("Edges: {}", graph.edges.len())),
-            CheckDetail::new(format!("Goal: {}", graph.goal())),
-        ],
-        remediation: None,
-    });
-
-    let daytona_config = resolve_daytona_config(settings);
-
-    let sandbox_result: Result<Arc<dyn Sandbox>, String> = match sandbox_provider {
-        SandboxProvider::Local => SandboxSpec::Local {
-            working_directory: working_directory.to_path_buf(),
-        }
-        .build(None)
-        .await
-        .map_err(|e| e.to_string()),
-        SandboxProvider::Docker => SandboxSpec::Docker {
-            config: DockerSandboxOptions {
-                host_working_directory: working_directory.to_string_lossy().to_string(),
-                ..DockerSandboxOptions::default()
-            },
-        }
-        .build(None)
-        .await
-        .map_err(|e| e.to_string()),
-        SandboxProvider::Daytona => SandboxSpec::Daytona {
-            config: daytona_config.unwrap_or_default(),
-            github_app: github_app.clone(),
-            run_id: None,
-            clone_branch: None,
-        }
-        .build(None)
-        .await
-        .map_err(|e| format!("Daytona sandbox creation failed: {e}")),
-    };
-
-    let sandbox_ok = match sandbox_result {
-        Ok(sandbox) => match sandbox.initialize().await {
-            Ok(()) => {
-                let _ = sandbox.cleanup().await;
-                true
-            }
-            Err(e) => {
-                let _ = sandbox.cleanup().await;
-                checks.push(CheckResult {
-                    name: "Sandbox".into(),
-                    status: CheckStatus::Error,
-                    summary: "failed".into(),
-                    details: vec![CheckDetail::new(format!("Provider: {sandbox_provider}"))],
-                    remediation: Some(format!("Sandbox init failed: {e}")),
-                });
-                false
-            }
-        },
-        Err(e) => {
-            checks.push(CheckResult {
-                name: "Sandbox".into(),
-                status: CheckStatus::Error,
-                summary: "failed".into(),
-                details: vec![CheckDetail::new(format!("Provider: {sandbox_provider}"))],
-                remediation: Some(e),
-            });
-            false
-        }
-    };
-
-    if sandbox_ok {
-        checks.push(CheckResult {
-            name: "Sandbox".into(),
-            status: CheckStatus::Pass,
-            summary: sandbox_provider.to_string(),
-            details: vec![CheckDetail::new(format!("Provider: {sandbox_provider}"))],
-            remediation: None,
-        });
-    }
-
-    let default_provider = provider.as_deref().unwrap_or("anthropic");
-    let llm_ok = match LlmClient::from_env().await {
-        Ok(c) => {
-            let configured: Vec<String> = c
-                .provider_names()
-                .iter()
-                .map(std::string::ToString::to_string)
-                .collect();
-
-            let mut model_providers = std::collections::BTreeSet::new();
-            for node in graph.nodes.values() {
-                if !is_llm_handler_type(node.handler_type()) {
-                    continue;
-                }
-                let node_model = node.model().unwrap_or(&model);
-                let node_provider = node.provider().unwrap_or(default_provider);
-
-                let (resolved_model, resolved_provider) =
-                    if let Some(info) = Catalog::builtin().get(node_model) {
-                        (info.id.clone(), info.provider.to_string())
-                    } else {
-                        (node_model.to_string(), node_provider.to_string())
-                    };
-
-                let final_provider = if node.provider().is_some() {
-                    node_provider.to_string()
-                } else {
-                    resolved_provider
-                };
-
-                model_providers.insert((resolved_model, final_provider));
-            }
-
-            if model_providers.is_empty() {
-                let (resolved_model, resolved_provider) =
-                    if let Some(info) = Catalog::builtin().get(&model) {
-                        (info.id.clone(), info.provider.to_string())
-                    } else {
-                        (model.clone(), default_provider.to_string())
-                    };
-                model_providers.insert((resolved_model, resolved_provider));
-            }
-
-            let mut all_ok = true;
-            for (model_id, provider_name) in &model_providers {
-                match provider_name.parse::<Provider>() {
-                    Ok(_) => {
-                        let mut status = CheckStatus::Pass;
-                        if !configured.iter().any(|n| n == provider_name) {
-                            status = CheckStatus::Warning;
-                            all_ok = false;
-                        }
-                        checks.push(CheckResult {
-                            name: "LLM".into(),
-                            status,
-                            summary: model_id.clone(),
-                            details: vec![CheckDetail::new(format!("Provider: {provider_name}"))],
-                            remediation: if status == CheckStatus::Warning {
-                                Some(format!("Provider \"{provider_name}\" is not configured"))
-                            } else {
-                                None
-                            },
-                        });
-                    }
-                    Err(e) => {
-                        checks.push(CheckResult {
-                            name: "LLM".into(),
-                            status: CheckStatus::Error,
-                            summary: model_id.clone(),
-                            details: vec![CheckDetail::new(format!("Provider: {provider_name}"))],
-                            remediation: Some(format!("Invalid provider \"{provider_name}\": {e}")),
-                        });
-                        all_ok = false;
-                    }
-                }
-            }
-            all_ok
-        }
-        Err(e) => {
-            checks.push(CheckResult {
-                name: "LLM".into(),
-                status: CheckStatus::Error,
-                summary: "initialization failed".into(),
-                details: vec![],
-                remediation: Some(format!("LLM client init failed: {e}")),
-            });
-            false
-        }
-    };
-
-    if let Some(github_permissions) = settings.github_permissions() {
-        if !github_permissions.is_empty() {
-            let perm_details: Vec<CheckDetail> = github_permissions
-                .iter()
-                .map(|(k, v)| CheckDetail::new(format!("{k}: {v}")))
-                .collect();
-            match (&github_app, origin_url) {
-                (Some(creds), Some(url)) => {
-                    match mint_github_token(creds, url, github_permissions).await {
-                        Ok(_) => {
-                            checks.push(CheckResult {
-                                name: "GitHub Token".into(),
-                                status: CheckStatus::Pass,
-                                summary: "minted".into(),
-                                details: perm_details,
-                                remediation: None,
-                            });
-                        }
-                        Err(e) => {
-                            checks.push(CheckResult {
-                                name: "GitHub Token".into(),
-                                status: CheckStatus::Error,
-                                summary: "failed".into(),
-                                details: perm_details,
-                                remediation: Some(format!("Failed to mint GitHub token: {e}")),
-                            });
-                        }
-                    }
-                }
-                _ => {
-                    checks.push(CheckResult {
-                        name: "GitHub Token".into(),
-                        status: CheckStatus::Warning,
-                        summary: "skipped".into(),
-                        details: vec![],
-                        remediation: Some(
-                            "No GitHub App credentials or origin URL available".to_string(),
-                        ),
-                    });
-                }
-            }
-        }
-    }
-
-    let report = CheckReport {
-        title: "Run Preflight".into(),
-        sections: vec![CheckSection {
-            title: String::new(),
-            checks,
-        }],
-    };
-    if let Some(spinner) = spinner {
-        spinner.finish_and_clear();
-    }
-    let _ = styles;
-
-    Ok((report, sandbox_ok && llm_ok))
 }

@@ -4003,7 +4003,10 @@ async fn import_e2e_through_engine() {
     let transformed = transform(
         parsed,
         &TransformOptions {
-            base_dir: Some(dir.path().to_path_buf()),
+            current_dir: Some(dir.path().to_path_buf()),
+            file_resolver: Some(std::sync::Arc::new(
+                fabro_workflow::file_resolver::FilesystemFileResolver::new(None),
+            )),
             custom_transforms: vec![],
         },
     );

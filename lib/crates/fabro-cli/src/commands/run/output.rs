@@ -2,58 +2,124 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::Result;
-use fabro_graphviz::graph::Graph;
+use fabro_api::types;
 use fabro_store::RuntimeState;
 use fabro_types::PullRequestRecord;
+use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_util::terminal::Styles;
 use fabro_util::text::strip_goal_decoration;
 use fabro_workflow::artifact_snapshot::collect_artifact_paths;
 use fabro_workflow::outcome::{StageStatus, format_cost};
-use fabro_workflow::pipeline::Validated;
 use fabro_workflow::records::Conclusion;
 use indicatif::HumanDuration;
 
 use crate::server_client;
 use crate::shared::{format_tokens_human, print_diagnostics, relative_path, tilde_path};
 
-fn print_workflow_header(
-    graph: &Graph,
-    diagnostics: &[fabro_validate::Diagnostic],
-    dot_path: Option<&Path>,
+pub(crate) fn print_preflight_workflow_summary(
+    workflow: &types::PreflightWorkflowSummary,
+    graph_path_override: Option<&Path>,
     styles: &Styles,
 ) {
+    let graph_path = graph_path_override
+        .map(relative_path)
+        .or_else(|| {
+            workflow.graph_path.as_deref().map(|path| {
+                let path = Path::new(path);
+                if path.is_absolute() {
+                    relative_path(path)
+                } else {
+                    path.display().to_string()
+                }
+            })
+        })
+        .unwrap_or_else(|| "<inline>".to_string());
+    let diagnostics = workflow
+        .diagnostics
+        .iter()
+        .map(api_diagnostic_to_local)
+        .collect::<Vec<_>>();
+
     eprintln!(
         "{} {} {}",
         styles.bold.apply_to("Workflow:"),
-        graph.name,
+        workflow.name,
         styles.dim.apply_to(format!(
             "({} nodes, {} edges)",
-            graph.nodes.len(),
-            graph.edges.len()
+            workflow.nodes, workflow.edges
         )),
     );
-    let graph_path = dot_path.map_or_else(|| "<inline>".to_string(), relative_path);
     eprintln!(
         "{} {}",
         styles.dim.apply_to("Graph:"),
         styles.dim.apply_to(graph_path),
     );
 
-    let goal = graph.goal();
-    if !goal.is_empty() {
-        let stripped = strip_goal_decoration(goal);
+    if !workflow.goal.is_empty() {
+        let stripped = strip_goal_decoration(&workflow.goal);
         eprintln!("{} {stripped}\n", styles.bold.apply_to("Goal:"));
     }
 
-    print_diagnostics(diagnostics, styles);
+    print_diagnostics(&diagnostics, styles);
 }
 
-pub(crate) fn print_workflow_report(
-    validated: &Validated,
-    dot_path: Option<&Path>,
-    styles: &Styles,
-) {
-    print_workflow_header(validated.graph(), validated.diagnostics(), dot_path, styles);
+fn api_diagnostic_to_local(diagnostic: &types::WorkflowDiagnostic) -> fabro_validate::Diagnostic {
+    fabro_validate::Diagnostic {
+        rule: diagnostic.rule.clone(),
+        severity: match diagnostic.severity {
+            types::WorkflowDiagnosticSeverity::Error => fabro_validate::Severity::Error,
+            types::WorkflowDiagnosticSeverity::Warning => fabro_validate::Severity::Warning,
+            types::WorkflowDiagnosticSeverity::Info => fabro_validate::Severity::Info,
+        },
+        message: diagnostic.message.clone(),
+        node_id: diagnostic.node_id.clone(),
+        edge: diagnostic
+            .edge
+            .as_ref()
+            .map(|edge| (edge[0].clone(), edge[1].clone())),
+        fix: diagnostic.fix.clone(),
+    }
+}
+
+pub(crate) fn api_diagnostics_to_local(
+    diagnostics: &[types::WorkflowDiagnostic],
+) -> Vec<fabro_validate::Diagnostic> {
+    diagnostics.iter().map(api_diagnostic_to_local).collect()
+}
+
+pub(crate) fn api_check_report_to_local(report: &types::PreflightCheckReport) -> CheckReport {
+    CheckReport {
+        title: report.title.clone(),
+        sections: report
+            .sections
+            .iter()
+            .map(|section| CheckSection {
+                title: section.title.clone(),
+                checks: section
+                    .checks
+                    .iter()
+                    .map(|check| CheckResult {
+                        name: check.name.clone(),
+                        status: match check.status {
+                            types::PreflightCheckResultStatus::Pass => CheckStatus::Pass,
+                            types::PreflightCheckResultStatus::Warning => CheckStatus::Warning,
+                            types::PreflightCheckResultStatus::Error => CheckStatus::Error,
+                        },
+                        summary: check.summary.clone(),
+                        details: check
+                            .details
+                            .iter()
+                            .map(|detail| CheckDetail {
+                                text: detail.text.clone(),
+                                warn: detail.warn,
+                            })
+                            .collect(),
+                        remediation: check.remediation.clone(),
+                    })
+                    .collect(),
+            })
+            .collect(),
+    }
 }
 
 pub(crate) async fn print_run_summary(

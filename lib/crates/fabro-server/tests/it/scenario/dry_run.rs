@@ -3,7 +3,8 @@ use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
 
 use crate::helpers::{
-    MINIMAL_DOT, api, body_json, create_and_start_run, dry_run_app, wait_for_run_status,
+    MINIMAL_DOT, api, body_json, create_and_start_run, dry_run_app, minimal_manifest_json,
+    wait_for_run_status,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -60,7 +61,7 @@ async fn dry_run_serve_rejects_invalid_dot() {
         .uri(api("/runs"))
         .header("content-type", "application/json")
         .body(Body::from(
-            serde_json::to_string(&serde_json::json!({"dot_source": "not valid dot"})).unwrap(),
+            serde_json::to_string(&minimal_manifest_json("not valid dot")).unwrap(),
         ))
         .unwrap();
 

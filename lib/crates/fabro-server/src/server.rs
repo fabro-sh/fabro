@@ -49,6 +49,7 @@ use crate::demo;
 use crate::diagnostics;
 use crate::error::ApiError;
 use crate::jwt_auth::{AuthMode, AuthenticatedService};
+use crate::run_manifest;
 use crate::secret_store::{SecretStore, SecretStoreError};
 use crate::sessions as sessions_mod;
 use crate::sessions::{SessionStore, new_session_store};
@@ -56,7 +57,7 @@ use crate::static_files;
 use crate::web_auth;
 use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
 use fabro_workflow::event::{self as workflow_event, Emitter};
-use fabro_workflow::operations::{self, CreateRunInput, WorkflowInput};
+use fabro_workflow::operations::{self};
 use fabro_workflow::pipeline::Persisted;
 use fabro_workflow::records::Checkpoint;
 use fabro_workflow::run_status::RunStatus as WorkflowRunStatus;
@@ -67,11 +68,13 @@ pub use fabro_api::types::{
     AggregateUsage, ApiQuestion, ApiQuestionOption, AppendEventResponse, ArtifactEntry,
     ArtifactListResponse, CompletionContentPart, CompletionMessage, CompletionMessageRole,
     CompletionResponse, CompletionToolChoiceMode, CompletionUsage, CreateCompletionRequest,
-    CreateRunRequest, EventEnvelope as ApiEventEnvelope, ModelReference, PaginatedEventList,
-    PaginatedRunList, PaginationMeta, QuestionType as ApiQuestionType, RunError,
-    RunEvent as ApiRunEvent, RunStatus, RunStatusResponse, SetSecretRequest, StartRunRequest,
-    SubmitAnswerRequest, TokenUsage, UsageByModel, WriteBlobResponse,
+    EventEnvelope as ApiEventEnvelope, ModelReference, PaginatedEventList, PaginatedRunList,
+    PaginationMeta, PreflightResponse, QuestionType as ApiQuestionType,
+    RenderWorkflowGraphDirection, RenderWorkflowGraphFormat, RenderWorkflowGraphRequest, RunError,
+    RunEvent as ApiRunEvent, RunManifest, RunStatus, RunStatusResponse, SetSecretRequest,
+    StartRunRequest, SubmitAnswerRequest, TokenUsage, UsageByModel, WriteBlobResponse,
 };
+use fabro_graphviz::render::GraphFormat;
 
 pub fn default_page_limit() -> u32 {
     20
@@ -336,6 +339,8 @@ pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
 fn demo_routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/runs", get(demo::list_runs).post(demo::create_run_stub))
+        .route("/preflight", post(run_preflight))
+        .route("/graph/render", post(render_graph_from_manifest))
         .route("/runs/{id}", get(demo::get_run_status))
         .route("/runs/{id}/questions", get(demo::get_questions_stub))
         .route("/runs/{id}/questions/{qid}/answer", post(demo::answer_stub))
@@ -434,6 +439,8 @@ fn demo_routes() -> Router<Arc<AppState>> {
 fn real_routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/runs", get(list_runs).post(create_run))
+        .route("/preflight", post(run_preflight))
+        .route("/graph/render", post(render_graph_from_manifest))
         .route("/boards/runs", get(list_board_runs))
         .route("/runs/{id}", get(get_run_status).delete(delete_run))
         .route("/runs/{id}/questions", get(get_questions))
@@ -1090,73 +1097,17 @@ fn managed_run(
 async fn create_run(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
-    Json(req): Json<CreateRunRequest>,
+    Json(req): Json<RunManifest>,
 ) -> Response {
-    let run_id = match req.run_id.as_deref() {
-        Some(raw) => match raw.parse::<RunId>() {
-            Ok(parsed) => parsed,
-            Err(_) => return ApiError::bad_request("Invalid run ID.").into_response(),
-        },
-        None => RunId::new(),
+    let prepared = match run_manifest::prepare_manifest(&state.settings.read().unwrap(), &req) {
+        Ok(prepared) => prepared,
+        Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
     };
+    let run_id = prepared.run_id.unwrap_or_else(RunId::new);
     info!(run_id = %run_id, "Run created");
 
-    let using_dot_source = req
-        .dot_source
-        .as_ref()
-        .is_some_and(|value| !value.is_empty());
-    let using_local_workflow = req
-        .workflow_path
-        .as_ref()
-        .is_some_and(|value| !value.is_empty());
-
-    if using_dot_source == using_local_workflow {
-        return ApiError::bad_request(
-            "Provide exactly one of dot_source or workflow_path/cwd/settings_json.",
-        )
-        .into_response();
-    }
-
-    let create_input = if let Some(dot_source) = req.dot_source.clone() {
-        CreateRunInput {
-            workflow: WorkflowInput::DotSource {
-                source: dot_source,
-                base_dir: None,
-            },
-            settings: state.settings.read().unwrap().clone(),
-            cwd: std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir()),
-            workflow_slug: None,
-            run_id: Some(run_id),
-            host_repo_path: None,
-            base_branch: None,
-        }
-    } else {
-        let Some(workflow_path) = req.workflow_path.as_ref() else {
-            return ApiError::bad_request("workflow_path is required").into_response();
-        };
-        let Some(cwd) = req.cwd.as_ref() else {
-            return ApiError::bad_request("cwd is required").into_response();
-        };
-        let Some(settings_json) = req.settings_json.as_ref() else {
-            return ApiError::bad_request("settings_json is required").into_response();
-        };
-        let settings = match serde_json::from_str::<Settings>(settings_json) {
-            Ok(settings) => settings,
-            Err(err) => {
-                return ApiError::bad_request(format!("Invalid settings_json payload: {err}"))
-                    .into_response();
-            }
-        };
-        CreateRunInput {
-            workflow: WorkflowInput::Path(std::path::PathBuf::from(workflow_path)),
-            settings,
-            cwd: std::path::PathBuf::from(cwd),
-            workflow_slug: None,
-            run_id: Some(run_id),
-            host_repo_path: None,
-            base_branch: None,
-        }
-    };
+    let mut create_input = run_manifest::create_run_input(prepared.clone());
+    create_input.run_id = Some(run_id);
 
     let created = match Box::pin(operations::create(state.store.as_ref(), create_input)).await {
         Ok(created) => created,
@@ -1198,6 +1149,62 @@ async fn create_run(
         }),
     )
         .into_response()
+}
+
+async fn run_preflight(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<RunManifest>,
+) -> Response {
+    let prepared = match run_manifest::prepare_manifest(&state.settings.read().unwrap(), &req) {
+        Ok(prepared) => prepared,
+        Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
+    };
+    let validated = match run_manifest::validate_prepared_manifest(&prepared) {
+        Ok(validated) => validated,
+        Err(FabroError::Parse(_)) => {
+            return ApiError::bad_request("Validation failed").into_response();
+        }
+        Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
+    };
+    let response = match run_manifest::run_preflight(&state, &prepared, &validated).await {
+        Ok((response, _ok)) => response,
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+    (StatusCode::OK, Json(response)).into_response()
+}
+
+async fn render_graph_from_manifest(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<RenderWorkflowGraphRequest>,
+) -> Response {
+    let prepared =
+        match run_manifest::prepare_manifest(&state.settings.read().unwrap(), &req.manifest) {
+            Ok(prepared) => prepared,
+            Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
+        };
+    let validated = match run_manifest::validate_prepared_manifest(&prepared) {
+        Ok(validated) => validated,
+        Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
+    };
+    if validated.has_errors() {
+        return ApiError::bad_request("Validation failed").into_response();
+    }
+
+    let format = match req.format.unwrap_or(RenderWorkflowGraphFormat::Svg) {
+        RenderWorkflowGraphFormat::Svg => GraphFormat::Svg,
+        RenderWorkflowGraphFormat::Png => GraphFormat::Png,
+    };
+    let direction = req.direction.as_ref().map(|direction| match direction {
+        RenderWorkflowGraphDirection::Lr => "LR",
+        RenderWorkflowGraphDirection::Tb => "TB",
+    });
+    let dot_source = run_manifest::graph_source(&prepared, direction);
+    render_graph_bytes(&dot_source, format).await
 }
 
 async fn start_run(
@@ -2601,15 +2608,17 @@ async fn get_retro(
     }
 }
 
-/// Render DOT source to a styled SVG via `render_dot` on a blocking thread.
-pub(crate) async fn render_dot_svg(dot_source: &str) -> Response {
-    use fabro_graphviz::render::{GraphFormat, render_dot};
+/// Render DOT source to a styled image via `render_dot` on a blocking thread.
+pub(crate) async fn render_graph_bytes(dot_source: &str, format: GraphFormat) -> Response {
+    use fabro_graphviz::render::render_dot;
 
+    let content_type = match format {
+        GraphFormat::Svg => "image/svg+xml",
+        GraphFormat::Png => "image/png",
+    };
     let source = dot_source.to_owned();
-    match spawn_blocking(move || render_dot(&source, GraphFormat::Svg)).await {
-        Ok(Ok(bytes)) => {
-            (StatusCode::OK, [("content-type", "image/svg+xml")], bytes).into_response()
-        }
+    match spawn_blocking(move || render_dot(&source, format)).await {
+        Ok(Ok(bytes)) => (StatusCode::OK, [("content-type", content_type)], bytes).into_response(),
         Ok(Err(e)) => ApiError::new(StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
         Err(e) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
@@ -2632,13 +2641,13 @@ async fn get_graph(
         }
     };
     if !live_dot_source.is_empty() {
-        return render_dot_svg(&live_dot_source).await;
+        return render_graph_bytes(&live_dot_source, GraphFormat::Svg).await;
     }
 
     match state.store.open_run_reader(&id).await {
         Ok(run_store) => match run_store.state().await {
             Ok(run_state) => match run_state.graph_source {
-                Some(dot_source) => render_dot_svg(&dot_source).await,
+                Some(dot_source) => render_graph_bytes(&dot_source, GraphFormat::Svg).await,
                 None => ApiError::new(StatusCode::NOT_FOUND, "Graph not found.").into_response(),
             },
             Err(err) => ApiError::new(StatusCode::BAD_GATEWAY, err.to_string()).into_response(),
@@ -2691,6 +2700,27 @@ mod tests {
         format!("/api/v1{path}")
     }
 
+    fn minimal_manifest_json(dot_source: &str) -> serde_json::Value {
+        serde_json::json!({
+            "version": 1,
+            "cwd": "/tmp",
+            "target": {
+                "identifier": "workflow.fabro",
+                "path": "workflow.fabro",
+            },
+            "workflows": {
+                "workflow.fabro": {
+                    "source": dot_source,
+                    "files": {},
+                },
+            },
+        })
+    }
+
+    fn manifest_body(dot_source: &str) -> Body {
+        Body::from(serde_json::to_string(&minimal_manifest_json(dot_source)).unwrap())
+    }
+
     /// Create a run via POST /runs, then start it via POST /runs/{id}/start.
     /// Returns the run_id string.
     async fn create_and_start_run(app: &Router, dot_source: &str) -> String {
@@ -2698,9 +2728,7 @@ mod tests {
             .method("POST")
             .uri(api("/runs"))
             .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": dot_source})).unwrap(),
-            ))
+            .body(manifest_body(dot_source))
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
@@ -2989,9 +3017,7 @@ mod tests {
             .method("POST")
             .uri(api("/runs"))
             .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-            ))
+            .body(manifest_body(MINIMAL_DOT))
             .unwrap();
 
         let response = app.oneshot(req).await.unwrap();
@@ -3010,9 +3036,7 @@ mod tests {
             .method("POST")
             .uri(api("/runs"))
             .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": "not a graph"})).unwrap(),
-            ))
+            .body(manifest_body("not a graph"))
             .unwrap();
 
         let response = app.oneshot(req).await.unwrap();
@@ -3069,9 +3093,7 @@ mod tests {
             .method("POST")
             .uri(api("/runs"))
             .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-            ))
+            .body(manifest_body(MINIMAL_DOT))
             .unwrap();
 
         let response = app.clone().oneshot(req).await.unwrap();
@@ -3135,9 +3157,7 @@ mod tests {
             .method("POST")
             .uri(api("/runs"))
             .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-            ))
+            .body(manifest_body(MINIMAL_DOT))
             .unwrap();
 
         let response = app.clone().oneshot(req).await.unwrap();
@@ -3165,9 +3185,7 @@ mod tests {
             .method("POST")
             .uri(api("/runs"))
             .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-            ))
+            .body(manifest_body(MINIMAL_DOT))
             .unwrap();
 
         let response = app.clone().oneshot(req).await.unwrap();
@@ -3196,9 +3214,7 @@ mod tests {
             .method("POST")
             .uri(api("/runs"))
             .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-            ))
+            .body(manifest_body(MINIMAL_DOT))
             .unwrap();
 
         let response = app.clone().oneshot(req).await.unwrap();
@@ -3235,9 +3251,7 @@ mod tests {
             .method("POST")
             .uri(api("/runs"))
             .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-            ))
+            .body(manifest_body(MINIMAL_DOT))
             .unwrap();
 
         let response = app.clone().oneshot(req).await.unwrap();
@@ -3264,9 +3278,7 @@ mod tests {
             .method("POST")
             .uri(api("/runs"))
             .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-            ))
+            .body(manifest_body(MINIMAL_DOT))
             .unwrap();
 
         let response = app.clone().oneshot(req).await.unwrap();
@@ -3304,9 +3316,7 @@ mod tests {
             .method("POST")
             .uri(api("/runs"))
             .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-            ))
+            .body(manifest_body(MINIMAL_DOT))
             .unwrap();
 
         let response = app.clone().oneshot(req).await.unwrap();
@@ -3357,9 +3367,7 @@ mod tests {
             .method("POST")
             .uri(api("/runs"))
             .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-            ))
+            .body(manifest_body(MINIMAL_DOT))
             .unwrap();
 
         let response = app.oneshot(req).await.unwrap();
@@ -3378,9 +3386,7 @@ mod tests {
             .method("POST")
             .uri(api("/runs"))
             .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-            ))
+            .body(manifest_body(MINIMAL_DOT))
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
@@ -3408,9 +3414,7 @@ mod tests {
             .method("POST")
             .uri(api("/runs"))
             .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-            ))
+            .body(manifest_body(MINIMAL_DOT))
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
@@ -3444,9 +3448,7 @@ mod tests {
             .method("POST")
             .uri(api("/runs"))
             .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-            ))
+            .body(manifest_body(MINIMAL_DOT))
             .unwrap();
 
         let response = app.clone().oneshot(req).await.unwrap();
@@ -3495,7 +3497,21 @@ mod tests {
             .uri(api("/runs"))
             .header("content-type", "application/json")
             .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
+                serde_json::to_string(&serde_json::json!({
+                    "version": 1,
+                    "cwd": "/tmp",
+                    "target": {
+                        "identifier": "workflow.fabro",
+                        "path": "workflow.fabro",
+                    },
+                    "workflows": {
+                        "workflow.fabro": {
+                            "source": MINIMAL_DOT,
+                            "files": {},
+                        },
+                    },
+                }))
+                .unwrap(),
             ))
             .unwrap();
 
@@ -3526,6 +3542,62 @@ mod tests {
             .to_str()
             .unwrap();
         assert_eq!(content_type, "image/svg+xml");
+
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let svg = String::from_utf8_lossy(&bytes);
+        assert!(
+            svg.contains("<?xml") || svg.contains("<svg"),
+            "expected SVG content, got: {}",
+            &svg[..svg.len().min(200)]
+        );
+    }
+
+    #[tokio::test]
+    async fn render_graph_from_manifest_returns_svg() {
+        let app = test_app_with();
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api("/graph/render"))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({
+                    "manifest": {
+                        "version": 1,
+                        "cwd": "/tmp",
+                        "target": {
+                            "identifier": "workflow.fabro",
+                            "path": "workflow.fabro",
+                        },
+                        "workflows": {
+                            "workflow.fabro": {
+                                "source": MINIMAL_DOT,
+                                "files": {},
+                            },
+                        },
+                    },
+                    "format": "svg",
+                }))
+                .unwrap(),
+            ))
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+
+        if response.status() == StatusCode::BAD_GATEWAY {
+            return;
+        }
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get("content-type")
+                .expect("content-type header should be present")
+                .to_str()
+                .unwrap(),
+            "image/svg+xml"
+        );
 
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         let svg = String::from_utf8_lossy(&bytes);
@@ -3573,9 +3645,7 @@ mod tests {
             .method("POST")
             .uri(api("/runs"))
             .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-            ))
+            .body(manifest_body(MINIMAL_DOT))
             .unwrap();
 
         let response = app.clone().oneshot(req).await.unwrap();
@@ -3607,9 +3677,7 @@ mod tests {
             .method("POST")
             .uri(api("/runs"))
             .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-            ))
+            .body(manifest_body(MINIMAL_DOT))
             .unwrap();
 
         let response = app.clone().oneshot(req).await.unwrap();
@@ -3665,9 +3733,7 @@ mod tests {
             .method("POST")
             .uri(api("/runs"))
             .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-            ))
+            .body(manifest_body(MINIMAL_DOT))
             .unwrap();
 
         let response = app.clone().oneshot(req).await.unwrap();
@@ -3738,9 +3804,7 @@ mod tests {
             .method("POST")
             .uri(api("/runs"))
             .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-            ))
+            .body(manifest_body(MINIMAL_DOT))
             .unwrap();
 
         let response = app.oneshot(req).await.unwrap();
@@ -3766,6 +3830,7 @@ mod tests {
             .expect("run record should exist");
         let mut expected_settings = settings;
         expected_settings.goal = Some("Test".to_string());
+        expected_settings.dry_run = None;
 
         assert_eq!(run_record.settings, expected_settings);
     }
@@ -3780,9 +3845,7 @@ mod tests {
             .method("POST")
             .uri(api("/runs"))
             .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-            ))
+            .body(manifest_body(MINIMAL_DOT))
             .unwrap();
 
         let response = app.clone().oneshot(req).await.unwrap();
@@ -3983,9 +4046,7 @@ mod tests {
             .method("POST")
             .uri(api("/runs"))
             .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::to_string(&serde_json::json!({"dot_source": MINIMAL_DOT})).unwrap(),
-            ))
+            .body(manifest_body(MINIMAL_DOT))
             .unwrap();
 
         let response = app.clone().oneshot(req).await.unwrap();

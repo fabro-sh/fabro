@@ -24,7 +24,8 @@ mod tests {
         let transformed = transform::transform(
             parsed,
             &TransformOptions {
-                base_dir: None,
+                current_dir: None,
+                file_resolver: None,
                 custom_transforms: vec![],
             },
         );

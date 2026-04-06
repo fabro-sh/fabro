@@ -641,6 +641,8 @@ pub async fn initialize(
         graph,
         source,
         run_options: options.run_options,
+        workflow_path: options.workflow_path,
+        workflow_bundle: options.workflow_bundle,
         run_store: options.run_store,
         checkpoint: options.checkpoint,
         seed_context: options.seed_context,
@@ -784,6 +786,8 @@ mod tests {
                     devcontainer_phases: vec![],
                 },
                 run_options: test_settings(&run_dir),
+                workflow_path: None,
+                workflow_bundle: None,
                 hooks: fabro_hooks::HookSettings { hooks: vec![] },
                 sandbox_env: SandboxEnvSpec {
                     devcontainer_env: HashMap::new(),
@@ -857,6 +861,8 @@ mod tests {
                     devcontainer_phases: vec![],
                 },
                 run_options: test_settings(&run_dir),
+                workflow_path: None,
+                workflow_bundle: None,
                 hooks: fabro_hooks::HookSettings { hooks: vec![] },
                 sandbox_env: SandboxEnvSpec {
                     devcontainer_env: HashMap::new(),

@@ -68,13 +68,18 @@ pub(crate) async fn body_json(body: Body) -> serde_json::Value {
 /// Create a run via POST /runs, then start it via POST /runs/{id}/start.
 /// Returns the run_id string.
 pub(crate) async fn create_and_start_run(app: &axum::Router, dot_source: &str) -> String {
+    create_and_start_run_from_manifest(app, minimal_manifest_json(dot_source)).await
+}
+
+pub(crate) async fn create_and_start_run_from_manifest(
+    app: &axum::Router,
+    manifest: serde_json::Value,
+) -> String {
     let req = Request::builder()
         .method("POST")
         .uri(api("/runs"))
         .header("content-type", "application/json")
-        .body(Body::from(
-            serde_json::to_string(&serde_json::json!({"dot_source": dot_source})).unwrap(),
-        ))
+        .body(Body::from(serde_json::to_string(&manifest).unwrap()))
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
     let body = body_json(response.into_body()).await;
@@ -88,6 +93,29 @@ pub(crate) async fn create_and_start_run(app: &axum::Router, dot_source: &str) -
     app.clone().oneshot(req).await.unwrap();
 
     run_id
+}
+
+pub(crate) fn minimal_manifest_json(dot_source: &str) -> serde_json::Value {
+    serde_json::json!({
+        "version": 1,
+        "cwd": "/tmp",
+        "target": {
+            "identifier": "workflow.fabro",
+            "path": "workflow.fabro"
+        },
+        "workflows": {
+            "workflow.fabro": {
+                "source": dot_source,
+                "files": {}
+            }
+        }
+    })
+}
+
+pub(crate) fn minimal_manifest_json_with_dry_run(dot_source: &str) -> serde_json::Value {
+    let mut manifest = minimal_manifest_json(dot_source);
+    manifest["args"] = serde_json::json!({ "dry_run": true });
+    manifest
 }
 
 pub(crate) async fn run_json(app: &axum::Router, run_id: &str) -> serde_json::Value {

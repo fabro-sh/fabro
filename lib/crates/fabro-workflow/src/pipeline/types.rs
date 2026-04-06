@@ -18,11 +18,13 @@ use fabro_validate::Diagnostic;
 use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::Emitter;
+use crate::file_resolver::FileResolver;
 use crate::handler::HandlerRegistry;
 use crate::outcome::Outcome;
 use crate::records::{Checkpoint, Conclusion, RunRecord};
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::transforms::Transform;
+use crate::workflow_bundle::WorkflowBundle;
 use fabro_config::run::PullRequestSettings;
 use fabro_llm::client::Client;
 use fabro_retro::retro::Retro;
@@ -235,6 +237,8 @@ pub struct InitOptions {
     pub interviewer: Arc<dyn Interviewer>,
     pub lifecycle: LifecycleOptions,
     pub run_options: RunOptions,
+    pub workflow_path: Option<PathBuf>,
+    pub workflow_bundle: Option<Arc<WorkflowBundle>>,
     pub hooks: fabro_hooks::HookSettings,
     pub sandbox_env: SandboxEnvSpec,
     pub devcontainer: Option<DevcontainerSpec>,
@@ -251,6 +255,8 @@ pub struct Initialized {
     pub graph: Graph,
     pub source: String,
     pub run_options: RunOptions,
+    pub workflow_path: Option<PathBuf>,
+    pub workflow_bundle: Option<Arc<WorkflowBundle>>,
     pub run_store: SlateRunStore,
     pub(crate) checkpoint: Option<Checkpoint>,
     pub(crate) seed_context: Option<Context>,
@@ -321,7 +327,8 @@ pub struct Finalized {
 
 /// Options for the TRANSFORM phase.
 pub struct TransformOptions {
-    pub base_dir: Option<PathBuf>,
+    pub current_dir: Option<PathBuf>,
+    pub file_resolver: Option<Arc<dyn FileResolver>>,
     pub custom_transforms: Vec<Box<dyn Transform>>,
 }
 

@@ -30,7 +30,8 @@ pub fn validate(input: ValidateInput) -> Result<Validated, FabroError> {
 
     preprocess_and_validate(
         &resolved.raw_source,
-        resolved.base_dir,
+        resolved.current_dir,
+        resolved.file_resolver,
         input.custom_transforms,
         Some(&resolved.settings),
         resolved.goal_override.as_deref(),

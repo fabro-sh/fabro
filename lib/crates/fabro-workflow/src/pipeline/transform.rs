@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::transforms::{
     FileInliningTransform, ImportTransform, ModelResolutionTransform,
     StylesheetApplicationTransform, Transform, VariableExpansionTransform,
@@ -13,16 +15,18 @@ pub fn transform(parsed: Parsed, options: &TransformOptions) -> Transformed {
     let Parsed { graph, source } = parsed;
 
     // Built-in transforms (PreambleTransform moved to engine execution time)
-    let graph = if let Some(ref dir) = options.base_dir {
-        let fallback = dirs::home_dir().map(|home| home.join(".fabro"));
-        ImportTransform::new(dir.clone(), fallback).apply(graph)
+    let graph = if let (Some(current_dir), Some(file_resolver)) =
+        (&options.current_dir, &options.file_resolver)
+    {
+        ImportTransform::new(current_dir.clone(), Arc::clone(file_resolver)).apply(graph)
     } else {
         graph
     };
 
-    let graph = if let Some(ref dir) = options.base_dir {
-        let fallback = dirs::home_dir().map(|home| home.join(".fabro"));
-        FileInliningTransform::new(dir.clone(), fallback).apply(graph)
+    let graph = if let (Some(current_dir), Some(file_resolver)) =
+        (&options.current_dir, &options.file_resolver)
+    {
+        FileInliningTransform::new(current_dir.clone(), Arc::clone(file_resolver)).apply(graph)
     } else {
         graph
     };
@@ -43,8 +47,10 @@ pub fn transform(parsed: Parsed, options: &TransformOptions) -> Transformed {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+    use std::sync::Arc;
 
     use super::*;
+    use crate::file_resolver::FilesystemFileResolver;
     use crate::pipeline::parse::parse;
     use fabro_graphviz::graph::AttrValue;
 
@@ -68,7 +74,8 @@ mod tests {
         let transformed = transform(
             parsed,
             &TransformOptions {
-                base_dir: None,
+                current_dir: None,
+                file_resolver: None,
                 custom_transforms: vec![],
             },
         );
@@ -93,7 +100,8 @@ mod tests {
         let transformed = transform(
             parsed,
             &TransformOptions {
-                base_dir: None,
+                current_dir: None,
+                file_resolver: None,
                 custom_transforms: vec![],
             },
         );
@@ -121,7 +129,8 @@ mod tests {
         let transformed = transform(
             parsed,
             &TransformOptions {
-                base_dir: Some(dir.path().to_path_buf()),
+                current_dir: Some(dir.path().to_path_buf()),
+                file_resolver: Some(Arc::new(FilesystemFileResolver::new(None))),
                 custom_transforms: vec![],
             },
         );
@@ -162,7 +171,8 @@ mod tests {
         let transformed = transform(
             parsed,
             &TransformOptions {
-                base_dir: Some(dir.path().to_path_buf()),
+                current_dir: Some(dir.path().to_path_buf()),
+                file_resolver: Some(Arc::new(FilesystemFileResolver::new(None))),
                 custom_transforms: vec![],
             },
         );

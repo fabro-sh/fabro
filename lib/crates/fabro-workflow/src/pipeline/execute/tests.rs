@@ -203,6 +203,8 @@ async fn execute_test_run_with_options(
                 devcontainer_phases: vec![],
             },
             run_options,
+            workflow_path: None,
+            workflow_bundle: None,
             hooks: HookSettings { hooks: vec![] },
             sandbox_env: SandboxEnvSpec {
                 devcontainer_env: HashMap::new(),
@@ -256,6 +258,8 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
                 devcontainer_phases: vec![],
             },
             run_options: test_run_options(&run_dir, "run-test"),
+            workflow_path: None,
+            workflow_bundle: None,
             hooks: HookSettings { hooks: vec![] },
             sandbox_env: SandboxEnvSpec {
                 devcontainer_env: HashMap::new(),
@@ -319,6 +323,8 @@ async fn run_with_lifecycle(
             interviewer: Arc::new(AutoApproveInterviewer),
             lifecycle,
             run_options,
+            workflow_path: None,
+            workflow_bundle: None,
             hooks: HookSettings { hooks: vec![] },
             sandbox_env: SandboxEnvSpec {
                 devcontainer_env: HashMap::new(),

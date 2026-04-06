@@ -38,6 +38,8 @@ pub async fn execute(init: Initialized) -> Executed {
         graph,
         source: _,
         run_options,
+        workflow_path,
+        workflow_bundle,
         run_store,
         checkpoint,
         seed_context,
@@ -78,6 +80,8 @@ pub async fn execute(init: Initialized) -> Executed {
         hook_runner: hook_runner.clone(),
         env,
         dry_run,
+        workflow_path,
+        workflow_bundle,
     });
 
     let handler = Arc::new(WorkflowNodeHandler {

@@ -271,6 +271,8 @@ impl Handler for ParallelHandler {
             let run_store = services.run_store.clone();
             let env = services.env.clone();
             let dry_run = services.dry_run;
+            let workflow_path = services.workflow_path.clone();
+            let workflow_bundle = services.workflow_bundle.clone();
             let graph = graph.clone();
             let run_dir = run_dir.to_path_buf();
             let sem = Arc::clone(&semaphore);
@@ -322,6 +324,8 @@ impl Handler for ParallelHandler {
                     hook_runner: hook_runner.clone(),
                     env: env.clone(),
                     dry_run,
+                    workflow_path,
+                    workflow_bundle,
                 };
                 let handler = registry.resolve(target_node);
                 let outcome = super::dispatch_handler(

@@ -187,7 +187,7 @@ pub(crate) struct RunArgs {
 #[derive(Args)]
 pub(crate) struct PreflightArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) target: ServerConnectionArgs,
 
     /// Path to a .fabro workflow file or .toml task config
     pub(crate) workflow: PathBuf,
@@ -290,6 +290,9 @@ pub(crate) struct LogsArgs {
 
 #[derive(Args)]
 pub(crate) struct ValidateArgs {
+    #[command(flatten)]
+    pub(crate) target: ServerConnectionArgs,
+
     /// Path to the .fabro workflow file
     pub(crate) workflow: PathBuf,
 }
@@ -337,6 +340,9 @@ impl fmt::Display for GraphOutputFormat {
 
 #[derive(Args)]
 pub(crate) struct GraphArgs {
+    #[command(flatten)]
+    pub(crate) target: ServerConnectionArgs,
+
     /// Path to the .fabro workflow file, .toml task config, or project workflow name
     pub(crate) workflow: PathBuf,
 

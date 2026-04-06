@@ -16,8 +16,8 @@ use tokio::time::sleep;
 use tower::ServiceExt;
 
 use crate::helpers::{
-    POLL_ATTEMPTS, POLL_INTERVAL, api, body_json, run_json, test_settings, wait_for_run_status,
-    wait_for_run_status_not_in,
+    POLL_ATTEMPTS, POLL_INTERVAL, api, body_json, minimal_manifest_json, run_json, test_settings,
+    wait_for_run_status, wait_for_run_status_not_in,
 };
 
 fn gate_registry(interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {
@@ -79,7 +79,7 @@ async fn full_http_lifecycle_approve_and_complete() {
         .uri(api("/runs"))
         .header("content-type", "application/json")
         .body(Body::from(
-            serde_json::to_string(&serde_json::json!({"dot_source": GATE_DOT})).unwrap(),
+            serde_json::to_string(&minimal_manifest_json(GATE_DOT)).unwrap(),
         ))
         .unwrap();
 
@@ -144,7 +144,7 @@ async fn full_http_lifecycle_cancel() {
         .uri(api("/runs"))
         .header("content-type", "application/json")
         .body(Body::from(
-            serde_json::to_string(&serde_json::json!({"dot_source": GATE_DOT})).unwrap(),
+            serde_json::to_string(&minimal_manifest_json(GATE_DOT)).unwrap(),
         ))
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();

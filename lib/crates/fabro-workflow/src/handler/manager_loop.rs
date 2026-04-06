@@ -26,6 +26,11 @@ use super::{EngineServices, Handler};
 /// Orchestrates a child workflow engine, polling for completion or stop conditions.
 pub struct SubWorkflowHandler;
 
+struct ParsedChildWorkflow {
+    graph: Graph,
+    workflow_path: Option<PathBuf>,
+}
+
 /// Parse a duration string like "45s", "200ms", "5m" into a Duration.
 /// Falls back to 45 seconds on parse failure.
 fn parse_duration_str(s: &str) -> Duration {
@@ -52,7 +57,10 @@ fn parse_duration_str(s: &str) -> Duration {
 /// (no file inlining), or file path `stack.child_workflow` / `stack.child_dotfile`
 /// (with file inlining). `stack.child_workflow` is preferred; `stack.child_dotfile`
 /// is kept for backward compatibility.
-fn parse_child_graph(node: &Node) -> Result<Graph, FabroError> {
+fn parse_child_graph(
+    node: &Node,
+    services: &EngineServices,
+) -> Result<ParsedChildWorkflow, FabroError> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
     if let Some(dot) = node
@@ -71,7 +79,10 @@ fn parse_child_graph(node: &Node) -> Result<Graph, FabroError> {
         })?;
         validated.raise_on_errors()?;
         let (graph, _, _) = validated.into_parts();
-        return Ok(graph);
+        return Ok(ParsedChildWorkflow {
+            graph,
+            workflow_path: None,
+        });
     }
     if let Some(path) = node
         .attrs
@@ -79,15 +90,36 @@ fn parse_child_graph(node: &Node) -> Result<Graph, FabroError> {
         .or_else(|| node.attrs.get("stack.child_dotfile"))
         .and_then(|v| v.as_str())
     {
+        let workflow = if let (Some(bundle), Some(current_workflow_path)) =
+            (&services.workflow_bundle, &services.workflow_path)
+        {
+            bundle
+                .resolve_child(current_workflow_path, path)
+                .cloned()
+                .map_or_else(
+                    || WorkflowInput::Path(PathBuf::from(path)),
+                    WorkflowInput::Bundled,
+                )
+        } else {
+            WorkflowInput::Path(PathBuf::from(path))
+        };
+        let workflow_path = match &workflow {
+            WorkflowInput::Bundled(workflow) => Some(workflow.logical_path.clone()),
+            WorkflowInput::Path(path) => Some(path.clone()),
+            WorkflowInput::DotSource { .. } => None,
+        };
         let validated = validate(ValidateInput {
-            workflow: WorkflowInput::Path(PathBuf::from(path)),
+            workflow,
             settings: Settings::default(),
             cwd,
             custom_transforms: Vec::new(),
         })?;
         validated.raise_on_errors()?;
         let (graph, _, _) = validated.into_parts();
-        return Ok(graph);
+        return Ok(ParsedChildWorkflow {
+            graph,
+            workflow_path,
+        });
     }
     Err(FabroError::handler("No child workflow source".to_string()))
 }
@@ -143,7 +175,10 @@ impl Handler for SubWorkflowHandler {
             .unwrap_or("");
 
         // Read and parse child workflow graph
-        let child_graph = match parse_child_graph(node) {
+        let ParsedChildWorkflow {
+            graph: child_graph,
+            workflow_path: child_workflow_path,
+        } = match parse_child_graph(node, services) {
             Ok(g) => g,
             Err(e) => {
                 return Ok(Outcome::fail_classify(format!(
@@ -192,6 +227,7 @@ impl Handler for SubWorkflowHandler {
         let hook_runner = services.hook_runner.clone();
         let env = services.env.clone();
         let dry_run = services.dry_run;
+        let workflow_bundle = services.workflow_bundle.clone();
         let store = Arc::new(SlateStore::new(
             Arc::new(InMemory::new()),
             "",
@@ -208,6 +244,8 @@ impl Handler for SubWorkflowHandler {
                 graph: child_graph,
                 source: String::new(),
                 run_options: child_run_options,
+                workflow_path: child_workflow_path,
+                workflow_bundle,
                 run_store,
                 checkpoint: None,
                 seed_context: Some(child_context),
@@ -299,10 +337,14 @@ impl Handler for SubWorkflowHandler {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
     use super::*;
     use crate::handler::HandlerRegistry;
     use crate::handler::exit::ExitHandler;
     use crate::handler::start::StartHandler;
+    use crate::workflow_bundle::{BundledWorkflow, WorkflowBundle};
     use fabro_graphviz::graph::AttrValue;
 
     fn make_services() -> EngineServices {
@@ -511,6 +553,43 @@ mod tests {
 
         let outcome = handler
             .execute(&node, &context, &graph, dir.path(), &make_services())
+            .await
+            .unwrap();
+        assert_eq!(outcome.status, StageStatus::Success);
+    }
+
+    #[tokio::test]
+    async fn child_workflow_reads_from_bundle_when_present() {
+        let handler = SubWorkflowHandler;
+        let mut node = Node::new("manager");
+        node.attrs.insert(
+            "stack.child_workflow".to_string(),
+            AttrValue::String("./children/review.fabro".to_string()),
+        );
+        node.attrs
+            .insert("manager.max_cycles".to_string(), AttrValue::Integer(100));
+        node.attrs.insert(
+            "manager.poll_interval".to_string(),
+            AttrValue::Duration(Duration::from_millis(10)),
+        );
+
+        let mut services = make_services();
+        services.workflow_path = Some(PathBuf::from("workflow.fabro"));
+        services.workflow_bundle = Some(Arc::new(WorkflowBundle::new(HashMap::from([(
+            PathBuf::from("children/review.fabro"),
+            BundledWorkflow {
+                logical_path: PathBuf::from("children/review.fabro"),
+                source: child_dot_succeeds().to_string(),
+                files: HashMap::new(),
+            },
+        )]))));
+
+        let context = Context::new();
+        let graph = Graph::new("test");
+        let dir = tempfile::tempdir().unwrap();
+
+        let outcome = handler
+            .execute(&node, &context, &graph, dir.path(), &services)
             .await
             .unwrap();
         assert_eq!(outcome.status, StageStatus::Success);

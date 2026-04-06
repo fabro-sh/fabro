@@ -141,13 +141,13 @@ paths:
       operationId: createRun
       tags: [Runs]
       summary: Create Run
-      description: Creates a new workflow run in `submitted` status. Callers may either provide `dot_source` directly or provide `workflow_path`, `cwd`, and `settings_json` so the server can load a local workflow path for trusted CLI execution.
+      description: Creates a new workflow run in `submitted` status from a self-contained manifest.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateRunRequest"
+              $ref: "#/components/schemas/RunManifest"
       responses:
         "201":
           description: Run created
@@ -157,6 +157,69 @@ paths:
                 $ref: "#/components/schemas/RunStatusResponse"
         "400":
           description: Invalid Graphviz source
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/preflight:
+    post:
+      operationId: runPreflight
+      tags: [Runs]
+      summary: Validate Workflow Manifest
+      description: Validates a workflow manifest without creating a run.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunManifest"
+      responses:
+        "200":
+          description: Preflight report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PreflightResponse"
+        "400":
+          description: Invalid manifest or workflow
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/graph/render:
+    post:
+      operationId: renderWorkflowGraph
+      tags: [Runs]
+      summary: Render Workflow Graph
+      description: Validates and renders a workflow manifest as SVG or PNG without creating a run.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenderWorkflowGraphRequest"
+      responses:
+        "200":
+          description: Rendered graph image
+          content:
+            image/svg+xml:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Invalid manifest or workflow
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Graphviz rendering failed
           content:
             application/json:
               schema:
@@ -2393,34 +2456,360 @@ components:
         - cancelled
         - paused
 
-    CreateRunRequest:
-      description: Request body for creating a new run, either from inline Graphviz source or from a local workflow path plus resolved settings.
+    RunManifest:
+      description: Self-contained workflow run manifest.
       type: object
+      required:
+        - version
+        - cwd
+        - target
+        - workflows
       properties:
-        dot_source:
-          type: string
-          nullable: true
-          description: Graphviz DOT language source defining the workflow graph.
-          example: 'digraph { start [shape=Mdiamond]; exit [shape=Msquare]; start -> exit }'
-        workflow_path:
-          type: string
-          nullable: true
-          description: Absolute or relative path to the workflow file to load on the local machine.
-          example: "/tmp/project/fabro/workflows/simple/workflow.fabro"
-        cwd:
-          type: string
-          nullable: true
-          description: Working directory used to resolve the workflow path.
-          example: "/tmp/project"
-        settings_json:
-          type: string
-          nullable: true
-          description: JSON-serialized `fabro_types::Settings` payload resolved by the CLI.
+        version:
+          type: integer
+          description: Manifest schema version.
+          example: 1
         run_id:
           type: string
           nullable: true
           description: Optional pre-generated run ID to use instead of allocating a new ULID.
           example: "01HV6D7S5YF4Z4B2M7K4N0Q6T9"
+        cwd:
+          type: string
+          description: CLI working directory at invocation time.
+          example: "/tmp/project"
+        git:
+          $ref: "#/components/schemas/ManifestGit"
+        goal:
+          $ref: "#/components/schemas/ManifestGoal"
+        args:
+          $ref: "#/components/schemas/ManifestArgs"
+        target:
+          $ref: "#/components/schemas/ManifestTarget"
+        configs:
+          type: array
+          items:
+            $ref: "#/components/schemas/ManifestConfig"
+        workflows:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/ManifestWorkflow"
+
+    ManifestGit:
+      description: Observable git state from the CLI working directory.
+      type: object
+      required:
+        - origin_url
+        - branch
+        - sha
+        - clean
+      properties:
+        origin_url:
+          type: string
+          description: Remote origin URL with any embedded credentials removed.
+          example: "https://github.com/acme/my-app.git"
+        branch:
+          type: string
+          description: Current branch name.
+          example: feature/foo
+        sha:
+          type: string
+          description: Current commit SHA.
+          example: abc123def
+        clean:
+          type: boolean
+          description: Whether the working tree has uncommitted changes.
+
+    ManifestGoal:
+      description: Resolved goal with provenance.
+      type: object
+      required:
+        - type
+        - text
+      properties:
+        type:
+          type: string
+          enum:
+            - value
+            - file
+            - graph
+        text:
+          type: string
+          description: Resolved goal content.
+        path:
+          type: string
+          nullable: true
+          description: Original goal file path when the goal came from a file.
+
+    ManifestArgs:
+      description: Sparse command-local args that affect run settings.
+      type: object
+      properties:
+        model:
+          type: string
+        provider:
+          type: string
+        sandbox:
+          type: string
+        verbose:
+          type: boolean
+        dry_run:
+          type: boolean
+        auto_approve:
+          type: boolean
+        no_retro:
+          type: boolean
+        preserve_sandbox:
+          type: boolean
+        label:
+          type: array
+          items:
+            type: string
+
+    ManifestTarget:
+      type: object
+      required:
+        - identifier
+        - path
+      properties:
+        identifier:
+          type: string
+          description: What the user typed.
+          example: smoke
+        path:
+          type: string
+          description: Resolved path that keys into the workflows map.
+          example: fabro/workflows/smoke/workflow.fabro
+
+    ManifestConfig:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - project
+            - user
+        path:
+          type: string
+          nullable: true
+        source:
+          type: string
+          nullable: true
+
+    ManifestWorkflowConfig:
+      type: object
+      required:
+        - path
+        - source
+      properties:
+        path:
+          type: string
+        source:
+          type: string
+
+    ManifestFileEntry:
+      description: A bundled file with discovery metadata.
+      type: object
+      required:
+        - content
+        - ref
+      properties:
+        content:
+          type: string
+        ref:
+          $ref: "#/components/schemas/ManifestFileRef"
+
+    ManifestFileRef:
+      type: object
+      required:
+        - type
+        - original
+      properties:
+        type:
+          type: string
+          enum:
+            - file_inline
+            - import
+            - dockerfile
+        original:
+          type: string
+        from:
+          type: string
+          nullable: true
+
+    ManifestWorkflow:
+      type: object
+      required:
+        - source
+      properties:
+        source:
+          type: string
+        config:
+          $ref: "#/components/schemas/ManifestWorkflowConfig"
+        files:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/ManifestFileEntry"
+
+    PreflightResponse:
+      type: object
+      required:
+        - ok
+        - workflow
+        - checks
+      properties:
+        ok:
+          type: boolean
+          description: Whether preflight passed using the CLI-compatible success rule.
+        workflow:
+          $ref: "#/components/schemas/PreflightWorkflowSummary"
+        checks:
+          $ref: "#/components/schemas/PreflightCheckReport"
+
+    RenderWorkflowGraphRequest:
+      type: object
+      required:
+        - manifest
+      properties:
+        manifest:
+          $ref: "#/components/schemas/RunManifest"
+        format:
+          $ref: "#/components/schemas/RenderWorkflowGraphFormat"
+        direction:
+          $ref: "#/components/schemas/RenderWorkflowGraphDirection"
+
+    RenderWorkflowGraphFormat:
+      type: string
+      enum:
+        - svg
+        - png
+
+    RenderWorkflowGraphDirection:
+      type: string
+      enum:
+        - lr
+        - tb
+
+    PreflightWorkflowSummary:
+      type: object
+      required:
+        - name
+        - nodes
+        - edges
+        - goal
+        - diagnostics
+      properties:
+        name:
+          type: string
+        graph_path:
+          type: string
+          nullable: true
+        nodes:
+          type: integer
+        edges:
+          type: integer
+        goal:
+          type: string
+        diagnostics:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowDiagnostic"
+
+    WorkflowDiagnostic:
+      type: object
+      required:
+        - rule
+        - severity
+        - message
+      properties:
+        rule:
+          type: string
+        severity:
+          type: string
+          enum:
+            - error
+            - warning
+            - info
+        message:
+          type: string
+        node_id:
+          type: string
+          nullable: true
+        edge:
+          type: array
+          nullable: true
+          minItems: 2
+          maxItems: 2
+          items:
+            type: string
+        fix:
+          type: string
+          nullable: true
+
+    PreflightCheckReport:
+      type: object
+      required:
+        - title
+        - sections
+      properties:
+        title:
+          type: string
+        sections:
+          type: array
+          items:
+            $ref: "#/components/schemas/PreflightCheckSection"
+
+    PreflightCheckSection:
+      type: object
+      required:
+        - title
+        - checks
+      properties:
+        title:
+          type: string
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/PreflightCheckResult"
+
+    PreflightCheckResult:
+      type: object
+      required:
+        - name
+        - status
+        - summary
+        - details
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+          enum:
+            - pass
+            - warning
+            - error
+        summary:
+          type: string
+        details:
+          type: array
+          items:
+            $ref: "#/components/schemas/PreflightCheckDetail"
+        remediation:
+          type: string
+          nullable: true
+
+    PreflightCheckDetail:
+      type: object
+      required:
+        - text
+        - warn
+      properties:
+        text:
+          type: string
+        warn:
+          type: boolean
 
     StartRunRequest:
       description: Request body for starting or resuming a run.

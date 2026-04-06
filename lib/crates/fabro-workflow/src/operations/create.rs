@@ -7,13 +7,16 @@ use fabro_types::{RunId, Settings};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::error::FabroError;
+use crate::file_resolver::FileResolver;
 use crate::pipeline::types::PersistOptions;
 use crate::pipeline::{self, Persisted, TransformOptions, Validated};
 use crate::records::RunRecord;
 use crate::run_lookup::default_runs_base;
 use crate::transforms::{Transform, expand_vars};
+use crate::workflow_bundle::{StoredWorkflowBundle, WorkflowBundle};
 use fabro_sandbox::daytona::detect_repo_info;
 use fabro_util::json::normalize_json_value;
 
@@ -26,6 +29,8 @@ pub struct CreateRunInput {
     pub settings: Settings,
     pub cwd: PathBuf,
     pub workflow_slug: Option<String>,
+    pub workflow_path: Option<PathBuf>,
+    pub workflow_bundle: Option<WorkflowBundle>,
     pub run_id: Option<RunId>,
     pub host_repo_path: Option<String>,
     pub base_branch: Option<String>,
@@ -68,6 +73,8 @@ pub async fn create(store: &SlateStore, request: CreateRunInput) -> Result<Creat
         settings: _,
         cwd: _,
         workflow_slug,
+        workflow_path,
+        workflow_bundle,
         run_id,
         host_repo_path,
         base_branch,
@@ -87,7 +94,8 @@ pub async fn create(store: &SlateStore, request: CreateRunInput) -> Result<Creat
     });
 
     let goal_override = resolved.goal_override.clone();
-    let base_dir = resolved.base_dir.clone();
+    let current_dir = resolved.current_dir.clone();
+    let file_resolver = resolved.file_resolver.clone();
 
     let persisted = create_from_source(
         &resolved.raw_source,
@@ -101,7 +109,8 @@ pub async fn create(store: &SlateStore, request: CreateRunInput) -> Result<Creat
             working_directory,
             host_repo_path,
         },
-        base_dir,
+        current_dir,
+        file_resolver,
         goal_override.as_deref(),
     )?;
 
@@ -110,6 +119,9 @@ pub async fn create(store: &SlateStore, request: CreateRunInput) -> Result<Creat
         .as_deref()
         .and_then(|path| std::fs::read_to_string(path).ok());
     persist_created_run(store, &persisted, &resolved.raw_source, workflow_config).await?;
+    if let (Some(workflow_path), Some(workflow_bundle)) = (workflow_path, workflow_bundle) {
+        persist_workflow_bundle(persisted.run_dir(), workflow_path, workflow_bundle)?;
+    }
 
     Ok(CreatedRun {
         persisted,
@@ -186,6 +198,18 @@ fn store_error(err: impl std::fmt::Display) -> FabroError {
     FabroError::engine(err.to_string())
 }
 
+fn persist_workflow_bundle(
+    run_dir: &Path,
+    workflow_path: PathBuf,
+    workflow_bundle: WorkflowBundle,
+) -> Result<(), FabroError> {
+    let path = run_dir.join("workflow_bundle.json");
+    let payload =
+        serde_json::to_string_pretty(&StoredWorkflowBundle::new(workflow_path, workflow_bundle))
+            .map_err(|err| FabroError::engine(err.to_string()))?;
+    std::fs::write(&path, payload).map_err(|err| FabroError::Io(err.to_string()))
+}
+
 fn validate_sandbox_provider(settings: &Settings) -> Result<(), FabroError> {
     if let Some(provider) = settings
         .sandbox_settings()
@@ -202,12 +226,14 @@ fn validate_sandbox_provider(settings: &Settings) -> Result<(), FabroError> {
 fn create_from_source(
     dot_source: &str,
     options: PersistCreateOptions,
-    base_dir: Option<PathBuf>,
+    current_dir: Option<PathBuf>,
+    file_resolver: Option<Arc<dyn FileResolver>>,
     goal_override: Option<&str>,
 ) -> Result<Persisted, FabroError> {
     let validated = preprocess_and_validate(
         dot_source,
-        base_dir,
+        current_dir,
+        file_resolver,
         Vec::new(),
         Some(&options.settings),
         goal_override,
@@ -224,7 +250,8 @@ fn create_from_source(
 
 pub(super) fn preprocess_and_validate(
     dot_source: &str,
-    base_dir: Option<PathBuf>,
+    current_dir: Option<PathBuf>,
+    file_resolver: Option<Arc<dyn FileResolver>>,
     custom_transforms: Vec<Box<dyn Transform>>,
     settings: Option<&Settings>,
     goal_override: Option<&str>,
@@ -245,7 +272,8 @@ pub(super) fn preprocess_and_validate(
     let transformed = pipeline::transform(
         parsed,
         &TransformOptions {
-            base_dir,
+            current_dir,
+            file_resolver,
             custom_transforms,
         },
     );
@@ -368,6 +396,7 @@ mod tests {
     use std::time::Duration;
 
     use crate::operations::{ValidateInput, validate};
+    use crate::workflow_bundle::BundledWorkflow;
     fn memory_store() -> StoreHandle {
         Arc::new(SlateStore::new(
             Arc::new(InMemory::new()),
@@ -579,6 +608,49 @@ mod tests {
         assert_eq!(validated.graph().goal(), "ship it");
     }
 
+    #[test]
+    fn validate_from_bundle_resolves_nested_import_files_relative_to_imported_graph() {
+        let validated = validate(ValidateInput {
+            workflow: WorkflowInput::Bundled(BundledWorkflow {
+                logical_path: PathBuf::from("workflow.fabro"),
+                source: r#"digraph Test {
+                    graph [goal="Ship"]
+                    start [shape=Mdiamond]
+                    validate [import="./child/validate.fabro"]
+                    exit [shape=Msquare]
+                    start -> validate -> exit
+                }"#
+                .to_string(),
+                files: HashMap::from([
+                    (
+                        PathBuf::from("child/validate.fabro"),
+                        r#"digraph Validate {
+                            start [shape=Mdiamond]
+                            lint [prompt="@../prompts/lint.md"]
+                            exit [shape=Msquare]
+                            start -> lint -> exit
+                        }"#
+                        .to_string(),
+                    ),
+                    (PathBuf::from("prompts/lint.md"), "Lint $goal".to_string()),
+                ]),
+            }),
+            settings: Settings::default(),
+            cwd: PathBuf::from("."),
+            custom_transforms: Vec::new(),
+        })
+        .unwrap();
+
+        validated.raise_on_errors().unwrap();
+        assert_eq!(
+            validated.graph().nodes["validate.lint"]
+                .attrs
+                .get("prompt")
+                .and_then(AttrValue::as_str),
+            Some("Lint Ship")
+        );
+    }
+
     #[tokio::test]
     async fn create_returns_validation_failed_with_diagnostics() {
         let dot = r#"digraph Test {
@@ -597,6 +669,8 @@ mod tests {
                 settings: Settings::default(),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: None,
+                workflow_path: None,
+                workflow_bundle: None,
                 run_id: None,
                 host_repo_path: None,
                 base_branch: None,
@@ -641,6 +715,8 @@ mod tests {
                 },
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: Some("slug".to_string()),
+                workflow_path: None,
+                workflow_bundle: None,
                 run_id: Some(fixtures::RUN_1),
                 host_repo_path: Some(dir.path().display().to_string()),
                 base_branch: Some("main".to_string()),
@@ -717,6 +793,8 @@ mod tests {
                 },
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: None,
+                workflow_path: None,
+                workflow_bundle: None,
                 run_id: Some(fixtures::RUN_2),
                 host_repo_path: None,
                 base_branch: None,
@@ -765,6 +843,8 @@ mod tests {
                 },
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: Some("slug".to_string()),
+                workflow_path: None,
+                workflow_bundle: None,
                 run_id: Some(fixtures::RUN_3),
                 host_repo_path: None,
                 base_branch: None,

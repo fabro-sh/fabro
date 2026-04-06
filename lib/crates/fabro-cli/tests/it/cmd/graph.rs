@@ -20,24 +20,44 @@ fn help() {
               Path to the .fabro workflow file, .toml task config, or project workflow name
 
     Options:
-          --format <FORMAT>
-              Output format
-              
-              [default: svg]
-              [possible values: svg, png]
-
           --json
               Output as JSON
               
               [env: FABRO_JSON=]
+
+          --storage-dir <STORAGE_DIR>
+              Local storage directory (default: ~/.fabro)
+              
+              [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
 
           --debug
               Enable DEBUG-level logging (default is INFO)
               
               [env: FABRO_DEBUG=]
 
+          --server <SERVER>
+              Fabro server target: http(s) URL or absolute Unix socket path
+              
+              [env: FABRO_SERVER=]
+
+          --format <FORMAT>
+              Output format
+              
+              [default: svg]
+              [possible values: svg, png]
+
+          --no-upgrade-check
+              Disable automatic upgrade check
+              
+              [env: FABRO_NO_UPGRADE_CHECK=true]
+
       -o, --output <OUTPUT>
               Output file path (defaults to stdout)
+
+          --quiet
+              Suppress non-essential output
+              
+              [env: FABRO_QUIET=]
 
       -d, --direction <DIRECTION>
               Graph layout direction (overrides the DOT file's rankdir)
@@ -45,16 +65,6 @@ fn help() {
               Possible values:
               - lr: Left to right
               - tb: Top to bottom
-
-          --no-upgrade-check
-              Disable automatic upgrade check
-              
-              [env: FABRO_NO_UPGRADE_CHECK=true]
-
-          --quiet
-              Suppress non-essential output
-              
-              [env: FABRO_QUIET=]
 
           --verbose
               Enable verbose output

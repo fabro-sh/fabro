@@ -3,6 +3,7 @@
 mod args;
 mod commands;
 mod logging;
+mod manifest_builder;
 mod server_client;
 mod server_runs;
 mod shared;
@@ -159,11 +160,11 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::Preflight(args) => commands::preflight::execute(args, &globals).await?,
             Commands::Validate(args) => {
                 let styles = Styles::detect_stderr();
-                commands::validate::run(&args, &styles, &globals)?;
+                commands::validate::run(&args, &styles, &globals).await?;
             }
             Commands::Graph(args) => {
                 let styles = Styles::detect_stderr();
-                commands::graph::run(&args, &styles, &globals)?;
+                commands::graph::run(&args, &styles, &globals).await?;
             }
             Commands::Parse(args) => {
                 commands::parse::run(&args, &globals)?;

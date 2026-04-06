@@ -10,6 +10,7 @@ pub mod diagnostics;
 pub mod error;
 pub mod github_webhooks;
 pub mod jwt_auth;
+mod run_manifest;
 pub mod secret_store;
 pub mod serve;
 pub mod server;

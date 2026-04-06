@@ -102,6 +102,8 @@ async fn initialized(
             graph: graph.clone(),
             source: String::new(),
             run_options: run_options.clone(),
+            workflow_path: None,
+            workflow_bundle: None,
             run_store,
             checkpoint: options.checkpoint,
             seed_context: None,

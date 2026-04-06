@@ -1,14 +1,17 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_graphviz::parser;
 
+use crate::file_resolver::{FileResolver, ResolvedFile};
+
 use super::{FileInliningTransform, Transform};
 
 pub struct ImportTransform {
-    base_dir: PathBuf,
-    fallback_dir: Option<PathBuf>,
+    current_dir: PathBuf,
+    resolver: Arc<dyn FileResolver>,
 }
 
 struct PlaceholderOptions {
@@ -27,39 +30,10 @@ struct PreparedImport {
 
 impl ImportTransform {
     #[must_use]
-    pub fn new(base_dir: PathBuf, fallback_dir: Option<PathBuf>) -> Self {
+    pub fn new(current_dir: PathBuf, resolver: Arc<dyn FileResolver>) -> Self {
         Self {
-            base_dir,
-            fallback_dir,
-        }
-    }
-
-    fn resolve_import_path(
-        import_path: &str,
-        base_dir: &Path,
-        fallback_dir: Option<&Path>,
-    ) -> Option<PathBuf> {
-        let raw = Path::new(import_path);
-        let is_tilde = raw.starts_with("~");
-        let expanded = if is_tilde {
-            match dirs::home_dir() {
-                Some(home) => home.join(raw.strip_prefix("~").unwrap()),
-                None => base_dir.join(import_path),
-            }
-        } else {
-            base_dir.join(import_path)
-        };
-
-        match expanded.canonicalize() {
-            Ok(path) if path.is_file() => Some(path),
-            _ if !is_tilde => fallback_dir.and_then(|fallback| {
-                let fallback_path = fallback.join(import_path);
-                match fallback_path.canonicalize() {
-                    Ok(path) if path.is_file() => Some(path),
-                    _ => None,
-                }
-            }),
-            _ => None,
+            current_dir,
+            resolver,
         }
     }
 
@@ -109,9 +83,7 @@ impl ImportTransform {
             }
         };
 
-        let Some(resolved_path) =
-            Self::resolve_import_path(import_path, current_base_dir, self.fallback_dir.as_deref())
-        else {
+        let Some(resolved_file) = self.resolver.resolve(current_base_dir, import_path) else {
             Self::poison_placeholder(
                 graph,
                 placeholder_id,
@@ -120,10 +92,10 @@ impl ImportTransform {
             return;
         };
 
-        if import_stack.contains(&resolved_path) {
+        if import_stack.contains(&resolved_file.logical_path) {
             let cycle = import_stack
                 .iter()
-                .chain(std::iter::once(&resolved_path))
+                .chain(std::iter::once(&resolved_file.logical_path))
                 .map(|path| path.display().to_string())
                 .collect::<Vec<_>>()
                 .join(" -> ");
@@ -135,7 +107,7 @@ impl ImportTransform {
             return;
         }
 
-        let prepared = match self.prepare_import(&resolved_path, import_stack) {
+        let prepared = match self.prepare_import(&resolved_file, import_stack) {
             Ok(prepared) => prepared,
             Err(message) => {
                 Self::poison_placeholder(graph, placeholder_id, &message);
@@ -146,7 +118,7 @@ impl ImportTransform {
         if let Err(message) = Self::splice_import(
             graph,
             placeholder_id,
-            &resolved_path,
+            &resolved_file.logical_path,
             &placeholder,
             prepared,
         ) {
@@ -156,38 +128,46 @@ impl ImportTransform {
 
     fn prepare_import(
         &self,
-        resolved_path: &Path,
+        resolved_file: &ResolvedFile,
         import_stack: &mut Vec<PathBuf>,
     ) -> Result<PreparedImport, String> {
-        Self::with_import_stack(import_stack, resolved_path.to_path_buf(), |import_stack| {
-            let source = std::fs::read_to_string(resolved_path)
-                .map_err(|error| format!("failed to read {}: {error}", resolved_path.display()))?;
-            let mut graph = parser::parse(&source)
-                .map_err(|error| format!("failed to parse {}: {error}", resolved_path.display()))?;
+        Self::with_import_stack(
+            import_stack,
+            resolved_file.logical_path.clone(),
+            |import_stack| {
+                let mut graph = parser::parse(&resolved_file.content).map_err(|error| {
+                    format!(
+                        "failed to parse {}: {error}",
+                        resolved_file.logical_path.display()
+                    )
+                })?;
 
-            let import_base_dir = resolved_path
-                .parent()
-                .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-            graph = FileInliningTransform::new(import_base_dir.clone(), self.fallback_dir.clone())
-                .apply(graph);
+                let import_base_dir = resolved_file
+                    .logical_path
+                    .parent()
+                    .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+                graph =
+                    FileInliningTransform::new(import_base_dir.clone(), Arc::clone(&self.resolver))
+                        .apply(graph);
 
-            if let Some(message) = Self::unresolved_imported_prompt_error(&graph) {
-                return Err(message);
-            }
+                if let Some(message) = Self::unresolved_imported_prompt_error(&graph) {
+                    return Err(message);
+                }
 
-            let nested_imports = Self::collect_import_nodes(&graph);
-            for (placeholder_id, import_path) in nested_imports {
-                self.expand_import(
-                    &mut graph,
-                    &placeholder_id,
-                    &import_path,
-                    &import_base_dir,
-                    import_stack,
-                );
-            }
+                let nested_imports = Self::collect_import_nodes(&graph);
+                for (placeholder_id, import_path) in nested_imports {
+                    self.expand_import(
+                        &mut graph,
+                        &placeholder_id,
+                        &import_path,
+                        &import_base_dir,
+                        import_stack,
+                    );
+                }
 
-            Self::validate_imported_graph(graph)
-        })
+                Self::validate_imported_graph(graph)
+            },
+        )
     }
 
     fn splice_import(
@@ -595,7 +575,7 @@ impl Transform for ImportTransform {
                 &mut graph,
                 &placeholder_id,
                 &import_path,
-                &self.base_dir,
+                &self.current_dir,
                 &mut import_stack,
             );
         }
@@ -607,11 +587,13 @@ impl Transform for ImportTransform {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+    use std::sync::Arc;
 
     use fabro_graphviz::graph::AttrValue;
     use fabro_graphviz::parser;
 
     use super::*;
+    use crate::file_resolver::FilesystemFileResolver;
 
     fn parse_graph(source: &str) -> Graph {
         parser::parse(source).unwrap()
@@ -626,8 +608,13 @@ mod tests {
 
     fn apply_import(dot: &str, base_dir: &Path, fallback_dir: Option<&Path>) -> Graph {
         let graph = parse_graph(dot);
-        ImportTransform::new(base_dir.to_path_buf(), fallback_dir.map(Path::to_path_buf))
-            .apply(graph)
+        ImportTransform::new(
+            base_dir.to_path_buf(),
+            Arc::new(FilesystemFileResolver::new(
+                fallback_dir.map(Path::to_path_buf),
+            )),
+        )
+        .apply(graph)
     }
 
     fn basic_import_source() -> &'static str {
@@ -1329,7 +1316,11 @@ mod tests {
         graph
             .nodes
             .insert("validate.lint".to_string(), colliding_node);
-        let graph = ImportTransform::new(dir.path().to_path_buf(), None).apply(graph);
+        let graph = ImportTransform::new(
+            dir.path().to_path_buf(),
+            Arc::new(FilesystemFileResolver::new(None)),
+        )
+        .apply(graph);
 
         assert_eq!(
             graph.nodes["validate"]

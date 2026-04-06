@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
@@ -70,6 +70,17 @@ fn apply_serve_overrides(base: &Settings, args: &ServeArgs, dry_run_mode: bool) 
     settings
 }
 
+fn apply_runtime_settings(
+    base: &Settings,
+    args: &ServeArgs,
+    dry_run_mode: bool,
+    data_dir: &Path,
+) -> Settings {
+    let mut settings = apply_serve_overrides(base, args, dry_run_mode);
+    settings.storage_dir = Some(data_dir.to_path_buf());
+    settings
+}
+
 /// Start the HTTP API server.
 ///
 /// # Errors
@@ -119,11 +130,8 @@ pub async fn serve_command(
     };
 
     // Shared config for live reloading
-    let shared_settings = Arc::new(RwLock::new(apply_serve_overrides(
-        &disk_settings,
-        &args,
-        dry_run_mode,
-    )));
+    let effective_settings = apply_runtime_settings(&disk_settings, &args, dry_run_mode, &data_dir);
+    let shared_settings = Arc::new(RwLock::new(effective_settings));
     std::fs::create_dir_all(&data_dir)?;
     let (auth_mode, client_auth, max_concurrent_runs) = {
         let cfg = shared_settings.read().expect("config lock poisoned");
@@ -235,6 +243,7 @@ pub async fn serve_command(
     let settings_for_poll = Arc::clone(&shared_settings);
     let config_path_for_poll = config_path.clone();
     let args_for_poll = args.clone();
+    let data_dir_for_poll = data_dir.clone();
     tokio::spawn(async move {
         let mut interval = interval(Duration::from_secs(5));
         interval.tick().await; // skip first immediate tick
@@ -242,8 +251,12 @@ pub async fn serve_command(
             interval.tick().await;
             match load_server_settings(config_path_for_poll.as_deref()) {
                 Ok(new_disk_settings) => {
-                    let effective =
-                        apply_serve_overrides(&new_disk_settings, &args_for_poll, dry_run_mode);
+                    let effective = apply_runtime_settings(
+                        &new_disk_settings,
+                        &args_for_poll,
+                        dry_run_mode,
+                        &data_dir_for_poll,
+                    );
                     let changed = {
                         let cfg = settings_for_poll.read().expect("config lock poisoned");
                         *cfg != effective
@@ -357,5 +370,35 @@ fn client_auth_from_mode(auth_mode: &AuthMode) -> ClientAuth {
         ClientAuth::Optional
     } else {
         ClientAuth::Required
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::{ServeArgs, apply_runtime_settings};
+    use fabro_types::Settings;
+
+    #[test]
+    fn apply_runtime_settings_preserves_storage_dir() {
+        let base = Settings::default();
+        let args = ServeArgs {
+            bind: None,
+            model: None,
+            provider: None,
+            dry_run: false,
+            sandbox: None,
+            max_concurrent_runs: None,
+            config: None,
+        };
+
+        let resolved =
+            apply_runtime_settings(&base, &args, false, &PathBuf::from("/srv/fabro-storage"));
+
+        assert_eq!(
+            resolved.storage_dir,
+            Some(PathBuf::from("/srv/fabro-storage"))
+        );
     }
 }

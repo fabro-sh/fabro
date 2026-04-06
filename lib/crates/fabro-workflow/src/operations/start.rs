@@ -29,6 +29,7 @@ use crate::pipeline::{
 use crate::records::Checkpoint;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::run_status::{RunStatus, StatusReason};
+use crate::workflow_bundle::{StoredWorkflowBundle, WorkflowBundle};
 use fabro_config::run::PullRequestSettings;
 use fabro_retro::retro::Retro;
 use fabro_sandbox::daytona::DaytonaConfig;
@@ -58,6 +59,8 @@ struct RunSession {
     pr_github_app: Option<fabro_github::GitHubAppCredentials>,
     pr_origin_url: Option<String>,
     pr_model: String,
+    workflow_path: Option<PathBuf>,
+    workflow_bundle: Option<Arc<WorkflowBundle>>,
 }
 
 pub struct StartServices {
@@ -255,6 +258,12 @@ impl RunSession {
                 meta_branch: Some(MetadataStore::branch_name(&record.run_id.to_string())),
             })
         });
+        let stored_workflow_bundle = StoredWorkflowBundle::load_from_run_dir(persisted.run_dir())?;
+        let workflow_path = stored_workflow_bundle
+            .as_ref()
+            .map(|bundle| bundle.workflow_path.clone());
+        let workflow_bundle =
+            stored_workflow_bundle.map(|bundle| Arc::new(bundle.workflow_bundle()));
 
         if let Some(env) = settings
             .sandbox
@@ -379,6 +388,8 @@ impl RunSession {
             pr_github_app: services.github_app,
             pr_origin_url: origin_url,
             pr_model: model,
+            workflow_path,
+            workflow_bundle,
         })
     }
 }
@@ -489,6 +500,8 @@ impl RunSession {
             interviewer: self.interviewer,
             lifecycle: self.lifecycle,
             run_options,
+            workflow_path: self.workflow_path,
+            workflow_bundle: self.workflow_bundle,
             hooks: self.hooks,
             sandbox_env: self.sandbox_env,
             devcontainer: self.devcontainer,
@@ -851,6 +864,8 @@ mod tests {
                     .unwrap_or_else(|| Path::new("."))
                     .to_path_buf(),
                 workflow_slug: Some("test".to_string()),
+                workflow_path: None,
+                workflow_bundle: None,
                 run_id: Some(fixtures::RUN_1),
                 host_repo_path: None,
                 base_branch: None,

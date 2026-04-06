@@ -8,8 +8,9 @@ use tokio::time::{sleep, timeout};
 use tower::ServiceExt;
 
 use crate::helpers::{
-    POLL_ATTEMPTS, POLL_INTERVAL, api, body_json, create_and_start_run, dry_run_settings,
-    test_app_with_scheduler, wait_for_run_status_not_in,
+    POLL_ATTEMPTS, POLL_INTERVAL, api, body_json, create_and_start_run_from_manifest,
+    dry_run_settings, minimal_manifest_json_with_dry_run, test_app_with_scheduler,
+    wait_for_run_status_not_in,
 };
 
 const SIMPLE_DOT: &str = r#"digraph SSETest {
@@ -41,7 +42,9 @@ async fn sse_stream_contains_expected_event_types() {
     let state = create_app_state_with_options(dry_run_settings(), 5);
     let app = test_app_with_scheduler(state);
 
-    let run_id = create_and_start_run(&app, SIMPLE_DOT).await;
+    let run_id =
+        create_and_start_run_from_manifest(&app, minimal_manifest_json_with_dry_run(SIMPLE_DOT))
+            .await;
 
     wait_for_run_status_not_in(&app, &run_id, &["queued", "starting"]).await;
 

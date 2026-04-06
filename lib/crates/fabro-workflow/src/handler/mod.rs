@@ -13,7 +13,7 @@ pub mod wait;
 
 use std::any::Any;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 #[cfg(test)]
 use std::time::Duration;
@@ -31,6 +31,7 @@ use crate::error::FabroError;
 use crate::event::Emitter;
 use crate::outcome::{Outcome, OutcomeExt};
 use crate::sandbox_git::GitState;
+use crate::workflow_bundle::WorkflowBundle;
 use fabro_graphviz::graph::{Graph, Node, shape_to_handler_type};
 use fabro_hooks::{HookContext, HookDecision, HookRunner};
 use fabro_interview::Interviewer;
@@ -50,6 +51,10 @@ pub struct EngineServices {
     pub env: HashMap<String, String>,
     /// When true, handlers should skip real execution and return simulated results.
     pub dry_run: bool,
+    /// Logical path of the current workflow when running from a bundle.
+    pub workflow_path: Option<PathBuf>,
+    /// Bundled workflows available for child-workflow resolution.
+    pub workflow_bundle: Option<Arc<WorkflowBundle>>,
 }
 
 impl EngineServices {
@@ -106,6 +111,8 @@ impl EngineServices {
             hook_runner: None,
             env: HashMap::new(),
             dry_run: false,
+            workflow_path: None,
+            workflow_bundle: None,
         }
     }
 }
