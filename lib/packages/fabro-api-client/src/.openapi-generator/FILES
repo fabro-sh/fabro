@@ -178,6 +178,10 @@ models/secret-list-response.ts
 models/secret-metadata.ts
 models/send-message-request.ts
 models/send-message-response.ts
+models/server-settings-exec.ts
+models/server-settings-fabro.ts
+models/server-settings-server-tls.ts
+models/server-settings-server.ts
 models/server-settings.ts
 models/session-detail.ts
 models/session-list-item.ts
