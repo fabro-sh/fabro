@@ -2014,6 +2014,7 @@ dependencies = [
  "clap",
  "dirs",
  "fabro-macros",
+ "fabro-util",
  "hex",
  "serde",
  "serde_json",
