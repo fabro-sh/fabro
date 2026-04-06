@@ -1,0 +1,25 @@
+---
+title: "Global JSON output mode"
+date: "2026-03-31"
+---
+
+## Global JSON output mode
+
+Every CLI command now supports a `--json` flag for machine-readable output. Previously, only a few commands had JSON variants. Now you can pipe any Fabro command into `jq` or feed it directly into scripts and CI pipelines.
+
+```bash
+fabro runs list --json | jq '.[].id'
+fabro system df --json
+fabro preflight --json
+```
+
+## More
+
+<Accordion title="Workflows">
+- Stale git worktrees are now pruned automatically before branch creation in worktree sandboxes
+</Accordion>
+
+<Accordion title="Fixes">
+- Fixed `logs --follow` timing out on long-running runs due to slow manifest polling
+- Fixed rewind snapshot filtering when using short commit SHAs
+</Accordion>
