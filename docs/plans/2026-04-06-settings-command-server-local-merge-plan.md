@@ -73,10 +73,13 @@ The goal of this pass is to make `fabro settings` answer two distinct questions 
   - `fabro settings WORKFLOW`: `workflow + project + user + server_defaults`
   - `fabro settings --local`: `project + user`
   - `fabro settings --local WORKFLOW`: `workflow + project + user`
+- In server-targeted mode, the helper must apply `strip_server_owned_fields` to local layers (workflow, project, user) before combining with server defaults, matching `prepare_manifest_with_mode` semantics. Without this, fields like `exec` or `server` set in a local workflow config would override the server's values, which doesn't match actual run behavior.
 - The helper should continue to apply the same server-side rules that exist today:
   - normal mode uses the full `server_defaults_layer()`
   - local-daemon mode uses `local_daemon_server_overrides_layer()`
   - any required post-resolution overrides, such as forcing `storage_dir` from the active server settings, remain in the shared helper rather than being reimplemented by the CLI
+- The CLI determines the mode from the resolved `ServerTarget` type: `ServerTarget::UnixSocket` → local-daemon mode, `ServerTarget::HttpUrl` → remote mode.
+- The shared helper's scope is layer combination + resolution + post-resolution overrides. `prepare_manifest_with_mode` continues to handle manifest-specific work (parsing workflow bundles, building `args_layer` from `ManifestArgs`, applying `manifest.goal`) and delegates to the shared helper for the combine/resolve step.
 - The server should be switched to use the shared helper so `fabro settings` cannot drift from actual run semantics.
 
 ### 3. Server settings source
@@ -132,6 +135,7 @@ The goal of this pass is to make `fabro settings` answer two distinct questions 
     - `project + user + server_defaults`
     - `workflow + project + user + server_defaults`
   - local-daemon merge semantics remain distinct from remote-server merge semantics where that distinction already exists
+  - server-owned fields in local layers (workflow, project, user) are stripped before merging in server-targeted mode, matching `prepare_manifest_with_mode` behavior
 - Server route tests:
   - real `/api/v1/settings` returns the structured settings shape from the OpenAPI contract
   - route reflects effective runtime settings, including active storage-dir/runtime overrides
