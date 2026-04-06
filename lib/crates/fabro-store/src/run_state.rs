@@ -94,6 +94,7 @@ impl RunProjection {
                     workflow_slug: props.workflow_slug.clone(),
                     working_directory,
                     host_repo_path: props.host_repo_path.clone(),
+                    repo_origin_url: props.repo_origin_url.clone(),
                     base_branch: props.base_branch.clone(),
                     labels,
                 });

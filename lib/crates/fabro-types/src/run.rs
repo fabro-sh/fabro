@@ -18,6 +18,8 @@ pub struct RunRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub host_repo_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo_origin_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_branch: Option<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub labels: HashMap<String, String>,

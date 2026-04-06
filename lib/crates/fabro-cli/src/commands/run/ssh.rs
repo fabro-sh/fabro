@@ -1,54 +1,33 @@
-use anyhow::{Context, Result, bail};
-use fabro_sandbox::daytona::DaytonaSandbox;
+use anyhow::{Result, bail};
 use tracing::info;
 
 use crate::args::{GlobalArgs, SshArgs};
-use crate::server_runs::ServerRunLookup;
-use crate::shared::{print_json_pretty, validate_daytona_provider};
-use crate::user_config::load_settings_with_storage_dir;
+use crate::server_runs::ServerSummaryLookup;
+use crate::shared::print_json_pretty;
 
 pub(crate) async fn run(args: SshArgs, globals: &GlobalArgs) -> Result<()> {
     if globals.json && !args.print {
         globals.require_no_json()?;
     }
 
-    let cli_settings = load_settings_with_storage_dir(args.storage_dir.as_deref())?;
-    let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
+    let lookup = ServerSummaryLookup::connect(&args.server).await?;
     let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();
-    let record = lookup
+    let ssh = lookup
         .client()
-        .get_run_state(&run_id)
-        .await?
-        .sandbox
-        .context("Failed to load sandbox record from store")?;
-
-    validate_daytona_provider(&record, "SSH access")?;
-
-    let name = record
-        .identifier
-        .as_deref()
-        .context("Daytona sandbox record missing identifier (sandbox name)")?;
+        .create_run_ssh_access(&run_id, args.ttl)
+        .await?;
 
     info!(run_id = %args.run, ttl_minutes = args.ttl, "Creating SSH access");
 
-    let daytona = DaytonaSandbox::reconnect(name)
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    let ssh_cmd = daytona
-        .create_ssh_access(Some(args.ttl))
-        .await
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-
     if args.print {
         if globals.json {
-            print_json_pretty(&serde_json::json!({ "command": ssh_cmd }))?;
+            print_json_pretty(&serde_json::json!({ "command": ssh.command }))?;
         } else {
-            print!("{}", format_output(&ssh_cmd));
+            print!("{}", format_output(&ssh.command));
         }
     } else {
-        exec_ssh(&ssh_cmd)?;
+        exec_ssh(&ssh.command)?;
     }
 
     Ok(())
@@ -64,7 +43,7 @@ fn exec_ssh(ssh_cmd: &str) -> Result<()> {
 
     let parts: Vec<&str> = ssh_cmd.split_whitespace().collect();
     if parts.is_empty() {
-        bail!("Empty SSH command returned from Daytona");
+        bail!("Empty SSH command returned from server");
     }
     let err = std::process::Command::new(parts[0])
         .args(&parts[1..])
@@ -74,5 +53,5 @@ fn exec_ssh(ssh_cmd: &str) -> Result<()> {
 
 #[cfg(not(unix))]
 fn exec_ssh(_ssh_cmd: &str) -> Result<()> {
-    bail!("Direct SSH connection is only supported on Unix systems; use --print instead");
+    bail!("Direct SSH connection is only supported on Unix systems; use --print instead")
 }

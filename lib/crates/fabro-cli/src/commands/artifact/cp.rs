@@ -1,25 +1,20 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use fabro_store::RuntimeState;
-use fabro_workflow::artifacts::{ArtifactEntry, scan_artifacts};
 
 use crate::args::{ArtifactCpArgs, GlobalArgs};
-use crate::server_runs::ServerRunLookup;
+use crate::server_client::ServerStoreClient;
 use crate::shared::{print_json_pretty, split_run_path};
-use crate::user_config::load_settings_with_storage_dir;
 
 pub(super) async fn cp_command(args: &ArtifactCpArgs, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = load_settings_with_storage_dir(args.storage_dir.as_deref())?;
-    let (run_id, asset_path) = parse_source(&args.source);
-    let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
-    let run = lookup.resolve(run_id)?;
-    let runtime_state = RuntimeState::new(&run.path);
-    let entries = scan_artifacts(
-        &runtime_state.artifacts_dir(),
+    let (run_id_selector, asset_path) = parse_source(&args.source);
+    let (run_id, client, entries) = super::resolve_artifacts(
+        &args.server,
+        run_id_selector,
         args.node.as_deref(),
         args.retry,
-    )?;
+    )
+    .await?;
 
     if entries.is_empty() {
         bail!("No artifacts found for this run");
@@ -39,7 +34,7 @@ pub(super) async fn cp_command(args: &ArtifactCpArgs, globals: &GlobalArgs) -> R
         if matching.len() > 1 {
             let candidates: Vec<_> = matching
                 .iter()
-                .map(|entry| format!("{}:retry_{}", entry.node_slug, entry.retry))
+                .map(|entry| format_candidate(entry))
                 .collect();
             bail!(
                 "Path '{path}' matches multiple artifacts: {}. Use --node and/or --retry to disambiguate.",
@@ -53,16 +48,7 @@ pub(super) async fn cp_command(args: &ArtifactCpArgs, globals: &GlobalArgs) -> R
                 .file_name()
                 .unwrap_or_else(|| std::ffi::OsStr::new(&entry.relative_path)),
         );
-        if let Some(parent) = dest_file.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::copy(&entry.absolute_path, &dest_file).with_context(|| {
-            format!(
-                "Failed to copy {} to {}",
-                entry.absolute_path.display(),
-                dest_file.display()
-            )
-        })?;
+        write_artifact_file(&client, &run_id, entry, &dest_file).await?;
         if globals.json {
             print_json_pretty(&serde_json::json!({
                 "copied": [{
@@ -83,23 +69,15 @@ pub(super) async fn cp_command(args: &ArtifactCpArgs, globals: &GlobalArgs) -> R
                 .join(format!("retry_{}", entry.retry))
                 .join(&entry.relative_path);
             let dest_file = args.dest.join(relative_dest);
-            if let Some(parent) = dest_file.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::copy(&entry.absolute_path, &dest_file).with_context(|| {
-                format!(
-                    "Failed to copy {} to {}",
-                    entry.absolute_path.display(),
-                    dest_file.display()
-                )
-            })?;
+            write_artifact_file(&client, &run_id, entry, &dest_file).await?;
             copied.push(serde_json::json!({
                 "relative_path": entry.relative_path,
                 "destination": dest_file.display().to_string(),
             }));
         }
     } else {
-        let mut by_filename: Vec<(String, &ArtifactEntry)> = Vec::with_capacity(entries.len());
+        let mut by_filename: Vec<(String, &super::ArtifactEntry)> =
+            Vec::with_capacity(entries.len());
         for entry in &entries {
             let filename = Path::new(&entry.relative_path)
                 .file_name()
@@ -119,16 +97,7 @@ pub(super) async fn cp_command(args: &ArtifactCpArgs, globals: &GlobalArgs) -> R
 
         for (filename, entry) in &by_filename {
             let dest_file = args.dest.join(filename);
-            if let Some(parent) = dest_file.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::copy(&entry.absolute_path, &dest_file).with_context(|| {
-                format!(
-                    "Failed to copy {} to {}",
-                    entry.absolute_path.display(),
-                    dest_file.display()
-                )
-            })?;
+            write_artifact_file(&client, &run_id, entry, &dest_file).await?;
             copied.push(serde_json::json!({
                 "relative_path": entry.relative_path,
                 "destination": dest_file.display().to_string(),
@@ -148,6 +117,23 @@ pub(super) async fn cp_command(args: &ArtifactCpArgs, globals: &GlobalArgs) -> R
     Ok(())
 }
 
+async fn write_artifact_file(
+    client: &ServerStoreClient,
+    run_id: &fabro_types::RunId,
+    entry: &super::ArtifactEntry,
+    dest_file: &Path,
+) -> Result<()> {
+    if let Some(parent) = dest_file.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let bytes = client
+        .download_stage_artifact(run_id, &entry.stage_id, &entry.relative_path)
+        .await?;
+    std::fs::write(dest_file, bytes)
+        .with_context(|| format!("Failed to write {}", dest_file.display()))?;
+    Ok(())
+}
+
 fn parse_source(source: &str) -> (&str, Option<&str>) {
     match split_run_path(source) {
         Some((run_id, path)) => (run_id, Some(path)),
@@ -155,7 +141,7 @@ fn parse_source(source: &str) -> (&str, Option<&str>) {
     }
 }
 
-fn format_candidate(entry: &ArtifactEntry) -> String {
+fn format_candidate(entry: &super::ArtifactEntry) -> String {
     format!("{}:retry_{}", entry.node_slug, entry.retry)
 }
 
@@ -193,11 +179,11 @@ mod tests {
 
     #[test]
     fn format_candidate_includes_retry() {
-        let entry = ArtifactEntry {
+        let entry = super::super::ArtifactEntry {
             node_slug: "retry_assets".to_string(),
             retry: 2,
+            stage_id: fabro_types::StageId::new("retry_assets", 2),
             relative_path: "assets/retry/report.txt".to_string(),
-            absolute_path: PathBuf::from("/tmp/report.txt"),
             size: 6,
         };
 

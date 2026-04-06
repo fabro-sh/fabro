@@ -744,6 +744,28 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/runs/{id}/artifacts:
+    get:
+      operationId: listRunArtifacts
+      tags: [Run Internals]
+      summary: List Run Artifacts
+      description: Lists captured artifact files for a run.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Artifact files captured for the run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunArtifactListResponse"
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1/runs/{id}/stages/{stageId}/artifacts:
     get:
       operationId: listStageArtifacts
@@ -824,31 +846,6 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Run, stage, or artifact not found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-
-  /api/v1/runs/{id}/files:
-    get:
-      operationId: retrieveRunFiles
-      tags: [Run Outputs]
-      summary: Retrieve Run Files
-      description: Returns a paginated list of file-level diffs produced by the run, optionally filtered to a specific checkpoint.
-      parameters:
-        - $ref: "#/components/parameters/RunId"
-        - $ref: "#/components/parameters/CheckpointFilter"
-        - $ref: "#/components/parameters/PageLimit"
-        - $ref: "#/components/parameters/PageOffset"
-      responses:
-        "200":
-          description: Paginated list of file diffs
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PaginatedRunFileList"
-        "404":
-          description: Run not found
           content:
             application/json:
               schema:
@@ -957,7 +954,7 @@ paths:
       operationId: generatePreviewUrl
       tags: [Human-in-the-Loop]
       summary: Preview URL
-      description: Generates a time-limited preview URL for a port exposed by the run's sandbox environment.
+      description: Generates a preview URL for a port exposed by the run's sandbox environment.
       parameters:
         - $ref: "#/components/parameters/RunId"
       requestBody:
@@ -973,6 +970,147 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PreviewUrlResponse"
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Run has no active sandbox
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/ssh:
+    post:
+      operationId: createRunSshAccess
+      tags: [Human-in-the-Loop]
+      summary: SSH Access
+      description: Creates a time-limited SSH command for the run's sandbox environment.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SshAccessRequest"
+      responses:
+        "201":
+          description: SSH command created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SshAccessResponse"
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Run has no active sandbox or provider does not support SSH
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/sandbox/files:
+    get:
+      operationId: listSandboxFiles
+      tags: [Human-in-the-Loop]
+      summary: List Sandbox Files
+      description: Lists directory entries from the run's sandbox environment.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - in: query
+          name: path
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: depth
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        "200":
+          description: Directory entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SandboxFileListResponse"
+        "404":
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Run has no active sandbox
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/runs/{id}/sandbox/file:
+    get:
+      operationId: getSandboxFile
+      tags: [Human-in-the-Loop]
+      summary: Download Sandbox File
+      description: Downloads a file from the run's sandbox environment.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - in: query
+          name: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File contents
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Run or file not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Run has no active sandbox
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: putSandboxFile
+      tags: [Human-in-the-Loop]
+      summary: Upload Sandbox File
+      description: Uploads a file into the run's sandbox environment.
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+        - in: query
+          name: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "204":
+          description: File written
         "404":
           description: Run not found
           content:
@@ -3067,6 +3205,45 @@ components:
           items:
             $ref: "#/components/schemas/ArtifactEntry"
 
+    RunArtifactEntry:
+      description: A captured artifact file for a run.
+      type: object
+      required:
+        - stage_id
+        - node_slug
+        - retry
+        - relative_path
+        - size
+      properties:
+        stage_id:
+          type: string
+          description: Stage ID in `node@visit` form.
+        node_slug:
+          type: string
+          description: Node slug that produced the artifact.
+        retry:
+          type: integer
+          format: int32
+          description: Retry attempt number.
+        relative_path:
+          type: string
+          description: Artifact path relative to the stage artifact capture directory.
+        size:
+          type: integer
+          format: int64
+          description: Artifact size in bytes.
+
+    RunArtifactListResponse:
+      description: List of captured artifact files for a run.
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunArtifactEntry"
+
     InternalRunStatus:
       description: Internal event-sourced run status.
       type: string
@@ -4101,6 +4278,10 @@ components:
           minimum: 1
           maximum: 86400
           example: 3600
+        signed:
+          type: boolean
+          description: When true, return a signed URL that does not require a preview token header.
+          default: false
 
     PreviewUrlResponse:
       description: Response containing the generated preview URL.
@@ -4110,8 +4291,65 @@ components:
       properties:
         url:
           type: string
-          description: Time-limited preview URL.
+          description: Preview URL.
           example: "https://preview.example.com/sb-a1b2c3d4/3000"
+        token:
+          type: string
+          description: Preview token header value for unsigned preview URLs.
+          example: "preview-token-123"
+
+    SshAccessRequest:
+      description: Request body for creating SSH access for a sandbox-backed run.
+      type: object
+      required:
+        - ttl_minutes
+      properties:
+        ttl_minutes:
+          type: number
+          description: Time-to-live for the SSH command in minutes.
+          minimum: 1
+          maximum: 1440
+          example: 60
+
+    SshAccessResponse:
+      description: Response containing an SSH command for the sandbox.
+      type: object
+      required:
+        - command
+      properties:
+        command:
+          type: string
+          description: SSH command to connect to the sandbox.
+          example: ssh daytona@preview.example.com -p 2222
+
+    SandboxFileEntry:
+      description: A directory entry in a run sandbox.
+      type: object
+      required:
+        - name
+        - is_dir
+      properties:
+        name:
+          type: string
+          description: Basename of the entry.
+        is_dir:
+          type: boolean
+          description: Whether the entry is a directory.
+        size:
+          type: integer
+          format: int64
+          description: File size in bytes when known.
+
+    SandboxFileListResponse:
+      description: Non-paginated list of sandbox directory entries.
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/SandboxFileEntry"
 
     # ── Workflow Schemas ─────────────────────────────────────────────────
 

@@ -128,6 +128,7 @@ mod tests {
             workflow_slug: Some("ship".to_string()),
             working_directory: PathBuf::from("/tmp/project"),
             host_repo_path: Some("/tmp/project".to_string()),
+            repo_origin_url: None,
             base_branch: Some("main".to_string()),
             labels: HashMap::from([
                 ("env".to_string(), "test".to_string()),
@@ -156,6 +157,7 @@ mod tests {
                 run_dir: run_dir.to_string_lossy().to_string(),
                 working_directory: record.working_directory.display().to_string(),
                 host_repo_path: record.host_repo_path.clone(),
+                repo_origin_url: record.repo_origin_url.clone(),
                 base_branch: record.base_branch.clone(),
                 workflow_slug: record.workflow_slug.clone(),
                 db_prefix: None,

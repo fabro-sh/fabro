@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Component, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -29,10 +29,13 @@ use fabro_store::{EventEnvelope, EventPayload, StageId, StoreHandle};
 use fabro_types::{RunBlobId, RunEvent, RunId, Settings};
 use fabro_util::redact::redact_jsonl_line;
 use fabro_util::version::FABRO_VERSION;
+use fabro_workflow::artifacts as workflow_artifacts;
 use fabro_workflow::error::FabroError;
 use fabro_workflow::handler::HandlerRegistry;
 use futures_util::stream;
 use object_store::memory::InMemory as MemoryObjectStore;
+use tempfile::NamedTempFile;
+use tokio::fs;
 use tokio::sync::Notify;
 use tokio::sync::RwLock as AsyncRwLock;
 use tokio::sync::broadcast;
@@ -56,6 +59,9 @@ use crate::sessions::{SessionStore, new_session_store};
 use crate::static_files;
 use crate::web_auth;
 use fabro_interview::{Answer, Interviewer, QuestionType, WebInterviewer};
+use fabro_sandbox::daytona::DaytonaSandbox;
+use fabro_sandbox::reconnect::reconnect;
+use fabro_sandbox::{Sandbox, SandboxProvider};
 use fabro_workflow::event::{self as workflow_event, Emitter};
 use fabro_workflow::operations::{self};
 use fabro_workflow::pipeline::Persisted;
@@ -69,9 +75,11 @@ pub use fabro_api::types::{
     ArtifactListResponse, CompletionContentPart, CompletionMessage, CompletionMessageRole,
     CompletionResponse, CompletionToolChoiceMode, CompletionUsage, CreateCompletionRequest,
     EventEnvelope as ApiEventEnvelope, ModelReference, PaginatedEventList, PaginatedRunList,
-    PaginationMeta, PreflightResponse, QuestionType as ApiQuestionType,
-    RenderWorkflowGraphDirection, RenderWorkflowGraphFormat, RenderWorkflowGraphRequest, RunError,
-    RunEvent as ApiRunEvent, RunManifest, RunStatus, RunStatusResponse, SetSecretRequest,
+    PaginationMeta, PreflightResponse, PreviewUrlRequest, PreviewUrlResponse,
+    QuestionType as ApiQuestionType, RenderWorkflowGraphDirection, RenderWorkflowGraphFormat,
+    RenderWorkflowGraphRequest, RunArtifactEntry, RunArtifactListResponse, RunError,
+    RunEvent as ApiRunEvent, RunManifest, RunStatus, RunStatusResponse, SandboxFileEntry,
+    SandboxFileListResponse, SetSecretRequest, SshAccessRequest, SshAccessResponse,
     StartRunRequest, SubmitAnswerRequest, TokenUsage, UsageByModel, WriteBlobResponse,
 };
 use fabro_graphviz::render::GraphFormat;
@@ -134,6 +142,18 @@ struct AttachParams {
 struct ArtifactFilenameParams {
     #[serde(default)]
     filename: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct SandboxFilesParams {
+    path: String,
+    #[serde(default)]
+    depth: Option<usize>,
+}
+
+#[derive(serde::Deserialize)]
+struct SandboxFileParams {
+    path: String,
 }
 
 /// Non-paginated list response wrapper with `has_more: false`.
@@ -362,6 +382,7 @@ fn demo_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/graph", get(demo::get_run_graph))
         .route("/runs/{id}/retro", get(demo::get_run_retro))
         .route("/runs/{id}/stages", get(demo::get_run_stages))
+        .route("/runs/{id}/artifacts", get(demo::list_run_artifacts_stub))
         .route(
             "/runs/{id}/stages/{stageId}/turns",
             get(demo::get_stage_turns),
@@ -374,12 +395,20 @@ fn demo_routes() -> Router<Arc<AppState>> {
             "/runs/{id}/stages/{stageId}/artifacts/download",
             get(not_implemented),
         )
-        .route("/runs/{id}/files", get(demo::get_run_files))
         .route("/runs/{id}/usage", get(demo::get_run_usage))
         .route("/runs/{id}/verification", get(demo::get_run_verification))
         .route("/runs/{id}/settings", get(demo::get_run_settings))
         .route("/runs/{id}/steer", post(demo::steer_run_stub))
         .route("/runs/{id}/preview", post(demo::generate_preview_url_stub))
+        .route("/runs/{id}/ssh", post(demo::create_ssh_access_stub))
+        .route(
+            "/runs/{id}/sandbox/files",
+            get(demo::list_sandbox_files_stub),
+        )
+        .route(
+            "/runs/{id}/sandbox/file",
+            get(demo::get_sandbox_file_stub).put(demo::put_sandbox_file_stub),
+        )
         .route("/workflows", get(demo::list_workflows))
         .route("/workflows/{name}", get(demo::get_workflow))
         .route("/workflows/{name}/runs", get(demo::list_workflow_runs))
@@ -463,6 +492,7 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/graph", get(get_graph))
         .route("/runs/{id}/retro", get(get_retro))
         .route("/runs/{id}/stages", get(not_implemented))
+        .route("/runs/{id}/artifacts", get(list_run_artifacts))
         .route("/runs/{id}/stages/{stageId}/turns", get(not_implemented))
         .route(
             "/runs/{id}/stages/{stageId}/artifacts",
@@ -472,12 +502,17 @@ fn real_routes() -> Router<Arc<AppState>> {
             "/runs/{id}/stages/{stageId}/artifacts/download",
             get(get_stage_artifact),
         )
-        .route("/runs/{id}/files", get(not_implemented))
         .route("/runs/{id}/usage", get(not_implemented))
         .route("/runs/{id}/verification", get(not_implemented))
         .route("/runs/{id}/settings", get(not_implemented))
         .route("/runs/{id}/steer", post(not_implemented))
-        .route("/runs/{id}/preview", post(not_implemented))
+        .route("/runs/{id}/preview", post(generate_preview_url))
+        .route("/runs/{id}/ssh", post(create_ssh_access))
+        .route("/runs/{id}/sandbox/files", get(list_sandbox_files))
+        .route(
+            "/runs/{id}/sandbox/file",
+            get(get_sandbox_file).put(put_sandbox_file),
+        )
         .route("/workflows", get(not_implemented))
         .route("/workflows/{name}", get(not_implemented))
         .route("/workflows/{name}/runs", get(not_implemented))
@@ -1068,6 +1103,46 @@ fn required_filename(params: ArtifactFilenameParams) -> Result<String, Response>
         Some(filename) if !filename.is_empty() => Ok(filename),
         _ => Err(ApiError::bad_request("Missing filename query parameter.").into_response()),
     }
+}
+
+#[allow(clippy::result_large_err)]
+fn validate_relative_artifact_path(kind: &str, value: &str) -> Result<PathBuf, Response> {
+    let mut normalized = PathBuf::new();
+    for component in PathBuf::from(value).components() {
+        match component {
+            Component::Normal(part) => normalized.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(ApiError::bad_request(format!(
+                    "{kind} must be a relative path without '..'"
+                ))
+                .into_response());
+            }
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        return Err(ApiError::bad_request(format!("{kind} must not be empty")).into_response());
+    }
+    Ok(normalized)
+}
+
+#[allow(clippy::result_large_err)]
+fn run_artifacts_dir(run: &fabro_types::RunRecord, run_id: &RunId) -> PathBuf {
+    operations::make_run_dir(&run.settings.storage_dir().join("runs"), run_id)
+        .join("cache/artifacts/files")
+}
+
+#[allow(clippy::result_large_err)]
+fn scan_run_artifacts(
+    run: &fabro_types::RunRecord,
+    run_id: &RunId,
+    node_filter: Option<&str>,
+    retry_filter: Option<u32>,
+) -> Result<Vec<workflow_artifacts::ArtifactEntry>, Response> {
+    workflow_artifacts::scan_artifacts(&run_artifacts_dir(run, run_id), node_filter, retry_filter)
+        .map_err(|err| {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        })
 }
 
 fn octet_stream_response(bytes: Bytes) -> Response {
@@ -2029,6 +2104,51 @@ async fn read_run_blob(
     }
 }
 
+async fn list_run_artifacts(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    match state.store.open_run_reader(&id).await {
+        Ok(run_store) => match run_store.state().await {
+            Ok(run_state) => {
+                let Some(run) = run_state.run.as_ref() else {
+                    return ApiError::new(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "run record missing from store",
+                    )
+                    .into_response();
+                };
+                match scan_run_artifacts(run, &id, None, None) {
+                    Ok(entries) => Json(RunArtifactListResponse {
+                        data: entries
+                            .into_iter()
+                            .map(|entry| RunArtifactEntry {
+                                stage_id: StageId::new(entry.node_slug.clone(), entry.retry)
+                                    .to_string(),
+                                node_slug: entry.node_slug,
+                                retry: entry.retry.cast_signed(),
+                                relative_path: entry.relative_path,
+                                size: entry.size.cast_signed(),
+                            })
+                            .collect(),
+                    })
+                    .into_response(),
+                    Err(response) => response,
+                }
+            }
+            Err(err) => {
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+            }
+        },
+        Err(_) => ApiError::not_found("Run not found.").into_response(),
+    }
+}
+
 async fn list_stage_artifacts(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
@@ -2043,14 +2163,44 @@ async fn list_stage_artifacts(
         Err(response) => return response,
     };
     match state.store.open_run_reader(&id).await {
-        Ok(run_store) => match run_store.list_artifacts_for_stage(&stage_id).await {
-            Ok(filenames) => Json(ArtifactListResponse {
-                data: filenames
-                    .into_iter()
-                    .map(|filename| ArtifactEntry { filename })
-                    .collect(),
-            })
-            .into_response(),
+        Ok(run_store) => match run_store.state().await {
+            Ok(run_state) => {
+                let Some(run) = run_state.run.as_ref() else {
+                    return ApiError::new(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "run record missing from store",
+                    )
+                    .into_response();
+                };
+                match run_store.list_artifacts_for_stage(&stage_id).await {
+                    Ok(filenames) if !filenames.is_empty() => Json(ArtifactListResponse {
+                        data: filenames
+                            .into_iter()
+                            .map(|filename| ArtifactEntry { filename })
+                            .collect(),
+                    })
+                    .into_response(),
+                    Ok(_) => match scan_run_artifacts(
+                        run,
+                        &id,
+                        Some(stage_id.node_id()),
+                        Some(stage_id.visit()),
+                    ) {
+                        Ok(entries) => Json(ArtifactListResponse {
+                            data: entries
+                                .into_iter()
+                                .map(|entry| ArtifactEntry {
+                                    filename: entry.relative_path,
+                                })
+                                .collect(),
+                        })
+                        .into_response(),
+                        Err(response) => response,
+                    },
+                    Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                        .into_response(),
+                }
+            }
             Err(err) => {
                 ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
             }
@@ -2108,14 +2258,267 @@ async fn get_stage_artifact(
         Err(response) => return response,
     };
     match state.store.open_run_reader(&id).await {
-        Ok(run_store) => match run_store.get_artifact(&stage_id, &filename).await {
-            Ok(Some(bytes)) => octet_stream_response(bytes),
-            Ok(None) => ApiError::not_found("Artifact not found.").into_response(),
+        Ok(run_store) => match run_store.state().await {
+            Ok(run_state) => {
+                let Some(run) = run_state.run.as_ref() else {
+                    return ApiError::new(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "run record missing from store",
+                    )
+                    .into_response();
+                };
+                match run_store.get_artifact(&stage_id, &filename).await {
+                    Ok(Some(bytes)) => octet_stream_response(bytes),
+                    Ok(None) => {
+                        let relative_path =
+                            match validate_relative_artifact_path("filename", &filename) {
+                                Ok(path) => path,
+                                Err(response) => return response,
+                            };
+                        let artifact_path = run_artifacts_dir(run, &id)
+                            .join(stage_id.node_id())
+                            .join(format!("retry_{}", stage_id.visit()))
+                            .join(relative_path);
+                        match std::fs::read(&artifact_path) {
+                            Ok(bytes) => octet_stream_response(Bytes::from(bytes)),
+                            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                                ApiError::not_found("Artifact not found.").into_response()
+                            }
+                            Err(err) => {
+                                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                                    .into_response()
+                            }
+                        }
+                    }
+                    Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                        .into_response(),
+                }
+            }
             Err(err) => {
                 ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
             }
         },
         Err(_) => ApiError::not_found("Run not found.").into_response(),
+    }
+}
+
+async fn generate_preview_url(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(request): Json<PreviewUrlRequest>,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    let Ok(port) = u16::try_from(request.port) else {
+        return ApiError::bad_request("Port must fit in a u16.").into_response();
+    };
+    let Ok(expires_in_secs) = i32::try_from(request.expires_in_secs.get()) else {
+        return ApiError::bad_request("Preview expiry exceeds supported range.").into_response();
+    };
+
+    let sandbox = match reconnect_daytona_sandbox(&state, &id).await {
+        Ok(sandbox) => sandbox,
+        Err(response) => return response,
+    };
+
+    let response = if request.signed {
+        match sandbox
+            .get_signed_preview_url(port, Some(expires_in_secs))
+            .await
+        {
+            Ok(preview) => PreviewUrlResponse {
+                token: None,
+                url: preview.url,
+            },
+            Err(err) => {
+                return ApiError::new(StatusCode::CONFLICT, err).into_response();
+            }
+        }
+    } else {
+        match sandbox.get_preview_link(port).await {
+            Ok(preview) => PreviewUrlResponse {
+                token: Some(preview.token),
+                url: preview.url,
+            },
+            Err(err) => {
+                return ApiError::new(StatusCode::CONFLICT, err).into_response();
+            }
+        }
+    };
+
+    (StatusCode::CREATED, Json(response)).into_response()
+}
+
+async fn create_ssh_access(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(request): Json<SshAccessRequest>,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    let sandbox = match reconnect_daytona_sandbox(&state, &id).await {
+        Ok(sandbox) => sandbox,
+        Err(response) => return response,
+    };
+    match sandbox.create_ssh_access(Some(request.ttl_minutes)).await {
+        Ok(command) => (StatusCode::CREATED, Json(SshAccessResponse { command })).into_response(),
+        Err(err) => ApiError::new(StatusCode::CONFLICT, err).into_response(),
+    }
+}
+
+async fn list_sandbox_files(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(params): Query<SandboxFilesParams>,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    let sandbox = match reconnect_run_sandbox(&state, &id).await {
+        Ok(sandbox) => sandbox,
+        Err(response) => return response,
+    };
+    match sandbox.list_directory(&params.path, params.depth).await {
+        Ok(entries) => Json(SandboxFileListResponse {
+            data: entries
+                .into_iter()
+                .map(|entry| SandboxFileEntry {
+                    is_dir: entry.is_dir,
+                    name: entry.name,
+                    size: entry.size.map(u64::cast_signed),
+                })
+                .collect(),
+        })
+        .into_response(),
+        Err(err) => ApiError::new(StatusCode::NOT_FOUND, err).into_response(),
+    }
+}
+
+async fn get_sandbox_file(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(params): Query<SandboxFileParams>,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    let sandbox = match reconnect_run_sandbox(&state, &id).await {
+        Ok(sandbox) => sandbox,
+        Err(response) => return response,
+    };
+    let temp = match NamedTempFile::new() {
+        Ok(temp) => temp,
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+    if let Err(err) = sandbox
+        .download_file_to_local(&params.path, temp.path())
+        .await
+    {
+        return ApiError::new(StatusCode::NOT_FOUND, err).into_response();
+    }
+    match fs::read(temp.path()).await {
+        Ok(bytes) => octet_stream_response(bytes.into()),
+        Err(err) => {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        }
+    }
+}
+
+async fn put_sandbox_file(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Query(params): Query<SandboxFileParams>,
+    body: Bytes,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    let sandbox = match reconnect_run_sandbox(&state, &id).await {
+        Ok(sandbox) => sandbox,
+        Err(response) => return response,
+    };
+    let temp = match NamedTempFile::new() {
+        Ok(temp) => temp,
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+    if let Err(err) = fs::write(temp.path(), &body).await {
+        return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
+    }
+    match sandbox
+        .upload_file_from_local(temp.path(), &params.path)
+        .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err).into_response(),
+    }
+}
+
+async fn reconnect_run_sandbox(
+    state: &Arc<AppState>,
+    run_id: &RunId,
+) -> Result<Box<dyn Sandbox>, Response> {
+    let record = load_run_sandbox_record(state, run_id).await?;
+    reconnect(&record)
+        .await
+        .map_err(|err| ApiError::new(StatusCode::CONFLICT, format!("{err}")).into_response())
+}
+
+async fn reconnect_daytona_sandbox(
+    state: &Arc<AppState>,
+    run_id: &RunId,
+) -> Result<DaytonaSandbox, Response> {
+    let record = load_run_sandbox_record(state, run_id).await?;
+    if record.provider != SandboxProvider::Daytona.to_string() {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "Sandbox provider does not support this capability.",
+        )
+        .into_response());
+    }
+    let Some(name) = record.identifier.as_deref() else {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "Sandbox record is missing the Daytona identifier.",
+        )
+        .into_response());
+    };
+    DaytonaSandbox::reconnect(name)
+        .await
+        .map_err(|err| ApiError::new(StatusCode::CONFLICT, err.clone()).into_response())
+}
+
+async fn load_run_sandbox_record(
+    state: &Arc<AppState>,
+    run_id: &RunId,
+) -> Result<fabro_types::SandboxRecord, Response> {
+    match state.store.open_run_reader(run_id).await {
+        Ok(run_store) => match run_store.state().await {
+            Ok(run_state) => run_state.sandbox.ok_or_else(|| {
+                ApiError::new(StatusCode::CONFLICT, "Run has no active sandbox.").into_response()
+            }),
+            Err(err) => Err(
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+            ),
+        },
+        Err(_) => Err(ApiError::not_found("Run not found.").into_response()),
     }
 }
 

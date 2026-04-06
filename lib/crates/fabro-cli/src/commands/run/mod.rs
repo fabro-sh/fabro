@@ -90,9 +90,7 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             #[cfg(feature = "sleep_inhibitor")]
             let _sleep_guard = {
-                let cli_settings = crate::user_config::load_settings_with_storage_dir(
-                    args.storage_dir.as_deref(),
-                )?;
+                let cli_settings = crate::user_config::load_settings()?;
                 crate::sleep_inhibitor::guard(cli_settings.prevent_idle_sleep_enabled())
             };
             resume::resume_command(args, styles, globals).await

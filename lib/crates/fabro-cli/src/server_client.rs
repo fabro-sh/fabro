@@ -19,6 +19,7 @@ use crate::args::{ServerConnectionArgs, ServerTargetArgs};
 use crate::commands::server::start;
 use crate::user_config;
 
+#[derive(Clone)]
 pub(crate) struct ServerStoreClient {
     client: fabro_api::Client,
 }
@@ -210,6 +211,10 @@ async fn wait_for_server_ready(http_client: &reqwest::Client) -> Result<()> {
 }
 
 impl ServerStoreClient {
+    pub(crate) fn clone_for_reuse(&self) -> Self {
+        self.clone()
+    }
+
     pub(crate) async fn create_run_from_manifest(
         &self,
         manifest: types::RunManifest,
@@ -384,6 +389,137 @@ impl ServerStoreClient {
         self.client
             .delete_run()
             .id(run_id.to_string())
+            .send()
+            .await
+            .map_err(map_api_error)?;
+        Ok(())
+    }
+
+    pub(crate) async fn list_run_artifacts(
+        &self,
+        run_id: &RunId,
+    ) -> Result<Vec<types::RunArtifactEntry>> {
+        let response = self
+            .client
+            .list_run_artifacts()
+            .id(run_id.to_string())
+            .send()
+            .await
+            .map_err(map_api_error)?;
+        Ok(response.into_inner().data)
+    }
+
+    pub(crate) async fn download_stage_artifact(
+        &self,
+        run_id: &RunId,
+        stage_id: &StageId,
+        filename: &str,
+    ) -> Result<Vec<u8>> {
+        let response = self
+            .client
+            .get_stage_artifact()
+            .id(run_id.to_string())
+            .stage_id(stage_id.to_string())
+            .filename(filename)
+            .send()
+            .await
+            .map_err(map_api_error)?;
+        let mut stream = response.into_inner();
+        let mut bytes = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|err| anyhow!("{err}"))?;
+            bytes.extend_from_slice(&chunk);
+        }
+        Ok(bytes)
+    }
+
+    pub(crate) async fn generate_preview_url(
+        &self,
+        run_id: &RunId,
+        port: u16,
+        expires_in_secs: u64,
+        signed: bool,
+    ) -> Result<types::PreviewUrlResponse> {
+        let expires_in_secs = NonZeroU64::new(expires_in_secs)
+            .ok_or_else(|| anyhow!("preview expiry must be greater than zero"))?;
+        let response = self
+            .client
+            .generate_preview_url()
+            .id(run_id.to_string())
+            .body(types::PreviewUrlRequest {
+                expires_in_secs,
+                port: i64::from(port),
+                signed,
+            })
+            .send()
+            .await
+            .map_err(map_api_error)?;
+        Ok(response.into_inner())
+    }
+
+    pub(crate) async fn create_run_ssh_access(
+        &self,
+        run_id: &RunId,
+        ttl_minutes: f64,
+    ) -> Result<types::SshAccessResponse> {
+        let response = self
+            .client
+            .create_run_ssh_access()
+            .id(run_id.to_string())
+            .body(types::SshAccessRequest { ttl_minutes })
+            .send()
+            .await
+            .map_err(map_api_error)?;
+        Ok(response.into_inner())
+    }
+
+    pub(crate) async fn list_sandbox_files(
+        &self,
+        run_id: &RunId,
+        path: &str,
+        depth: Option<u32>,
+    ) -> Result<Vec<types::SandboxFileEntry>> {
+        let mut request = self
+            .client
+            .list_sandbox_files()
+            .id(run_id.to_string())
+            .path(path);
+        if let Some(depth) = depth.and_then(non_zero_u64_from_u32) {
+            request = request.depth(depth);
+        }
+        let response = request.send().await.map_err(map_api_error)?;
+        Ok(response.into_inner().data)
+    }
+
+    pub(crate) async fn get_sandbox_file(&self, run_id: &RunId, path: &str) -> Result<Vec<u8>> {
+        let response = self
+            .client
+            .get_sandbox_file()
+            .id(run_id.to_string())
+            .path(path)
+            .send()
+            .await
+            .map_err(map_api_error)?;
+        let mut stream = response.into_inner();
+        let mut bytes = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|err| anyhow!("{err}"))?;
+            bytes.extend_from_slice(&chunk);
+        }
+        Ok(bytes)
+    }
+
+    pub(crate) async fn put_sandbox_file(
+        &self,
+        run_id: &RunId,
+        path: &str,
+        bytes: Vec<u8>,
+    ) -> Result<()> {
+        self.client
+            .put_sandbox_file()
+            .id(run_id.to_string())
+            .path(path)
+            .body(bytes)
             .send()
             .await
             .map_err(map_api_error)?;

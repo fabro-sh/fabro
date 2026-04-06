@@ -1,22 +1,11 @@
 use anyhow::Result;
-use fabro_store::RuntimeState;
-use fabro_workflow::artifacts::scan_artifacts;
 
 use crate::args::{ArtifactListArgs, GlobalArgs};
-use crate::server_runs::ServerRunLookup;
-use crate::shared::format_size;
-use crate::user_config::load_settings_with_storage_dir;
 
 pub(super) async fn list_command(args: &ArtifactListArgs, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = load_settings_with_storage_dir(args.storage_dir.as_deref())?;
-    let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
-    let run = lookup.resolve(&args.run_id)?;
-    let runtime_state = RuntimeState::new(&run.path);
-    let entries = scan_artifacts(
-        &runtime_state.artifacts_dir(),
-        args.node.as_deref(),
-        args.retry,
-    )?;
+    let (_run_id, _client, entries) =
+        super::resolve_artifacts(&args.server, &args.run_id, args.node.as_deref(), args.retry)
+            .await?;
 
     if globals.json {
         println!("{}", serde_json::to_string_pretty(&entries)?);
@@ -34,34 +23,22 @@ pub(super) async fn list_command(args: &ArtifactListArgs, globals: &GlobalArgs) 
         .max()
         .unwrap_or(4)
         .max(4);
-    let retry_width = 5;
-    let size_width = entries
+    let retry_width = entries
         .iter()
-        .map(|entry| format_size(entry.size).len())
+        .map(|entry| entry.retry.to_string().len())
         .max()
-        .unwrap_or(4)
-        .max(4);
+        .unwrap_or(5)
+        .max(5);
 
-    println!(
-        "{:<node_width$}  {:>retry_width$}  {:>size_width$}  PATH",
-        "NODE", "RETRY", "SIZE"
-    );
-    let total_size: u64 = entries.iter().map(|entry| entry.size).sum();
+    println!("{:<node_width$}  {:>retry_width$}  PATH", "NODE", "RETRY");
     for entry in &entries {
         println!(
-            "{:<node_width$}  {:>retry_width$}  {:>size_width$}  {}",
-            entry.node_slug,
-            entry.retry,
-            format_size(entry.size),
-            entry.relative_path
+            "{:<node_width$}  {:>retry_width$}  {}",
+            entry.node_slug, entry.retry, entry.relative_path
         );
     }
     println!();
-    println!(
-        "{} artifact(s), {} total",
-        entries.len(),
-        format_size(total_size)
-    );
+    println!("{} artifact(s)", entries.len());
 
     Ok(())
 }

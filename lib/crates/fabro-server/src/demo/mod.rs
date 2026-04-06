@@ -8,7 +8,9 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use fabro_api::types::{RunStatus, RunStatusResponse, SessionTurn, SmoothnessRating};
+use fabro_api::types::{
+    RunArtifactListResponse, RunStatus, RunStatusResponse, SessionTurn, SmoothnessRating,
+};
 use serde_json::json;
 
 use crate::error::ApiError;
@@ -94,13 +96,16 @@ pub(crate) async fn get_stage_turns(
     paginated_response(runs::turns(), &pagination)
 }
 
-pub(crate) async fn get_run_files(
+pub(crate) async fn list_run_artifacts_stub(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
-    Query(pagination): Query<PaginationParams>,
 ) -> Response {
-    paginated_response(runs::files(), &pagination)
+    (
+        StatusCode::OK,
+        Json(RunArtifactListResponse { data: vec![] }),
+    )
+        .into_response()
 }
 
 pub(crate) async fn get_run_usage(
@@ -143,9 +148,54 @@ pub(crate) async fn generate_preview_url_stub(
 ) -> Response {
     (
         StatusCode::CREATED,
-        Json(serde_json::json!({"url": "https://google.com"})),
+        Json(serde_json::json!({"url": "https://google.com", "token": "demo-preview-token"})),
     )
         .into_response()
+}
+
+pub(crate) async fn create_ssh_access_stub(
+    _auth: AuthenticatedService,
+    State(_state): State<Arc<AppState>>,
+    Path(_id): Path<String>,
+) -> Response {
+    (
+        StatusCode::CREATED,
+        Json(serde_json::json!({"command": "ssh demo@fabro.example"})),
+    )
+        .into_response()
+}
+
+pub(crate) async fn list_sandbox_files_stub(
+    _auth: AuthenticatedService,
+    State(_state): State<Arc<AppState>>,
+    Path(_id): Path<String>,
+) -> Response {
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "data": [
+                { "name": "report.txt", "is_dir": false, "size": 12 },
+                { "name": "logs", "is_dir": true }
+            ]
+        })),
+    )
+        .into_response()
+}
+
+pub(crate) async fn get_sandbox_file_stub(
+    _auth: AuthenticatedService,
+    State(_state): State<Arc<AppState>>,
+    Path(_id): Path<String>,
+) -> Response {
+    (StatusCode::OK, "demo sandbox file").into_response()
+}
+
+pub(crate) async fn put_sandbox_file_stub(
+    _auth: AuthenticatedService,
+    State(_state): State<Arc<AppState>>,
+    Path(_id): Path<String>,
+) -> Response {
+    StatusCode::NO_CONTENT.into_response()
 }
 
 pub(crate) async fn get_run_status(
@@ -1203,23 +1253,6 @@ mod runs {
                 ],
             }),
             StageTurn::AssistantStageTurn(AssistantStageTurn { kind: AssistantStageTurnKind::Assistant, content: "I've detected drift in 3 resources between production and staging:\n\n1. **redis.max_connections** — production has 200, staging has 100\n2. **redis.tls** — enabled in production, disabled in staging\n3. **iam.session_duration** — production uses 3600s, staging uses 1800s".into() }),
-        ]
-    }
-
-    pub(super) fn files() -> Vec<FileDiff> {
-        vec![
-                FileDiff {
-                    old_file: DiffFile { name: "src/commands/run.ts".into(), contents: "import { parseArgs } from \"node:util\";\nimport { loadConfig } from \"../config.js\";\nimport { execute } from \"../executor.js\";\n\ninterface RunOptions {\n  config: string;\n  dryRun: boolean;\n}\n\nexport async function run(argv: string[]) {\n  const { values } = parseArgs({\n    args: argv,\n    options: {\n      config: { type: \"string\", short: \"c\", default: \"fabro.toml\" },\n      \"dry-run\": { type: \"boolean\", default: false },\n    },\n  });\n\n  const opts: RunOptions = {\n    config: values.config ?? \"fabro.toml\",\n    dryRun: values[\"dry-run\"] ?? false,\n  };\n\n  const config = await loadConfig(opts.config);\n  const result = await execute(config, { dryRun: opts.dryRun });\n\n  if (result.success) {\n    console.log(\"Run completed successfully.\");\n  } else {\n    console.error(\"Run failed:\", result.error);\n    process.exitCode = 1;\n  }\n}\n".into() },
-                    new_file: DiffFile { name: "src/commands/run.ts".into(), contents: "import { parseArgs } from \"node:util\";\nimport { loadConfig } from \"../config.js\";\nimport { execute } from \"../executor.js\";\nimport { createLogger, type Logger } from \"../logger.js\";\n\ninterface RunOptions {\n  config: string;\n  dryRun: boolean;\n  verbose: boolean;\n}\n\nexport async function run(argv: string[]) {\n  const { values } = parseArgs({\n    args: argv,\n    options: {\n      config: { type: \"string\", short: \"c\", default: \"fabro.toml\" },\n      \"dry-run\": { type: \"boolean\", default: false },\n      verbose: { type: \"boolean\", short: \"v\", default: false },\n    },\n  });\n\n  const opts: RunOptions = {\n    config: values.config ?? \"fabro.toml\",\n    dryRun: values[\"dry-run\"] ?? false,\n    verbose: values.verbose ?? false,\n  };\n\n  const logger: Logger = createLogger({ verbose: opts.verbose });\n\n  const config = await loadConfig(opts.config);\n  logger.debug(\"Loaded config from %s\", opts.config);\n\n  const result = await execute(config, { dryRun: opts.dryRun, logger });\n  logger.debug(\"Execution finished in %dms\", result.elapsed);\n\n  if (result.success) {\n    console.log(\"Run completed successfully.\");\n  } else {\n    console.error(\"Run failed:\", result.error);\n    process.exitCode = 1;\n  }\n}\n".into() },
-                },
-                FileDiff {
-                    old_file: DiffFile { name: "src/logger.ts".into(), contents: String::new() },
-                    new_file: DiffFile { name: "src/logger.ts".into(), contents: "export interface Logger {\n  info(message: string, ...args: unknown[]): void;\n  debug(message: string, ...args: unknown[]): void;\n  error(message: string, ...args: unknown[]): void;\n}\n\ninterface LoggerOptions {\n  verbose: boolean;\n}\n\nexport function createLogger({ verbose }: LoggerOptions): Logger {\n  return {\n    info(message, ...args) {\n      console.log(message, ...args);\n    },\n    debug(message, ...args) {\n      if (verbose) {\n        console.log(\"[debug]\", message, ...args);\n      }\n    },\n    error(message, ...args) {\n      console.error(message, ...args);\n    },\n  };\n}\n".into() },
-                },
-                FileDiff {
-                    old_file: DiffFile { name: "src/executor.ts".into(), contents: "import type { Config } from \"./config.js\";\n\ninterface ExecuteOptions {\n  dryRun: boolean;\n}\n\ninterface ExecuteResult {\n  success: boolean;\n  error?: string;\n}\n\nexport async function execute(\n  config: Config,\n  options: ExecuteOptions,\n): Promise<ExecuteResult> {\n  if (options.dryRun) {\n    console.log(\"Dry run — skipping execution.\");\n    return { success: true };\n  }\n\n  try {\n    for (const step of config.steps) {\n      await step.run();\n    }\n    return { success: true };\n  } catch (err) {\n    const message = err instanceof Error ? err.message : String(err);\n    return { success: false, error: message };\n  }\n}\n".into() },
-                    new_file: DiffFile { name: "src/executor.ts".into(), contents: "import type { Config } from \"./config.js\";\nimport type { Logger } from \"./logger.js\";\n\ninterface ExecuteOptions {\n  dryRun: boolean;\n  logger: Logger;\n}\n\ninterface ExecuteResult {\n  success: boolean;\n  elapsed: number;\n  error?: string;\n}\n\nexport async function execute(\n  config: Config,\n  options: ExecuteOptions,\n): Promise<ExecuteResult> {\n  const start = performance.now();\n\n  if (options.dryRun) {\n    options.logger.info(\"Dry run — skipping execution.\");\n    return { success: true, elapsed: performance.now() - start };\n  }\n\n  try {\n    for (const step of config.steps) {\n      options.logger.debug(\"Running step: %s\", step.name);\n      await step.run();\n    }\n    return { success: true, elapsed: performance.now() - start };\n  } catch (err) {\n    const message = err instanceof Error ? err.message : String(err);\n    return { success: false, elapsed: performance.now() - start, error: message };\n  }\n}\n".into() },
-                },
         ]
     }
 

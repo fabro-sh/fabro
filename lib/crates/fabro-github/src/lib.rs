@@ -579,6 +579,41 @@ pub fn ssh_url_to_https(url: &str) -> String {
     url.to_string()
 }
 
+pub fn normalize_repo_origin_url(url: &str) -> String {
+    let https = ssh_url_to_https(url.trim());
+    let without_credentials = strip_https_credentials(&https);
+    let normalized = normalize_https_host_path(&without_credentials);
+    let normalized = normalized.trim_end_matches('/');
+    normalized
+        .strip_suffix(".git")
+        .unwrap_or(normalized)
+        .to_string()
+}
+
+fn strip_https_credentials(url: &str) -> String {
+    let Some(rest) = url.strip_prefix("https://") else {
+        return url.to_string();
+    };
+
+    match rest.split_once('@') {
+        Some((before, after)) if !before.contains('/') => format!("https://{after}"),
+        _ => url.to_string(),
+    }
+}
+
+fn normalize_https_host_path(url: &str) -> String {
+    let Some(rest) = url.strip_prefix("https://") else {
+        return url.to_string();
+    };
+
+    match rest.split_once(':') {
+        Some((host, path)) if !host.contains('/') && !path.starts_with('/') => {
+            format!("https://{host}/{path}")
+        }
+        _ => url.to_string(),
+    }
+}
+
 /// Check whether a branch exists in a GitHub repository.
 ///
 /// Uses a GitHub App installation token to query the branches API.
@@ -1055,6 +1090,30 @@ mod tests {
         assert_eq!(
             ssh_url_to_https("https://github.com/brynary/arc.git"),
             "https://github.com/brynary/arc.git"
+        );
+    }
+
+    #[test]
+    fn normalize_repo_origin_url_converts_ssh_and_trims_git_suffix() {
+        assert_eq!(
+            normalize_repo_origin_url("git@github.com:brynary/arc.git"),
+            "https://github.com/brynary/arc"
+        );
+    }
+
+    #[test]
+    fn normalize_repo_origin_url_strips_credentials_and_trailing_slash() {
+        assert_eq!(
+            normalize_repo_origin_url("https://token@github.com/acme/widgets.git/"),
+            "https://github.com/acme/widgets"
+        );
+    }
+
+    #[test]
+    fn normalize_repo_origin_url_handles_sanitized_git_at_shape() {
+        assert_eq!(
+            normalize_repo_origin_url("https://***@github.com:acme/widgets.git"),
+            "https://github.com/acme/widgets"
         );
     }
 

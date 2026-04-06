@@ -87,6 +87,7 @@ async fn initialized(
                 .host_repo_path
                 .as_ref()
                 .map(|path| path.display().to_string()),
+            repo_origin_url: None,
             base_branch: run_options.base_branch.clone(),
             workflow_slug: run_options.workflow_slug.clone(),
             db_prefix: None,

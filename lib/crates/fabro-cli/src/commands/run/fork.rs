@@ -7,16 +7,18 @@ use git2::Repository;
 
 use crate::args::{ForkArgs, GlobalArgs};
 use crate::commands::store::rebuild::rebuild_run_store;
-use crate::server_runs::ServerRunLookup;
+use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
-use crate::user_config::load_settings_with_storage_dir;
+use crate::shared::repo::ensure_matching_repo_origin;
 
 pub(crate) async fn run(args: &ForkArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
     let repo = Repository::discover(".").context("not in a git repository")?;
-    let cli_settings = load_settings_with_storage_dir(args.storage_dir.as_deref())?;
-    let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
+    let lookup = ServerSummaryLookup::connect(&args.server).await?;
     let run = lookup.resolve(&args.run_id)?;
     let run_id = run.run_id();
+    let state = lookup.client().get_run_state(&run_id).await?;
+    let record = state.run.context("Failed to load run record from store")?;
+    ensure_matching_repo_origin(record.repo_origin_url.as_deref(), "fork")?;
     let store = Store::new(repo);
     let events = lookup.client().list_run_events(&run_id, None, None).await?;
     let run_store = rebuild_run_store(&run_id, &events).await?;

@@ -1,36 +1,22 @@
-use std::path::Path;
-
 use anyhow::{Context, Result, bail};
 use fabro_model::Catalog;
 use fabro_sandbox::daytona::detect_repo_info;
 use fabro_workflow::outcome::StageStatus;
 use fabro_workflow::pull_request::maybe_open_pull_request;
-use fabro_workflow::run_lookup::runs_base;
 use tracing::info;
 
 use crate::args::{GlobalArgs, PrCreateArgs};
 use crate::commands::store::rebuild::rebuild_run_store;
-use crate::server_runs::ServerRunLookup;
+use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
-use crate::user_config::load_settings_with_storage_dir;
+use crate::shared::repo::ensure_matching_repo_origin;
 
 pub(super) async fn create_command(
     args: PrCreateArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
     globals: &GlobalArgs,
 ) -> Result<()> {
-    let cli_settings = load_settings_with_storage_dir(args.storage_dir.as_deref())?;
-    let base = runs_base(&cli_settings.storage_dir());
-    create_from(&base, args, github_app, globals).await
-}
-
-async fn create_from(
-    base: &Path,
-    args: PrCreateArgs,
-    github_app: Option<fabro_github::GitHubAppCredentials>,
-    globals: &GlobalArgs,
-) -> Result<()> {
-    let lookup = ServerRunLookup::connect_from_runs_base(base).await?;
+    let lookup = ServerSummaryLookup::connect(&args.server).await?;
     let run = lookup.resolve(&args.run_id)?;
     let run_id = run.run_id();
     let events = lookup.client().list_run_events(&run_id, None, None).await?;
@@ -38,6 +24,10 @@ async fn create_from(
     let state = run_store.state().await?;
 
     let record = state.run.context("Failed to load run record from store")?;
+    ensure_matching_repo_origin(
+        record.repo_origin_url.as_deref(),
+        "create a pull request for",
+    )?;
 
     let start = state
         .start

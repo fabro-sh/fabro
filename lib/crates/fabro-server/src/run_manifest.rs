@@ -130,6 +130,10 @@ pub(crate) fn create_run_input(prepared: PreparedManifest) -> CreateRunInput {
         workflow_bundle: Some(prepared.workflow_bundle),
         run_id: prepared.run_id,
         host_repo_path: Some(prepared.working_directory.display().to_string()),
+        repo_origin_url: prepared
+            .git
+            .as_ref()
+            .map(|git| fabro_github::normalize_repo_origin_url(&git.origin_url)),
         base_branch: prepared.git.as_ref().map(|git| git.branch.clone()),
     }
 }

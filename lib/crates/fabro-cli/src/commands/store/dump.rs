@@ -176,6 +176,7 @@ mod tests {
             workflow_slug: Some("night-sky".to_string()),
             working_directory: PathBuf::from("/tmp/night-sky"),
             host_repo_path: Some("github.com/fabro-sh/fabro".to_string()),
+            repo_origin_url: Some("https://github.com/fabro-sh/fabro".to_string()),
             base_branch: Some("main".to_string()),
             labels: HashMap::from([("team".to_string(), "infra".to_string())]),
         }
@@ -306,6 +307,7 @@ mod tests {
                 run_dir: "/tmp/night-sky-run".to_string(),
                 working_directory: run_record.working_directory.display().to_string(),
                 host_repo_path: run_record.host_repo_path.clone(),
+                repo_origin_url: run_record.repo_origin_url.clone(),
                 base_branch: run_record.base_branch.clone(),
                 workflow_slug: run_record.workflow_slug.clone(),
                 db_prefix: None,
@@ -657,6 +659,7 @@ mod tests {
                 run_dir: "/tmp/night-sky-run".to_string(),
                 working_directory: run_record.working_directory.display().to_string(),
                 host_repo_path: run_record.host_repo_path.clone(),
+                repo_origin_url: run_record.repo_origin_url.clone(),
                 base_branch: run_record.base_branch.clone(),
                 workflow_slug: run_record.workflow_slug.clone(),
                 db_prefix: None,

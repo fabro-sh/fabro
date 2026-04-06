@@ -263,6 +263,7 @@ mod tests {
             workflow_slug: Some("night-sky".to_string()),
             working_directory: PathBuf::from(format!("/tmp/{label}")),
             host_repo_path: Some("github.com/fabro-sh/fabro".to_string()),
+            repo_origin_url: Some("https://github.com/fabro-sh/fabro".to_string()),
             base_branch: Some("main".to_string()),
             labels: std::collections::HashMap::from([("team".to_string(), "infra".to_string())]),
         }

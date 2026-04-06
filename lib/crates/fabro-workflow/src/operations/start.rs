@@ -868,6 +868,7 @@ mod tests {
                 workflow_bundle: None,
                 run_id: Some(fixtures::RUN_1),
                 host_repo_path: None,
+                repo_origin_url: None,
                 base_branch: None,
             },
         )

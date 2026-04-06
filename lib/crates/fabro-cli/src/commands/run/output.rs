@@ -122,20 +122,6 @@ pub(crate) fn api_check_report_to_local(report: &types::PreflightCheckReport) ->
     }
 }
 
-pub(crate) async fn print_run_summary(
-    storage_dir: &Path,
-    run_dir: &Path,
-    run_id: impl std::fmt::Display,
-    styles: &Styles,
-) -> Result<()> {
-    let run_id = run_id
-        .to_string()
-        .parse()
-        .map_err(|err| anyhow::anyhow!("invalid run ID: {err}"))?;
-    let client = server_client::connect_server(storage_dir).await?;
-    print_run_summary_with_client(&client, &run_id, Some(run_dir), styles).await
-}
-
 pub(crate) async fn print_run_summary_with_client(
     client: &server_client::ServerStoreClient,
     run_id: &fabro_types::RunId,

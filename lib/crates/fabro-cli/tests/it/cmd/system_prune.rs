@@ -57,7 +57,7 @@ fn system_prune_dry_run_lists_matching_runs_without_deleting() {
     success: true
     exit_code: 0
     ----- stdout -----
-    would delete: 20260405-[ULID] (Simple)
+    would delete: 20260406-[ULID] (Simple)
     ----- stderr -----
 
     1 run(s) would be deleted ([SIZE] freed). Pass --yes to confirm.

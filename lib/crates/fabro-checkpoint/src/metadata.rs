@@ -211,6 +211,7 @@ mod tests {
             workflow_slug: None,
             working_directory: PathBuf::from("/tmp"),
             host_repo_path: None,
+            repo_origin_url: None,
             base_branch: None,
             labels: HashMap::new(),
         }

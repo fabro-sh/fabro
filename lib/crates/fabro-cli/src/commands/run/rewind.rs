@@ -16,9 +16,9 @@ use serde::Serialize;
 use crate::args::{GlobalArgs, RewindArgs};
 use crate::commands::store::rebuild::rebuild_run_store;
 use crate::server_client::ServerStoreClient;
-use crate::server_runs::ServerRunLookup;
+use crate::server_runs::ServerSummaryLookup;
+use crate::shared::repo::ensure_matching_repo_origin;
 use crate::shared::{color_if, print_json_pretty};
-use crate::user_config::load_settings_with_storage_dir;
 
 #[derive(Serialize)]
 pub(crate) struct TimelineEntryJson {
@@ -30,10 +30,12 @@ pub(crate) struct TimelineEntryJson {
 
 pub(crate) async fn run(args: &RewindArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
     let repo = Repository::discover(".").context("not in a git repository")?;
-    let cli_settings = load_settings_with_storage_dir(args.storage_dir.as_deref())?;
-    let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
+    let lookup = ServerSummaryLookup::connect(&args.server).await?;
     let run = lookup.resolve(&args.run_id)?;
     let run_id = run.run_id();
+    let state = lookup.client().get_run_state(&run_id).await?;
+    let record = state.run.context("Failed to load run record from store")?;
+    ensure_matching_repo_origin(record.repo_origin_url.as_deref(), "rewind")?;
     let store = Store::new(repo);
     let events = lookup.client().list_run_events(&run_id, None, None).await?;
     let run_store = rebuild_run_store(&run_id, &events).await?;
@@ -60,7 +62,7 @@ pub(crate) async fn run(args: &RewindArgs, styles: &Styles, globals: &GlobalArgs
         },
     )?;
     let entry = timeline.resolve(&target)?;
-    reset_rewound_run_state(lookup.client(), &store, &run_id, &run.path, entry).await?;
+    reset_rewound_run_state(lookup.client(), &store, &run_id, entry).await?;
 
     let run_id_string = run_id.to_string();
 
@@ -96,7 +98,6 @@ async fn reset_rewound_run_state(
     client: &ServerStoreClient,
     git_store: &Store,
     run_id: &fabro_types::RunId,
-    run_dir: &std::path::Path,
     entry: &TimelineEntry,
 ) -> Result<()> {
     let state = client.get_run_state(run_id).await.map_err(|err| {
@@ -109,8 +110,6 @@ async fn reset_rewound_run_state(
     let checkpoint = MetadataStore::read_checkpoint(git_store.repo_dir(), &run_id.to_string())?
         .context("rewound metadata branch is missing checkpoint.json")?;
     let previous_status = state.status.map(|status| status.status.to_string());
-
-    let _ = std::fs::remove_file(run_dir.join("detached_failure.json"));
 
     client
         .append_run_event(

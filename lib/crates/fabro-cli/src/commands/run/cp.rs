@@ -1,16 +1,15 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use fabro_agent::sandbox::Sandbox;
-use fabro_sandbox::reconnect::reconnect;
 use tokio::fs;
 use tracing::{debug, info};
 
-use crate::args::{CpArgs, GlobalArgs};
-use crate::server_runs::ServerRunLookup;
+use crate::args::{CpArgs, GlobalArgs, ServerTargetArgs};
+use crate::server_client::ServerStoreClient;
+use crate::server_runs::ServerSummaryLookup;
 use crate::shared::{print_json_pretty, split_run_path};
-use crate::user_config::load_settings_with_storage_dir;
 
+#[derive(Debug)]
 enum CopyDirection {
     Download {
         run_prefix: String,
@@ -26,7 +25,6 @@ enum CopyDirection {
 
 pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs) -> Result<()> {
     let direction = parse_direction(&args.src, &args.dst)?;
-    let cli_settings = load_settings_with_storage_dir(args.storage_dir.as_deref())?;
 
     match direction {
         CopyDirection::Download {
@@ -34,16 +32,13 @@ pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs) -> Result<()>
             remote_path,
             local_path,
         } => {
-            let sandbox = load_sandbox(&cli_settings.storage_dir(), &run_prefix).await?;
+            let (client, run_id) = resolve_client_and_run_id(&args.server, &run_prefix).await?;
 
             let file_count = if args.recursive {
-                Some(download_recursive(&*sandbox, &remote_path, &local_path).await?)
+                Some(download_recursive(&client, &run_id, &remote_path, &local_path).await?)
             } else {
                 debug!(path = %remote_path, "Downloading file from sandbox");
-                sandbox
-                    .download_file_to_local(&remote_path, &local_path)
-                    .await
-                    .map_err(|err| anyhow::anyhow!("{err}"))?;
+                write_sandbox_file(&client, &run_id, &remote_path, &local_path).await?;
                 None
             };
 
@@ -67,16 +62,13 @@ pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs) -> Result<()>
             run_prefix,
             remote_path,
         } => {
-            let sandbox = load_sandbox(&cli_settings.storage_dir(), &run_prefix).await?;
+            let (client, run_id) = resolve_client_and_run_id(&args.server, &run_prefix).await?;
 
             let file_count = if args.recursive {
-                Some(upload_recursive(&*sandbox, &local_path, &remote_path).await?)
+                Some(upload_recursive(&client, &run_id, &local_path, &remote_path).await?)
             } else {
                 debug!(path = %remote_path, "Uploading file to sandbox");
-                sandbox
-                    .upload_file_from_local(&local_path, &remote_path)
-                    .await
-                    .map_err(|err| anyhow::anyhow!("{err}"))?;
+                upload_sandbox_file(&client, &run_id, &local_path, &remote_path).await?;
                 None
             };
 
@@ -121,29 +113,54 @@ fn parse_direction(src: &str, dst: &str) -> Result<CopyDirection> {
     }
 }
 
-async fn load_sandbox(storage_dir: &Path, run_prefix: &str) -> Result<Box<dyn Sandbox>> {
-    let lookup = ServerRunLookup::connect(storage_dir).await?;
+async fn resolve_client_and_run_id(
+    server: &ServerTargetArgs,
+    run_prefix: &str,
+) -> Result<(ServerStoreClient, fabro_types::RunId)> {
+    let lookup = ServerSummaryLookup::connect(server).await?;
     let run = lookup.resolve(run_prefix)?;
-    let record = lookup
-        .client()
-        .get_run_state(&run.run_id())
-        .await?
-        .sandbox
-        .context("Failed to load sandbox record from store")?;
+    Ok((lookup.client().clone_for_reuse(), run.run_id()))
+}
 
-    info!(run_id = %run_prefix, provider = %record.provider, "Connecting to sandbox");
-    reconnect(&record).await
+async fn write_sandbox_file(
+    client: &ServerStoreClient,
+    run_id: &fabro_types::RunId,
+    remote_path: &str,
+    local_path: &Path,
+) -> Result<()> {
+    if let Some(parent) = local_path.parent() {
+        fs::create_dir_all(parent)
+            .await
+            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
+    }
+    let bytes = client.get_sandbox_file(run_id, remote_path).await?;
+    fs::write(local_path, bytes)
+        .await
+        .with_context(|| format!("Failed to write {}", local_path.display()))?;
+    Ok(())
+}
+
+async fn upload_sandbox_file(
+    client: &ServerStoreClient,
+    run_id: &fabro_types::RunId,
+    local_path: &Path,
+    remote_path: &str,
+) -> Result<()> {
+    let bytes = fs::read(local_path)
+        .await
+        .with_context(|| format!("Failed to read {}", local_path.display()))?;
+    client.put_sandbox_file(run_id, remote_path, bytes).await
 }
 
 async fn download_recursive(
-    sandbox: &dyn Sandbox,
+    client: &ServerStoreClient,
+    run_id: &fabro_types::RunId,
     remote_path: &str,
     local_path: &Path,
 ) -> Result<usize> {
-    let entries = sandbox
-        .list_directory(remote_path, Some(100))
-        .await
-        .map_err(|err| anyhow::anyhow!("Failed to list directory {remote_path}: {err}"))?;
+    let entries = client
+        .list_sandbox_files(run_id, remote_path, Some(100))
+        .await?;
 
     let mut file_count = 0usize;
     for entry in &entries {
@@ -152,16 +169,8 @@ async fn download_recursive(
         }
         let remote_file = format!("{remote_path}/{}", entry.name);
         let local_file = local_path.join(&entry.name);
-        if let Some(parent) = local_file.parent() {
-            fs::create_dir_all(parent)
-                .await
-                .with_context(|| format!("Failed to create directory {}", parent.display()))?;
-        }
         debug!(path = %remote_file, "Downloading file from sandbox");
-        sandbox
-            .download_file_to_local(&remote_file, &local_file)
-            .await
-            .map_err(|err| anyhow::anyhow!("{err}"))?;
+        write_sandbox_file(client, run_id, &remote_file, &local_file).await?;
         file_count += 1;
     }
     debug!(count = file_count, "Recursive download complete");
@@ -169,7 +178,8 @@ async fn download_recursive(
 }
 
 async fn upload_recursive(
-    sandbox: &dyn Sandbox,
+    client: &ServerStoreClient,
+    run_id: &fabro_types::RunId,
     local_path: &Path,
     remote_path: &str,
 ) -> Result<usize> {
@@ -190,10 +200,7 @@ async fn upload_recursive(
                 stack.push((entry_path, remote_file));
             } else {
                 debug!(path = %remote_file, "Uploading file to sandbox");
-                sandbox
-                    .upload_file_from_local(&entry_path, &remote_file)
-                    .await
-                    .map_err(|err| anyhow::anyhow!("{err}"))?;
+                upload_sandbox_file(client, run_id, &entry_path, &remote_file).await?;
                 file_count += 1;
             }
         }
@@ -241,9 +248,11 @@ mod tests {
     }
 
     #[test]
-    fn split_run_path_ignores_local_paths() {
-        assert_eq!(split_run_path("/tmp/file"), None);
-        assert_eq!(split_run_path("./file"), None);
-        assert_eq!(split_run_path("../file"), None);
+    fn parse_direction_rejects_sandbox_to_sandbox_copy() {
+        let err = parse_direction("abc123:/in.txt", "def456:/out.txt").unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("Cannot copy between two sandboxes")
+        );
     }
 }

@@ -33,6 +33,7 @@ pub struct CreateRunInput {
     pub workflow_bundle: Option<WorkflowBundle>,
     pub run_id: Option<RunId>,
     pub host_repo_path: Option<String>,
+    pub repo_origin_url: Option<String>,
     pub base_branch: Option<String>,
 }
 
@@ -53,6 +54,7 @@ struct PersistCreateOptions {
     base_branch: Option<String>,
     working_directory: PathBuf,
     host_repo_path: Option<String>,
+    repo_origin_url: Option<String>,
 }
 
 /// Resolve workflow inputs, normalize settings, and persist a run directory.
@@ -77,6 +79,7 @@ pub async fn create(store: &SlateStore, request: CreateRunInput) -> Result<Creat
         workflow_bundle,
         run_id,
         host_repo_path,
+        repo_origin_url,
         base_branch,
     } = request;
 
@@ -87,10 +90,16 @@ pub async fn create(store: &SlateStore, request: CreateRunInput) -> Result<Creat
     let working_directory = resolved.working_directory.clone();
     let host_repo_path =
         host_repo_path.or_else(|| Some(working_directory.to_string_lossy().to_string()));
+    let detected_repo = detect_repo_info(&working_directory).ok();
+    let repo_origin_url = repo_origin_url.or_else(|| {
+        detected_repo
+            .as_ref()
+            .map(|(origin_url, _)| fabro_github::normalize_repo_origin_url(origin_url))
+    });
     let base_branch = base_branch.or_else(|| {
-        detect_repo_info(&working_directory)
-            .ok()
-            .and_then(|(_, branch)| branch)
+        detected_repo
+            .as_ref()
+            .and_then(|(_, branch)| branch.clone())
     });
 
     let goal_override = resolved.goal_override.clone();
@@ -108,6 +117,7 @@ pub async fn create(store: &SlateStore, request: CreateRunInput) -> Result<Creat
             base_branch,
             working_directory,
             host_repo_path,
+            repo_origin_url,
         },
         current_dir,
         file_resolver,
@@ -169,6 +179,7 @@ async fn persist_created_run(
             run_dir: persisted.run_dir().display().to_string(),
             working_directory: record.working_directory.display().to_string(),
             host_repo_path: record.host_repo_path.clone(),
+            repo_origin_url: record.repo_origin_url.clone(),
             base_branch: record.base_branch.clone(),
             workflow_slug: record.workflow_slug.clone(),
             db_prefix: None,
@@ -302,6 +313,7 @@ fn persist_validated(
         base_branch,
         working_directory,
         host_repo_path,
+        repo_origin_url,
     } = options;
 
     let settings = resolve_run_settings(settings, validated.graph());
@@ -316,6 +328,7 @@ fn persist_validated(
         workflow_slug,
         working_directory,
         host_repo_path,
+        repo_origin_url,
         base_branch,
         labels,
     };
@@ -673,6 +686,7 @@ mod tests {
                 workflow_bundle: None,
                 run_id: None,
                 host_repo_path: None,
+                repo_origin_url: None,
                 base_branch: None,
             },
         )
@@ -719,6 +733,7 @@ mod tests {
                 workflow_bundle: None,
                 run_id: Some(fixtures::RUN_1),
                 host_repo_path: Some(dir.path().display().to_string()),
+                repo_origin_url: None,
                 base_branch: Some("main".to_string()),
             },
         )
@@ -797,6 +812,7 @@ mod tests {
                 workflow_bundle: None,
                 run_id: Some(fixtures::RUN_2),
                 host_repo_path: None,
+                repo_origin_url: None,
                 base_branch: None,
             },
         )
@@ -814,6 +830,40 @@ mod tests {
                     .to_string_lossy()
                     .as_ref()
             )
+        );
+    }
+
+    #[tokio::test]
+    async fn create_persists_repo_origin_url_from_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = memory_store();
+        let created = create(
+            &store,
+            CreateRunInput {
+                workflow: WorkflowInput::DotSource {
+                    source: MINIMAL_DOT.to_string(),
+                    base_dir: None,
+                },
+                settings: Settings {
+                    dry_run: Some(true),
+                    ..Default::default()
+                },
+                cwd: dir.path().to_path_buf(),
+                workflow_slug: None,
+                workflow_path: None,
+                workflow_bundle: None,
+                run_id: Some(fixtures::RUN_2),
+                host_repo_path: None,
+                repo_origin_url: Some("https://github.com/acme/widgets".to_string()),
+                base_branch: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            created.persisted.run_record().repo_origin_url.as_deref(),
+            Some("https://github.com/acme/widgets")
         );
     }
 
@@ -847,6 +897,7 @@ mod tests {
                 workflow_bundle: None,
                 run_id: Some(fixtures::RUN_3),
                 host_repo_path: None,
+                repo_origin_url: None,
                 base_branch: None,
             },
         )

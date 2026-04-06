@@ -224,6 +224,7 @@ mod tests {
             workflow_slug: None,
             working_directory: run_dir.to_path_buf(),
             host_repo_path: None,
+            repo_origin_url: None,
             base_branch: None,
             labels: std::collections::HashMap::new(),
         };
@@ -240,6 +241,7 @@ mod tests {
                 run_dir: run_dir.to_string_lossy().to_string(),
                 working_directory: run_dir.to_string_lossy().to_string(),
                 host_repo_path: None,
+                repo_origin_url: run_record.repo_origin_url.clone(),
                 base_branch: None,
                 workflow_slug: None,
                 db_prefix: None,

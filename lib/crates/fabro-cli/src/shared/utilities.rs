@@ -2,7 +2,6 @@ use std::path::Path;
 use std::time::Duration;
 use std::{io::Write, path::PathBuf};
 
-use anyhow::{Result, bail};
 use cli_table::Color;
 use fabro_util::terminal::Styles;
 use fabro_validate::{Diagnostic, Severity};
@@ -101,19 +100,6 @@ pub(crate) fn split_run_path(s: &str) -> Option<(&str, &str)> {
         return None;
     }
     s.split_once(':')
-}
-
-pub(crate) fn validate_daytona_provider(
-    record: &fabro_sandbox::SandboxRecord,
-    feature: &str,
-) -> Result<()> {
-    if record.provider != "daytona" {
-        bail!(
-            "{feature} is only supported for Daytona sandboxes (this run uses '{}')",
-            record.provider
-        );
-    }
-    Ok(())
 }
 
 pub(crate) fn format_duration_ms(ms: u64) -> String {

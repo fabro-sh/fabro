@@ -20,16 +20,16 @@ fn help() {
       [DEST]    Destination directory (defaults to current directory) [default: .]
 
     Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --node <NODE>                Filter to artifacts from a specific node
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --retry <RETRY>              Filter to artifacts from a specific retry attempt
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --tree                       Preserve {node_slug}/retry_{N}/ directory structure
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-      -h, --help                       Print help
+          --json              Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --node <NODE>       Filter to artifacts from a specific node
+          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --retry <RETRY>     Filter to artifacts from a specific retry attempt
+          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
+          --tree              Preserve {node_slug}/retry_{N}/ directory structure
+          --verbose           Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help              Print help
     ----- stderr -----
     ");
 }

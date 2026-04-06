@@ -1090,6 +1090,7 @@ mod tests {
             workflow_slug: Some("test".to_string()),
             working_directory: PathBuf::from("/tmp/project"),
             host_repo_path: Some("/tmp/project".to_string()),
+            repo_origin_url: None,
             base_branch: Some("main".to_string()),
             labels: HashMap::new(),
         };
@@ -1106,6 +1107,7 @@ mod tests {
                 run_dir: run_record.working_directory.display().to_string(),
                 working_directory: run_record.working_directory.display().to_string(),
                 host_repo_path: run_record.host_repo_path.clone(),
+                repo_origin_url: run_record.repo_origin_url.clone(),
                 base_branch: run_record.base_branch.clone(),
                 workflow_slug: run_record.workflow_slug.clone(),
                 db_prefix: None,
@@ -1156,6 +1158,7 @@ mod tests {
             workflow_slug: Some("test".to_string()),
             working_directory: PathBuf::from("/tmp/project"),
             host_repo_path: Some("/tmp/project".to_string()),
+            repo_origin_url: None,
             base_branch: Some("main".to_string()),
             labels: HashMap::new(),
         };
@@ -1172,6 +1175,7 @@ mod tests {
                 run_dir: run_record.working_directory.display().to_string(),
                 working_directory: run_record.working_directory.display().to_string(),
                 host_repo_path: run_record.host_repo_path.clone(),
+                repo_origin_url: run_record.repo_origin_url.clone(),
                 base_branch: run_record.base_branch.clone(),
                 workflow_slug: run_record.workflow_slug.clone(),
                 db_prefix: None,
@@ -1375,6 +1379,7 @@ mod tests {
             workflow_slug: None,
             working_directory: tmp.path().to_path_buf(),
             host_repo_path: None,
+            repo_origin_url: None,
             base_branch: None,
             labels: std::collections::HashMap::new(),
         };
@@ -1391,6 +1396,7 @@ mod tests {
                 run_dir: run_record.working_directory.display().to_string(),
                 working_directory: tmp.path().display().to_string(),
                 host_repo_path: None,
+                repo_origin_url: run_record.repo_origin_url.clone(),
                 base_branch: None,
                 workflow_slug: None,
                 db_prefix: None,

@@ -30,42 +30,36 @@ fn artifact_commands_share_populated_run_fixture() {
         "node_slug": "create_assets",
         "retry": 1,
         "relative_path": "assets/node_a/summary.txt",
-        "absolute_path": "[RUN_DIR]/cache/artifacts/files/create_assets/retry_1/assets/node_a/summary.txt",
         "size": 5
       },
       {
         "node_slug": "create_assets",
         "retry": 1,
         "relative_path": "assets/shared/report.txt",
-        "absolute_path": "[RUN_DIR]/cache/artifacts/files/create_assets/retry_1/assets/shared/report.txt",
         "size": 3
       },
       {
         "node_slug": "create_colliding",
         "retry": 1,
         "relative_path": "assets/other/summary.txt",
-        "absolute_path": "[RUN_DIR]/cache/artifacts/files/create_colliding/retry_1/assets/other/summary.txt",
         "size": 4
       },
       {
         "node_slug": "create_colliding",
         "retry": 1,
         "relative_path": "assets/retry/report.txt",
-        "absolute_path": "[RUN_DIR]/cache/artifacts/files/create_colliding/retry_1/assets/retry/report.txt",
         "size": 6
       },
       {
         "node_slug": "retry_assets",
         "retry": 1,
         "relative_path": "assets/retry/report.txt",
-        "absolute_path": "[RUN_DIR]/cache/artifacts/files/retry_assets/retry_1/assets/retry/report.txt",
         "size": 5
       },
       {
         "node_slug": "retry_assets",
         "retry": 2,
         "relative_path": "assets/retry/report.txt",
-        "absolute_path": "[RUN_DIR]/cache/artifacts/files/retry_assets/retry_2/assets/retry/report.txt",
         "size": 6
       }
     ]
@@ -92,7 +86,6 @@ fn artifact_commands_share_populated_run_fixture() {
         "node_slug": "retry_assets",
         "retry": 2,
         "relative_path": "assets/retry/report.txt",
-        "absolute_path": "[RUN_DIR]/cache/artifacts/files/retry_assets/retry_2/assets/retry/report.txt",
         "size": 6
       }
     ]

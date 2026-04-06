@@ -375,7 +375,7 @@ pub(crate) struct ParseArgs {
 #[derive(Args)]
 pub(crate) struct ArtifactListArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) server: ServerTargetArgs,
 
     /// Run ID (or prefix)
     pub(crate) run_id: String,
@@ -392,7 +392,7 @@ pub(crate) struct ArtifactListArgs {
 #[derive(Args)]
 pub(crate) struct ArtifactCpArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) server: ServerTargetArgs,
 
     /// Source: RUN_ID (all artifacts) or RUN_ID:path (specific artifact)
     pub(crate) source: String,
@@ -417,7 +417,7 @@ pub(crate) struct ArtifactCpArgs {
 #[derive(Args)]
 pub(crate) struct CpArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) server: ServerTargetArgs,
 
     /// Source: <run-id>:<path> or local path
     pub(crate) src: String,
@@ -431,7 +431,7 @@ pub(crate) struct CpArgs {
 #[derive(Args)]
 pub(crate) struct PreviewArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) server: ServerTargetArgs,
 
     /// Run ID or prefix
     pub(crate) run: String,
@@ -451,7 +451,7 @@ pub(crate) struct PreviewArgs {
 #[derive(Args)]
 pub(crate) struct SshArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) server: ServerTargetArgs,
 
     /// Run ID or prefix
     pub(crate) run: String,
@@ -466,19 +466,13 @@ pub(crate) struct SshArgs {
 #[derive(Args)]
 pub(crate) struct DiffArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) server: ServerTargetArgs,
 
     /// Run ID or prefix
     pub(crate) run: String,
     /// Show diff for a specific node
     #[arg(long)]
     pub(crate) node: Option<String>,
-    /// Show diffstat instead of full patch (live diffs only)
-    #[arg(long)]
-    pub(crate) stat: bool,
-    /// Show only files-changed/insertions/deletions summary (live diffs only)
-    #[arg(long)]
-    pub(crate) shortstat: bool,
 }
 
 #[derive(Args)]
@@ -523,7 +517,7 @@ pub(crate) struct SecretSetArgs {
 #[derive(Debug, Args)]
 pub(crate) struct ResumeArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) server: ServerTargetArgs,
 
     /// Run ID or unambiguous prefix
     pub(crate) run: String,
@@ -536,7 +530,7 @@ pub(crate) struct ResumeArgs {
 #[derive(Debug, Args)]
 pub(crate) struct RewindArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) server: ServerTargetArgs,
 
     /// Run ID (or unambiguous prefix)
     pub(crate) run_id: String,
@@ -556,7 +550,7 @@ pub(crate) struct RewindArgs {
 #[derive(Debug, Args)]
 pub(crate) struct ForkArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) server: ServerTargetArgs,
 
     /// Run ID (or unambiguous prefix)
     pub(crate) run_id: String,
@@ -683,7 +677,7 @@ pub(crate) struct SkillInstallArgs {
 #[derive(Args)]
 pub(crate) struct PrCreateArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) server: ServerTargetArgs,
 
     /// Run ID or prefix
     pub(crate) run_id: String,
@@ -695,7 +689,7 @@ pub(crate) struct PrCreateArgs {
 #[derive(Args)]
 pub(crate) struct PrListArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) server: ServerTargetArgs,
 
     /// Show all PRs (including closed/merged), not just open
     #[arg(long)]
@@ -705,7 +699,7 @@ pub(crate) struct PrListArgs {
 #[derive(Args)]
 pub(crate) struct PrViewArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) server: ServerTargetArgs,
 
     /// Run ID or prefix
     pub(crate) run_id: String,
@@ -714,7 +708,7 @@ pub(crate) struct PrViewArgs {
 #[derive(Args)]
 pub(crate) struct PrMergeArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) server: ServerTargetArgs,
 
     /// Run ID or prefix
     pub(crate) run_id: String,
@@ -726,7 +720,7 @@ pub(crate) struct PrMergeArgs {
 #[derive(Args)]
 pub(crate) struct PrCloseArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) server: ServerTargetArgs,
 
     /// Run ID or prefix
     pub(crate) run_id: String,

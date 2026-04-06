@@ -743,6 +743,7 @@ mod tests {
                 workflow_slug: Some("test".to_string()),
                 working_directory: std::env::current_dir().unwrap(),
                 host_repo_path: Some(std::env::current_dir().unwrap().display().to_string()),
+                repo_origin_url: None,
                 base_branch: Some("main".to_string()),
                 labels: HashMap::new(),
             },

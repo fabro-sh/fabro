@@ -19,15 +19,15 @@ fn help() {
       <RUN>  Run ID or prefix
 
     Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --ttl <TTL>                  SSH access expiry in minutes (default 60) [default: 60]
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --print                      Print the SSH command instead of connecting
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-      -h, --help                       Print help
+          --json              Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --ttl <TTL>         SSH access expiry in minutes (default 60) [default: 60]
+          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --print             Print the SSH command instead of connecting
+          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose           Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help              Print help
     ----- stderr -----
     ");
 }
@@ -44,7 +44,7 @@ fn sandbox_ssh_rejects_non_daytona_run() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-    error: SSH access is only supported for Daytona sandboxes (this run uses 'local')
+    error: Sandbox provider does not support this capability.
     ");
 }
 

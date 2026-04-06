@@ -39,6 +39,8 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         host_repo_path: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        repo_origin_url: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         base_branch: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         workflow_slug: Option<String>,
@@ -1321,6 +1323,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             run_dir,
             working_directory,
             host_repo_path,
+            repo_origin_url,
             base_branch,
             workflow_slug,
             db_prefix,
@@ -1334,6 +1337,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             run_dir: run_dir.clone(),
             working_directory: working_directory.clone(),
             host_repo_path: host_repo_path.clone(),
+            repo_origin_url: repo_origin_url.clone(),
             base_branch: base_branch.clone(),
             workflow_slug: workflow_slug.clone(),
             db_prefix: db_prefix.clone(),

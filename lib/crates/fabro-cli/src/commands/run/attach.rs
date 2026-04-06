@@ -1,5 +1,8 @@
 use std::io::{IsTerminal, Write};
-use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -32,6 +35,7 @@ const ATTACH_FINAL_STATUS_GRACE: Duration = Duration::from_secs(2);
 /// Attach to a running (or finished) workflow run, rendering progress live.
 ///
 /// Returns exit code 0 for success/partial_success, 1 otherwise.
+#[cfg(test)]
 pub(crate) async fn attach_run(
     run_dir: &Path,
     storage_dir: Option<&Path>,
@@ -376,12 +380,14 @@ fn restore_empty_run_properties(value: &mut serde_json::Value) {
     }
 }
 
+#[cfg(test)]
 fn infer_storage_dir(run_dir: &Path) -> Option<PathBuf> {
     let runs_dir = run_dir.parent()?;
     let storage_dir = runs_dir.parent()?;
     (runs_dir.file_name()? == "runs").then(|| storage_dir.to_path_buf())
 }
 
+#[cfg(test)]
 fn infer_run_id(run_dir: &Path) -> Option<RunId> {
     std::fs::read_to_string(run_dir.join("id.txt"))
         .ok()

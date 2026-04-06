@@ -467,10 +467,7 @@ fn build_manifest_git(cwd: &Path) -> Option<types::ManifestGit> {
 }
 
 fn sanitize_origin_url(origin_url: &str) -> String {
-    if let Some(at_pos) = origin_url.find('@') {
-        return format!("https://***@{}", &origin_url[at_pos + 1..]);
-    }
-    origin_url.to_string()
+    fabro_github::normalize_repo_origin_url(origin_url)
 }
 
 fn normalize_absolute_path(base_dir: &Path, reference: &str) -> Option<PathBuf> {
