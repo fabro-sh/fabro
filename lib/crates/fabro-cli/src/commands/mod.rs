@@ -15,7 +15,6 @@ pub(crate) mod runs;
 pub(crate) mod sandbox;
 pub(crate) mod secret;
 pub(crate) mod server;
-pub(crate) mod skill;
 pub(crate) mod store;
 pub(crate) mod system;
 pub(crate) mod upgrade;

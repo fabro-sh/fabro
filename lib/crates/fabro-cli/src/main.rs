@@ -227,7 +227,6 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::Secret(ns) => commands::secret::dispatch(ns, &globals).await?,
             Commands::Settings(args) => commands::config::execute(&args, &globals).await?,
             Commands::Workflow(ns) => commands::workflow::dispatch(ns, &globals)?,
-            Commands::Skill(ns) => commands::skill::dispatch(ns, &globals)?,
             Commands::Upgrade(args) => {
                 commands::upgrade::run_upgrade(args, &globals).await?;
             }

@@ -85,10 +85,6 @@ const ENDPOINTS: &[PaginatedEndpoint] = &[
         path: "/api/v1/runs/run-1/stages",
         name: "listRunStages",
     },
-    PaginatedEndpoint {
-        path: "/api/v1/runs/run-1/verification",
-        name: "retrieveRunVerification",
-    },
 ];
 
 #[tokio::test]

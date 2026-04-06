@@ -119,7 +119,6 @@ models/paginated-retro-list.ts
 models/paginated-run-file-list.ts
 models/paginated-run-list.ts
 models/paginated-run-stage-list.ts
-models/paginated-run-verification-list.ts
 models/paginated-saved-query-list.ts
 models/paginated-session-list.ts
 models/paginated-signoff-list.ts
@@ -173,8 +172,6 @@ models/run-status-response.ts
 models/run-status.ts
 models/run-timings.ts
 models/run-usage.ts
-models/run-verification-control.ts
-models/run-verification.ts
 models/sandbox-file-entry.ts
 models/sandbox-file-list-response.ts
 models/sandbox-resources.ts

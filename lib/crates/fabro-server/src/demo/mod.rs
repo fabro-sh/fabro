@@ -117,15 +117,6 @@ pub(crate) async fn get_run_usage(
     (StatusCode::OK, Json(runs::usage())).into_response()
 }
 
-pub(crate) async fn get_run_verification(
-    _auth: AuthenticatedService,
-    State(_state): State<Arc<AppState>>,
-    Path(_id): Path<String>,
-    Query(pagination): Query<PaginationParams>,
-) -> Response {
-    paginated_response(runs::verifications(), &pagination)
-}
-
 pub(crate) async fn get_run_settings(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
@@ -1495,10 +1486,6 @@ mod runs {
         }
     }
 
-    pub(super) fn verifications() -> Vec<RunVerification> {
-        super::verifications::run_verifications()
-    }
-
     pub(super) fn questions() -> Vec<ApiQuestion> {
         vec![
             ApiQuestion {
@@ -2037,7 +2024,7 @@ mod verifications {
         f1: Option<f64>,
         pass_at_1: Option<f64>,
         evaluations: &'static [VerificationResult],
-        // Run-level status
+        #[allow(dead_code)]
         run_status: VerificationResult,
         // Detail fields
         detail_description: &'static str,
@@ -2898,24 +2885,6 @@ mod verifications {
             .collect()
     }
 
-    fn category_run_status(cat: &CategoryDef) -> VerificationResult {
-        if cat
-            .controls
-            .iter()
-            .any(|c| c.run_status == VerificationResult::Fail)
-        {
-            VerificationResult::Fail
-        } else if cat
-            .controls
-            .iter()
-            .all(|c| c.run_status == VerificationResult::Na)
-        {
-            VerificationResult::Na
-        } else {
-            VerificationResult::Pass
-        }
-    }
-
     fn slugify(name: &str) -> String {
         name.to_lowercase()
             .chars()
@@ -3050,28 +3019,6 @@ mod verifications {
             }
         }
         None
-    }
-
-    pub(super) fn run_verifications() -> Vec<RunVerification> {
-        ALL_CATEGORIES
-            .iter()
-            .map(|cat| RunVerification {
-                name: cat.name.into(),
-                question: cat.question.into(),
-                status: category_run_status(cat),
-                controls: cat
-                    .controls
-                    .iter()
-                    .map(|c| RunVerificationControl {
-                        name: c.name.into(),
-                        slug: c.slug.into(),
-                        description: c.description.into(),
-                        type_: c.type_,
-                        status: c.run_status,
-                    })
-                    .collect(),
-            })
-            .collect()
     }
 }
 

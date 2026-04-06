@@ -648,33 +648,6 @@ pub(crate) struct SettingsArgs {
     pub(crate) workflow: Option<PathBuf>,
 }
 
-#[derive(Clone, ValueEnum)]
-pub(crate) enum SkillDir {
-    Claude,
-    Agents,
-}
-
-#[derive(Clone, ValueEnum)]
-pub(crate) enum SkillScope {
-    User,
-    Project,
-}
-
-#[derive(Args)]
-pub(crate) struct SkillInstallArgs {
-    /// Where to install: user-level or project-level
-    #[arg(long = "for", default_value = "user")]
-    pub(crate) scope: SkillScope,
-
-    /// Target directory convention
-    #[arg(long)]
-    pub(crate) dir: SkillDir,
-
-    /// Overwrite existing skill without prompting
-    #[arg(long)]
-    pub(crate) force: bool,
-}
-
 #[derive(Args)]
 pub(crate) struct PrCreateArgs {
     #[command(flatten)]
@@ -945,9 +918,6 @@ pub(crate) enum Commands {
     Install(InstallArgs),
     /// Pull request operations
     Pr(PrNamespace),
-    /// Skill management
-    #[command(hide = true)]
-    Skill(SkillNamespace),
     /// Manage server-owned secrets
     Secret(SecretNamespace),
     /// Inspect effective settings
@@ -1044,9 +1014,6 @@ impl Commands {
             Self::Workflow(ns) => match &ns.command {
                 WorkflowCommand::List(_) => "workflow list",
                 WorkflowCommand::Create(_) => "workflow create",
-            },
-            Self::Skill(ns) => match &ns.command {
-                SkillCommand::Install(_) => "skill install",
             },
             Self::Discord => "discord",
             Self::Docs => "docs",
@@ -1253,10 +1220,6 @@ pub(crate) enum RepoCommand {
 pub(crate) struct RepoInitArgs {
     #[command(flatten)]
     pub(crate) target: ServerTargetArgs,
-
-    /// Also install the fabro-create-workflow skill
-    #[arg(long, hide = true)]
-    pub(crate) skill: bool,
 }
 
 #[derive(Args)]
@@ -1295,16 +1258,4 @@ pub(crate) enum ProviderCommand {
 pub(crate) struct CompletionArgs {
     /// Shell to generate completions for
     pub shell: clap_complete::Shell,
-}
-
-#[derive(Args)]
-pub(crate) struct SkillNamespace {
-    #[command(subcommand)]
-    pub(crate) command: SkillCommand,
-}
-
-#[derive(Subcommand)]
-pub(crate) enum SkillCommand {
-    /// Install a built-in skill
-    Install(SkillInstallArgs),
 }
