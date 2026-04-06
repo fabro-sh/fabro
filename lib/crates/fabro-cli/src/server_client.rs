@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::num::NonZeroU64;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow};
@@ -15,13 +15,19 @@ use futures::StreamExt;
 use serde::de::DeserializeOwned;
 use tokio::time::sleep;
 
-use crate::args::{ServerConnectionArgs, ServerTargetArgs};
+use crate::args::ServerTargetArgs;
 use crate::commands::server::start;
 use crate::user_config;
 
 #[derive(Clone)]
 pub(crate) struct ServerStoreClient {
     client: fabro_api::Client,
+}
+
+#[derive(Debug, Clone)]
+struct LocalServerRuntime {
+    active_config_path: PathBuf,
+    storage_dir: PathBuf,
 }
 
 #[allow(dead_code)]
@@ -107,23 +113,23 @@ pub(crate) async fn connect_server(storage_dir: &Path) -> Result<ServerStoreClie
     })
 }
 
-pub(crate) async fn connect_server_connection(
-    connection: &user_config::ServerConnection,
-) -> Result<ServerStoreClient> {
+pub(crate) async fn connect_server_only(args: &ServerTargetArgs) -> Result<ServerStoreClient> {
+    let settings = user_config::load_settings()?;
+    let target = user_config::resolve_server_target(args, &settings)?;
+    let runtime = LocalServerRuntime {
+        active_config_path: user_config::active_settings_path(None)
+            .unwrap_or_else(|| PathBuf::from(".fabro/settings.toml")),
+        storage_dir: settings.storage_dir(),
+    };
     Ok(ServerStoreClient {
-        client: connect_resolved_api_client(connection).await?,
+        client: connect_target_api_client(&target, &runtime).await?,
     })
 }
 
-pub(crate) async fn connect_server_only(args: &ServerTargetArgs) -> Result<ServerStoreClient> {
-    let storage_dir = std::env::var_os("FABRO_STORAGE_DIR").map(std::path::PathBuf::from);
-    let settings = user_config::load_settings_with_storage_dir(storage_dir.as_deref())?;
-    let connection = user_config::server_only_command_connection(args, &settings)?;
-    connect_server_connection(&connection).await
-}
-
 pub(crate) async fn connect_api_client(storage_dir: &Path) -> Result<fabro_api::Client> {
-    let bind = start::ensure_server_running(storage_dir)
+    let config_path = user_config::active_settings_path(None)
+        .unwrap_or_else(|| PathBuf::from(".fabro/settings.toml"));
+    let bind = start::ensure_server_running_for_storage(storage_dir, &config_path)
         .with_context(|| format!("Failed to start fabro server for {}", storage_dir.display()))?;
     match bind {
         Bind::Unix(path) => connect_unix_socket_api_client(&path).await,
@@ -133,29 +139,44 @@ pub(crate) async fn connect_api_client(storage_dir: &Path) -> Result<fabro_api::
     }
 }
 
-pub(crate) async fn connect_resolved_api_client(
-    connection: &user_config::ServerConnection,
+async fn connect_target_api_client(
+    target: &user_config::ServerTarget,
+    runtime: &LocalServerRuntime,
 ) -> Result<fabro_api::Client> {
-    match connection {
-        user_config::ServerConnection::Local { storage_dir } => {
-            connect_api_client(storage_dir).await
+    match target {
+        user_config::ServerTarget::HttpUrl { api_url, tls } => {
+            Ok(connect_remote_api_client(api_url, tls.as_ref())?)
         }
-        user_config::ServerConnection::Target(user_config::ServerTarget::HttpUrl {
-            api_url,
-            tls,
-        }) => connect_remote_api_client(api_url, tls.as_ref()),
-        user_config::ServerConnection::Target(user_config::ServerTarget::UnixSocket(path)) => {
-            connect_unix_socket_api_client(path).await
+        user_config::ServerTarget::UnixSocket(path) => {
+            match connect_unix_socket_api_client(path).await {
+                Ok(client) => Ok(client),
+                Err(_) => {
+                    start::ensure_server_running_on_socket(
+                        path,
+                        &runtime.active_config_path,
+                        &runtime.storage_dir,
+                    )
+                    .with_context(|| {
+                        format!("Failed to start fabro server for {}", path.display())
+                    })?;
+                    connect_unix_socket_api_client(path).await
+                }
+            }
         }
     }
 }
 
 pub(crate) async fn connect_server_backed_api_client(
-    args: &ServerConnectionArgs,
+    args: &ServerTargetArgs,
 ) -> Result<fabro_api::Client> {
-    let settings = user_config::load_settings_with_storage_dir(args.storage_dir())?;
-    let connection = user_config::server_backed_command_connection(args, &settings)?;
-    connect_resolved_api_client(&connection).await
+    let settings = user_config::load_settings()?;
+    let target = user_config::resolve_server_target(args, &settings)?;
+    let runtime = LocalServerRuntime {
+        active_config_path: user_config::active_settings_path(None)
+            .unwrap_or_else(|| PathBuf::from(".fabro/settings.toml")),
+        storage_dir: settings.storage_dir(),
+    };
+    connect_target_api_client(&target, &runtime).await
 }
 
 pub(crate) fn connect_remote_api_client(

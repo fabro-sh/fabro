@@ -222,8 +222,68 @@ fn list_uses_configured_server_target_without_server_flag() {
     );
 
     let mut cmd = context.model();
-    cmd.env_remove("FABRO_STORAGE_DIR");
     cmd.args(["list", "--json"]);
+    let output = cmd.assert().success().get_output().stdout.clone();
+    let models: serde_json::Value =
+        serde_json::from_slice(&output).expect("model list json should parse");
+
+    mock.assert();
+    assert_eq!(models.as_array().map(Vec::len), Some(1));
+    assert_eq!(models[0]["id"].as_str(), Some("remote-model"));
+}
+
+#[test]
+fn list_uses_fabro_config_for_machine_settings() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method("GET");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "data": [{
+                        "id": "remote-model",
+                        "display_name": "Remote Model",
+                        "provider": "openai",
+                        "family": "test",
+                        "aliases": ["remote"],
+                        "limits": {
+                            "context_window": 131_072,
+                            "max_output": 4096
+                        },
+                        "training": null,
+                        "knowledge_cutoff": null,
+                        "features": {
+                            "tools": true,
+                            "vision": false,
+                            "reasoning": false,
+                            "effort": false
+                        },
+                        "costs": {
+                            "input_cost_per_mtok": 1.0,
+                            "output_cost_per_mtok": 2.0,
+                            "cache_input_cost_per_mtok": null
+                        },
+                        "estimated_output_tps": 42.0,
+                        "default": false
+                    }],
+                    "meta": { "has_more": false }
+                })
+                .to_string(),
+            );
+    });
+    let config_dir = tempfile::tempdir().unwrap();
+    let config_path = config_dir.path().join("custom-settings.toml");
+    std::fs::write(
+        &config_path,
+        format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
+    )
+    .unwrap();
+
+    let mut cmd = context.model();
+    cmd.args(["list", "--json"]);
+    cmd.env("FABRO_CONFIG", &config_path);
     let output = cmd.assert().success().get_output().stdout.clone();
     let models: serde_json::Value =
         serde_json::from_slice(&output).expect("model list json should parse");

@@ -46,7 +46,7 @@ impl GlobalArgs {
 
 #[derive(Args, Debug, Clone, Default)]
 pub(crate) struct StorageDirArgs {
-    /// Local storage directory (default: ~/.fabro)
+    /// Local storage directory (default: ~/.fabro/storage)
     #[arg(long, env = "FABRO_STORAGE_DIR")]
     pub(crate) storage_dir: Option<PathBuf>,
 }
@@ -71,34 +71,6 @@ pub(crate) struct ServerTargetArgs {
 impl ServerTargetArgs {
     pub(crate) fn as_deref(&self) -> Option<&str> {
         self.server.as_deref()
-    }
-}
-
-#[derive(Args, Debug, Clone, Default)]
-pub(crate) struct ServerConnectionArgs {
-    /// Local storage directory (default: ~/.fabro)
-    #[arg(long, env = "FABRO_STORAGE_DIR")]
-    pub(crate) storage_dir: Option<PathBuf>,
-
-    /// Fabro server target: http(s) URL or absolute Unix socket path
-    #[arg(long = "server", env = "FABRO_SERVER")]
-    pub(crate) server: Option<String>,
-
-    #[arg(skip)]
-    pub(crate) storage_dir_explicit: bool,
-}
-
-impl ServerConnectionArgs {
-    pub(crate) fn storage_dir(&self) -> Option<&Path> {
-        self.storage_dir.as_deref()
-    }
-
-    pub(crate) fn server(&self) -> Option<&str> {
-        self.server.as_deref()
-    }
-
-    pub(crate) fn storage_dir_is_explicit(&self) -> bool {
-        self.storage_dir_explicit
     }
 }
 
@@ -132,7 +104,7 @@ impl From<fabro_sandbox::SandboxProvider> for CliSandboxProvider {
 #[derive(Args)]
 pub(crate) struct RunArgs {
     #[command(flatten)]
-    pub(crate) target: ServerConnectionArgs,
+    pub(crate) target: ServerTargetArgs,
 
     /// Path to a .fabro workflow file or .toml task config
     #[arg(required = true)]
@@ -194,7 +166,7 @@ pub(crate) struct RunArgs {
 #[derive(Args)]
 pub(crate) struct PreflightArgs {
     #[command(flatten)]
-    pub(crate) target: ServerConnectionArgs,
+    pub(crate) target: ServerTargetArgs,
 
     /// Path to a .fabro workflow file or .toml task config
     pub(crate) workflow: PathBuf,
@@ -298,7 +270,7 @@ pub(crate) struct LogsArgs {
 #[derive(Args)]
 pub(crate) struct ValidateArgs {
     #[command(flatten)]
-    pub(crate) target: ServerConnectionArgs,
+    pub(crate) target: ServerTargetArgs,
 
     /// Path to the .fabro workflow file
     pub(crate) workflow: PathBuf,
@@ -348,7 +320,7 @@ impl fmt::Display for GraphOutputFormat {
 #[derive(Args)]
 pub(crate) struct GraphArgs {
     #[command(flatten)]
-    pub(crate) target: ServerConnectionArgs,
+    pub(crate) target: ServerTargetArgs,
 
     /// Path to the .fabro workflow file, .toml task config, or project workflow name
     pub(crate) workflow: PathBuf,
@@ -600,7 +572,7 @@ pub(crate) struct WorkflowCreateArgs {
 #[derive(Args)]
 pub(crate) struct ProviderLoginArgs {
     #[command(flatten)]
-    pub(crate) target: ServerConnectionArgs,
+    pub(crate) target: ServerTargetArgs,
 
     /// LLM provider to authenticate with
     #[arg(long)]
@@ -760,7 +732,7 @@ pub(crate) struct RunnerArgs {
 #[derive(Args, Debug, Clone, Default)]
 pub(crate) struct ModelListArgs {
     #[command(flatten)]
-    pub(crate) target: ServerConnectionArgs,
+    pub(crate) target: ServerTargetArgs,
 
     /// Filter by provider
     #[arg(short, long)]
@@ -774,7 +746,7 @@ pub(crate) struct ModelListArgs {
 #[derive(Args, Debug, Clone, Default)]
 pub(crate) struct ModelTestArgs {
     #[command(flatten)]
-    pub(crate) target: ServerConnectionArgs,
+    pub(crate) target: ServerTargetArgs,
 
     /// Filter by provider
     #[arg(short, long)]
@@ -1116,7 +1088,7 @@ pub(crate) enum StoreCommand {
 #[derive(Args)]
 pub(crate) struct SecretNamespace {
     #[command(flatten)]
-    pub(crate) target: ServerConnectionArgs,
+    pub(crate) target: ServerTargetArgs,
 
     #[command(subcommand)]
     pub(crate) command: SecretCommand,
@@ -1245,7 +1217,7 @@ pub(crate) enum RepoCommand {
 #[derive(Args)]
 pub(crate) struct RepoInitArgs {
     #[command(flatten)]
-    pub(crate) target: ServerConnectionArgs,
+    pub(crate) target: ServerTargetArgs,
 
     /// Also install the fabro-create-workflow skill
     #[arg(long, hide = true)]
@@ -1255,7 +1227,7 @@ pub(crate) struct RepoInitArgs {
 #[derive(Args)]
 pub(crate) struct DoctorArgs {
     #[command(flatten)]
-    pub(crate) target: ServerConnectionArgs,
+    pub(crate) target: ServerTargetArgs,
 
     /// Show detailed information for each check
     #[arg(short, long)]

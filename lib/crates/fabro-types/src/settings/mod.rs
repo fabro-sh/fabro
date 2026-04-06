@@ -183,9 +183,25 @@ impl Settings {
     pub fn storage_dir(&self) -> PathBuf {
         self.storage_dir.clone().unwrap_or_else(|| {
             std::env::var_os("FABRO_HOME")
-                .map(PathBuf::from)
+                .map(|root| PathBuf::from(root).join("storage"))
                 .or_else(|| dirs::home_dir().map(|home| home.join(".fabro")))
-                .unwrap_or_else(|| PathBuf::from(".fabro"))
+                .map(|root| root.join("storage"))
+                .unwrap_or_else(|| PathBuf::from(".fabro/storage"))
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Settings;
+
+    #[test]
+    fn storage_dir_defaults_to_home_storage_subdir() {
+        let home = dirs::home_dir().expect("home directory should be available for tests");
+
+        assert_eq!(
+            Settings::default().storage_dir(),
+            home.join(".fabro/storage")
+        );
     }
 }

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 use tokio::task::spawn_blocking;
 
-use crate::args::{GlobalArgs, RepoInitArgs, ServerConnectionArgs};
+use crate::args::{GlobalArgs, RepoInitArgs, ServerTargetArgs};
 use crate::server_client;
 
 pub(super) fn git_repo_root() -> Result<PathBuf> {
@@ -131,7 +131,7 @@ draft = true
     Ok(created)
 }
 
-async fn check_github_app_installation(target: &ServerConnectionArgs) {
+async fn check_github_app_installation(target: &ServerTargetArgs) {
     // Get the git remote origin URL
     let output = match std::process::Command::new("git")
         .args(["remote", "get-url", "origin"])

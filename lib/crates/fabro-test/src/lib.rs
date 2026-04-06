@@ -413,11 +413,21 @@ impl TestContext {
 
         let temp_dir = root_path.join("temp");
         let home_dir = root_path.join("home");
-        let storage_dir = session_paths.storage_dir.clone();
+        let storage_dir = root_path.join("storage");
         let test_case_id = test_case_id();
 
         std::fs::create_dir_all(&temp_dir).expect("failed to create temp_dir");
         std::fs::create_dir_all(&home_dir).expect("failed to create home_dir");
+        std::fs::create_dir_all(&storage_dir).expect("failed to create storage_dir");
+        let settings_path = home_dir.join(".fabro/settings.toml");
+        if let Some(parent) = settings_path.parent() {
+            std::fs::create_dir_all(parent).expect("failed to create fabro settings dir");
+        }
+        std::fs::write(
+            &settings_path,
+            format!("storage_dir = \"{}\"\n", storage_dir.display()),
+        )
+        .expect("failed to write default fabro settings");
 
         let filters = vec![
             (
@@ -686,11 +696,23 @@ impl TestContext {
         path: impl AsRef<std::path::Path>,
         content: impl AsRef<[u8]>,
     ) -> &Self {
+        let path = path.as_ref();
         let full = self.home_dir.join(path);
         if let Some(parent) = full.parent() {
             std::fs::create_dir_all(parent).expect("failed to create parent dirs");
         }
-        std::fs::write(&full, content).expect("failed to write file");
+        let content = content.as_ref();
+        let effective_content = if path == std::path::Path::new(".fabro/settings.toml")
+            && !String::from_utf8_lossy(content).contains("storage_dir")
+        {
+            let mut merged =
+                format!("storage_dir = \"{}\"\n", self.storage_dir.display()).into_bytes();
+            merged.extend_from_slice(content);
+            merged
+        } else {
+            content.to_vec()
+        };
+        std::fs::write(&full, effective_content).expect("failed to write file");
         self
     }
 

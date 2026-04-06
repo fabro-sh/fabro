@@ -20,7 +20,7 @@ fn help() {
     Usage: fabro server status [OPTIONS]
 
     Options:
-          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro/storage) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
           --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --json                       Output as JSON
           --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]

@@ -9,6 +9,7 @@ use std::time::Duration;
 use anyhow::Result;
 use fabro_server::bind;
 use fabro_server::bind::Bind;
+use fabro_server::serve::ServeArgs;
 use fabro_util::terminal::Styles;
 
 use crate::args::{
@@ -23,11 +24,14 @@ pub(crate) async fn dispatch(command: ServerCommand, _globals: &GlobalArgs) -> R
             foreground,
             serve_args,
         }) => {
-            let settings = user_config::load_settings_with_storage_dir(storage_dir.as_deref())?;
+            let settings = user_config::load_settings_with_config_and_storage_dir(
+                serve_args.config.as_deref(),
+                storage_dir.as_deref(),
+            )?;
             let storage_dir = settings.storage_dir();
             let bind_addr = match serve_args.bind.as_deref() {
                 Some(s) => bind::parse_bind(s)?,
-                None => Bind::Unix(storage_dir.join("fabro.sock")),
+                None => Bind::Unix(user_config::default_socket_path()),
             };
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             start::execute(bind_addr, foreground, serve_args, storage_dir, styles).await
@@ -51,18 +55,24 @@ pub(crate) async fn dispatch(command: ServerCommand, _globals: &GlobalArgs) -> R
             record_path,
             serve_args,
         }) => {
+            let active_config_path = serve_args
+                .config
+                .clone()
+                .or_else(|| user_config::active_settings_path(None));
             let bind_addr = if let Some(s) = serve_args.bind.as_deref() {
                 bind::parse_bind(s)?
             } else {
                 // __serve should always receive an explicit --bind from the parent,
                 // but fall back to the storage dir default if missing.
-                let settings = user_config::load_settings_with_storage_dir(storage_dir.as_deref())?;
-                Bind::Unix(settings.storage_dir().join("fabro.sock"))
+                Bind::Unix(user_config::default_socket_path())
             };
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             foreground::execute(
                 record_path,
-                serve_args,
+                ServeArgs {
+                    config: active_config_path,
+                    ..serve_args
+                },
                 bind_addr,
                 storage_dir.clone_path(),
                 styles,

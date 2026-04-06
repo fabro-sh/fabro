@@ -26,7 +26,7 @@ fn help() {
           --json
               Output as JSON [env: FABRO_JSON=]
           --storage-dir <STORAGE_DIR>
-              Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+              Local storage directory (default: ~/.fabro/storage) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
           --debug
               Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --foreground
@@ -97,18 +97,50 @@ fn start_already_running_exits_with_error() {
 }
 
 #[test]
+fn start_without_bind_uses_home_socket_instead_of_storage_socket() {
+    let context = test_context!();
+    let expected_socket = context.home_dir.join(".fabro").join("fabro.sock");
+    let storage_socket = context.storage_dir.join("fabro.sock");
+
+    context
+        .command()
+        .args(["server", "start", "--dry-run"])
+        .assert()
+        .success();
+
+    let output = context
+        .command()
+        .args(["server", "status", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+
+    assert_eq!(json["bind"].as_str(), expected_socket.to_str());
+    assert_ne!(json["bind"].as_str(), storage_socket.to_str());
+
+    context
+        .command()
+        .args(["server", "stop"])
+        .assert()
+        .success();
+}
+
+#[test]
 fn concurrent_autostart_converges_on_one_shared_daemon_and_cleans_up() {
     fn run_ps_json(
         home_dir: &std::path::Path,
         temp_dir: &std::path::Path,
-        storage_dir: &std::path::Path,
+        config_path: &std::path::Path,
     ) -> std::process::Output {
         std::process::Command::new(env!("CARGO_BIN_EXE_fabro"))
             .current_dir(temp_dir)
             .env("NO_COLOR", "1")
             .env("HOME", home_dir)
+            .env("FABRO_CONFIG", config_path)
             .env("FABRO_NO_UPGRADE_CHECK", "true")
-            .env("FABRO_STORAGE_DIR", storage_dir)
             .args(["ps", "-a", "--json"])
             .output()
             .expect("ps command should execute")
@@ -130,7 +162,19 @@ fn concurrent_autostart_converges_on_one_shared_daemon_and_cleans_up() {
 
     let storage_root = isolated_storage_dir();
     let storage_dir = storage_root.path().join("storage");
-    let socket_path = storage_dir.join("fabro.sock").display().to_string();
+    let socket_path = storage_root.path().join("shared.sock");
+    let socket_path_str = socket_path.display().to_string();
+    let config_dir = tempfile::tempdir_in("/tmp").unwrap();
+    let config_path = config_dir.path().join("settings.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            "storage_dir = \"{}\"\n[server]\ntarget = \"{}\"\n",
+            storage_dir.display(),
+            socket_path.display()
+        ),
+    )
+    .unwrap();
     let home_a = tempfile::tempdir_in("/tmp").unwrap();
     let home_b = tempfile::tempdir_in("/tmp").unwrap();
     let temp_a = tempfile::tempdir_in("/tmp").unwrap();
@@ -138,17 +182,17 @@ fn concurrent_autostart_converges_on_one_shared_daemon_and_cleans_up() {
 
     let barrier = Arc::new(Barrier::new(3));
     let barrier_a = Arc::clone(&barrier);
-    let storage_a = storage_dir.clone();
+    let config_a = config_path.clone();
     let thread_a = std::thread::spawn(move || {
         barrier_a.wait();
-        run_ps_json(home_a.path(), temp_a.path(), &storage_a)
+        run_ps_json(home_a.path(), temp_a.path(), &config_a)
     });
 
     let barrier_b = Arc::clone(&barrier);
-    let storage_b = storage_dir.clone();
+    let config_b = config_path.clone();
     let thread_b = std::thread::spawn(move || {
         barrier_b.wait();
-        run_ps_json(home_b.path(), temp_b.path(), &storage_b)
+        run_ps_json(home_b.path(), temp_b.path(), &config_b)
     });
 
     barrier.wait();
@@ -169,7 +213,7 @@ fn concurrent_autostart_converges_on_one_shared_daemon_and_cleans_up() {
 
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
-        if storage_dir.join("server.json").exists() && daemon_match_count(&socket_path) == 1 {
+        if storage_dir.join("server.json").exists() && daemon_match_count(&socket_path_str) == 1 {
             break;
         }
         std::thread::sleep(Duration::from_millis(50));
@@ -179,15 +223,15 @@ fn concurrent_autostart_converges_on_one_shared_daemon_and_cleans_up() {
         "shared storage should have an active server record"
     );
     assert_eq!(
-        daemon_match_count(&socket_path),
+        daemon_match_count(&socket_path_str),
         1,
         "concurrent auto-start should converge on one daemon"
     );
 
     let stop = std::process::Command::new(env!("CARGO_BIN_EXE_fabro"))
         .env("NO_COLOR", "1")
+        .env("FABRO_CONFIG", &config_path)
         .env("FABRO_NO_UPGRADE_CHECK", "true")
-        .env("FABRO_STORAGE_DIR", &storage_dir)
         .args(["server", "stop"])
         .output()
         .expect("server stop should execute");
@@ -200,7 +244,7 @@ fn concurrent_autostart_converges_on_one_shared_daemon_and_cleans_up() {
 
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
-        if !storage_dir.join("server.json").exists() && daemon_match_count(&socket_path) == 0 {
+        if !storage_dir.join("server.json").exists() && daemon_match_count(&socket_path_str) == 0 {
             break;
         }
         std::thread::sleep(Duration::from_millis(50));
@@ -210,7 +254,7 @@ fn concurrent_autostart_converges_on_one_shared_daemon_and_cleans_up() {
         "last TestContext drop should remove the server record"
     );
     assert_eq!(
-        daemon_match_count(&socket_path),
+        daemon_match_count(&socket_path_str),
         0,
         "last TestContext drop should clean up the shared daemon"
     );

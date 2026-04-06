@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use fabro_config::Storage;
+use fabro_config::user::legacy_default_storage_root;
 use fabro_server::bind::Bind;
 use serde::{Deserialize, Serialize};
 
@@ -12,6 +13,12 @@ pub(crate) struct ServerRecord {
     pub bind: Bind,
     pub log_path: PathBuf,
     pub started_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ActiveServerRecord {
+    pub record: ServerRecord,
+    pub record_path: PathBuf,
 }
 
 pub(crate) fn write_server_record(path: &Path, record: &ServerRecord) -> Result<()> {
@@ -35,15 +42,41 @@ pub(crate) fn server_record_is_running(record: &ServerRecord) -> bool {
     fabro_proc::process_alive(record.pid) && server_process_matches(record)
 }
 
-pub(crate) fn active_server_record(storage_dir: &Path) -> Option<ServerRecord> {
-    let path = Storage::new(storage_dir).server_state().record_path();
+fn server_record_path(storage_dir: &Path) -> PathBuf {
+    Storage::new(storage_dir).server_state().record_path()
+}
+
+fn legacy_record_path(storage_dir: &Path) -> Option<PathBuf> {
+    let default_storage_dir = legacy_default_storage_root().join("storage");
+    if storage_dir == default_storage_dir {
+        Some(server_record_path(&legacy_default_storage_root()))
+    } else {
+        None
+    }
+}
+
+fn active_server_record_at_path(path: PathBuf) -> Option<ActiveServerRecord> {
     let record = read_server_record(&path)?;
     if server_record_is_running(&record) {
-        Some(record)
+        Some(ActiveServerRecord {
+            record,
+            record_path: path,
+        })
     } else {
         remove_server_record(&path);
         None
     }
+}
+
+pub(crate) fn active_server_record_details(storage_dir: &Path) -> Option<ActiveServerRecord> {
+    let primary_path = server_record_path(storage_dir);
+    active_server_record_at_path(primary_path).or_else(|| {
+        legacy_record_path(storage_dir).and_then(|path| active_server_record_at_path(path))
+    })
+}
+
+pub(crate) fn active_server_record(storage_dir: &Path) -> Option<ServerRecord> {
+    active_server_record_details(storage_dir).map(|active| active.record)
 }
 
 #[cfg(unix)]

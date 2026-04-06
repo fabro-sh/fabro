@@ -33,25 +33,24 @@ fn help() {
       <WORKFLOW>  Path to a .fabro workflow file or .toml task config
 
     Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --server <SERVER>            Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
-          --dry-run                    Execute with simulated LLM backend
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --auto-approve               Auto-approve all human gates
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --goal <GOAL>                Override the workflow goal (exposed as $goal in prompts)
-          --goal-file <GOAL_FILE>      Read the workflow goal from a file
-          --model <MODEL>              Override default LLM model
-          --provider <PROVIDER>        Override default LLM provider
-      -v, --verbose                    Enable verbose output
-          --sandbox <SANDBOX>          Sandbox for agent tools [possible values: local, docker, daytona]
-          --label <KEY=VALUE>          Attach a label to this run (repeatable, format: KEY=VALUE)
-          --no-retro                   Skip retro generation after the run
-          --preserve-sandbox           Keep the sandbox alive after the run finishes (for debugging)
-      -d, --detach                     Run the workflow in the background and print the run ID
-      -h, --help                       Print help
+          --json                   Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>        Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --debug                  Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --dry-run                Execute with simulated LLM backend
+          --auto-approve           Auto-approve all human gates
+          --no-upgrade-check       Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --goal <GOAL>            Override the workflow goal (exposed as $goal in prompts)
+          --quiet                  Suppress non-essential output [env: FABRO_QUIET=]
+          --goal-file <GOAL_FILE>  Read the workflow goal from a file
+          --model <MODEL>          Override default LLM model
+          --provider <PROVIDER>    Override default LLM provider
+      -v, --verbose                Enable verbose output
+          --sandbox <SANDBOX>      Sandbox for agent tools [possible values: local, docker, daytona]
+          --label <KEY=VALUE>      Attach a label to this run (repeatable, format: KEY=VALUE)
+          --no-retro               Skip retro generation after the run
+          --preserve-sandbox       Keep the sandbox alive after the run finishes (for debugging)
+      -d, --detach                 Run the workflow in the background and print the run ID
+      -h, --help                   Print help
     ----- stderr -----
     ");
 }
@@ -122,28 +121,13 @@ fn create_uses_configured_server_target_without_server_flag() {
 }
 
 #[test]
-fn create_storage_dir_suppresses_configured_server_target() {
+fn create_rejects_storage_dir_flag() {
     let context = test_context!();
-    let server = MockServer::start();
-    let mock = server.mock(|when, then| {
-        when.method("POST").path("/api/v1/runs");
-        then.status(500)
-            .body("configured-server-should-not-be-used");
-    });
-    let local_storage = std::path::PathBuf::from(format!(
-        "/tmp/fabro-create-{}",
-        &context.test_case_id()[..8]
-    ));
-    context.write_home(
-        ".fabro/settings.toml",
-        format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
-    );
-
     let output = context
         .create_cmd()
         .args([
             "--storage-dir",
-            local_storage.to_str().unwrap(),
+            "/tmp/fabro-create",
             "--dry-run",
             fixture("simple.fabro").to_str().unwrap(),
         ])
@@ -151,13 +135,11 @@ fn create_storage_dir_suppresses_configured_server_target() {
         .expect("command should execute");
 
     assert!(
-        output.status.success(),
-        "command failed:\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        !output.status.success(),
+        "command should reject --storage-dir"
     );
-    mock.assert_calls(0);
-    assert!(!output_stdout(&output).trim().is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unexpected argument '--storage-dir'"));
 }
 
 #[test]

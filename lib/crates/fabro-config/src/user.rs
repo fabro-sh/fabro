@@ -16,6 +16,7 @@ pub const SETTINGS_CONFIG_FILENAME: &str = "settings.toml";
 pub const LEGACY_USER_CONFIG_FILENAME: &str = "cli.toml";
 pub const LEGACY_OLD_USER_CONFIG_FILENAME: &str = "user.toml";
 pub const LEGACY_SERVER_CONFIG_FILENAME: &str = "server.toml";
+pub const FABRO_CONFIG_ENV: &str = "FABRO_CONFIG";
 
 static WARNED_LEGACY_USER_CONFIGS: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
 
@@ -84,6 +85,20 @@ pub fn default_settings_path() -> Option<PathBuf> {
     Some(Home::from_env().user_config())
 }
 
+pub fn default_socket_path() -> PathBuf {
+    Home::from_env().root().join("fabro.sock")
+}
+
+pub fn legacy_default_storage_root() -> PathBuf {
+    Home::from_env().root().to_path_buf()
+}
+
+pub fn active_settings_path(path: Option<&Path>) -> Option<PathBuf> {
+    path.map(Path::to_path_buf)
+        .or_else(|| std::env::var_os(FABRO_CONFIG_ENV).map(PathBuf::from))
+        .or_else(default_settings_path)
+}
+
 pub fn legacy_user_config_path() -> Option<PathBuf> {
     Some(Home::from_env().root().join(LEGACY_USER_CONFIG_FILENAME))
 }
@@ -115,8 +130,11 @@ fn should_warn_about_legacy_user_config(path: &Path) -> bool {
 /// default file doesn't exist. An explicit path that doesn't exist is an error.
 #[allow(clippy::print_stderr)]
 pub fn load_settings_config(path: Option<&Path>) -> anyhow::Result<ConfigLayer> {
-    if let Some(explicit) = path {
-        return crate::load_config_file(Some(explicit), SETTINGS_CONFIG_FILENAME);
+    if let Some(explicit) = path
+        .map(Path::to_path_buf)
+        .or_else(|| std::env::var_os(FABRO_CONFIG_ENV).map(PathBuf::from))
+    {
+        return crate::load_config_file(Some(&explicit), SETTINGS_CONFIG_FILENAME);
     }
 
     for legacy_path in [
@@ -144,11 +162,36 @@ pub fn load_settings_config(path: Option<&Path>) -> anyhow::Result<ConfigLayer> 
 #[cfg(test)]
 mod tests {
     use super::{
-        LEGACY_OLD_USER_CONFIG_FILENAME, LEGACY_SERVER_CONFIG_FILENAME,
-        LEGACY_USER_CONFIG_FILENAME, SETTINGS_CONFIG_FILENAME, default_settings_path,
-        legacy_old_user_config_path, legacy_server_config_path, legacy_user_config_path,
-        should_warn_about_legacy_user_config,
+        FABRO_CONFIG_ENV, LEGACY_OLD_USER_CONFIG_FILENAME, LEGACY_SERVER_CONFIG_FILENAME,
+        LEGACY_USER_CONFIG_FILENAME, SETTINGS_CONFIG_FILENAME, active_settings_path,
+        default_settings_path, default_socket_path, legacy_old_user_config_path,
+        legacy_server_config_path, legacy_user_config_path, should_warn_about_legacy_user_config,
     };
+
+    struct EnvGuard {
+        key: &'static str,
+        original: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: Option<&std::path::Path>) -> Self {
+            let original = std::env::var_os(key);
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+            Self { key, original }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
 
     #[test]
     fn should_warn_about_legacy_user_config_once_per_path() {
@@ -169,6 +212,7 @@ mod tests {
             default_settings_path(),
             Some(home.join(".fabro").join(SETTINGS_CONFIG_FILENAME))
         );
+        assert_eq!(default_socket_path(), home.join(".fabro/fabro.sock"));
         assert_eq!(
             legacy_user_config_path(),
             Some(home.join(".fabro").join(LEGACY_USER_CONFIG_FILENAME))
@@ -195,5 +239,14 @@ mod tests {
         assert!(should_warn_about_legacy_user_config(&server));
         assert!(!should_warn_about_legacy_user_config(&server));
         assert!(should_warn_about_legacy_user_config(&cli));
+    }
+
+    #[test]
+    fn active_settings_path_honors_fabro_config_env() {
+        let dir = tempfile::tempdir().unwrap();
+        let custom_path = dir.path().join("custom-settings.toml");
+        let _guard = EnvGuard::set(FABRO_CONFIG_ENV, Some(&custom_path));
+
+        assert_eq!(active_settings_path(None), Some(custom_path));
     }
 }

@@ -24,7 +24,7 @@ use tokio::sync::oneshot;
 use tokio::task::spawn_blocking;
 
 use super::doctor;
-use crate::args::{DoctorArgs, GlobalArgs, InstallArgs, ServerConnectionArgs};
+use crate::args::{DoctorArgs, GlobalArgs, InstallArgs, ServerTargetArgs};
 use crate::commands::server::record;
 use crate::server_client;
 use crate::shared::provider_auth::{
@@ -856,11 +856,7 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
     if run_doctor {
         eprintln!();
         let doctor_args = DoctorArgs {
-            target: ServerConnectionArgs {
-                storage_dir: Some(storage_dir.clone()),
-                server: None,
-                storage_dir_explicit: true,
-            },
+            target: ServerTargetArgs::default(),
             verbose: true,
         };
         let _ = doctor::run_doctor(&doctor_args, true, globals).await?;

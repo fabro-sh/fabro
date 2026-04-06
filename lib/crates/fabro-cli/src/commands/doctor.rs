@@ -6,7 +6,7 @@ use anyhow::Result;
 use fabro_api::types as api_types;
 use fabro_config::legacy_env;
 use fabro_config::user::{
-    default_settings_path, legacy_old_user_config_path, legacy_server_config_path,
+    active_settings_path, legacy_old_user_config_path, legacy_server_config_path,
     legacy_user_config_path,
 };
 pub(crate) use fabro_util::check_report::{
@@ -314,7 +314,7 @@ pub(crate) async fn run_doctor(
         Some(spinner)
     };
 
-    let settings_config_path = default_settings_path();
+    let settings_config_path = active_settings_path(None);
     let legacy_config_paths = [
         legacy_user_config_path(),
         legacy_old_user_config_path(),

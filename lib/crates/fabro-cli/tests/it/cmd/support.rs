@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::time::{Duration, Instant};
 
+use fabro_config::Storage;
+use fabro_server::bind::Bind;
 use fabro_store::EventEnvelope;
 use fabro_test::TestContext;
 use fabro_types::{
@@ -632,12 +634,34 @@ fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
         .block_on(future)
 }
 
-fn server_http_client(storage_dir: &Path) -> reqwest::Client {
-    reqwest::ClientBuilder::new()
-        .unix_socket(storage_dir.join("fabro.sock"))
-        .no_proxy()
-        .build()
-        .expect("test HTTP client should build")
+#[derive(Debug, serde::Deserialize)]
+struct TestServerRecord {
+    bind: Bind,
+}
+
+fn server_endpoint(storage_dir: &Path) -> Option<(reqwest::Client, String)> {
+    let record_path = Storage::new(storage_dir).server_state().record_path();
+    let record = std::fs::read_to_string(record_path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<TestServerRecord>(&content).ok())?;
+    match record.bind {
+        Bind::Unix(path) if path.exists() => Some((
+            reqwest::ClientBuilder::new()
+                .unix_socket(path)
+                .no_proxy()
+                .build()
+                .expect("test Unix-socket HTTP client should build"),
+            "http://fabro".to_string(),
+        )),
+        Bind::Unix(_) => None,
+        Bind::Tcp(addr) => Some((
+            reqwest::ClientBuilder::new()
+                .no_proxy()
+                .build()
+                .expect("test TCP HTTP client should build"),
+            format!("http://{addr}"),
+        )),
+    }
 }
 
 async fn get_server_json<T: serde::de::DeserializeOwned>(run_dir: &Path, path: &str) -> T {
@@ -650,14 +674,8 @@ async fn try_get_server_json_for_storage<T: serde::de::DeserializeOwned>(
     storage_dir: &Path,
     path: &str,
 ) -> Option<T> {
-    if !storage_dir.join("fabro.sock").exists() {
-        return None;
-    }
-    let response = server_http_client(storage_dir)
-        .get(format!("http://fabro{path}"))
-        .send()
-        .await
-        .ok()?;
+    let (client, base_url) = server_endpoint(storage_dir)?;
+    let response = client.get(format!("{base_url}{path}")).send().await.ok()?;
     if !response.status().is_success() {
         return None;
     }
@@ -668,8 +686,9 @@ async fn get_server_json_for_storage<T: serde::de::DeserializeOwned>(
     storage_dir: &Path,
     path: &str,
 ) -> T {
-    let response = server_http_client(storage_dir)
-        .get(format!("http://fabro{path}"))
+    let (client, base_url) = server_endpoint(storage_dir).expect("server endpoint should exist");
+    let response = client
+        .get(format!("{base_url}{path}"))
         .send()
         .await
         .expect("server request should succeed");

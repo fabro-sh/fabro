@@ -2,16 +2,16 @@ use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
-use fabro_config::Storage;
 use fabro_server::bind::Bind;
 
 use super::record;
 
 pub(crate) fn execute(storage_dir: &Path, timeout: Duration) {
-    let Some(record) = record::active_server_record(storage_dir) else {
+    let Some(active) = record::active_server_record_details(storage_dir) else {
         eprintln!("Server is not running");
         std::process::exit(1);
     };
+    let record = active.record;
 
     fabro_proc::sigterm(record.pid);
 
@@ -30,8 +30,7 @@ pub(crate) fn execute(storage_dir: &Path, timeout: Duration) {
         thread::sleep(Duration::from_millis(100));
     }
 
-    let record_path = Storage::new(storage_dir).server_state().record_path();
-    record::remove_server_record(&record_path);
+    record::remove_server_record(&active.record_path);
 
     if let Bind::Unix(ref path) = record.bind {
         let _ = std::fs::remove_file(path);

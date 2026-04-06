@@ -7,7 +7,7 @@ use fabro_config::ConfigLayer;
 use fabro_config::project::{self, discover_project_config, resolve_workflow_path};
 use fabro_config::run::parse_run_config;
 use fabro_config::sandbox::DockerfileSource;
-use fabro_config::user::default_settings_path;
+use fabro_config::user::active_settings_path;
 use fabro_graphviz::graph::AttrValue;
 use fabro_graphviz::parser;
 use fabro_sandbox::daytona::detect_repo_info;
@@ -86,7 +86,7 @@ pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManif
             type_: types::ManifestConfigType::Project,
         });
     }
-    if let Some(path) = default_settings_path().filter(|path| path.is_file()) {
+    if let Some(path) = active_settings_path(None).filter(|path| path.is_file()) {
         let source = std::fs::read_to_string(&path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
         configs.push(types::ManifestConfig {

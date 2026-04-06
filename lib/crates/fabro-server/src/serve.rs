@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use fabro_config::Storage;
 use fabro_config::server::resolve_storage_dir;
-use fabro_config::user::{default_settings_path, load_settings_config};
+use fabro_config::user::{active_settings_path, load_settings_config};
 use fabro_util::terminal::Styles;
 use object_store::ObjectStore;
 use object_store::local::LocalFileSystem;
@@ -61,9 +61,7 @@ fn load_settings(path: Option<&Path>) -> anyhow::Result<Settings> {
 }
 
 fn resolved_config_path(path: Option<&Path>) -> PathBuf {
-    path.map(Path::to_path_buf)
-        .or_else(default_settings_path)
-        .unwrap_or_else(|| PathBuf::from(".fabro/settings.toml"))
+    active_settings_path(path).unwrap_or_else(|| PathBuf::from(".fabro/settings.toml"))
 }
 
 fn apply_serve_overrides(base: &Settings, args: &ServeArgs, dry_run_mode: bool) -> Settings {

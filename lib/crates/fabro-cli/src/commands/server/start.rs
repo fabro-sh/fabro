@@ -5,6 +5,7 @@ use std::time::Duration;
 use anyhow::{Result, bail};
 use chrono::Utc;
 use fabro_config::Storage;
+use fabro_config::user::default_socket_path;
 use fabro_server::bind::Bind;
 use fabro_server::serve;
 use fabro_server::serve::ServeArgs;
@@ -28,12 +29,44 @@ pub(crate) async fn execute(
     }
 }
 
-pub(crate) fn ensure_server_running(storage_dir: &Path) -> Result<Bind> {
+pub(crate) fn ensure_server_running_for_storage(
+    storage_dir: &Path,
+    config_path: &Path,
+) -> Result<Bind> {
     if let Some(existing) = record::active_server_record(storage_dir) {
         return Ok(existing.bind);
     }
 
-    let bind = Bind::Unix(storage_dir.join("fabro.sock"));
+    let bind = Bind::Unix(default_socket_path());
+    ensure_server_running_with_bind(bind, config_path, storage_dir)
+}
+
+pub(crate) fn ensure_server_running_on_socket(
+    socket_path: &Path,
+    config_path: &Path,
+    storage_dir: &Path,
+) -> Result<()> {
+    let bind = Bind::Unix(socket_path.to_path_buf());
+    let _ = ensure_server_running_with_bind(bind, config_path, storage_dir)?;
+    Ok(())
+}
+
+fn ensure_server_running_with_bind(
+    bind: Bind,
+    config_path: &Path,
+    storage_dir: &Path,
+) -> Result<Bind> {
+    if let Some(existing) = record::active_server_record(storage_dir) {
+        if existing.bind == bind {
+            return Ok(existing.bind);
+        }
+        bail!(
+            "Server already running (pid {}) on {}",
+            existing.pid,
+            existing.bind
+        );
+    }
+
     let serve_args = ServeArgs {
         bind: None,
         model: None,
@@ -41,7 +74,7 @@ pub(crate) fn ensure_server_running(storage_dir: &Path) -> Result<Bind> {
         dry_run: false,
         sandbox: None,
         max_concurrent_runs: server_max_concurrent_runs_override(),
-        config: None,
+        config: Some(config_path.to_path_buf()),
     };
 
     match execute_daemon(&bind, &serve_args, storage_dir, false) {

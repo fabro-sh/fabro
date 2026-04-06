@@ -25,20 +25,15 @@ fn help() {
               
               [env: FABRO_JSON=]
 
-          --storage-dir <STORAGE_DIR>
-              Local storage directory (default: ~/.fabro)
+          --server <SERVER>
+              Fabro server target: http(s) URL or absolute Unix socket path
               
-              [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+              [env: FABRO_SERVER=]
 
           --debug
               Enable DEBUG-level logging (default is INFO)
               
               [env: FABRO_DEBUG=]
-
-          --server <SERVER>
-              Fabro server target: http(s) URL or absolute Unix socket path
-              
-              [env: FABRO_SERVER=]
 
           --format <FORMAT>
               Output format
@@ -54,17 +49,17 @@ fn help() {
       -o, --output <OUTPUT>
               Output file path (defaults to stdout)
 
-          --quiet
-              Suppress non-essential output
-              
-              [env: FABRO_QUIET=]
-
       -d, --direction <DIRECTION>
               Graph layout direction (overrides the DOT file's rankdir)
 
               Possible values:
               - lr: Left to right
               - tb: Top to bottom
+
+          --quiet
+              Suppress non-essential output
+              
+              [env: FABRO_QUIET=]
 
           --verbose
               Enable verbose output

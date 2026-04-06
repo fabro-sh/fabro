@@ -7,23 +7,37 @@ use fabro_config::ConfigLayer;
 use fabro_types::Settings;
 use tracing::debug;
 
-use crate::args::{ServerConnectionArgs, ServerTargetArgs};
+use crate::args::ServerTargetArgs;
 
 pub(crate) fn load_settings() -> anyhow::Result<Settings> {
-    ConfigLayer::settings()?.resolve()
+    load_settings_with_config_and_storage_dir(None, None)
+}
+
+pub(crate) fn settings_layer_with_config_and_storage_dir(
+    config_path: Option<&Path>,
+    storage_dir: Option<&Path>,
+) -> anyhow::Result<ConfigLayer> {
+    let layer = load_settings_config(config_path)?;
+    Ok(apply_storage_dir_override(layer, storage_dir))
 }
 
 pub(crate) fn settings_layer_with_storage_dir(
     storage_dir: Option<&Path>,
 ) -> anyhow::Result<ConfigLayer> {
-    let layer = ConfigLayer::settings()?;
-    Ok(apply_storage_dir_override(layer, storage_dir))
+    settings_layer_with_config_and_storage_dir(None, storage_dir)
 }
 
 pub(crate) fn load_settings_with_storage_dir(
     storage_dir: Option<&Path>,
 ) -> anyhow::Result<Settings> {
     settings_layer_with_storage_dir(storage_dir)?.resolve()
+}
+
+pub(crate) fn load_settings_with_config_and_storage_dir(
+    config_path: Option<&Path>,
+    storage_dir: Option<&Path>,
+) -> anyhow::Result<Settings> {
+    settings_layer_with_config_and_storage_dir(config_path, storage_dir)?.resolve()
 }
 
 pub(crate) fn apply_storage_dir_override(
@@ -46,12 +60,6 @@ pub(crate) enum ServerTarget {
     UnixSocket(PathBuf),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum ServerConnection {
-    Local { storage_dir: PathBuf },
-    Target(ServerTarget),
-}
-
 fn configured_server_target(settings: &Settings) -> Result<Option<ServerTarget>> {
     settings
         .server
@@ -67,6 +75,10 @@ fn configured_server_target(settings: &Settings) -> Result<Option<ServerTarget>>
             )
         })
         .transpose()
+}
+
+pub(crate) fn default_server_target() -> ServerTarget {
+    ServerTarget::UnixSocket(default_socket_path())
 }
 
 fn parse_server_target(value: &str, tls: Option<ClientTlsSettings>) -> Result<ServerTarget> {
@@ -102,40 +114,13 @@ fn explicit_server_target(
         .transpose()
 }
 
-fn resolve_server_connection(
-    args: &ServerConnectionArgs,
+pub(crate) fn resolve_server_target(
+    args: &ServerTargetArgs,
     settings: &Settings,
-    use_config_target: bool,
-) -> Result<ServerConnection> {
-    let connection = if let Some(value) = args.server() {
-        ServerConnection::Target(parse_server_target(
-            value,
-            settings
-                .server
-                .as_ref()
-                .and_then(|server| server.tls.clone()),
-        )?)
-    } else if args.storage_dir_is_explicit() {
-        let storage_dir = args.storage_dir().ok_or_else(|| {
-            anyhow::anyhow!("--storage-dir flag was present but no value was parsed")
-        })?;
-        ServerConnection::Local {
-            storage_dir: storage_dir.to_path_buf(),
-        }
-    } else if use_config_target {
-        configured_server_target(settings)?.map_or_else(
-            || ServerConnection::Local {
-                storage_dir: settings.storage_dir(),
-            },
-            ServerConnection::Target,
-        )
-    } else {
-        ServerConnection::Local {
-            storage_dir: settings.storage_dir(),
-        }
-    };
-    debug!(?connection, "Resolved server connection");
-    Ok(connection)
+) -> Result<ServerTarget> {
+    explicit_server_target(args, settings)?
+        .or(configured_server_target(settings)?)
+        .map_or_else(|| Ok(default_server_target()), Ok)
 }
 
 pub(crate) fn exec_server_target(
@@ -145,37 +130,6 @@ pub(crate) fn exec_server_target(
     let target = explicit_server_target(args, settings)?;
     debug!(?target, "Resolved exec server target");
     Ok(target)
-}
-
-pub(crate) fn server_only_command_connection(
-    args: &ServerTargetArgs,
-    settings: &Settings,
-) -> Result<ServerConnection> {
-    let connection = if let Some(target) = explicit_server_target(args, settings)? {
-        ServerConnection::Target(target)
-    } else if let Some(target) = configured_server_target(settings)? {
-        ServerConnection::Target(target)
-    } else {
-        ServerConnection::Local {
-            storage_dir: settings.storage_dir(),
-        }
-    };
-    debug!(?connection, "Resolved server-only command connection");
-    Ok(connection)
-}
-
-pub(crate) fn model_server_connection(
-    args: &ServerConnectionArgs,
-    settings: &Settings,
-) -> Result<ServerConnection> {
-    resolve_server_connection(args, settings, true)
-}
-
-pub(crate) fn server_backed_command_connection(
-    args: &ServerConnectionArgs,
-    settings: &Settings,
-) -> Result<ServerConnection> {
-    resolve_server_connection(args, settings, true)
 }
 
 pub(crate) fn build_server_client(
@@ -212,22 +166,11 @@ pub(crate) fn build_server_client(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::args::{ServerConnectionArgs, ServerTargetArgs};
+    use crate::args::ServerTargetArgs;
 
     fn server_target_args(value: Option<&str>) -> ServerTargetArgs {
         ServerTargetArgs {
             server: value.map(str::to_string),
-        }
-    }
-
-    fn server_connection_args(
-        storage_dir: Option<&str>,
-        server: Option<&str>,
-    ) -> ServerConnectionArgs {
-        ServerConnectionArgs {
-            storage_dir: storage_dir.map(PathBuf::from),
-            server: server.map(str::to_string),
-            storage_dir_explicit: storage_dir.is_some(),
         }
     }
 
@@ -281,7 +224,7 @@ mod tests {
     }
 
     #[test]
-    fn model_uses_configured_server_target() {
+    fn resolve_server_target_uses_configured_server_target() {
         let settings = Settings {
             server: Some(ServerSettings {
                 target: Some("https://config.example.com".to_string()),
@@ -290,16 +233,16 @@ mod tests {
             ..Settings::default()
         };
         assert_eq!(
-            model_server_connection(&server_connection_args(None, None), &settings).unwrap(),
-            ServerConnection::Target(ServerTarget::HttpUrl {
+            resolve_server_target(&server_target_args(None), &settings).unwrap(),
+            ServerTarget::HttpUrl {
                 api_url: "https://config.example.com".to_string(),
                 tls: None,
-            })
+            }
         );
     }
 
     #[test]
-    fn server_only_command_uses_configured_server_target() {
+    fn resolve_server_target_explicit_target_overrides_config_target() {
         let settings = Settings {
             server: Some(ServerSettings {
                 target: Some("https://config.example.com".to_string()),
@@ -308,47 +251,24 @@ mod tests {
             ..Settings::default()
         };
         assert_eq!(
-            server_only_command_connection(&server_target_args(None), &settings).unwrap(),
-            ServerConnection::Target(ServerTarget::HttpUrl {
-                api_url: "https://config.example.com".to_string(),
-                tls: None,
-            })
-        );
-    }
-
-    #[test]
-    fn server_only_command_explicit_target_overrides_config_target() {
-        let settings = Settings {
-            server: Some(ServerSettings {
-                target: Some("https://config.example.com".to_string()),
-                tls: None,
-            }),
-            ..Settings::default()
-        };
-        assert_eq!(
-            server_only_command_connection(
+            resolve_server_target(
                 &server_target_args(Some("https://cli.example.com")),
-                &settings,
+                &settings
             )
             .unwrap(),
-            ServerConnection::Target(ServerTarget::HttpUrl {
+            ServerTarget::HttpUrl {
                 api_url: "https://cli.example.com".to_string(),
                 tls: None,
-            })
+            }
         );
     }
 
     #[test]
-    fn server_only_command_defaults_to_local_storage_dir() {
-        let settings = Settings {
-            storage_dir: Some(PathBuf::from("/tmp/fabro")),
-            ..Settings::default()
-        };
+    fn resolve_server_target_defaults_to_default_unix_socket_target() {
+        let settings = Settings::default();
         assert_eq!(
-            server_only_command_connection(&server_target_args(None), &settings).unwrap(),
-            ServerConnection::Local {
-                storage_dir: PathBuf::from("/tmp/fabro"),
-            }
+            resolve_server_target(&server_target_args(None), &settings).unwrap(),
+            ServerTarget::UnixSocket(dirs::home_dir().unwrap().join(".fabro/fabro.sock"))
         );
     }
 
@@ -362,32 +282,14 @@ mod tests {
             ..Settings::default()
         };
         assert_eq!(
-            model_server_connection(
-                &server_connection_args(None, Some("https://cli.example.com")),
-                &settings,
+            resolve_server_target(
+                &server_target_args(Some("https://cli.example.com")),
+                &settings
             )
             .unwrap(),
-            ServerConnection::Target(ServerTarget::HttpUrl {
+            ServerTarget::HttpUrl {
                 api_url: "https://cli.example.com".to_string(),
                 tls: None,
-            })
-        );
-    }
-
-    #[test]
-    fn storage_dir_suppresses_configured_remote_target() {
-        let settings = Settings {
-            server: Some(ServerSettings {
-                target: Some("https://config.example.com".to_string()),
-                tls: None,
-            }),
-            ..Settings::default()
-        };
-        assert_eq!(
-            model_server_connection(&server_connection_args(Some("/tmp/fabro"), None), &settings)
-                .unwrap(),
-            ServerConnection::Local {
-                storage_dir: PathBuf::from("/tmp/fabro"),
             }
         );
     }

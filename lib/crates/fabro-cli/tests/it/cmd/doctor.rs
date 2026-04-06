@@ -25,14 +25,13 @@ fn help() {
     Usage: fabro doctor [OPTIONS]
 
     Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --server <SERVER>            Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-      -v, --verbose                    Show detailed information for each check
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-      -h, --help                       Print help
+          --json              Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+      -v, --verbose           Show detailed information for each check
+          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
+      -h, --help              Print help
     ----- stderr -----
     ");
 }

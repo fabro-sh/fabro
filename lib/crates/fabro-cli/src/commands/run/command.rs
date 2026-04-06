@@ -8,8 +8,8 @@ use crate::user_config::{self, settings_layer_with_storage_dir};
 
 pub(crate) async fn execute(mut args: RunArgs, globals: &GlobalArgs) -> Result<()> {
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-    let cli_settings = user_config::load_settings_with_storage_dir(args.target.storage_dir())?;
-    let cli = settings_layer_with_storage_dir(args.target.storage_dir())?;
+    let cli_settings = user_config::load_settings()?;
+    let cli = settings_layer_with_storage_dir(None)?;
     args.verbose = args.verbose || cli_settings.verbose_enabled();
 
     let quiet = args.detach;
@@ -22,7 +22,7 @@ pub(crate) async fn execute(mut args: RunArgs, globals: &GlobalArgs) -> Result<(
     #[cfg(not(feature = "sleep_inhibitor"))]
     let _ = prevent_idle_sleep;
 
-    let client = server_client::connect_server_connection(&created_run.connection).await?;
+    let client = server_client::connect_server_only(&args.target).await?;
     super::start::start_run_with_client(&client, &created_run.run_id, false).await?;
 
     if args.detach {
