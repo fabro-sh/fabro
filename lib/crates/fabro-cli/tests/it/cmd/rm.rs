@@ -1,5 +1,8 @@
 use fabro_test::{fabro_snapshot, test_context};
+use httpmock::MockServer;
 use serde_json::Value;
+
+use crate::support::unique_run_id;
 
 use super::support::{
     setup_completed_fast_dry_run, setup_created_fast_dry_run, setup_local_sandbox_run,
@@ -22,14 +25,14 @@ fn help() {
       <RUNS>...  Run IDs or workflow names to remove
 
     Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-      -f, --force                      Force removal of active runs
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-      -h, --help                       Print help
+          --json              Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+      -f, --force             Force removal of active runs
+          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose           Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help              Print help
     ----- stderr -----
     ");
 }
@@ -199,4 +202,57 @@ fn rm_partial_failure_json_includes_removed_and_errors() {
         !run.run_dir.exists(),
         "existing run should still be removed"
     );
+}
+
+#[test]
+fn rm_uses_configured_server_target_without_local_run_dir() {
+    let context = test_context!();
+    let run_id = unique_run_id();
+    let server = MockServer::start();
+    let list_mock = server.mock(|when, then| {
+        when.method("GET").path("/api/v1/runs");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!([
+                    {
+                        "run_id": run_id,
+                        "workflow_name": "Remote Workflow",
+                        "workflow_slug": "remote-workflow",
+                        "goal": "Remote goal",
+                        "labels": {},
+                        "host_repo_path": null,
+                        "start_time": "2026-04-05T12:00:00Z",
+                        "status": "succeeded",
+                        "status_reason": null,
+                        "duration_ms": 123,
+                        "total_cost": null
+                    }
+                ])
+                .to_string(),
+            );
+    });
+    let delete_mock = server.mock(|when, then| {
+        when.method("DELETE").path(format!("/api/v1/runs/{run_id}"));
+        then.status(204);
+    });
+    context.write_home(
+        ".fabro/user.toml",
+        format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
+    );
+
+    let output = context
+        .command()
+        .args(["rm", &run_id])
+        .output()
+        .expect("rm should execute");
+
+    assert!(
+        output.status.success(),
+        "rm failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    list_mock.assert();
+    delete_mock.assert();
 }

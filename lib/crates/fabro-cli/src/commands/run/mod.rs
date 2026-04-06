@@ -2,9 +2,9 @@ use anyhow::Result;
 use fabro_util::terminal::Styles;
 
 use crate::args::{AttachArgs, GlobalArgs, RunArgs, RunCommands, RunnerArgs, StartArgs};
-use crate::server_runs::ServerRunLookup;
+use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
-use crate::user_config::{load_user_settings_with_storage_dir, user_layer_with_storage_dir};
+use crate::user_config::user_layer_with_storage_dir;
 
 pub(crate) mod attach;
 pub(crate) mod command;
@@ -48,27 +48,24 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             }
             Ok(())
         }
-        RunCommands::Start(StartArgs { storage_dir, run }) => {
-            let cli_settings = load_user_settings_with_storage_dir(storage_dir.as_deref())?;
-            let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
+        RunCommands::Start(StartArgs { server, run }) => {
+            let lookup = ServerSummaryLookup::connect(&server).await?;
             let run_info = lookup.resolve(&run)?;
             let run_id = run_info.run_id();
-            start::start_run(&run_id, &cli_settings.storage_dir(), false).await?;
+            start::start_run_with_client(lookup.client(), &run_id, false).await?;
             if globals.json {
                 print_json_pretty(&serde_json::json!({ "run_id": run_id }))?;
             }
             Ok(())
         }
-        RunCommands::Attach(AttachArgs { storage_dir, run }) => {
+        RunCommands::Attach(AttachArgs { server, run }) => {
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-            let cli_settings = load_user_settings_with_storage_dir(storage_dir.as_deref())?;
-            let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
+            let lookup = ServerSummaryLookup::connect(&server).await?;
             let run_info = lookup.resolve(&run)?;
             let run_id = run_info.run_id();
-            let exit_code = attach::attach_run(
-                &run_info.path,
-                Some(cli_settings.storage_dir().as_path()),
-                Some(&run_id),
+            let exit_code = attach::attach_run_with_client(
+                lookup.client(),
+                &run_id,
                 false,
                 styles,
                 globals.json,

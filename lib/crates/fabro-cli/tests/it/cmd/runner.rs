@@ -269,7 +269,7 @@ digraph Test {
     });
     fabro_json_snapshot!(context, &before_summary, @r#"
     {
-      "run_dir": "[RUN_DIR]",
+      "run_dir": null,
       "start_time": "[TIMESTAMP]",
       "conclusion_timestamp": "[TIMESTAMP]",
       "conclusion_status": "success"

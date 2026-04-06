@@ -970,8 +970,35 @@ async fn delete_run(
         Err(response) => return response,
     };
 
-    if let Ok(mut runs) = state.runs.lock() {
-        runs.remove(&id);
+    let managed_run = if let Ok(mut runs) = state.runs.lock() {
+        runs.remove(&id)
+    } else {
+        None
+    };
+
+    if let Some(mut managed_run) = managed_run {
+        if let Some(token) = &managed_run.cancel_token {
+            token.store(true, Ordering::Relaxed);
+        }
+        if let Some(interviewer) = &managed_run.interviewer {
+            interviewer.abort_pending();
+        }
+        if let Some(cancel_tx) = managed_run.cancel_tx.take() {
+            let _ = cancel_tx.send(());
+        }
+        if let Some(run_dir) = managed_run.run_dir.take() {
+            if let Err(err) = remove_run_dir(&run_dir) {
+                return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                    .into_response();
+            }
+        }
+    } else {
+        let storage_dir = state.settings.read().unwrap().storage_dir();
+        let run_dir = operations::make_run_dir(&storage_dir.join("runs"), &id);
+        if let Err(err) = remove_run_dir(&run_dir) {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
     }
 
     match state.store.delete_run(&id).await {
@@ -979,6 +1006,14 @@ async fn delete_run(
         Err(err) => {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         }
+    }
+}
+
+fn remove_run_dir(run_dir: &std::path::Path) -> std::io::Result<()> {
+    match std::fs::remove_dir_all(run_dir) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(err),
     }
 }
 

@@ -246,7 +246,7 @@ pub(crate) struct RunFilterArgs {
 #[derive(Args)]
 pub(crate) struct RunsListArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) server: ServerTargetArgs,
 
     #[command(flatten)]
     pub(crate) filter: RunFilterArgs,
@@ -263,7 +263,7 @@ pub(crate) struct RunsListArgs {
 #[derive(Args)]
 pub(crate) struct RunsRemoveArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) server: ServerTargetArgs,
 
     /// Run IDs or workflow names to remove
     #[arg(required = true)]
@@ -277,7 +277,7 @@ pub(crate) struct RunsRemoveArgs {
 #[derive(Args)]
 pub(crate) struct LogsArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) server: ServerTargetArgs,
 
     /// Run ID prefix or workflow name (most recent run)
     pub(crate) run: String,
@@ -484,7 +484,7 @@ pub(crate) struct DiffArgs {
 #[derive(Args)]
 pub(crate) struct InspectArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) server: ServerTargetArgs,
 
     /// Run ID prefix or workflow name (most recent run)
     pub(crate) run: String,
@@ -576,7 +576,7 @@ pub(crate) struct ForkArgs {
 #[derive(Args)]
 pub(crate) struct WaitArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) server: ServerTargetArgs,
 
     /// Run ID prefix or workflow name (most recent run)
     pub(crate) run: String,
@@ -735,7 +735,7 @@ pub(crate) struct PrCloseArgs {
 #[derive(Args)]
 pub(crate) struct StartArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) server: ServerTargetArgs,
 
     /// Run ID prefix or workflow name
     pub(crate) run: String,
@@ -744,7 +744,7 @@ pub(crate) struct StartArgs {
 #[derive(Args)]
 pub(crate) struct AttachArgs {
     #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+    pub(crate) server: ServerTargetArgs,
 
     /// Run ID prefix or workflow name
     pub(crate) run: String,

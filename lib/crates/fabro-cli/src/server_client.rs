@@ -15,7 +15,7 @@ use futures::StreamExt;
 use serde::de::DeserializeOwned;
 use tokio::time::sleep;
 
-use crate::args::ServerConnectionArgs;
+use crate::args::{ServerConnectionArgs, ServerTargetArgs};
 use crate::commands::server::start;
 use crate::user_config;
 
@@ -120,6 +120,13 @@ pub(crate) async fn connect_server_connection(
     Ok(ServerStoreClient {
         client: connect_resolved_api_client(connection).await?,
     })
+}
+
+pub(crate) async fn connect_server_only(args: &ServerTargetArgs) -> Result<ServerStoreClient> {
+    let storage_dir = std::env::var_os("FABRO_STORAGE_DIR").map(std::path::PathBuf::from);
+    let settings = user_config::load_user_settings_with_storage_dir(storage_dir.as_deref())?;
+    let connection = user_config::server_only_command_connection(args, &settings)?;
+    connect_server_connection(&connection).await
 }
 
 pub(crate) async fn connect_api_client(storage_dir: &Path) -> Result<fabro_api::Client> {

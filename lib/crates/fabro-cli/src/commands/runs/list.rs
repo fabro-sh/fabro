@@ -7,13 +7,11 @@ use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_util::terminal::Styles;
 
 use fabro_util::text::strip_goal_decoration;
-use fabro_workflow::run_lookup::{StatusFilter, filter_runs, runs_base, scan_runs_with_summaries};
 use fabro_workflow::run_status::RunStatus;
 
 use crate::args::{GlobalArgs, RunsListArgs};
-use crate::server_runs::ServerRunLookup;
+use crate::server_runs::{ServerSummaryLookup, filter_server_runs};
 use crate::shared::{color_if, format_duration_ms, tilde_path};
-use crate::user_config::load_user_settings_with_storage_dir;
 
 use super::short_run_id;
 
@@ -23,22 +21,14 @@ pub(crate) async fn list_command(
     styles: &Styles,
     globals: &GlobalArgs,
 ) -> Result<()> {
-    let cli_settings = load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
-    let base = runs_base(&cli_settings.storage_dir());
-    let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
-    let runs = scan_runs_with_summaries(lookup.summaries(), &base)?;
+    let lookup = ServerSummaryLookup::connect(&args.server).await?;
     let label_filters = parse_label_filters(&args.filter.label);
-    let filtered = filter_runs(
-        &runs,
+    let filtered = filter_server_runs(
+        lookup.runs(),
         args.filter.before.as_deref(),
         args.filter.workflow.as_deref(),
         &label_filters,
-        args.filter.orphans,
-        if args.all {
-            StatusFilter::All
-        } else {
-            StatusFilter::RunningOnly
-        },
+        !args.all,
     );
 
     if globals.json {
@@ -47,7 +37,6 @@ pub(crate) async fn list_command(
             .map(|run| {
                 serde_json::json!({
                     "run_id": run.run_id(),
-                    "dir_name": run.dir_name,
                     "workflow_name": run.workflow_name(),
                     "workflow_slug": run.workflow_slug(),
                     "status": run.status(),
@@ -100,7 +89,7 @@ pub(crate) async fn list_command(
         .map(|run| {
             let duration_display = match run.duration_ms() {
                 Some(ms) => format_duration_ms(ms),
-                None => match run.start_time_dt {
+                None => match run.start_time_dt() {
                     Some(start) => {
                         let elapsed = now.signed_duration_since(start);
                         format_duration_ms(

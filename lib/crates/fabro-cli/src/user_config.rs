@@ -147,6 +147,23 @@ pub(crate) fn exec_server_target(
     Ok(target)
 }
 
+pub(crate) fn server_only_command_connection(
+    args: &ServerTargetArgs,
+    settings: &Settings,
+) -> Result<ServerConnection> {
+    let connection = if let Some(target) = explicit_server_target(args, settings)? {
+        ServerConnection::Target(target)
+    } else if let Some(target) = configured_server_target(settings)? {
+        ServerConnection::Target(target)
+    } else {
+        ServerConnection::Local {
+            storage_dir: settings.storage_dir(),
+        }
+    };
+    debug!(?connection, "Resolved server-only command connection");
+    Ok(connection)
+}
+
 pub(crate) fn model_server_connection(
     args: &ServerConnectionArgs,
     settings: &Settings,
@@ -278,6 +295,60 @@ mod tests {
                 api_url: "https://config.example.com".to_string(),
                 tls: None,
             })
+        );
+    }
+
+    #[test]
+    fn server_only_command_uses_configured_server_target() {
+        let settings = Settings {
+            server: Some(ServerSettings {
+                target: Some("https://config.example.com".to_string()),
+                tls: None,
+            }),
+            ..Settings::default()
+        };
+        assert_eq!(
+            server_only_command_connection(&server_target_args(None), &settings).unwrap(),
+            ServerConnection::Target(ServerTarget::HttpUrl {
+                api_url: "https://config.example.com".to_string(),
+                tls: None,
+            })
+        );
+    }
+
+    #[test]
+    fn server_only_command_explicit_target_overrides_config_target() {
+        let settings = Settings {
+            server: Some(ServerSettings {
+                target: Some("https://config.example.com".to_string()),
+                tls: None,
+            }),
+            ..Settings::default()
+        };
+        assert_eq!(
+            server_only_command_connection(
+                &server_target_args(Some("https://cli.example.com")),
+                &settings,
+            )
+            .unwrap(),
+            ServerConnection::Target(ServerTarget::HttpUrl {
+                api_url: "https://cli.example.com".to_string(),
+                tls: None,
+            })
+        );
+    }
+
+    #[test]
+    fn server_only_command_defaults_to_local_storage_dir() {
+        let settings = Settings {
+            storage_dir: Some(PathBuf::from("/tmp/fabro")),
+            ..Settings::default()
+        };
+        assert_eq!(
+            server_only_command_connection(&server_target_args(None), &settings).unwrap(),
+            ServerConnection::Local {
+                storage_dir: PathBuf::from("/tmp/fabro"),
+            }
         );
     }
 

@@ -24,13 +24,13 @@ fn help() {
       <RUN>  Run ID prefix or workflow name (most recent run)
 
     Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-      -h, --help                       Print help
+          --json              Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose           Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help              Print help
     ----- stderr -----
     ");
 }
@@ -103,6 +103,23 @@ fn inspect_completed_run_shows_run_start_conclusion_checkpoint() {
       }
     ]
     "#);
+}
+
+#[test]
+fn inspect_json_omits_run_dir() {
+    let context = test_context!();
+    let run = setup_completed_fast_dry_run(&context);
+    let output = run_success(&context, &["inspect", &run.run_id]);
+    let items: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("inspect output should parse");
+    let first = items
+        .as_array()
+        .and_then(|items| items.first())
+        .expect("inspect output should contain one item");
+    assert!(
+        first.get("run_dir").is_none(),
+        "inspect JSON should not expose run_dir"
+    );
 }
 
 #[test]

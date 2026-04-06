@@ -19,15 +19,15 @@ fn help() {
       <RUN>  Run ID prefix or workflow name (most recent run)
 
     Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --timeout <SECONDS>          Maximum time to wait in seconds
-          --interval <MS>              Poll interval in milliseconds [default: 1000]
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-      -h, --help                       Print help
+          --json               Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>    Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --debug              Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --timeout <SECONDS>  Maximum time to wait in seconds
+          --interval <MS>      Poll interval in milliseconds [default: 1000]
+          --no-upgrade-check   Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet              Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose            Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help               Print help
     ----- stderr -----
     ");
 }

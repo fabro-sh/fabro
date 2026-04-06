@@ -1,5 +1,8 @@
 use fabro_test::{fabro_snapshot, test_context};
+use httpmock::MockServer;
 use serde_json::Value;
+
+use crate::support::unique_run_id;
 
 use super::support::{fixture, setup_completed_fast_dry_run, setup_created_fast_dry_run};
 
@@ -17,18 +20,18 @@ fn help() {
     Usage: fabro ps [OPTIONS]
 
     Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-          --before <BEFORE>            Only include runs started before this date (YYYY-MM-DD prefix match)
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --workflow <WORKFLOW>        Filter by workflow name (substring match)
-          --label <KEY=VALUE>          Filter by label (KEY=VALUE, repeatable, AND semantics)
-          --orphans                    Include orphan directories (no run.json)
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-      -a, --all                        Show all runs, not just running (like docker ps -a)
-      -q, --quiet                      Only display run IDs
-      -h, --help                       Print help
+          --json                 Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>      Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --before <BEFORE>      Only include runs started before this date (YYYY-MM-DD prefix match)
+          --debug                Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --no-upgrade-check     Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --workflow <WORKFLOW>  Filter by workflow name (substring match)
+          --label <KEY=VALUE>    Filter by label (KEY=VALUE, repeatable, AND semantics)
+          --orphans              Include orphan directories (no run.json)
+          --verbose              Enable verbose output [env: FABRO_VERBOSE=]
+      -a, --all                  Show all runs, not just running (like docker ps -a)
+      -q, --quiet                Only display run IDs
+      -h, --help                 Print help
     ----- stderr -----
     ");
 }
@@ -164,4 +167,53 @@ fn ps_filters_by_workflow_and_label() {
     assert_eq!(run["labels"]["suite"], "alpha");
     assert_eq!(run["labels"]["fabro_test_case"], context.test_case_id());
     assert_eq!(run["labels"]["fabro_test_run"], context.test_run_id());
+}
+
+#[test]
+fn ps_uses_configured_server_target_without_server_flag() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let run_id = unique_run_id();
+    let mock = server.mock(|when, then| {
+        when.method("GET").path("/api/v1/runs");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!([
+                    {
+                        "run_id": run_id,
+                        "workflow_name": "Remote Workflow",
+                        "workflow_slug": "remote-workflow",
+                        "goal": "Remote goal",
+                        "labels": {
+                            "suite": "remote"
+                        },
+                        "host_repo_path": "/srv/repo",
+                        "start_time": "2026-04-05T12:00:00Z",
+                        "status": "succeeded",
+                        "status_reason": null,
+                        "duration_ms": 123,
+                        "total_cost": null
+                    }
+                ])
+                .to_string(),
+            );
+    });
+    context.write_home(
+        ".fabro/user.toml",
+        format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
+    );
+
+    let output = context
+        .ps()
+        .args(["-a", "--json"])
+        .output()
+        .expect("ps should execute");
+
+    assert!(output.status.success(), "ps should succeed");
+    let runs: Vec<Value> = serde_json::from_slice(&output.stdout).expect("ps JSON should parse");
+    mock.assert();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0]["workflow_name"], "Remote Workflow");
+    assert_eq!(runs[0]["host_repo_path"], "/srv/repo");
 }

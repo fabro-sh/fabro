@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use fabro_test::{fabro_snapshot, run_and_format, test_context};
+use httpmock::MockServer;
 use serde_json::Value;
 
 use crate::support::{example_fixture, fabro_json_snapshot, run_output_filters, unique_run_id};
@@ -26,13 +27,13 @@ fn help() {
       <RUN>  Run ID prefix or workflow name
 
     Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-      -h, --help                       Print help
+          --json              Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
+          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose           Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help              Print help
     ----- stderr -----
     ");
 }
@@ -50,10 +51,114 @@ fn attach_requires_run_arg() {
     error: the following required arguments were not provided:
       <RUN>
 
-    Usage: fabro attach --storage-dir <STORAGE_DIR> --no-upgrade-check <RUN>
+    Usage: fabro attach --no-upgrade-check <RUN>
 
     For more information, try '--help'.
     ");
+}
+
+#[test]
+fn attach_uses_configured_server_target_without_server_flag() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let run_id = unique_run_id();
+    let list_mock = server.mock(|when, then| {
+        when.method("GET").path("/api/v1/runs");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!([
+                    {
+                        "run_id": run_id,
+                        "workflow_name": "Remote Workflow",
+                        "workflow_slug": "remote-workflow",
+                        "goal": "Remote output",
+                        "labels": {},
+                        "host_repo_path": null,
+                        "start_time": "2026-04-05T12:00:00Z",
+                        "status": "succeeded",
+                        "status_reason": null,
+                        "duration_ms": 12,
+                        "total_cost": null
+                    }
+                ])
+                .to_string(),
+            );
+    });
+    server.mock(|when, then| {
+        when.method("GET")
+            .path(format!("/api/v1/runs/{run_id}/events"));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(r#"{"data":[],"meta":{"has_more":false}}"#);
+    });
+    server.mock(|when, then| {
+        when.method("GET")
+            .path(format!("/api/v1/runs/{run_id}/state"));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "run": null,
+                    "graph_source": null,
+                    "start": null,
+                    "status": {
+                        "status": "succeeded",
+                        "reason": null,
+                        "updated_at": "2026-04-05T12:00:01Z"
+                    },
+                    "checkpoint": null,
+                    "checkpoints": [],
+                    "conclusion": {
+                        "timestamp": "2026-04-05T12:00:01Z",
+                        "status": "success",
+                        "duration_ms": 12,
+                        "stages": [],
+                        "total_cost": null,
+                        "total_retries": 0,
+                        "total_input_tokens": 0,
+                        "total_output_tokens": 0,
+                        "total_cache_read_tokens": 0,
+                        "total_cache_write_tokens": 0,
+                        "total_reasoning_tokens": 0,
+                        "has_pricing": false
+                    },
+                    "retro": null,
+                    "retro_prompt": null,
+                    "retro_response": null,
+                    "sandbox": null,
+                    "final_patch": null,
+                    "pull_request": null,
+                    "nodes": {}
+                })
+                .to_string(),
+            );
+    });
+    server.mock(|when, then| {
+        when.method("GET")
+            .path(format!("/api/v1/runs/{run_id}/questions"));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(r#"{"data":[],"meta":{"has_more":false}}"#);
+    });
+    context.write_home(
+        ".fabro/user.toml",
+        format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
+    );
+
+    let output = context
+        .command()
+        .args(["attach", &run_id])
+        .output()
+        .expect("attach should execute");
+
+    assert!(
+        output.status.success(),
+        "attach failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    list_mock.assert();
 }
 
 #[test]

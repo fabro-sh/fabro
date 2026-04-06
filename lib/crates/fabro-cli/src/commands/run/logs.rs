@@ -12,12 +12,10 @@ use tracing::{debug, info};
 
 use crate::args::{GlobalArgs, LogsArgs};
 use crate::server_client;
-use crate::server_runs::ServerRunLookup;
-use crate::user_config::load_user_settings_with_storage_dir;
+use crate::server_runs::ServerSummaryLookup;
 
 pub(crate) async fn run(args: &LogsArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
-    let cli_settings = load_user_settings_with_storage_dir(args.storage_dir.as_deref())?;
-    let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
+    let lookup = ServerSummaryLookup::connect(&args.server).await?;
     let run = lookup.resolve(&args.run)?;
     let client = lookup.client();
 
