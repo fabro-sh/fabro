@@ -80,7 +80,7 @@ pub use fabro_api::types::{
     QuestionType as ApiQuestionType, RenderWorkflowGraphDirection, RenderWorkflowGraphFormat,
     RenderWorkflowGraphRequest, RunArtifactEntry, RunArtifactListResponse, RunError,
     RunEvent as ApiRunEvent, RunManifest, RunStatus, RunStatusResponse, SandboxFileEntry,
-    SandboxFileListResponse, SetSecretRequest, SshAccessRequest, SshAccessResponse,
+    SandboxFileListResponse, ServerSettings, SetSecretRequest, SshAccessRequest, SshAccessResponse,
     StartRunRequest, SubmitAnswerRequest, TokenUsage, UsageByModel, WriteBlobResponse,
 };
 use fabro_graphviz::render::GraphFormat;
@@ -588,7 +588,7 @@ async fn get_server_settings(
     (StatusCode::OK, Json(response)).into_response()
 }
 
-fn api_server_settings(settings: &Settings) -> anyhow::Result<fabro_api::types::ServerSettings> {
+fn api_server_settings(settings: &Settings) -> anyhow::Result<ServerSettings> {
     let mut value = serde_json::to_value(settings)?;
     strip_nulls(&mut value);
     serde_json::from_value(value).map_err(Into::into)
