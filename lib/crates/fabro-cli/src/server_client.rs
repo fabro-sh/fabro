@@ -211,7 +211,7 @@ fn normalize_remote_server_target(api_url: &str) -> String {
 }
 
 pub(crate) async fn connect_unix_socket_api_client(path: &Path) -> Result<fabro_api::Client> {
-    let http_client = reqwest::ClientBuilder::new()
+    let http_client = crate::user_config::cli_http_client_builder()
         .unix_socket(path)
         .no_proxy()
         .build()

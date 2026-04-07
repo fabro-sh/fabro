@@ -132,11 +132,16 @@ pub(crate) fn exec_server_target(
     Ok(target)
 }
 
+pub(crate) fn cli_http_client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .user_agent(format!("fabro-cli/{}", fabro_util::version::FABRO_VERSION))
+}
+
 pub(crate) fn build_server_client(
     tls: Option<&ClientTlsSettings>,
 ) -> anyhow::Result<reqwest::Client> {
     let Some(tls) = tls else {
-        return Ok(reqwest::Client::new());
+        return Ok(cli_http_client_builder().build()?);
     };
 
     let cert_path = fabro_config::expand_tilde(&tls.cert);
@@ -154,7 +159,7 @@ pub(crate) fn build_server_client(
     let identity = reqwest::Identity::from_pem(&identity_pem)?;
     let ca_cert = reqwest::Certificate::from_pem(&ca_pem)?;
 
-    let client = reqwest::Client::builder()
+    let client = cli_http_client_builder()
         .use_rustls_tls()
         .identity(identity)
         .add_root_certificate(ca_cert)
