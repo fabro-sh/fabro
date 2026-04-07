@@ -1,6 +1,7 @@
 [profile.default]
 # Unit tests: flag SLOW after 1.5s, hard-kill after 3s for most crates
 slow-timeout = { period = "1.5s", terminate-after = 2 }
+leak-timeout = "500ms"
 
     [[profile.default.overrides]]
     filter = "package(fabro-cli) & kind(test)"
@@ -17,3 +18,4 @@ slow-timeout = { period = "1.5s", terminate-after = 2 }
 [profile.e2e]
 # E2E (ignored) tests: flag SLOW after 10s, hard-kill after 30s
 slow-timeout = { period = "10s", terminate-after = 3 }
+leak-timeout = "500ms"
