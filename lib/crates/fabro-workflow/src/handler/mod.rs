@@ -15,7 +15,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-#[cfg(test)]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -35,6 +35,8 @@ use crate::workflow_bundle::WorkflowBundle;
 use fabro_graphviz::graph::{Graph, Node, shape_to_handler_type};
 use fabro_hooks::{HookContext, HookDecision, HookRunner};
 use fabro_interview::Interviewer;
+use tokio::time;
+use tokio_util::sync::CancellationToken;
 
 /// Shared services available to all handlers during execution.
 pub struct EngineServices {
@@ -51,6 +53,8 @@ pub struct EngineServices {
     pub env: HashMap<String, String>,
     /// When true, handlers should skip real execution and return simulated results.
     pub dry_run: bool,
+    /// Optional run-scoped cancellation flag from the core executor.
+    pub cancel_requested: Option<Arc<AtomicBool>>,
     /// Logical path of the current workflow when running from a bundle.
     pub workflow_path: Option<PathBuf>,
     /// Bundled workflows available for child-workflow resolution.
@@ -66,6 +70,33 @@ impl EngineServices {
     /// Set the git state for the current run.
     pub fn set_git_state(&self, state: Option<Arc<GitState>>) {
         *self.git_state.write().unwrap() = state;
+    }
+
+    /// Bridge the core executor's atomic cancel flag to sandbox command cancellation.
+    pub fn sandbox_cancel_token(&self) -> Option<CancellationToken> {
+        let cancel_requested = self.cancel_requested.clone()?;
+        let token = CancellationToken::new();
+
+        if cancel_requested.load(Ordering::Relaxed) {
+            token.cancel();
+            return Some(token);
+        }
+
+        let token_clone = token.clone();
+        tokio::spawn(async move {
+            loop {
+                if token_clone.is_cancelled() {
+                    return;
+                }
+                if cancel_requested.load(Ordering::Relaxed) {
+                    token_clone.cancel();
+                    return;
+                }
+                time::sleep(Duration::from_millis(10)).await;
+            }
+        });
+
+        Some(token)
     }
 
     /// Run lifecycle hooks and return the merged decision.
@@ -111,6 +142,7 @@ impl EngineServices {
             hook_runner: None,
             env: HashMap::new(),
             dry_run: false,
+            cancel_requested: None,
             workflow_path: None,
             workflow_bundle: None,
         }

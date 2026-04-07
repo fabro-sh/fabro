@@ -106,12 +106,17 @@ impl Handler for CommandHandler {
         } else {
             Some(&services.env)
         };
+        let cancel_token = services.sandbox_cancel_token();
 
         let result = services
             .sandbox
-            .exec_command(&command, timeout_ms, None, env_vars, None)
-            .await
-            .map_err(|e| FabroError::handler(format!("Failed to spawn script: {e}")))?;
+            .exec_command(&command, timeout_ms, None, env_vars, cancel_token.clone())
+            .await;
+        if let Some(token) = cancel_token {
+            token.cancel();
+        }
+        let result =
+            result.map_err(|e| FabroError::handler(format!("Failed to spawn script: {e}")))?;
 
         services.emitter.emit(&Event::CommandCompleted {
             node_id: node.id.clone(),
@@ -173,6 +178,7 @@ mod tests {
     use fabro_types::fixtures;
     use object_store::memory::InMemory;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
     use std::time::Duration;
 
     fn make_services() -> EngineServices {
@@ -702,6 +708,7 @@ mod tests {
         exec_result: fabro_agent::sandbox::ExecResult,
         captured_command: std::sync::Mutex<Option<String>>,
         captured_env_vars: std::sync::Mutex<Option<std::collections::HashMap<String, String>>>,
+        captured_cancel_token: std::sync::Mutex<Option<bool>>,
     }
 
     impl SpySandbox {
@@ -710,6 +717,7 @@ mod tests {
                 exec_result,
                 captured_command: std::sync::Mutex::new(None),
                 captured_env_vars: std::sync::Mutex::new(None),
+                captured_cancel_token: std::sync::Mutex::new(None),
             }
         }
 
@@ -750,10 +758,11 @@ mod tests {
             _timeout_ms: u64,
             _working_dir: Option<&str>,
             env_vars: Option<&std::collections::HashMap<String, String>>,
-            _cancel_token: Option<tokio_util::sync::CancellationToken>,
+            cancel_token: Option<tokio_util::sync::CancellationToken>,
         ) -> Result<fabro_agent::sandbox::ExecResult, String> {
             *self.captured_command.lock().unwrap() = Some(command.to_string());
             *self.captured_env_vars.lock().unwrap() = env_vars.cloned();
+            *self.captured_cancel_token.lock().unwrap() = Some(cancel_token.is_some());
             Ok(self.exec_result.clone())
         }
         async fn grep(
@@ -917,6 +926,35 @@ mod tests {
             captured_env.get("MY_VAR").map(String::as_str),
             Some("my_value")
         );
+    }
+
+    #[tokio::test]
+    async fn passes_run_cancellation_to_sandbox() {
+        let spy = std::sync::Arc::new(SpySandbox::new(fabro_agent::sandbox::ExecResult {
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 0,
+            timed_out: false,
+            duration_ms: 5,
+        }));
+
+        let handler = CommandHandler;
+        let mut node = Node::new("script_node");
+        node.attrs
+            .insert("script".to_string(), AttrValue::String("true".to_string()));
+        let context = Context::new();
+        let graph = Graph::new("test");
+        let run_dir = tempfile::tempdir().unwrap();
+
+        let mut services = make_spy_services(spy.clone());
+        services.cancel_requested = Some(Arc::new(AtomicBool::new(false)));
+
+        handler
+            .execute(&node, &context, &graph, run_dir.path(), &services)
+            .await
+            .unwrap();
+
+        assert_eq!(*spy.captured_cancel_token.lock().unwrap(), Some(true));
     }
 
     #[tokio::test]

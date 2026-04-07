@@ -4,8 +4,8 @@ use httpmock::MockServer;
 use serde_json::Value;
 
 use super::support::{
-    only_run, output_stderr, run_count_for_test_case, run_state, wait_for_status,
-    write_gated_workflow,
+    only_run, output_stderr, run_count_for_test_case, run_state, wait_for_no_process_match,
+    wait_for_status, write_gated_workflow,
 };
 use crate::support::{example_fixture, fabro_json_snapshot, run_output_filters, unique_run_id};
 
@@ -1357,7 +1357,7 @@ fn detach_creates_run_dir_with_detach_log() {
 #[test]
 fn ctrl_c_cancels_active_run_via_server() {
     let context = test_context!();
-    let _gate = write_gated_workflow(&context.temp_dir.join("slow.fabro"), "slow", "Run slowly");
+    let gate = write_gated_workflow(&context.temp_dir.join("slow.fabro"), "slow", "Run slowly");
 
     let mut run_cmd = std::process::Command::new(env!("CARGO_BIN_EXE_fabro"));
     run_cmd.current_dir(&context.temp_dir);
@@ -1418,4 +1418,6 @@ fn ctrl_c_cancels_active_run_via_server() {
             .and_then(|record| record.reason),
         Some(StatusReason::Cancelled)
     );
+    let gate_pattern = gate.gate_path().to_string_lossy().into_owned();
+    wait_for_no_process_match(&gate_pattern);
 }

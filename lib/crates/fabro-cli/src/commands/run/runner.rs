@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
@@ -58,12 +59,13 @@ pub(crate) async fn execute(
         scratch.interview_claim_path(),
     ));
     let run_control = RunControlState::new();
-    install_signal_handlers(Arc::clone(&run_control))?;
+    let cancel_token = Arc::new(AtomicBool::new(false));
+    install_signal_handlers(Arc::clone(&run_control), Arc::clone(&cancel_token))?;
     let github_app = maybe_build_github_app_credentials(&run_record.settings)?;
     let event_client = client.clone_for_reuse();
     let services = fabro_workflow::operations::StartServices {
         run_id,
-        cancel_token: None,
+        cancel_token: Some(Arc::clone(&cancel_token)),
         emitter: Arc::new(Emitter::new(run_id)),
         interviewer,
         run_store: run_store.clone(),
@@ -203,7 +205,10 @@ fn maybe_build_github_app_credentials(
     }
 }
 
-fn install_signal_handlers(run_control: Arc<RunControlState>) -> Result<()> {
+fn install_signal_handlers(
+    run_control: Arc<RunControlState>,
+    cancel_token: Arc<AtomicBool>,
+) -> Result<()> {
     #[cfg(unix)]
     {
         let mut pause = signal(SignalKind::user_defined1())?;
@@ -218,6 +223,21 @@ fn install_signal_handlers(run_control: Arc<RunControlState>) -> Result<()> {
         tokio::spawn(async move {
             while unpause.recv().await.is_some() {
                 run_control.request_unpause();
+            }
+        });
+
+        let mut terminate = signal(SignalKind::terminate())?;
+        let terminate_cancel = Arc::clone(&cancel_token);
+        tokio::spawn(async move {
+            while terminate.recv().await.is_some() {
+                terminate_cancel.store(true, Ordering::SeqCst);
+            }
+        });
+
+        let mut interrupt = signal(SignalKind::interrupt())?;
+        tokio::spawn(async move {
+            while interrupt.recv().await.is_some() {
+                cancel_token.store(true, Ordering::SeqCst);
             }
         });
     }

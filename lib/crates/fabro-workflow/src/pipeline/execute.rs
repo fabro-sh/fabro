@@ -81,6 +81,7 @@ pub async fn execute(init: Initialized) -> Executed {
         hook_runner: hook_runner.clone(),
         env,
         dry_run,
+        cancel_requested: run_options.cancel_token.clone(),
         workflow_path,
         workflow_bundle,
     });
