@@ -13,90 +13,18 @@ use fabro_config::Storage;
 use fabro_server::bind::Bind;
 use fabro_store::EventEnvelope;
 use fabro_test::TestContext;
-use fabro_types::{
-    Checkpoint, Conclusion, NodeStatusRecord, PullRequestRecord, Retro, RunRecord, RunStatusRecord,
-    SandboxRecord, StageId, StartRecord,
-};
 use serde_json::Value;
 use shlex::try_quote;
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
-#[allow(dead_code)]
-#[derive(Debug, Clone, Default, serde::Deserialize)]
-pub(crate) struct RunProjection {
-    #[serde(default)]
-    pub run: Option<RunRecord>,
-    #[serde(default)]
-    pub graph_source: Option<String>,
-    #[serde(default)]
-    pub start: Option<StartRecord>,
-    #[serde(default)]
-    pub status: Option<RunStatusRecord>,
-    #[serde(default)]
-    pub checkpoint: Option<Checkpoint>,
-    #[serde(default)]
-    pub checkpoints: Vec<(u32, Checkpoint)>,
-    #[serde(default)]
-    pub conclusion: Option<Conclusion>,
-    #[serde(default)]
-    pub retro: Option<Retro>,
-    #[serde(default)]
-    pub retro_prompt: Option<String>,
-    #[serde(default)]
-    pub retro_response: Option<String>,
-    #[serde(default)]
-    pub sandbox: Option<SandboxRecord>,
-    #[serde(default)]
-    pub final_patch: Option<String>,
-    #[serde(default)]
-    pub pull_request: Option<PullRequestRecord>,
-    #[serde(default)]
-    pub nodes: std::collections::HashMap<String, NodeState>,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, Default, serde::Deserialize)]
-pub(crate) struct NodeState {
-    #[serde(default)]
-    pub prompt: Option<String>,
-    #[serde(default)]
-    pub response: Option<String>,
-    #[serde(default)]
-    pub status: Option<NodeStatusRecord>,
-    #[serde(default)]
-    pub provider_used: Option<serde_json::Value>,
-    #[serde(default)]
-    pub diff: Option<String>,
-    #[serde(default)]
-    pub script_invocation: Option<serde_json::Value>,
-    #[serde(default)]
-    pub script_timing: Option<serde_json::Value>,
-    #[serde(default)]
-    pub parallel_results: Option<serde_json::Value>,
-    #[serde(default)]
-    pub stdout: Option<String>,
-    #[serde(default)]
-    pub stderr: Option<String>,
-}
+pub(crate) use fabro_store::RunProjection;
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 struct RunSummaryRecord {
     run_id: String,
     #[serde(default)]
     labels: std::collections::HashMap<String, String>,
-}
-
-impl RunProjection {
-    pub(crate) fn iter_nodes(&self) -> impl Iterator<Item = (StageId, &NodeState)> {
-        self.nodes
-            .iter()
-            .filter_map(|(stage_id, state)| stage_id.parse::<StageId>().ok().map(|id| (id, state)))
-    }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.nodes.is_empty()
-    }
 }
 
 pub(crate) struct RunSetup {

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -7,10 +6,7 @@ use anyhow::{Context as _, Result, anyhow, bail};
 use fabro_api::types;
 use fabro_server::bind::Bind;
 use fabro_store::{EventEnvelope, RunSummary, StageId};
-use fabro_types::{
-    Checkpoint, Conclusion, NodeStatusRecord, PullRequestRecord, Retro, RunEvent, RunId, RunRecord,
-    RunStatusRecord, SandboxRecord, Settings, StartRecord,
-};
+use fabro_types::{RunEvent, RunId, Settings};
 use futures::StreamExt;
 use serde::de::DeserializeOwned;
 use tokio::time::sleep;
@@ -30,82 +26,7 @@ struct LocalServerRuntime {
     storage_dir: PathBuf,
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone, Default, serde::Deserialize)]
-pub(crate) struct RunProjection {
-    #[serde(default)]
-    pub run: Option<RunRecord>,
-    #[serde(default)]
-    pub graph_source: Option<String>,
-    #[serde(default)]
-    pub start: Option<StartRecord>,
-    #[serde(default)]
-    pub status: Option<RunStatusRecord>,
-    #[serde(default)]
-    pub checkpoint: Option<Checkpoint>,
-    #[serde(default)]
-    pub checkpoints: Vec<(u32, Checkpoint)>,
-    #[serde(default)]
-    pub conclusion: Option<Conclusion>,
-    #[serde(default)]
-    pub retro: Option<Retro>,
-    #[serde(default)]
-    pub retro_prompt: Option<String>,
-    #[serde(default)]
-    pub retro_response: Option<String>,
-    #[serde(default)]
-    pub sandbox: Option<SandboxRecord>,
-    #[serde(default)]
-    pub final_patch: Option<String>,
-    #[serde(default)]
-    pub pull_request: Option<PullRequestRecord>,
-    #[serde(default)]
-    nodes: HashMap<String, NodeState>,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, Default, serde::Deserialize)]
-pub(crate) struct NodeState {
-    #[serde(default)]
-    pub prompt: Option<String>,
-    #[serde(default)]
-    pub response: Option<String>,
-    #[serde(default)]
-    pub status: Option<NodeStatusRecord>,
-    #[serde(default)]
-    pub provider_used: Option<serde_json::Value>,
-    #[serde(default)]
-    pub diff: Option<String>,
-    #[serde(default)]
-    pub script_invocation: Option<serde_json::Value>,
-    #[serde(default)]
-    pub script_timing: Option<serde_json::Value>,
-    #[serde(default)]
-    pub parallel_results: Option<serde_json::Value>,
-    #[serde(default)]
-    pub stdout: Option<String>,
-    #[serde(default)]
-    pub stderr: Option<String>,
-}
-
-impl RunProjection {
-    pub(crate) fn list_node_visits(&self, node_id: &str) -> Vec<u32> {
-        let mut visits = self
-            .nodes
-            .keys()
-            .filter_map(|key| key.parse::<StageId>().ok())
-            .filter(|stage_id| stage_id.node_id() == node_id)
-            .map(|stage_id| stage_id.visit())
-            .collect::<Vec<_>>();
-        visits.sort_unstable();
-        visits.dedup();
-        visits
-    }
-
-    pub(crate) fn node(&self, stage_id: &StageId) -> Option<&NodeState> {
-        self.nodes.get(&stage_id.to_string())
-    }
-}
+pub(crate) use fabro_store::RunProjection;
 
 pub(crate) async fn connect_server(storage_dir: &Path) -> Result<ServerStoreClient> {
     Ok(ServerStoreClient {
