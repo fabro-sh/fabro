@@ -16,7 +16,8 @@ use fabro_types::{
     RunStatusRecord, SandboxRecord, StageStatus, StageUsage, StartRecord, StatusReason, TokenUsage,
 };
 
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct RunProjection {
     pub run: Option<RunRecord>,
     pub graph_source: Option<String>,
@@ -35,7 +36,7 @@ pub struct RunProjection {
     nodes: HashMap<StageId, NodeState>,
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct NodeState {
     pub prompt: Option<String>,
     pub response: Option<String>,
@@ -576,5 +577,118 @@ fn run_usage_from_token_usage(usage: &TokenUsage) -> RunUsage {
         cache_read_tokens: usage.cache_read_tokens,
         cache_write_tokens: usage.cache_write_tokens,
         cost: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::{NodeState, RunProjection};
+    use crate::StageId;
+    use fabro_types::{Checkpoint, RunControlAction};
+
+    #[test]
+    fn deserialize_projection_defaults_missing_nodes_and_checkpoints() {
+        let state: RunProjection = serde_json::from_value(serde_json::json!({
+            "pending_control": "pause"
+        }))
+        .unwrap();
+
+        assert_eq!(state.pending_control, Some(RunControlAction::Pause));
+        assert!(state.checkpoints.is_empty());
+        assert!(state.is_empty());
+    }
+
+    #[test]
+    fn deserialize_and_round_trip_projection_preserves_stage_ids_and_pending_control() {
+        let state: RunProjection = serde_json::from_value(serde_json::json!({
+            "pending_control": "cancel",
+            "checkpoints": [[
+                0,
+                {
+                    "timestamp": "2026-04-07T12:00:00Z",
+                    "current_node": "build",
+                    "completed_nodes": ["build"],
+                    "node_retries": {},
+                    "context_values": {},
+                    "node_outcomes": {},
+                    "loop_failure_signatures": {},
+                    "restart_failure_signatures": {},
+                    "node_visits": { "build": 2 }
+                }
+            ]],
+            "nodes": {
+                "build@2": {
+                    "diff": "diff --git a/file b/file",
+                    "stdout": "done"
+                }
+            }
+        }))
+        .unwrap();
+
+        let stage_id = StageId::new("build", 2);
+        let node = state.node(&stage_id).unwrap();
+        assert_eq!(node.diff.as_deref(), Some("diff --git a/file b/file"));
+        assert_eq!(state.list_node_visits("build"), vec![2]);
+        assert_eq!(state.pending_control, Some(RunControlAction::Cancel));
+
+        let round_tripped: RunProjection =
+            serde_json::from_value(serde_json::to_value(&state).unwrap()).unwrap();
+        let round_tripped_node = round_tripped.node(&stage_id).unwrap();
+        assert_eq!(round_tripped_node.stdout.as_deref(), Some("done"));
+        assert_eq!(round_tripped.list_node_visits("build"), vec![2]);
+        assert_eq!(
+            round_tripped.pending_control,
+            Some(RunControlAction::Cancel)
+        );
+    }
+
+    #[test]
+    fn set_node_round_trips_through_json() {
+        let mut state = RunProjection {
+            pending_control: Some(RunControlAction::Unpause),
+            checkpoints: vec![(
+                7,
+                Checkpoint {
+                    timestamp: "2026-04-07T12:00:00Z".parse().unwrap(),
+                    current_node: "build".to_string(),
+                    completed_nodes: vec!["build".to_string()],
+                    node_retries: HashMap::new(),
+                    context_values: HashMap::new(),
+                    node_outcomes: HashMap::new(),
+                    next_node_id: None,
+                    git_commit_sha: None,
+                    loop_failure_signatures: HashMap::new(),
+                    restart_failure_signatures: HashMap::new(),
+                    node_visits: HashMap::from([("build".to_string(), 2usize)]),
+                },
+            )],
+            ..RunProjection::default()
+        };
+        state.set_node(
+            StageId::new("build", 2),
+            NodeState {
+                stdout: Some("done".to_string()),
+                ..NodeState::default()
+            },
+        );
+
+        let round_tripped: RunProjection =
+            serde_json::from_value(serde_json::to_value(&state).unwrap()).unwrap();
+
+        assert_eq!(
+            round_tripped
+                .node(&StageId::new("build", 2))
+                .unwrap()
+                .stdout
+                .as_deref(),
+            Some("done")
+        );
+        assert_eq!(round_tripped.list_node_visits("build"), vec![2]);
+        assert_eq!(
+            round_tripped.pending_control,
+            Some(RunControlAction::Unpause)
+        );
     }
 }
