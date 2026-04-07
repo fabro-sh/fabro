@@ -49,6 +49,8 @@ pub enum Event {
         workflow_slug: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         db_prefix: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        provenance: Option<::fabro_types::RunProvenance>,
     },
     WorkflowRunStarted {
         name: String,
@@ -1355,6 +1357,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             base_branch,
             workflow_slug,
             db_prefix,
+            provenance,
             ..
         } => EventBody::RunCreated(fabro_types::RunCreatedProps {
             settings: serde_json::from_value(settings.clone()).expect("run.created settings"),
@@ -1369,6 +1372,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             base_branch: base_branch.clone(),
             workflow_slug: workflow_slug.clone(),
             db_prefix: db_prefix.clone(),
+            provenance: provenance.clone(),
         }),
         Event::WorkflowRunStarted {
             name,
@@ -2370,7 +2374,7 @@ pub enum RunEventSink {
     Store(RunDatabase),
     JsonLines(Arc<AsyncMutex<Pin<Box<dyn AsyncWrite + Send>>>>),
     Callback(Arc<RunEventSinkCallback>),
-    Composite(Vec<RunEventSink>),
+    Composite(Vec<Self>),
 }
 
 type RunEventSinkFuture = Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>>;
@@ -2440,6 +2444,7 @@ impl RunEventSink {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 enum RunEventCommand {
     Event(RunEvent),
     Flush(oneshot::Sender<()>),

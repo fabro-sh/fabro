@@ -378,6 +378,7 @@ mod tests {
             repo_origin_url: None,
             base_branch: None,
             labels: HashMap::new(),
+            provenance: None,
         }
     }
 
@@ -451,6 +452,7 @@ mod tests {
                 base_branch: run_record.base_branch.clone(),
                 workflow_slug: run_record.workflow_slug.clone(),
                 db_prefix: None,
+                provenance: run_record.provenance.clone(),
             },
         )
         .await

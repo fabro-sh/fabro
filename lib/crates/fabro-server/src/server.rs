@@ -10,7 +10,7 @@ use crate::bind::Bind;
 #[cfg(test)]
 use axum::body::to_bytes;
 use axum::extract::{self as axum_extract, Path, Query, State};
-use axum::http::{HeaderValue, Method, StatusCode};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
@@ -29,7 +29,10 @@ use fabro_llm::types::{
     Response as LlmResponse, Role, StreamEvent, ToolChoice, ToolDefinition, Usage,
 };
 use fabro_store::{ArtifactStore, Database, EventEnvelope, EventPayload, StageId};
-use fabro_types::{RunBlobId, RunControlAction, RunEvent, RunId, Settings};
+use fabro_types::{
+    RunBlobId, RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance,
+    RunServerProvenance, RunSubjectProvenance, Settings,
+};
 use fabro_util::redact::redact_jsonl_line;
 use fabro_util::version::FABRO_VERSION;
 use fabro_workflow::artifacts as workflow_artifacts;
@@ -58,7 +61,7 @@ use tracing::{error, info};
 use crate::demo;
 use crate::diagnostics;
 use crate::error::ApiError;
-use crate::jwt_auth::{AuthMode, AuthenticatedService};
+use crate::jwt_auth::{AuthMode, AuthenticatedService, AuthenticatedSubject};
 use crate::run_manifest;
 use crate::secret_store::{SecretStore, SecretStoreError};
 use crate::static_files;
@@ -2223,8 +2226,9 @@ async fn write_file_answer(run_dir: &std::path::Path, answer: &Answer) -> anyhow
 }
 
 async fn create_run(
-    _auth: AuthenticatedService,
+    subject: AuthenticatedSubject,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<RunManifest>,
 ) -> Response {
     let prepared = match run_manifest::prepare_manifest_with_mode(
@@ -2240,6 +2244,7 @@ async fn create_run(
 
     let mut create_input = run_manifest::create_run_input(prepared.clone());
     create_input.run_id = Some(run_id);
+    create_input.provenance = Some(run_provenance(&headers, &subject));
 
     let created = match Box::pin(operations::create(state.store.as_ref(), create_input)).await {
         Ok(created) => created,
@@ -2283,6 +2288,47 @@ async fn create_run(
         }),
     )
         .into_response()
+}
+
+fn run_provenance(headers: &HeaderMap, subject: &AuthenticatedSubject) -> RunProvenance {
+    RunProvenance {
+        server: Some(RunServerProvenance {
+            version: FABRO_VERSION.to_string(),
+        }),
+        client: run_client_provenance(headers),
+        subject: Some(RunSubjectProvenance {
+            login: subject.login.clone(),
+            auth_method: subject.auth_method,
+        }),
+    }
+}
+
+fn run_client_provenance(headers: &HeaderMap) -> Option<RunClientProvenance> {
+    let user_agent = headers
+        .get(header::USER_AGENT)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string)?;
+    let (name, version) = parse_known_fabro_user_agent(&user_agent)
+        .map_or((None, None), |(name, version)| {
+            (Some(name.to_string()), Some(version.to_string()))
+        });
+    Some(RunClientProvenance {
+        user_agent: Some(user_agent),
+        name,
+        version,
+    })
+}
+
+fn parse_known_fabro_user_agent(user_agent: &str) -> Option<(&str, &str)> {
+    let token = user_agent.split_whitespace().next()?;
+    let (name, version) = token.split_once('/')?;
+    if version.is_empty() {
+        return None;
+    }
+    match name {
+        "fabro-cli" | "fabro-web" => Some((name, version)),
+        _ => None,
+    }
 }
 
 async fn run_preflight(
@@ -4996,6 +5042,49 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let body = body_json(response.into_body()).await;
         assert!(body["nodes"].is_object());
+    }
+
+    #[tokio::test]
+    async fn get_run_state_includes_provenance_from_user_agent() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api("/runs"))
+            .header("content-type", "application/json")
+            .header("user-agent", "fabro-cli/1.2.3")
+            .body(manifest_body(MINIMAL_DOT))
+            .unwrap();
+
+        let response = app.clone().oneshot(req).await.unwrap();
+        let body = body_json(response.into_body()).await;
+        let run_id = body["id"].as_str().unwrap();
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{run_id}/state")))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        assert_eq!(
+            body["run"]["provenance"]["server"]["version"],
+            FABRO_VERSION
+        );
+        assert_eq!(
+            body["run"]["provenance"]["client"]["user_agent"],
+            "fabro-cli/1.2.3"
+        );
+        assert_eq!(body["run"]["provenance"]["client"]["name"], "fabro-cli");
+        assert_eq!(body["run"]["provenance"]["client"]["version"], "1.2.3");
+        assert_eq!(
+            body["run"]["provenance"]["subject"]["auth_method"],
+            "disabled"
+        );
+        assert!(body["run"]["provenance"]["subject"]["login"].is_null());
     }
 
     #[tokio::test]

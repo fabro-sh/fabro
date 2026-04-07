@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Graph, RunControlAction, Settings, StatusReason};
+use crate::{Graph, RunControlAction, RunProvenance, Settings, StatusReason};
 
 use super::{RunNoticeLevel, TokenUsage};
 
@@ -28,6 +28,8 @@ pub struct RunCreatedProps {
     pub workflow_slug: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub db_prefix: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<RunProvenance>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -56,6 +58,7 @@ pub struct RunControlRequestedProps {
     pub action: RunControlAction,
 }
 
+#[allow(clippy::empty_structs_with_brackets)]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct RunControlEffectProps {}
 

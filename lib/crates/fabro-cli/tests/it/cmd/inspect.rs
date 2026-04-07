@@ -51,7 +51,13 @@ fn inspect_created_run_shows_run_record_without_start_or_conclusion() {
           "workflow_name": "Simple",
           "workflow_slug": "simple",
           "sandbox_provider": "local",
-          "dry_run": true
+          "dry_run": true,
+          "provenance": {
+            "server_version": "[VERSION]",
+            "client_name": "fabro-cli",
+            "client_version": "[VERSION]",
+            "subject_auth_method": "disabled"
+          }
         },
         "start_record": null,
         "conclusion": null,
@@ -78,7 +84,13 @@ fn inspect_completed_run_shows_run_start_conclusion_checkpoint() {
           "workflow_name": "Simple",
           "workflow_slug": "simple",
           "sandbox_provider": "local",
-          "dry_run": true
+          "dry_run": true,
+          "provenance": {
+            "server_version": "[VERSION]",
+            "client_name": "fabro-cli",
+            "client_version": "[VERSION]",
+            "subject_auth_method": "disabled"
+          }
         },
         "start_record": {
           "has_start_time": true
@@ -147,7 +159,13 @@ fn inspect_completed_run_reads_store_without_disk_metadata_files() {
           "workflow_name": "Simple",
           "workflow_slug": "simple",
           "sandbox_provider": "local",
-          "dry_run": true
+          "dry_run": true,
+          "provenance": {
+            "server_version": "[VERSION]",
+            "client_name": "fabro-cli",
+            "client_version": "[VERSION]",
+            "subject_auth_method": "disabled"
+          }
         },
         "start_record": {
           "has_start_time": true
@@ -192,7 +210,13 @@ fn inspect_git_backed_run_exposes_checkpoint_and_sandbox_state() {
           "workflow_name": "Flow",
           "workflow_slug": "flow",
           "llm_provider": "openai",
-          "sandbox_provider": "local"
+          "sandbox_provider": "local",
+          "provenance": {
+            "server_version": "[VERSION]",
+            "client_name": "fabro-cli",
+            "client_version": "[VERSION]",
+            "subject_auth_method": "disabled"
+          }
         },
         "start_record": {
           "has_start_time": true,

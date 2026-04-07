@@ -31,7 +31,10 @@ pub use retro::{
     AggregateStats, FrictionKind, FrictionPoint, Learning, LearningCategory, OpenItem,
     OpenItemKind, Retro, RetroNarrative, SmoothnessRating, StageRetro,
 };
-pub use run::RunRecord;
+pub use run::{
+    RunAuthMethod, RunClientProvenance, RunProvenance, RunRecord, RunServerProvenance,
+    RunSubjectProvenance,
+};
 pub use run_blob_id::RunBlobId;
 pub use run_event::{EventBody, RunEvent, RunNoticeLevel, TokenUsage};
 pub use run_id::RunId;

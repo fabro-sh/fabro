@@ -134,6 +134,7 @@ mod tests {
                 ("env".to_string(), "test".to_string()),
                 ("team".to_string(), "workflow".to_string()),
             ]),
+            provenance: None,
         }
     }
 
@@ -157,6 +158,7 @@ mod tests {
                 base_branch: record.base_branch.clone(),
                 workflow_slug: record.workflow_slug.clone(),
                 db_prefix: None,
+                provenance: record.provenance.clone(),
             },
         )
         .await
