@@ -226,7 +226,7 @@ fn ps_uses_configured_server_target_without_server_flag() {
                         "status": "succeeded",
                         "status_reason": null,
                         "duration_ms": 123,
-                        "total_cost": null
+                        "total_usd_micros": null
                     }
                 ])
                 .to_string(),

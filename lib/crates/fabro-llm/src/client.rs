@@ -302,10 +302,9 @@ mod tests {
                 provider: self.provider_name.clone(),
                 message: Message::assistant(&self.response_text),
                 finish_reason: FinishReason::Stop,
-                usage: Usage {
+                usage: TokenCounts {
                     input_tokens: 10,
                     output_tokens: 20,
-                    total_tokens: 30,
                     ..Default::default()
                 },
                 raw: None,
@@ -321,14 +320,14 @@ mod tests {
                 Ok(StreamEvent::text_delta(&text, Some("t1".into()))),
                 Ok(StreamEvent::finish(
                     FinishReason::Stop,
-                    Usage::default(),
+                    TokenCounts::default(),
                     Response {
                         id: "resp_mock".into(),
                         model: "mock-model".into(),
                         provider,
                         message: Message::assistant(&text),
                         finish_reason: FinishReason::Stop,
-                        usage: Usage::default(),
+                        usage: TokenCounts::default(),
                         raw: None,
                         warnings: vec![],
                         rate_limit: None,

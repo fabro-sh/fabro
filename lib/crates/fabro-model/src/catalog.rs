@@ -458,13 +458,13 @@ mod tests {
             },
             costs: ModelCosts {
                 input_cost_per_mtok: Some(
-                    15.0,
+                    5.0,
                 ),
                 output_cost_per_mtok: Some(
-                    75.0,
+                    25.0,
                 ),
                 cache_input_cost_per_mtok: Some(
-                    1.5,
+                    0.5,
                 ),
             },
             estimated_output_tps: Some(
@@ -874,8 +874,8 @@ mod tests {
     #[test]
     fn model_info_costs() {
         let claude = Catalog::builtin().get("claude-opus-4-6").unwrap();
-        assert_eq!(claude.costs.input_cost_per_mtok, Some(15.0));
-        assert_eq!(claude.costs.output_cost_per_mtok, Some(75.0));
+        assert_eq!(claude.costs.input_cost_per_mtok, Some(5.0));
+        assert_eq!(claude.costs.output_cost_per_mtok, Some(25.0));
 
         let sonnet = Catalog::builtin().get("claude-sonnet-4-5").unwrap();
         assert_eq!(sonnet.costs.input_cost_per_mtok, Some(3.0));

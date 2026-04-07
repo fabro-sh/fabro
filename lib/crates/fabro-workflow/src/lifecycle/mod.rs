@@ -30,7 +30,7 @@ use crate::error::{FailureSignature, FailureSignatureExt};
 use crate::event::Emitter;
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
-use crate::outcome::{Outcome, StageUsage};
+use crate::outcome::{BilledModelUsage, Outcome};
 use crate::run_control::RunControlState;
 use crate::run_options::RunOptions;
 use fabro_graphviz::graph::types::Graph as GvGraph;
@@ -46,9 +46,9 @@ use self::git::{GitCheckpointResult, GitLifecycle};
 use self::hook::HookLifecycle;
 use crate::outcome::OutcomeExt;
 
-type WfRunState = ExecutionState<Option<StageUsage>>;
-type WfNodeResult = NodeResult<Option<StageUsage>>;
-type WfNodeDecision = NodeDecision<Option<StageUsage>>;
+type WfRunState = ExecutionState<Option<BilledModelUsage>>;
+type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
+type WfNodeDecision = NodeDecision<Option<BilledModelUsage>>;
 
 /// Orchestrates all sub-lifecycles with explicit per-callback ordering.
 /// Implements `RunLifecycle<WorkflowGraph>` by delegating to focused structs.

@@ -9237,8 +9237,8 @@ async fn cli_backend_run_writes_prompt_and_calls_exec() {
         } => {
             assert_eq!(text, "I fixed the bug.");
             let usage = usage.expect("should have usage");
-            assert_eq!(usage.input_tokens, 500);
-            assert_eq!(usage.output_tokens, 200);
+            assert_eq!(usage.tokens().input_tokens, 500);
+            assert_eq!(usage.tokens().output_tokens, 200);
             assert!(files_touched.is_empty(), "no files changed before/after");
         }
         CodergenResult::Full(_) => panic!("expected Text result, got Full"),
@@ -9311,8 +9311,8 @@ async fn cli_backend_run_with_codex_provider() {
         CodergenResult::Text { text, usage, .. } => {
             assert_eq!(text, "Implemented the feature.");
             let usage = usage.expect("should have usage");
-            assert_eq!(usage.input_tokens, 300);
-            assert_eq!(usage.output_tokens, 150);
+            assert_eq!(usage.tokens().input_tokens, 300);
+            assert_eq!(usage.tokens().output_tokens, 150);
         }
         CodergenResult::Full(_) => panic!("expected Text result"),
     }
@@ -9593,9 +9593,9 @@ async fn cli_backend_run_returns_text_and_usage() {
         CodergenResult::Text { text, usage, .. } => {
             assert_eq!(text, "done");
             let usage = usage.expect("CLI backend should report usage");
-            assert_eq!(usage.input_tokens, 10);
-            assert_eq!(usage.output_tokens, 5);
-            assert_eq!(usage.model, "claude-opus-4-6");
+            assert_eq!(usage.tokens().input_tokens, 10);
+            assert_eq!(usage.tokens().output_tokens, 5);
+            assert_eq!(usage.model_id(), "claude-opus-4-6");
         }
         CodergenResult::Full(_) => panic!("expected Text result"),
     }

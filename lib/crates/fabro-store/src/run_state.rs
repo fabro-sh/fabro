@@ -11,9 +11,9 @@ use fabro_types::run_event::{
     RunFailedProps, StageCompletedProps, StagePromptProps,
 };
 use fabro_types::{
-    Checkpoint, Conclusion, EventBody, FailureSignature, NodeStatusRecord, Outcome,
-    PullRequestRecord, Retro, RunControlAction, RunEvent, RunId, RunRecord, RunStatus,
-    RunStatusRecord, SandboxRecord, StageStatus, StageUsage, StartRecord, StatusReason, TokenUsage,
+    BilledModelUsage, Checkpoint, Conclusion, EventBody, FailureSignature, NodeStatusRecord,
+    Outcome, PullRequestRecord, Retro, RunControlAction, RunEvent, RunId, RunRecord, RunStatus,
+    RunStatusRecord, SandboxRecord, StageStatus, StartRecord, StatusReason,
 };
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -48,20 +48,6 @@ pub struct NodeState {
     pub parallel_results: Option<serde_json::Value>,
     pub stdout: Option<String>,
     pub stderr: Option<String>,
-}
-
-#[derive(Debug, Clone, serde::Deserialize)]
-struct RunUsage {
-    input_tokens: i64,
-    output_tokens: i64,
-    #[serde(default)]
-    reasoning_tokens: Option<i64>,
-    #[serde(default)]
-    cache_read_tokens: Option<i64>,
-    #[serde(default)]
-    cache_write_tokens: Option<i64>,
-    #[serde(default)]
-    cost: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -357,10 +343,11 @@ impl RunProjection {
                 .conclusion
                 .as_ref()
                 .map(|conclusion| conclusion.duration_ms),
-            total_cost: self
+            total_usd_micros: self
                 .conclusion
                 .as_ref()
-                .and_then(|conclusion| conclusion.total_cost),
+                .and_then(|conclusion| conclusion.billing.as_ref())
+                .and_then(|billing| billing.total_usd_micros),
         }
     }
 
@@ -437,7 +424,6 @@ fn conclusion_from_completed(
     props: &RunCompletedProps,
     timestamp: DateTime<Utc>,
 ) -> Result<Conclusion> {
-    let usage = props.usage.as_ref().map(run_usage_from_token_usage);
     Ok(Conclusion {
         timestamp,
         status: StageStatus::from_str(&props.status).map_err(|err| {
@@ -447,23 +433,8 @@ fn conclusion_from_completed(
         failure_reason: None,
         final_git_commit_sha: props.final_git_commit_sha.clone(),
         stages: Vec::new(),
-        total_cost: props.total_cost,
+        billing: props.billing.clone(),
         total_retries: 0,
-        total_input_tokens: usage.as_ref().map_or(0, |usage| usage.input_tokens),
-        total_output_tokens: usage.as_ref().map_or(0, |usage| usage.output_tokens),
-        total_cache_read_tokens: usage
-            .as_ref()
-            .and_then(|usage| usage.cache_read_tokens)
-            .unwrap_or(0),
-        total_cache_write_tokens: usage
-            .as_ref()
-            .and_then(|usage| usage.cache_write_tokens)
-            .unwrap_or(0),
-        total_reasoning_tokens: usage
-            .as_ref()
-            .and_then(|usage| usage.reasoning_tokens)
-            .unwrap_or(0),
-        has_pricing: usage.as_ref().is_some_and(|usage| usage.cost.is_some()),
     })
 }
 
@@ -475,14 +446,8 @@ fn conclusion_from_failed(props: &RunFailedProps, timestamp: DateTime<Utc>) -> C
         failure_reason: Some(props.error.clone()),
         final_git_commit_sha: props.git_commit_sha.clone(),
         stages: Vec::new(),
-        total_cost: None,
+        billing: None,
         total_retries: 0,
-        total_input_tokens: 0,
-        total_output_tokens: 0,
-        total_cache_read_tokens: 0,
-        total_cache_write_tokens: 0,
-        total_reasoning_tokens: 0,
-        has_pricing: false,
     }
 }
 
@@ -497,7 +462,7 @@ fn stage_visit(
         .or_else(|| state.current_visit_for(node_id))
 }
 
-fn stage_outcome_from_props(props: &StageCompletedProps) -> Outcome<Option<StageUsage>> {
+fn stage_outcome_from_props(props: &StageCompletedProps) -> Outcome<Option<BilledModelUsage>> {
     Outcome {
         status: props.status.clone(),
         preferred_label: props.preferred_label.clone(),
@@ -511,14 +476,14 @@ fn stage_outcome_from_props(props: &StageCompletedProps) -> Outcome<Option<Stage
         jump_to_node: props.jump_to_node.clone(),
         notes: props.notes.clone(),
         failure: props.failure.clone(),
-        usage: props.usage.clone(),
+        usage: props.billing.clone(),
         files_touched: props.files_touched.clone(),
         duration_ms: Some(props.duration_ms),
     }
 }
 
 fn node_status_from_outcome(
-    outcome: &Outcome<Option<StageUsage>>,
+    outcome: &Outcome<Option<BilledModelUsage>>,
     timestamp: DateTime<Utc>,
 ) -> NodeStatusRecord {
     NodeStatusRecord {
@@ -568,17 +533,6 @@ fn provider_used_from_agent_cli_started(props: &AgentCliStartedProps) -> Value {
     provider_used.insert("model".to_string(), Value::String(props.model.clone()));
     provider_used.insert("command".to_string(), Value::String(props.command.clone()));
     Value::Object(provider_used)
-}
-
-fn run_usage_from_token_usage(usage: &TokenUsage) -> RunUsage {
-    RunUsage {
-        input_tokens: usage.input_tokens,
-        output_tokens: usage.output_tokens,
-        reasoning_tokens: usage.reasoning_tokens,
-        cache_read_tokens: usage.cache_read_tokens,
-        cache_write_tokens: usage.cache_write_tokens,
-        cost: None,
-    }
 }
 
 #[cfg(test)]

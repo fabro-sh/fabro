@@ -94,7 +94,7 @@ fn is_repeating_pattern(signatures: &[u64], pattern_len: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fabro_llm::types::{ToolCall, Usage};
+    use fabro_llm::types::{TokenCounts, ToolCall};
     use std::time::SystemTime;
 
     fn assistant_with_tool(name: &str, args: serde_json::Value) -> Turn {
@@ -102,7 +102,7 @@ mod tests {
             content: String::new(),
             tool_calls: vec![ToolCall::new("call_1", name, args)],
             provider_parts: vec![],
-            usage: Box::new(Usage::default()),
+            usage: Box::new(TokenCounts::default()),
             response_id: "resp".into(),
             timestamp: SystemTime::now(),
         }

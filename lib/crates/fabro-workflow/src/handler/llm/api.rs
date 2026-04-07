@@ -9,7 +9,7 @@ use fabro_agent::{
     subagent::{SessionFactory, SubAgentManager},
 };
 use fabro_llm::client::Client;
-use fabro_llm::types::{Message, Request, Usage};
+use fabro_llm::types::{Message, Request, TokenCounts};
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::FallbackTarget;
 use fabro_model::Provider;
@@ -20,8 +20,7 @@ use crate::context::keys::Fidelity;
 use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
 use crate::event::{Emitter, Event};
-use crate::outcome::StageUsage;
-use crate::outcome::compute_stage_cost;
+use crate::outcome::billed_model_usage_from_llm;
 use crate::run_dir::visit_from_context;
 use fabro_graphviz::graph::Node;
 
@@ -320,7 +319,7 @@ impl CodergenBackend for AgentApiBackend {
 
         let default_provider = self.provider.as_str().to_string();
 
-        let (response, actual_model, _actual_provider) = match result {
+        let (response, actual_model, actual_provider) = match result {
             Ok(resp) => (
                 resp,
                 request.model.clone(),
@@ -384,17 +383,13 @@ impl CodergenBackend for AgentApiBackend {
             Err(sdk_err) => return Err(FabroError::Llm(sdk_err)),
         };
 
-        let mut stage_usage = StageUsage {
-            model: actual_model,
-            input_tokens: response.usage.input_tokens,
-            output_tokens: response.usage.output_tokens,
-            cache_read_tokens: response.usage.cache_read_tokens,
-            cache_write_tokens: response.usage.cache_write_tokens,
-            reasoning_tokens: response.usage.reasoning_tokens,
-            speed: response.usage.speed.clone(),
-            cost: None,
-        };
-        stage_usage.cost = compute_stage_cost(&stage_usage);
+        let actual_provider = actual_provider.parse::<Provider>().unwrap_or(self.provider);
+        let stage_usage = billed_model_usage_from_llm(
+            &actual_model,
+            actual_provider,
+            node.speed(),
+            &response.usage,
+        );
 
         Ok(CodergenResult::Text {
             text: response.text(),
@@ -569,24 +564,19 @@ impl CodergenBackend for AgentApiBackend {
         result?;
 
         // Aggregate token usage only from new turns (prevents double-counting on reuse).
-        let mut total_usage = Usage::default();
+        let mut total_usage = TokenCounts::default();
         for turn in &session.history().turns()[turns_before..] {
             if let Turn::Assistant { usage, .. } = turn {
                 total_usage = total_usage + *usage.clone();
             }
         }
 
-        let mut stage_usage = StageUsage {
-            model: actual_model.clone(),
-            input_tokens: total_usage.input_tokens,
-            output_tokens: total_usage.output_tokens,
-            cache_read_tokens: total_usage.cache_read_tokens,
-            cache_write_tokens: total_usage.cache_write_tokens,
-            reasoning_tokens: total_usage.reasoning_tokens,
-            speed: total_usage.speed.clone(),
-            cost: None,
-        };
-        stage_usage.cost = compute_stage_cost(&stage_usage);
+        let stage_usage = billed_model_usage_from_llm(
+            &actual_model,
+            _actual_provider,
+            node.speed(),
+            &total_usage,
+        );
 
         // Extract last assistant response from the session history.
         let response = session

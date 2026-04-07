@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::BilledTokenCounts;
 use crate::outcome::StageStatus;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9,7 +10,7 @@ pub struct StageSummary {
     pub stage_label: String,
     pub duration_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cost: Option<f64>,
+    pub billing_usd_micros: Option<i64>,
     pub retries: u32,
 }
 
@@ -25,19 +26,7 @@ pub struct Conclusion {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stages: Vec<StageSummary>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub total_cost: Option<f64>,
+    pub billing: Option<BilledTokenCounts>,
     #[serde(default)]
     pub total_retries: u32,
-    #[serde(default)]
-    pub total_input_tokens: i64,
-    #[serde(default)]
-    pub total_output_tokens: i64,
-    #[serde(default)]
-    pub total_cache_read_tokens: i64,
-    #[serde(default)]
-    pub total_cache_write_tokens: i64,
-    #[serde(default)]
-    pub total_reasoning_tokens: i64,
-    #[serde(default)]
-    pub has_pricing: bool,
 }

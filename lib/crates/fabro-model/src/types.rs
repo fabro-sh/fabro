@@ -141,9 +141,9 @@ mod tests {
         assert!(info.supports_effort());
         assert_eq!(info.training(), Some("2025-08-01"));
         assert_eq!(info.knowledge_cutoff(), Some("May 2025"));
-        assert_eq!(info.input_cost_per_mtok(), Some(15.0));
-        assert_eq!(info.output_cost_per_mtok(), Some(75.0));
-        assert_eq!(info.cache_input_cost_per_mtok(), Some(1.5));
+        assert_eq!(info.input_cost_per_mtok(), Some(5.0));
+        assert_eq!(info.output_cost_per_mtok(), Some(25.0));
+        assert_eq!(info.cache_input_cost_per_mtok(), Some(0.5));
         assert_eq!(info.estimated_output_tps(), Some(25.0));
         assert!(!info.aliases().is_empty());
         assert!(!info.is_default());

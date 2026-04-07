@@ -26,8 +26,9 @@ use fabro_llm::generate::{GenerateParams, generate_object};
 use fabro_llm::model_test::{ModelTestMode, run_model_test_with_client};
 use fabro_llm::types::{
     ContentPart, FinishReason, Message as LlmMessage, Request as LlmRequest,
-    Response as LlmResponse, Role, StreamEvent, ToolChoice, ToolDefinition, Usage,
+    Response as LlmResponse, Role, StreamEvent, TokenCounts, ToolChoice, ToolDefinition,
 };
+use fabro_model::{BilledModelUsage, BilledTokenCounts};
 use fabro_store::{ArtifactStore, Database, EventEnvelope, EventPayload, StageId};
 use fabro_types::{
     RunBlobId, RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance,
@@ -80,21 +81,21 @@ use fabro_workflow::run_lookup::{
 use fabro_workflow::run_status::RunStatus as WorkflowRunStatus;
 use fabro_workflow::run_status::StatusReason as WorkflowStatusReason;
 
-use fabro_api::types::AggregateUsageTotals;
 pub use fabro_api::types::{
-    AggregateUsage, ApiQuestion, ApiQuestionOption, AppendEventResponse, ArtifactEntry,
-    ArtifactListResponse, CompletionContentPart, CompletionMessage, CompletionMessageRole,
+    AggregateBilling, AggregateBillingTotals, ApiQuestion, ApiQuestionOption, AppendEventResponse,
+    ArtifactEntry, ArtifactListResponse, BilledTokenCounts as ApiBilledTokenCounts, BillingByModel,
+    BillingStageRef, CompletionContentPart, CompletionMessage, CompletionMessageRole,
     CompletionResponse, CompletionToolChoiceMode, CompletionUsage, CreateCompletionRequest,
     DiskUsageResponse, DiskUsageRunRow, DiskUsageSummaryRow, EventEnvelope as ApiEventEnvelope,
     ModelReference, PaginatedEventList, PaginatedRunList, PaginationMeta, PreflightResponse,
     PreviewUrlRequest, PreviewUrlResponse, PruneRunEntry, PruneRunsRequest, PruneRunsResponse,
     QuestionType as ApiQuestionType, RenderWorkflowGraphDirection, RenderWorkflowGraphFormat,
-    RenderWorkflowGraphRequest, RunArtifactEntry, RunArtifactListResponse,
-    RunControlAction as ApiRunControlAction, RunError, RunEvent as ApiRunEvent, RunManifest,
-    RunStatus, RunStatusResponse, SandboxFileEntry, SandboxFileListResponse, ServerSettings,
-    SetSecretRequest, SshAccessRequest, SshAccessResponse, StartRunRequest,
-    StatusReason as ApiStatusReason, SubmitAnswerRequest, SystemInfoResponse, SystemRunCounts,
-    TokenUsage, UsageByModel, WriteBlobResponse,
+    RenderWorkflowGraphRequest, RunArtifactEntry, RunArtifactListResponse, RunBilling,
+    RunBillingStage, RunBillingTotals, RunControlAction as ApiRunControlAction, RunError,
+    RunEvent as ApiRunEvent, RunManifest, RunStatus, RunStatusResponse, SandboxFileEntry,
+    SandboxFileListResponse, ServerSettings, SetSecretRequest, SshAccessRequest, SshAccessResponse,
+    StartRunRequest, StatusReason as ApiStatusReason, SubmitAnswerRequest, SystemInfoResponse,
+    SystemRunCounts, WriteBlobResponse,
 };
 use fabro_graphviz::render::GraphFormat;
 
@@ -232,21 +233,19 @@ const FILE_INTERVIEW_QUESTION_ID: &str = "q-file";
 const WORKER_STDERR_LOG: &str = "worker.stderr.log";
 const WORKER_CANCEL_GRACE: Duration = Duration::from_secs(5);
 
-/// Per-model usage totals.
+/// Per-model billing totals.
 #[derive(Default)]
-struct ModelUsageTotals {
+struct ModelBillingTotals {
     stages: i64,
-    input_tokens: i64,
-    output_tokens: i64,
-    cost: f64,
+    billing: BilledTokenCounts,
 }
 
-/// In-memory aggregate usage counters, reset on server restart.
+/// In-memory aggregate billing counters, reset on server restart.
 #[derive(Default)]
-struct UsageAccumulator {
+struct BillingAccumulator {
     total_runs: i64,
     total_runtime_secs: f64,
-    by_model: HashMap<String, ModelUsageTotals>,
+    by_model: HashMap<String, ModelBillingTotals>,
 }
 
 type RegistryFactoryOverride = dyn Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync;
@@ -254,7 +253,7 @@ type RegistryFactoryOverride = dyn Fn(Arc<dyn Interviewer>) -> HandlerRegistry +
 /// Shared application state for the server.
 pub struct AppState {
     runs: Mutex<HashMap<RunId, ManagedRun>>,
-    aggregate_usage: Mutex<UsageAccumulator>,
+    aggregate_billing: Mutex<BillingAccumulator>,
     store: Arc<Database>,
     artifact_store: ArtifactStore,
     started_at: Instant,
@@ -268,6 +267,49 @@ pub struct AppState {
     pub(crate) local_daemon_mode: bool,
     shutting_down: AtomicBool,
     registry_factory_override: Option<Box<RegistryFactoryOverride>>,
+}
+
+fn nonzero_i64(value: i64) -> Option<i64> {
+    (value != 0).then_some(value)
+}
+
+fn api_billed_token_counts_from_domain(billing: &BilledTokenCounts) -> ApiBilledTokenCounts {
+    ApiBilledTokenCounts {
+        cache_read_tokens: nonzero_i64(billing.cache_read_tokens),
+        cache_write_tokens: nonzero_i64(billing.cache_write_tokens),
+        input_tokens: billing.input_tokens,
+        output_tokens: billing.output_tokens,
+        reasoning_tokens: nonzero_i64(billing.reasoning_tokens),
+        total_tokens: billing.total_tokens,
+        total_usd_micros: billing.total_usd_micros,
+    }
+}
+
+fn api_billed_token_counts_from_usage(usage: &BilledModelUsage) -> ApiBilledTokenCounts {
+    let tokens = usage.tokens();
+    ApiBilledTokenCounts {
+        cache_read_tokens: nonzero_i64(tokens.cache_read_tokens),
+        cache_write_tokens: nonzero_i64(tokens.cache_write_tokens),
+        input_tokens: tokens.input_tokens,
+        output_tokens: tokens.output_tokens,
+        reasoning_tokens: nonzero_i64(tokens.reasoning_tokens),
+        total_tokens: tokens.total_tokens(),
+        total_usd_micros: usage.total_usd_micros,
+    }
+}
+
+fn accumulate_model_billing(entry: &mut ModelBillingTotals, usage: &BilledModelUsage) {
+    let tokens = usage.tokens();
+    entry.stages += 1;
+    entry.billing.input_tokens += tokens.input_tokens;
+    entry.billing.output_tokens += tokens.output_tokens;
+    entry.billing.reasoning_tokens += tokens.reasoning_tokens;
+    entry.billing.cache_read_tokens += tokens.cache_read_tokens;
+    entry.billing.cache_write_tokens += tokens.cache_write_tokens;
+    entry.billing.total_tokens += tokens.total_tokens();
+    if let Some(value) = usage.total_usd_micros {
+        *entry.billing.total_usd_micros.get_or_insert(0) += value;
+    }
 }
 
 impl AppState {
@@ -440,7 +482,7 @@ fn demo_routes() -> Router<Arc<AppState>> {
             "/runs/{id}/stages/{stageId}/artifacts/download",
             get(not_implemented),
         )
-        .route("/runs/{id}/usage", get(demo::get_run_usage))
+        .route("/runs/{id}/billing", get(demo::get_run_billing))
         .route("/runs/{id}/settings", get(demo::get_run_settings))
         .route("/runs/{id}/preview", post(demo::generate_preview_url_stub))
         .route("/runs/{id}/ssh", post(demo::create_ssh_access_stub))
@@ -478,7 +520,7 @@ fn demo_routes() -> Router<Arc<AppState>> {
         .route("/system/info", get(demo::get_system_info))
         .route("/system/df", get(demo::get_system_disk_usage))
         .route("/system/prune/runs", post(demo::prune_runs))
-        .route("/usage", get(demo::get_aggregate_usage))
+        .route("/billing", get(demo::get_aggregate_billing))
 }
 
 fn real_routes() -> Router<Arc<AppState>> {
@@ -516,7 +558,7 @@ fn real_routes() -> Router<Arc<AppState>> {
             "/runs/{id}/stages/{stageId}/artifacts/download",
             get(get_stage_artifact),
         )
-        .route("/runs/{id}/usage", get(not_implemented))
+        .route("/runs/{id}/billing", get(get_run_billing))
         .route("/runs/{id}/settings", get(not_implemented))
         .route("/runs/{id}/steer", post(not_implemented))
         .route("/runs/{id}/preview", post(generate_preview_url))
@@ -552,7 +594,7 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/system/info", get(get_system_info))
         .route("/system/df", get(get_system_df))
         .route("/system/prune/runs", post(prune_runs))
-        .route("/usage", get(get_aggregate_usage))
+        .route("/billing", get(get_aggregate_billing))
 }
 
 async fn not_implemented() -> Response {
@@ -1266,37 +1308,158 @@ async fn cookie_and_demo_middleware(
     next.run(req).await
 }
 
-async fn get_aggregate_usage(
+async fn get_aggregate_billing(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
 ) -> Response {
     let agg = state
-        .aggregate_usage
+        .aggregate_billing
         .lock()
-        .expect("aggregate_usage lock poisoned");
-    let by_model: Vec<UsageByModel> = agg
+        .expect("aggregate_billing lock poisoned");
+    let by_model: Vec<BillingByModel> = agg
         .by_model
         .iter()
-        .map(|(model, totals)| UsageByModel {
+        .map(|(model, totals)| BillingByModel {
+            billing: api_billed_token_counts_from_domain(&totals.billing),
             model: ModelReference { id: model.clone() },
             stages: totals.stages,
-            usage: TokenUsage {
-                input_tokens: totals.input_tokens,
-                output_tokens: totals.output_tokens,
-                cost: totals.cost,
-            },
         })
         .collect();
-    let response = AggregateUsage {
-        totals: AggregateUsageTotals {
+    let total_billing =
+        by_model
+            .iter()
+            .fold(BilledTokenCounts::default(), |mut acc, model| {
+                acc.input_tokens += model.billing.input_tokens;
+                acc.output_tokens += model.billing.output_tokens;
+                acc.reasoning_tokens += model.billing.reasoning_tokens.unwrap_or(0);
+                acc.cache_read_tokens += model.billing.cache_read_tokens.unwrap_or(0);
+                acc.cache_write_tokens += model.billing.cache_write_tokens.unwrap_or(0);
+                acc.total_tokens += model.billing.total_tokens;
+                if let Some(value) = model.billing.total_usd_micros {
+                    *acc.total_usd_micros.get_or_insert(0) += value;
+                }
+                acc
+            });
+    let response = AggregateBilling {
+        totals: AggregateBillingTotals {
+            cache_read_tokens: nonzero_i64(total_billing.cache_read_tokens),
+            cache_write_tokens: nonzero_i64(total_billing.cache_write_tokens),
+            input_tokens: total_billing.input_tokens,
+            output_tokens: total_billing.output_tokens,
+            reasoning_tokens: nonzero_i64(total_billing.reasoning_tokens),
             runs: agg.total_runs,
-            input_tokens: by_model.iter().map(|m| m.usage.input_tokens).sum(),
-            output_tokens: by_model.iter().map(|m| m.usage.output_tokens).sum(),
-            cost: by_model.iter().map(|m| m.usage.cost).sum(),
             runtime_secs: agg.total_runtime_secs,
+            total_tokens: total_billing.total_tokens,
+            total_usd_micros: total_billing.total_usd_micros,
         },
         by_model,
     };
+    (StatusCode::OK, Json(response)).into_response()
+}
+
+async fn get_run_billing(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<RunId>,
+) -> Response {
+    let run_store = match state.store.open_run_reader(&id).await {
+        Ok(run_store) => run_store,
+        Err(err) => {
+            return ApiError::new(StatusCode::NOT_FOUND, err.to_string()).into_response();
+        }
+    };
+
+    let checkpoint = match run_store.state().await {
+        Ok(state) => state.checkpoint,
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+
+    let Some(checkpoint) = checkpoint else {
+        let empty = RunBilling {
+            by_model: Vec::new(),
+            stages: Vec::new(),
+            totals: RunBillingTotals {
+                cache_read_tokens: None,
+                cache_write_tokens: None,
+                input_tokens: 0,
+                output_tokens: 0,
+                reasoning_tokens: None,
+                runtime_secs: 0.0,
+                total_tokens: 0,
+                total_usd_micros: None,
+            },
+        };
+        return (StatusCode::OK, Json(empty)).into_response();
+    };
+
+    let stage_durations = match run_store.list_events().await {
+        Ok(events) => fabro_workflow::extract_stage_durations_from_events(&events),
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+
+    let mut by_model_totals = HashMap::<String, ModelBillingTotals>::new();
+    let mut billed_usages = Vec::new();
+    let mut runtime_secs = 0.0_f64;
+    let mut stages = Vec::new();
+
+    for node_id in &checkpoint.completed_nodes {
+        let duration_ms = stage_durations.get(node_id).copied().unwrap_or(0);
+        runtime_secs += duration_ms as f64 / 1000.0;
+
+        let Some(usage) = checkpoint
+            .node_outcomes
+            .get(node_id)
+            .and_then(|outcome| outcome.usage.as_ref())
+        else {
+            continue;
+        };
+
+        billed_usages.push(usage.clone());
+        let billing = api_billed_token_counts_from_usage(usage);
+        let model_id = usage.model_id().to_string();
+        accumulate_model_billing(by_model_totals.entry(model_id.clone()).or_default(), usage);
+        stages.push(RunBillingStage {
+            billing,
+            model: ModelReference { id: model_id },
+            runtime_secs: duration_ms as f64 / 1000.0,
+            stage: BillingStageRef {
+                id: node_id.clone(),
+                name: node_id.clone(),
+            },
+        });
+    }
+
+    let totals = BilledTokenCounts::from_billed_usage(&billed_usages);
+    let by_model = by_model_totals
+        .into_iter()
+        .map(|(model, totals)| BillingByModel {
+            billing: api_billed_token_counts_from_domain(&totals.billing),
+            model: ModelReference { id: model },
+            stages: totals.stages,
+        })
+        .collect::<Vec<_>>();
+
+    let response = RunBilling {
+        by_model,
+        stages,
+        totals: RunBillingTotals {
+            cache_read_tokens: nonzero_i64(totals.cache_read_tokens),
+            cache_write_tokens: nonzero_i64(totals.cache_write_tokens),
+            input_tokens: totals.input_tokens,
+            output_tokens: totals.output_tokens,
+            reasoning_tokens: nonzero_i64(totals.reasoning_tokens),
+            runtime_secs,
+            total_tokens: totals.total_tokens,
+            total_usd_micros: totals.total_usd_micros,
+        },
+    };
+
     (StatusCode::OK, Json(response)).into_response()
 }
 
@@ -1392,7 +1555,7 @@ pub(crate) fn build_app_state_with_path(
     let (global_event_tx, _) = broadcast::channel(4096);
     Ok(Arc::new(AppState {
         runs: Mutex::new(HashMap::new()),
-        aggregate_usage: Mutex::new(UsageAccumulator::default()),
+        aggregate_billing: Mutex::new(BillingAccumulator::default()),
         store,
         artifact_store,
         started_at: Instant::now(),
@@ -2695,18 +2858,18 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
             }
         };
         let mut agg = state
-            .aggregate_usage
+            .aggregate_billing
             .lock()
-            .expect("aggregate_usage lock poisoned");
+            .expect("aggregate_billing lock poisoned");
         agg.total_runs += 1;
         let mut run_runtime: f64 = 0.0;
         for (node_id, outcome) in &cp.node_outcomes {
             if let Some(usage) = &outcome.usage {
-                let entry = agg.by_model.entry(usage.model.clone()).or_default();
-                entry.stages += 1;
-                entry.input_tokens += usage.input_tokens;
-                entry.output_tokens += usage.output_tokens;
-                entry.cost += usage.cost.unwrap_or(0.0);
+                let entry = agg
+                    .by_model
+                    .entry(usage.model_id().to_string())
+                    .or_default();
+                accumulate_model_billing(entry, usage);
             }
             let duration_ms = stage_durations.get(node_id).copied().unwrap_or(0);
             run_runtime += duration_ms as f64 / 1000.0;
@@ -2918,18 +3081,18 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             }
         };
         let mut agg = state
-            .aggregate_usage
+            .aggregate_billing
             .lock()
-            .expect("aggregate_usage lock poisoned");
+            .expect("aggregate_billing lock poisoned");
         agg.total_runs += 1;
         let mut run_runtime: f64 = 0.0;
         for (node_id, outcome) in &checkpoint.node_outcomes {
             if let Some(usage) = &outcome.usage {
-                let entry = agg.by_model.entry(usage.model.clone()).or_default();
-                entry.stages += 1;
-                entry.input_tokens += usage.input_tokens;
-                entry.output_tokens += usage.output_tokens;
-                entry.cost += usage.cost.unwrap_or(0.0);
+                let entry = agg
+                    .by_model
+                    .entry(usage.model_id().to_string())
+                    .or_default();
+                accumulate_model_billing(entry, usage);
             }
             let duration_ms = stage_durations.get(node_id).copied().unwrap_or(0);
             run_runtime += duration_ms as f64 / 1000.0;
@@ -4309,14 +4472,14 @@ async fn create_completion(
         if use_stream {
             let finish_event = StreamEvent::finish(
                 FinishReason::Stop,
-                Usage::default(),
+                TokenCounts::default(),
                 LlmResponse {
                     id: msg_id.clone(),
                     model: model_id.clone(),
                     provider: String::new(),
                     message: LlmMessage::assistant(""),
                     finish_reason: FinishReason::Stop,
-                    usage: Usage::default(),
+                    usage: TokenCounts::default(),
                     raw: None,
                     warnings: vec![],
                     rate_limit: None,

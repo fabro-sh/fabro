@@ -1,7 +1,7 @@
 use crate::error::{SdkError, error_from_status_code};
 use crate::provider::{ProviderAdapter, StreamEventStream};
 use crate::providers::common::LineReader;
-use crate::types::{FinishReason, Message, Request, Response, StreamEvent, Usage};
+use crate::types::{FinishReason, Message, Request, Response, StreamEvent, TokenCounts};
 use futures::stream;
 use tracing::{debug, error};
 
@@ -135,18 +135,15 @@ impl ProviderAdapter for Adapter {
             })?;
 
         let finish_reason = map_stop_reason(&server_resp.stop_reason);
-        let total = server_resp.usage.input_tokens + server_resp.usage.output_tokens;
-
         Ok(Response {
             id: server_resp.id,
             model: server_resp.model,
             provider: self.provider_name.clone(),
             message: server_resp.message,
             finish_reason,
-            usage: Usage {
+            usage: TokenCounts {
                 input_tokens: server_resp.usage.input_tokens,
                 output_tokens: server_resp.usage.output_tokens,
-                total_tokens: total,
                 ..Default::default()
             },
             raw: None,
@@ -338,7 +335,7 @@ data: {\"type\":\"text_delta\",\"delta\":\" world\",\"text_id\":null}\n\
         assert_eq!(response.finish_reason, FinishReason::Stop);
         assert_eq!(response.usage.input_tokens, 10);
         assert_eq!(response.usage.output_tokens, 5);
-        assert_eq!(response.usage.total_tokens, 15);
+        assert_eq!(response.usage.total_tokens(), 15);
     }
 
     #[tokio::test]

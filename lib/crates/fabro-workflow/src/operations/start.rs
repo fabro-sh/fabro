@@ -1105,14 +1105,8 @@ mod tests {
             failure_reason: None,
             final_git_commit_sha: None,
             stages: vec![],
-            total_cost: None,
+            billing: None,
             total_retries: 0,
-            total_input_tokens: 0,
-            total_output_tokens: 0,
-            total_cache_read_tokens: 0,
-            total_cache_write_tokens: 0,
-            total_reasoning_tokens: 0,
-            has_pricing: false,
         };
         std::fs::write(
             run_dir.join("conclusion.json"),

@@ -11,6 +11,7 @@ use crate::run_status::{RunStatus, StatusReason};
 use crate::sandbox_git::git_push_host;
 use fabro_hooks::{HookContext, HookEvent, HookRunner};
 use fabro_store::RunDatabase;
+use fabro_types::BilledTokenCounts;
 
 use super::types::{Concluded, FinalizeOptions, Retroed};
 
@@ -98,17 +99,10 @@ fn build_conclusion_from_parts(
     run_duration_ms: u64,
     final_git_commit_sha: Option<String>,
 ) -> Conclusion {
-    let mut total_input_tokens: i64 = 0;
-    let mut total_output_tokens: i64 = 0;
-    let mut total_cache_read_tokens: i64 = 0;
-    let mut total_cache_write_tokens: i64 = 0;
-    let mut total_reasoning_tokens: i64 = 0;
-    let mut has_pricing = false;
-
-    let (stages, total_cost, total_retries) = if let Some(cp) = checkpoint {
+    let (stages, billing, total_retries) = if let Some(cp) = checkpoint {
         let mut stages = Vec::new();
-        let mut cost_sum: Option<f64> = None;
         let mut retries_sum: u32 = 0;
+        let mut billed_usage = Vec::new();
 
         for node_id in &cp.completed_nodes {
             let outcome = cp.node_outcomes.get(node_id);
@@ -120,29 +114,25 @@ fn build_conclusion_from_parts(
                 .saturating_sub(1);
             retries_sum += retries;
 
-            let cost = outcome.and_then(|o| o.usage.as_ref()).and_then(|u| u.cost);
-            if let Some(c) = cost {
-                *cost_sum.get_or_insert(0.0) += c;
-                has_pricing = true;
-            }
-
             if let Some(usage) = outcome.and_then(|o| o.usage.as_ref()) {
-                total_input_tokens += usage.input_tokens;
-                total_output_tokens += usage.output_tokens;
-                total_cache_read_tokens += usage.cache_read_tokens.unwrap_or(0);
-                total_cache_write_tokens += usage.cache_write_tokens.unwrap_or(0);
-                total_reasoning_tokens += usage.reasoning_tokens.unwrap_or(0);
+                billed_usage.push(usage.clone());
             }
 
             stages.push(StageSummary {
                 stage_id: node_id.clone(),
                 stage_label: node_id.clone(),
                 duration_ms: stage_durations.get(node_id).copied().unwrap_or(0),
-                cost,
+                billing_usd_micros: outcome
+                    .and_then(|o| o.usage.as_ref())
+                    .and_then(|usage| usage.total_usd_micros),
                 retries,
             });
         }
-        (stages, cost_sum, retries_sum)
+        (
+            stages,
+            (!billed_usage.is_empty()).then(|| BilledTokenCounts::from_billed_usage(&billed_usage)),
+            retries_sum,
+        )
     } else {
         (vec![], None, 0)
     };
@@ -154,14 +144,8 @@ fn build_conclusion_from_parts(
         failure_reason,
         final_git_commit_sha,
         stages,
-        total_cost,
+        billing,
         total_retries,
-        total_input_tokens,
-        total_output_tokens,
-        total_cache_read_tokens,
-        total_cache_write_tokens,
-        total_reasoning_tokens,
-        has_pricing,
     }
 }
 

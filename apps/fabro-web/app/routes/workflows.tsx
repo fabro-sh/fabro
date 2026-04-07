@@ -15,7 +15,27 @@ import {
 import { Link } from "react-router";
 import { apiJson } from "../api";
 import { timeAgo, timeUntil } from "../lib/time";
-import type { PaginatedWorkflowList } from "@qltysh/fabro-api-client";
+
+interface WorkflowRunSummary {
+  ran_at?: string | null;
+}
+
+interface WorkflowScheduleSummary {
+  expression: string;
+  next_run?: string | null;
+}
+
+interface WorkflowListItem {
+  name: string;
+  slug: string;
+  filename: string;
+  last_run?: WorkflowRunSummary | null;
+  schedule?: WorkflowScheduleSummary | null;
+}
+
+interface PaginatedWorkflowList {
+  data: WorkflowListItem[];
+}
 
 export function meta({}: any) {
   return [{ title: "Workflows — Fabro" }];

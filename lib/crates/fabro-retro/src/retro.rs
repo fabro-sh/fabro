@@ -12,7 +12,7 @@ pub struct CompletedStage {
     pub succeeded: bool,
     pub failed: bool,
     pub retries: u32,
-    pub cost: Option<f64>,
+    pub billing_usd_micros: Option<i64>,
     pub notes: Option<String>,
     pub failure_reason: Option<String>,
     pub files_touched: Vec<String>,
@@ -28,7 +28,7 @@ pub fn derive_retro(
 ) -> Retro {
     let mut stages = Vec::new();
     let mut all_files: Vec<String> = Vec::new();
-    let mut total_cost: Option<f64> = None;
+    let mut total_billing_usd_micros: Option<i64> = None;
     let mut total_retries: u32 = 0;
     let mut stages_completed: usize = 0;
     let mut stages_failed: usize = 0;
@@ -43,8 +43,8 @@ pub fn derive_retro(
             stages_failed += 1;
         }
 
-        if let Some(c) = cs.cost {
-            *total_cost.get_or_insert(0.0) += c;
+        if let Some(cost) = cs.billing_usd_micros {
+            *total_billing_usd_micros.get_or_insert(0) += cost;
         }
 
         let dur = stage_durations.get(&cs.node_id).copied().unwrap_or(0);
@@ -53,7 +53,7 @@ pub fn derive_retro(
             stage_label: cs.node_id.clone(),
             duration_ms: dur,
             retries: cs.retries,
-            cost: cs.cost,
+            billing_usd_micros: cs.billing_usd_micros,
             stage_id: cs.node_id,
             status: cs.status,
             notes: cs.notes,
@@ -76,7 +76,7 @@ pub fn derive_retro(
 
     let stats = AggregateStats {
         total_duration_ms: duration_ms,
-        total_cost,
+        total_billing_usd_micros,
         total_retries,
         files_touched: all_files,
         stages_completed,

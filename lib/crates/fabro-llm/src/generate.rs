@@ -6,7 +6,7 @@ use crate::tools::{RepairToolCallFn, Tool, execute_all_tools_with_repair};
 use crate::types::{
     FinishReason, GenerateResult, Message, ObjectStreamEvent, ReasoningEffort, Request, Response,
     ResponseFormat, ResponseFormatType, RetryPolicy, StepResult, StreamEvent, TimeoutOptions,
-    ToolCall, ToolChoice, ToolDefinition, Usage,
+    TokenCounts, ToolCall, ToolChoice, ToolDefinition,
 };
 use fabro_util::backoff::BackoffPolicy;
 use futures::{Stream, StreamExt, future, stream};
@@ -79,7 +79,7 @@ fn build_request(
     }
 }
 
-fn build_generate_result(steps: Vec<StepResult>, total_usage: Usage) -> GenerateResult {
+fn build_generate_result(steps: Vec<StepResult>, total_usage: TokenCounts) -> GenerateResult {
     let last = steps.last().expect("steps should not be empty");
     let response = last.response.clone();
     let tool_results = last.tool_results.clone();
@@ -132,7 +132,7 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError
 
     let generate_future = async {
         let mut steps: Vec<StepResult> = Vec::new();
-        let mut total_usage = Usage::default();
+        let mut total_usage = TokenCounts::default();
 
         let mut round = 0u32;
         loop {
@@ -479,7 +479,7 @@ pub struct StreamAccumulator {
     reasoning_parts: Vec<String>,
     tool_calls: Vec<ToolCall>,
     finish_reason: Option<FinishReason>,
-    usage: Option<Usage>,
+    usage: Option<TokenCounts>,
     response: Option<Response>,
 }
 
@@ -1144,10 +1144,9 @@ mod tests {
                 provider: "mock".into(),
                 message: Message::assistant(&self.response_text),
                 finish_reason: FinishReason::Stop,
-                usage: Usage {
+                usage: TokenCounts {
                     input_tokens: 10,
                     output_tokens: 20,
-                    total_tokens: 30,
                     ..Default::default()
                 },
                 raw: None,
@@ -1162,10 +1161,9 @@ mod tests {
                 Ok(StreamEvent::text_delta(&text, Some("t1".into()))),
                 Ok(StreamEvent::finish(
                     FinishReason::Stop,
-                    Usage {
+                    TokenCounts {
                         input_tokens: 10,
                         output_tokens: 20,
-                        total_tokens: 30,
                         ..Default::default()
                     },
                     Response {
@@ -1174,10 +1172,9 @@ mod tests {
                         provider: "mock".into(),
                         message: Message::assistant(&text),
                         finish_reason: FinishReason::Stop,
-                        usage: Usage {
+                        usage: TokenCounts {
                             input_tokens: 10,
                             output_tokens: 20,
-                            total_tokens: 30,
                             ..Default::default()
                         },
                         raw: None,
@@ -1292,10 +1289,9 @@ mod tests {
                         tool_call_id: None,
                     },
                     finish_reason: FinishReason::ToolCalls,
-                    usage: Usage {
+                    usage: TokenCounts {
                         input_tokens: 10,
                         output_tokens: 5,
-                        total_tokens: 15,
                         ..Default::default()
                     },
                     raw: None,
@@ -1310,10 +1306,9 @@ mod tests {
                     provider: "mock".into(),
                     message: Message::assistant("The weather in SF is 72F"),
                     finish_reason: FinishReason::Stop,
-                    usage: Usage {
+                    usage: TokenCounts {
                         input_tokens: 20,
                         output_tokens: 10,
-                        total_tokens: 30,
                         ..Default::default()
                     },
                     raw: None,
@@ -1381,10 +1376,9 @@ mod tests {
             provider: "p".into(),
             message: Message::assistant("Hello world"),
             finish_reason: FinishReason::Stop,
-            usage: Usage {
+            usage: TokenCounts {
                 input_tokens: 5,
                 output_tokens: 2,
-                total_tokens: 7,
                 ..Default::default()
             },
             raw: None,
@@ -1597,7 +1591,7 @@ mod tests {
                 provider: "mock".into(),
                 message: Message::assistant(&self.full_text),
                 finish_reason: FinishReason::Stop,
-                usage: Usage::default(),
+                usage: TokenCounts::default(),
                 raw: None,
                 warnings: vec![],
                 rate_limit: None,
@@ -1613,10 +1607,9 @@ mod tests {
 
             events.push(Ok(StreamEvent::finish(
                 FinishReason::Stop,
-                Usage {
+                TokenCounts {
                     input_tokens: 10,
                     output_tokens: 20,
-                    total_tokens: 30,
                     ..Default::default()
                 },
                 Response {
@@ -1625,10 +1618,9 @@ mod tests {
                     provider: "mock".into(),
                     message: Message::assistant(&self.full_text),
                     finish_reason: FinishReason::Stop,
-                    usage: Usage {
+                    usage: TokenCounts {
                         input_tokens: 10,
                         output_tokens: 20,
-                        total_tokens: 30,
                         ..Default::default()
                     },
                     raw: None,
@@ -1816,7 +1808,7 @@ mod tests {
                         tool_call_id: None,
                     },
                     finish_reason: FinishReason::ToolCalls,
-                    usage: Usage::default(),
+                    usage: TokenCounts::default(),
                     raw: None,
                     warnings: vec![],
                     rate_limit: None,
@@ -1993,7 +1985,7 @@ mod tests {
                 provider: "mock".into(),
                 message: Message::assistant("fallback"),
                 finish_reason: FinishReason::Stop,
-                usage: Usage::default(),
+                usage: TokenCounts::default(),
                 raw: None,
                 warnings: vec![],
                 rate_limit: None,
@@ -2018,10 +2010,9 @@ mod tests {
                         tool_call_id: None,
                     },
                     finish_reason: FinishReason::ToolCalls,
-                    usage: Usage {
+                    usage: TokenCounts {
                         input_tokens: 10,
                         output_tokens: 5,
-                        total_tokens: 15,
                         ..Default::default()
                     },
                     raw: None,
@@ -2046,10 +2037,9 @@ mod tests {
                     provider: "mock".into(),
                     message: Message::assistant(text),
                     finish_reason: FinishReason::Stop,
-                    usage: Usage {
+                    usage: TokenCounts {
                         input_tokens: 20,
                         output_tokens: 10,
-                        total_tokens: 30,
                         ..Default::default()
                     },
                     raw: None,
@@ -2165,10 +2155,9 @@ mod tests {
             provider: "mock".into(),
             message: Message::assistant("tool step"),
             finish_reason: FinishReason::ToolCalls,
-            usage: Usage {
+            usage: TokenCounts {
                 input_tokens: 10,
                 output_tokens: 5,
-                total_tokens: 15,
                 ..Default::default()
             },
             raw: None,
@@ -2335,7 +2324,7 @@ mod tests {
                 provider: "mock".into(),
                 message: Message::assistant("fallback"),
                 finish_reason: FinishReason::Stop,
-                usage: Usage::default(),
+                usage: TokenCounts::default(),
                 raw: None,
                 warnings: vec![],
                 rate_limit: None,
@@ -2362,10 +2351,9 @@ mod tests {
                 provider: "mock".into(),
                 message: Message::assistant(text),
                 finish_reason: FinishReason::Stop,
-                usage: Usage {
+                usage: TokenCounts {
                     input_tokens: 10,
                     output_tokens: 20,
-                    total_tokens: 30,
                     ..Default::default()
                 },
                 raw: None,
@@ -2450,7 +2438,7 @@ mod tests {
                 provider: "mock".into(),
                 message: Message::assistant("fallback"),
                 finish_reason: FinishReason::Stop,
-                usage: Usage::default(),
+                usage: TokenCounts::default(),
                 raw: None,
                 warnings: vec![],
                 rate_limit: None,
@@ -2466,7 +2454,7 @@ mod tests {
                 provider: "mock".into(),
                 message: Message::assistant(text),
                 finish_reason: FinishReason::Stop,
-                usage: Usage::default(),
+                usage: TokenCounts::default(),
                 raw: None,
                 warnings: vec![],
                 rate_limit: None,
@@ -2475,7 +2463,7 @@ mod tests {
                 Ok(StreamEvent::text_delta(text, Some("t1".into()))),
                 Ok(StreamEvent::finish(
                     FinishReason::Stop,
-                    Usage::default(),
+                    TokenCounts::default(),
                     response,
                 )),
             ];
@@ -2548,7 +2536,7 @@ mod tests {
                     provider: "mock".into(),
                     message: Message::assistant("fallback"),
                     finish_reason: FinishReason::Stop,
-                    usage: Usage::default(),
+                    usage: TokenCounts::default(),
                     raw: None,
                     warnings: vec![],
                     rate_limit: None,
@@ -2573,7 +2561,7 @@ mod tests {
                             tool_call_id: None,
                         },
                         finish_reason: FinishReason::ToolCalls,
-                        usage: Usage::default(),
+                        usage: TokenCounts::default(),
                         raw: None,
                         warnings: vec![],
                         rate_limit: None,
@@ -2582,7 +2570,7 @@ mod tests {
                         Ok(StreamEvent::ToolCallEnd { tool_call }),
                         Ok(StreamEvent::finish(
                             FinishReason::ToolCalls,
-                            Usage::default(),
+                            TokenCounts::default(),
                             response,
                         )),
                     ];
@@ -2597,7 +2585,7 @@ mod tests {
                         provider: "mock".into(),
                         message: Message::assistant(text),
                         finish_reason: FinishReason::Stop,
-                        usage: Usage::default(),
+                        usage: TokenCounts::default(),
                         raw: None,
                         warnings: vec![],
                         rate_limit: None,
@@ -2606,7 +2594,7 @@ mod tests {
                         Ok(StreamEvent::text_delta(text, Some("t1".into()))),
                         Ok(StreamEvent::finish(
                             FinishReason::Stop,
-                            Usage::default(),
+                            TokenCounts::default(),
                             response,
                         )),
                     ];

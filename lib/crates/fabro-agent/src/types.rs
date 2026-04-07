@@ -1,6 +1,6 @@
 use crate::error::AgentError;
 use fabro_llm::error::SdkError;
-use fabro_llm::types::{ContentPart, ThinkingData, ToolCall, ToolResult, Usage};
+use fabro_llm::types::{ContentPart, ThinkingData, TokenCounts, ToolCall, ToolResult};
 use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
 
@@ -41,7 +41,7 @@ pub enum Turn {
         /// `Anthropic` thinking blocks with signatures) preserved for round-tripping.
         /// Reasoning/thinking text is stored here as `ContentPart::Thinking`.
         provider_parts: Vec<ContentPart>,
-        usage: Box<Usage>,
+        usage: Box<TokenCounts>,
         response_id: String,
         timestamp: SystemTime,
     },
@@ -112,7 +112,7 @@ pub enum AgentEvent {
     AssistantMessage {
         text: String,
         model: String,
-        usage: Usage,
+        usage: TokenCounts,
         tool_call_count: usize,
     },
     TextDelta {
@@ -661,15 +661,12 @@ mod tests {
 
     #[test]
     fn agent_event_assistant_message() {
-        let usage = Usage {
+        let usage = TokenCounts {
             input_tokens: 100,
             output_tokens: 50,
-            total_tokens: 150,
-            cache_read_tokens: Some(80),
-            cache_write_tokens: Some(10),
-            reasoning_tokens: Some(20),
-            speed: None,
-            raw: None,
+            cache_read_tokens: 80,
+            cache_write_tokens: 10,
+            reasoning_tokens: 20,
         };
         let event = AgentEvent::AssistantMessage {
             text: "Hello".into(),
@@ -685,8 +682,8 @@ mod tests {
             } => {
                 assert_eq!(*tool_call_count, 2);
                 assert_eq!(usage.input_tokens, 100);
-                assert_eq!(usage.cache_read_tokens, Some(80));
-                assert_eq!(usage.reasoning_tokens, Some(20));
+                assert_eq!(usage.cache_read_tokens, 80);
+                assert_eq!(usage.reasoning_tokens, 20);
             }
             _ => panic!("expected AssistantMessage"),
         }

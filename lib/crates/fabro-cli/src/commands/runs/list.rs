@@ -44,7 +44,7 @@ pub(crate) async fn list_command(
                     "start_time": run.start_time(),
                     "labels": run.labels(),
                     "duration_ms": run.duration_ms(),
-                    "total_cost": run.total_cost(),
+                    "total_usd_micros": run.total_usd_micros(),
                     "host_repo_path": run.host_repo_path(),
                     "goal": run.goal(),
                 })

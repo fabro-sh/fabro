@@ -24,23 +24,23 @@ import { BASE_PATH, COLLECTION_FORMATS, type RequestArgs, BaseAPI, RequiredError
 // @ts-ignore
 import type { ErrorResponse } from '../models';
 // @ts-ignore
-import type { RunUsage } from '../models';
+import type { RunBilling } from '../models';
 /**
  * RunOutputsApi - axios parameter creator
  */
 export const RunOutputsApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
         /**
-         * Returns token and cost usage broken down by stage and model for a specific run.
-         * @summary Retrieve Run Usage
+         * Returns token counts and billed totals broken down by stage and model for a specific run.
+         * @summary Retrieve Run Billing
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        retrieveRunUsage: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        retrieveRunBilling: async (id: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
-            assertParamExists('retrieveRunUsage', 'id', id)
-            const localVarPath = `/api/v1/runs/{id}/usage`
+            assertParamExists('retrieveRunBilling', 'id', id)
+            const localVarPath = `/api/v1/runs/{id}/billing`
                 .replace(`{${"id"}}`, encodeURIComponent(String(id)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -81,16 +81,16 @@ export const RunOutputsApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = RunOutputsApiAxiosParamCreator(configuration)
     return {
         /**
-         * Returns token and cost usage broken down by stage and model for a specific run.
-         * @summary Retrieve Run Usage
+         * Returns token counts and billed totals broken down by stage and model for a specific run.
+         * @summary Retrieve Run Billing
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async retrieveRunUsage(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunUsage>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.retrieveRunUsage(id, options);
+        async retrieveRunBilling(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunBilling>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.retrieveRunBilling(id, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RunOutputsApi.retrieveRunUsage']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['RunOutputsApi.retrieveRunBilling']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
     }
@@ -103,14 +103,14 @@ export const RunOutputsApiFactory = function (configuration?: Configuration, bas
     const localVarFp = RunOutputsApiFp(configuration)
     return {
         /**
-         * Returns token and cost usage broken down by stage and model for a specific run.
-         * @summary Retrieve Run Usage
+         * Returns token counts and billed totals broken down by stage and model for a specific run.
+         * @summary Retrieve Run Billing
          * @param {string} id Unique run identifier (ULID).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        retrieveRunUsage(id: string, options?: RawAxiosRequestConfig): AxiosPromise<RunUsage> {
-            return localVarFp.retrieveRunUsage(id, options).then((request) => request(axios, basePath));
+        retrieveRunBilling(id: string, options?: RawAxiosRequestConfig): AxiosPromise<RunBilling> {
+            return localVarFp.retrieveRunBilling(id, options).then((request) => request(axios, basePath));
         },
     };
 };
@@ -120,14 +120,14 @@ export const RunOutputsApiFactory = function (configuration?: Configuration, bas
  */
 export class RunOutputsApi extends BaseAPI {
     /**
-     * Returns token and cost usage broken down by stage and model for a specific run.
-     * @summary Retrieve Run Usage
+     * Returns token counts and billed totals broken down by stage and model for a specific run.
+     * @summary Retrieve Run Billing
      * @param {string} id Unique run identifier (ULID).
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public retrieveRunUsage(id: string, options?: RawAxiosRequestConfig) {
-        return RunOutputsApiFp(this.configuration).retrieveRunUsage(id, options).then((request) => request(this.axios, this.basePath));
+    public retrieveRunBilling(id: string, options?: RawAxiosRequestConfig) {
+        return RunOutputsApiFp(this.configuration).retrieveRunBilling(id, options).then((request) => request(this.axios, this.basePath));
     }
 }
 

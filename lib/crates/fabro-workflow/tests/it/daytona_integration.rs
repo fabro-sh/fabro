@@ -1048,7 +1048,7 @@ async fn run_daytona_cli_test(provider: Provider, model: &str, install_command: 
             );
             if let Some(u) = usage {
                 assert!(
-                    u.input_tokens > 0,
+                    u.tokens().input_tokens > 0,
                     "{provider}/{model}: input_tokens should be > 0"
                 );
             }

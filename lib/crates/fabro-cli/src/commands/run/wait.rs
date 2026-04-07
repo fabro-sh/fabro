@@ -9,7 +9,7 @@ use tracing::info;
 
 use crate::args::{GlobalArgs, WaitArgs};
 use crate::server_runs::ServerSummaryLookup;
-use crate::shared::format_duration_ms;
+use crate::shared::{format_duration_ms, format_usd_micros};
 
 #[cfg(test)]
 const WAIT_STARTUP_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
@@ -92,8 +92,12 @@ fn build_json_output(
     });
     if let Some(c) = conclusion {
         value["duration_ms"] = c.duration_ms.into();
-        if let Some(cost) = c.total_cost {
-            value["total_cost"] = cost.into();
+        if let Some(total_usd_micros) = c
+            .billing
+            .as_ref()
+            .and_then(|billing| billing.total_usd_micros)
+        {
+            value["total_usd_micros"] = total_usd_micros.into();
         }
     }
     value
@@ -118,8 +122,10 @@ fn print_human_output(
         Some(c) => {
             let duration = format_duration_ms(c.duration_ms);
             let cost = c
-                .total_cost
-                .map(|v| format!("  ${v:.2}"))
+                .billing
+                .as_ref()
+                .and_then(|billing| billing.total_usd_micros)
+                .map(|value| format!("  {}", format_usd_micros(value)))
                 .unwrap_or_default();
             format!("  {duration}{cost}")
         }
@@ -136,6 +142,7 @@ fn print_human_output(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fabro_types::BilledTokenCounts;
     use fabro_types::fixtures;
     use fabro_workflow::outcome::StageStatus;
     use fabro_workflow::records::Conclusion;
@@ -155,20 +162,22 @@ mod tests {
             failure_reason: None,
             final_git_commit_sha: None,
             stages: vec![],
-            total_cost: Some(0.42),
+            billing: Some(BilledTokenCounts {
+                input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+                reasoning_tokens: 0,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                total_usd_micros: Some(420_000),
+            }),
             total_retries: 0,
-            total_input_tokens: 0,
-            total_output_tokens: 0,
-            total_cache_read_tokens: 0,
-            total_cache_write_tokens: 0,
-            total_reasoning_tokens: 0,
-            has_pricing: false,
         };
         let json = build_json_output(RunStatus::Succeeded, &run_id, Some(&conclusion));
         assert_eq!(json["run_id"], run_id.to_string());
         assert_eq!(json["status"], "succeeded");
         assert_eq!(json["duration_ms"], 12345);
-        assert!((json["total_cost"].as_f64().unwrap() - 0.42).abs() < f64::EPSILON);
+        assert_eq!(json["total_usd_micros"], 420_000);
     }
 
     #[test]
@@ -178,7 +187,7 @@ mod tests {
         assert_eq!(json["run_id"], run_id.to_string());
         assert_eq!(json["status"], "failed");
         assert!(json.get("duration_ms").is_none());
-        assert!(json.get("total_cost").is_none());
+        assert!(json.get("total_usd_micros").is_none());
     }
 
     #[test]
@@ -197,17 +206,11 @@ mod tests {
             failure_reason: Some("error".into()),
             final_git_commit_sha: None,
             stages: vec![],
-            total_cost: None,
+            billing: None,
             total_retries: 0,
-            total_input_tokens: 0,
-            total_output_tokens: 0,
-            total_cache_read_tokens: 0,
-            total_cache_write_tokens: 0,
-            total_reasoning_tokens: 0,
-            has_pricing: false,
         };
         let json = build_json_output(RunStatus::Failed, &run_id, Some(&conclusion));
-        assert!(json.get("total_cost").is_none());
+        assert!(json.get("total_usd_micros").is_none());
         assert_eq!(json["duration_ms"], 500);
     }
 
@@ -222,14 +225,16 @@ mod tests {
             failure_reason: None,
             final_git_commit_sha: None,
             stages: vec![],
-            total_cost: Some(0.15),
+            billing: Some(BilledTokenCounts {
+                input_tokens: 0,
+                output_tokens: 0,
+                total_tokens: 0,
+                reasoning_tokens: 0,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+                total_usd_micros: Some(150_000),
+            }),
             total_retries: 0,
-            total_input_tokens: 0,
-            total_output_tokens: 0,
-            total_cache_read_tokens: 0,
-            total_cache_write_tokens: 0,
-            total_reasoning_tokens: 0,
-            has_pricing: false,
         };
         // Just verify no panic; actual stderr output is hard to capture
         print_human_output(RunStatus::Succeeded, &run_id, Some(&conclusion), &styles);

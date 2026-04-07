@@ -256,7 +256,7 @@ mod tests {
     use crate::test_support::TestProfile;
     use crate::tool_registry::ToolRegistry;
     use crate::types::Turn;
-    use fabro_llm::types::{ToolCall, ToolResult, Usage};
+    use fabro_llm::types::{TokenCounts, ToolCall, ToolResult};
     use std::time::SystemTime;
 
     #[test]
@@ -274,7 +274,7 @@ mod tests {
                     serde_json::json!({"path": "foo.rs"}),
                 )],
                 provider_parts: vec![],
-                usage: Box::new(Usage::default()),
+                usage: Box::new(TokenCounts::default()),
                 response_id: "resp_1".into(),
                 timestamp: SystemTime::now(),
             },

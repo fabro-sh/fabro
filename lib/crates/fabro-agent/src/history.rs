@@ -136,7 +136,7 @@ fn extract_recent_user_messages(discarded: Vec<Turn>, token_budget: usize) -> Ve
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fabro_llm::types::{ThinkingData, ToolCall, ToolResult, Usage};
+    use fabro_llm::types::{ThinkingData, TokenCounts, ToolCall, ToolResult};
     use std::time::SystemTime;
 
     #[test]
@@ -231,7 +231,7 @@ mod tests {
             content: "Hi there".into(),
             tool_calls: vec![],
             provider_parts: vec![],
-            usage: Box::new(Usage::default()),
+            usage: Box::new(TokenCounts::default()),
             response_id: "resp_1".into(),
             timestamp: SystemTime::now(),
         });
@@ -249,7 +249,7 @@ mod tests {
             content: "Let me read that".into(),
             tool_calls: vec![tc],
             provider_parts: vec![],
-            usage: Box::new(Usage::default()),
+            usage: Box::new(TokenCounts::default()),
             response_id: "resp_2".into(),
             timestamp: SystemTime::now(),
         });
@@ -275,7 +275,7 @@ mod tests {
             content: "The answer is 42".into(),
             tool_calls: vec![],
             provider_parts: vec![thinking],
-            usage: Box::new(Usage::default()),
+            usage: Box::new(TokenCounts::default()),
             response_id: "resp_3".into(),
             timestamp: SystemTime::now(),
         });
@@ -300,7 +300,7 @@ mod tests {
             content: "The answer".into(),
             tool_calls: vec![],
             provider_parts: vec![thinking],
-            usage: Box::new(Usage::default()),
+            usage: Box::new(TokenCounts::default()),
             response_id: "resp_4".into(),
             timestamp: SystemTime::now(),
         });
@@ -331,7 +331,7 @@ mod tests {
             content: String::new(),
             tool_calls: vec![tc],
             provider_parts: vec![reasoning_item],
-            usage: Box::new(Usage::default()),
+            usage: Box::new(TokenCounts::default()),
             response_id: "resp_1".into(),
             timestamp: SystemTime::now(),
         });
@@ -397,7 +397,7 @@ mod tests {
             content: "Second".into(),
             tool_calls: vec![],
             provider_parts: vec![],
-            usage: Box::new(Usage::default()),
+            usage: Box::new(TokenCounts::default()),
             response_id: "resp_1".into(),
             timestamp: SystemTime::now(),
         });
@@ -423,10 +423,9 @@ mod tests {
                 signature: None,
                 redacted: false,
             })],
-            usage: Box::new(Usage {
+            usage: Box::new(TokenCounts {
                 input_tokens: 10,
                 output_tokens: 5,
-                total_tokens: 15,
                 ..Default::default()
             }),
             response_id: "resp_1".into(),
@@ -467,7 +466,7 @@ mod tests {
             content: "response".into(),
             tool_calls: vec![tc],
             provider_parts: vec![reasoning],
-            usage: Box::new(Usage::default()),
+            usage: Box::new(TokenCounts::default()),
             response_id: "resp_1".into(),
             timestamp: SystemTime::now(),
         });
@@ -514,7 +513,7 @@ mod tests {
             content: "answer".into(),
             tool_calls: vec![],
             provider_parts: vec![thinking],
-            usage: Box::new(Usage::default()),
+            usage: Box::new(TokenCounts::default()),
             response_id: "resp_1".into(),
             timestamp: SystemTime::now(),
         });
@@ -551,7 +550,7 @@ mod tests {
                     kind: ContentPart::OPENAI_REASONING.into(),
                     data: serde_json::json!({"type": "reasoning", "id": format!("rs_{i}")}),
                 }],
-                usage: Box::new(Usage::default()),
+                usage: Box::new(TokenCounts::default()),
                 response_id: format!("resp_{i}"),
                 timestamp: SystemTime::now(),
             });
@@ -580,7 +579,7 @@ mod tests {
                 content: "reply".into(),
                 tool_calls: vec![],
                 provider_parts: vec![],
-                usage: Box::new(Usage::default()),
+                usage: Box::new(TokenCounts::default()),
                 response_id: "r1".into(),
                 timestamp: SystemTime::now(),
             },
@@ -624,7 +623,7 @@ mod tests {
             content: "assistant msg".into(),
             tool_calls: vec![],
             provider_parts: vec![],
-            usage: Box::new(Usage::default()),
+            usage: Box::new(TokenCounts::default()),
             response_id: "r1".into(),
             timestamp: SystemTime::now(),
         });

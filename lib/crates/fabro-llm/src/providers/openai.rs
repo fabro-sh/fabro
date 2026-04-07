@@ -9,8 +9,8 @@ use crate::providers::common::{
 };
 use crate::types::{
     AdapterTimeout, ContentPart, FinishReason, Message, RateLimitInfo, Request, Response,
-    ResponseFormat, ResponseFormatType, Role, StreamEvent, ToolCall, ToolChoice, ToolDefinition,
-    Usage,
+    ResponseFormat, ResponseFormatType, Role, StreamEvent, TokenCounts, ToolCall, ToolChoice,
+    ToolDefinition,
 };
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
@@ -162,7 +162,6 @@ struct ApiResponse {
 struct ApiUsage {
     input_tokens: i64,
     output_tokens: i64,
-    total_tokens: Option<i64>,
     output_tokens_details: Option<OutputTokenDetails>,
     input_tokens_details: Option<InputTokenDetails>,
 }
@@ -543,7 +542,7 @@ struct SseStreamState {
     reasoning_items: Vec<serde_json::Value>,
     /// Raw message output items to preserve for round-tripping.
     message_items: Vec<serde_json::Value>,
-    usage: Usage,
+    usage: TokenCounts,
     finish_reason: FinishReason,
     emitted_start: bool,
     emitted_text_start: bool,
@@ -837,19 +836,21 @@ fn handle_response_completed(
 
     if let Some(usage_data) = response_data.get("usage") {
         if let Ok(u) = serde_json::from_value::<ApiUsage>(usage_data.clone()) {
-            state.usage = Usage {
+            let reasoning_tokens = u
+                .output_tokens_details
+                .as_ref()
+                .and_then(|d| d.reasoning_tokens)
+                .unwrap_or(0);
+            state.usage = TokenCounts {
                 input_tokens: u.input_tokens,
-                output_tokens: u.output_tokens,
-                total_tokens: u.total_tokens.unwrap_or(u.input_tokens + u.output_tokens),
-                reasoning_tokens: u
-                    .output_tokens_details
-                    .as_ref()
-                    .and_then(|d| d.reasoning_tokens),
+                output_tokens: u.output_tokens.saturating_sub(reasoning_tokens),
+                reasoning_tokens,
                 cache_read_tokens: u
                     .input_tokens_details
                     .as_ref()
-                    .and_then(|d| d.cached_tokens),
-                ..Usage::default()
+                    .and_then(|d| d.cached_tokens)
+                    .unwrap_or(0),
+                ..TokenCounts::default()
             };
         }
     }
@@ -961,19 +962,23 @@ impl ProviderAdapter for Adapter {
         let usage = api_resp
             .usage
             .as_ref()
-            .map_or_else(Usage::default, |u| Usage {
-                input_tokens: u.input_tokens,
-                output_tokens: u.output_tokens,
-                total_tokens: u.total_tokens.unwrap_or(u.input_tokens + u.output_tokens),
-                reasoning_tokens: u
+            .map_or_else(TokenCounts::default, |u| {
+                let reasoning_tokens = u
                     .output_tokens_details
                     .as_ref()
-                    .and_then(|d| d.reasoning_tokens),
-                cache_read_tokens: u
-                    .input_tokens_details
-                    .as_ref()
-                    .and_then(|d| d.cached_tokens),
-                ..Usage::default()
+                    .and_then(|d| d.reasoning_tokens)
+                    .unwrap_or(0);
+                TokenCounts {
+                    input_tokens: u.input_tokens,
+                    output_tokens: u.output_tokens.saturating_sub(reasoning_tokens),
+                    reasoning_tokens,
+                    cache_read_tokens: u
+                        .input_tokens_details
+                        .as_ref()
+                        .and_then(|d| d.cached_tokens)
+                        .unwrap_or(0),
+                    ..TokenCounts::default()
+                }
             });
 
         Ok(Response {
@@ -1039,7 +1044,7 @@ impl ProviderAdapter for Adapter {
             tool_calls: Vec::new(),
             reasoning_items: Vec::new(),
             message_items: Vec::new(),
-            usage: Usage::default(),
+            usage: TokenCounts::default(),
             finish_reason: FinishReason::Stop,
             emitted_start: false,
             emitted_text_start: false,
@@ -1593,7 +1598,7 @@ mod tests {
             tool_calls: Vec::new(),
             reasoning_items: Vec::new(),
             message_items: Vec::new(),
-            usage: Usage::default(),
+            usage: TokenCounts::default(),
             finish_reason: FinishReason::Stop,
             emitted_start: true,
             emitted_text_start: false,

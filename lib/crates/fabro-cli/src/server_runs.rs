@@ -91,8 +91,8 @@ impl ServerRunSummaryInfo {
         self.summary.duration_ms
     }
 
-    pub(crate) fn total_cost(&self) -> Option<f64> {
-        self.summary.total_cost
+    pub(crate) fn total_usd_micros(&self) -> Option<i64> {
+        self.summary.total_usd_micros
     }
 
     pub(crate) fn host_repo_path(&self) -> Option<&str> {

@@ -9,12 +9,14 @@ use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSecti
 use fabro_util::terminal::Styles;
 use fabro_util::text::strip_goal_decoration;
 use fabro_workflow::artifact_snapshot::collect_artifact_paths;
-use fabro_workflow::outcome::{StageStatus, format_cost};
+use fabro_workflow::outcome::StageStatus;
 use fabro_workflow::records::Conclusion;
 use indicatif::HumanDuration;
 
 use crate::server_client;
-use crate::shared::{format_tokens_human, print_diagnostics, relative_path, tilde_path};
+use crate::shared::{
+    format_tokens_human, format_usd_micros, print_diagnostics, relative_path, tilde_path,
+};
 
 pub(crate) fn print_preflight_workflow_summary(
     workflow: &types::PreflightWorkflowSummary,
@@ -177,46 +179,59 @@ pub(crate) fn print_run_conclusion(
         HumanDuration(Duration::from_millis(conclusion.duration_ms))
     );
 
-    let total_tokens = conclusion.total_input_tokens + conclusion.total_output_tokens;
-    if total_tokens > 0 {
-        if conclusion.has_pricing {
-            if let Some(cost) = conclusion.total_cost {
-                if cost > 0.0 {
+    if let Some(billing) = conclusion.billing.as_ref() {
+        let total_tokens = i64::try_from(billing.total_tokens).unwrap_or(i64::MAX);
+        if total_tokens > 0 {
+            if let Some(total_usd_micros) = billing.total_usd_micros {
+                if total_usd_micros > 0 {
                     eprintln!(
                         "{}",
                         styles.dim.apply_to(format!(
                             "Cost:      {} ({} toks)",
-                            format_cost(cost),
+                            format_usd_micros(total_usd_micros),
                             format_tokens_human(total_tokens)
                         ))
                     );
                 }
+            } else {
+                eprintln!(
+                    "{}",
+                    styles
+                        .dim
+                        .apply_to(format!("Toks:      {}", format_tokens_human(total_tokens)))
+                );
             }
-        } else {
+            if billing.cache_read_tokens > 0 || billing.cache_write_tokens > 0 {
+                eprintln!(
+                    "{}",
+                    styles.dim.apply_to(format!(
+                        "Cache:     {} read, {} write",
+                        format_tokens_human(
+                            i64::try_from(billing.cache_read_tokens).unwrap_or(i64::MAX)
+                        ),
+                        format_tokens_human(
+                            i64::try_from(billing.cache_write_tokens).unwrap_or(i64::MAX)
+                        ),
+                    )),
+                );
+            }
+            if billing.reasoning_tokens > 0 {
+                eprintln!(
+                    "{}",
+                    styles.dim.apply_to(format!(
+                        "Reasoning: {} tokens",
+                        format_tokens_human(
+                            i64::try_from(billing.reasoning_tokens).unwrap_or(i64::MAX)
+                        ),
+                    )),
+                );
+            }
+        } else if billing.total_usd_micros.is_none() {
             eprintln!(
                 "{}",
                 styles
                     .dim
                     .apply_to(format!("Toks:      {}", format_tokens_human(total_tokens)))
-            );
-        }
-        if conclusion.total_cache_read_tokens > 0 {
-            eprintln!(
-                "{}",
-                styles.dim.apply_to(format!(
-                    "Cache:     {} read, {} write",
-                    format_tokens_human(conclusion.total_cache_read_tokens),
-                    format_tokens_human(conclusion.total_cache_write_tokens),
-                )),
-            );
-        }
-        if conclusion.total_reasoning_tokens > 0 {
-            eprintln!(
-                "{}",
-                styles.dim.apply_to(format!(
-                    "Reasoning: {} tokens",
-                    format_tokens_human(conclusion.total_reasoning_tokens),
-                )),
             );
         }
     }

@@ -12,7 +12,7 @@ use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
 use crate::event::{Emitter, Event};
 use crate::outcome::{
-    FailureCategory, FailureDetail, Outcome, OutcomeExt, StageStatus, StageUsage,
+    BilledModelUsage, FailureCategory, FailureDetail, Outcome, OutcomeExt, StageStatus,
 };
 use crate::run_dir::visit_from_context;
 use crate::transforms::variable_expansion::expand_vars;
@@ -24,7 +24,7 @@ use super::{EngineServices, Handler};
 pub enum CodergenResult {
     Text {
         text: String,
-        usage: Option<StageUsage>,
+        usage: Option<BilledModelUsage>,
         files_touched: Vec<String>,
         last_file_touched: Option<String>,
     },
@@ -321,7 +321,7 @@ impl Handler for AgentHandler {
 
         let response_model = stage_usage
             .as_ref()
-            .map(|usage| usage.model.clone())
+            .map(|usage| usage.model_id().to_string())
             .or_else(|| node.model().map(String::from))
             .unwrap_or_default();
         let response_provider = node
@@ -334,7 +334,7 @@ impl Handler for AgentHandler {
             response: response_text.clone(),
             model: response_model,
             provider: response_provider,
-            usage: stage_usage.clone(),
+            billing: stage_usage.clone(),
         });
 
         // Build and write status

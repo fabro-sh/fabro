@@ -57,7 +57,9 @@ pub fn build_completed_stages(cp: &records::Checkpoint, run_failed: bool) -> Vec
             succeeded,
             failed,
             retries,
-            cost: outcome.and_then(|o| o.usage.as_ref()).and_then(|u| u.cost),
+            billing_usd_micros: outcome
+                .and_then(|o| o.usage.as_ref())
+                .and_then(|usage| usage.total_usd_micros),
             notes: outcome.and_then(|o| o.notes.clone()),
             failure_reason: outcome.and_then(|o| o.failure_reason().map(String::from)),
             files_touched: outcome.map(|o| o.files_touched.clone()).unwrap_or_default(),
@@ -75,7 +77,7 @@ pub fn build_completed_stages(cp: &records::Checkpoint, run_failed: bool) -> Vec
                 succeeded: false,
                 failed: true,
                 retries: 0,
-                cost: None,
+                billing_usd_micros: None,
                 notes: None,
                 failure_reason: None,
                 files_touched: vec![],

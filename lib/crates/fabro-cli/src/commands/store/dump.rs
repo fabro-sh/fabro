@@ -149,9 +149,9 @@ mod tests {
     use chrono::{DateTime, Utc};
     use fabro_store::{Database, EventEnvelope, EventPayload};
     use fabro_types::{
-        AggregateStats, AttrValue, Checkpoint, Conclusion, Graph, NodeStatusRecord, Retro, RunId,
-        RunRecord, RunStatus, RunStatusRecord, SandboxRecord, Settings, StageStatus, StartRecord,
-        StatusReason, fixtures,
+        AggregateStats, AttrValue, BilledTokenCounts, Checkpoint, Conclusion, Graph,
+        NodeStatusRecord, Retro, RunId, RunRecord, RunStatus, RunStatusRecord, SandboxRecord,
+        Settings, StageStatus, StartRecord, StatusReason, fixtures,
     };
     use fabro_workflow::event::{Event, append_event};
     use object_store::memory::InMemory;
@@ -241,14 +241,16 @@ mod tests {
             failure_reason: None,
             final_git_commit_sha: Some("feedbeef".to_string()),
             stages: Vec::new(),
-            total_cost: Some(1.25),
+            billing: Some(BilledTokenCounts {
+                input_tokens: 10,
+                output_tokens: 20,
+                total_tokens: 150,
+                reasoning_tokens: 50,
+                cache_read_tokens: 30,
+                cache_write_tokens: 40,
+                total_usd_micros: Some(1_250_000),
+            }),
             total_retries: 2,
-            total_input_tokens: 10,
-            total_output_tokens: 20,
-            total_cache_read_tokens: 30,
-            total_cache_write_tokens: 40,
-            total_reasoning_tokens: 50,
-            has_pricing: true,
         }
     }
 
@@ -262,7 +264,7 @@ mod tests {
             stages: Vec::new(),
             stats: AggregateStats {
                 total_duration_ms: 3210,
-                total_cost: Some(1.25),
+                total_billing_usd_micros: Some(1_250_000),
                 total_retries: 2,
                 files_touched: vec!["src/lib.rs".to_string()],
                 stages_completed: 3,
@@ -423,7 +425,7 @@ mod tests {
                 response: "Implemented".to_string(),
                 model: "gpt-5".to_string(),
                 provider: "openai".to_string(),
-                usage: None,
+                billing: None,
             },
         )
         .await
@@ -439,7 +441,7 @@ mod tests {
                 status: "partial_success".to_string(),
                 preferred_label: None,
                 suggested_next_ids: Vec::new(),
-                usage: None,
+                billing: None,
                 failure: None,
                 notes: Some("captured output".to_string()),
                 files_touched: Vec::new(),
@@ -516,10 +518,13 @@ mod tests {
                 artifact_count: 0,
                 status: "success".to_string(),
                 reason: None,
-                total_cost: conclusion.total_cost,
+                total_usd_micros: conclusion
+                    .billing
+                    .as_ref()
+                    .and_then(|billing| billing.total_usd_micros),
                 final_git_commit_sha: conclusion.final_git_commit_sha.clone(),
                 final_patch: None,
-                usage: None,
+                billing: conclusion.billing.clone(),
             },
         )
         .await

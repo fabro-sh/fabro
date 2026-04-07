@@ -9,8 +9,8 @@ use crate::providers::common::{
 };
 use crate::types::{
     AdapterTimeout, ContentPart, FinishReason, Message, RateLimitInfo, Request, Response,
-    ResponseFormatType, Role, StreamEvent, ThinkingData, ToolCall, ToolChoice, ToolDefinition,
-    Usage,
+    ResponseFormatType, Role, StreamEvent, ThinkingData, TokenCounts, ToolCall, ToolChoice,
+    ToolDefinition,
 };
 
 /// Provider adapter for the Anthropic Messages API.
@@ -170,8 +170,6 @@ struct ApiUsage {
     cache_read_input_tokens: Option<i64>,
     #[serde(default)]
     cache_creation_input_tokens: Option<i64>,
-    #[serde(default)]
-    speed: Option<String>,
 }
 
 /// Estimate reasoning tokens from thinking content blocks.
@@ -660,7 +658,7 @@ struct StreamAccumulator {
     id: String,
     model: String,
     content_parts: Vec<ContentPart>,
-    usage: Usage,
+    usage: TokenCounts,
     finish_reason: FinishReason,
     /// The kind of the current content block, set by `content_block_start`.
     current_block: Option<ContentBlockKind>,
@@ -680,7 +678,7 @@ impl StreamAccumulator {
             id: String::new(),
             model: String::new(),
             content_parts: Vec::new(),
-            usage: Usage::default(),
+            usage: TokenCounts::default(),
             finish_reason: FinishReason::Stop,
             current_block: None,
             current_text: String::new(),
@@ -728,14 +726,12 @@ impl StreamAccumulator {
                     .unwrap_or(0);
                 self.usage.cache_read_tokens = usage
                     .get("cache_read_input_tokens")
-                    .and_then(serde_json::Value::as_i64);
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0);
                 self.usage.cache_write_tokens = usage
                     .get("cache_creation_input_tokens")
-                    .and_then(serde_json::Value::as_i64);
-                self.usage.speed = usage
-                    .get("speed")
-                    .and_then(serde_json::Value::as_str)
-                    .map(String::from);
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0);
             }
         }
         vec![StreamEvent::StreamStart]
@@ -922,12 +918,13 @@ impl StreamAccumulator {
                 .get("output_tokens")
                 .and_then(serde_json::Value::as_i64)
                 .unwrap_or(0);
-            self.usage.total_tokens = self.usage.input_tokens + self.usage.output_tokens;
         }
     }
 
     fn handle_message_stop(&mut self) -> Vec<StreamEvent> {
-        self.usage.reasoning_tokens = estimate_reasoning_tokens(&self.content_parts);
+        let reasoning_tokens = estimate_reasoning_tokens(&self.content_parts).unwrap_or(0);
+        self.usage.reasoning_tokens = reasoning_tokens;
+        self.usage.output_tokens = self.usage.output_tokens.saturating_sub(reasoning_tokens);
         let response = self.take_response();
         vec![StreamEvent::Finish {
             finish_reason: response.finish_reason.clone(),
@@ -1260,8 +1257,7 @@ impl ProviderAdapter for Adapter {
         } else {
             map_finish_reason(api_resp.stop_reason.as_deref())
         };
-        let total = api_resp.usage.input_tokens + api_resp.usage.output_tokens;
-        let reasoning_tokens = estimate_reasoning_tokens(&content_parts);
+        let reasoning_tokens = estimate_reasoning_tokens(&content_parts).unwrap_or(0);
 
         Ok(Response {
             id: api_resp.id,
@@ -1274,15 +1270,16 @@ impl ProviderAdapter for Adapter {
                 tool_call_id: None,
             },
             finish_reason,
-            usage: Usage {
+            usage: TokenCounts {
                 input_tokens: api_resp.usage.input_tokens,
-                output_tokens: api_resp.usage.output_tokens,
-                total_tokens: total,
+                output_tokens: api_resp
+                    .usage
+                    .output_tokens
+                    .saturating_sub(reasoning_tokens),
                 reasoning_tokens,
-                cache_read_tokens: api_resp.usage.cache_read_input_tokens,
-                cache_write_tokens: api_resp.usage.cache_creation_input_tokens,
-                speed: api_resp.usage.speed,
-                ..Usage::default()
+                cache_read_tokens: api_resp.usage.cache_read_input_tokens.unwrap_or(0),
+                cache_write_tokens: api_resp.usage.cache_creation_input_tokens.unwrap_or(0),
+                ..TokenCounts::default()
             },
             raw: serde_json::from_str(&body).ok(),
             warnings: vec![],
@@ -1956,14 +1953,14 @@ mod tests {
                 tool_call_id: None,
             },
             finish_reason: FinishReason::ToolCalls,
-            usage: Usage::default(),
+            usage: TokenCounts::default(),
             raw: None,
             warnings: vec![],
             rate_limit: None,
         });
         let event = StreamEvent::Finish {
             finish_reason: FinishReason::ToolCalls,
-            usage: Usage::default(),
+            usage: TokenCounts::default(),
             response,
         };
         let result = convert_stream_event_for_json_schema(event);

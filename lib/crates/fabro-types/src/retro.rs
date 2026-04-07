@@ -84,7 +84,7 @@ pub struct StageRetro {
     pub duration_ms: u64,
     pub retries: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cost: Option<f64>,
+    pub billing_usd_micros: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -97,7 +97,7 @@ pub struct StageRetro {
 pub struct AggregateStats {
     pub total_duration_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub total_cost: Option<f64>,
+    pub total_billing_usd_micros: Option<i64>,
     pub total_retries: u32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files_touched: Vec<String>,
