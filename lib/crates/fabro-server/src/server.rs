@@ -30,7 +30,7 @@ use fabro_llm::types::{
 };
 use fabro_store::{ArtifactStore, Database, EventEnvelope, EventPayload, StageId};
 use fabro_types::{
-    RunBlobId, RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance,
+    EventBody, RunBlobId, RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance,
     RunServerProvenance, RunSubjectProvenance, Settings,
 };
 use fabro_util::redact::redact_jsonl_line;
@@ -48,11 +48,12 @@ use tokio::sync::Notify;
 use tokio::sync::RwLock as AsyncRwLock;
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
+use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task::spawn_blocking;
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
-use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::{BroadcastStream, UnboundedReceiverStream};
 use tower::{ServiceExt, service_fn};
 use ulid::Ulid;
 
@@ -992,6 +993,23 @@ fn sse_event_from_store(event: &EventEnvelope) -> Option<Event> {
     let data = serde_json::to_string(&event).ok()?;
     let data = redact_jsonl_line(&data);
     Some(Event::default().data(data))
+}
+
+fn attach_event_is_terminal(event: &EventEnvelope) -> bool {
+    let Ok(run_event) = RunEvent::try_from(&event.payload) else {
+        return false;
+    };
+    matches!(
+        run_event.body,
+        EventBody::RunCompleted(_) | EventBody::RunFailed(_)
+    )
+}
+
+fn run_projection_is_active(state: &fabro_store::RunProjection) -> bool {
+    state
+        .status
+        .as_ref()
+        .is_some_and(|record| record.status.is_active())
 }
 
 fn dir_size(path: &std::path::Path) -> u64 {
@@ -3264,20 +3282,6 @@ async fn attach_run_events(
         Ok(id) => id,
         Err(response) => return response,
     };
-    {
-        let runs = state.runs.lock().expect("runs lock poisoned");
-        let Some(managed_run) = runs.get(&id) else {
-            return ApiError::not_found("Run not found.").into_response();
-        };
-        if !matches!(
-            managed_run.status,
-            RunStatus::Queued | RunStatus::Starting | RunStatus::Running | RunStatus::Paused
-        ) {
-            return ApiError::new(StatusCode::GONE, "Run is not live on this server.")
-                .into_response();
-        }
-    }
-
     let Ok(run_store) = state.store.open_run_reader(&id).await else {
         return ApiError::not_found("Run not found.").into_response();
     };
@@ -3292,19 +3296,110 @@ async fn attach_run_events(
             }
         },
     };
-    let stream = match run_store.watch_events_from(start_seq) {
-        Ok(stream) => stream,
-        Err(err) => {
-            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response();
+    const ATTACH_REPLAY_BATCH_LIMIT: usize = 256;
+
+    let (sender, receiver) = mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        let mut next_seq = start_seq;
+
+        loop {
+            let replay_batch = match run_store
+                .list_events_from_with_limit(next_seq, ATTACH_REPLAY_BATCH_LIMIT)
+                .await
+            {
+                Ok(events) => events,
+                Err(_) => return,
+            };
+            let replay_has_more = replay_batch.len() > ATTACH_REPLAY_BATCH_LIMIT;
+
+            for event in replay_batch.into_iter().take(ATTACH_REPLAY_BATCH_LIMIT) {
+                next_seq = event.seq.saturating_add(1);
+                let terminal = attach_event_is_terminal(&event);
+                if let Some(sse_event) = sse_event_from_store(&event) {
+                    if sender
+                        .send(Ok::<Event, std::convert::Infallible>(sse_event))
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+                if terminal {
+                    return;
+                }
+            }
+
+            if replay_has_more {
+                continue;
+            }
+
+            let state = match run_store.state().await {
+                Ok(state) => state,
+                Err(_) => return,
+            };
+
+            if run_projection_is_active(&state) {
+                break;
+            }
+
+            let tail_batch = match run_store
+                .list_events_from_with_limit(next_seq, ATTACH_REPLAY_BATCH_LIMIT)
+                .await
+            {
+                Ok(events) => events,
+                Err(_) => return,
+            };
+            let tail_has_more = tail_batch.len() > ATTACH_REPLAY_BATCH_LIMIT;
+
+            for event in tail_batch.into_iter().take(ATTACH_REPLAY_BATCH_LIMIT) {
+                next_seq = event.seq.saturating_add(1);
+                let terminal = attach_event_is_terminal(&event);
+                if let Some(sse_event) = sse_event_from_store(&event) {
+                    if sender
+                        .send(Ok::<Event, std::convert::Infallible>(sse_event))
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+                if terminal {
+                    return;
+                }
+            }
+
+            if tail_has_more {
+                continue;
+            }
+
+            return;
         }
-    };
-    let stream = stream.filter_map(|result| match result {
-        Ok(event) => sse_event_from_store(&event).map(Ok::<Event, std::convert::Infallible>),
-        Err(_) => None,
+
+        let mut live_stream = match run_store.watch_events_from(next_seq) {
+            Ok(stream) => stream,
+            Err(_) => return,
+        };
+
+        while let Some(result) = live_stream.next().await {
+            let Ok(event) = result else {
+                return;
+            };
+            let terminal = attach_event_is_terminal(&event);
+            if let Some(sse_event) = sse_event_from_store(&event) {
+                if sender
+                    .send(Ok::<Event, std::convert::Infallible>(sse_event))
+                    .is_err()
+                {
+                    return;
+                }
+            }
+            if terminal {
+                return;
+            }
+        }
     });
 
-    Sse::new(stream).into_response()
+    Sse::new(UnboundedReceiverStream::new(receiver))
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
 
 async fn get_checkpoint(
@@ -6138,7 +6233,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn cancel_before_run_transitions_to_running_closes_event_stream() {
+    async fn cancel_before_run_transitions_to_running_returns_empty_attach_stream() {
         let state = create_app_state_with_registry_factory(|interviewer| {
             std::thread::sleep(std::time::Duration::from_millis(200));
             fabro_workflow::handler::default_registry(interviewer, || None)
@@ -6167,7 +6262,9 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         let response = app.oneshot(req).await.unwrap();
-        assert_eq!(response.status(), StatusCode::GONE);
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(body.is_empty(), "expected an empty attach stream");
     }
 
     #[tokio::test]

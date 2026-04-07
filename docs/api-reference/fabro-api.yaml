@@ -529,7 +529,7 @@ paths:
       operationId: attachRunEvents
       tags: [Run Internals]
       summary: Attach Run Events
-      description: Opens a server-sent event stream for a live run. Optionally replays stored events from `since_seq` before switching to live updates.
+      description: Opens an ordered server-sent event stream starting at `since_seq`, replaying persisted events and continuing with live updates while the run remains active.
       parameters:
         - $ref: "#/components/parameters/RunId"
         - $ref: "#/components/parameters/SinceSeq"
@@ -542,12 +542,6 @@ paths:
                 type: string
         "404":
           description: Run not found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "410":
-          description: Run is not live on this server
           content:
             application/json:
               schema:

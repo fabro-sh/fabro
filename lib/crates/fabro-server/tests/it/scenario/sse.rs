@@ -54,15 +54,12 @@ async fn sse_stream_contains_expected_event_types() {
         .body(Body::empty())
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();
-    // May be 200 (stream open) or 410 (run completed before connect)
     let sse_status = response.status();
-    assert!(
-        sse_status == StatusCode::OK || sse_status == StatusCode::GONE,
-        "expected 200 or 410, got: {sse_status}"
+    assert_eq!(
+        sse_status,
+        StatusCode::OK,
+        "expected 200, got: {sse_status}"
     );
-    if sse_status == StatusCode::GONE {
-        return;
-    }
 
     let content_type = response
         .headers()
@@ -96,8 +93,8 @@ async fn sse_stream_contains_expected_event_types() {
 
     // Because we subscribe while the run is only guaranteed to be past
     // "queued", a live stream should include at least one stage event.
-    // A 410 response above still covers the case where the run completed
-    // before we managed to attach.
+    // If the run completes before we attach with no unread events, an empty
+    // stream is still a valid 200 response.
     if !event_types.is_empty() {
         assert!(
             event_types

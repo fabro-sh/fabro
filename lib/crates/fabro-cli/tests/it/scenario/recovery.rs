@@ -5,6 +5,7 @@ use fabro_checkpoint::branch::BranchStore;
 use fabro_checkpoint::git::Store as GitStore;
 use fabro_test::{fabro_snapshot, test_context};
 use fabro_types::Checkpoint;
+use fabro_workflow::operations::build_timeline;
 use git2::{Repository, Signature};
 
 use crate::support::unique_run_id;
@@ -54,6 +55,17 @@ fn latest_metadata_checkpoint(repo_dir: &Path, run_id: &str) -> Checkpoint {
         .unwrap()
         .unwrap();
     serde_json::from_slice(&store.read_blob_at(tip, "checkpoint.json").unwrap().unwrap()).unwrap()
+}
+
+fn timeline_run_shas(repo_dir: &Path, run_id: &str) -> Vec<Option<String>> {
+    let repo = Repository::discover(repo_dir).unwrap();
+    let store = GitStore::new(repo);
+    build_timeline(&store, run_id)
+        .unwrap()
+        .entries
+        .into_iter()
+        .map(|entry| entry.run_commit_sha)
+        .collect()
 }
 
 fn init_repo_with_workflow(repo_dir: &Path) {
@@ -151,10 +163,9 @@ fn rewind_and_fork_recover_missing_metadata_from_real_run_state() {
     exit_code: 0
     ----- stdout -----
     ----- stderr -----
-    @   Node   Details         
-     @1  start  (no run commit) 
-     @2  plan                   
-     @3  build
+    @   Node   Details 
+     @1  plan           
+     @2  build
     ");
 
     let rebuilt_checkpoints = metadata_checkpoints(repo_dir.path(), &source_run_id);
@@ -165,12 +176,9 @@ fn rewind_and_fork_recover_missing_metadata_from_real_run_state() {
         None
     );
     assert!(rebuilt_checkpoints.len() >= 2);
-    let plan_sha = rebuilt_checkpoints[rebuilt_checkpoints.len() - 2]
-        .git_commit_sha
-        .clone();
-    let build_sha = rebuilt_checkpoints
-        .last()
-        .and_then(|checkpoint| checkpoint.git_commit_sha.clone());
+
+    let timeline_shas = timeline_run_shas(repo_dir.path(), &source_run_id);
+    let build_sha = timeline_shas.last().cloned().flatten();
     assert!(build_sha.is_some());
 
     let before_child = list_metadata_run_ids(repo_dir.path());
@@ -204,14 +212,14 @@ fn rewind_and_fork_recover_missing_metadata_from_real_run_state() {
     exit_code: 0
     ----- stdout -----
     ----- stderr -----
-    Rewound metadata branch to @2 (plan)
+    Rewound metadata branch to @2 (build)
     Rewound run branch fabro/run/[ULID] to [SHA]
 
     To resume: fabro resume [RUN_PREFIX]
     ");
 
-    let rewound_child = latest_metadata_checkpoint(repo_dir.path(), &source_run_id);
-    assert_eq!(rewound_child.git_commit_sha, plan_sha);
+    let rewound_timeline_shas = timeline_run_shas(repo_dir.path(), &source_run_id);
+    assert_eq!(rewound_timeline_shas.last().cloned().flatten(), build_sha);
 
     let before_grandchild = list_metadata_run_ids(repo_dir.path());
     context
@@ -229,5 +237,5 @@ fn rewind_and_fork_recover_missing_metadata_from_real_run_state() {
     assert_eq!(grandchild_run_ids.len(), 1, "expected one grandchild run");
 
     let grandchild_checkpoint = latest_metadata_checkpoint(repo_dir.path(), &grandchild_run_ids[0]);
-    assert_eq!(grandchild_checkpoint.git_commit_sha, plan_sha);
+    assert_eq!(grandchild_checkpoint.git_commit_sha, build_sha);
 }

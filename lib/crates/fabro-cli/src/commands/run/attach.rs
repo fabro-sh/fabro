@@ -4,7 +4,7 @@ use std::path::Path;
 #[cfg(test)]
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::Result;
 use fabro_types::{EventBody, RunEvent, RunId};
@@ -17,7 +17,7 @@ use fabro_util::terminal::Styles;
 use fabro_workflow::outcome::StageStatus;
 use fabro_workflow::run_status::RunStatus;
 use tokio::signal::ctrl_c;
-use tokio::time::{sleep, timeout};
+use tokio::time::sleep;
 
 use super::run_progress;
 use crate::server_client;
@@ -25,10 +25,7 @@ use crate::server_client;
 const INTERVIEW_UNANSWERED_MESSAGE: &str =
     "Interview ended without an answer. The run is still waiting for input; reattach to answer it.";
 const JSON_INTERVIEW_MESSAGE: &str = "This run is waiting for human input, but --json is non-interactive. Reattach without --json to answer it.";
-#[cfg(test)]
-const ATTACH_FINAL_STATUS_GRACE: Duration = Duration::from_millis(250);
-#[cfg(not(test))]
-const ATTACH_FINAL_STATUS_GRACE: Duration = Duration::from_secs(2);
+const ATTACH_PREMATURE_EOF_MESSAGE: &str = "Attach stream ended before terminal run event.";
 
 /// Attach to a running (or finished) workflow run, rendering progress live.
 ///
@@ -73,57 +70,51 @@ pub(crate) async fn attach_run_with_client(
     let replay_events = events.clone();
     let next_seq = events.last().map_or(1, |event| event.seq.saturating_add(1));
     let initial_exit_code = events.iter().rev().find_map(event_exit_code);
+    let state_exit_code = state_exit_code(&state);
 
     if state_is_terminal(&state) || initial_exit_code.is_some() {
-        return replay_run_with_client(client, run_id, verbose, events, json_output).await;
+        return replay_run_with_client(
+            verbose,
+            events,
+            initial_exit_code
+                .or(state_exit_code)
+                .unwrap_or(ExitCode::from(1)),
+            json_output,
+        )
+        .await;
     }
 
-    match client.attach_run_events(run_id, Some(next_seq)).await {
-        Ok(stream) => {
-            attach_live_run_with_client(
-                client,
-                run_id,
-                verbose,
-                events,
-                stream,
-                kill_on_detach,
-                styles,
-                json_output,
-            )
-            .await
-        }
-        Err(server_client::RunAttachStreamError::Gone) => {
-            replay_run_with_client(client, run_id, verbose, replay_events, json_output).await
-        }
-        Err(server_client::RunAttachStreamError::Other(err)) => Err(err),
-    }
+    let stream = client.attach_run_events(run_id, Some(next_seq)).await?;
+    attach_live_run_with_client(
+        client,
+        run_id,
+        verbose,
+        replay_events,
+        stream,
+        kill_on_detach,
+        styles,
+        json_output,
+    )
+    .await
 }
 
 async fn replay_run_with_client(
-    client: &server_client::ServerStoreClient,
-    run_id: &RunId,
     verbose: bool,
     events: Vec<EventEnvelope>,
+    exit_code: ExitCode,
     json_output: bool,
 ) -> Result<ExitCode> {
     let is_tty = std::io::stderr().is_terminal();
     let mut progress_ui = run_progress::ProgressUI::new(is_tty, verbose);
-    let mut terminal_exit_code = None;
 
     for event in events {
-        if let Some(exit_code) = event_exit_code(&event) {
-            terminal_exit_code = Some(exit_code);
-        }
         let line = event_payload_line(&event)?;
         emit_progress_line(&mut progress_ui, &line, json_output)?;
     }
 
     finish_progress(&mut progress_ui, json_output);
 
-    Ok(match terminal_exit_code {
-        Some(exit_code) => exit_code,
-        None => determine_exit_code_with_server(client, run_id).await,
-    })
+    Ok(exit_code)
 }
 
 async fn attach_live_run_with_client(
@@ -141,16 +132,7 @@ async fn attach_live_run_with_client(
     let ctrl_c_signal = ctrl_c();
     tokio::pin!(ctrl_c_signal);
 
-    let mut next_seq = 1;
-    let mut terminal_exit_code = None;
-    let mut terminal_event_seen_at: Option<Instant> = None;
-
     for event in existing_events {
-        next_seq = event.seq.saturating_add(1);
-        if let Some(exit_code) = event_exit_code(&event) {
-            terminal_exit_code = Some(exit_code);
-            terminal_event_seen_at = Some(Instant::now());
-        }
         let line = event_payload_line(&event)?;
         emit_progress_line(&mut progress_ui, &line, json_output)?;
     }
@@ -163,45 +145,27 @@ async fn attach_live_run_with_client(
     }
 
     loop {
-        let next_event = if let Some(seen_at) = terminal_event_seen_at {
-            let remaining = ATTACH_FINAL_STATUS_GRACE.saturating_sub(seen_at.elapsed());
-            if remaining.is_zero() {
-                break;
+        let next_event = tokio::select! {
+            _ = &mut ctrl_c_signal => {
+                handle_detach_signal(client, run_id, kill_on_detach).await;
+                finish_progress(&mut progress_ui, json_output);
+                return Ok(ExitCode::from(1));
             }
-            tokio::select! {
-                _ = &mut ctrl_c_signal => {
-                    handle_detach_signal(client, run_id, kill_on_detach).await;
-                    break;
-                }
-                result = timeout(remaining, stream.next_event()) => {
-                    match result {
-                        Ok(result) => result?,
-                        Err(_) => break,
-                    }
-                }
-            }
-        } else {
-            tokio::select! {
-                _ = &mut ctrl_c_signal => {
-                    handle_detach_signal(client, run_id, kill_on_detach).await;
-                    break;
-                }
-                result = stream.next_event() => result?,
-            }
+            result = stream.next_event() => result?,
         };
 
         let Some(event) = next_event else {
-            break;
+            finish_progress(&mut progress_ui, json_output);
+            return Err(anyhow::anyhow!(ATTACH_PREMATURE_EOF_MESSAGE));
         };
-
-        next_seq = event.seq.saturating_add(1);
-        if let Some(exit_code) = event_exit_code(&event) {
-            terminal_exit_code = Some(exit_code);
-            terminal_event_seen_at = Some(Instant::now());
-        }
 
         let line = event_payload_line(&event)?;
         emit_progress_line(&mut progress_ui, &line, json_output)?;
+
+        if let Some(exit_code) = event_exit_code(&event) {
+            finish_progress(&mut progress_ui, json_output);
+            return Ok(exit_code);
+        }
 
         if event_starts_interview(&event) {
             if let Some(exit_code) = handle_pending_server_interview(
@@ -217,20 +181,6 @@ async fn attach_live_run_with_client(
             }
         }
     }
-
-    if terminal_exit_code.is_none() {
-        let (_, trailing_exit_code) =
-            emit_server_events_from(client, run_id, next_seq, &mut progress_ui, json_output)
-                .await?;
-        terminal_exit_code = trailing_exit_code;
-    }
-
-    finish_progress(&mut progress_ui, json_output);
-
-    Ok(match terminal_exit_code {
-        Some(exit_code) => exit_code,
-        None => determine_exit_code_with_server(client, run_id).await,
-    })
 }
 
 async fn handle_pending_server_interview(
@@ -287,33 +237,6 @@ async fn handle_detach_signal(
     }
 }
 
-async fn emit_server_events_from(
-    client: &server_client::ServerStoreClient,
-    run_id: &RunId,
-    next_seq: u32,
-    progress_ui: &mut run_progress::ProgressUI,
-    json_output: bool,
-) -> Result<(u32, Option<ExitCode>)> {
-    let events = match client.list_run_events(run_id, Some(next_seq), None).await {
-        Ok(events) => events,
-        Err(err) if is_run_not_found_error(&err) => Vec::new(),
-        Err(err) => return Err(err),
-    };
-
-    let mut current_seq = next_seq;
-    let mut terminal_exit_code = None;
-    for event in events {
-        if let Some(exit_code) = event_exit_code(&event) {
-            terminal_exit_code = Some(exit_code);
-        }
-        let line = event_payload_line(&event)?;
-        emit_progress_line(progress_ui, &line, json_output)?;
-        current_seq = event.seq.saturating_add(1);
-    }
-
-    Ok((current_seq, terminal_exit_code))
-}
-
 fn api_question_to_question(question: &types::ApiQuestion) -> Question {
     let question_type = match question.question_type {
         types::QuestionType::YesNo => QuestionType::YesNo,
@@ -361,11 +284,6 @@ async fn submit_server_interview_answer(
         )
         .await?;
     Ok(true)
-}
-
-fn is_run_not_found_error(err: &anyhow::Error) -> bool {
-    err.chain()
-        .any(|cause| cause.to_string() == "Run not found.")
 }
 
 fn state_is_terminal(state: &server_client::RunProjection) -> bool {
@@ -455,38 +373,23 @@ fn answer_requires_reattach(answer: &fabro_interview::Answer) -> bool {
     matches!(answer.value, AnswerValue::Aborted | AnswerValue::Skipped)
 }
 
-async fn determine_exit_code_with_server(
-    client: &server_client::ServerStoreClient,
-    run_id: &RunId,
-) -> ExitCode {
-    let deadline = Instant::now() + ATTACH_FINAL_STATUS_GRACE;
-    loop {
-        if let Ok(state) = client.get_run_state(run_id).await {
-            if let Some(conclusion) = state.conclusion {
-                let success = matches!(
-                    conclusion.status,
-                    StageStatus::Success | StageStatus::PartialSuccess
-                );
-                return if success {
-                    ExitCode::from(0)
-                } else {
-                    ExitCode::from(1)
-                };
-            }
+fn state_exit_code(state: &server_client::RunProjection) -> Option<ExitCode> {
+    if let Some(conclusion) = &state.conclusion {
+        let success = matches!(
+            conclusion.status,
+            StageStatus::Success | StageStatus::PartialSuccess
+        );
+        return Some(if success {
+            ExitCode::from(0)
+        } else {
+            ExitCode::from(1)
+        });
+    }
 
-            match state.status {
-                Some(record) if matches!(record.status, RunStatus::Succeeded) => {
-                    return ExitCode::from(0);
-                }
-                Some(record) if record.status.is_terminal() => return ExitCode::from(1),
-                Some(_) | None => {}
-            }
-        }
-
-        if Instant::now() >= deadline {
-            return ExitCode::from(1);
-        }
-        sleep(Duration::from_millis(100)).await;
+    match state.status.as_ref() {
+        Some(record) if record.status == RunStatus::Succeeded => Some(ExitCode::from(0)),
+        Some(record) if record.status.is_terminal() => Some(ExitCode::from(1)),
+        Some(_) | None => None,
     }
 }
 
