@@ -2,8 +2,8 @@ use anyhow::{Context, Result};
 use bytes::Bytes;
 #[cfg(test)]
 use fabro_store::{ArtifactStore, RunDatabase};
-use fabro_store::{RunProjection, StageId};
-use fabro_types::RunBlobId;
+use fabro_store::{EventEnvelope, RunProjection, StageId};
+use fabro_types::{RunBlobId, RunId};
 use fabro_workflow::run_dump::RunDump;
 use futures::future::BoxFuture;
 #[cfg(test)]
@@ -23,7 +23,8 @@ pub(crate) async fn dump_command(args: &StoreDumpArgs, globals: &GlobalArgs) -> 
     let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();
     let state = lookup.client().get_run_state(&run_id).await?;
-    let file_count = export_run_from_server(lookup.client(), &run_id, &state, &args.output).await?;
+    let source = ServerDumpSource::new(lookup.client(), &run_id);
+    let file_count = export_run_from_source(&source, &state, &args.output).await?;
     if globals.json {
         print_json_pretty(&serde_json::json!({
             "run_id": run_id,
@@ -47,64 +48,13 @@ pub(crate) async fn export_run(
     output_dir: &Path,
 ) -> Result<usize> {
     let state = run_store.state().await?;
-    anyhow::ensure!(state.run.is_some(), "run has no data in the store");
-
-    let output_state = inspect_output_dir(output_dir)?;
-    let staging_parent = output_parent_dir(output_dir);
-    std::fs::create_dir_all(staging_parent)
-        .with_context(|| format!("failed to create {}", staging_parent.display()))?;
-
-    let staging_dir = tempfile::Builder::new()
-        .prefix(".fabro-store-dump-")
-        .tempdir_in(staging_parent)
-        .with_context(|| {
-            format!(
-                "failed to create staging dir in {}",
-                staging_parent.display()
-            )
-        })?;
-    let staging_path = staging_dir.path().to_path_buf();
-
-    let file_count = export_run_to_dir(run_store, artifact_store, &state, &staging_path).await?;
-    finalize_export(
-        output_dir,
-        output_state,
-        staging_dir,
-        &staging_path,
-        file_count,
-    )
-}
-
-async fn export_run_from_server(
-    client: &ServerStoreClient,
-    run_id: &fabro_types::RunId,
-    state: &RunProjection,
-    output_dir: &Path,
-) -> Result<usize> {
-    let output_state = inspect_output_dir(output_dir)?;
-    let staging_parent = output_parent_dir(output_dir);
-    std::fs::create_dir_all(staging_parent)
-        .with_context(|| format!("failed to create {}", staging_parent.display()))?;
-
-    let staging_dir = tempfile::Builder::new()
-        .prefix(".fabro-store-dump-")
-        .tempdir_in(staging_parent)
-        .with_context(|| {
-            format!(
-                "failed to create staging dir in {}",
-                staging_parent.display()
-            )
-        })?;
-    let staging_path = staging_dir.path().to_path_buf();
-
-    let file_count = export_server_run_to_dir(client, run_id, state, &staging_path).await?;
-    finalize_export(
-        output_dir,
-        output_state,
-        staging_dir,
-        &staging_path,
-        file_count,
-    )
+    let run_id = state
+        .run
+        .as_ref()
+        .map(|run| run.run_id)
+        .context("run has no data in the store")?;
+    let source = LocalDumpSource::new(run_store, artifact_store, run_id);
+    export_run_from_source(&source, &state, output_dir).await
 }
 
 fn finalize_export(
@@ -130,57 +80,170 @@ fn finalize_export(
     Ok(file_count)
 }
 
-#[cfg(test)]
-async fn export_run_to_dir(
-    run_store: &RunDatabase,
-    artifact_store: &ArtifactStore,
-    state: &RunProjection,
-    output_dir: &Path,
-) -> Result<usize> {
-    let dump = RunDump::store_export(run_store, artifact_store, state).await?;
-    dump.write_to_dir(output_dir)
+struct DumpArtifact {
+    stage_id: StageId,
+    relative_path: String,
+    data: Vec<u8>,
 }
 
-async fn export_server_run_to_dir(
-    client: &ServerStoreClient,
-    run_id: &fabro_types::RunId,
+trait DumpDataSource {
+    fn list_events(&self) -> BoxFuture<'_, Result<Vec<EventEnvelope>>>;
+
+    fn read_blob(&self, blob_id: RunBlobId) -> BoxFuture<'_, Result<Option<Bytes>>>;
+
+    fn list_artifacts(&self) -> BoxFuture<'_, Result<Vec<DumpArtifact>>>;
+}
+
+#[cfg(test)]
+struct LocalDumpSource<'a> {
+    run_store: &'a RunDatabase,
+    artifact_store: &'a ArtifactStore,
+    run_id: RunId,
+}
+
+#[cfg(test)]
+impl<'a> LocalDumpSource<'a> {
+    fn new(run_store: &'a RunDatabase, artifact_store: &'a ArtifactStore, run_id: RunId) -> Self {
+        Self {
+            run_store,
+            artifact_store,
+            run_id,
+        }
+    }
+}
+
+#[cfg(test)]
+impl DumpDataSource for LocalDumpSource<'_> {
+    fn list_events(&self) -> BoxFuture<'_, Result<Vec<EventEnvelope>>> {
+        Box::pin(async move { Ok(self.run_store.list_events().await?) })
+    }
+
+    fn read_blob(&self, blob_id: RunBlobId) -> BoxFuture<'_, Result<Option<Bytes>>> {
+        Box::pin(async move { Ok(self.run_store.read_blob(&blob_id).await?) })
+    }
+
+    fn list_artifacts(&self) -> BoxFuture<'_, Result<Vec<DumpArtifact>>> {
+        Box::pin(async move {
+            let mut artifacts = Vec::new();
+            for asset in self.artifact_store.list_for_run(&self.run_id).await? {
+                let data = self
+                    .artifact_store
+                    .get(&self.run_id, &asset.node, &asset.filename)
+                    .await?
+                    .with_context(|| {
+                        format!(
+                            "asset {:?} for node {:?} visit {} is missing from the store",
+                            asset.filename,
+                            asset.node.node_id(),
+                            asset.node.visit()
+                        )
+                    })?;
+                artifacts.push(DumpArtifact {
+                    stage_id: asset.node,
+                    relative_path: asset.filename,
+                    data: data.to_vec(),
+                });
+            }
+            Ok(artifacts)
+        })
+    }
+}
+
+struct ServerDumpSource<'a> {
+    client: &'a ServerStoreClient,
+    run_id: &'a RunId,
+}
+
+impl<'a> ServerDumpSource<'a> {
+    fn new(client: &'a ServerStoreClient, run_id: &'a RunId) -> Self {
+        Self { client, run_id }
+    }
+}
+
+impl DumpDataSource for ServerDumpSource<'_> {
+    fn list_events(&self) -> BoxFuture<'_, Result<Vec<EventEnvelope>>> {
+        Box::pin(async move { self.client.list_run_events(self.run_id, None, None).await })
+    }
+
+    fn read_blob(&self, blob_id: RunBlobId) -> BoxFuture<'_, Result<Option<Bytes>>> {
+        Box::pin(async move { self.client.read_run_blob(self.run_id, &blob_id).await })
+    }
+
+    fn list_artifacts(&self) -> BoxFuture<'_, Result<Vec<DumpArtifact>>> {
+        Box::pin(async move {
+            let mut artifacts = Vec::new();
+            for artifact in self.client.list_run_artifacts(self.run_id).await? {
+                let stage_id: StageId = artifact.stage_id.parse().with_context(|| {
+                    format!("server returned invalid stage id {:?}", artifact.stage_id)
+                })?;
+                let data = self
+                    .client
+                    .download_stage_artifact(self.run_id, &stage_id, &artifact.relative_path)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "failed to download artifact {} for stage {}",
+                            artifact.relative_path, artifact.stage_id
+                        )
+                    })?;
+                artifacts.push(DumpArtifact {
+                    stage_id,
+                    relative_path: artifact.relative_path,
+                    data,
+                });
+            }
+            Ok(artifacts)
+        })
+    }
+}
+
+async fn export_run_from_source(
+    source: &impl DumpDataSource,
     state: &RunProjection,
     output_dir: &Path,
 ) -> Result<usize> {
-    let events = client.list_run_events(run_id, None, None).await?;
+    let output_state = inspect_output_dir(output_dir)?;
+    let staging_parent = output_parent_dir(output_dir);
+    std::fs::create_dir_all(staging_parent)
+        .with_context(|| format!("failed to create {}", staging_parent.display()))?;
+
+    let staging_dir = tempfile::Builder::new()
+        .prefix(".fabro-store-dump-")
+        .tempdir_in(staging_parent)
+        .with_context(|| {
+            format!(
+                "failed to create staging dir in {}",
+                staging_parent.display()
+            )
+        })?;
+    let staging_path = staging_dir.path().to_path_buf();
+
+    let file_count = write_run_dump(source, state, &staging_path).await?;
+    finalize_export(
+        output_dir,
+        output_state,
+        staging_dir,
+        &staging_path,
+        file_count,
+    )
+}
+
+async fn write_run_dump(
+    source: &impl DumpDataSource,
+    state: &RunProjection,
+    output_dir: &Path,
+) -> Result<usize> {
+    let events = source.list_events().await?;
     let mut dump = RunDump::from_store_state_and_events(state, &events)?;
 
-    dump.hydrate_referenced_blobs_with_reader(|blob_id| {
-        read_blob_from_client(client, run_id, blob_id)
-    })
-    .await?;
+    dump.hydrate_referenced_blobs_with_reader(|blob_id| source.read_blob(blob_id))
+        .await?;
 
-    for artifact in client.list_run_artifacts(run_id).await? {
-        let stage_id: StageId = artifact
-            .stage_id
-            .parse()
-            .with_context(|| format!("server returned invalid stage id {:?}", artifact.stage_id))?;
-        let data = client
-            .download_stage_artifact(run_id, &stage_id, &artifact.relative_path)
-            .await
-            .with_context(|| {
-                format!(
-                    "failed to download artifact {} for stage {}",
-                    artifact.relative_path, artifact.stage_id
-                )
-            })?;
-        dump.add_artifact_bytes(&stage_id, &artifact.relative_path, data)?;
+    for artifact in source.list_artifacts().await? {
+        dump.add_artifact_bytes(&artifact.stage_id, &artifact.relative_path, artifact.data)?;
     }
 
     dump.write_to_dir(output_dir)
-}
-
-fn read_blob_from_client<'a>(
-    client: &'a ServerStoreClient,
-    run_id: &'a fabro_types::RunId,
-    blob_id: RunBlobId,
-) -> BoxFuture<'a, Result<Option<Bytes>>> {
-    Box::pin(async move { client.read_run_blob(run_id, &blob_id).await })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -4,7 +4,7 @@ use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use bytes::Bytes;
-use fabro_store::{ArtifactStore, EventEnvelope, RunDatabase, RunProjection, StageId};
+use fabro_store::{EventEnvelope, RunProjection, StageId};
 use fabro_types::{RunBlobId, parse_blob_ref, parse_legacy_blob_file_ref};
 use futures::future::BoxFuture;
 
@@ -118,40 +118,6 @@ impl RunDump {
             push_json_entry(&mut dump.entries, "retro.json", retro);
         }
         dump
-    }
-
-    #[allow(dead_code)]
-    pub async fn store_export(
-        run_store: &RunDatabase,
-        artifact_store: &ArtifactStore,
-        state: &RunProjection,
-    ) -> Result<Self> {
-        let events = run_store.list_events().await?;
-        let mut dump = Self::from_store_state_and_events(state, &events)?;
-
-        if let Some(run_record) = state.run.as_ref() {
-            for asset in artifact_store.list_for_run(&run_record.run_id).await? {
-                let data = artifact_store
-                    .get(&run_record.run_id, &asset.node, &asset.filename)
-                    .await?
-                    .with_context(|| {
-                        format!(
-                            "asset {:?} for node {:?} visit {} is missing from the store",
-                            asset.filename,
-                            asset.node.node_id(),
-                            asset.node.visit()
-                        )
-                    })?;
-                dump.add_artifact_bytes(&asset.node, &asset.filename, data.to_vec())?;
-            }
-        }
-
-        dump.hydrate_referenced_blobs_with_reader(|blob_id| {
-            read_blob_from_store(run_store, blob_id)
-        })
-        .await?;
-
-        Ok(dump)
     }
 
     pub fn from_store_state_and_events(
@@ -500,14 +466,6 @@ fn replace_blob_refs_in_value(
         serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {}
     }
     Ok(())
-}
-
-#[allow(dead_code)]
-fn read_blob_from_store(
-    run_store: &RunDatabase,
-    blob_id: RunBlobId,
-) -> BoxFuture<'_, Result<Option<Bytes>>> {
-    Box::pin(async move { Ok(run_store.read_blob(&blob_id).await?) })
 }
 
 fn artifact_dump_path(stage_id: &StageId, filename: &str) -> Result<PathBuf> {
