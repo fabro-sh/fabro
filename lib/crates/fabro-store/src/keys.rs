@@ -3,6 +3,7 @@ use fabro_types::{RunBlobId, RunId};
 const RUNS_PREFIX: &str = "runs#";
 const RUNS_INDEX_BY_START_PREFIX: &str = "runs#_index#by-start#";
 const BLOBS_PREFIX: &str = "blobs#";
+const GLOBAL_BLOBS_PREFIX: &str = "blobs#sha256#";
 
 pub(crate) fn runs_index_by_start_prefix() -> &'static str {
     RUNS_INDEX_BY_START_PREFIX
@@ -28,11 +29,17 @@ pub(crate) fn run_event_key(run_id: &RunId, seq: u32, epoch_ms: i64) -> String {
 }
 
 pub(crate) fn blobs_prefix(run_id: &RunId) -> String {
-    format!("{BLOBS_PREFIX}{run_id}#")
+    let _ = run_id;
+    GLOBAL_BLOBS_PREFIX.to_string()
 }
 
 pub(crate) fn blob_key(run_id: &RunId, id: &RunBlobId) -> String {
-    format!("{}{id}", blobs_prefix(run_id))
+    let _ = run_id;
+    format!("{GLOBAL_BLOBS_PREFIX}{id}")
+}
+
+pub(crate) fn legacy_blob_key(run_id: &RunId, id: &RunBlobId) -> String {
+    format!("{BLOBS_PREFIX}{run_id}#{id}")
 }
 
 pub(crate) fn parse_event_seq(key: &str) -> Option<u32> {
@@ -45,6 +52,10 @@ pub(crate) fn parse_event_seq(key: &str) -> Option<u32> {
 }
 
 pub(crate) fn parse_blob_id(key: &str) -> Option<RunBlobId> {
+    if let Some(blob_id) = key.strip_prefix(GLOBAL_BLOBS_PREFIX) {
+        return blob_id.parse().ok();
+    }
+
     let rest = key.strip_prefix(BLOBS_PREFIX)?;
     let (_, blob_id) = rest.split_once('#')?;
     blob_id.parse().ok()
@@ -92,7 +103,7 @@ mod tests {
         let blob_id = RunBlobId::new(b"summary");
         assert_eq!(
             blob_key(&run_id, &blob_id),
-            format!("blobs#{run_id}#{blob_id}")
+            format!("blobs#sha256#{blob_id}")
         );
     }
 
@@ -103,6 +114,10 @@ mod tests {
             Some(7)
         );
         let blob_id = RunBlobId::new(b"summary");
+        assert_eq!(
+            parse_blob_id(&format!("blobs#sha256#{blob_id}")),
+            Some(blob_id)
+        );
         assert_eq!(
             parse_blob_id(&format!("blobs#01JT56VE4Z5NZ814GZN2JZD65A#{blob_id}")),
             Some(blob_id)

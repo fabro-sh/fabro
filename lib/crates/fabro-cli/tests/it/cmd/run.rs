@@ -913,7 +913,6 @@ fn json_run_implies_auto_approve_for_human_gates() {
             "start"
           ],
           "context_values": {
-            "current.preamble": "Goal: Route through the default approval path/n",
             "current_node": "start",
             "failure_class": "",
             "failure_signature": "",
@@ -1025,7 +1024,6 @@ fn json_run_implies_auto_approve_for_human_gates() {
             "approve"
           ],
           "context_values": {
-            "current.preamble": "Goal: Route through the default approval path/n",
             "current_node": "approve",
             "failure_class": "",
             "failure_signature": "",
@@ -1184,7 +1182,6 @@ fn json_run_implies_auto_approve_for_human_gates() {
           "context_values": {
             "command.output": "shipped/n",
             "command.stderr": "",
-            "current.preamble": "Goal: Route through the default approval path/n/n## Completed stages/n- **approve**: success/n/n## Context/n- human.gate.label: [A] Approve/n- human.gate.selected: A/n",
             "current_node": "ship",
             "failure_class": "",
             "failure_signature": "",

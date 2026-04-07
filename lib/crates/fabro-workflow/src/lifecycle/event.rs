@@ -15,6 +15,7 @@ use fabro_core::state::ExecutionState;
 
 use super::circuit_breaker::CircuitBreakerLifecycle;
 use super::git::GitCheckpointResult;
+use crate::artifact;
 use crate::context;
 use crate::error::FabroError;
 use crate::event::{Emitter, Event};
@@ -320,6 +321,10 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         let diff = git_result.as_ref().and_then(|r| r.diff.clone());
         let (loop_failure_signatures, restart_failure_signatures) =
             snapshot_failure_signatures(&self.circuit_breaker);
+        let context_values = artifact::durable_context_snapshot(&state.context);
+        let mut node_outcomes = state.node_outcomes.clone();
+        node_outcomes.insert(node.id().to_string(), result.outcome.clone());
+        artifact::normalize_durable_outcomes(&mut node_outcomes);
 
         self.emitter.emit(&Event::CheckpointCompleted {
             node_id: node.id().to_string(),
@@ -331,20 +336,8 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                 .clone()
                 .into_iter()
                 .collect::<BTreeMap<_, _>>(),
-            context_values: state
-                .context
-                .snapshot()
-                .into_iter()
-                .collect::<BTreeMap<_, _>>(),
-            node_outcomes: state
-                .node_outcomes
-                .clone()
-                .into_iter()
-                .chain(std::iter::once((
-                    node.id().to_string(),
-                    result.outcome.clone(),
-                )))
-                .collect::<BTreeMap<_, _>>(),
+            context_values: context_values.into_iter().collect::<BTreeMap<_, _>>(),
+            node_outcomes: node_outcomes.into_iter().collect::<BTreeMap<_, _>>(),
             next_node_id: next_node_id.map(ToOwned::to_owned),
             git_commit_sha: git_sha.clone(),
             loop_failure_signatures: loop_failure_signatures.unwrap_or_default(),

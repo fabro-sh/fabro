@@ -1,18 +1,23 @@
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use fabro_agent::Sandbox;
 
+use fabro_core::error::CoreError;
 use fabro_core::error::Result as CoreResult;
 use fabro_core::graph::NodeSpec;
 use fabro_core::lifecycle::{EdgeContext, EdgeDecision, NodeDecision, RunLifecycle};
 use fabro_core::state::ExecutionState;
 use fabro_graphviz::graph::types::{Edge as GvEdge, Graph as GvGraph, Node as GvNode};
 
+use crate::artifact;
 use crate::context::keys;
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::handler::llm::preamble::build_preamble;
 use crate::outcome::BilledModelUsage;
+use crate::runtime_store::RunStoreHandle;
 
 type WfRunState = ExecutionState<Option<BilledModelUsage>>;
 type WfNodeDecision = NodeDecision<Option<BilledModelUsage>>;
@@ -27,15 +32,26 @@ struct IncomingEdgeData {
 /// Sub-lifecycle responsible for fidelity/thread resolution and context key setup.
 pub(crate) struct FidelityLifecycle {
     pub graph: Arc<GvGraph>,
+    pub sandbox: Arc<dyn Sandbox>,
+    pub run_store: RunStoreHandle,
+    pub run_dir: PathBuf,
     incoming_edge_data: Mutex<Option<IncomingEdgeData>>,
     /// True on the first node after checkpoint resume when prior fidelity was Full.
     degrade_fidelity_on_resume: Mutex<bool>,
 }
 
 impl FidelityLifecycle {
-    pub(crate) fn new(graph: Arc<GvGraph>) -> Self {
+    pub(crate) fn new(
+        graph: Arc<GvGraph>,
+        sandbox: Arc<dyn Sandbox>,
+        run_store: RunStoreHandle,
+        run_dir: PathBuf,
+    ) -> Self {
         Self {
             graph,
+            sandbox,
+            run_store,
+            run_dir,
             incoming_edge_data: Mutex::new(None),
             degrade_fidelity_on_resume: Mutex::new(false),
         }
@@ -84,12 +100,29 @@ impl RunLifecycle<WorkflowGraph> for FidelityLifecycle {
         );
 
         // 4. Preamble building: if Full, empty preamble; otherwise build from context
+        let resolved_context = artifact::resolve_context_for_execution(
+            &state.context,
+            &self.run_store,
+            &*self.sandbox,
+            &self.run_dir,
+        )
+        .await
+        .map_err(|err| CoreError::Other(err.to_string()))?;
+        let resolved_outcomes = artifact::resolve_outcomes_for_execution(
+            &state.node_outcomes,
+            &self.run_store,
+            &*self.sandbox,
+            &self.run_dir,
+        )
+        .await
+        .map_err(|err| CoreError::Other(err.to_string()))?;
+
         let preamble = build_preamble(
             fidelity,
-            &state.context,
+            &resolved_context,
             &self.graph,
             &state.completed_nodes,
-            &state.node_outcomes,
+            &resolved_outcomes,
         );
         state
             .context

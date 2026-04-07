@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::artifact;
 use crate::context::Context;
 use crate::outcome::Outcome;
 pub use fabro_types::checkpoint::Checkpoint;
@@ -25,18 +26,20 @@ impl CheckpointExt for Checkpoint {
         current_node: &str,
         completed_nodes: Vec<String>,
         node_retries: HashMap<String, u32>,
-        node_outcomes: HashMap<String, Outcome>,
+        mut node_outcomes: HashMap<String, Outcome>,
         next_node_id: Option<String>,
         loop_failure_signatures: HashMap<FailureSignature, usize>,
         restart_failure_signatures: HashMap<FailureSignature, usize>,
         node_visits: HashMap<String, usize>,
     ) -> Self {
+        artifact::normalize_durable_outcomes(&mut node_outcomes);
+
         Self {
             timestamp: chrono::Utc::now(),
             current_node: current_node.to_string(),
             completed_nodes,
             node_retries,
-            context_values: context.snapshot(),
+            context_values: artifact::durable_context_snapshot(context),
             node_outcomes,
             next_node_id,
             git_commit_sha: None,

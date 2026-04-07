@@ -13,6 +13,7 @@ use fabro_core::lifecycle::RunLifecycle;
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
 
+use crate::artifact;
 use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::git::MetadataStore;
 use crate::graph::WorkflowGraph;
@@ -37,6 +38,7 @@ fn build_checkpoint(
 ) -> fabro_types::Checkpoint {
     let mut node_outcomes = state.node_outcomes.clone();
     node_outcomes.insert(node.id().to_string(), result.outcome.clone());
+    artifact::normalize_durable_outcomes(&mut node_outcomes);
 
     fabro_types::Checkpoint {
         timestamp: chrono::Utc::now(),
@@ -44,7 +46,7 @@ fn build_checkpoint(
         completed_nodes: state.completed_nodes.clone(),
         node_outcomes,
         node_retries: state.node_retries.clone(),
-        context_values: state.context.snapshot(),
+        context_values: artifact::durable_context_snapshot(&state.context),
         next_node_id: next_node_id.map(String::from),
         git_commit_sha,
         node_visits: state.node_visits.clone(),

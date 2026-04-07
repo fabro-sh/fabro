@@ -139,7 +139,12 @@ impl WorkflowLifecycle {
             graph_name: graph.name.clone(),
         };
 
-        let fidelity = FidelityLifecycle::new(Arc::clone(&graph));
+        let fidelity = FidelityLifecycle::new(
+            Arc::clone(&graph),
+            Arc::clone(sandbox),
+            run_store.clone(),
+            run_dir.clone(),
+        );
 
         let start_node_id = graph.find_start_node().map(|n| n.id.clone());
 
@@ -307,9 +312,9 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
     ) -> CoreResult<()> {
         self.auto_status.after_node(node, result, state).await?;
         self.circuit_breaker.after_node(node, result, state).await?;
+        self.artifact.after_node(node, result, state).await?;
         self.event.after_node(node, result, state).await?;
         self.hook.after_node(node, result, state).await?;
-        self.artifact.after_node(node, result, state).await?;
         Ok(())
     }
 

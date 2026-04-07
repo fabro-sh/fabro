@@ -837,7 +837,6 @@ fn attach_json_errors_without_prompting_for_human_input() {
             "start"
           ],
           "context_values": {
-            "current.preamble": "Goal: Wait for approval/n",
             "current_node": "start",
             "failure_class": "",
             "failure_signature": "",

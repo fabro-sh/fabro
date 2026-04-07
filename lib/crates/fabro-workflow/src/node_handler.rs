@@ -10,6 +10,7 @@ use fabro_core::handler::NodeHandler;
 use fabro_core::outcome::FailureCategory;
 use fabro_core::retry::RetryPolicy as CoreRetryPolicy;
 
+use crate::artifact;
 use crate::context::Context;
 
 use crate::graph::WorkflowGraph;
@@ -42,9 +43,22 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
         let gv_node = node.inner();
         let handler = self.services.registry.resolve(gv_node);
 
-        // Fork the context so handler writes don't leak back unless we diff+apply.
-        let snapshot = context.snapshot();
-        let wf_context = context.fork();
+        let wf_context = artifact::resolve_context_for_execution(
+            context,
+            &self.services.run_store,
+            &*self.services.sandbox,
+            &self.run_dir,
+        )
+        .await
+        .map_err(|err| {
+            CoreError::handler(HandlerErrorDetail {
+                message: err.to_string(),
+                retryable: true,
+                category: Some(FailureCategory::TransientInfra),
+                signature: None,
+            })
+        })?;
+        let execution_snapshot = wf_context.snapshot();
 
         // Timeout from the node
         let node_timeout = gv_node.timeout();
@@ -79,9 +93,10 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
 
         // 2. After handler returns, diff the forked context against the snapshot
         //    and apply changes back to the original context
-        let new_values = wf_context.snapshot();
+        let mut new_values = wf_context.snapshot();
+        artifact::normalize_durable_updates(&mut new_values);
         for (k, v) in &new_values {
-            if snapshot.get(k) != Some(v) {
+            if execution_snapshot.get(k) != Some(v) {
                 context.set(k.clone(), v.clone());
             }
         }
