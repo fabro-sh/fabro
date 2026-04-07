@@ -143,10 +143,15 @@ fn run_completed_dry_run(context: &TestContext, workflow: &Path) -> RunSetup {
             stderr(&output)
         );
     }
-    RunSetup {
+    let run_setup = RunSetup {
         run_dir: context.find_run_dir(&run_id),
         run_id,
-    }
+    };
+    wait_for_event_names(
+        &run_setup.run_dir,
+        &["run.completed", "sandbox.cleanup.completed"],
+    );
+    run_setup
 }
 
 pub(crate) fn setup_created_dry_run(context: &TestContext) -> RunSetup {
@@ -689,6 +694,37 @@ pub(crate) fn run_events(run_dir: &Path) -> Vec<EventEnvelope> {
         &format!("/api/v1/runs/{run_id}/events"),
     ));
     serde_json::from_value(response["data"].clone()).expect("event list should parse")
+}
+
+pub(crate) fn wait_for_event_names(run_dir: &Path, expected: &[&str]) {
+    let deadline = std::time::Instant::now() + COMMAND_TIMEOUT;
+
+    loop {
+        let event_names = run_events(run_dir)
+            .into_iter()
+            .filter_map(|event| {
+                event
+                    .payload
+                    .as_value()
+                    .get("event")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToString::to_string)
+            })
+            .collect::<Vec<_>>();
+
+        if expected
+            .iter()
+            .all(|expected_name| event_names.iter().any(|name| name == expected_name))
+        {
+            return;
+        }
+
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for events {expected:?}; saw {event_names:?}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
 }
 
 pub(crate) fn git_stdout(repo_dir: &Path, args: &[&str]) -> String {

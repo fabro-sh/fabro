@@ -82,6 +82,7 @@ sha2.workspace = true
 shlex = "1"
 walkdir.workspace = true
 object_store.workspace = true
+bytes.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = { version = "0.9", optional = true }

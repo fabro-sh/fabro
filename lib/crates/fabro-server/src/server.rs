@@ -31,7 +31,7 @@ use fabro_llm::types::{
 use fabro_model::{BilledModelUsage, BilledTokenCounts};
 use fabro_store::{ArtifactStore, Database, EventEnvelope, EventPayload, StageId};
 use fabro_types::{
-    RunBlobId, RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance,
+    EventBody, RunBlobId, RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance,
     RunServerProvenance, RunSubjectProvenance, Settings,
 };
 use fabro_util::redact::redact_jsonl_line;
@@ -49,11 +49,12 @@ use tokio::sync::Notify;
 use tokio::sync::RwLock as AsyncRwLock;
 use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
+use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task::spawn_blocking;
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
-use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::{BroadcastStream, UnboundedReceiverStream};
 use tower::{ServiceExt, service_fn};
 use ulid::Ulid;
 
@@ -1036,6 +1037,23 @@ fn sse_event_from_store(event: &EventEnvelope) -> Option<Event> {
     Some(Event::default().data(data))
 }
 
+fn attach_event_is_terminal(event: &EventEnvelope) -> bool {
+    let Ok(run_event) = RunEvent::try_from(&event.payload) else {
+        return false;
+    };
+    matches!(
+        run_event.body,
+        EventBody::RunCompleted(_) | EventBody::RunFailed(_)
+    )
+}
+
+fn run_projection_is_active(state: &fabro_store::RunProjection) -> bool {
+    state
+        .status
+        .as_ref()
+        .is_some_and(|record| record.status.is_active())
+}
+
 fn dir_size(path: &std::path::Path) -> u64 {
     walkdir::WalkDir::new(path)
         .into_iter()
@@ -1325,21 +1343,20 @@ async fn get_aggregate_billing(
             stages: totals.stages,
         })
         .collect();
-    let total_billing =
-        by_model
-            .iter()
-            .fold(BilledTokenCounts::default(), |mut acc, model| {
-                acc.input_tokens += model.billing.input_tokens;
-                acc.output_tokens += model.billing.output_tokens;
-                acc.reasoning_tokens += model.billing.reasoning_tokens.unwrap_or(0);
-                acc.cache_read_tokens += model.billing.cache_read_tokens.unwrap_or(0);
-                acc.cache_write_tokens += model.billing.cache_write_tokens.unwrap_or(0);
-                acc.total_tokens += model.billing.total_tokens;
-                if let Some(value) = model.billing.total_usd_micros {
-                    *acc.total_usd_micros.get_or_insert(0) += value;
-                }
-                acc
-            });
+    let total_billing = by_model
+        .iter()
+        .fold(BilledTokenCounts::default(), |mut acc, model| {
+            acc.input_tokens += model.billing.input_tokens;
+            acc.output_tokens += model.billing.output_tokens;
+            acc.reasoning_tokens += model.billing.reasoning_tokens.unwrap_or(0);
+            acc.cache_read_tokens += model.billing.cache_read_tokens.unwrap_or(0);
+            acc.cache_write_tokens += model.billing.cache_write_tokens.unwrap_or(0);
+            acc.total_tokens += model.billing.total_tokens;
+            if let Some(value) = model.billing.total_usd_micros {
+                *acc.total_usd_micros.get_or_insert(0) += value;
+            }
+            acc
+        });
     let response = AggregateBilling {
         totals: AggregateBillingTotals {
             cache_read_tokens: nonzero_i64(total_billing.cache_read_tokens),
@@ -2774,7 +2791,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         run_store.subscribe(),
         state.global_event_tx.clone(),
     ));
-    let persisted = match Persisted::load_from_store(&run_store, &run_dir).await {
+    let persisted = match Persisted::load_from_store(&run_store.clone().into(), &run_dir).await {
         Ok(persisted) => persisted,
         Err(e) => {
             tracing::error!(run_id = %run_id, error = %e, "Failed to load persisted run");
@@ -2810,7 +2827,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         cancel_token: Some(Arc::clone(&cancel_token)),
         emitter: Arc::clone(&emitter),
         interviewer: Arc::clone(&interviewer) as Arc<dyn Interviewer>,
-        run_store: run_store.clone(),
+        run_store: run_store.clone().into(),
         event_sink: workflow_event::RunEventSink::store(run_store.clone()),
         run_control: None,
         github_app,
@@ -3427,20 +3444,6 @@ async fn attach_run_events(
         Ok(id) => id,
         Err(response) => return response,
     };
-    {
-        let runs = state.runs.lock().expect("runs lock poisoned");
-        let Some(managed_run) = runs.get(&id) else {
-            return ApiError::not_found("Run not found.").into_response();
-        };
-        if !matches!(
-            managed_run.status,
-            RunStatus::Queued | RunStatus::Starting | RunStatus::Running | RunStatus::Paused
-        ) {
-            return ApiError::new(StatusCode::GONE, "Run is not live on this server.")
-                .into_response();
-        }
-    }
-
     let Ok(run_store) = state.store.open_run_reader(&id).await else {
         return ApiError::not_found("Run not found.").into_response();
     };
@@ -3455,19 +3458,110 @@ async fn attach_run_events(
             }
         },
     };
-    let stream = match run_store.watch_events_from(start_seq) {
-        Ok(stream) => stream,
-        Err(err) => {
-            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response();
+    const ATTACH_REPLAY_BATCH_LIMIT: usize = 256;
+
+    let (sender, receiver) = mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        let mut next_seq = start_seq;
+
+        loop {
+            let replay_batch = match run_store
+                .list_events_from_with_limit(next_seq, ATTACH_REPLAY_BATCH_LIMIT)
+                .await
+            {
+                Ok(events) => events,
+                Err(_) => return,
+            };
+            let replay_has_more = replay_batch.len() > ATTACH_REPLAY_BATCH_LIMIT;
+
+            for event in replay_batch.into_iter().take(ATTACH_REPLAY_BATCH_LIMIT) {
+                next_seq = event.seq.saturating_add(1);
+                let terminal = attach_event_is_terminal(&event);
+                if let Some(sse_event) = sse_event_from_store(&event) {
+                    if sender
+                        .send(Ok::<Event, std::convert::Infallible>(sse_event))
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+                if terminal {
+                    return;
+                }
+            }
+
+            if replay_has_more {
+                continue;
+            }
+
+            let state = match run_store.state().await {
+                Ok(state) => state,
+                Err(_) => return,
+            };
+
+            if run_projection_is_active(&state) {
+                break;
+            }
+
+            let tail_batch = match run_store
+                .list_events_from_with_limit(next_seq, ATTACH_REPLAY_BATCH_LIMIT)
+                .await
+            {
+                Ok(events) => events,
+                Err(_) => return,
+            };
+            let tail_has_more = tail_batch.len() > ATTACH_REPLAY_BATCH_LIMIT;
+
+            for event in tail_batch.into_iter().take(ATTACH_REPLAY_BATCH_LIMIT) {
+                next_seq = event.seq.saturating_add(1);
+                let terminal = attach_event_is_terminal(&event);
+                if let Some(sse_event) = sse_event_from_store(&event) {
+                    if sender
+                        .send(Ok::<Event, std::convert::Infallible>(sse_event))
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+                if terminal {
+                    return;
+                }
+            }
+
+            if tail_has_more {
+                continue;
+            }
+
+            return;
         }
-    };
-    let stream = stream.filter_map(|result| match result {
-        Ok(event) => sse_event_from_store(&event).map(Ok::<Event, std::convert::Infallible>),
-        Err(_) => None,
+
+        let mut live_stream = match run_store.watch_events_from(next_seq) {
+            Ok(stream) => stream,
+            Err(_) => return,
+        };
+
+        while let Some(result) = live_stream.next().await {
+            let Ok(event) = result else {
+                return;
+            };
+            let terminal = attach_event_is_terminal(&event);
+            if let Some(sse_event) = sse_event_from_store(&event) {
+                if sender
+                    .send(Ok::<Event, std::convert::Infallible>(sse_event))
+                    .is_err()
+                {
+                    return;
+                }
+            }
+            if terminal {
+                return;
+            }
+        }
     });
 
-    Sse::new(stream).into_response()
+    Sse::new(UnboundedReceiverStream::new(receiver))
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
 
 async fn get_checkpoint(
@@ -6301,7 +6395,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn cancel_before_run_transitions_to_running_closes_event_stream() {
+    async fn cancel_before_run_transitions_to_running_returns_empty_attach_stream() {
         let state = create_app_state_with_registry_factory(|interviewer| {
             std::thread::sleep(std::time::Duration::from_millis(200));
             fabro_workflow::handler::default_registry(interviewer, || None)
@@ -6330,7 +6424,9 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         let response = app.oneshot(req).await.unwrap();
-        assert_eq!(response.status(), StatusCode::GONE);
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(body.is_empty(), "expected an empty attach stream");
     }
 
     #[tokio::test]

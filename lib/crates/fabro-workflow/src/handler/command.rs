@@ -202,7 +202,7 @@ mod tests {
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         let services = EngineServices {
             emitter: Arc::new(crate::event::Emitter::new(fixtures::RUN_1)),
-            run_store: run_store.clone(),
+            run_store: run_store.clone().into(),
             ..EngineServices::test_default()
         };
         let logger = crate::event::StoreProgressLogger::new(run_store.clone());

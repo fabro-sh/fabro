@@ -197,6 +197,103 @@ fn attach_uses_configured_server_target_without_server_flag() {
 }
 
 #[test]
+fn attach_errors_when_live_stream_ends_before_terminal_event() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let run_id = unique_run_id();
+
+    server.mock(|when, then| {
+        when.method("GET").path("/api/v1/runs");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!([
+                    {
+                        "run_id": run_id,
+                        "workflow_name": "Remote Workflow",
+                        "workflow_slug": "remote-workflow",
+                        "goal": "Remote output",
+                        "labels": {},
+                        "host_repo_path": null,
+                        "start_time": "2026-04-05T12:00:00Z",
+                        "status": "running",
+                        "status_reason": null,
+                        "duration_ms": 12,
+                        "total_cost": null
+                    }
+                ])
+                .to_string(),
+            );
+    });
+    server.mock(|when, then| {
+        when.method("GET")
+            .path(format!("/api/v1/runs/{run_id}/events"));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "data": [{
+                        "seq": 1,
+                        "payload": {
+                            "event": "run.running",
+                            "id": "evt-run-running",
+                            "run_id": run_id,
+                            "ts": "2026-04-05T12:00:00Z",
+                            "properties": {}
+                        }
+                    }],
+                    "meta": { "has_more": false }
+                })
+                .to_string(),
+            );
+    });
+    server.mock(|when, then| {
+        when.method("GET")
+            .path(format!("/api/v1/runs/{run_id}/state"));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(live_run_state_response().to_string());
+    });
+    server.mock(|when, then| {
+        when.method("GET")
+            .path(format!("/api/v1/runs/{run_id}/questions"))
+            .query_param("page[limit]", "100")
+            .query_param("page[offset]", "0");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(r#"{"data":[],"meta":{"has_more":false}}"#);
+    });
+    server.mock(|when, then| {
+        when.method("GET")
+            .path(format!("/api/v1/runs/{run_id}/attach"))
+            .query_param("since_seq", "2");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body("");
+    });
+    context.write_home(
+        ".fabro/settings.toml",
+        format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
+    );
+
+    let output = context
+        .command()
+        .args(["attach", &run_id])
+        .output()
+        .expect("attach should execute");
+
+    assert!(
+        !output.status.success(),
+        "attach should fail on premature EOF"
+    );
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
+    assert!(
+        stderr.contains("terminal run event"),
+        "expected a protocol error, got:\n{stderr}"
+    );
+}
+
+#[test]
 fn attach_replays_completed_detached_run() {
     let context = test_context!();
     let run_id = unique_run_id();

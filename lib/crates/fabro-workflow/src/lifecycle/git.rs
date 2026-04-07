@@ -4,7 +4,6 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use fabro_config::RunScratch;
-use fabro_store::RunDatabase;
 use fabro_types::RunId;
 use tokio::fs;
 
@@ -21,6 +20,7 @@ use crate::graph::WorkflowNode;
 use crate::outcome::{BilledModelUsage, Outcome, StageStatus};
 use crate::run_dump::RunDump;
 use crate::run_options::RunOptions;
+use crate::runtime_store::RunStoreHandle;
 use crate::sandbox_git::{git_checkpoint, git_diff, git_push_host};
 
 type WfRunState = ExecutionState<Option<BilledModelUsage>>;
@@ -67,7 +67,7 @@ pub(crate) struct GitLifecycle {
     pub emitter: Arc<Emitter>,
     pub run_dir: PathBuf,
     pub run_id: RunId,
-    pub run_store: RunDatabase,
+    pub run_store: RunStoreHandle,
     pub run_options: Arc<RunOptions>,
     pub start_node_id: Option<String>,
     // Cross-lifecycle data (shared with EventLifecycle)

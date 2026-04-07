@@ -4,10 +4,11 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow, bail};
+use bytes::Bytes;
 use fabro_api::types;
 use fabro_server::bind::Bind;
 use fabro_store::{EventEnvelope, RunSummary, StageId};
-use fabro_types::{RunEvent, RunId, Settings};
+use fabro_types::{RunBlobId, RunEvent, RunId, Settings};
 use futures::StreamExt;
 use serde::de::DeserializeOwned;
 use tokio::time::sleep;
@@ -32,11 +33,6 @@ pub(crate) struct RunAttachEventStream {
     stream: progenitor_client::ByteStream,
     pending_bytes: Vec<u8>,
     buffered_events: VecDeque<EventEnvelope>,
-}
-
-pub(crate) enum RunAttachStreamError {
-    Gone,
-    Other(anyhow::Error),
 }
 
 impl RunAttachEventStream {
@@ -355,12 +351,12 @@ impl ServerStoreClient {
         &self,
         run_id: &RunId,
         since_seq: Option<u32>,
-    ) -> std::result::Result<RunAttachEventStream, RunAttachStreamError> {
+    ) -> Result<RunAttachEventStream> {
         let mut request = self.client.attach_run_events().id(run_id.to_string());
         if let Some(seq) = since_seq.and_then(non_zero_u64_from_u32) {
             request = request.since_seq(seq);
         }
-        let response = request.send().await.map_err(map_attach_run_stream_error)?;
+        let response = request.send().await.map_err(map_api_error)?;
         Ok(RunAttachEventStream::new(response.into_inner()))
     }
 
@@ -403,16 +399,65 @@ impl ServerStoreClient {
         Ok(())
     }
 
-    pub(crate) async fn append_run_event(&self, run_id: &RunId, event: &RunEvent) -> Result<()> {
+    pub(crate) async fn append_run_event(&self, run_id: &RunId, event: &RunEvent) -> Result<u32> {
         let body: types::RunEvent = convert_type(event)?;
-        self.client
+        let response = self
+            .client
             .append_run_event()
             .id(run_id.to_string())
             .body(body)
             .send()
             .await
             .map_err(map_api_error)?;
-        Ok(())
+        u32::try_from(response.into_inner().seq).context("append_run_event returned invalid seq")
+    }
+
+    pub(crate) async fn write_run_blob(&self, run_id: &RunId, data: &[u8]) -> Result<RunBlobId> {
+        let response = self
+            .client
+            .write_run_blob()
+            .id(run_id.to_string())
+            .body(data.to_vec())
+            .send()
+            .await
+            .map_err(map_api_error)?;
+        response
+            .into_inner()
+            .id
+            .parse()
+            .context("write_run_blob returned invalid blob id")
+    }
+
+    pub(crate) async fn read_run_blob(
+        &self,
+        run_id: &RunId,
+        blob_id: &RunBlobId,
+    ) -> Result<Option<Bytes>> {
+        let response = self
+            .client
+            .read_run_blob()
+            .id(run_id.to_string())
+            .blob_id(blob_id.to_string())
+            .send()
+            .await;
+        match response {
+            Ok(response) => {
+                let mut stream = response.into_inner();
+                let mut bytes = Vec::new();
+                while let Some(chunk) = stream.next().await {
+                    let chunk = chunk.map_err(|err| anyhow!("{err}"))?;
+                    bytes.extend_from_slice(&chunk);
+                }
+                Ok(Some(Bytes::from(bytes)))
+            }
+            Err(err) => {
+                if is_not_found_error(&err) {
+                    Ok(None)
+                } else {
+                    Err(map_api_error(err))
+                }
+            }
+        }
     }
 
     pub(crate) async fn delete_store_run(&self, run_id: &RunId) -> Result<()> {
@@ -584,19 +629,20 @@ where
     }
 }
 
-fn map_attach_run_stream_error(
-    err: progenitor_client::Error<types::ErrorResponse>,
-) -> RunAttachStreamError {
-    match &err {
-        progenitor_client::Error::ErrorResponse(response)
-            if response.status() == reqwest::StatusCode::GONE =>
-        {
-            RunAttachStreamError::Gone
+fn is_not_found_error<E>(err: &progenitor_client::Error<E>) -> bool
+where
+    E: serde::Serialize + std::fmt::Debug,
+{
+    match err {
+        progenitor_client::Error::ErrorResponse(response) => {
+            response.status() == reqwest::StatusCode::NOT_FOUND
         }
-        _ => RunAttachStreamError::Other(map_api_error(err)),
+        progenitor_client::Error::UnexpectedResponse(response) => {
+            response.status() == reqwest::StatusCode::NOT_FOUND
+        }
+        _ => false,
     }
 }
-
 fn convert_type<TInput, TOutput>(value: TInput) -> Result<TOutput>
 where
     TInput: serde::Serialize,

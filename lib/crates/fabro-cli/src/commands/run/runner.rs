@@ -4,21 +4,28 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
+use async_trait::async_trait;
 use fabro_config::RunScratch;
 use fabro_interview::FileInterviewer;
-use fabro_store::{Database, EventPayload, RunDatabase};
-use fabro_types::{EventBody, RunEvent, RunId, Settings, StatusReason};
+use fabro_store::{EventEnvelope, EventPayload, RunProjection};
+use fabro_types::{EventBody, RunBlobId, RunEvent, RunId, Settings, StatusReason};
 use fabro_workflow::event::{Emitter, RunEventSink};
 use fabro_workflow::run_control::RunControlState;
-use object_store::memory::InMemory as MemoryObjectStore;
+use fabro_workflow::runtime_store::{RunStoreBackend, RunStoreHandle};
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal};
+use tokio::sync::Mutex;
+use tokio::time::sleep;
 
 use crate::args::RunWorkerMode;
 use crate::server_client;
 use crate::shared::github::build_github_app_credentials;
 
-const STORE_FLUSH_INTERVAL: Duration = Duration::from_millis(100);
+const RUN_STORE_RETRY_DELAYS: [Duration; 3] = [
+    Duration::from_millis(50),
+    Duration::from_millis(100),
+    Duration::from_millis(250),
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WorkerTitlePhase {
@@ -43,7 +50,7 @@ pub(crate) async fn execute(
     set_worker_title(&run_id, initial_worker_title_phase(mode));
 
     let client = server_client::connect_server_target_direct(&server).await?;
-    let run_store = load_seed_run_store(&client, &run_id).await?;
+    let run_store = HttpRunStore::connect(run_id, client.clone_for_reuse()).await?;
     let run_state = run_store
         .state()
         .await
@@ -62,7 +69,6 @@ pub(crate) async fn execute(
     let cancel_token = Arc::new(AtomicBool::new(false));
     install_signal_handlers(Arc::clone(&run_control), Arc::clone(&cancel_token))?;
     let github_app = maybe_build_github_app_credentials(&run_record.settings)?;
-    let event_client = client.clone_for_reuse();
     let services = fabro_workflow::operations::StartServices {
         run_id,
         cancel_token: Some(Arc::clone(&cancel_token)),
@@ -70,11 +76,10 @@ pub(crate) async fn execute(
         interviewer,
         run_store: run_store.clone(),
         event_sink: RunEventSink::fanout(vec![
-            RunEventSink::store(run_store),
+            RunEventSink::backend(run_store),
             RunEventSink::callback(move |event| {
                 update_worker_title_from_event(&event);
-                let client = event_client.clone_for_reuse();
-                async move { client.append_run_event(&event.run_id, &event).await }
+                async move { Ok(()) }
             }),
         ]),
         run_control: Some(run_control),
@@ -95,42 +100,139 @@ pub(crate) async fn execute(
     Ok(())
 }
 
-fn open_memory_store() -> Arc<Database> {
-    Arc::new(Database::new(
-        Arc::new(MemoryObjectStore::new()),
-        "",
-        STORE_FLUSH_INTERVAL,
-    ))
+#[derive(Clone)]
+struct HttpRunStore {
+    run_id: RunId,
+    client: server_client::ServerStoreClient,
+    state: Arc<Mutex<RunProjection>>,
+    events: Arc<Mutex<Option<Vec<EventEnvelope>>>>,
 }
 
-async fn load_seed_run_store(
-    client: &server_client::ServerStoreClient,
-    run_id: &RunId,
-) -> Result<RunDatabase> {
-    let events = client
-        .list_run_events(run_id, None, None)
-        .await
-        .with_context(|| format!("failed to fetch run events for {run_id}"))?;
-    let payloads = events
-        .into_iter()
-        .map(|event| event.payload)
-        .collect::<Vec<_>>();
-    seed_run_store(run_id, &payloads).await
-}
-
-async fn seed_run_store(run_id: &RunId, events: &[EventPayload]) -> Result<RunDatabase> {
-    let store = open_memory_store();
-    let run_store = store
-        .create_run(run_id)
-        .await
-        .with_context(|| format!("failed to create in-memory run store for {run_id}"))?;
-    for payload in events {
-        run_store
-            .append_event(payload)
+impl HttpRunStore {
+    async fn connect(
+        run_id: RunId,
+        client: server_client::ServerStoreClient,
+    ) -> Result<RunStoreHandle> {
+        let state = client
+            .get_run_state(&run_id)
             .await
-            .with_context(|| format!("failed to seed in-memory run store for {run_id}"))?;
+            .with_context(|| format!("failed to fetch run state for {run_id}"))?;
+        Ok(RunStoreHandle::new(Arc::new(Self {
+            run_id,
+            client,
+            state: Arc::new(Mutex::new(state)),
+            events: Arc::new(Mutex::new(None)),
+        })))
     }
-    Ok(run_store)
+
+    async fn with_retries<T, F, Fut>(&self, operation: &'static str, mut op: F) -> Result<T>
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = Result<T>>,
+    {
+        let mut last_error = None;
+        for attempt in 0..=RUN_STORE_RETRY_DELAYS.len() {
+            match op().await {
+                Ok(value) => return Ok(value),
+                Err(err) => last_error = Some(err),
+            }
+            if let Some(delay) = RUN_STORE_RETRY_DELAYS.get(attempt) {
+                sleep(*delay).await;
+            }
+        }
+        Err(last_error
+            .unwrap_or_else(|| anyhow!("run store operation failed"))
+            .context(format!(
+                "worker lost canonical run store during {operation}"
+            )))
+    }
+
+    async fn refresh_state_from_server(&self) -> Result<RunProjection> {
+        self.with_retries("refresh state", || {
+            let client = self.client.clone_for_reuse();
+            let run_id = self.run_id;
+            async move { client.get_run_state(&run_id).await }
+        })
+        .await
+    }
+
+    async fn apply_acknowledged_event(&self, seq: u32, event: &RunEvent) -> Result<()> {
+        let payload = EventPayload::new(event.to_value()?, &self.run_id)?;
+        let envelope = EventEnvelope { seq, payload };
+
+        {
+            let mut state = self.state.lock().await;
+            if let Err(err) = state.apply_event(&envelope) {
+                tracing::warn!(run_id = %self.run_id, error = %err, "failed to apply acknowledged event to local run-state mirror; refreshing from server");
+                drop(state);
+                let refreshed = self.refresh_state_from_server().await?;
+                *self.state.lock().await = refreshed;
+            }
+        }
+
+        let mut events = self.events.lock().await;
+        if let Some(cached) = events.as_mut() {
+            cached.push(envelope);
+        }
+
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl RunStoreBackend for HttpRunStore {
+    async fn load_state(&self) -> Result<RunProjection> {
+        Ok(self.state.lock().await.clone())
+    }
+
+    async fn list_events(&self) -> Result<Vec<EventEnvelope>> {
+        let mut cached = self.events.lock().await;
+        if let Some(events) = cached.as_ref() {
+            return Ok(events.clone());
+        }
+
+        let events = self
+            .with_retries("list run events", || {
+                let client = self.client.clone_for_reuse();
+                let run_id = self.run_id;
+                async move { client.list_run_events(&run_id, None, None).await }
+            })
+            .await?;
+        *cached = Some(events.clone());
+        Ok(events)
+    }
+
+    async fn append_run_event(&self, event: &RunEvent) -> Result<()> {
+        let seq = self
+            .with_retries("append run event", || {
+                let client = self.client.clone_for_reuse();
+                let run_id = self.run_id;
+                let event = event.clone();
+                async move { client.append_run_event(&run_id, &event).await }
+            })
+            .await?;
+        self.apply_acknowledged_event(seq, event).await
+    }
+
+    async fn write_blob(&self, data: &[u8]) -> Result<RunBlobId> {
+        self.with_retries("write run blob", || {
+            let client = self.client.clone_for_reuse();
+            let run_id = self.run_id;
+            let data = data.to_vec();
+            async move { client.write_run_blob(&run_id, &data).await }
+        })
+        .await
+    }
+
+    async fn read_blob(&self, id: &RunBlobId) -> Result<Option<bytes::Bytes>> {
+        self.with_retries("read run blob", || {
+            let client = self.client.clone_for_reuse();
+            let run_id = self.run_id;
+            let blob_id = *id;
+            async move { client.read_run_blob(&run_id, &blob_id).await }
+        })
+        .await
+    }
 }
 
 fn set_worker_title(run_id: &RunId, phase: WorkerTitlePhase) {
@@ -247,8 +349,12 @@ fn install_signal_handlers(
 
 #[cfg(test)]
 mod tests {
+    use httpmock::MockServer;
+    use serde_json::json;
+
     use super::{
-        WorkerTitlePhase, initial_worker_title_phase, worker_title, worker_title_phase_for_event,
+        WorkerTitlePhase, execute, initial_worker_title_phase, worker_title,
+        worker_title_phase_for_event,
     };
     use crate::args::RunWorkerMode;
     use fabro_types::fixtures;
@@ -341,5 +447,62 @@ mod tests {
             })),
             Some(WorkerTitlePhase::Failed)
         );
+    }
+
+    #[tokio::test]
+    async fn worker_bootstrap_loads_run_state_without_prefetching_run_events() {
+        let server = MockServer::start_async().await;
+        let run_id = fixtures::RUN_1;
+
+        let state_mock = server
+            .mock_async(|when, then| {
+                when.method("GET")
+                    .path(format!("/api/v1/runs/{run_id}/state"));
+                then.status(200)
+                    .header("Content-Type", "application/json")
+                    .body(
+                        json!({
+                            "run": null,
+                            "graph_source": null,
+                            "start": null,
+                            "status": null,
+                            "checkpoint": null,
+                            "checkpoints": [],
+                            "conclusion": null,
+                            "retro": null,
+                            "retro_prompt": null,
+                            "retro_response": null,
+                            "sandbox": null,
+                            "final_patch": null,
+                            "pull_request": null,
+                            "nodes": {}
+                        })
+                        .to_string(),
+                    );
+            })
+            .await;
+        let events_mock = server
+            .mock_async(|when, then| {
+                when.method("GET")
+                    .path(format!("/api/v1/runs/{run_id}/events"));
+                then.status(200)
+                    .header("Content-Type", "application/json")
+                    .body(json!({ "data": [], "meta": { "has_more": false } }).to_string());
+            })
+            .await;
+
+        let run_dir = tempfile::tempdir().unwrap();
+        let error = execute(
+            run_id,
+            format!("{}/api/v1", server.base_url()),
+            run_dir.path().to_path_buf(),
+            RunWorkerMode::Start,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.to_string().contains("has no run record"));
+        state_mock.assert_async().await;
+        assert_eq!(events_mock.calls_async().await, 0);
     }
 }

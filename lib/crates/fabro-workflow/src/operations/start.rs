@@ -9,7 +9,6 @@ use fabro_config::{project as project_config, run as run_config, sandbox as sand
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_model::{Catalog, FallbackTarget, Provider};
 use fabro_sandbox::{SandboxProvider, SandboxSpec};
-use fabro_store::RunDatabase;
 use fabro_types::{RunId, Settings};
 
 use crate::context::Context;
@@ -29,6 +28,7 @@ use crate::records::Checkpoint;
 use crate::run_control::RunControlState;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::run_status::{RunStatus, StatusReason};
+use crate::runtime_store::RunStoreHandle;
 use crate::workflow_bundle::{StoredWorkflowBundle, WorkflowBundle};
 use fabro_config::run::PullRequestSettings;
 use fabro_retro::retro::Retro;
@@ -48,7 +48,7 @@ struct RunSession {
     sandbox_env: SandboxEnvSpec,
     devcontainer: Option<DevcontainerSpec>,
     seed_context: Option<Context>,
-    run_store: RunDatabase,
+    run_store: RunStoreHandle,
     event_sink: RunEventSink,
     git: Option<GitCheckpointOptions>,
     github_app: Option<fabro_github::GitHubAppCredentials>,
@@ -70,7 +70,7 @@ pub struct StartServices {
     pub cancel_token: Option<Arc<AtomicBool>>,
     pub emitter: Arc<Emitter>,
     pub interviewer: Arc<dyn Interviewer>,
-    pub run_store: RunDatabase,
+    pub run_store: RunStoreHandle,
     pub event_sink: RunEventSink,
     pub run_control: Option<Arc<RunControlState>>,
     pub github_app: Option<fabro_github::GitHubAppCredentials>,
@@ -221,7 +221,7 @@ pub(super) async fn execute_persisted_run(
 
 async fn persist_terminal_engine_failure(
     run_id: RunId,
-    run_store: &RunDatabase,
+    run_store: &RunStoreHandle,
     event_sink: &RunEventSink,
     _run_dir: &Path,
     error: &FabroError,
@@ -867,7 +867,7 @@ mod tests {
             cancel_token: None,
             emitter,
             interviewer: Arc::new(fabro_interview::AutoApproveInterviewer),
-            run_store: store.open_run(&fixtures::RUN_1).await.unwrap(),
+            run_store: store.open_run(&fixtures::RUN_1).await.unwrap().into(),
             event_sink: RunEventSink::store(store.open_run(&fixtures::RUN_1).await.unwrap()),
             run_control: None,
             github_app: None,
@@ -1005,7 +1005,7 @@ mod tests {
             node_visits: HashMap::new(),
         };
         crate::event::append_event(
-            &services.run_store,
+            &store.open_run(&fixtures::RUN_1).await.unwrap(),
             &services.run_id,
             &Event::CheckpointCompleted {
                 node_id: checkpoint.current_node.clone(),

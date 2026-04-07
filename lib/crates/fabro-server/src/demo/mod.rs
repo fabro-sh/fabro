@@ -215,7 +215,26 @@ pub(crate) async fn run_events_stub(
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> Response {
-    ApiError::new(StatusCode::GONE, "Event stream closed.").into_response()
+    let events = vec![Ok::<_, std::convert::Infallible>(
+        Event::default().data(
+            json!({
+                "seq": 2,
+                "payload": {
+                    "id": "evt_demo_attach_completed",
+                    "ts": "2026-04-06T15:00:02Z",
+                    "run_id": "01JQ0000000000000000000001",
+                    "event": "run.completed",
+                    "properties": {
+                        "duration_ms": 42,
+                        "artifact_count": 0,
+                        "status": "success"
+                    }
+                }
+            })
+            .to_string(),
+        ),
+    )];
+    Sse::new(tokio_stream::iter(events)).into_response()
 }
 
 pub(crate) async fn checkpoint_stub(

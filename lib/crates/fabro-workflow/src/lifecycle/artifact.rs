@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
-use fabro_store::RunDatabase;
 
 use fabro_core::graph::NodeSpec;
 use fabro_core::lifecycle::{AttemptContext, AttemptResultContext, RunLifecycle};
@@ -16,6 +15,7 @@ use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::BilledModelUsage;
+use crate::runtime_store::RunStoreHandle;
 use fabro_core::error::Result as CoreResult;
 use fabro_core::lifecycle::NodeDecision;
 
@@ -26,7 +26,7 @@ type WfNodeDecision = NodeDecision<Option<BilledModelUsage>>;
 /// Sub-lifecycle responsible for artifact collection, offloading, and syncing.
 pub(crate) struct ArtifactLifecycle {
     pub sandbox: Arc<dyn fabro_sandbox::Sandbox>,
-    pub run_store: RunDatabase,
+    pub run_store: RunStoreHandle,
     pub blob_cache_dir: PathBuf,
     pub emitter: Arc<Emitter>,
     pub artifacts_dir: PathBuf,
@@ -40,7 +40,7 @@ impl ArtifactLifecycle {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         sandbox: Arc<dyn fabro_sandbox::Sandbox>,
-        run_store: RunDatabase,
+        run_store: RunStoreHandle,
         blob_cache_dir: PathBuf,
         emitter: Arc<Emitter>,
         artifacts_dir: PathBuf,

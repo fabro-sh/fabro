@@ -15,27 +15,7 @@ import {
 import { Link } from "react-router";
 import { apiJson } from "../api";
 import { timeAgo, timeUntil } from "../lib/time";
-
-interface WorkflowRunSummary {
-  ran_at?: string | null;
-}
-
-interface WorkflowScheduleSummary {
-  expression: string;
-  next_run?: string | null;
-}
-
-interface WorkflowListItem {
-  name: string;
-  slug: string;
-  filename: string;
-  last_run?: WorkflowRunSummary | null;
-  schedule?: WorkflowScheduleSummary | null;
-}
-
-interface PaginatedWorkflowList {
-  data: WorkflowListItem[];
-}
+import type { PaginatedWorkflowListResponse } from "../lib/workflow-api";
 
 export function meta({}: any) {
   return [{ title: "Workflows — Fabro" }];
@@ -125,7 +105,7 @@ interface WorkflowData {
 }
 
 export async function loader({ request }: any) {
-  const { data: apiWorkflows } = await apiJson<PaginatedWorkflowList>("/workflows", { request });
+  const { data: apiWorkflows } = await apiJson<PaginatedWorkflowListResponse>("/workflows", { request });
   const workflows: WorkflowData[] = apiWorkflows.map((w) => ({
     name: w.name,
     slug: w.slug,

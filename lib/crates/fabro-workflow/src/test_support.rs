@@ -106,7 +106,7 @@ async fn initialized(
             run_options: run_options.clone(),
             workflow_path: None,
             workflow_bundle: None,
-            run_store,
+            run_store: run_store.into(),
             checkpoint: options.checkpoint,
             seed_context: None,
             emitter,

@@ -22,7 +22,6 @@ use async_trait::async_trait;
 use fabro_agent::Sandbox;
 #[cfg(test)]
 use fabro_store::Database;
-use fabro_store::RunDatabase;
 #[cfg(test)]
 use object_store::memory::InMemory;
 
@@ -30,6 +29,7 @@ use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::Emitter;
 use crate::outcome::{Outcome, OutcomeExt};
+use crate::runtime_store::RunStoreHandle;
 use crate::sandbox_git::GitState;
 use crate::workflow_bundle::WorkflowBundle;
 use fabro_graphviz::graph::{Graph, Node, shape_to_handler_type};
@@ -43,7 +43,7 @@ pub struct EngineServices {
     pub registry: Arc<HandlerRegistry>,
     pub emitter: Arc<Emitter>,
     pub sandbox: Arc<dyn Sandbox>,
-    pub run_store: RunDatabase,
+    pub run_store: RunStoreHandle,
     /// Git state for the current run. Set via `set_git_state` at the start of
     /// `run_via_core` and read by parallel/fan-in handlers.
     pub(crate) git_state: std::sync::RwLock<Option<Arc<GitState>>>,
@@ -137,7 +137,8 @@ impl EngineServices {
                     })
             })
             .join()
-            .expect("test run store thread should join"),
+            .expect("test run store thread should join")
+            .into(),
             git_state: std::sync::RwLock::new(None),
             hook_runner: None,
             env: HashMap::new(),

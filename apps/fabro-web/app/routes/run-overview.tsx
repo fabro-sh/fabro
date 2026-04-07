@@ -8,10 +8,7 @@ import { getGraphTheme } from "../lib/graph-theme";
 import { apiJson } from "../api";
 import { formatDurationSecs } from "../lib/format";
 import type { PaginatedRunStageList, PaginatedRunList } from "@qltysh/fabro-api-client";
-
-interface WorkflowGraphResponse {
-  graph: string;
-}
+import type { WorkflowDetailResponse } from "../lib/workflow-api";
 
 export const handle = { wide: true };
 
@@ -39,7 +36,7 @@ export async function loader({ request, params }: any) {
   let graphDot: string | null = null;
   if (run) {
     try {
-      const workflow = await apiJson<WorkflowGraphResponse>(`/workflows/${run.workflow}`, { request });
+      const workflow = await apiJson<WorkflowDetailResponse>(`/workflows/${run.workflow}`, { request });
       graphDot = workflow.graph;
     } catch {
       // workflow not found — leave graphDot null

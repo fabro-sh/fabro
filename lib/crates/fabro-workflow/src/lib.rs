@@ -140,6 +140,7 @@ pub mod run_dump;
 pub mod run_lookup;
 pub mod run_options;
 pub mod run_status;
+pub mod runtime_store;
 pub mod sandbox_git;
 #[doc(hidden)]
 pub mod test_support;
