@@ -110,8 +110,6 @@ pub fn default_page_limit() -> u32 {
     20
 }
 
-const ATTACH_REPLAY_BATCH_LIMIT: usize = 256;
-
 #[derive(serde::Deserialize)]
 pub struct PaginationParams {
     #[serde(rename = "page[limit]", default = "default_page_limit")]
@@ -2559,7 +2557,7 @@ fn api_question_from_interview_question(id: &str, question: &Question) -> ApiQue
     }
 }
 
-#[allow(clippy::result_large_err)]
+#[allow(clippy::result_large_err)] // Axum handlers naturally propagate full `Response` errors.
 fn answer_from_request(req: SubmitAnswerRequest, question: &Question) -> Result<Answer, Response> {
     if let Some(key) = req.selected_option_key {
         let option = question
@@ -3645,6 +3643,8 @@ async fn attach_run_events(
     Path(id): Path<String>,
     Query(params): Query<AttachParams>,
 ) -> Response {
+    const ATTACH_REPLAY_BATCH_LIMIT: usize = 256;
+
     let id = match parse_run_id_path(&id) {
         Ok(id) => id,
         Err(response) => return response,

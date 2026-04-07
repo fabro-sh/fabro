@@ -5,10 +5,10 @@ pub(crate) use fabro_config::user::*;
 use anyhow::{Result, bail};
 use fabro_config::ConfigLayer;
 use fabro_types::Settings;
+use fabro_util::version::FABRO_VERSION;
 use tracing::debug;
 
 use crate::args::ServerTargetArgs;
-use fabro_util::version::FABRO_VERSION;
 
 pub(crate) fn load_settings() -> anyhow::Result<Settings> {
     load_settings_with_config_and_storage_dir(None, None)

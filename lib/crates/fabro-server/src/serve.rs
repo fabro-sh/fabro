@@ -472,7 +472,7 @@ async fn wait_for_shutdown(mut shutdown_rx: watch::Receiver<bool>) {
     let _ = shutdown_rx.changed().await;
 }
 
-#[allow(clippy::print_stderr)]
+#[allow(clippy::print_stderr)] // Startup status belongs on stderr for operator-facing CLI output.
 fn announce_server_ready(bind_addr: &Bind, styles: &'static Styles, dry_run_mode: bool) {
     set_server_title(ServerTitlePhase::Listening, Some(bind_addr));
     info!(bind = %bind_addr, dry_run = dry_run_mode, "API server started");

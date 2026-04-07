@@ -247,7 +247,7 @@ pub struct ModelPricing {
     pub policy: ModelPricingPolicy,
 }
 
-#[allow(clippy::empty_structs_with_brackets)]
+#[allow(clippy::empty_structs_with_brackets)] // Serialize as `{}` rather than unit-struct `null`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct OpenAiBillingFacts {}
 
@@ -734,5 +734,13 @@ mod tests {
         let price = PricePerMTok::from_usd(f64::MAX);
 
         assert_eq!(price.usd_micros, i64::MAX);
+    }
+
+    #[test]
+    fn openai_billing_facts_serialize_as_empty_object() {
+        assert_eq!(
+            serde_json::to_value(OpenAiBillingFacts::default()).unwrap(),
+            serde_json::json!({})
+        );
     }
 }
