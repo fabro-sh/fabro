@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::sync::{Mutex, oneshot};
@@ -8,29 +7,34 @@ use crate::{Answer, Interviewer, Question};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubmitError {
-    UnknownQuestion,
     AlreadyResolved,
 }
 
 #[derive(Default)]
-struct InterviewBrokerState {
+struct ControlInterviewerState {
     pending: HashMap<String, oneshot::Sender<Answer>>,
     queued: HashMap<String, Answer>,
+    closed: bool,
 }
 
 #[derive(Default)]
-pub struct InterviewBroker {
-    state: Mutex<InterviewBrokerState>,
+pub struct ControlInterviewer {
+    state: Mutex<ControlInterviewerState>,
 }
 
-impl InterviewBroker {
+impl ControlInterviewer {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub async fn register(&self, question_id: String) -> oneshot::Receiver<Answer> {
+    async fn register(&self, question_id: String) -> oneshot::Receiver<Answer> {
         let mut state = self.state.lock().await;
+        if state.closed {
+            let (tx, rx) = oneshot::channel();
+            let _ = tx.send(Answer::aborted());
+            return rx;
+        }
         if let Some(answer) = state.queued.remove(&question_id) {
             let (tx, rx) = oneshot::channel();
             let _ = tx.send(answer);
@@ -45,6 +49,9 @@ impl InterviewBroker {
     pub async fn submit(&self, question_id: &str, answer: Answer) -> Result<(), SubmitError> {
         let pending_sender = {
             let mut state = self.state.lock().await;
+            if state.closed {
+                return Err(SubmitError::AlreadyResolved);
+            }
             if let Some(sender) = state.pending.remove(question_id) {
                 Some(sender)
             } else if state.queued.contains_key(question_id) {
@@ -59,13 +66,14 @@ impl InterviewBroker {
             Some(sender) => sender
                 .send(answer)
                 .map_err(|_| SubmitError::AlreadyResolved),
-            None => Err(SubmitError::UnknownQuestion),
+            None => Err(SubmitError::AlreadyResolved),
         }
     }
 
     pub async fn abort_all(&self) {
         let (pending, queued) = {
             let mut state = self.state.lock().await;
+            state.closed = true;
             let pending = state
                 .pending
                 .drain()
@@ -83,27 +91,16 @@ impl InterviewBroker {
         if queued > 0 {
             tracing::debug!(
                 count = queued,
-                "Dropped queued interview answers while aborting broker"
+                "Dropped queued interview answers while aborting control interviewer"
             );
         }
-    }
-}
-
-pub struct ControlInterviewer {
-    broker: Arc<InterviewBroker>,
-}
-
-impl ControlInterviewer {
-    #[must_use]
-    pub fn new(broker: Arc<InterviewBroker>) -> Self {
-        Self { broker }
     }
 }
 
 #[async_trait]
 impl Interviewer for ControlInterviewer {
     async fn ask(&self, question: Question) -> Answer {
-        let receiver = self.broker.register(question.id.clone()).await;
+        let receiver = self.register(question.id.clone()).await;
         match receiver.await {
             Ok(answer) => answer,
             Err(_) => Answer::aborted(),
@@ -124,22 +121,22 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn submit_unknown_question_returns_error() {
-        let broker = InterviewBroker::new();
-        let result = broker.submit("missing", Answer::yes()).await;
+    async fn submit_before_ask_buffers_answer() {
+        let interviewer = ControlInterviewer::new();
+        let result = interviewer.submit("q-1", Answer::yes()).await;
         assert_eq!(result, Ok(()));
     }
 
     #[tokio::test]
     async fn register_then_submit_delivers_answer() {
-        let broker = Arc::new(InterviewBroker::new());
-        let interviewer = ControlInterviewer::new(Arc::clone(&broker));
+        let interviewer = Arc::new(ControlInterviewer::new());
 
         let mut question = Question::new("approve?", QuestionType::YesNo);
         question.id = "q-1".to_string();
 
-        let ask = tokio::spawn(async move { interviewer.ask(question).await });
-        let submit_result = broker.submit("q-1", Answer::yes()).await;
+        let ask_interviewer = Arc::clone(&interviewer);
+        let ask = tokio::spawn(async move { ask_interviewer.ask(question).await });
+        let submit_result = interviewer.submit("q-1", Answer::yes()).await;
 
         assert_eq!(submit_result, Ok(()));
         let answer = ask.await.unwrap();
@@ -148,21 +145,50 @@ mod tests {
 
     #[tokio::test]
     async fn submit_before_register_buffers_answer() {
-        let broker = Arc::new(InterviewBroker::new());
-        assert_eq!(broker.submit("q-1", Answer::no()).await, Ok(()));
+        let interviewer = Arc::new(ControlInterviewer::new());
+        assert_eq!(interviewer.submit("q-1", Answer::no()).await, Ok(()));
 
-        let receiver = broker.register("q-1".to_string()).await;
-        let answer = receiver.await.unwrap();
+        let mut question = Question::new("approve?", QuestionType::YesNo);
+        question.id = "q-1".to_string();
+        let answer = interviewer.ask(question).await;
         assert_eq!(answer.value, AnswerValue::No);
     }
 
     #[tokio::test]
     async fn duplicate_buffered_answer_is_rejected() {
-        let broker = InterviewBroker::new();
-        assert_eq!(broker.submit("q-1", Answer::yes()).await, Ok(()));
+        let interviewer = ControlInterviewer::new();
+        assert_eq!(interviewer.submit("q-1", Answer::yes()).await, Ok(()));
         assert_eq!(
-            broker.submit("q-1", Answer::no()).await,
+            interviewer.submit("q-1", Answer::no()).await,
             Err(SubmitError::AlreadyResolved)
         );
+    }
+
+    #[tokio::test]
+    async fn abort_all_aborts_pending_questions() {
+        let interviewer = Arc::new(ControlInterviewer::new());
+        let mut question = Question::new("approve?", QuestionType::YesNo);
+        question.id = "q-1".to_string();
+
+        let ask_interviewer = Arc::clone(&interviewer);
+        let ask = tokio::spawn(async move { ask_interviewer.ask(question).await });
+        tokio::task::yield_now().await;
+
+        interviewer.abort_all().await;
+
+        let answer = ask.await.unwrap();
+        assert_eq!(answer.value, AnswerValue::Aborted);
+    }
+
+    #[tokio::test]
+    async fn ask_after_abort_all_returns_aborted() {
+        let interviewer = ControlInterviewer::new();
+        interviewer.abort_all().await;
+
+        let mut question = Question::new("approve?", QuestionType::YesNo);
+        question.id = "q-1".to_string();
+
+        let answer = interviewer.ask(question).await;
+        assert_eq!(answer.value, AnswerValue::Aborted);
     }
 }

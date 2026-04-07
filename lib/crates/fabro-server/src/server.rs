@@ -34,8 +34,9 @@ use fabro_store::{
     ArtifactStore, Database, EventEnvelope, EventPayload, PendingInterviewRecord, StageId,
 };
 use fabro_types::{
-    EventBody, RunArtifactStorage, RunBlobId, RunClientProvenance, RunControlAction, RunEvent,
-    RunId, RunProvenance, RunServerProvenance, RunSubjectProvenance, Settings,
+    EventBody, InterviewQuestionRecord, InterviewQuestionType, RunArtifactStorage, RunBlobId,
+    RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance, RunServerProvenance,
+    RunSubjectProvenance, Settings,
 };
 use fabro_util::redact::redact_jsonl_line;
 use fabro_util::version::FABRO_VERSION;
@@ -77,8 +78,7 @@ use crate::secret_store::{SecretStore, SecretStoreError};
 use crate::static_files;
 use crate::web_auth;
 use fabro_interview::{
-    Answer, ControlInterviewer, InterviewBroker, Interviewer, Question, QuestionType,
-    WorkerControlEnvelope,
+    Answer, ControlInterviewer, Interviewer, Question, QuestionType, WorkerControlEnvelope,
 };
 use fabro_sandbox::daytona::DaytonaSandbox;
 use fabro_sandbox::reconnect::reconnect;
@@ -316,7 +316,7 @@ enum RunAnswerTransport {
         control_tx: mpsc::Sender<WorkerControlEnvelope>,
     },
     InProcess {
-        broker: Arc<InterviewBroker>,
+        interviewer: Arc<ControlInterviewer>,
     },
 }
 
@@ -336,7 +336,7 @@ impl RunAnswerTransport {
                     .map_err(|_| AnswerTransportError::Timeout)?
                     .map_err(|_| AnswerTransportError::Closed)
             }
-            Self::InProcess { broker } => broker
+            Self::InProcess { interviewer } => interviewer
                 .submit(qid, answer)
                 .await
                 .map_err(|_| AnswerTransportError::Closed),
@@ -344,10 +344,17 @@ impl RunAnswerTransport {
     }
 
     async fn abort_pending(&self) {
-        if let Self::InProcess { broker } = self {
-            broker.abort_all().await;
+        if let Self::InProcess { interviewer } = self {
+            interviewer.abort_all().await;
         }
     }
+}
+
+#[derive(Debug, Clone)]
+struct LoadedPendingInterview {
+    run_id: RunId,
+    qid: String,
+    question: InterviewQuestionRecord,
 }
 
 #[derive(Clone)]
@@ -386,25 +393,16 @@ impl SlackService {
                     return;
                 }
 
-                let question = Question {
+                let question = runtime_question_from_interview_record(&InterviewQuestionRecord {
                     id: props.question_id.clone(),
                     text: props.question.clone(),
-                    question_type: parse_question_type(&props.question_type),
-                    options: props
-                        .options
-                        .iter()
-                        .map(|option| fabro_interview::QuestionOption {
-                            key: option.key.clone(),
-                            label: option.label.clone(),
-                        })
-                        .collect(),
-                    allow_freeform: props.allow_freeform,
-                    default: None,
-                    timeout_seconds: props.timeout_seconds,
                     stage: props.stage.clone(),
-                    metadata: HashMap::new(),
+                    question_type: InterviewQuestionType::from_wire_name(&props.question_type),
+                    options: props.options.clone(),
+                    allow_freeform: props.allow_freeform,
+                    timeout_seconds: props.timeout_seconds,
                     context_display: props.context_display.clone(),
-                };
+                });
                 let blocks = slack_blocks::question_to_blocks(
                     &event.run_id.to_string(),
                     &props.question_id,
@@ -496,16 +494,16 @@ impl SlackService {
             Err(_) => return,
         };
 
-        let question =
-            match load_pending_interview_question(state.as_ref(), run_id, &submission.qid).await {
-                Ok(question) => question,
-                Err(_) => return,
-            };
-        if validate_answer_for_question(&question, &submission.answer).is_err() {
+        let pending = match load_pending_interview(state.as_ref(), run_id, &submission.qid).await {
+            Ok(pending) => pending,
+            Err(_) => return,
+        };
+        if submit_pending_interview_answer(state.as_ref(), &pending, submission.answer)
+            .await
+            .is_err()
+        {
             return;
         }
-        let _ =
-            deliver_answer_to_run(state.as_ref(), run_id, &submission.qid, submission.answer).await;
     }
 }
 
@@ -2879,18 +2877,54 @@ fn worker_command(
     Ok(cmd)
 }
 
-fn api_question_from_interview_question(id: &str, question: &Question) -> ApiQuestion {
+fn api_question_type(question_type: InterviewQuestionType) -> ApiQuestionType {
+    match question_type {
+        InterviewQuestionType::YesNo => ApiQuestionType::YesNo,
+        InterviewQuestionType::MultipleChoice => ApiQuestionType::MultipleChoice,
+        InterviewQuestionType::MultiSelect => ApiQuestionType::MultiSelect,
+        InterviewQuestionType::Freeform => ApiQuestionType::Freeform,
+        InterviewQuestionType::Confirmation => ApiQuestionType::Confirmation,
+    }
+}
+
+fn runtime_question_type(question_type: InterviewQuestionType) -> QuestionType {
+    match question_type {
+        InterviewQuestionType::YesNo => QuestionType::YesNo,
+        InterviewQuestionType::MultipleChoice => QuestionType::MultipleChoice,
+        InterviewQuestionType::MultiSelect => QuestionType::MultiSelect,
+        InterviewQuestionType::Freeform => QuestionType::Freeform,
+        InterviewQuestionType::Confirmation => QuestionType::Confirmation,
+    }
+}
+
+fn runtime_question_from_interview_record(question: &InterviewQuestionRecord) -> Question {
+    Question {
+        id: question.id.clone(),
+        text: question.text.clone(),
+        question_type: runtime_question_type(question.question_type),
+        options: question
+            .options
+            .iter()
+            .map(|option| fabro_interview::QuestionOption {
+                key: option.key.clone(),
+                label: option.label.clone(),
+            })
+            .collect(),
+        allow_freeform: question.allow_freeform,
+        default: None,
+        timeout_seconds: question.timeout_seconds,
+        stage: question.stage.clone(),
+        metadata: HashMap::new(),
+        context_display: question.context_display.clone(),
+    }
+}
+
+fn api_question_from_interview_record(question: &InterviewQuestionRecord) -> ApiQuestion {
     ApiQuestion {
-        id: id.to_string(),
+        id: question.id.clone(),
         text: question.text.clone(),
         stage: question.stage.clone(),
-        question_type: match question.question_type {
-            QuestionType::YesNo => ApiQuestionType::YesNo,
-            QuestionType::MultipleChoice => ApiQuestionType::MultipleChoice,
-            QuestionType::MultiSelect => ApiQuestionType::MultiSelect,
-            QuestionType::Freeform => ApiQuestionType::Freeform,
-            QuestionType::Confirmation => ApiQuestionType::Confirmation,
-        },
+        question_type: api_question_type(question.question_type),
         options: question
             .options
             .iter()
@@ -2905,52 +2939,16 @@ fn api_question_from_interview_question(id: &str, question: &Question) -> ApiQue
     }
 }
 
-fn parse_question_type(question_type: &str) -> QuestionType {
-    match question_type {
-        "yes_no" => QuestionType::YesNo,
-        "multiple_choice" => QuestionType::MultipleChoice,
-        "multi_select" => QuestionType::MultiSelect,
-        "freeform" => QuestionType::Freeform,
-        "confirmation" => QuestionType::Confirmation,
-        _ => QuestionType::Freeform,
-    }
-}
-
-fn question_from_pending_interview(record: &PendingInterviewRecord) -> Question {
-    Question {
-        id: record.question_id.clone(),
-        text: record.question.clone(),
-        question_type: parse_question_type(&record.question_type),
-        options: record
-            .options
-            .iter()
-            .map(|option| fabro_interview::QuestionOption {
-                key: option.key.clone(),
-                label: option.label.clone(),
-            })
-            .collect(),
-        allow_freeform: record.allow_freeform,
-        default: None,
-        timeout_seconds: record.timeout_seconds,
-        stage: record.stage.clone(),
-        metadata: HashMap::new(),
-        context_display: record.context_display.clone(),
-    }
-}
-
 fn api_question_from_pending_interview(record: &PendingInterviewRecord) -> ApiQuestion {
-    api_question_from_interview_question(
-        &record.question_id,
-        &question_from_pending_interview(record),
-    )
+    api_question_from_interview_record(&record.question)
 }
 
 #[allow(clippy::result_large_err)] // Axum handlers naturally propagate full `Response` errors.
-async fn load_pending_interview_question(
+async fn load_pending_interview(
     state: &AppState,
     run_id: RunId,
     qid: &str,
-) -> Result<Question, Response> {
+) -> Result<LoadedPendingInterview, Response> {
     let run_store = match state.store.open_run_reader(&run_id).await {
         Ok(run_store) => run_store,
         Err(fabro_store::StoreError::RunNotFound(_)) => {
@@ -2978,25 +2976,38 @@ async fn load_pending_interview_question(
         .into_response());
     };
 
-    Ok(question_from_pending_interview(record))
+    Ok(LoadedPendingInterview {
+        run_id,
+        qid: qid.to_string(),
+        question: record.question.clone(),
+    })
 }
 
 #[allow(clippy::result_large_err)] // Axum handlers naturally propagate full `Response` errors.
-fn validate_answer_for_question(question: &Question, answer: &Answer) -> Result<(), Response> {
+fn validate_answer_for_question(
+    question: &InterviewQuestionRecord,
+    answer: &Answer,
+) -> Result<(), Response> {
     match (&question.question_type, &answer.value) {
-        (QuestionType::YesNo | QuestionType::Confirmation, fabro_interview::AnswerValue::Yes)
-        | (QuestionType::YesNo | QuestionType::Confirmation, fabro_interview::AnswerValue::No)
+        (
+            InterviewQuestionType::YesNo | InterviewQuestionType::Confirmation,
+            fabro_interview::AnswerValue::Yes,
+        )
+        | (
+            InterviewQuestionType::YesNo | InterviewQuestionType::Confirmation,
+            fabro_interview::AnswerValue::No,
+        )
         | (_, fabro_interview::AnswerValue::Aborted)
         | (_, fabro_interview::AnswerValue::Skipped)
         | (_, fabro_interview::AnswerValue::Timeout) => Ok(()),
-        (QuestionType::MultipleChoice, fabro_interview::AnswerValue::Selected(key)) => {
+        (InterviewQuestionType::MultipleChoice, fabro_interview::AnswerValue::Selected(key)) => {
             if question.options.iter().any(|option| option.key == *key) {
                 Ok(())
             } else {
                 Err(ApiError::bad_request("Invalid option key.").into_response())
             }
         }
-        (QuestionType::MultiSelect, fabro_interview::AnswerValue::MultiSelected(keys)) => {
+        (InterviewQuestionType::MultiSelect, fabro_interview::AnswerValue::MultiSelected(keys)) => {
             if keys
                 .iter()
                 .all(|key| question.options.iter().any(|option| option.key == *key))
@@ -3006,7 +3017,7 @@ fn validate_answer_for_question(question: &Question, answer: &Answer) -> Result<
                 Err(ApiError::bad_request("Invalid option key.").into_response())
             }
         }
-        (QuestionType::Freeform, fabro_interview::AnswerValue::Text(text))
+        (InterviewQuestionType::Freeform, fabro_interview::AnswerValue::Text(text))
             if !text.trim().is_empty() =>
         {
             Ok(())
@@ -3018,6 +3029,16 @@ fn validate_answer_for_question(question: &Question, answer: &Answer) -> Result<
         }
         _ => Err(ApiError::bad_request("Answer does not match question type.").into_response()),
     }
+}
+
+#[allow(clippy::result_large_err)] // Axum handlers naturally propagate full `Response` errors.
+async fn submit_pending_interview_answer(
+    state: &AppState,
+    pending: &LoadedPendingInterview,
+    answer: Answer,
+) -> Result<(), Response> {
+    validate_answer_for_question(&pending.question, &answer)?;
+    deliver_answer_to_run(state, pending.run_id, &pending.qid, answer).await
 }
 
 #[allow(clippy::result_large_err)] // Axum handlers naturally propagate full `Response` errors.
@@ -3060,7 +3081,10 @@ async fn deliver_answer_to_run(
 }
 
 #[allow(clippy::result_large_err)] // Axum handlers naturally propagate full `Response` errors.
-fn answer_from_request(req: SubmitAnswerRequest, question: &Question) -> Result<Answer, Response> {
+fn answer_from_request(
+    req: SubmitAnswerRequest,
+    question: &InterviewQuestionRecord,
+) -> Result<Answer, Response> {
     if let Some(key) = req.selected_option_key {
         let option = question
             .options
@@ -3068,7 +3092,13 @@ fn answer_from_request(req: SubmitAnswerRequest, question: &Question) -> Result<
             .find(|option| option.key == key)
             .cloned();
         match option {
-            Some(option) => Ok(Answer::selected(key, option)),
+            Some(option) => Ok(Answer::selected(
+                key,
+                fabro_interview::QuestionOption {
+                    key: option.key,
+                    label: option.label,
+                },
+            )),
             None => Err(ApiError::bad_request("Invalid option key.").into_response()),
         }
     } else if !req.selected_option_keys.is_empty() {
@@ -3420,8 +3450,8 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
     let _ = queued_for;
 
     // Create interviewer and event plumbing (this is the "provisioning" phase)
-    let broker = Arc::new(InterviewBroker::new());
-    let interviewer: Arc<dyn Interviewer> = Arc::new(ControlInterviewer::new(Arc::clone(&broker)));
+    let interviewer = Arc::new(ControlInterviewer::new());
+    let interview_runtime: Arc<dyn Interviewer> = interviewer.clone();
     let emitter = Emitter::new(run_id);
     if let Some(tx_clone) = event_tx {
         emitter.on_event(move |event| {
@@ -3431,7 +3461,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
     let registry_override = state
         .registry_factory_override
         .as_ref()
-        .map(|factory| Arc::new(factory(Arc::clone(&interviewer))));
+        .map(|factory| Arc::new(factory(Arc::clone(&interview_runtime))));
     let emitter = Arc::new(emitter);
 
     // Transition to Running, populate interviewer
@@ -3441,7 +3471,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
             if managed_run.status == RunStatus::Starting {
                 managed_run.status = RunStatus::Running;
                 managed_run.answer_transport = Some(RunAnswerTransport::InProcess {
-                    broker: Arc::clone(&broker),
+                    interviewer: Arc::clone(&interviewer),
                 });
                 false
             } else {
@@ -3515,7 +3545,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         run_id,
         cancel_token: Some(Arc::clone(&cancel_token)),
         emitter: Arc::clone(&emitter),
-        interviewer: Arc::clone(&interviewer),
+        interviewer: Arc::clone(&interview_runtime),
         run_store: run_store.clone().into(),
         event_sink: workflow_event::RunEventSink::store(run_store.clone()),
         artifact_uploader: None,
@@ -3970,15 +4000,15 @@ async fn submit_answer(
         Ok(id) => id,
         Err(response) => return response,
     };
-    let question = match load_pending_interview_question(state.as_ref(), id, &qid).await {
-        Ok(question) => question,
+    let pending = match load_pending_interview(state.as_ref(), id, &qid).await {
+        Ok(pending) => pending,
         Err(response) => return response,
     };
-    let answer = match answer_from_request(req, &question) {
+    let answer = match answer_from_request(req, &pending.question) {
         Ok(answer) => answer,
         Err(response) => return response,
     };
-    match deliver_answer_to_run(state.as_ref(), id, &qid, answer).await {
+    match submit_pending_interview_answer(state.as_ref(), &pending, answer).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(response) => response,
     }
@@ -5792,7 +5822,7 @@ mod tests {
     use fabro_config::server::{
         AuthProvider, AuthSettings, GitAuthorSettings, GitProvider, GitSettings, WebSettings,
     };
-    use fabro_types::fixtures;
+    use fabro_types::{InterviewQuestionRecord, InterviewQuestionType, fixtures};
     #[cfg(unix)]
     use std::process::Stdio;
     use tower::ServiceExt;
@@ -6333,6 +6363,38 @@ mod tests {
 
         let response = app.oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn submit_pending_interview_answer_rejects_invalid_answer_shape() {
+        let state = create_app_state();
+        let pending = LoadedPendingInterview {
+            run_id: fixtures::RUN_1,
+            qid: "q-1".to_string(),
+            question: InterviewQuestionRecord {
+                id: "q-1".to_string(),
+                text: "Approve deploy?".to_string(),
+                stage: "gate".to_string(),
+                question_type: InterviewQuestionType::MultipleChoice,
+                options: vec![fabro_types::run_event::InterviewOption {
+                    key: "approve".to_string(),
+                    label: "Approve".to_string(),
+                }],
+                allow_freeform: false,
+                timeout_seconds: None,
+                context_display: None,
+            },
+        };
+
+        let response = submit_pending_interview_answer(
+            state.as_ref(),
+            &pending,
+            Answer::text("not a valid multiple choice answer"),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

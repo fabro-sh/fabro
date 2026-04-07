@@ -5,9 +5,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
-use fabro_interview::{
-    ControlInterviewer, InterviewBroker, WorkerControlEnvelope, WorkerControlMessage,
-};
+use fabro_interview::{ControlInterviewer, WorkerControlEnvelope, WorkerControlMessage};
 use fabro_store::{EventEnvelope, EventPayload, RunProjection};
 use fabro_types::{EventBody, RunBlobId, RunEvent, RunId, Settings, StatusReason};
 use fabro_workflow::artifact_snapshot::CapturedArtifactInfo;
@@ -71,9 +69,11 @@ pub(crate) async fn execute(
         client.clone_for_reuse(),
         artifact_upload_token,
     );
-    let broker = Arc::new(InterviewBroker::new());
-    let interviewer = Arc::new(ControlInterviewer::new(Arc::clone(&broker)));
-    tokio::spawn(read_worker_control_stream(io::stdin(), broker));
+    let interviewer = Arc::new(ControlInterviewer::new());
+    tokio::spawn(read_worker_control_stream(
+        io::stdin(),
+        Arc::clone(&interviewer),
+    ));
     let run_control = RunControlState::new();
     let cancel_token = Arc::new(AtomicBool::new(false));
     install_signal_handlers(Arc::clone(&run_control), Arc::clone(&cancel_token))?;
@@ -110,7 +110,7 @@ pub(crate) async fn execute(
     Ok(())
 }
 
-async fn read_worker_control_stream<R>(reader: R, broker: Arc<InterviewBroker>)
+async fn read_worker_control_stream<R>(reader: R, interviewer: Arc<ControlInterviewer>)
 where
     R: AsyncRead + Unpin,
 {
@@ -118,17 +118,17 @@ where
     loop {
         match lines.next_line().await {
             Ok(Some(line)) => {
-                apply_worker_control_line(&broker, &line).await;
+                apply_worker_control_line(&interviewer, &line).await;
             }
             Ok(None) | Err(_) => {
-                broker.abort_all().await;
+                interviewer.abort_all().await;
                 break;
             }
         }
     }
 }
 
-async fn apply_worker_control_line(broker: &InterviewBroker, line: &str) {
+async fn apply_worker_control_line(interviewer: &ControlInterviewer, line: &str) {
     if line.trim().is_empty() {
         return;
     }
@@ -139,7 +139,7 @@ async fn apply_worker_control_line(broker: &InterviewBroker, line: &str) {
 
     match message.message {
         WorkerControlMessage::InterviewAnswer { qid, answer } => {
-            let _ = broker.submit(&qid, answer.into()).await;
+            let _ = interviewer.submit(&qid, answer.into()).await;
         }
     }
 }
@@ -488,7 +488,7 @@ mod tests {
         read_worker_control_stream, worker_title, worker_title_phase_for_event,
     };
     use crate::args::RunWorkerMode;
-    use fabro_interview::{AnswerValue, InterviewBroker};
+    use fabro_interview::{AnswerValue, ControlInterviewer, Interviewer, Question, QuestionType};
     use fabro_types::fixtures;
     use fabro_types::run_event::{
         InterviewCompletedProps, InterviewStartedProps, RunCompletedProps, RunControlEffectProps,
@@ -648,27 +648,33 @@ mod tests {
 
     #[tokio::test]
     async fn worker_control_line_routes_answer_by_question_id() {
-        let broker = Arc::new(InterviewBroker::new());
-        let receiver = broker.register("q-1".to_string()).await;
+        let interviewer = Arc::new(ControlInterviewer::new());
+        let mut question = Question::new("Approve?", QuestionType::YesNo);
+        question.id = "q-1".to_string();
+        let ask_interviewer = Arc::clone(&interviewer);
+        let answer_task = tokio::spawn(async move { ask_interviewer.ask(question).await });
 
         apply_worker_control_line(
-            &broker,
+            &interviewer,
             r#"{"v":1,"type":"interview.answer","qid":"q-1","answer":{"kind":"yes"}}"#,
         )
         .await;
 
-        let answer: fabro_interview::Answer = receiver.await.unwrap();
+        let answer: fabro_interview::Answer = answer_task.await.unwrap();
         assert_eq!(answer.value, AnswerValue::Yes);
     }
 
     #[tokio::test]
     async fn worker_control_stream_eof_aborts_pending_interviews() {
-        let broker = Arc::new(InterviewBroker::new());
-        let receiver = broker.register("q-1".to_string()).await;
+        let interviewer = Arc::new(ControlInterviewer::new());
+        let mut question = Question::new("Approve?", QuestionType::YesNo);
+        question.id = "q-1".to_string();
+        let ask_interviewer = Arc::clone(&interviewer);
+        let answer_task = tokio::spawn(async move { ask_interviewer.ask(question).await });
 
-        read_worker_control_stream(tokio::io::empty(), Arc::clone(&broker)).await;
+        read_worker_control_stream(tokio::io::empty(), Arc::clone(&interviewer)).await;
 
-        let answer: fabro_interview::Answer = receiver.await.unwrap();
+        let answer: fabro_interview::Answer = answer_task.await.unwrap();
         assert_eq!(answer.value, AnswerValue::Aborted);
     }
 }

@@ -130,7 +130,7 @@ async fn full_http_lifecycle_approve_and_complete() {
         )))
         .header("content-type", "application/json")
         .body(Body::from(
-            serde_json::to_string(&serde_json::json!({"value": "A"})).unwrap(),
+            serde_json::to_string(&serde_json::json!({"selected_option_key": "A"})).unwrap(),
         ))
         .unwrap();
     let response = app.clone().oneshot(req).await.unwrap();

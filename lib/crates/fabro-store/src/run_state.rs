@@ -7,13 +7,14 @@ use serde_json::Value;
 
 use crate::{EventEnvelope, Result, RunSummary, StageId, StoreError};
 use fabro_types::run_event::{
-    AgentCliStartedProps, AgentSessionStartedProps, CheckpointCompletedProps, InterviewOption,
-    RunCompletedProps, RunFailedProps, StageCompletedProps, StagePromptProps,
+    AgentCliStartedProps, AgentSessionStartedProps, CheckpointCompletedProps, RunCompletedProps,
+    RunFailedProps, StageCompletedProps, StagePromptProps,
 };
 use fabro_types::{
-    BilledModelUsage, Checkpoint, Conclusion, EventBody, FailureSignature, NodeStatusRecord,
-    Outcome, PullRequestRecord, Retro, RunControlAction, RunEvent, RunId, RunRecord, RunStatus,
-    RunStatusRecord, SandboxRecord, StageStatus, StartRecord, StatusReason,
+    BilledModelUsage, Checkpoint, Conclusion, EventBody, FailureSignature, InterviewQuestionRecord,
+    InterviewQuestionType, NodeStatusRecord, Outcome, PullRequestRecord, Retro, RunControlAction,
+    RunEvent, RunId, RunRecord, RunStatus, RunStatusRecord, SandboxRecord, StageStatus,
+    StartRecord, StatusReason,
 };
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -39,14 +40,7 @@ pub struct RunProjection {
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct PendingInterviewRecord {
-    pub question_id: String,
-    pub question: String,
-    pub stage: String,
-    pub question_type: String,
-    pub options: Vec<InterviewOption>,
-    pub allow_freeform: bool,
-    pub timeout_seconds: Option<f64>,
-    pub context_display: Option<String>,
+    pub question: InterviewQuestionRecord,
     pub started_at: Option<DateTime<Utc>>,
 }
 
@@ -213,14 +207,18 @@ impl RunProjection {
                 self.pending_interviews.insert(
                     props.question_id.clone(),
                     PendingInterviewRecord {
-                        question_id: props.question_id.clone(),
-                        question: props.question.clone(),
-                        stage: props.stage.clone(),
-                        question_type: props.question_type.clone(),
-                        options: props.options.clone(),
-                        allow_freeform: props.allow_freeform,
-                        timeout_seconds: props.timeout_seconds,
-                        context_display: props.context_display.clone(),
+                        question: InterviewQuestionRecord {
+                            id: props.question_id.clone(),
+                            text: props.question.clone(),
+                            stage: props.stage.clone(),
+                            question_type: InterviewQuestionType::from_wire_name(
+                                &props.question_type,
+                            ),
+                            options: props.options.clone(),
+                            allow_freeform: props.allow_freeform,
+                            timeout_seconds: props.timeout_seconds,
+                            context_display: props.context_display.clone(),
+                        },
                         started_at: Some(ts),
                     },
                 );
@@ -596,7 +594,9 @@ mod tests {
     use super::{NodeState, RunProjection};
     use crate::{EventEnvelope, EventPayload, StageId};
     use fabro_types::run_event::{InterviewCompletedProps, InterviewOption, InterviewStartedProps};
-    use fabro_types::{Checkpoint, EventBody, RunControlAction, RunEvent, fixtures};
+    use fabro_types::{
+        Checkpoint, EventBody, InterviewQuestionType, RunControlAction, RunEvent, fixtures,
+    };
 
     fn test_event(seq: u32, body: EventBody, node_id: Option<&str>) -> EventEnvelope {
         let event = RunEvent {
@@ -754,12 +754,19 @@ mod tests {
             .pending_interviews
             .get("q-1")
             .expect("pending interview should be present");
-        assert_eq!(pending.question_id, "q-1");
-        assert_eq!(pending.stage, "gate");
-        assert_eq!(pending.options.len(), 2);
-        assert!(pending.allow_freeform);
-        assert_eq!(pending.timeout_seconds, Some(30.0));
-        assert_eq!(pending.context_display.as_deref(), Some("Latest draft"));
+        assert_eq!(pending.question.id, "q-1");
+        assert_eq!(pending.question.stage, "gate");
+        assert_eq!(
+            pending.question.question_type,
+            InterviewQuestionType::MultipleChoice
+        );
+        assert_eq!(pending.question.options.len(), 2);
+        assert!(pending.question.allow_freeform);
+        assert_eq!(pending.question.timeout_seconds, Some(30.0));
+        assert_eq!(
+            pending.question.context_display.as_deref(),
+            Some("Latest draft")
+        );
 
         state
             .apply_event(&test_event(

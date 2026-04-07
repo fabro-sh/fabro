@@ -209,7 +209,7 @@ pub trait Interviewer: Send + Sync {
 pub use auto_approve::AutoApproveInterviewer;
 pub use callback::CallbackInterviewer;
 pub use console::ConsoleInterviewer;
-pub use control::{ControlInterviewer, InterviewBroker, SubmitError};
+pub use control::{ControlInterviewer, SubmitError};
 pub use control_protocol::{
     WORKER_CONTROL_PROTOCOL_VERSION, WorkerControlAnswer, WorkerControlEnvelope,
     WorkerControlMessage,
@@ -375,16 +375,16 @@ mod tests {
 
     #[tokio::test]
     async fn control_interviewer_routes_answers_by_question_id() {
-        let broker = Arc::new(InterviewBroker::new());
-        let interviewer = ControlInterviewer::new(Arc::clone(&broker));
+        let interviewer = Arc::new(ControlInterviewer::new());
 
         let mut question = Question::new("Approve?", QuestionType::YesNo);
         question.id = "q-1".to_string();
 
-        let ask = tokio::spawn(async move { interviewer.ask(question).await });
+        let ask_interviewer = Arc::clone(&interviewer);
+        let ask = tokio::spawn(async move { ask_interviewer.ask(question).await });
 
         time::sleep(std::time::Duration::from_millis(10)).await;
-        broker.submit("q-1", Answer::yes()).await.unwrap();
+        interviewer.submit("q-1", Answer::yes()).await.unwrap();
 
         let answer = ask.await.unwrap();
         assert_eq!(answer.value, AnswerValue::Yes);
