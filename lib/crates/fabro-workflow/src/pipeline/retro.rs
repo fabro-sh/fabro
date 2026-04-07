@@ -23,7 +23,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
             return None;
         }
     };
-    let Some(cp) = state.checkpoint else {
+    let Some(ref cp) = state.checkpoint else {
         tracing::warn!("Could not load checkpoint, skipping retro");
         if let Some(ref emitter) = options.emitter {
             emitter.emit(&Event::RetroFailed {
@@ -80,9 +80,23 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
                     }
                 })
             });
+        let events = match options.run_store.list_events().await {
+            Ok(events) => events,
+            Err(err) => {
+                tracing::warn!(error = %err, "Could not load events from store, skipping retro");
+                if let Some(ref emitter) = options.emitter {
+                    emitter.emit(&Event::RetroFailed {
+                        error: err.to_string(),
+                        duration_ms: 0,
+                    });
+                }
+                return None;
+            }
+        };
         run_retro_agent(
             &options.sandbox,
-            &options.run_store,
+            &state,
+            &events,
             &options.run_dir,
             client,
             options.provider,
@@ -319,7 +333,7 @@ mod tests {
             graph: Graph::new("test"),
             outcome: Ok(crate::outcome::Outcome::success()),
             run_options: test_run_options(&run_dir),
-            run_store: run_store.clone(),
+            run_store: run_store.clone().into(),
             hook_runner: None,
             emitter: Arc::clone(&emitter),
             sandbox: Arc::clone(&sandbox),
@@ -334,7 +348,7 @@ mod tests {
             executed,
             &RetroOptions {
                 run_id: test_run_id(),
-                run_store,
+                run_store: run_store.into(),
                 workflow_name: "test".to_string(),
                 goal: "Ship it".to_string(),
                 run_dir: run_dir.clone(),
@@ -371,7 +385,7 @@ mod tests {
         let retro = run_retro(
             &RetroOptions {
                 run_id: test_run_id(),
-                run_store: test_run_store(&run_dir, &checkpoint).await,
+                run_store: test_run_store(&run_dir, &checkpoint).await.into(),
                 workflow_name: "test".to_string(),
                 goal: "Ship it".to_string(),
                 run_dir: run_dir.clone(),

@@ -1,8 +1,7 @@
 use std::path::Path;
 
-use fabro_store::RunDatabase;
-
 use crate::error::FabroError;
+use crate::runtime_store::RunStoreHandle;
 
 use super::types::{PersistOptions, Persisted, Validated};
 
@@ -26,7 +25,7 @@ pub(crate) fn persist(
 }
 
 pub(crate) async fn load_from_store(
-    run_store: &RunDatabase,
+    run_store: &RunStoreHandle,
     run_dir: &Path,
 ) -> Result<Persisted, FabroError> {
     let state = run_store
@@ -231,7 +230,9 @@ mod tests {
         .unwrap();
 
         let run_store = seeded_store(&run_dir, &expected, Some(&source)).await;
-        let loaded = load_from_store(&run_store, &run_dir).await.unwrap();
+        let loaded = load_from_store(&run_store.clone().into(), &run_dir)
+            .await
+            .unwrap();
 
         let loaded_record = loaded.run_record();
         assert_eq!(loaded_record.run_id, expected.run_id);
@@ -284,7 +285,9 @@ mod tests {
         record.graph = graph;
 
         let run_store = seeded_store(&run_dir, &record, None).await;
-        let loaded = load_from_store(&run_store, &run_dir).await.unwrap();
+        let loaded = load_from_store(&run_store.clone().into(), &run_dir)
+            .await
+            .unwrap();
 
         assert!(loaded.source().is_empty());
     }
@@ -300,7 +303,9 @@ mod tests {
         record.graph = graph.clone();
 
         let run_store = seeded_store(&run_dir, &record, Some(&source)).await;
-        let loaded = load_from_store(&run_store, &run_dir).await.unwrap();
+        let loaded = load_from_store(&run_store.clone().into(), &run_dir)
+            .await
+            .unwrap();
 
         assert_eq!(
             serde_json::to_value(loaded.graph()).unwrap(),

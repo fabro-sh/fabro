@@ -2629,7 +2629,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         run_store.subscribe(),
         state.global_event_tx.clone(),
     ));
-    let persisted = match Persisted::load_from_store(&run_store, &run_dir).await {
+    let persisted = match Persisted::load_from_store(&run_store.clone().into(), &run_dir).await {
         Ok(persisted) => persisted,
         Err(e) => {
             tracing::error!(run_id = %run_id, error = %e, "Failed to load persisted run");
@@ -2665,7 +2665,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         cancel_token: Some(Arc::clone(&cancel_token)),
         emitter: Arc::clone(&emitter),
         interviewer: Arc::clone(&interviewer) as Arc<dyn Interviewer>,
-        run_store: run_store.clone(),
+        run_store: run_store.clone().into(),
         event_sink: workflow_event::RunEventSink::store(run_store.clone()),
         run_control: None,
         github_app,
