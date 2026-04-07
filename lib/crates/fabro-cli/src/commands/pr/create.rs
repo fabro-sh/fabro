@@ -103,7 +103,7 @@ pub(super) async fn create_command(
         &model,
         true,
         None,
-        &run_store,
+        &run_store.clone().into(),
         None,
     )
     .await

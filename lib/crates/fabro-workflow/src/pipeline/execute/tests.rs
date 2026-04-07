@@ -185,7 +185,7 @@ async fn execute_test_run_with_options(
         persisted_workflow(graph, String::new(), &run_options.run_dir, run_id_value),
         InitOptions {
             run_id: run_id_value,
-            run_store,
+            run_store: run_store.into(),
             dry_run: false,
             emitter,
             sandbox: SandboxSpec::Local {
@@ -241,7 +241,7 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
         persisted_workflow(graph, source, &run_dir, test_run_id("run-test")),
         InitOptions {
             run_id: test_run_id("run-test"),
-            run_store: test_run_store(&test_run_id("run-test")).await,
+            run_store: test_run_store(&test_run_id("run-test")).await.into(),
             dry_run: false,
             emitter: test_emitter_arc("run-test"),
             sandbox: SandboxSpec::Local {
@@ -311,7 +311,7 @@ async fn run_with_lifecycle(
         persisted_workflow(graph.clone(), String::new(), &run_dir, run_id),
         InitOptions {
             run_id,
-            run_store: test_run_store(&run_id).await,
+            run_store: test_run_store(&run_id).await.into(),
             dry_run: false,
             emitter,
             sandbox: SandboxSpec::Local {
