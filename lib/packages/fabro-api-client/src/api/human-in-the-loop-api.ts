@@ -36,8 +36,6 @@ import type { SshAccessRequest } from '../models';
 // @ts-ignore
 import type { SshAccessResponse } from '../models';
 // @ts-ignore
-import type { SteerRequest } from '../models';
-// @ts-ignore
 import type { SubmitAnswerRequest } from '../models';
 /**
  * HumanInTheLoopApi - axios parameter creator
@@ -342,52 +340,6 @@ export const HumanInTheLoopApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Sends inline guidance to a running agent, targeting a specific file and line. The guidance is delivered asynchronously.
-         * @summary Steer Run
-         * @param {string} id Unique run identifier (ULID).
-         * @param {SteerRequest} steerRequest 
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        steerRun: async (id: string, steerRequest: SteerRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'id' is not null or undefined
-            assertParamExists('steerRun', 'id', id)
-            // verify required parameter 'steerRequest' is not null or undefined
-            assertParamExists('steerRun', 'steerRequest', steerRequest)
-            const localVarPath = `/api/v1/runs/{id}/steer`
-                .replace(`{${"id"}}`, encodeURIComponent(String(id)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            // authentication mTLS required
-            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
-
-            // authentication BearerAuth required
-            // http bearer authentication required
-            await setBearerAuthToObject(localVarHeaderParameter, configuration)
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(steerRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
          * Submits an answer to a pending question. The answer can be freeform text or a selected option key, depending on the question type.
          * @summary Submit Run Answer
          * @param {string} id Unique run identifier (ULID).
@@ -534,20 +486,6 @@ export const HumanInTheLoopApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Sends inline guidance to a running agent, targeting a specific file and line. The guidance is delivered asynchronously.
-         * @summary Steer Run
-         * @param {string} id Unique run identifier (ULID).
-         * @param {SteerRequest} steerRequest 
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async steerRun(id: string, steerRequest: SteerRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.steerRun(id, steerRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['HumanInTheLoopApi.steerRun']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
          * Submits an answer to a pending question. The answer can be freeform text or a selected option key, depending on the question type.
          * @summary Submit Run Answer
          * @param {string} id Unique run identifier (ULID).
@@ -641,17 +579,6 @@ export const HumanInTheLoopApiFactory = function (configuration?: Configuration,
             return localVarFp.putSandboxFile(id, path, body, options).then((request) => request(axios, basePath));
         },
         /**
-         * Sends inline guidance to a running agent, targeting a specific file and line. The guidance is delivered asynchronously.
-         * @summary Steer Run
-         * @param {string} id Unique run identifier (ULID).
-         * @param {SteerRequest} steerRequest 
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        steerRun(id: string, steerRequest: SteerRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.steerRun(id, steerRequest, options).then((request) => request(axios, basePath));
-        },
-        /**
          * Submits an answer to a pending question. The answer can be freeform text or a selected option key, depending on the question type.
          * @summary Submit Run Answer
          * @param {string} id Unique run identifier (ULID).
@@ -743,18 +670,6 @@ export class HumanInTheLoopApi extends BaseAPI {
      */
     public putSandboxFile(id: string, path: string, body: File, options?: RawAxiosRequestConfig) {
         return HumanInTheLoopApiFp(this.configuration).putSandboxFile(id, path, body, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * Sends inline guidance to a running agent, targeting a specific file and line. The guidance is delivered asynchronously.
-     * @summary Steer Run
-     * @param {string} id Unique run identifier (ULID).
-     * @param {SteerRequest} steerRequest 
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public steerRun(id: string, steerRequest: SteerRequest, options?: RawAxiosRequestConfig) {
-        return HumanInTheLoopApiFp(this.configuration).steerRun(id, steerRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

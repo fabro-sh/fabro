@@ -46,14 +46,6 @@ struct PaginatedEndpoint {
 
 const ENDPOINTS: &[PaginatedEndpoint] = &[
     PaginatedEndpoint {
-        path: "/api/v1/workflows",
-        name: "listWorkflows",
-    },
-    PaginatedEndpoint {
-        path: "/api/v1/workflows/implement/runs",
-        name: "listWorkflowRuns",
-    },
-    PaginatedEndpoint {
         path: "/api/v1/insights/queries",
         name: "listSavedQueries",
     },

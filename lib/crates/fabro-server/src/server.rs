@@ -439,7 +439,6 @@ fn demo_routes() -> Router<Arc<AppState>> {
         )
         .route("/runs/{id}/usage", get(demo::get_run_usage))
         .route("/runs/{id}/settings", get(demo::get_run_settings))
-        .route("/runs/{id}/steer", post(demo::steer_run_stub))
         .route("/runs/{id}/preview", post(demo::generate_preview_url_stub))
         .route("/runs/{id}/ssh", post(demo::create_ssh_access_stub))
         .route(
@@ -450,9 +449,6 @@ fn demo_routes() -> Router<Arc<AppState>> {
             "/runs/{id}/sandbox/file",
             get(demo::get_sandbox_file_stub).put(demo::put_sandbox_file_stub),
         )
-        .route("/workflows", get(demo::list_workflows))
-        .route("/workflows/{name}", get(demo::get_workflow))
-        .route("/workflows/{name}/runs", get(demo::list_workflow_runs))
         .route(
             "/insights/queries",
             get(demo::list_saved_queries).post(demo::save_query_stub),

@@ -867,36 +867,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /api/v1/runs/{id}/steer:
-    post:
-      operationId: steerRun
-      tags: [Human-in-the-Loop]
-      summary: Steer Run
-      description: Sends inline guidance to a running agent, targeting a specific file and line. The guidance is delivered asynchronously.
-      parameters:
-        - $ref: "#/components/parameters/RunId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/SteerRequest"
-      responses:
-        "202":
-          description: Steering accepted for processing
-        "404":
-          description: Run not found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "409":
-          description: Run is not in a steerable state
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-
   /api/v1/runs/{id}/preview:
     post:
       operationId: generatePreviewUrl
@@ -1067,71 +1037,6 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Run has no active sandbox
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-
-  # ── Workflows ─────────────────────────────────────────────────────────
-
-  /api/v1/workflows:
-    get:
-      operationId: listWorkflows
-      tags: [Workflows]
-      summary: List Workflows
-      description: Returns a paginated list of workflow definitions available for execution.
-      parameters:
-        - $ref: "#/components/parameters/PageLimit"
-        - $ref: "#/components/parameters/PageOffset"
-      responses:
-        "200":
-          description: Paginated list of workflows
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PaginatedWorkflowList"
-
-  /api/v1/workflows/{name}:
-    get:
-      operationId: retrieveWorkflow
-      tags: [Workflows]
-      summary: Retrieve Workflow
-      description: Returns the full detail of a workflow including its Graphviz graph, resolved settings, and description.
-      parameters:
-        - $ref: "#/components/parameters/WorkflowName"
-      responses:
-        "200":
-          description: Workflow detail
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/WorkflowDetail"
-        "404":
-          description: Workflow not found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-
-  /api/v1/workflows/{name}/runs:
-    get:
-      operationId: listWorkflowRuns
-      tags: [Workflows]
-      summary: List Workflow Runs
-      description: Returns a paginated list of runs filtered to a specific workflow.
-      parameters:
-        - $ref: "#/components/parameters/WorkflowName"
-        - $ref: "#/components/parameters/PageLimit"
-        - $ref: "#/components/parameters/PageOffset"
-      responses:
-        "200":
-          description: Paginated list of runs
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PaginatedRunList"
-        "404":
-          description: Workflow not found
           content:
             application/json:
               schema:
@@ -1686,15 +1591,6 @@ components:
         type: string
       example: q-001
 
-    WorkflowName:
-      name: name
-      in: path
-      required: true
-      description: URL-safe slug identifying a workflow definition.
-      schema:
-        type: string
-      example: fix_build
-
     InsightQueryId:
       name: id
       in: path
@@ -1788,20 +1684,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/RunListItem"
-        meta:
-          $ref: "#/components/schemas/PaginationMeta"
-
-    PaginatedWorkflowList:
-      description: Paginated list of workflows.
-      type: object
-      required:
-        - data
-        - meta
-      properties:
-        data:
-          type: array
-          items:
-            $ref: "#/components/schemas/WorkflowListItem"
         meta:
           $ref: "#/components/schemas/PaginationMeta"
 
@@ -3329,34 +3211,6 @@ components:
           description: Total runtime in seconds.
           example: 3501.0
 
-    WorkflowSchedule:
-      description: Schedule configuration for a workflow.
-      type: object
-      required:
-        - expression
-      properties:
-        expression:
-          type: string
-          description: Cron-like schedule expression.
-          example: "0 */6 * * *"
-        next_run:
-          type: string
-          format: date-time
-          description: ISO 8601 timestamp of the next scheduled run.
-          example: "2025-09-15T18:00:00Z"
-
-    WorkflowLastRun:
-      description: Information about a workflow's most recent run.
-      type: object
-      required:
-        - ran_at
-      properties:
-        ran_at:
-          type: string
-          format: date-time
-          description: ISO 8601 timestamp of the most recent run.
-          example: "2025-09-15T12:00:00Z"
-
     UsageStageRef:
       description: Reference to a usage stage.
       type: object
@@ -3777,19 +3631,6 @@ components:
           items:
             $ref: "#/components/schemas/UsageByModel"
 
-    SteerRequest:
-      description: Request body for sending inline steering guidance to a running agent.
-      type: object
-      required:
-        - guidance
-      properties:
-        location:
-          $ref: "#/components/schemas/CodeLocation"
-        guidance:
-          type: string
-          description: Guidance text for the agent.
-          example: Use a sliding window algorithm instead of fixed window.
-
     PreviewUrlRequest:
       description: Request body for generating a preview URL from a sandbox port.
       type: object
@@ -3879,67 +3720,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SandboxFileEntry"
-
-    # ── Workflow Schemas ─────────────────────────────────────────────────
-
-    WorkflowListItem:
-      description: Summary of a workflow shown in list views.
-      type: object
-      required:
-        - name
-        - slug
-        - filename
-      properties:
-        name:
-          type: string
-          description: Human-readable workflow name.
-          example: Fix Build
-        slug:
-          type: string
-          description: URL-safe slug used in API paths.
-          example: fix_build
-        filename:
-          type: string
-          description: Graphviz graph filename.
-          example: fix_build.fabro
-        last_run:
-          $ref: "#/components/schemas/WorkflowLastRun"
-        schedule:
-          $ref: "#/components/schemas/WorkflowSchedule"
-
-    WorkflowDetail:
-      description: Full detail of a workflow definition including graph and resolved settings.
-      type: object
-      required:
-        - name
-        - slug
-        - filename
-        - description
-        - settings
-        - graph
-      properties:
-        name:
-          type: string
-          description: Human-readable workflow name.
-          example: Fix Build
-        slug:
-          type: string
-          description: URL-safe slug used in API paths.
-          example: fix_build
-        filename:
-          type: string
-          description: Graphviz graph filename.
-          example: fix_build.fabro
-        description:
-          type: string
-          description: Prose description of what the workflow does.
-          example: Automatically diagnoses and fixes CI build failures.
-        settings:
-          $ref: "#/components/schemas/RunSettings"
-        graph:
-          type: string
-          description: Graphviz DOT language source defining the workflow graph.
-          example: "digraph fix_build { rankdir=LR; start -> diagnose -> fix -> validate }"
 
     # ── Insights Schemas ─────────────────────────────────────────────────
 

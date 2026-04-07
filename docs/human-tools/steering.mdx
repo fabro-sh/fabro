@@ -11,14 +11,12 @@ A steering message is injected into the agent's conversation as a user-role mess
 
 The delivery flow:
 
-1. You send a `POST /api/v1/runs/{id}/steer` request with your guidance text
+1. You send a steering request with your guidance text
 2. The message is queued on the agent session's steering queue
 3. Before the next LLM call, Fabro drains the queue and injects each message as a `Steering` turn in the conversation history
 4. The LLM sees the guidance alongside its existing context and adjusts accordingly
 
-Steering is **asynchronous** — the API returns `202 Accepted` immediately. The agent picks up the message at its next natural pause point (between tool calls), not mid-execution.
-
-See the [Steer Run API reference](/api-reference/human-in-the-loop/steer-run) for the full request and response schema.
+Steering is **asynchronous** — the agent picks up the message at its next natural pause point (between tool calls), not mid-execution.
 
 ## When steering is delivered
 

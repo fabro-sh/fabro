@@ -12,7 +12,6 @@ api/secrets-api.ts
 api/settings-api.ts
 api/system-api.ts
 api/usage-api.ts
-api/workflows-api.ts
 base.ts
 common.ts
 configuration.ts
@@ -102,7 +101,6 @@ models/paginated-run-list.ts
 models/paginated-run-stage-list.ts
 models/paginated-saved-query-list.ts
 models/paginated-stage-turn-list.ts
-models/paginated-workflow-list.ts
 models/pagination-meta.ts
 models/preflight-check-detail.ts
 models/preflight-check-report.ts
@@ -167,7 +165,6 @@ models/stage-status.ts
 models/stage-turn.ts
 models/start-run-request.ts
 models/status-reason.ts
-models/steer-request.ts
 models/store-run-summary.ts
 models/submit-answer-request.ts
 models/system-info-response.ts
@@ -184,10 +181,6 @@ models/usage-totals.ts
 models/user-response.ts
 models/web-settings.ts
 models/webhook-settings.ts
-models/workflow-detail.ts
 models/workflow-diagnostic.ts
-models/workflow-last-run.ts
-models/workflow-list-item.ts
 models/workflow-reference.ts
-models/workflow-schedule.ts
 models/write-blob-response.ts
