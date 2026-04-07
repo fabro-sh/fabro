@@ -10,7 +10,7 @@ use fabro_agent::{
 use fabro_llm::client::Client;
 use fabro_llm::provider::Provider;
 use fabro_llm::types::ToolDefinition;
-use fabro_store::RunDatabase;
+use fabro_store::{EventEnvelope, RunProjection};
 use tokio::task::JoinHandle;
 
 use crate::retro::{RetroNarrative, SmoothnessRating};
@@ -135,7 +135,8 @@ pub fn build_retro_prompt(retro_data_dir: &str) -> String {
 /// files via tool access, then calls `submit_retro` with its analysis.
 pub async fn run_retro_agent(
     sandbox: &Arc<dyn Sandbox>,
-    run_store: &RunDatabase,
+    state: &RunProjection,
+    events: &[EventEnvelope],
     run_dir: &Path,
     llm_client: &Client,
     provider: Provider,
@@ -144,7 +145,7 @@ pub async fn run_retro_agent(
 ) -> anyhow::Result<RetroAgentResult> {
     // Upload data files into sandbox (needed for Daytona; no-op effect for local
     // since the agent can also read from the original paths via tools).
-    upload_data_files(sandbox, run_store, run_dir, RETRO_DATA_DIR).await?;
+    upload_data_files(sandbox, state, events, run_dir, RETRO_DATA_DIR).await?;
 
     // Build provider profile with the submit_retro tool
     let captured: Arc<Mutex<Option<RetroNarrative>>> = Arc::new(Mutex::new(None));
@@ -292,7 +293,8 @@ fn build_profile(provider: Provider, model: &str) -> Box<dyn AgentProfile> {
 
 async fn upload_data_files(
     sandbox: &Arc<dyn Sandbox>,
-    run_store: &RunDatabase,
+    state: &RunProjection,
+    events: &[EventEnvelope],
     _run_dir: &Path,
     target_dir: &str,
 ) -> anyhow::Result<()> {
@@ -302,19 +304,16 @@ async fn upload_data_files(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to create retro data dir: {e}"))?;
 
-    let progress_content = match run_store.list_events().await {
-        Ok(envelopes) => {
-            let lines: Vec<String> = envelopes
-                .into_iter()
-                .filter_map(|env| serde_json::to_string(env.payload.as_value()).ok())
-                .collect();
-            if lines.is_empty() {
-                None
-            } else {
-                Some(lines.join("\n") + "\n")
-            }
+    let progress_content = {
+        let lines: Vec<String> = events
+            .iter()
+            .filter_map(|env| serde_json::to_string(env.payload.as_value()).ok())
+            .collect();
+        if lines.is_empty() {
+            None
+        } else {
+            Some(lines.join("\n") + "\n")
         }
-        Err(e) => return Err(anyhow::anyhow!("Failed to load events from store: {e}")),
     };
     if let Some(content) = progress_content {
         sandbox
@@ -323,24 +322,23 @@ async fn upload_data_files(
             .map_err(|e| anyhow::anyhow!("Failed to upload progress.jsonl: {e}"))?;
     }
 
-    let state = run_store
-        .state()
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to load run state from store: {e}"))?;
     let checkpoint_content = state
         .checkpoint
+        .clone()
         .map(|cp| serde_json::to_string_pretty(&cp))
         .transpose()?;
     upload_file(sandbox, target_dir, "checkpoint.json", checkpoint_content).await?;
 
     let run_content = state
         .run
+        .clone()
         .map(|run| serde_json::to_string_pretty(&run))
         .transpose()?;
     upload_file(sandbox, target_dir, "run.json", run_content).await?;
 
     let start_content = state
         .start
+        .clone()
         .map(|start| serde_json::to_string_pretty(&start))
         .transpose()?;
     upload_file(sandbox, target_dir, "start.json", start_content).await?;

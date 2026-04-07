@@ -11,7 +11,6 @@ use fabro_llm::Provider;
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::FallbackTarget;
 use fabro_sandbox::SandboxSpec;
-use fabro_store::RunDatabase;
 use fabro_types::RunId;
 use fabro_validate::Diagnostic;
 
@@ -24,6 +23,7 @@ use crate::outcome::Outcome;
 use crate::records::{Checkpoint, Conclusion, RunRecord};
 use crate::run_control::RunControlState;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
+use crate::runtime_store::RunStoreHandle;
 use crate::transforms::Transform;
 use crate::workflow_bundle::WorkflowBundle;
 use fabro_config::run::PullRequestSettings;
@@ -198,7 +198,7 @@ impl Persisted {
     }
 
     pub async fn load_from_store(
-        run_store: &RunDatabase,
+        run_store: &RunStoreHandle,
         run_dir: &Path,
     ) -> Result<Self, FabroError> {
         super::persist::load_from_store(run_store, run_dir).await
@@ -230,7 +230,7 @@ pub struct DevcontainerSpec {
 
 pub struct InitOptions {
     pub run_id: RunId,
-    pub run_store: RunDatabase,
+    pub run_store: RunStoreHandle,
     pub dry_run: bool,
     pub emitter: Arc<Emitter>,
     pub sandbox: SandboxSpec,
@@ -259,7 +259,7 @@ pub struct Initialized {
     pub run_options: RunOptions,
     pub workflow_path: Option<PathBuf>,
     pub workflow_bundle: Option<Arc<WorkflowBundle>>,
-    pub run_store: RunDatabase,
+    pub run_store: RunStoreHandle,
     pub(crate) checkpoint: Option<Checkpoint>,
     pub(crate) seed_context: Option<Context>,
     pub emitter: Arc<Emitter>,
@@ -281,7 +281,7 @@ pub struct Executed {
     pub graph: Graph,
     pub outcome: Result<Outcome, FabroError>,
     pub run_options: RunOptions,
-    pub run_store: RunDatabase,
+    pub run_store: RunStoreHandle,
     pub hook_runner: Option<Arc<HookRunner>>,
     pub emitter: Arc<Emitter>,
     pub sandbox: Arc<dyn Sandbox>,
@@ -298,7 +298,7 @@ pub struct Retroed {
     pub graph: Graph,
     pub outcome: Result<Outcome, FabroError>,
     pub run_options: RunOptions,
-    pub run_store: RunDatabase,
+    pub run_store: RunStoreHandle,
     pub hook_runner: Option<Arc<HookRunner>>,
     pub emitter: Arc<Emitter>,
     pub sandbox: Arc<dyn Sandbox>,
@@ -338,7 +338,7 @@ pub struct TransformOptions {
 /// Options for the RETRO phase.
 pub struct RetroOptions {
     pub run_id: RunId,
-    pub run_store: RunDatabase,
+    pub run_store: RunStoreHandle,
     pub workflow_name: String,
     pub goal: String,
     pub run_dir: PathBuf,
@@ -356,7 +356,7 @@ pub struct RetroOptions {
 pub struct FinalizeOptions {
     pub run_dir: PathBuf,
     pub run_id: RunId,
-    pub run_store: RunDatabase,
+    pub run_store: RunStoreHandle,
     pub workflow_name: String,
     pub hook_runner: Option<Arc<HookRunner>>,
     pub preserve_sandbox: bool,
@@ -366,7 +366,7 @@ pub struct FinalizeOptions {
 /// Options for the PULL_REQUEST phase.
 pub struct PullRequestOptions {
     pub run_dir: PathBuf,
-    pub run_store: RunDatabase,
+    pub run_store: RunStoreHandle,
     pub pr_config: Option<PullRequestSettings>,
     pub github_app: Option<fabro_github::GitHubAppCredentials>,
     pub origin_url: Option<String>,

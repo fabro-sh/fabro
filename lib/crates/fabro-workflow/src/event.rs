@@ -22,6 +22,8 @@ use fabro_agent::{AgentEvent, SandboxEvent, WorktreeEvent, WorktreeEventCallback
 use fabro_llm::types::Usage as LlmUsage;
 use fabro_util::redact::redact_json_value;
 
+use crate::runtime_store::RunStoreHandle;
+
 pub use fabro_types::{EventBody, RunNoticeLevel};
 
 /// Events emitted during workflow run execution for observability.
@@ -2371,7 +2373,7 @@ pub async fn append_event_to_sink(
 
 #[derive(Clone)]
 pub enum RunEventSink {
-    Store(RunDatabase),
+    Store(RunStoreHandle),
     JsonLines(Arc<AsyncMutex<Pin<Box<dyn AsyncWrite + Send>>>>),
     Callback(Arc<RunEventSinkCallback>),
     Composite(Vec<Self>),
@@ -2383,6 +2385,11 @@ type RunEventSinkCallback = dyn Fn(RunEvent) -> RunEventSinkFuture + Send + Sync
 impl RunEventSink {
     #[must_use]
     pub fn store(run_store: RunDatabase) -> Self {
+        Self::Store(RunStoreHandle::local(run_store))
+    }
+
+    #[must_use]
+    pub fn backend(run_store: RunStoreHandle) -> Self {
         Self::Store(run_store)
     }
 
@@ -2420,12 +2427,7 @@ impl RunEventSink {
         while let Some(sink) = pending.pop() {
             match sink {
                 Self::Store(run_store) => {
-                    let payload = build_redacted_event_payload(event, &event.run_id)?;
-                    run_store
-                        .append_event(&payload)
-                        .await
-                        .map(|_| ())
-                        .map_err(anyhow::Error::from)?;
+                    run_store.append_run_event(event).await?;
                 }
                 Self::JsonLines(writer) => {
                     let line = redacted_event_json(event)?;
@@ -2506,9 +2508,9 @@ pub struct StoreProgressLogger {
 
 impl StoreProgressLogger {
     #[must_use]
-    pub fn new(run_store: RunDatabase) -> Self {
+    pub fn new(run_store: impl Into<RunStoreHandle>) -> Self {
         Self {
-            inner: RunEventLogger::new(RunEventSink::store(run_store)),
+            inner: RunEventLogger::new(RunEventSink::backend(run_store.into())),
         }
     }
 

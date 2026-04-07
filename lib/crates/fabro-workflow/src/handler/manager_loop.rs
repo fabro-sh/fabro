@@ -251,7 +251,7 @@ impl Handler for SubWorkflowHandler {
                 run_options: child_run_options,
                 workflow_path: child_workflow_path,
                 workflow_bundle,
-                run_store,
+                run_store: run_store.into(),
                 checkpoint: None,
                 seed_context: Some(child_context),
                 emitter,

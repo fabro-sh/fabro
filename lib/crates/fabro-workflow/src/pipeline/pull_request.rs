@@ -1,5 +1,5 @@
 use fabro_config::run::MergeStrategy;
-use fabro_store::{RunDatabase, RunProjection};
+use fabro_store::RunProjection;
 use fabro_types::PullRequestRecord;
 use tracing::{debug, info};
 
@@ -12,6 +12,7 @@ use super::types::{Concluded, Finalized, PullRequestOptions};
 use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::outcome::{StageStatus, format_cost as outcome_format_cost};
 use crate::records::{Conclusion, RunRecord};
+use crate::runtime_store::RunStoreHandle;
 use fabro_retro::retro::Retro;
 
 /// Derive a PR title from the workflow goal.
@@ -280,7 +281,7 @@ fn emit_run_notice(
     });
 }
 
-async fn load_pull_request_diff(run_store: &RunDatabase) -> String {
+async fn load_pull_request_diff(run_store: &RunStoreHandle) -> String {
     run_store
         .state()
         .await
@@ -298,7 +299,7 @@ pub async fn build_pr_body(
     diff: &str,
     goal: &str,
     model: &str,
-    run_store: &RunDatabase,
+    run_store: &RunStoreHandle,
     conclusion: Option<&Conclusion>,
 ) -> Result<String, String> {
     debug!("Building PR body");
@@ -406,7 +407,7 @@ pub async fn maybe_open_pull_request(
     model: &str,
     draft: bool,
     auto_merge: Option<AutoMergeOptions>,
-    run_store: &RunDatabase,
+    run_store: &RunStoreHandle,
     conclusion: Option<&Conclusion>,
 ) -> Result<Option<PullRequestRecord>, String> {
     if diff.is_empty() {
@@ -1064,7 +1065,7 @@ mod tests {
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
             "Implement feature",
             "mock-model",
-            &run_store,
+            &run_store.clone().into(),
             Some(&conclusion),
         )
         .await
@@ -1134,7 +1135,7 @@ mod tests {
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
             "Implement feature",
             "mock-model",
-            &run_store,
+            &run_store.clone().into(),
             Some(&conclusion),
         )
         .await
@@ -1220,7 +1221,7 @@ mod tests {
             "diff --git a/src/lib.rs b/src/lib.rs\n+fn new_feature() {}\n",
             "Implement feature",
             "mock-model",
-            &run_store,
+            &run_store.clone().into(),
             Some(&make_test_conclusion()),
         )
         .await
@@ -1363,7 +1364,7 @@ mod tests {
             "claude-sonnet-4-20250514",
             false,
             None,
-            &run_store,
+            &run_store.clone().into(),
             None,
         )
         .await;
@@ -1429,7 +1430,7 @@ mod tests {
         .await
         .unwrap();
 
-        let diff = load_pull_request_diff(&run_store).await;
+        let diff = load_pull_request_diff(&run_store.clone().into()).await;
 
         assert!(diff.contains("from_store"));
     }
