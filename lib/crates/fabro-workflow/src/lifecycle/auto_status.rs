@@ -7,10 +7,10 @@ use fabro_core::state::ExecutionState;
 
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
-use crate::outcome::{StageStatus, StageUsage};
+use crate::outcome::{BilledModelUsage, StageStatus};
 
-type WfRunState = ExecutionState<Option<StageUsage>>;
-type WfNodeResult = NodeResult<Option<StageUsage>>;
+type WfRunState = ExecutionState<Option<BilledModelUsage>>;
+type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
 
 /// Sub-lifecycle responsible for auto-status override on nodes with `auto_status=true`.
 pub(crate) struct AutoStatusLifecycle;

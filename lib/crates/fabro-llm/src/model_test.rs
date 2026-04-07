@@ -223,7 +223,7 @@ fn validate_deep_result(result: &GenerateResult) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::types::ToolResult;
-    use crate::types::{FinishReason, Message, Response, StepResult, Usage};
+    use crate::types::{FinishReason, Message, Response, StepResult, TokenCounts};
     use fabro_model::{ModelCosts, ModelFeatures, ModelLimits, Provider};
 
     fn test_model_with(features: ModelFeatures) -> Model {
@@ -257,7 +257,7 @@ mod tests {
             provider: "anthropic".to_string(),
             message: Message::assistant(text),
             finish_reason: FinishReason::Stop,
-            usage: Usage::default(),
+            usage: TokenCounts::default(),
             raw: None,
             warnings: vec![],
             rate_limit: None,
@@ -296,7 +296,7 @@ mod tests {
         let result = GenerateResult {
             response: response_with_text("84 is even"),
             tool_results,
-            total_usage: Usage::default(),
+            total_usage: TokenCounts::default(),
             steps: vec![first_step, second_step],
             output: None,
         };

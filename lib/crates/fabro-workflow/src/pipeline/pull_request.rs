@@ -39,8 +39,10 @@ fn truncate_pr_body(body: &str) -> String {
 }
 
 /// Format an optional cost as `$X.XX` or an en-dash when absent.
-fn format_cost(cost: Option<f64>) -> String {
-    cost.map_or_else(|| "\u{2013}".to_string(), outcome_format_cost)
+fn format_cost(cost_usd_micros: Option<i64>) -> String {
+    cost_usd_micros
+        .map(|value| value as f64 / 1_000_000.0)
+        .map_or_else(|| "\u{2013}".to_string(), outcome_format_cost)
 }
 
 /// Format a duration in milliseconds as a human-readable string.
@@ -113,7 +115,7 @@ fn format_arc_details_section(
 
     // Cost table
     let total_duration = format_duration_ms(conclusion.duration_ms);
-    let total_cost_str = format_cost(conclusion.total_cost);
+    let total_cost_str = format_cost(conclusion.billing.as_ref().and_then(|b| b.total_usd_micros));
     let stage_count = conclusion.stages.len();
     parts.push(format!(
         "<details>\n<summary>Ran {stage_count} {} in {total_duration} for {total_cost_str}</summary>",
@@ -125,7 +127,7 @@ fn format_arc_details_section(
     parts.push("|---|---|---|---|".to_string());
     for stage in &conclusion.stages {
         let dur = format_duration_ms(stage.duration_ms);
-        let cost = format_cost(stage.cost);
+        let cost = format_cost(stage.billing_usd_micros);
         parts.push(format!(
             "| {} | {} | {} | {} |",
             stage.stage_label, dur, cost, stage.retries
@@ -587,12 +589,12 @@ mod tests {
     use fabro_llm::error::SdkError;
     use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
     use fabro_llm::set_default_client;
-    use fabro_llm::types::{FinishReason, Message, Request, Response, StreamEvent, Usage};
+    use fabro_llm::types::{FinishReason, Message, Request, Response, StreamEvent, TokenCounts};
     use fabro_retro::retro::{
         AggregateStats, FrictionKind, FrictionPoint, OpenItem, OpenItemKind, StageRetro,
     };
     use fabro_store::Database;
-    use fabro_types::{RunRecord, Settings, fixtures};
+    use fabro_types::{BilledTokenCounts, RunRecord, Settings, fixtures};
     use futures::stream;
     use object_store::memory::InMemory;
     use std::time::Duration;
@@ -622,10 +624,9 @@ mod tests {
                 provider: "mock".into(),
                 message: Message::assistant(&self.response_text),
                 finish_reason: FinishReason::Stop,
-                usage: Usage {
+                usage: TokenCounts {
                     input_tokens: 10,
                     output_tokens: 20,
-                    total_tokens: 30,
                     ..Default::default()
                 },
                 raw: None,
@@ -640,10 +641,9 @@ mod tests {
                 Ok(StreamEvent::text_delta(&text, Some("t1".into()))),
                 Ok(StreamEvent::finish(
                     FinishReason::Stop,
-                    Usage {
+                    TokenCounts {
                         input_tokens: 10,
                         output_tokens: 20,
-                        total_tokens: 30,
                         ..Default::default()
                     },
                     Response {
@@ -652,10 +652,9 @@ mod tests {
                         provider: "mock".into(),
                         message: Message::assistant(&text),
                         finish_reason: FinishReason::Stop,
-                        usage: Usage {
+                        usage: TokenCounts {
                             input_tokens: 10,
                             output_tokens: 20,
-                            total_tokens: 30,
                             ..Default::default()
                         },
                         raw: None,
@@ -701,32 +700,29 @@ mod tests {
                     stage_id: "plan".to_string(),
                     stage_label: "plan".to_string(),
                     duration_ms: 45_000,
-                    cost: Some(0.12),
+                    billing_usd_micros: Some(120_000),
                     retries: 0,
                 },
                 StageSummary {
                     stage_id: "implement".to_string(),
                     stage_label: "implement".to_string(),
                     duration_ms: 90_000,
-                    cost: Some(0.25),
+                    billing_usd_micros: Some(250_000),
                     retries: 0,
                 },
                 StageSummary {
                     stage_id: "simplify".to_string(),
                     stage_label: "simplify".to_string(),
                     duration_ms: 15_000,
-                    cost: Some(0.05),
+                    billing_usd_micros: Some(50_000),
                     retries: 0,
                 },
             ],
-            total_cost: Some(0.42),
+            billing: Some(BilledTokenCounts {
+                total_usd_micros: Some(420_000),
+                ..BilledTokenCounts::default()
+            }),
             total_retries: 0,
-            total_input_tokens: 0,
-            total_output_tokens: 0,
-            total_cache_read_tokens: 0,
-            total_cache_write_tokens: 0,
-            total_reasoning_tokens: 0,
-            has_pricing: true,
         }
     }
 
@@ -744,7 +740,7 @@ mod tests {
                     status: "success".to_string(),
                     duration_ms: 45_000,
                     retries: 0,
-                    cost: Some(0.12),
+                    billing_usd_micros: Some(120_000),
                     notes: None,
                     failure_reason: None,
                     files_touched: vec![],
@@ -755,7 +751,7 @@ mod tests {
                     status: "success".to_string(),
                     duration_ms: 90_000,
                     retries: 0,
-                    cost: Some(0.25),
+                    billing_usd_micros: Some(250_000),
                     notes: None,
                     failure_reason: None,
                     files_touched: vec!["src/main.rs".to_string(), "src/lib.rs".to_string()],
@@ -766,7 +762,7 @@ mod tests {
                     status: "success".to_string(),
                     duration_ms: 15_000,
                     retries: 0,
-                    cost: Some(0.05),
+                    billing_usd_micros: Some(50_000),
                     notes: None,
                     failure_reason: None,
                     files_touched: vec![],
@@ -774,7 +770,7 @@ mod tests {
             ],
             stats: AggregateStats {
                 total_duration_ms: 150_000,
-                total_cost: Some(0.42),
+                total_billing_usd_micros: Some(420_000),
                 total_retries: 0,
                 files_touched: vec!["src/lib.rs".to_string(), "src/main.rs".to_string()],
                 stages_completed: 3,
@@ -843,7 +839,7 @@ mod tests {
             stages: vec![],
             stats: AggregateStats {
                 total_duration_ms: 0,
-                total_cost: None,
+                total_billing_usd_micros: None,
                 total_retries: 0,
                 files_touched: vec![],
                 stages_completed: 0,
@@ -880,9 +876,9 @@ mod tests {
     fn format_arc_details_no_cost() {
         let mut conclusion = make_test_conclusion();
         for stage in &mut conclusion.stages {
-            stage.cost = None;
+            stage.billing_usd_micros = None;
         }
-        conclusion.total_cost = None;
+        conclusion.billing = None;
         let section = format_arc_details_section(&conclusion, None, None);
 
         // En-dash for missing costs
@@ -1198,7 +1194,7 @@ mod tests {
                 status: "success".to_string(),
                 preferred_label: None,
                 suggested_next_ids: vec![],
-                usage: None,
+                billing: None,
                 failure: None,
                 notes: None,
                 files_touched: vec![],
@@ -1418,12 +1414,12 @@ mod tests {
                 artifact_count: 0,
                 status: "success".to_string(),
                 reason: None,
-                total_cost: None,
+                total_usd_micros: None,
                 final_git_commit_sha: None,
                 final_patch: Some(
                     "diff --git a/src/lib.rs b/src/lib.rs\n+fn from_store() {}\n".to_string(),
                 ),
-                usage: None,
+                billing: None,
             },
         )
         .await

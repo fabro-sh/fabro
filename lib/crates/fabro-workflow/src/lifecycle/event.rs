@@ -20,13 +20,11 @@ use crate::error::FabroError;
 use crate::event::{Emitter, Event};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
-use crate::outcome::{
-    FailureCategory, FailureDetail, Outcome, StageStatus, StageUsage, stage_usage_to_llm,
-};
-use fabro_types::{RunId, StatusReason};
+use crate::outcome::{BilledModelUsage, FailureCategory, FailureDetail, Outcome, StageStatus};
+use fabro_types::{BilledTokenCounts, RunId, StatusReason};
 
-type WfRunState = ExecutionState<Option<StageUsage>>;
-type WfNodeResult = NodeResult<Option<StageUsage>>;
+type WfRunState = ExecutionState<Option<BilledModelUsage>>;
+type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
 type FailureSignatureSnapshot = (
     Option<BTreeMap<String, usize>>,
     Option<BTreeMap<String, usize>>,
@@ -139,7 +137,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             status: StageStatus::Success.to_string(),
             preferred_label: None,
             suggested_next_ids: Vec::new(),
-            usage: None,
+            billing: None,
             failure: None,
             notes: None,
             files_touched: Vec::new(),
@@ -162,7 +160,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         &self,
         ctx: &AttemptContext<'_, WorkflowGraph>,
         state: &WfRunState,
-    ) -> CoreResult<NodeDecision<Option<StageUsage>>> {
+    ) -> CoreResult<NodeDecision<Option<BilledModelUsage>>> {
         let gv = ctx.node.inner();
         self.emitter.emit(&Event::StageStarted {
             node_id: gv.id.clone(),
@@ -245,7 +243,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                 status: outcome.status.to_string(),
                 preferred_label: outcome.preferred_label.clone(),
                 suggested_next_ids: outcome.suggested_next_ids.clone(),
-                usage: outcome.usage.clone(),
+                billing: outcome.usage.clone(),
                 failure: outcome.failure.clone(),
                 notes: outcome.notes.clone(),
                 files_touched: outcome.files_touched.clone(),
@@ -387,19 +385,31 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         let artifact_count = self.captured_artifact_count.load(Ordering::Relaxed);
         let last_sha = self.last_git_sha.lock().unwrap().clone();
         let final_patch = self.final_patch.lock().unwrap().clone();
-        let total_cost = {
-            let sum: f64 = state
-                .node_outcomes
-                .values()
-                .filter_map(|o| o.usage.as_ref()?.cost)
-                .sum();
-            if sum > 0.0 { Some(sum) } else { None }
-        };
-        let run_usage = state
+        let run_billing_entries = state
             .node_outcomes
             .values()
-            .filter_map(|o| o.usage.as_ref().map(stage_usage_to_llm))
-            .reduce(|a, b| a + b);
+            .filter_map(|o| o.usage.clone())
+            .collect::<Vec<_>>();
+        let run_billing = (!run_billing_entries.is_empty())
+            .then(|| BilledTokenCounts::from_billed_usage(&run_billing_entries));
+        let total_usd_micros = run_billing
+            .as_ref()
+            .and_then(|billing| billing.total_usd_micros)
+            .or_else(|| {
+                let mut total = 0_i64;
+                let mut has_total = false;
+                for usage in state
+                    .node_outcomes
+                    .values()
+                    .filter_map(|o| o.usage.as_ref())
+                {
+                    if let Some(value) = usage.total_usd_micros {
+                        total += value;
+                        has_total = true;
+                    }
+                }
+                has_total.then_some(total)
+            });
 
         if outcome.status == StageStatus::Success || outcome.status == StageStatus::PartialSuccess {
             self.emitter.emit(&Event::WorkflowRunCompleted {
@@ -410,10 +420,10 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                     StageStatus::PartialSuccess => StatusReason::PartialSuccess,
                     _ => StatusReason::Completed,
                 }),
-                total_cost,
+                total_usd_micros,
                 final_git_commit_sha: last_sha,
                 final_patch,
-                usage: run_usage,
+                billing: run_billing,
             });
         } else {
             let error_msg = outcome

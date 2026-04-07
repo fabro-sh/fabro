@@ -7,8 +7,8 @@ use crate::providers::common::{
 };
 use crate::types::{
     AdapterTimeout, ContentPart, FinishReason, Message, RateLimitInfo, Request, Response,
-    ResponseFormat, ResponseFormatType, Role, StreamEvent, ThinkingData, ToolCall, ToolChoice,
-    ToolDefinition, Usage,
+    ResponseFormat, ResponseFormatType, Role, StreamEvent, ThinkingData, TokenCounts, ToolCall,
+    ToolChoice, ToolDefinition,
 };
 
 /// `OpenAI`-compatible Chat Completions adapter (Section 7.10).
@@ -157,7 +157,6 @@ struct ApiFunction {
 struct ApiUsage {
     prompt_tokens: i64,
     completion_tokens: i64,
-    total_tokens: i64,
 }
 
 // --- Streaming response types ---
@@ -505,11 +504,10 @@ impl ProviderAdapter for Adapter {
         let usage = api_resp
             .usage
             .as_ref()
-            .map_or_else(Usage::default, |u| Usage {
+            .map_or_else(TokenCounts::default, |u| TokenCounts {
                 input_tokens: u.prompt_tokens,
                 output_tokens: u.completion_tokens,
-                total_tokens: u.total_tokens,
-                ..Usage::default()
+                ..TokenCounts::default()
             });
 
         Ok(Response {
@@ -676,7 +674,7 @@ struct StreamState {
     accumulated_text: String,
     accumulated_reasoning: String,
     tool_calls: Vec<AccumulatedToolCall>,
-    usage: Usage,
+    usage: TokenCounts,
     finish_reason: FinishReason,
     text_started: bool,
     done: bool,
@@ -702,7 +700,7 @@ impl StreamState {
             accumulated_text: String::new(),
             accumulated_reasoning: String::new(),
             tool_calls: Vec::new(),
-            usage: Usage::default(),
+            usage: TokenCounts::default(),
             finish_reason: FinishReason::Stop,
             text_started: false,
             done: false,
@@ -740,11 +738,10 @@ impl StreamState {
 
         // Capture usage if present (often in a dedicated chunk).
         if let Some(usage) = &chunk.usage {
-            self.usage = Usage {
+            self.usage = TokenCounts {
                 input_tokens: usage.prompt_tokens,
                 output_tokens: usage.completion_tokens,
-                total_tokens: usage.total_tokens,
-                ..Usage::default()
+                ..TokenCounts::default()
             };
         }
 
@@ -956,7 +953,6 @@ mod tests {
         let usage = chunk.usage.unwrap();
         assert_eq!(usage.prompt_tokens, 10);
         assert_eq!(usage.completion_tokens, 20);
-        assert_eq!(usage.total_tokens, 30);
     }
 
     #[test]
@@ -1045,11 +1041,10 @@ mod tests {
         state.response_model = "gpt-4".into();
         state.accumulated_text = "Hello world".into();
         state.text_started = true;
-        state.usage = Usage {
+        state.usage = TokenCounts {
             input_tokens: 5,
             output_tokens: 10,
-            total_tokens: 15,
-            ..Usage::default()
+            ..TokenCounts::default()
         };
 
         let events = state.finish_events();

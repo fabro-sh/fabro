@@ -179,7 +179,7 @@ async fn run_multi_turn_cache_test(
             "response text should not be empty on turn {turn}"
         );
 
-        let cache_read = response.usage.cache_read_tokens.unwrap_or(0) as f64;
+        let cache_read = response.usage.cache_read_tokens as f64;
         let input = response.usage.input_tokens as f64;
         let ratio = cache_read / input;
         best_cache_ratio = best_cache_ratio.max(ratio);

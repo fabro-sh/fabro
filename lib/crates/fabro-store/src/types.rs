@@ -19,7 +19,7 @@ pub struct RunSummary {
     pub status_reason: Option<StatusReason>,
     pub pending_control: Option<RunControlAction>,
     pub duration_ms: Option<u64>,
-    pub total_cost: Option<f64>,
+    pub total_usd_micros: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

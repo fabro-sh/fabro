@@ -2020,6 +2020,7 @@ dependencies = [
  "clap",
  "dirs",
  "fabro-macros",
+ "fabro-model",
  "fabro-util",
  "hex",
  "serde",

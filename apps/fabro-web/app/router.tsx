@@ -24,7 +24,7 @@ import * as RunStages from "./routes/run-stages";
 import * as RunSettings from "./routes/run-settings";
 import * as RunGraph from "./routes/run-graph";
 import * as RunFiles from "./routes/run-files";
-import * as RunUsage from "./routes/run-usage";
+import * as RunBilling from "./routes/run-billing";
 import * as Insights from "./routes/insights";
 import * as InsightsEditor from "./routes/insights-editor";
 import * as InsightsNew from "./routes/insights-new";
@@ -106,7 +106,7 @@ export const routes: RouteObject[] = [
               route("settings", RunSettings),
               route("graph", RunGraph),
               route("files", RunFiles),
-              route("usage", RunUsage),
+              route("billing", RunBilling),
             ],
           }),
           route("insights", Insights, {

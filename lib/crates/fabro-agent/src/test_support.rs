@@ -11,7 +11,9 @@ use async_trait::async_trait;
 use fabro_llm::client::Client;
 use fabro_llm::error::SdkError;
 use fabro_llm::provider::{ProviderAdapter, StreamEventStream};
-use fabro_llm::types::{ContentPart, FinishReason, Message, Request, Response, StreamEvent, Usage};
+use fabro_llm::types::{
+    ContentPart, FinishReason, Message, Request, Response, StreamEvent, TokenCounts,
+};
 use fabro_model::Provider;
 use futures::stream;
 use std::collections::HashMap;
@@ -172,10 +174,9 @@ pub fn text_response(text: &str) -> Response {
         provider: "mock".into(),
         message: Message::assistant(text),
         finish_reason: FinishReason::Stop,
-        usage: Usage {
+        usage: TokenCounts {
             input_tokens: 10,
             output_tokens: 5,
-            total_tokens: 15,
             ..Default::default()
         },
         raw: None,
@@ -248,10 +249,9 @@ pub fn tool_call_response(
             tool_call_id: None,
         },
         finish_reason: FinishReason::ToolCalls,
-        usage: Usage {
+        usage: TokenCounts {
             input_tokens: 10,
             output_tokens: 5,
-            total_tokens: 15,
             ..Default::default()
         },
         raw: None,
@@ -401,10 +401,9 @@ pub fn multi_tool_call_response(calls: Vec<(&str, &str, serde_json::Value)>) -> 
             tool_call_id: None,
         },
         finish_reason: FinishReason::ToolCalls,
-        usage: Usage {
+        usage: TokenCounts {
             input_tokens: 10,
             output_tokens: 5,
-            total_tokens: 15,
             ..Default::default()
         },
         raw: None,

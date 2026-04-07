@@ -5,6 +5,7 @@ pub mod run;
 pub mod stage;
 
 use chrono::{DateTime, Utc};
+pub use fabro_model::BilledTokenCounts;
 use serde::de::Error as DeError;
 use serde::ser::Error as SerError;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -24,23 +25,6 @@ pub enum RunNoticeLevel {
     Info,
     Warn,
     Error,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TokenUsage {
-    pub input_tokens: i64,
-    pub output_tokens: i64,
-    pub total_tokens: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning_tokens: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cache_read_tokens: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cache_write_tokens: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub speed: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub raw: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

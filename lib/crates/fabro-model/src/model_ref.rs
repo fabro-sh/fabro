@@ -7,14 +7,14 @@ use crate::types::Model;
 /// A reference to a model — either a fully resolved `Model` or a
 /// provider + model-name pair that hasn't been looked up yet.
 #[derive(Clone)]
-pub enum ModelRef {
+pub enum ModelHandle {
     /// A model whose metadata has been resolved from the catalog.
     Resolved(Arc<Model>),
     /// An unresolved provider:model pair (e.g. from CLI input or config).
     ByName { provider: Provider, model: String },
 }
 
-impl ModelRef {
+impl ModelHandle {
     /// The model identifier string (e.g. `"claude-opus-4-6"`).
     #[must_use]
     pub fn model_id(&self) -> &str {
@@ -34,13 +34,13 @@ impl ModelRef {
     }
 }
 
-impl fmt::Display for ModelRef {
+impl fmt::Display for ModelHandle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}:{}", self.provider(), self.model_id())
     }
 }
 
-impl fmt::Debug for ModelRef {
+impl fmt::Debug for ModelHandle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Resolved(m) => write!(f, "ModelRef::Resolved({:?})", m.id),
@@ -60,7 +60,7 @@ mod tests {
 
     #[test]
     fn by_name_display() {
-        let r = ModelRef::ByName {
+        let r = ModelHandle::ByName {
             provider: Provider::Anthropic,
             model: "claude-opus-4-6".to_string(),
         };
@@ -69,7 +69,7 @@ mod tests {
 
     #[test]
     fn by_name_accessors() {
-        let r = ModelRef::ByName {
+        let r = ModelHandle::ByName {
             provider: Provider::OpenAi,
             model: "gpt-5.4".to_string(),
         };
@@ -80,21 +80,21 @@ mod tests {
     #[test]
     fn resolved_display() {
         let info = Catalog::builtin().get("claude-opus-4-6").unwrap().clone();
-        let r = ModelRef::Resolved(Arc::new(info));
+        let r = ModelHandle::Resolved(Arc::new(info));
         assert_eq!(r.to_string(), "anthropic:claude-opus-4-6");
     }
 
     #[test]
     fn resolved_accessors() {
         let info = Catalog::builtin().get("gpt-5.4").unwrap().clone();
-        let r = ModelRef::Resolved(Arc::new(info));
+        let r = ModelHandle::Resolved(Arc::new(info));
         assert_eq!(r.model_id(), "gpt-5.4");
         assert_eq!(r.provider(), Provider::OpenAi);
     }
 
     #[test]
     fn debug_format() {
-        let r = ModelRef::ByName {
+        let r = ModelHandle::ByName {
             provider: Provider::Gemini,
             model: "gemini-3.1-pro-preview".to_string(),
         };

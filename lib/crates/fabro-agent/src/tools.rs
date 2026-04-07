@@ -3,7 +3,7 @@ use crate::sandbox::GrepOptions;
 use crate::tool_registry::{RegisteredTool, ToolRegistry};
 use fabro_llm::client::Client;
 use fabro_llm::types::{Message, Request, ToolDefinition};
-use fabro_model::ModelRef;
+use fabro_model::ModelHandle;
 use std::borrow::Cow;
 use std::fmt::Write;
 use std::sync::Arc;
@@ -14,7 +14,7 @@ const MAX_WEB_FETCH_BYTES: usize = 100 * 1024;
 #[derive(Clone)]
 pub struct WebFetchSummarizer {
     pub client: Client,
-    pub model_id: ModelRef,
+    pub model_id: ModelHandle,
 }
 
 /// Returns true if the input looks like it contains HTML markup.
@@ -1257,7 +1257,7 @@ mod tests {
         let client = make_client(provider).await;
         let summarizer = WebFetchSummarizer {
             client,
-            model_id: ModelRef::ByName {
+            model_id: ModelHandle::ByName {
                 provider: fabro_model::Provider::Anthropic,
                 model: "mock-model".to_string(),
             },
@@ -1353,7 +1353,7 @@ mod tests {
 
         let summarizer = WebFetchSummarizer {
             client,
-            model_id: ModelRef::ByName {
+            model_id: ModelHandle::ByName {
                 provider: fabro_model::Provider::Anthropic,
                 model: "target-model".to_string(),
             },

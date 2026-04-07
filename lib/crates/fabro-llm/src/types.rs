@@ -365,50 +365,9 @@ impl<'de> Deserialize<'de> for FinishReason {
     }
 }
 
-// --- 3.9 Usage ---
+// --- 3.9 TokenCounts ---
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct Usage {
-    pub input_tokens: i64,
-    pub output_tokens: i64,
-    pub total_tokens: i64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning_tokens: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cache_read_tokens: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cache_write_tokens: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub speed: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub raw: Option<serde_json::Value>,
-}
-
-impl std::ops::Add for Usage {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self {
-        const fn add_optional(a: Option<i64>, b: Option<i64>) -> Option<i64> {
-            match (a, b) {
-                (None, None) => None,
-                (Some(a), None) => Some(a),
-                (None, Some(b)) => Some(b),
-                (Some(a), Some(b)) => Some(a + b),
-            }
-        }
-
-        Self {
-            input_tokens: self.input_tokens + rhs.input_tokens,
-            output_tokens: self.output_tokens + rhs.output_tokens,
-            total_tokens: self.total_tokens + rhs.total_tokens,
-            reasoning_tokens: add_optional(self.reasoning_tokens, rhs.reasoning_tokens),
-            cache_read_tokens: add_optional(self.cache_read_tokens, rhs.cache_read_tokens),
-            cache_write_tokens: add_optional(self.cache_write_tokens, rhs.cache_write_tokens),
-            speed: self.speed,
-            raw: None,
-        }
-    }
-}
+pub use fabro_model::TokenCounts;
 
 // --- 3.10 ResponseFormat ---
 
@@ -557,7 +516,7 @@ pub struct Response {
     pub provider: String,
     pub message: Message,
     pub finish_reason: FinishReason,
-    pub usage: Usage,
+    pub usage: TokenCounts,
     pub raw: Option<serde_json::Value>,
     pub warnings: Vec<Warning>,
     pub rate_limit: Option<RateLimitInfo>,
@@ -633,14 +592,14 @@ pub enum StreamEvent {
     },
     StepFinish {
         finish_reason: FinishReason,
-        usage: Usage,
+        usage: TokenCounts,
         response: Box<Response>,
         tool_calls: Vec<ToolCall>,
         tool_results: Vec<ToolResult>,
     },
     Finish {
         finish_reason: FinishReason,
-        usage: Usage,
+        usage: TokenCounts,
         response: Box<Response>,
     },
     Error {
@@ -660,7 +619,7 @@ impl StreamEvent {
     #[must_use]
     pub fn step_finish(
         reason: FinishReason,
-        usage: Usage,
+        usage: TokenCounts,
         response: Response,
         tool_calls: Vec<ToolCall>,
         tool_results: Vec<ToolResult>,
@@ -675,7 +634,7 @@ impl StreamEvent {
     }
 
     #[must_use]
-    pub fn finish(reason: FinishReason, usage: Usage, response: Response) -> Self {
+    pub fn finish(reason: FinishReason, usage: TokenCounts, response: Response) -> Self {
         Self::Finish {
             finish_reason: reason,
             usage,
@@ -787,7 +746,7 @@ pub enum ObjectStreamEvent {
 pub struct GenerateResult {
     pub response: Response,
     pub tool_results: Vec<ToolResult>,
-    pub total_usage: Usage,
+    pub total_usage: TokenCounts,
     pub steps: Vec<StepResult>,
     pub output: Option<serde_json::Value>,
 }
@@ -916,42 +875,35 @@ mod tests {
 
     #[test]
     fn usage_serialization_skips_none_optional_fields() {
-        let usage = Usage {
+        let usage = TokenCounts {
             input_tokens: 100,
             output_tokens: 50,
-            total_tokens: 150,
-            reasoning_tokens: None,
-            cache_read_tokens: None,
-            cache_write_tokens: None,
-            speed: None,
-            raw: None,
+            ..TokenCounts::default()
         };
         insta::assert_snapshot!(serde_json::to_string_pretty(&usage).unwrap(), @r#"
         {
           "input_tokens": 100,
           "output_tokens": 50,
-          "total_tokens": 150
+          "reasoning_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0
         }
         "#);
     }
 
     #[test]
     fn usage_serialization_includes_present_optional_fields() {
-        let usage = Usage {
+        let usage = TokenCounts {
             input_tokens: 100,
-            output_tokens: 50,
-            total_tokens: 150,
-            reasoning_tokens: Some(20),
-            cache_read_tokens: Some(80),
-            cache_write_tokens: Some(10),
-            speed: None,
-            raw: None,
+            output_tokens: 30,
+            reasoning_tokens: 20,
+            cache_read_tokens: 80,
+            cache_write_tokens: 10,
         };
         insta::assert_snapshot!(serde_json::to_string_pretty(&usage).unwrap(), @r#"
         {
           "input_tokens": 100,
-          "output_tokens": 50,
-          "total_tokens": 150,
+          "output_tokens": 30,
           "reasoning_tokens": 20,
           "cache_read_tokens": 80,
           "cache_write_tokens": 10
@@ -961,70 +913,57 @@ mod tests {
 
     #[test]
     fn usage_deserialization_without_optional_fields() {
-        let json = r#"{"input_tokens":100,"output_tokens":50,"total_tokens":150}"#;
-        let usage: Usage = serde_json::from_str(json).unwrap();
+        let json = r#"{"input_tokens":100,"output_tokens":50}"#;
+        let usage: TokenCounts = serde_json::from_str(json).unwrap();
         assert_eq!(usage.input_tokens, 100);
-        assert_eq!(usage.reasoning_tokens, None);
-        assert_eq!(usage.cache_read_tokens, None);
+        assert_eq!(usage.reasoning_tokens, 0);
+        assert_eq!(usage.cache_read_tokens, 0);
+        assert_eq!(usage.total_tokens(), 150);
     }
 
     #[test]
     fn usage_addition_both_filled() {
-        let a = Usage {
+        let a = TokenCounts {
             input_tokens: 10,
-            output_tokens: 20,
-            total_tokens: 30,
-            reasoning_tokens: Some(5),
-            cache_read_tokens: Some(3),
-            cache_write_tokens: Some(1),
-            speed: None,
-            raw: None,
+            output_tokens: 15,
+            reasoning_tokens: 5,
+            cache_read_tokens: 3,
+            cache_write_tokens: 1,
         };
-        let b = Usage {
+        let b = TokenCounts {
             input_tokens: 15,
-            output_tokens: 25,
-            total_tokens: 40,
-            reasoning_tokens: Some(10),
-            cache_read_tokens: Some(7),
-            cache_write_tokens: Some(2),
-            speed: None,
-            raw: None,
+            output_tokens: 15,
+            reasoning_tokens: 10,
+            cache_read_tokens: 7,
+            cache_write_tokens: 2,
         };
         let sum = a + b;
         assert_eq!(sum.input_tokens, 25);
-        assert_eq!(sum.output_tokens, 45);
-        assert_eq!(sum.total_tokens, 70);
-        assert_eq!(sum.reasoning_tokens, Some(15));
-        assert_eq!(sum.cache_read_tokens, Some(10));
-        assert_eq!(sum.cache_write_tokens, Some(3));
+        assert_eq!(sum.output_tokens, 30);
+        assert_eq!(sum.total_tokens(), 83);
+        assert_eq!(sum.reasoning_tokens, 15);
+        assert_eq!(sum.cache_read_tokens, 10);
+        assert_eq!(sum.cache_write_tokens, 3);
     }
 
     #[test]
     fn usage_addition_one_none() {
-        let a = Usage {
+        let a = TokenCounts {
             input_tokens: 10,
-            output_tokens: 20,
-            total_tokens: 30,
-            reasoning_tokens: Some(5),
-            cache_read_tokens: None,
-            cache_write_tokens: None,
-            speed: None,
-            raw: None,
+            output_tokens: 15,
+            reasoning_tokens: 5,
+            ..TokenCounts::default()
         };
-        let b = Usage {
+        let b = TokenCounts {
             input_tokens: 15,
             output_tokens: 25,
-            total_tokens: 40,
-            reasoning_tokens: None,
-            cache_read_tokens: Some(7),
-            cache_write_tokens: None,
-            speed: None,
-            raw: None,
+            cache_read_tokens: 7,
+            ..TokenCounts::default()
         };
         let sum = a + b;
-        assert_eq!(sum.reasoning_tokens, Some(5));
-        assert_eq!(sum.cache_read_tokens, Some(7));
-        assert_eq!(sum.cache_write_tokens, None);
+        assert_eq!(sum.reasoning_tokens, 5);
+        assert_eq!(sum.cache_read_tokens, 7);
+        assert_eq!(sum.cache_write_tokens, 0);
     }
 
     #[test]
@@ -1049,7 +988,7 @@ mod tests {
             provider: "test".into(),
             message: Message::assistant("Hello world"),
             finish_reason: FinishReason::Stop,
-            usage: Usage::default(),
+            usage: TokenCounts::default(),
             raw: None,
             warnings: vec![],
             rate_limit: None,
@@ -1077,7 +1016,7 @@ mod tests {
                 tool_call_id: None,
             },
             finish_reason: FinishReason::ToolCalls,
-            usage: Usage::default(),
+            usage: TokenCounts::default(),
             raw: None,
             warnings: vec![],
             rate_limit: None,
@@ -1108,7 +1047,7 @@ mod tests {
                 tool_call_id: None,
             },
             finish_reason: FinishReason::Stop,
-            usage: Usage::default(),
+            usage: TokenCounts::default(),
             raw: None,
             warnings: vec![],
             rate_limit: None,
@@ -1125,7 +1064,7 @@ mod tests {
             provider: "test".into(),
             message: Message::assistant("Hello"),
             finish_reason: FinishReason::Stop,
-            usage: Usage::default(),
+            usage: TokenCounts::default(),
             raw: None,
             warnings: vec![],
             rate_limit: None,
@@ -1291,10 +1230,9 @@ mod tests {
             provider: "test".into(),
             message: Message::assistant("tool response"),
             finish_reason: FinishReason::ToolCalls,
-            usage: Usage {
+            usage: TokenCounts {
                 input_tokens: 10,
                 output_tokens: 5,
-                total_tokens: 15,
                 ..Default::default()
             },
             raw: None,

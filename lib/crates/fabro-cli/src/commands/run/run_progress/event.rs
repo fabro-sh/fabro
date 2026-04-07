@@ -1,28 +1,24 @@
 use std::convert::TryFrom;
 
 use chrono::{DateTime, Utc};
-use fabro_types::{EventBody, RunEvent, StageUsage};
+use fabro_types::{BilledModelUsage, EventBody, RunEvent};
 use fabro_workflow::event::RunNoticeLevel;
-use fabro_workflow::outcome::compute_stage_cost;
 use serde_json::Value;
 
 #[derive(Debug, Clone)]
 pub(super) struct ProgressUsage {
-    pub(super) model: Option<String>,
     pub(super) input_tokens: u64,
     pub(super) output_tokens: u64,
-    pub(super) speed: Option<String>,
     pub(super) cost: Option<f64>,
 }
 
 impl ProgressUsage {
-    pub(super) fn from_stage_usage(usage: &StageUsage) -> Option<Self> {
+    pub(super) fn from_stage_usage(usage: &BilledModelUsage) -> Option<Self> {
+        let tokens = usage.tokens();
         Some(Self {
-            model: Some(usage.model.clone()),
-            input_tokens: u64::try_from(usage.input_tokens).ok()?,
-            output_tokens: u64::try_from(usage.output_tokens).ok()?,
-            speed: usage.speed.clone(),
-            cost: usage.cost,
+            input_tokens: u64::try_from(tokens.input_tokens).ok()?,
+            output_tokens: u64::try_from(tokens.billable_output_tokens()).ok()?,
+            cost: usage.total_usd_micros.map(|cost| cost as f64 / 1_000_000.0),
         })
     }
 
@@ -31,22 +27,7 @@ impl ProgressUsage {
     }
 
     pub(super) fn display_cost(&self) -> Option<f64> {
-        self.cost.or_else(|| {
-            let model = self.model.clone()?;
-            let input_tokens = i64::try_from(self.input_tokens).ok()?;
-            let output_tokens = i64::try_from(self.output_tokens).ok()?;
-            let usage = StageUsage {
-                model,
-                input_tokens,
-                output_tokens,
-                cache_read_tokens: None,
-                cache_write_tokens: None,
-                reasoning_tokens: None,
-                speed: self.speed.clone(),
-                cost: None,
-            };
-            compute_stage_cost(&usage)
-        })
+        self.cost
     }
 }
 
@@ -331,7 +312,7 @@ pub(super) fn from_run_event(stored: &RunEvent) -> Option<ProgressEvent> {
             duration_ms: props.duration_ms,
             status: props.status.to_string(),
             usage: props
-                .usage
+                .billing
                 .as_ref()
                 .and_then(ProgressUsage::from_stage_usage),
         }),
@@ -533,7 +514,7 @@ mod tests {
             status: "success".into(),
             preferred_label: None,
             suggested_next_ids: Vec::new(),
-            usage: None,
+            billing: None,
             failure: None,
             notes: None,
             files_touched: Vec::new(),

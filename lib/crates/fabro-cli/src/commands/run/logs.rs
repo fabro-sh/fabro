@@ -13,6 +13,7 @@ use tracing::{debug, info};
 use crate::args::{GlobalArgs, LogsArgs};
 use crate::server_client;
 use crate::server_runs::ServerSummaryLookup;
+use crate::shared::format_usd_micros;
 
 const FOLLOW_TERMINAL_GRACE: Duration = Duration::from_millis(500);
 
@@ -323,7 +324,10 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 "success" | "partial_success" => &styles.bold_green,
                 _ => &styles.bold_red,
             };
-            let cost = format_cost(prop_field(&envelope, "total_cost"));
+            let cost = format_cost(
+                prop_field(&envelope, "total_usd_micros")
+                    .or_else(|| prop_field(&envelope, "total_cost")),
+            );
 
             let mut lines = vec![format!(
                 "{} {} {}  {}",
@@ -333,8 +337,10 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                 styles.dim.apply_to(&cost),
             )];
 
-            if let Some(usage) = prop_field(&envelope, "usage") {
-                let total = usage
+            if let Some(billing) =
+                prop_field(&envelope, "billing").or_else(|| prop_field(&envelope, "usage"))
+            {
+                let total = billing
                     .get("total_tokens")
                     .and_then(serde_json::Value::as_i64)
                     .unwrap_or(0);
@@ -349,11 +355,11 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                         ))
                     ));
                 }
-                if let Some(cache_read) = usage
+                if let Some(cache_read) = billing
                     .get("cache_read_tokens")
                     .and_then(serde_json::Value::as_i64)
                 {
-                    let cache_write = usage
+                    let cache_write = billing
                         .get("cache_write_tokens")
                         .and_then(serde_json::Value::as_i64)
                         .unwrap_or(0);
@@ -367,7 +373,7 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
                         ))
                     ));
                 }
-                if let Some(reasoning) = usage
+                if let Some(reasoning) = billing
                     .get("reasoning_tokens")
                     .and_then(serde_json::Value::as_i64)
                 {
@@ -429,13 +435,18 @@ pub(crate) fn format_event_pretty(line: &str, styles: &Styles) -> Option<String>
         "stage.completed" => {
             let label = str_field(&envelope, "node_label").unwrap_or("?");
             let duration = format_duration_ms(prop_field(&envelope, "duration_ms"));
-            let usage = prop_field(&envelope, "usage");
-            let cost = format_cost(usage.and_then(|value| value.get("cost")));
-            let input_tokens = usage
+            let billing =
+                prop_field(&envelope, "billing").or_else(|| prop_field(&envelope, "usage"));
+            let cost = format_cost(
+                billing
+                    .and_then(|value| value.get("total_usd_micros"))
+                    .or_else(|| billing.and_then(|value| value.get("cost"))),
+            );
+            let input_tokens = billing
                 .and_then(|value| value.get("input_tokens"))
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
-            let output_tokens = usage
+            let output_tokens = billing
                 .and_then(|value| value.get("output_tokens"))
                 .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
@@ -698,11 +709,21 @@ fn format_duration_ms(value: Option<&serde_json::Value>) -> String {
 }
 
 fn format_cost(value: Option<&serde_json::Value>) -> String {
-    let cost = value.and_then(serde_json::Value::as_f64).unwrap_or(0.0);
-    if cost > 0.0 {
-        format!("${cost:.2}")
-    } else {
-        String::new()
+    match value {
+        Some(value) => {
+            if let Some(usd_micros) = value.as_i64() {
+                if usd_micros > 0 {
+                    return format_usd_micros(usd_micros);
+                }
+            }
+            let cost = value.as_f64().unwrap_or(0.0);
+            if cost > 0.0 {
+                format!("${cost:.2}")
+            } else {
+                String::new()
+            }
+        }
+        None => String::new(),
     }
 }
 
@@ -934,7 +955,7 @@ mod tests {
     #[test]
     fn pretty_workflow_run_completed() {
         let styles = no_color_styles();
-        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"run.completed","properties":{"duration_ms":25000,"status":"success","total_cost":0.57,"usage":{"input_tokens":5000,"output_tokens":2000,"total_tokens":7000,"cache_read_tokens":3000,"cache_write_tokens":500,"reasoning_tokens":800}}}"#;
+        let line = r#"{"ts":"2026-01-01T14:23:32Z","run_id":"abc123","event":"run.completed","properties":{"duration_ms":25000,"status":"success","total_usd_micros":570000,"billing":{"input_tokens":5000,"output_tokens":2000,"total_tokens":7000,"cache_read_tokens":3000,"cache_write_tokens":500,"reasoning_tokens":800}}}"#;
         let result = format_event_pretty(line, &styles).unwrap();
         assert!(result.contains("SUCCESS"), "got: {result}");
         assert!(result.contains("25s"), "got: {result}");

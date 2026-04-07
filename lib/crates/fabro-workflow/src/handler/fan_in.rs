@@ -274,7 +274,7 @@ async fn llm_evaluate(
                 response: response_text.clone(),
                 model: String::new(),
                 provider: String::new(),
-                usage: None,
+                billing: None,
             });
             Ok(Candidate {
                 id: best_id,
@@ -288,7 +288,7 @@ async fn llm_evaluate(
                 response: text.clone(),
                 model: String::new(),
                 provider: String::new(),
-                usage: None,
+                billing: None,
             });
 
             // The LLM responded with text; try to find a matching candidate ID

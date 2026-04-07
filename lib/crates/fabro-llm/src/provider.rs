@@ -3,7 +3,7 @@ use crate::types::{Request, Response, StreamEvent, ToolChoice};
 use futures::Stream;
 use std::pin::Pin;
 
-pub use fabro_model::{ModelRef, Provider};
+pub use fabro_model::{ModelHandle, Provider};
 
 // ---------------------------------------------------------------------------
 // ProviderAdapter trait

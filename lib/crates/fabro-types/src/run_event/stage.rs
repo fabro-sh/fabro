@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{FailureDetail, Outcome, StageStatus, StageUsage};
+use crate::{BilledModelUsage, FailureDetail, Outcome, StageStatus};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StageStartedProps {
@@ -23,7 +23,7 @@ pub struct StageCompletedProps {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub suggested_next_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage: Option<StageUsage>,
+    pub billing: Option<BilledModelUsage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure: Option<FailureDetail>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -82,7 +82,7 @@ pub struct PromptCompletedProps {
     pub model: String,
     pub provider: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage: Option<StageUsage>,
+    pub billing: Option<BilledModelUsage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -96,7 +96,7 @@ pub struct CheckpointCompletedProps {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub context_values: BTreeMap<String, Value>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub node_outcomes: BTreeMap<String, Outcome<Option<StageUsage>>>,
+    pub node_outcomes: BTreeMap<String, Outcome<Option<BilledModelUsage>>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_node_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

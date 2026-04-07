@@ -316,10 +316,10 @@ mod tests {
                 artifact_count: 0,
                 status: "success".to_string(),
                 reason: None,
-                total_cost: None,
+                total_usd_micros: None,
                 final_git_commit_sha: None,
                 final_patch: None,
-                usage: None,
+                billing: None,
             })),
             Some(WorkerTitlePhase::Succeeded)
         );

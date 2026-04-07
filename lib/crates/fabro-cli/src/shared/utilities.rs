@@ -72,6 +72,10 @@ pub(crate) fn format_tokens_human(tokens: i64) -> String {
     }
 }
 
+pub(crate) fn format_usd_micros(usd_micros: i64) -> String {
+    format!("${:.2}", usd_micros as f64 / 1_000_000.0)
+}
+
 pub(crate) fn tilde_path(path: &Path) -> String {
     if let Some(home) = dirs::home_dir() {
         if let Ok(suffix) = path.strip_prefix(&home) {
@@ -132,7 +136,7 @@ pub(crate) fn format_size(bytes: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::format_tokens_human;
+    use super::{format_tokens_human, format_usd_micros};
 
     #[test]
     fn format_tokens_human_zero() {
@@ -162,5 +166,10 @@ mod tests {
     #[test]
     fn format_tokens_human_mid_millions() {
         assert_eq!(format_tokens_human(3_456_789), "3.5m");
+    }
+
+    #[test]
+    fn format_usd_micros_two_decimals() {
+        assert_eq!(format_usd_micros(570_000), "$0.57");
     }
 }

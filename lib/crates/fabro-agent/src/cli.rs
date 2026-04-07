@@ -14,7 +14,7 @@ use fabro_llm::middleware::{Middleware, NextFn, NextStreamFn};
 use fabro_llm::provider::StreamEventStream;
 use fabro_llm::types::{Request, Response};
 use fabro_mcp::config::McpServerSettings;
-use fabro_model::{Catalog, ModelRef, Provider};
+use fabro_model::{Catalog, ModelHandle, Provider};
 use fabro_util::terminal::Styles;
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
@@ -166,8 +166,8 @@ fn build_tool_approval(
     })
 }
 
-fn summarizer_model_id(provider: Provider) -> ModelRef {
-    ModelRef::ByName {
+fn summarizer_model_id(provider: Provider) -> ModelHandle {
+    ModelHandle::ByName {
         provider,
         model: match provider {
             Provider::OpenAi | Provider::OpenAiCompatible => "gpt-4o-mini",
@@ -257,7 +257,7 @@ fn print_summary(session: &Session, styles: &Styles) {
         {
             turn_count += 1;
             tool_call_count += tool_calls.len();
-            total_tokens += usage.total_tokens;
+            total_tokens += usage.total_tokens();
         }
     }
     let token_str = if total_tokens >= 1_000_000 {
@@ -303,7 +303,7 @@ impl Middleware for DebugMiddleware {
                 response.finish_reason,
                 response.usage.input_tokens,
                 response.usage.output_tokens,
-                response.usage.total_tokens,
+                response.usage.total_tokens(),
             )),
         );
         Ok(response)

@@ -12,10 +12,10 @@ use crate::context::keys;
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::handler::llm::preamble::build_preamble;
-use crate::outcome::StageUsage;
+use crate::outcome::BilledModelUsage;
 
-type WfRunState = ExecutionState<Option<StageUsage>>;
-type WfNodeDecision = NodeDecision<Option<StageUsage>>;
+type WfRunState = ExecutionState<Option<BilledModelUsage>>;
+type WfNodeDecision = NodeDecision<Option<BilledModelUsage>>;
 
 /// Graphviz edge captured from edge selection, passed to the next node's before_node
 /// for fidelity/thread resolution.

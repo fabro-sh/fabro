@@ -418,10 +418,11 @@ mod tests {
 
     use chrono::{DateTime, Utc};
     use fabro_agent::{AgentEvent, SandboxEvent};
-    use fabro_llm::types::Usage;
+    use fabro_llm::types::TokenCounts;
+    use fabro_model::Provider;
     use fabro_types::fixtures;
     use fabro_workflow::event::{Event, RunNoticeLevel, to_run_event, to_run_event_at};
-    use fabro_workflow::outcome::StageUsage;
+    use fabro_workflow::outcome::billed_model_usage_from_llm;
 
     use super::*;
     use crate::commands::run::run_progress::stage_display::ToolCallStatus;
@@ -498,7 +499,7 @@ mod tests {
             AgentEvent::AssistantMessage {
                 text: "done".into(),
                 model: model.into(),
-                usage: Usage::default(),
+                usage: TokenCounts::default(),
                 tool_call_count: 0,
             },
         )
@@ -513,16 +514,16 @@ mod tests {
             status: "success".into(),
             preferred_label: None,
             suggested_next_ids: Vec::new(),
-            usage: Some(StageUsage {
-                model: "gpt-5-mini".into(),
-                input_tokens: 1200,
-                output_tokens: 300,
-                cache_read_tokens: None,
-                cache_write_tokens: None,
-                reasoning_tokens: None,
-                speed: None,
-                cost: Some(0.12),
-            }),
+            billing: Some(billed_model_usage_from_llm(
+                "gpt-5-mini",
+                Provider::OpenAi,
+                None,
+                &TokenCounts {
+                    input_tokens: 1200,
+                    output_tokens: 300,
+                    ..TokenCounts::default()
+                },
+            )),
             failure: None,
             notes: None,
             files_touched: Vec::new(),
@@ -811,9 +812,7 @@ mod tests {
         );
         emit(&mut ui, stage_completed("plan", "Plan"));
 
-        insta::assert_snapshot!(rendered(&buffer), @r"
-            ✓ Plan  $0.12   5s
-        ");
+        insta::assert_snapshot!(rendered(&buffer), @"    ✓ Plan  $0.00   5s");
     }
 
     #[test]
@@ -1049,7 +1048,7 @@ mod tests {
         Running devcontainer postCreate (1 commands)...
           ✓ [1/1] npm run setup  1s
         Devcontainer: postCreate (1s)
-        ✓ Code  $0.12   5s  (1 turns, 0 tools, 1.5k toks)
+        ✓ Code  $0.00   5s  (1 turns, 0 tools, 1.5k toks)
         "#);
     }
 

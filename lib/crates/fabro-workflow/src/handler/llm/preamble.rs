@@ -4,8 +4,7 @@ use std::fmt::Write;
 use crate::artifact::{artifact_path, format_artifact_reference};
 use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
-use crate::outcome::Outcome;
-use crate::outcome::OutcomeExt;
+use crate::outcome::{Outcome, OutcomeExt};
 use fabro_graphviz::graph::{Graph, Node, is_llm_handler_type};
 
 const COMPACT_OUTPUT_MAX_LINES: usize = 25;
@@ -209,11 +208,13 @@ fn render_compact_stage_details(
         h if is_llm_handler_type(h) => {
             let mut lines = Vec::new();
             if let Some(usage) = &outcome.usage {
-                let input = format_token_count(usage.input_tokens);
-                let output = format_token_count(usage.output_tokens);
+                let input = format_token_count(usage.tokens().input_tokens);
+                let output = format_token_count(usage.tokens().billable_output_tokens());
                 lines.push(format!(
                     "  - Model: {}, {} tokens in / {} out",
-                    usage.model, input, output
+                    usage.model_id(),
+                    input,
+                    output
                 ));
             }
             if !outcome.files_touched.is_empty() {
@@ -293,11 +294,11 @@ fn render_summary_high_stage_section(
         }
         h if is_llm_handler_type(h) => {
             if let Some(usage) = &outcome.usage {
-                lines.push(format!("- Model: {}", usage.model));
+                lines.push(format!("- Model: {}", usage.model_id()));
                 lines.push(format!(
                     "- Tokens: {} in / {} out",
-                    format_token_count(usage.input_tokens),
-                    format_token_count(usage.output_tokens)
+                    format_token_count(usage.tokens().input_tokens),
+                    format_token_count(usage.tokens().billable_output_tokens())
                 ));
             }
             if !outcome.files_touched.is_empty() {
@@ -595,7 +596,7 @@ fn build_summary_preamble(
                             }
                             h if is_llm_handler_type(h) => {
                                 if let Some(usage) = &outcome.usage {
-                                    parts.push(format!("  - Model: {}", usage.model));
+                                    parts.push(format!("  - Model: {}", usage.model_id()));
                                 }
                             }
                             _ => {}
@@ -615,8 +616,23 @@ fn build_summary_preamble(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::outcome::StageUsage;
+    use crate::outcome::{BilledModelUsage, billed_model_usage_from_llm};
     use fabro_graphviz::graph::AttrValue;
+    use fabro_llm::types::TokenCounts;
+    use fabro_model::Provider;
+
+    fn stage_usage(model: &str, input_tokens: i64, output_tokens: i64) -> BilledModelUsage {
+        billed_model_usage_from_llm(
+            model,
+            Provider::Anthropic,
+            None,
+            &TokenCounts {
+                input_tokens,
+                output_tokens,
+                ..TokenCounts::default()
+            },
+        )
+    }
 
     // --- truncate mode ---
 
@@ -920,16 +936,7 @@ mod tests {
         let completed_nodes = vec!["report".to_string()];
         let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
         let mut outcome = Outcome::success();
-        outcome.usage = Some(StageUsage {
-            model: "claude-sonnet-4-20250514".to_string(),
-            input_tokens: 1234,
-            output_tokens: 567,
-            cache_read_tokens: None,
-            cache_write_tokens: None,
-            reasoning_tokens: None,
-            speed: None,
-            cost: None,
-        });
+        outcome.usage = Some(stage_usage("claude-sonnet-4-20250514", 1234, 567));
         outcome.files_touched = vec!["src/lib.rs".to_string(), "src/main.rs".to_string()];
         node_outcomes.insert("report".to_string(), outcome);
 
@@ -1187,16 +1194,7 @@ mod tests {
         let completed_nodes = vec!["report".to_string()];
         let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
         let mut outcome = Outcome::success();
-        outcome.usage = Some(StageUsage {
-            model: "claude-sonnet-4-20250514".to_string(),
-            input_tokens: 1000,
-            output_tokens: 200,
-            cache_read_tokens: None,
-            cache_write_tokens: None,
-            reasoning_tokens: None,
-            speed: None,
-            cost: None,
-        });
+        outcome.usage = Some(stage_usage("claude-sonnet-4-20250514", 1000, 200));
         node_outcomes.insert("report".to_string(), outcome);
 
         let preamble = build_preamble(
@@ -1367,16 +1365,7 @@ mod tests {
         let completed_nodes = vec!["report".to_string()];
         let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
         let mut outcome = Outcome::success();
-        outcome.usage = Some(StageUsage {
-            model: "claude-sonnet-4-20250514".to_string(),
-            input_tokens: 1500,
-            output_tokens: 300,
-            cache_read_tokens: None,
-            cache_write_tokens: None,
-            reasoning_tokens: None,
-            speed: None,
-            cost: None,
-        });
+        outcome.usage = Some(stage_usage("claude-sonnet-4-20250514", 1500, 300));
         outcome.files_touched = vec!["src/lib.rs".to_string()];
         node_outcomes.insert("report".to_string(), outcome);
 
@@ -1587,16 +1576,7 @@ mod tests {
         let completed_nodes = vec!["report".to_string()];
         let mut node_outcomes: HashMap<String, Outcome> = HashMap::new();
         let mut outcome = Outcome::success();
-        outcome.usage = Some(StageUsage {
-            model: "claude-sonnet-4-20250514".to_string(),
-            input_tokens: 1500,
-            output_tokens: 300,
-            cache_read_tokens: None,
-            cache_write_tokens: None,
-            reasoning_tokens: None,
-            speed: None,
-            cost: None,
-        });
+        outcome.usage = Some(stage_usage("claude-sonnet-4-20250514", 1500, 300));
         outcome.files_touched = vec!["src/lib.rs".to_string()];
         outcome.context_updates.insert(
             keys::response_key("report"),

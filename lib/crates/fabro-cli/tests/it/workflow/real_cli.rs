@@ -45,10 +45,11 @@ async fn run_real_cli_test(provider: Provider, model: &str) {
                 "{provider}/{model}: expected response to contain '4', got: {text}"
             );
             let usage = usage.unwrap_or_else(|| panic!("{provider}/{model}: should have usage"));
+            let tokens = usage.tokens();
             assert!(
-                usage.input_tokens > 0,
+                tokens.input_tokens > 0,
                 "{provider}/{model}: input_tokens should be > 0, got {}",
-                usage.input_tokens
+                tokens.input_tokens
             );
         }
         CodergenResult::Full(_) => panic!("expected Text result from {provider}/{model}"),

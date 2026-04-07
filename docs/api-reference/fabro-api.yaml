@@ -17,8 +17,8 @@ tags:
     description: Internal run details (stages, turns, context, configuration)
   - name: Workflows
     description: Workflow definitions and execution
-  - name: Usage
-    description: Token and cost usage
+  - name: Billing
+    description: Token counts and billed totals
   - name: Insights
     description: SQL query editor and history
   - name: Models
@@ -823,21 +823,21 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /api/v1/runs/{id}/usage:
+  /api/v1/runs/{id}/billing:
     get:
-      operationId: retrieveRunUsage
+      operationId: retrieveRunBilling
       tags: [Run Outputs]
-      summary: Retrieve Run Usage
-      description: Returns token and cost usage broken down by stage and model for a specific run.
+      summary: Retrieve Run Billing
+      description: Returns token counts and billed totals broken down by stage and model for a specific run.
       parameters:
         - $ref: "#/components/parameters/RunId"
       responses:
         "200":
-          description: Usage data
+          description: Billing data
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RunUsage"
+                $ref: "#/components/schemas/RunBilling"
         "404":
           description: Run not found
           content:
@@ -1186,21 +1186,21 @@ paths:
               schema:
                 $ref: "#/components/schemas/PaginatedHistoryEntryList"
 
-  # ── Usage ────────────────────────────────────────────────────────────
+  # ── Billing ──────────────────────────────────────────────────────────
 
-  /api/v1/usage:
+  /api/v1/billing:
     get:
-      operationId: getAggregateUsage
-      tags: [Usage]
-      summary: Aggregate Usage
-      description: Returns aggregate token/cost usage across all completed runs since server start.
+      operationId: getAggregateBilling
+      tags: [Billing]
+      summary: Aggregate Billing
+      description: Returns aggregate token counts and billed totals across all completed runs since server start.
       responses:
         "200":
-          description: Aggregate usage data
+          description: Aggregate billing data
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AggregateUsage"
+                $ref: "#/components/schemas/AggregateBilling"
 
   # ── System ───────────────────────────────────────────────────────────
 
@@ -2955,9 +2955,9 @@ components:
           format: int64
           minimum: 0
           nullable: true
-        total_cost:
-          type: number
-          format: double
+        total_usd_micros:
+          type: integer
+          format: int64
           nullable: true
 
     # ── Run Board Schemas ────────────────────────────────────────────────
@@ -3050,13 +3050,13 @@ components:
           description: Repository name.
           example: api-server
 
-    TokenUsage:
-      description: Token and cost usage totals.
+    BilledTokenCounts:
+      description: Token counts with optional billed USD micros totals.
       type: object
       required:
         - input_tokens
         - output_tokens
-        - cost
+        - total_tokens
       properties:
         input_tokens:
           type: integer
@@ -3066,10 +3066,28 @@ components:
           type: integer
           description: Number of output tokens generated.
           example: 8750
-        cost:
-          type: number
-          description: Cost in USD.
-          example: 0.72
+        total_tokens:
+          type: integer
+          description: Total billable tokens aggregated across categories.
+          example: 37390
+        reasoning_tokens:
+          type: integer
+          description: Number of reasoning tokens.
+          example: 1200
+        cache_read_tokens:
+          type: integer
+          description: Number of cache read tokens.
+          example: 4800
+        cache_write_tokens:
+          type: integer
+          description: Number of cache write tokens.
+          example: 1500
+        total_usd_micros:
+          type: integer
+          format: int64
+          nullable: true
+          description: Billed USD amount in micros.
+          example: 720000
 
     CodeLocation:
       description: A file and line location in the codebase.
@@ -3180,14 +3198,14 @@ components:
           description: Question text.
           example: Accept or push for another round?
 
-    AggregateUsageTotals:
-      description: Aggregate usage totals across all runs.
+    AggregateBillingTotals:
+      description: Aggregate billing totals across all runs.
       type: object
       required:
         - runs
         - input_tokens
         - output_tokens
-        - cost
+        - total_tokens
         - runtime_secs
       properties:
         runs:
@@ -3202,17 +3220,35 @@ components:
           type: integer
           description: Total output tokens.
           example: 189720
-        cost:
-          type: number
-          description: Total cost in USD.
-          example: 20.34
+        total_tokens:
+          type: integer
+          description: Total tokens aggregated across all billing categories.
+          example: 833580
+        reasoning_tokens:
+          type: integer
+          description: Total reasoning tokens.
+          example: 12040
+        cache_read_tokens:
+          type: integer
+          description: Total cache read tokens.
+          example: 85400
+        cache_write_tokens:
+          type: integer
+          description: Total cache write tokens.
+          example: 9200
+        total_usd_micros:
+          type: integer
+          format: int64
+          nullable: true
+          description: Total billed USD amount in micros.
+          example: 20340000
         runtime_secs:
           type: number
           description: Total runtime in seconds.
           example: 3501.0
 
-    UsageStageRef:
-      description: Reference to a usage stage.
+    BillingStageRef:
+      description: Reference to a billing stage.
       type: object
       required:
         - id
@@ -3530,36 +3566,36 @@ components:
         meta:
           $ref: "#/components/schemas/PaginationMeta"
 
-    # ── Usage Schemas ────────────────────────────────────────────────────
+    # ── Billing Schemas ──────────────────────────────────────────────────
 
-    UsageStage:
-      description: Token and cost usage for a single stage within a run.
+    RunBillingStage:
+      description: Token counts and billed totals for a single stage within a run.
       type: object
       required:
         - stage
         - model
-        - usage
+        - billing
         - runtime_secs
       properties:
         stage:
-          $ref: "#/components/schemas/UsageStageRef"
+          $ref: "#/components/schemas/BillingStageRef"
         model:
           $ref: "#/components/schemas/ModelReference"
-        usage:
-          $ref: "#/components/schemas/TokenUsage"
+        billing:
+          $ref: "#/components/schemas/BilledTokenCounts"
         runtime_secs:
           type: number
           description: Wall-clock runtime in seconds.
           example: 154.0
 
-    UsageTotals:
-      description: Aggregate usage totals across all stages of a run.
+    RunBillingTotals:
+      description: Aggregate billing totals across all stages of a run.
       type: object
       required:
         - runtime_secs
         - input_tokens
         - output_tokens
-        - cost
+        - total_tokens
       properties:
         runtime_secs:
           type: number
@@ -3573,18 +3609,36 @@ components:
           type: integer
           description: Total output tokens generated.
           example: 21080
-        cost:
-          type: number
-          description: Total cost in USD.
-          example: 2.26
+        total_tokens:
+          type: integer
+          description: Total tokens aggregated across all billing categories.
+          example: 92620
+        reasoning_tokens:
+          type: integer
+          description: Total reasoning tokens.
+          example: 3400
+        cache_read_tokens:
+          type: integer
+          description: Total cache read tokens.
+          example: 22000
+        cache_write_tokens:
+          type: integer
+          description: Total cache write tokens.
+          example: 4500
+        total_usd_micros:
+          type: integer
+          format: int64
+          nullable: true
+          description: Total billed USD amount in micros.
+          example: 2260000
 
-    UsageByModel:
-      description: Usage statistics grouped by model.
+    BillingByModel:
+      description: Billing statistics grouped by model.
       type: object
       required:
         - model
         - stages
-        - usage
+        - billing
       properties:
         model:
           $ref: "#/components/schemas/ModelReference"
@@ -3592,11 +3646,11 @@ components:
           type: integer
           description: Number of stages that used this model.
           example: 2
-        usage:
-          $ref: "#/components/schemas/TokenUsage"
+        billing:
+          $ref: "#/components/schemas/BilledTokenCounts"
 
-    RunUsage:
-      description: Complete usage breakdown for a single run.
+    RunBilling:
+      description: Complete billing breakdown for a single run.
       type: object
       required:
         - stages
@@ -3605,31 +3659,31 @@ components:
       properties:
         stages:
           type: array
-          description: Per-stage usage breakdown.
+          description: Per-stage billing breakdown.
           items:
-            $ref: "#/components/schemas/UsageStage"
+            $ref: "#/components/schemas/RunBillingStage"
         totals:
-          $ref: "#/components/schemas/UsageTotals"
+          $ref: "#/components/schemas/RunBillingTotals"
         by_model:
           type: array
-          description: Usage grouped by model.
+          description: Billing grouped by model.
           items:
-            $ref: "#/components/schemas/UsageByModel"
+            $ref: "#/components/schemas/BillingByModel"
 
-    AggregateUsage:
-      description: Aggregate token and cost usage across all runs since server start.
+    AggregateBilling:
+      description: Aggregate token counts and billed totals across all runs since server start.
       type: object
       required:
         - totals
         - by_model
       properties:
         totals:
-          $ref: "#/components/schemas/AggregateUsageTotals"
+          $ref: "#/components/schemas/AggregateBillingTotals"
         by_model:
           type: array
-          description: Usage grouped by model.
+          description: Billing grouped by model.
           items:
-            $ref: "#/components/schemas/UsageByModel"
+            $ref: "#/components/schemas/BillingByModel"
 
     PreviewUrlRequest:
       description: Request body for generating a preview URL from a sandbox port.

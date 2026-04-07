@@ -131,7 +131,7 @@ impl Handler for PromptHandler {
 
         let response_model = stage_usage
             .as_ref()
-            .map(|usage| usage.model.clone())
+            .map(|usage| usage.model_id().to_string())
             .or_else(|| node.model().map(String::from))
             .unwrap_or_default();
         let response_provider = node
@@ -145,7 +145,7 @@ impl Handler for PromptHandler {
             response: response_text.clone(),
             model: response_model,
             provider: response_provider,
-            usage: stage_usage.clone(),
+            billing: stage_usage.clone(),
         });
 
         // 4. Build and write status

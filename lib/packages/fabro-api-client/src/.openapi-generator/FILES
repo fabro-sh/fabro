@@ -1,4 +1,5 @@
 api.ts
+api/billing-api.ts
 api/completions-api.ts
 api/discovery-api.ts
 api/human-in-the-loop-api.ts
@@ -11,13 +12,12 @@ api/runs-api.ts
 api/secrets-api.ts
 api/settings-api.ts
 api/system-api.ts
-api/usage-api.ts
 base.ts
 common.ts
 configuration.ts
 index.ts
-models/aggregate-usage-totals.ts
-models/aggregate-usage.ts
+models/aggregate-billing-totals.ts
+models/aggregate-billing.ts
 models/api-question-option.ts
 models/api-question.ts
 models/api-settings.ts
@@ -27,6 +27,9 @@ models/artifact-list-response.ts
 models/artifacts-settings.ts
 models/assistant-stage-turn.ts
 models/auth-settings.ts
+models/billed-token-counts.ts
+models/billing-by-model.ts
+models/billing-stage-ref.ts
 models/board-column.ts
 models/check-run-status.ts
 models/check-run.ts
@@ -125,6 +128,9 @@ models/root-response-urls.ts
 models/root-response.ts
 models/run-artifact-entry.ts
 models/run-artifact-list-response.ts
+models/run-billing-stage.ts
+models/run-billing-totals.ts
+models/run-billing.ts
 models/run-checkpoint.ts
 models/run-control-action.ts
 models/run-error.ts
@@ -143,7 +149,6 @@ models/run-status-record.ts
 models/run-status-response.ts
 models/run-status.ts
 models/run-timings.ts
-models/run-usage.ts
 models/sandbox-file-entry.ts
 models/sandbox-file-list-response.ts
 models/sandbox-resources.ts
@@ -171,13 +176,8 @@ models/system-info-response.ts
 models/system-run-counts.ts
 models/system-stage-turn.ts
 models/tls-settings.ts
-models/token-usage.ts
 models/tool-stage-turn.ts
 models/tool-use.ts
-models/usage-by-model.ts
-models/usage-stage-ref.ts
-models/usage-stage.ts
-models/usage-totals.ts
 models/user-response.ts
 models/web-settings.ts
 models/webhook-settings.ts

@@ -1,5 +1,6 @@
 extern crate self as fabro_types;
 
+pub mod billing;
 pub mod checkpoint;
 pub mod combine;
 pub mod conclusion;
@@ -18,10 +19,16 @@ pub mod settings;
 pub mod stage_id;
 pub mod start;
 pub mod status;
-pub mod usage;
 
+pub use billing::{
+    AnthropicBillingFacts, AnthropicModelPricing, BilledModelUsage, BilledTokenCounts,
+    GeminiBillingFacts, GeminiModelPricing, GeminiStoragePricing, GeminiStorageSegment,
+    ModelBillingFacts, ModelBillingInput, ModelPricing, ModelPricingPolicy, ModelRef, ModelUsage,
+    OpenAiBillingFacts, OpenAiModelPricing, PricePerMTok, Speed, TokenCounts, UsdMicros,
+};
 pub use checkpoint::Checkpoint;
 pub use conclusion::{Conclusion, StageSummary};
+pub use fabro_macros::Combine;
 pub use failure_signature::FailureSignature;
 pub use graph::{AttrValue, Edge, Graph, Node, is_llm_handler_type, shape_to_handler_type};
 pub use node_status::NodeStatusRecord;
@@ -36,7 +43,7 @@ pub use run::{
     RunSubjectProvenance,
 };
 pub use run_blob_id::RunBlobId;
-pub use run_event::{EventBody, RunEvent, RunNoticeLevel, TokenUsage};
+pub use run_event::{EventBody, RunEvent, RunNoticeLevel};
 pub use run_id::RunId;
 pub use run_id::fixtures;
 pub use sandbox_record::SandboxRecord;
@@ -47,6 +54,3 @@ pub use status::{
     InvalidTransition, ParseRunStatusError, RunControlAction, RunStatus, RunStatusRecord,
     StatusReason,
 };
-pub use usage::StageUsage;
-
-pub use fabro_macros::Combine;

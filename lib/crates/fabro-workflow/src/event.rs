@@ -4,7 +4,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use ::fabro_types::run_event as fabro_types;
-use ::fabro_types::{RunControlAction, RunEvent, RunId, StageStatus, StatusReason};
+use ::fabro_types::{
+    BilledTokenCounts, RunControlAction, RunEvent, RunId, StageStatus, StatusReason,
+};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use fabro_store::{EventPayload, RunDatabase};
@@ -17,9 +19,9 @@ use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot};
 use uuid::Uuid;
 
 use crate::error::FabroError;
-use crate::outcome::{FailureDetail, Outcome, StageUsage};
+use crate::outcome::{BilledModelUsage, FailureDetail, Outcome};
 use fabro_agent::{AgentEvent, SandboxEvent, WorktreeEvent, WorktreeEventCallback};
-use fabro_llm::types::Usage as LlmUsage;
+use fabro_llm::types::TokenCounts as LlmTokenCounts;
 use fabro_util::redact::redact_json_value;
 
 pub use fabro_types::{EventBody, RunNoticeLevel};
@@ -104,13 +106,13 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<StatusReason>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        total_cost: Option<f64>,
+        total_usd_micros: Option<i64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         final_git_commit_sha: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         final_patch: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        usage: Option<LlmUsage>,
+        billing: Option<BilledTokenCounts>,
     },
     WorkflowRunFailed {
         error: FabroError,
@@ -141,7 +143,7 @@ pub enum Event {
         status: String,
         preferred_label: Option<String>,
         suggested_next_ids: Vec<String>,
-        usage: Option<StageUsage>,
+        billing: Option<BilledModelUsage>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         failure: Option<FailureDetail>,
         notes: Option<String>,
@@ -315,7 +317,7 @@ pub enum Event {
         model: String,
         provider: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        usage: Option<StageUsage>,
+        billing: Option<BilledModelUsage>,
     },
     /// Forwarded from an agent session, tagged with the workflow stage.
     Agent {
@@ -1222,16 +1224,15 @@ fn default_node_label(node_id: Option<&String>, node_label: Option<String>) -> O
     node_label.or_else(|| node_id.cloned())
 }
 
-fn token_usage_from_llm(usage: &LlmUsage) -> fabro_types::TokenUsage {
-    fabro_types::TokenUsage {
+fn billed_token_counts_from_llm(usage: &LlmTokenCounts) -> BilledTokenCounts {
+    BilledTokenCounts {
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,
-        total_tokens: usage.total_tokens,
+        total_tokens: usage.total_tokens(),
         reasoning_tokens: usage.reasoning_tokens,
         cache_read_tokens: usage.cache_read_tokens,
         cache_write_tokens: usage.cache_write_tokens,
-        speed: usage.speed.clone(),
-        raw: usage.raw.clone(),
+        total_usd_micros: None,
     }
 }
 
@@ -1437,19 +1438,19 @@ fn event_body_from_event(event: &Event) -> EventBody {
             artifact_count,
             status,
             reason,
-            total_cost,
+            total_usd_micros,
             final_git_commit_sha,
             final_patch,
-            usage,
+            billing,
         } => EventBody::RunCompleted(fabro_types::RunCompletedProps {
             duration_ms: *duration_ms,
             artifact_count: *artifact_count,
             status: status.clone(),
             reason: *reason,
-            total_cost: *total_cost,
+            total_usd_micros: *total_usd_micros,
             final_git_commit_sha: final_git_commit_sha.clone(),
             final_patch: final_patch.clone(),
-            usage: usage.as_ref().map(token_usage_from_llm),
+            billing: billing.clone(),
         }),
         Event::WorkflowRunFailed {
             error,
@@ -1489,7 +1490,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             status,
             preferred_label,
             suggested_next_ids,
-            usage,
+            billing,
             failure,
             notes,
             files_touched,
@@ -1509,7 +1510,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             status: stage_status_from_string(status),
             preferred_label: preferred_label.clone(),
             suggested_next_ids: suggested_next_ids.clone(),
-            usage: usage.clone(),
+            billing: billing.clone(),
             failure: failure.clone(),
             notes: notes.clone(),
             files_touched: files_touched.clone(),
@@ -1716,13 +1717,13 @@ fn event_body_from_event(event: &Event) -> EventBody {
             response,
             model,
             provider,
-            usage,
+            billing,
             ..
         } => EventBody::PromptCompleted(fabro_types::PromptCompletedProps {
             response: response.clone(),
             model: model.clone(),
             provider: provider.clone(),
-            usage: usage.clone(),
+            billing: billing.clone(),
         }),
         Event::Agent { visit, event, .. } => match event {
             AgentEvent::SessionStarted { provider, model } => {
@@ -1752,7 +1753,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             } => EventBody::AgentMessage(fabro_types::AgentMessageProps {
                 text: text.clone(),
                 model: model.clone(),
-                usage: token_usage_from_llm(usage),
+                billing: billed_token_counts_from_llm(usage),
                 tool_call_count: *tool_call_count,
                 visit: *visit,
             }),
@@ -2690,7 +2691,7 @@ mod tests {
                 status: "success".to_string(),
                 preferred_label: None,
                 suggested_next_ids: Vec::new(),
-                usage: None,
+                billing: None,
                 failure: None,
                 notes: None,
                 files_touched: Vec::new(),
@@ -2728,7 +2729,7 @@ mod tests {
                 status: "success".to_string(),
                 preferred_label: None,
                 suggested_next_ids: Vec::new(),
-                usage: None,
+                billing: None,
                 failure: None,
                 notes: None,
                 files_touched: Vec::new(),

@@ -97,12 +97,12 @@ pub(crate) async fn list_run_artifacts_stub(
         .into_response()
 }
 
-pub(crate) async fn get_run_usage(
+pub(crate) async fn get_run_billing(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
     Path(_id): Path<String>,
 ) -> Response {
-    (StatusCode::OK, Json(runs::usage())).into_response()
+    (StatusCode::OK, Json(runs::billing())).into_response()
 }
 
 pub(crate) async fn get_run_settings(
@@ -588,11 +588,11 @@ pub(crate) async fn prune_runs(
 
 // ── Usage ──────────────────────────────────────────────────────────────
 
-pub(crate) async fn get_aggregate_usage(
+pub(crate) async fn get_aggregate_billing(
     _auth: AuthenticatedService,
     State(_state): State<Arc<AppState>>,
 ) -> Response {
-    (StatusCode::OK, Json(usage::aggregate())).into_response()
+    (StatusCode::OK, Json(billing::aggregate())).into_response()
 }
 
 // ── Data modules ───────────────────────────────────────────────────────
@@ -1101,109 +1101,141 @@ mod runs {
         ]
     }
 
-    pub(super) fn usage() -> RunUsage {
-        RunUsage {
+    pub(super) fn billing() -> RunBilling {
+        RunBilling {
             stages: vec![
-                UsageStage {
-                    stage: UsageStageRef {
+                RunBillingStage {
+                    stage: BillingStageRef {
                         id: "detect-drift".into(),
                         name: "Detect Drift".into(),
                     },
                     model: ModelReference {
                         id: "Opus 4.6".into(),
                     },
-                    usage: TokenUsage {
+                    billing: BilledTokenCounts {
+                        cache_read_tokens: None,
+                        cache_write_tokens: None,
                         input_tokens: 12480,
                         output_tokens: 3210,
-                        cost: 0.48,
+                        reasoning_tokens: None,
+                        total_tokens: 15690,
+                        total_usd_micros: Some(480_000),
                     },
                     runtime_secs: 72.0,
                 },
-                UsageStage {
-                    stage: UsageStageRef {
+                RunBillingStage {
+                    stage: BillingStageRef {
                         id: "propose-changes".into(),
                         name: "Propose Changes".into(),
                     },
                     model: ModelReference {
                         id: "Gemini 3.1".into(),
                     },
-                    usage: TokenUsage {
+                    billing: BilledTokenCounts {
+                        cache_read_tokens: None,
+                        cache_write_tokens: None,
                         input_tokens: 28640,
                         output_tokens: 8750,
-                        cost: 0.72,
+                        reasoning_tokens: None,
+                        total_tokens: 37390,
+                        total_usd_micros: Some(720_000),
                     },
                     runtime_secs: 154.0,
                 },
-                UsageStage {
-                    stage: UsageStageRef {
+                RunBillingStage {
+                    stage: BillingStageRef {
                         id: "review-changes".into(),
                         name: "Review Changes".into(),
                     },
                     model: ModelReference {
                         id: "Codex 5.3".into(),
                     },
-                    usage: TokenUsage {
+                    billing: BilledTokenCounts {
+                        cache_read_tokens: None,
+                        cache_write_tokens: None,
                         input_tokens: 9120,
                         output_tokens: 2640,
-                        cost: 0.19,
+                        reasoning_tokens: None,
+                        total_tokens: 11760,
+                        total_usd_micros: Some(190_000),
                     },
                     runtime_secs: 45.0,
                 },
-                UsageStage {
-                    stage: UsageStageRef {
+                RunBillingStage {
+                    stage: BillingStageRef {
                         id: "apply-changes".into(),
                         name: "Apply Changes".into(),
                     },
                     model: ModelReference {
                         id: "Opus 4.6".into(),
                     },
-                    usage: TokenUsage {
+                    billing: BilledTokenCounts {
+                        cache_read_tokens: None,
+                        cache_write_tokens: None,
                         input_tokens: 21300,
                         output_tokens: 6480,
-                        cost: 0.87,
+                        reasoning_tokens: None,
+                        total_tokens: 27780,
+                        total_usd_micros: Some(870_000),
                     },
                     runtime_secs: 118.0,
                 },
             ],
-            totals: UsageTotals {
+            totals: RunBillingTotals {
+                cache_read_tokens: None,
+                cache_write_tokens: None,
                 runtime_secs: 389.0,
                 input_tokens: 71540,
                 output_tokens: 21080,
-                cost: 2.26,
+                reasoning_tokens: None,
+                total_tokens: 92620,
+                total_usd_micros: Some(2_260_000),
             },
             by_model: vec![
-                UsageByModel {
+                BillingByModel {
+                    billing: BilledTokenCounts {
+                        cache_read_tokens: None,
+                        cache_write_tokens: None,
+                        input_tokens: 33780,
+                        output_tokens: 9690,
+                        reasoning_tokens: None,
+                        total_tokens: 43470,
+                        total_usd_micros: Some(1_350_000),
+                    },
                     model: ModelReference {
                         id: "Opus 4.6".into(),
                     },
                     stages: 2,
-                    usage: TokenUsage {
-                        input_tokens: 33780,
-                        output_tokens: 9690,
-                        cost: 1.35,
-                    },
                 },
-                UsageByModel {
+                BillingByModel {
+                    billing: BilledTokenCounts {
+                        cache_read_tokens: None,
+                        cache_write_tokens: None,
+                        input_tokens: 28640,
+                        output_tokens: 8750,
+                        reasoning_tokens: None,
+                        total_tokens: 37390,
+                        total_usd_micros: Some(720_000),
+                    },
                     model: ModelReference {
                         id: "Gemini 3.1".into(),
                     },
                     stages: 1,
-                    usage: TokenUsage {
-                        input_tokens: 28640,
-                        output_tokens: 8750,
-                        cost: 0.72,
-                    },
                 },
-                UsageByModel {
+                BillingByModel {
+                    billing: BilledTokenCounts {
+                        cache_read_tokens: None,
+                        cache_write_tokens: None,
+                        input_tokens: 9120,
+                        output_tokens: 2640,
+                        reasoning_tokens: None,
+                        total_tokens: 11760,
+                        total_usd_micros: Some(190_000),
+                    },
                     model: ModelReference {
                         id: "Codex 5.3".into(),
                     },
                     stages: 1,
-                    usage: TokenUsage {
-                        input_tokens: 9120,
-                        output_tokens: 2640,
-                        cost: 0.19,
-                    },
                 },
             ],
         }
@@ -1303,51 +1335,67 @@ mod runs {
     }
 }
 
-mod usage {
+mod billing {
     use fabro_api::types::*;
 
-    pub(super) fn aggregate() -> AggregateUsage {
-        AggregateUsage {
-            totals: AggregateUsageTotals {
+    pub(super) fn aggregate() -> AggregateBilling {
+        AggregateBilling {
+            totals: AggregateBillingTotals {
+                cache_read_tokens: None,
+                cache_write_tokens: None,
                 runs: 9,
                 input_tokens: 643_860,
                 output_tokens: 189_720,
-                cost: 20.34,
+                reasoning_tokens: None,
                 runtime_secs: 3_501.0,
+                total_tokens: 833_580,
+                total_usd_micros: Some(20_340_000),
             },
             by_model: vec![
-                UsageByModel {
+                BillingByModel {
+                    billing: BilledTokenCounts {
+                        cache_read_tokens: None,
+                        cache_write_tokens: None,
+                        input_tokens: 304_020,
+                        output_tokens: 87_210,
+                        reasoning_tokens: None,
+                        total_tokens: 391_230,
+                        total_usd_micros: Some(12_150_000),
+                    },
                     model: ModelReference {
                         id: "Opus 4.6".into(),
                     },
                     stages: 18,
-                    usage: TokenUsage {
-                        input_tokens: 304_020,
-                        output_tokens: 87_210,
-                        cost: 12.15,
-                    },
                 },
-                UsageByModel {
+                BillingByModel {
+                    billing: BilledTokenCounts {
+                        cache_read_tokens: None,
+                        cache_write_tokens: None,
+                        input_tokens: 257_760,
+                        output_tokens: 78_750,
+                        reasoning_tokens: None,
+                        total_tokens: 336_510,
+                        total_usd_micros: Some(6_480_000),
+                    },
                     model: ModelReference {
                         id: "Gemini 3.1".into(),
                     },
                     stages: 9,
-                    usage: TokenUsage {
-                        input_tokens: 257_760,
-                        output_tokens: 78_750,
-                        cost: 6.48,
-                    },
                 },
-                UsageByModel {
+                BillingByModel {
+                    billing: BilledTokenCounts {
+                        cache_read_tokens: None,
+                        cache_write_tokens: None,
+                        input_tokens: 82_080,
+                        output_tokens: 23_760,
+                        reasoning_tokens: None,
+                        total_tokens: 105_840,
+                        total_usd_micros: Some(1_710_000),
+                    },
                     model: ModelReference {
                         id: "Codex 5.3".into(),
                     },
                     stages: 9,
-                    usage: TokenUsage {
-                        input_tokens: 82_080,
-                        output_tokens: 23_760,
-                        cost: 1.71,
-                    },
                 },
             ],
         }

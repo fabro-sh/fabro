@@ -13,14 +13,14 @@ use fabro_core::state::ExecutionState;
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::hook_context::set_hook_node;
-use crate::outcome::{Outcome, OutcomeExt, StageStatus, StageUsage};
+use crate::outcome::{BilledModelUsage, Outcome, OutcomeExt, StageStatus};
 use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
 use fabro_sandbox::Sandbox;
 use fabro_types::RunId;
 
-type WfRunState = ExecutionState<Option<StageUsage>>;
-type WfNodeResult = NodeResult<Option<StageUsage>>;
-type WfNodeDecision = NodeDecision<Option<StageUsage>>;
+type WfRunState = ExecutionState<Option<BilledModelUsage>>;
+type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
+type WfNodeDecision = NodeDecision<Option<BilledModelUsage>>;
 
 /// Sub-lifecycle responsible for running workflow hooks.
 pub(crate) struct HookLifecycle {

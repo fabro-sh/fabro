@@ -15,13 +15,13 @@ use crate::artifact_snapshot::collect_artifacts;
 use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
-use crate::outcome::StageUsage;
+use crate::outcome::BilledModelUsage;
 use fabro_core::error::Result as CoreResult;
 use fabro_core::lifecycle::NodeDecision;
 
-type WfRunState = ExecutionState<Option<StageUsage>>;
-type WfNodeResult = NodeResult<Option<StageUsage>>;
-type WfNodeDecision = NodeDecision<Option<StageUsage>>;
+type WfRunState = ExecutionState<Option<BilledModelUsage>>;
+type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
+type WfNodeDecision = NodeDecision<Option<BilledModelUsage>>;
 
 /// Sub-lifecycle responsible for artifact collection, offloading, and syncing.
 pub(crate) struct ArtifactLifecycle {

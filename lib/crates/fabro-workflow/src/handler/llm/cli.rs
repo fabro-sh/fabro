@@ -11,10 +11,10 @@ use super::super::agent::{CodergenBackend, CodergenResult};
 use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::{Emitter, Event};
-use crate::outcome::StageUsage;
-use crate::outcome::compute_stage_cost;
+use crate::outcome::billed_model_usage_from_llm;
 use crate::run_dir::visit_from_context;
 use fabro_graphviz::graph::Node;
+use fabro_llm::types::TokenCounts;
 
 /// Maps a provider to its corresponding CLI tool metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -261,7 +261,7 @@ fn parse_claude_ndjson(output: &str) -> Option<CliResponse> {
 /// Parse NDJSON output from Codex CLI (`codex exec --json`).
 ///
 /// Codex emits NDJSON lines. Text comes from `item.completed` events where
-/// `item.type == "agent_message"`. Usage comes from the `turn.completed` event.
+/// `item.type == "agent_message"`. TokenCounts comes from the `turn.completed` event.
 fn parse_codex_ndjson(output: &str) -> Option<CliResponse> {
     let mut last_message_text = String::new();
     let mut input_tokens: i64 = 0;
@@ -689,17 +689,16 @@ impl CodergenBackend for AgentCliBackend {
             }
         };
 
-        let mut stage_usage = StageUsage {
-            model: model.to_string(),
-            input_tokens: parsed.input_tokens,
-            output_tokens: parsed.output_tokens,
-            cache_read_tokens: None,
-            cache_write_tokens: None,
-            reasoning_tokens: None,
-            speed: None,
-            cost: None,
-        };
-        stage_usage.cost = compute_stage_cost(&stage_usage);
+        let stage_usage = billed_model_usage_from_llm(
+            model,
+            provider,
+            node.speed(),
+            &TokenCounts {
+                input_tokens: parsed.input_tokens,
+                output_tokens: parsed.output_tokens,
+                ..TokenCounts::default()
+            },
+        );
 
         Ok(CodergenResult::Text {
             text: parsed.text,

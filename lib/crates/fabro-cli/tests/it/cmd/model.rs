@@ -38,7 +38,7 @@ fn bare() {
     exit_code: 0
     ----- stdout -----
     MODEL                               PROVIDER   ALIASES                  CONTEXT            COST       SPEED 
-     claude-opus-4-6                     anthropic  opus, claude-opus             1m   $15.0 / $75.0    25 tok/s 
+     claude-opus-4-6                     anthropic  opus, claude-opus             1m    $5.0 / $25.0    25 tok/s 
      claude-sonnet-4-5                   anthropic                              200k    $3.0 / $15.0    50 tok/s 
      claude-sonnet-4-6                   anthropic  sonnet, claude-sonnet       200k    $3.0 / $15.0    50 tok/s 
      claude-haiku-4-5                    anthropic  haiku, claude-haiku         200k     $0.8 / $4.0   100 tok/s 
@@ -72,7 +72,7 @@ fn list() {
     exit_code: 0
     ----- stdout -----
     MODEL                               PROVIDER   ALIASES                  CONTEXT            COST       SPEED 
-     claude-opus-4-6                     anthropic  opus, claude-opus             1m   $15.0 / $75.0    25 tok/s 
+     claude-opus-4-6                     anthropic  opus, claude-opus             1m    $5.0 / $25.0    25 tok/s 
      claude-sonnet-4-5                   anthropic                              200k    $3.0 / $15.0    50 tok/s 
      claude-sonnet-4-6                   anthropic  sonnet, claude-sonnet       200k    $3.0 / $15.0    50 tok/s 
      claude-haiku-4-5                    anthropic  haiku, claude-haiku         200k     $0.8 / $4.0   100 tok/s 
@@ -105,11 +105,11 @@ fn list_provider() {
     success: true
     exit_code: 0
     ----- stdout -----
-    MODEL              PROVIDER   ALIASES                CONTEXT           COST      SPEED 
-     claude-opus-4-6    anthropic  opus, claude-opus           1m  $15.0 / $75.0   25 tok/s 
-     claude-sonnet-4-5  anthropic                            200k   $3.0 / $15.0   50 tok/s 
-     claude-sonnet-4-6  anthropic  sonnet, claude-sonnet     200k   $3.0 / $15.0   50 tok/s 
-     claude-haiku-4-5   anthropic  haiku, claude-haiku       200k    $0.8 / $4.0  100 tok/s
+    MODEL              PROVIDER   ALIASES                CONTEXT          COST      SPEED 
+     claude-opus-4-6    anthropic  opus, claude-opus           1m  $5.0 / $25.0   25 tok/s 
+     claude-sonnet-4-5  anthropic                            200k  $3.0 / $15.0   50 tok/s 
+     claude-sonnet-4-6  anthropic  sonnet, claude-sonnet     200k  $3.0 / $15.0   50 tok/s 
+     claude-haiku-4-5   anthropic  haiku, claude-haiku       200k   $0.8 / $4.0  100 tok/s
     ----- stderr -----
     ");
 }
@@ -123,8 +123,8 @@ fn list_query() {
     success: true
     exit_code: 0
     ----- stdout -----
-    MODEL            PROVIDER   ALIASES            CONTEXT           COST     SPEED 
-     claude-opus-4-6  anthropic  opus, claude-opus       1m  $15.0 / $75.0  25 tok/s
+    MODEL            PROVIDER   ALIASES            CONTEXT          COST     SPEED 
+     claude-opus-4-6  anthropic  opus, claude-opus       1m  $5.0 / $25.0  25 tok/s
     ----- stderr -----
     ");
 }
@@ -155,8 +155,8 @@ fn list_query_case_insensitive() {
     success: true
     exit_code: 0
     ----- stdout -----
-    MODEL            PROVIDER   ALIASES            CONTEXT           COST     SPEED 
-     claude-opus-4-6  anthropic  opus, claude-opus       1m  $15.0 / $75.0  25 tok/s
+    MODEL            PROVIDER   ALIASES            CONTEXT          COST     SPEED 
+     claude-opus-4-6  anthropic  opus, claude-opus       1m  $5.0 / $25.0  25 tok/s
     ----- stderr -----
     ");
 }

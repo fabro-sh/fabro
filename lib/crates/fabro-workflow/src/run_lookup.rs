@@ -105,7 +105,16 @@ impl RunInfo {
     }
 
     pub fn total_cost(&self) -> Option<f64> {
-        self.summary.as_ref().and_then(|summary| summary.total_cost)
+        self.summary
+            .as_ref()
+            .and_then(|summary| summary.total_usd_micros)
+            .map(|value| value as f64 / 1_000_000.0)
+    }
+
+    pub fn total_usd_micros(&self) -> Option<i64> {
+        self.summary
+            .as_ref()
+            .and_then(|summary| summary.total_usd_micros)
     }
 
     pub fn host_repo_path(&self) -> Option<&str> {

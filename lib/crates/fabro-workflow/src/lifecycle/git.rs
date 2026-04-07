@@ -18,13 +18,13 @@ use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::git::MetadataStore;
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
-use crate::outcome::{Outcome, StageStatus, StageUsage};
+use crate::outcome::{BilledModelUsage, Outcome, StageStatus};
 use crate::run_dump::RunDump;
 use crate::run_options::RunOptions;
 use crate::sandbox_git::{git_checkpoint, git_diff, git_push_host};
 
-type WfRunState = ExecutionState<Option<StageUsage>>;
-type WfNodeResult = NodeResult<Option<StageUsage>>;
+type WfRunState = ExecutionState<Option<BilledModelUsage>>;
+type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
 
 fn build_checkpoint(
     node: &WorkflowNode,

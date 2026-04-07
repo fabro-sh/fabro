@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Graph, RunControlAction, RunProvenance, Settings, StatusReason};
 
-use super::{RunNoticeLevel, TokenUsage};
+use super::{BilledTokenCounts, RunNoticeLevel};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunCreatedProps {
@@ -81,13 +81,13 @@ pub struct RunCompletedProps {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<StatusReason>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub total_cost: Option<f64>,
+    pub total_usd_micros: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub final_git_commit_sha: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub final_patch: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage: Option<TokenUsage>,
+    pub billing: Option<BilledTokenCounts>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

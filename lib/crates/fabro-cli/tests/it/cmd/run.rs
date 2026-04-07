@@ -62,14 +62,8 @@ fn remote_run_state_response() -> serde_json::Value {
             "status": "success",
             "duration_ms": 12,
             "stages": [],
-            "total_cost": null,
+            "billing": null,
             "total_retries": 0,
-            "total_input_tokens": 0,
-            "total_output_tokens": 0,
-            "total_cache_read_tokens": 0,
-            "total_cache_write_tokens": 0,
-            "total_reasoning_tokens": 0,
-            "has_pricing": false
         },
         "retro": null,
         "retro_prompt": null,
@@ -746,6 +740,19 @@ fn json_run_implies_auto_approve_for_human_gates() {
             }
           },
           "host_repo_path": "[TEMP_DIR]",
+          "provenance": {
+            "client": {
+              "name": "fabro-cli",
+              "user_agent": "fabro-cli/0.176.2",
+              "version": "0.176.2"
+            },
+            "server": {
+              "version": "0.176.2"
+            },
+            "subject": {
+              "auth_method": "disabled"
+            }
+          },
           "run_dir": "[RUN_DIR]",
           "settings": {
             "auto_approve": true,

@@ -12,8 +12,8 @@ use crate::providers::common::{
 };
 use crate::types::{
     AdapterTimeout, ContentPart, FinishReason, Message, RateLimitInfo, Request, Response,
-    ResponseFormat, ResponseFormatType, Role, StreamEvent, ThinkingData, ToolCall, ToolChoice,
-    ToolDefinition, Usage,
+    ResponseFormat, ResponseFormatType, Role, StreamEvent, ThinkingData, TokenCounts, ToolCall,
+    ToolChoice, ToolDefinition,
 };
 use reqwest::header::HeaderMap;
 
@@ -138,7 +138,6 @@ struct CandidateContent {
 struct UsageMetadata {
     prompt_token_count: Option<i64>,
     candidates_token_count: Option<i64>,
-    total_token_count: Option<i64>,
     thoughts_token_count: Option<i64>,
     cached_content_token_count: Option<i64>,
 }
@@ -487,19 +486,21 @@ fn apply_default_safety_settings(body: &mut serde_json::Value) {
     }
 }
 
-/// Convert `UsageMetadata` from the Gemini API into a unified `Usage`.
-fn parse_usage(metadata: Option<&UsageMetadata>) -> Usage {
-    metadata.map_or_else(Usage::default, |u| {
+/// Convert `UsageMetadata` from the Gemini API into a unified `TokenCounts`.
+fn parse_usage(metadata: Option<&UsageMetadata>) -> TokenCounts {
+    metadata.map_or_else(TokenCounts::default, |u| {
         let input = u.prompt_token_count.unwrap_or(0);
-        let output = u.candidates_token_count.unwrap_or(0);
-        let total = u.total_token_count.unwrap_or(input + output);
-        Usage {
+        let reasoning_tokens = u.thoughts_token_count.unwrap_or(0);
+        let output = u
+            .candidates_token_count
+            .unwrap_or(0)
+            .saturating_sub(reasoning_tokens);
+        TokenCounts {
             input_tokens: input,
             output_tokens: output,
-            total_tokens: total,
-            reasoning_tokens: u.thoughts_token_count,
-            cache_read_tokens: u.cached_content_token_count,
-            ..Usage::default()
+            reasoning_tokens,
+            cache_read_tokens: u.cached_content_token_count.unwrap_or(0),
+            ..TokenCounts::default()
         }
     })
 }
@@ -696,7 +697,7 @@ struct SseStreamState {
     /// The `text_id` used for `TextStart`/`TextDelta`/`TextEnd`.
     text_id: String,
     /// Latest usage metadata (updated per chunk; final chunk has totals).
-    usage: Usage,
+    usage: TokenCounts,
     /// The finish reason string from the candidate, if received.
     finish_reason_str: Option<String>,
     /// Whether we have emitted the `Finish` event.
@@ -723,7 +724,7 @@ impl SseStreamState {
             accumulated_text: String::new(),
             accumulated_tool_calls: Vec::new(),
             text_id: uuid::Uuid::new_v4().to_string(),
-            usage: Usage::default(),
+            usage: TokenCounts::default(),
             finish_reason_str: None,
             finished: false,
             rate_limit,

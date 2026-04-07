@@ -9,7 +9,7 @@ use crate::helpers::{
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn aggregate_usage_increments_after_run_completes() {
+async fn aggregate_billing_increments_after_run_completes() {
     let state = test_app_state_with_options(dry_run_settings(), 5);
     let app = test_app_with_scheduler(state);
 
@@ -23,7 +23,7 @@ async fn aggregate_usage_increments_after_run_completes() {
     for _ in 0..POLL_ATTEMPTS {
         let req = Request::builder()
             .method("GET")
-            .uri(api("/usage"))
+            .uri(api("/billing"))
             .body(Body::empty())
             .unwrap();
 

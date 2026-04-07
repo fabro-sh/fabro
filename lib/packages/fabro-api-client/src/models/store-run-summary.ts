@@ -32,7 +32,7 @@ export interface StoreRunSummary {
     'status_reason'?: string;
     'pending_control'?: RunControlAction;
     'duration_ms'?: number;
-    'total_cost'?: number;
+    'total_usd_micros'?: number;
 }
 
 

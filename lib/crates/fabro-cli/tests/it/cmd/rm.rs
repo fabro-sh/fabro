@@ -226,7 +226,7 @@ fn rm_uses_configured_server_target_without_local_run_dir() {
                         "status": "succeeded",
                         "status_reason": null,
                         "duration_ms": 123,
-                        "total_cost": null
+                        "total_usd_micros": null
                     }
                 ])
                 .to_string(),

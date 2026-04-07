@@ -11,7 +11,7 @@ use fabro_agent::{
 use fabro_llm::client::Client;
 use fabro_llm::provider::{Provider, ProviderAdapter};
 use fabro_llm::providers::OpenAiAdapter;
-use fabro_model::ModelRef;
+use fabro_model::ModelHandle;
 use fabro_test::{TwinScenario, TwinScenarios, TwinToolCall, twin_openai};
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -21,22 +21,22 @@ struct OpenAiTwinOptions {
     api_key: String,
 }
 
-fn summarizer_model_id(provider: Provider) -> ModelRef {
+fn summarizer_model_id(provider: Provider) -> ModelHandle {
     match provider {
         Provider::OpenAi
         | Provider::Kimi
         | Provider::Zai
         | Provider::Minimax
         | Provider::Inception
-        | Provider::OpenAiCompatible => ModelRef::ByName {
+        | Provider::OpenAiCompatible => ModelHandle::ByName {
             provider: Provider::OpenAi,
             model: "gpt-5.4-mini".to_string(),
         },
-        Provider::Gemini => ModelRef::ByName {
+        Provider::Gemini => ModelHandle::ByName {
             provider: Provider::Gemini,
             model: "gemini-3-flash-preview".to_string(),
         },
-        Provider::Anthropic => ModelRef::ByName {
+        Provider::Anthropic => ModelHandle::ByName {
             provider: Provider::Anthropic,
             model: "claude-haiku-4-5".to_string(),
         },
