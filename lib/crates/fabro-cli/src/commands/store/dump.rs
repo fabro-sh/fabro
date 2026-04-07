@@ -1,35 +1,29 @@
 use anyhow::{Context, Result};
-use fabro_config::Storage;
+use bytes::Bytes;
 #[cfg(test)]
-use fabro_store::StageId;
-use fabro_store::{ArtifactStore, RunDatabase, RunProjection};
+use fabro_store::{ArtifactStore, RunDatabase};
+use fabro_store::{RunProjection, StageId};
+use fabro_types::RunBlobId;
 use fabro_workflow::run_dump::RunDump;
+use futures::future::BoxFuture;
 #[cfg(test)]
 use serde::de::DeserializeOwned;
 use std::io::ErrorKind;
 use std::path::Path;
-use std::sync::Arc;
 
 use crate::args::{GlobalArgs, StoreDumpArgs};
-use crate::commands::store::rebuild::rebuild_run_store;
+use crate::server_client::ServerStoreClient;
 use crate::server_runs::ServerRunLookup;
 use crate::shared::{absolute_or_current, print_json_pretty};
 use crate::user_config::load_settings_with_storage_dir;
-use object_store::{ObjectStore, local::LocalFileSystem};
 
 pub(crate) async fn dump_command(args: &StoreDumpArgs, globals: &GlobalArgs) -> Result<()> {
     let cli_settings = load_settings_with_storage_dir(args.storage_dir.as_deref())?;
     let lookup = ServerRunLookup::connect(&cli_settings.storage_dir()).await?;
     let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();
-    let events = lookup.client().list_run_events(&run_id, None, None).await?;
-    let run_store = rebuild_run_store(&run_id, &events).await?;
-    let artifact_object_store: Arc<dyn ObjectStore> = Arc::new(LocalFileSystem::new_with_prefix(
-        Storage::new(cli_settings.storage_dir()).store_dir(),
-    )?);
-    let artifact_store = ArtifactStore::new(artifact_object_store, "artifacts");
-
-    let file_count = export_run(&run_store, &artifact_store, &args.output).await?;
+    let state = lookup.client().get_run_state(&run_id).await?;
+    let file_count = export_run_from_server(lookup.client(), &run_id, &state, &args.output).await?;
     if globals.json {
         print_json_pretty(&serde_json::json!({
             "run_id": run_id,
@@ -46,6 +40,7 @@ pub(crate) async fn dump_command(args: &StoreDumpArgs, globals: &GlobalArgs) -> 
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) async fn export_run(
     run_store: &RunDatabase,
     artifact_store: &ArtifactStore,
@@ -71,12 +66,59 @@ pub(crate) async fn export_run(
     let staging_path = staging_dir.path().to_path_buf();
 
     let file_count = export_run_to_dir(run_store, artifact_store, &state, &staging_path).await?;
+    finalize_export(
+        output_dir,
+        output_state,
+        staging_dir,
+        &staging_path,
+        file_count,
+    )
+}
 
+async fn export_run_from_server(
+    client: &ServerStoreClient,
+    run_id: &fabro_types::RunId,
+    state: &RunProjection,
+    output_dir: &Path,
+) -> Result<usize> {
+    let output_state = inspect_output_dir(output_dir)?;
+    let staging_parent = output_parent_dir(output_dir);
+    std::fs::create_dir_all(staging_parent)
+        .with_context(|| format!("failed to create {}", staging_parent.display()))?;
+
+    let staging_dir = tempfile::Builder::new()
+        .prefix(".fabro-store-dump-")
+        .tempdir_in(staging_parent)
+        .with_context(|| {
+            format!(
+                "failed to create staging dir in {}",
+                staging_parent.display()
+            )
+        })?;
+    let staging_path = staging_dir.path().to_path_buf();
+
+    let file_count = export_server_run_to_dir(client, run_id, state, &staging_path).await?;
+    finalize_export(
+        output_dir,
+        output_state,
+        staging_dir,
+        &staging_path,
+        file_count,
+    )
+}
+
+fn finalize_export(
+    output_dir: &Path,
+    output_state: OutputDirState,
+    staging_dir: tempfile::TempDir,
+    staging_path: &Path,
+    file_count: usize,
+) -> Result<usize> {
     if matches!(output_state, OutputDirState::ExistingEmpty) {
         std::fs::remove_dir(output_dir)
             .with_context(|| format!("failed to replace {}", output_dir.display()))?;
     }
-    std::fs::rename(&staging_path, output_dir).with_context(|| {
+    std::fs::rename(staging_path, output_dir).with_context(|| {
         format!(
             "failed to move staged export {} into {}",
             staging_path.display(),
@@ -88,6 +130,7 @@ pub(crate) async fn export_run(
     Ok(file_count)
 }
 
+#[cfg(test)]
 async fn export_run_to_dir(
     run_store: &RunDatabase,
     artifact_store: &ArtifactStore,
@@ -96,6 +139,48 @@ async fn export_run_to_dir(
 ) -> Result<usize> {
     let dump = RunDump::store_export(run_store, artifact_store, state).await?;
     dump.write_to_dir(output_dir)
+}
+
+async fn export_server_run_to_dir(
+    client: &ServerStoreClient,
+    run_id: &fabro_types::RunId,
+    state: &RunProjection,
+    output_dir: &Path,
+) -> Result<usize> {
+    let events = client.list_run_events(run_id, None, None).await?;
+    let mut dump = RunDump::from_store_state_and_events(state, &events)?;
+
+    dump.hydrate_referenced_blobs_with_reader(|blob_id| {
+        read_blob_from_client(client, run_id, blob_id)
+    })
+    .await?;
+
+    for artifact in client.list_run_artifacts(run_id).await? {
+        let stage_id: StageId = artifact
+            .stage_id
+            .parse()
+            .with_context(|| format!("server returned invalid stage id {:?}", artifact.stage_id))?;
+        let data = client
+            .download_stage_artifact(run_id, &stage_id, &artifact.relative_path)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to download artifact {} for stage {}",
+                    artifact.relative_path, artifact.stage_id
+                )
+            })?;
+        dump.add_artifact_bytes(&stage_id, &artifact.relative_path, data)?;
+    }
+
+    dump.write_to_dir(output_dir)
+}
+
+fn read_blob_from_client<'a>(
+    client: &'a ServerStoreClient,
+    run_id: &'a fabro_types::RunId,
+    blob_id: RunBlobId,
+) -> BoxFuture<'a, Result<Option<Bytes>>> {
+    Box::pin(async move { client.read_run_blob(run_id, &blob_id).await })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,6 +229,7 @@ mod tests {
 
     use std::collections::HashMap;
     use std::path::PathBuf;
+    use std::sync::Arc;
     use std::time::Duration;
 
     use chrono::{DateTime, Utc};
@@ -154,7 +240,7 @@ mod tests {
         Settings, StageStatus, StartRecord, StatusReason, fixtures,
     };
     use fabro_workflow::event::{Event, append_event};
-    use object_store::memory::InMemory;
+    use object_store::{ObjectStore, memory::InMemory};
 
     fn dt(rfc3339: &str) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(rfc3339)

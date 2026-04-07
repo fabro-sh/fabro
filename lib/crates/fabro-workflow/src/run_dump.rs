@@ -3,7 +3,8 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use fabro_store::{ArtifactStore, RunDatabase, RunProjection};
+use bytes::Bytes;
+use fabro_store::{ArtifactStore, EventEnvelope, RunDatabase, RunProjection, StageId};
 use fabro_types::{RunBlobId, parse_blob_ref, parse_legacy_blob_file_ref};
 use futures::future::BoxFuture;
 
@@ -119,15 +120,47 @@ impl RunDump {
         dump
     }
 
+    #[allow(dead_code)]
     pub async fn store_export(
         run_store: &RunDatabase,
         artifact_store: &ArtifactStore,
         state: &RunProjection,
     ) -> Result<Self> {
+        let events = run_store.list_events().await?;
+        let mut dump = Self::from_store_state_and_events(state, &events)?;
+
+        if let Some(run_record) = state.run.as_ref() {
+            for asset in artifact_store.list_for_run(&run_record.run_id).await? {
+                let data = artifact_store
+                    .get(&run_record.run_id, &asset.node, &asset.filename)
+                    .await?
+                    .with_context(|| {
+                        format!(
+                            "asset {:?} for node {:?} visit {} is missing from the store",
+                            asset.filename,
+                            asset.node.node_id(),
+                            asset.node.visit()
+                        )
+                    })?;
+                dump.add_artifact_bytes(&asset.node, &asset.filename, data.to_vec())?;
+            }
+        }
+
+        dump.hydrate_referenced_blobs_with_reader(|blob_id| {
+            read_blob_from_store(run_store, blob_id)
+        })
+        .await?;
+
+        Ok(dump)
+    }
+
+    pub fn from_store_state_and_events(
+        state: &RunProjection,
+        events: &[EventEnvelope],
+    ) -> Result<Self> {
         let mut entries = Vec::new();
 
-        let run_record = state.run.as_ref();
-        if let Some(record) = run_record {
+        if let Some(record) = state.run.as_ref() {
             push_json_entry(&mut entries, "run.json", record);
         }
         if let Some(record) = state.start.as_ref() {
@@ -200,8 +233,8 @@ impl RunDump {
         }
 
         let mut events_jsonl = Vec::new();
-        for event in run_store.list_events().await? {
-            serde_json::to_writer(&mut events_jsonl, &event)?;
+        for event in events {
+            serde_json::to_writer(&mut events_jsonl, event)?;
             events_jsonl.write_all(b"\n")?;
         }
         entries.push(RunDumpEntry::bytes("events.jsonl", events_jsonl));
@@ -214,36 +247,47 @@ impl RunDump {
             );
         }
 
-        if let Some(run_record) = run_record {
-            for asset in artifact_store.list_for_run(&run_record.run_id).await? {
-                let node_id_segment =
-                    validate_single_path_segment("node id", asset.node.node_id())?;
-                let filename_path = validate_relative_path("artifact filename", &asset.filename)?;
-                let data = artifact_store
-                    .get(&run_record.run_id, &asset.node, &asset.filename)
-                    .await?
-                    .with_context(|| {
-                        format!(
-                            "asset {:?} for node {:?} visit {} is missing from the store",
-                            asset.filename,
-                            asset.node.node_id(),
-                            asset.node.visit()
-                        )
-                    })?;
-                entries.push(RunDumpEntry::bytes_path(
-                    &PathBuf::from("artifacts")
-                        .join("nodes")
-                        .join(node_id_segment)
-                        .join(format!("visit-{}", asset.node.visit()))
-                        .join(filename_path),
-                    data.to_vec(),
-                ));
+        Ok(Self { entries })
+    }
+
+    pub fn add_artifact_bytes(
+        &mut self,
+        stage_id: &StageId,
+        filename: &str,
+        data: Vec<u8>,
+    ) -> Result<()> {
+        let path = artifact_dump_path(stage_id, filename)?;
+        self.entries.push(RunDumpEntry::bytes_path(&path, data));
+        Ok(())
+    }
+
+    pub async fn hydrate_referenced_blobs_with_reader<'a, F>(
+        &mut self,
+        mut read_blob: F,
+    ) -> Result<()>
+    where
+        F: FnMut(RunBlobId) -> BoxFuture<'a, Result<Option<Bytes>>>,
+    {
+        let mut cache = HashMap::new();
+        for entry in &mut self.entries {
+            if let RunDumpContents::Json(value) = &mut entry.contents {
+                let mut blob_ids = Vec::new();
+                collect_blob_refs_in_value(value, &mut blob_ids);
+                for blob_id in blob_ids {
+                    if cache.contains_key(&blob_id) {
+                        continue;
+                    }
+                    let blob = read_blob(blob_id)
+                        .await?
+                        .with_context(|| format!("blob {blob_id:?} is missing from the store"))?;
+                    let hydrated: serde_json::Value = serde_json::from_slice(&blob)
+                        .with_context(|| format!("blob {blob_id:?} is not valid JSON"))?;
+                    cache.insert(blob_id, hydrated);
+                }
+                replace_blob_refs_in_value(value, &cache)?;
             }
         }
-
-        hydrate_referenced_blobs(&mut entries, run_store).await?;
-
-        Ok(Self { entries })
+        Ok(())
     }
 
     pub fn entries(&self) -> &[RunDumpEntry] {
@@ -403,61 +447,77 @@ fn validate_relative_path(kind: &str, value: &str) -> Result<PathBuf> {
     Ok(normalized)
 }
 
-async fn hydrate_referenced_blobs(
-    entries: &mut [RunDumpEntry],
-    run_store: &RunDatabase,
-) -> Result<()> {
-    let mut cache = HashMap::new();
-    for entry in entries {
-        if let RunDumpContents::Json(value) = &mut entry.contents {
-            hydrate_blob_refs_in_value(value, run_store, &mut cache).await?;
+fn collect_blob_refs_in_value(value: &serde_json::Value, blob_ids: &mut Vec<RunBlobId>) {
+    match value {
+        serde_json::Value::String(current) => {
+            if let Some(blob_id) =
+                parse_blob_ref(current).or_else(|| parse_legacy_blob_file_ref(current))
+            {
+                blob_ids.push(blob_id);
+            }
         }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_blob_refs_in_value(item, blob_ids);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for item in map.values() {
+                collect_blob_refs_in_value(item, blob_ids);
+            }
+        }
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {}
+    }
+}
+
+fn replace_blob_refs_in_value(
+    value: &mut serde_json::Value,
+    cache: &HashMap<RunBlobId, serde_json::Value>,
+) -> Result<()> {
+    match value {
+        serde_json::Value::String(current) => {
+            let Some(blob_id) =
+                parse_blob_ref(current).or_else(|| parse_legacy_blob_file_ref(current))
+            else {
+                return Ok(());
+            };
+            let hydrated = cache
+                .get(&blob_id)
+                .cloned()
+                .with_context(|| format!("blob {blob_id:?} is missing from the hydration cache"))?;
+            *value = hydrated;
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                replace_blob_refs_in_value(item, cache)?;
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for item in map.values_mut() {
+                replace_blob_refs_in_value(item, cache)?;
+            }
+        }
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {}
     }
     Ok(())
 }
 
-fn hydrate_blob_refs_in_value<'a>(
-    value: &'a mut serde_json::Value,
-    run_store: &'a RunDatabase,
-    cache: &'a mut HashMap<RunBlobId, serde_json::Value>,
-) -> BoxFuture<'a, Result<()>> {
-    Box::pin(async move {
-        match value {
-            serde_json::Value::String(current) => {
-                let Some(blob_id) =
-                    parse_blob_ref(current).or_else(|| parse_legacy_blob_file_ref(current))
-                else {
-                    return Ok(());
-                };
-                if let Some(cached) = cache.get(&blob_id).cloned() {
-                    *value = cached;
-                    return Ok(());
-                }
+#[allow(dead_code)]
+fn read_blob_from_store(
+    run_store: &RunDatabase,
+    blob_id: RunBlobId,
+) -> BoxFuture<'_, Result<Option<Bytes>>> {
+    Box::pin(async move { Ok(run_store.read_blob(&blob_id).await?) })
+}
 
-                let blob = run_store
-                    .read_blob(&blob_id)
-                    .await?
-                    .with_context(|| format!("blob {blob_id:?} is missing from the store"))?;
-                let hydrated: serde_json::Value = serde_json::from_slice(&blob)
-                    .with_context(|| format!("blob {blob_id:?} is not valid JSON"))?;
-                cache.insert(blob_id, hydrated.clone());
-                *value = hydrated;
-            }
-            serde_json::Value::Array(items) => {
-                for item in items {
-                    hydrate_blob_refs_in_value(item, run_store, cache).await?;
-                }
-            }
-            serde_json::Value::Object(map) => {
-                for item in map.values_mut() {
-                    hydrate_blob_refs_in_value(item, run_store, cache).await?;
-                }
-            }
-            serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {
-            }
-        }
-        Ok(())
-    })
+fn artifact_dump_path(stage_id: &StageId, filename: &str) -> Result<PathBuf> {
+    let node_id_segment = validate_single_path_segment("node id", stage_id.node_id())?;
+    let filename_path = validate_relative_path("artifact filename", filename)?;
+    Ok(PathBuf::from("artifacts")
+        .join("nodes")
+        .join(node_id_segment)
+        .join(format!("visit-{}", stage_id.visit()))
+        .join(filename_path))
 }
 
 fn ensure_parent_dir(path: &Path) -> Result<()> {
