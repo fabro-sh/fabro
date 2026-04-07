@@ -41,6 +41,8 @@ static INSTA_FILTERS: &[(&str, &str)] = &[
     (r"\\([\w\d])", "/$1"),
 ];
 
+const MANAGED_STORAGE_MARKER: &str = "# fabro-test managed storage_dir";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TestMode {
     #[default]
@@ -103,14 +105,24 @@ pub struct TestContext {
     session_root: PathBuf,
     fabro_bin: PathBuf,
     filters: Vec<(String, String)>,
+    active_socket_path: PathBuf,
+    isolated_server: Option<ServerPaths>,
     managed_storage_dirs: Vec<PathBuf>,
     _context_root: tempfile::TempDir,
 }
 
 #[derive(Debug, Clone)]
-struct SessionPaths {
+struct ServerPaths {
     root: PathBuf,
     storage_dir: PathBuf,
+    socket_path: PathBuf,
+    config_path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+struct SessionPaths {
+    root: PathBuf,
+    server: ServerPaths,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -171,7 +183,12 @@ fn session_paths() -> (SessionMode, String, SessionPaths) {
                 SessionMode::Nextest,
                 run_id,
                 SessionPaths {
-                    storage_dir: root.join("storage"),
+                    server: ServerPaths {
+                        root: root.clone(),
+                        storage_dir: root.join("storage"),
+                        socket_path: root.join("fabro.sock"),
+                        config_path: root.join("settings.toml"),
+                    },
                     root,
                 },
             );
@@ -184,7 +201,12 @@ fn session_paths() -> (SessionMode, String, SessionPaths) {
         SessionMode::Process,
         process_id,
         SessionPaths {
-            storage_dir: root.join("storage"),
+            server: ServerPaths {
+                root: root.clone(),
+                storage_dir: root.join("storage"),
+                socket_path: root.join("fabro.sock"),
+                config_path: root.join("settings.toml"),
+            },
             root,
         },
     )
@@ -297,15 +319,257 @@ fn write_marker(root: &Path) {
         .unwrap_or_else(|err| panic!("failed to write {}: {err}", marker_path.display()));
 }
 
-fn stop_session_server(storage_dir: &Path) {
-    let record_path = storage_dir.join("server.json");
-    let Ok(content) = std::fs::read_to_string(&record_path) else {
+fn managed_storage_settings(storage_dir: &Path, rest: &str) -> String {
+    format!(
+        "{MANAGED_STORAGE_MARKER}\nstorage_dir = \"{}\"\n{rest}",
+        storage_dir.display()
+    )
+}
+
+fn strip_managed_storage_settings(contents: &str) -> &str {
+    if !contents.starts_with(MANAGED_STORAGE_MARKER) {
+        return contents;
+    }
+
+    let after_marker = contents
+        .strip_prefix(MANAGED_STORAGE_MARKER)
+        .and_then(|rest| rest.strip_prefix('\n'))
+        .unwrap_or("");
+    let (first_line, mut rest) = after_marker.split_once('\n').unwrap_or((after_marker, ""));
+    if !first_line.starts_with("storage_dir = ") {
+        return after_marker;
+    }
+    if let Some((maybe_target, tail)) = rest.split_once('\n') {
+        if maybe_target.starts_with("server.target = ") {
+            rest = tail;
+        }
+    }
+    rest
+}
+
+fn settings_storage_dir(settings_path: &Path) -> Option<PathBuf> {
+    let content = std::fs::read_to_string(settings_path).ok()?;
+    let value = toml::from_str::<toml::Value>(strip_managed_storage_settings(&content)).ok()?;
+    value
+        .get("storage_dir")
+        .or_else(|| value.get("data_dir"))
+        .and_then(toml::Value::as_str)
+        .map(PathBuf::from)
+}
+
+fn home_settings_path(home_dir: &Path) -> PathBuf {
+    home_dir.join(".fabro/settings.toml")
+}
+
+fn write_settings_file(path: &Path, storage_dir: &Path, rest: &str) {
+    ensure_parent_dir(path);
+    std::fs::write(
+        path,
+        format!("storage_dir = \"{}\"\n{rest}", storage_dir.display()),
+    )
+    .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
+}
+
+fn parse_settings_table(contents: &str, source: &Path) -> toml::map::Map<String, toml::Value> {
+    let stripped = strip_managed_storage_settings(contents);
+    let value = toml::from_str::<toml::Value>(stripped)
+        .unwrap_or_else(|err| panic!("failed to parse {}: {err}", source.display()));
+    let Some(table) = value.as_table() else {
+        panic!("expected {} to contain a TOML table", source.display());
+    };
+    table.clone()
+}
+
+fn write_settings_table(path: &Path, table: &toml::map::Map<String, toml::Value>) {
+    ensure_parent_dir(path);
+    let mut contents = toml::to_string(table)
+        .unwrap_or_else(|err| panic!("failed to serialize {}: {err}", path.display()));
+    if !contents.ends_with('\n') {
+        contents.push('\n');
+    }
+    std::fs::write(path, contents)
+        .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
+}
+
+fn server_target_from_table(table: &toml::map::Map<String, toml::Value>) -> Option<String> {
+    table
+        .get("server")
+        .and_then(toml::Value::as_table)
+        .and_then(|server| server.get("target"))
+        .and_then(toml::Value::as_str)
+        .map(ToOwned::to_owned)
+}
+
+fn set_server_target(table: &mut toml::map::Map<String, toml::Value>, socket_path: &Path) {
+    let server_entry = table
+        .entry("server".to_string())
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+    let Some(server_table) = server_entry.as_table_mut() else {
+        panic!("expected [server] to be a TOML table");
+    };
+    server_table.insert(
+        "target".to_string(),
+        toml::Value::String(socket_path.display().to_string()),
+    );
+}
+
+fn clear_server_target(table: &mut toml::map::Map<String, toml::Value>) {
+    let Some(server_entry) = table.get_mut("server") else {
         return;
+    };
+    let Some(server_table) = server_entry.as_table_mut() else {
+        return;
+    };
+    server_table.remove("target");
+    if server_table.is_empty() {
+        table.remove("server");
+    }
+}
+
+fn sync_home_settings(
+    settings_path: &Path,
+    storage_dir: &Path,
+    socket_path: &Path,
+    force_server_target: bool,
+) {
+    let (mut table, had_explicit_storage, had_explicit_target) =
+        match std::fs::read_to_string(settings_path) {
+            Ok(contents) => {
+                let had_managed_storage = contents.starts_with(MANAGED_STORAGE_MARKER);
+                let table = parse_settings_table(&contents, settings_path);
+                let had_explicit_storage = !had_managed_storage
+                    && (table.contains_key("storage_dir") || table.contains_key("data_dir"));
+                let had_explicit_target = server_target_from_table(&table).is_some();
+                (table, had_explicit_storage, had_explicit_target)
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                (toml::map::Map::new(), false, false)
+            }
+            Err(err) => panic!("failed to read {}: {err}", settings_path.display()),
+        };
+
+    if !had_explicit_storage {
+        table.insert(
+            "storage_dir".to_string(),
+            toml::Value::String(storage_dir.display().to_string()),
+        );
+        table.remove("data_dir");
+    }
+
+    if force_server_target || (!had_explicit_storage && !had_explicit_target) {
+        set_server_target(&mut table, socket_path);
+    } else if had_explicit_storage && !had_explicit_target {
+        clear_server_target(&mut table);
+    }
+
+    if !had_explicit_storage {
+        let mut rest = table.clone();
+        rest.remove("storage_dir");
+        let managed_target = !had_explicit_target && !force_server_target;
+        if managed_target {
+            clear_server_target(&mut rest);
+        }
+        let rest = toml::to_string(&rest)
+            .unwrap_or_else(|err| panic!("failed to serialize {}: {err}", settings_path.display()));
+        let mut contents = managed_storage_settings(storage_dir, &rest);
+        if managed_target {
+            contents = format!(
+                "{MANAGED_STORAGE_MARKER}\nstorage_dir = \"{}\"\nserver.target = \"{}\"\n{rest}",
+                storage_dir.display(),
+                socket_path.display()
+            );
+        }
+        ensure_parent_dir(settings_path);
+        std::fs::write(settings_path, contents)
+            .unwrap_or_else(|err| panic!("failed to write {}: {err}", settings_path.display()));
+        return;
+    }
+
+    write_settings_table(settings_path, &table);
+}
+
+fn server_record_path(storage_dir: &Path) -> PathBuf {
+    storage_dir.join("server.json")
+}
+
+fn server_record_pid(storage_dir: &Path) -> Option<u32> {
+    let record_path = server_record_path(storage_dir);
+    let Ok(content) = std::fs::read_to_string(&record_path) else {
+        return None;
     };
     let Ok(record) = serde_json::from_str::<serde_json::Value>(&content) else {
-        return;
+        return None;
     };
-    let Some(pid) = record["pid"].as_u64().and_then(|p| u32::try_from(p).ok()) else {
+    record["pid"]
+        .as_u64()
+        .and_then(|pid| u32::try_from(pid).ok())
+}
+
+fn server_running(server: &ServerPaths) -> bool {
+    server_record_pid(&server.storage_dir).is_some_and(|pid| fabro_proc::process_alive(pid))
+}
+
+fn wait_for_server_running(server: &ServerPaths) {
+    let poll = std::time::Duration::from_millis(50);
+    let timeout = std::time::Duration::from_secs(5);
+    let mut elapsed = std::time::Duration::ZERO;
+    while elapsed < timeout {
+        if server_running(server) {
+            return;
+        }
+        std::thread::sleep(poll);
+        elapsed += poll;
+    }
+    panic!(
+        "timed out waiting for test server record in {}",
+        server.storage_dir.display()
+    );
+}
+
+fn ensure_server_running(fabro_bin: &Path, server: &ServerPaths, config_path: &Path) {
+    if server_running(server) {
+        return;
+    }
+
+    ensure_parent_dir(&server.socket_path);
+    ensure_parent_dir(config_path);
+    std::fs::create_dir_all(&server.storage_dir)
+        .unwrap_or_else(|err| panic!("failed to create {}: {err}", server.storage_dir.display()));
+    let _ = std::fs::remove_file(server_record_path(&server.storage_dir));
+    let _ = std::fs::remove_file(&server.socket_path);
+
+    let output = std::process::Command::new(fabro_bin)
+        .env("NO_COLOR", "1")
+        .env("FABRO_NO_UPGRADE_CHECK", "true")
+        .env("FABRO_SERVER_MAX_CONCURRENT_RUNS", "64")
+        .env("FABRO_HOME", &server.root)
+        .args(["server", "start"])
+        .arg("--storage-dir")
+        .arg(&server.storage_dir)
+        .arg("--bind")
+        .arg(&server.socket_path)
+        .arg("--config")
+        .arg(config_path)
+        .output()
+        .unwrap_or_else(|err| panic!("failed to execute {}: {err}", fabro_bin.display()));
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !output.status.success() && !stderr.contains("Server already running") {
+        panic!(
+            "failed to start test server:\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            stderr
+        );
+    }
+
+    wait_for_server_running(server);
+}
+
+fn stop_test_server(server: &ServerPaths) {
+    let record_path = server_record_path(&server.storage_dir);
+    let Some(pid) = server_record_pid(&server.storage_dir) else {
+        let _ = std::fs::remove_file(&server.socket_path);
+        let _ = std::fs::remove_file(&record_path);
         return;
     };
 
@@ -322,16 +586,62 @@ fn stop_session_server(storage_dir: &Path) {
         fabro_proc::sigkill(pid);
     }
 
+    let _ = std::fs::remove_file(&server.socket_path);
     let _ = std::fs::remove_file(&record_path);
 }
 
-fn cleanup_session_root(root: &Path, storage_dir: &Path) {
+fn shared_server_paths(root: &Path) -> ServerPaths {
+    ServerPaths {
+        root: root.to_path_buf(),
+        storage_dir: root.join("storage"),
+        socket_path: root.join("fabro.sock"),
+        config_path: root.join("settings.toml"),
+    }
+}
+
+fn isolated_server_paths(
+    root: &Path,
+    test_case_id: &str,
+    storage_dir: Option<PathBuf>,
+) -> ServerPaths {
+    let server_root = root.join("isolated").join(test_case_id);
+    ServerPaths {
+        root: server_root.clone(),
+        storage_dir: storage_dir.unwrap_or_else(|| server_root.join("storage")),
+        socket_path: server_root.join("fabro.sock"),
+        config_path: server_root.join("settings.toml"),
+    }
+}
+
+fn reap_isolated_servers(root: &Path) {
+    let isolated_root = root.join("isolated");
+    let Ok(entries) = std::fs::read_dir(&isolated_root) else {
+        return;
+    };
+
+    for entry in entries.filter_map(Result::ok) {
+        let server_root = entry.path();
+        if !server_root.is_dir() {
+            continue;
+        }
+        stop_test_server(&ServerPaths {
+            root: server_root.clone(),
+            storage_dir: server_root.join("storage"),
+            socket_path: server_root.join("fabro.sock"),
+            config_path: server_root.join("settings.toml"),
+        });
+        let _ = std::fs::remove_dir_all(server_root);
+    }
+}
+
+fn cleanup_session_root(root: &Path) {
     with_session_lock(root, || {
         let marker_path = session_marker_path(root, current_pid());
         let _ = std::fs::remove_file(&marker_path);
         let live_count = live_marker_count(root);
         if live_count == 0 {
-            stop_session_server(storage_dir);
+            stop_test_server(&shared_server_paths(root));
+            reap_isolated_servers(root);
             let _ = std::fs::remove_dir_all(root);
         }
     });
@@ -361,8 +671,8 @@ fn reap_stale_session_roots(mode: SessionMode) {
         }
         with_session_lock(&root, || {
             if live_marker_count(&root) == 0 {
-                let storage_dir = root.join("storage");
-                stop_session_server(&storage_dir);
+                stop_test_server(&shared_server_paths(&root));
+                reap_isolated_servers(&root);
                 let _ = std::fs::remove_dir_all(&root);
             }
         });
@@ -402,32 +712,40 @@ impl TestContext {
                     )
                 },
             );
-            std::fs::create_dir_all(&session_paths.storage_dir).unwrap_or_else(|err| {
+            std::fs::create_dir_all(&session_paths.server.storage_dir).unwrap_or_else(|err| {
                 panic!(
                     "failed to create {}: {err}",
-                    session_paths.storage_dir.display()
+                    session_paths.server.storage_dir.display()
                 )
             });
+            write_settings_file(
+                &session_paths.server.config_path,
+                &session_paths.server.storage_dir,
+                "",
+            );
+            if fabro_bin.exists() {
+                ensure_server_running(
+                    &fabro_bin,
+                    &session_paths.server,
+                    &session_paths.server.config_path,
+                );
+            }
             write_marker(&session_paths.root);
         });
 
         let temp_dir = root_path.join("temp");
         let home_dir = root_path.join("home");
-        let storage_dir = root_path.join("storage");
+        let storage_dir = session_paths.server.storage_dir.clone();
         let test_case_id = test_case_id();
 
         std::fs::create_dir_all(&temp_dir).expect("failed to create temp_dir");
         std::fs::create_dir_all(&home_dir).expect("failed to create home_dir");
-        std::fs::create_dir_all(&storage_dir).expect("failed to create storage_dir");
-        let settings_path = home_dir.join(".fabro/settings.toml");
-        if let Some(parent) = settings_path.parent() {
-            std::fs::create_dir_all(parent).expect("failed to create fabro settings dir");
-        }
-        std::fs::write(
-            &settings_path,
-            format!("storage_dir = \"{}\"\n", storage_dir.display()),
-        )
-        .expect("failed to write default fabro settings");
+        sync_home_settings(
+            &home_settings_path(&home_dir),
+            &storage_dir,
+            &session_paths.server.socket_path,
+            false,
+        );
 
         let filters = vec![
             (
@@ -472,6 +790,8 @@ impl TestContext {
             session_root: session_paths.root,
             fabro_bin,
             filters,
+            active_socket_path: session_paths.server.socket_path,
+            isolated_server: None,
             managed_storage_dirs: Vec::new(),
             _context_root: context_root,
         }
@@ -529,7 +849,6 @@ impl TestContext {
         cmd.env("NO_COLOR", "1");
         cmd.env("HOME", &self.home_dir);
         cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
-        cmd.env("FABRO_STORAGE_DIR", &self.storage_dir);
         cmd.env("FABRO_SERVER_MAX_CONCURRENT_RUNS", "64");
         cmd
     }
@@ -702,17 +1021,50 @@ impl TestContext {
             std::fs::create_dir_all(parent).expect("failed to create parent dirs");
         }
         let content = content.as_ref();
-        let effective_content = if path == std::path::Path::new(".fabro/settings.toml")
-            && !String::from_utf8_lossy(content).contains("storage_dir")
-        {
-            let mut merged =
-                format!("storage_dir = \"{}\"\n", self.storage_dir.display()).into_bytes();
-            merged.extend_from_slice(content);
-            merged
+        if path == std::path::Path::new(".fabro/settings.toml") {
+            let contents =
+                std::str::from_utf8(content).expect("settings.toml should be valid UTF-8");
+            let table = parse_settings_table(contents, &full);
+            write_settings_table(&full, &table);
+            sync_home_settings(
+                &full,
+                &self.storage_dir,
+                &self.active_socket_path,
+                self.isolated_server.is_some(),
+            );
         } else {
-            content.to_vec()
-        };
-        std::fs::write(&full, effective_content).expect("failed to write file");
+            std::fs::write(&full, content).expect("failed to write file");
+        }
+        self
+    }
+
+    pub fn server_target(&self) -> String {
+        self.active_socket_path.display().to_string()
+    }
+
+    pub fn isolated_server(&mut self) -> &mut Self {
+        if self.isolated_server.is_some() {
+            return self;
+        }
+
+        let settings_path = home_settings_path(&self.home_dir);
+        let storage_dir_override = settings_storage_dir(&settings_path);
+        let server =
+            isolated_server_paths(&self.session_root, &self.test_case_id, storage_dir_override);
+        std::fs::create_dir_all(&server.root)
+            .unwrap_or_else(|err| panic!("failed to create {}: {err}", server.root.display()));
+        sync_home_settings(
+            &settings_path,
+            &server.storage_dir,
+            &server.socket_path,
+            true,
+        );
+        if fabro_bin_exists(&self.fabro_bin) {
+            ensure_server_running(&self.fabro_bin, &server, &settings_path);
+        }
+        self.storage_dir = server.storage_dir.clone();
+        self.active_socket_path = server.socket_path.clone();
+        self.isolated_server = Some(server);
         self
     }
 
@@ -783,10 +1135,24 @@ impl TestContext {
     }
 }
 
+fn fabro_bin_exists(path: &Path) -> bool {
+    path.exists()
+}
+
 impl Drop for TestContext {
     fn drop(&mut self) {
         for storage_dir in &self.managed_storage_dirs {
-            stop_session_server(storage_dir);
+            stop_test_server(&ServerPaths {
+                root: storage_dir.clone(),
+                storage_dir: storage_dir.clone(),
+                socket_path: PathBuf::new(),
+                config_path: PathBuf::new(),
+            });
+        }
+
+        if let Some(server) = &self.isolated_server {
+            stop_test_server(server);
+            let _ = std::fs::remove_dir_all(&server.root);
         }
 
         let is_last_ref = {
@@ -807,7 +1173,7 @@ impl Drop for TestContext {
             return;
         }
 
-        cleanup_session_root(&self.session_root, &self.storage_dir);
+        cleanup_session_root(&self.session_root);
     }
 }
 
@@ -1326,7 +1692,8 @@ mod tests {
         let (_, run_id, paths) = session_paths();
         assert_eq!(run_id, "nextest-run-123");
         assert!(paths.root.ends_with(Path::new("fx").join("n-nextestrun12")));
-        assert_eq!(paths.storage_dir, paths.root.join("storage"));
+        assert_eq!(paths.server.storage_dir, paths.root.join("storage"));
+        assert_eq!(paths.server.socket_path, paths.root.join("fabro.sock"));
     }
 
     #[test]
@@ -1340,7 +1707,8 @@ mod tests {
                 .root
                 .ends_with(Path::new("fx").join(format!("p-{}", current_pid())))
         );
-        assert_eq!(paths.storage_dir, paths.root.join("storage"));
+        assert_eq!(paths.server.storage_dir, paths.root.join("storage"));
+        assert_eq!(paths.server.socket_path, paths.root.join("fabro.sock"));
     }
 
     #[test]

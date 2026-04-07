@@ -21,7 +21,7 @@ fn help() {
 
     Options:
           --json                       Output as JSON [env: FABRO_JSON=]
-          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro/storage) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro/storage) [env: FABRO_STORAGE_DIR=]
           --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --timeout <TIMEOUT>          Seconds to wait for graceful shutdown before SIGKILL [default: 10]
           --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]

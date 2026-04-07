@@ -26,7 +26,7 @@ fn help() {
           --json
               Output as JSON [env: FABRO_JSON=]
           --storage-dir <STORAGE_DIR>
-              Local storage directory (default: ~/.fabro/storage) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
+              Local storage directory (default: ~/.fabro/storage) [env: FABRO_STORAGE_DIR=]
           --debug
               Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
           --foreground
@@ -99,17 +99,21 @@ fn start_already_running_exits_with_error() {
 #[test]
 fn start_without_bind_uses_home_socket_instead_of_storage_socket() {
     let context = test_context!();
+    let storage_root = isolated_storage_dir();
+    let storage_dir = storage_root.path().join("storage");
     let expected_socket = context.home_dir.join(".fabro").join("fabro.sock");
-    let storage_socket = context.storage_dir.join("fabro.sock");
+    let storage_socket = storage_dir.join("fabro.sock");
 
     context
         .command()
+        .env("FABRO_STORAGE_DIR", &storage_dir)
         .args(["server", "start", "--dry-run"])
         .assert()
         .success();
 
     let output = context
         .command()
+        .env("FABRO_STORAGE_DIR", &storage_dir)
         .args(["server", "status", "--json"])
         .assert()
         .success()
@@ -123,9 +127,79 @@ fn start_without_bind_uses_home_socket_instead_of_storage_socket() {
 
     context
         .command()
+        .env("FABRO_STORAGE_DIR", &storage_dir)
         .args(["server", "stop"])
         .assert()
         .success();
+}
+
+#[test]
+fn default_test_contexts_share_one_eager_session_server() {
+    let context_a = test_context!();
+    let context_b = test_context!();
+
+    assert_eq!(
+        context_a.storage_dir, context_b.storage_dir,
+        "default test contexts in one session should share storage owned by one server"
+    );
+
+    let output_a = context_a
+        .command()
+        .args(["server", "status", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let output_b = context_b
+        .command()
+        .args(["server", "status", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let status_a: serde_json::Value = serde_json::from_slice(&output_a).unwrap();
+    let status_b: serde_json::Value = serde_json::from_slice(&output_b).unwrap();
+
+    assert_eq!(status_a["status"].as_str(), Some("running"));
+    assert_eq!(status_a["pid"], status_b["pid"]);
+}
+
+#[test]
+fn isolated_server_switches_context_to_separate_daemon() {
+    let mut context = test_context!();
+    let shared_storage_dir = context.storage_dir.clone();
+    let shared_status = context
+        .command()
+        .args(["server", "status", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let shared_status: serde_json::Value = serde_json::from_slice(&shared_status).unwrap();
+
+    context.isolated_server();
+
+    assert_ne!(
+        context.storage_dir, shared_storage_dir,
+        "isolated_server should move the context onto a separate server-owned storage dir"
+    );
+
+    let isolated_status = context
+        .command()
+        .args(["server", "status", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let isolated_status: serde_json::Value = serde_json::from_slice(&isolated_status).unwrap();
+
+    assert_eq!(isolated_status["status"].as_str(), Some("running"));
+    assert_ne!(isolated_status["pid"], shared_status["pid"]);
 }
 
 #[test]

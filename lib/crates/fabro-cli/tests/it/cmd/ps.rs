@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::support::unique_run_id;
 
-use super::support::{fixture, setup_completed_fast_dry_run, setup_created_fast_dry_run};
+use super::support::{setup_completed_fast_dry_run, setup_created_fast_dry_run};
 
 #[test]
 fn help() {
@@ -111,8 +111,28 @@ fn ps_quiet_outputs_run_ids_only() {
 #[test]
 fn ps_filters_by_workflow_and_label() {
     let context = test_context!();
-    let simple = fixture("simple.fabro");
-    let branching = fixture("branching.fabro");
+    let simple = context.temp_dir.join("simple.fabro");
+    let branching = context.temp_dir.join("branching.fabro");
+    context.write_temp(
+        "simple.fabro",
+        r#"digraph Simple {
+  start [shape=Mdiamond]
+  exit [shape=Msquare]
+  run [shape=parallelogram, script="true"]
+  start -> run -> exit
+}
+"#,
+    );
+    context.write_temp(
+        "branching.fabro",
+        r#"digraph Branching {
+  start [shape=Mdiamond]
+  exit [shape=Msquare]
+  run [shape=parallelogram, script="true"]
+  start -> run -> exit
+}
+"#,
+    );
 
     context
         .run_cmd()
@@ -127,7 +147,7 @@ fn ps_filters_by_workflow_and_label() {
         .assert()
         .success();
     context
-        .run_cmd()
+        .create_cmd()
         .args([
             "--dry-run",
             "--auto-approve",

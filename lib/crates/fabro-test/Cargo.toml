@@ -23,5 +23,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tempfile = "3"
 tokio = { workspace = true }
+toml = { workspace = true }
 twin-openai = { workspace = true }
 twin-github = { workspace = true }

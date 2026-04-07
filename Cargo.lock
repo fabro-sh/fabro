@@ -1992,6 +1992,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "toml 0.8.23",
  "twin-github",
  "twin-openai",
 ]
