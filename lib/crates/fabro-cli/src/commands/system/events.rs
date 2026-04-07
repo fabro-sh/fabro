@@ -3,6 +3,7 @@ use futures::StreamExt;
 
 use crate::args::{GlobalArgs, SystemEventsArgs};
 use crate::server_client;
+use crate::sse;
 
 pub(super) async fn events_command(args: &SystemEventsArgs, globals: &GlobalArgs) -> Result<()> {
     let client = server_client::connect_server_backed_api_client_with_storage_dir(
@@ -23,25 +24,15 @@ pub(super) async fn events_command(args: &SystemEventsArgs, globals: &GlobalArgs
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|err| anyhow::anyhow!("{err}"))?;
         pending.extend_from_slice(&chunk);
-        drain_sse_lines(&mut pending, globals.json)?;
-    }
-
-    if !pending.is_empty() {
-        drain_sse_lines(&mut pending, globals.json)?;
-    }
-
-    Ok(())
-}
-
-fn drain_sse_lines(buffer: &mut Vec<u8>, json_output: bool) -> Result<()> {
-    while let Some(pos) = buffer.iter().position(|byte| *byte == b'\n') {
-        let line = buffer.drain(..=pos).collect::<Vec<_>>();
-        let line = String::from_utf8_lossy(&line);
-        let line = line.trim_end_matches(['\r', '\n']);
-        if let Some(data) = line.strip_prefix("data:") {
-            render_sse_payload(data.trim(), json_output)?;
+        for payload in sse::drain_sse_payloads(&mut pending, false) {
+            render_sse_payload(&payload, globals.json)?;
         }
     }
+
+    for payload in sse::drain_sse_payloads(&mut pending, true) {
+        render_sse_payload(&payload, globals.json)?;
+    }
+
     Ok(())
 }
 

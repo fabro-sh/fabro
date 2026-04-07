@@ -4,8 +4,6 @@ use std::path::Path;
 #[cfg(test)]
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -19,7 +17,7 @@ use fabro_util::terminal::Styles;
 use fabro_workflow::outcome::StageStatus;
 use fabro_workflow::run_status::RunStatus;
 use tokio::signal::ctrl_c;
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 
 use super::run_progress;
 use crate::server_client;
@@ -72,157 +70,52 @@ pub(crate) async fn attach_run_with_client(
         .as_ref()
         .is_some_and(|record| record.settings.verbose_enabled());
     let events = client.list_run_events(run_id, None, None).await?;
-    let event_lines = events
-        .iter()
-        .map(event_payload_line)
-        .collect::<Result<Vec<_>>>()?;
+    let replay_events = events.clone();
+    let next_seq = events.last().map_or(1, |event| event.seq.saturating_add(1));
     let initial_exit_code = events.iter().rev().find_map(event_exit_code);
-    attach_run_server(
-        client,
-        run_id,
-        verbose,
-        event_lines,
-        events.last().map_or(0, |event| event.seq),
-        initial_exit_code,
-        kill_on_detach,
-        styles,
-        json_output,
-    )
-    .await
+
+    if state_is_terminal(&state) || initial_exit_code.is_some() {
+        return replay_run_with_client(client, run_id, verbose, events, json_output).await;
+    }
+
+    match client.attach_run_events(run_id, Some(next_seq)).await {
+        Ok(stream) => {
+            attach_live_run_with_client(
+                client,
+                run_id,
+                verbose,
+                events,
+                stream,
+                kill_on_detach,
+                styles,
+                json_output,
+            )
+            .await
+        }
+        Err(server_client::RunAttachStreamError::Gone) => {
+            replay_run_with_client(client, run_id, verbose, replay_events, json_output).await
+        }
+        Err(server_client::RunAttachStreamError::Other(err)) => Err(err),
+    }
 }
 
-async fn attach_run_server(
+async fn replay_run_with_client(
     client: &server_client::ServerStoreClient,
     run_id: &RunId,
     verbose: bool,
-    existing_events: Vec<String>,
-    last_seq: u32,
-    initial_exit_code: Option<ExitCode>,
-    kill_on_detach: bool,
-    styles: &'static Styles,
+    events: Vec<EventEnvelope>,
     json_output: bool,
 ) -> Result<ExitCode> {
     let is_tty = std::io::stderr().is_terminal();
     let mut progress_ui = run_progress::ProgressUI::new(is_tty, verbose);
+    let mut terminal_exit_code = None;
 
-    // Install Ctrl+C handler
-    let cancelled = Arc::new(AtomicBool::new(false));
-    {
-        let cancelled = Arc::clone(&cancelled);
-        tokio::spawn(async move {
-            let _ = ctrl_c().await;
-            cancelled.store(true, Ordering::Relaxed);
-        });
-    }
-
-    for line in &existing_events {
-        emit_progress_line(&mut progress_ui, line, json_output)?;
-    }
-
-    if json_output && !client.list_run_questions(run_id).await?.is_empty() {
-        eprintln!("{JSON_INTERVIEW_MESSAGE}");
-        return Ok(ExitCode::from(1));
-    }
-
-    let mut next_seq = if last_seq == 0 { 1 } else { last_seq + 1 };
-    let mut terminal_exit_code = initial_exit_code;
-    let mut terminal_event_seen_at = initial_exit_code.map(|_| Instant::now());
-
-    loop {
-        if cancelled.load(Ordering::Relaxed) {
-            if kill_on_detach {
-                let _ = client.cancel_run(run_id).await;
-                // Wait briefly for a terminal status or conclusion
-                for _ in 0..20 {
-                    if client
-                        .get_run_state(run_id)
-                        .await
-                        .ok()
-                        .is_some_and(|state| {
-                            state.conclusion.is_some()
-                                || state
-                                    .status
-                                    .is_some_and(|record| record.status.is_terminal())
-                        })
-                    {
-                        break;
-                    }
-                    sleep(Duration::from_millis(100)).await;
-                }
-            } else {
-                eprintln!("Detached from run (engine continues in background)");
-            }
-            break;
+    for event in events {
+        if let Some(exit_code) = event_exit_code(&event) {
+            terminal_exit_code = Some(exit_code);
         }
-
-        let mut saw_event = false;
-        let events = match client.list_run_events(run_id, Some(next_seq), None).await {
-            Ok(events) => events,
-            Err(err) if terminal_event_seen_at.is_some() && is_run_not_found_error(&err) => break,
-            Err(err) => return Err(err),
-        };
-        for event in events {
-            if let Some(exit_code) = event_exit_code(&event) {
-                terminal_exit_code = Some(exit_code);
-                terminal_event_seen_at = Some(Instant::now());
-            }
-            let line = event_payload_line(&event)?;
-            emit_progress_line(&mut progress_ui, &line, json_output)?;
-            next_seq = event.seq.saturating_add(1);
-            saw_event = true;
-        }
-
-        if let Some(seen_at) = terminal_event_seen_at {
-            if !saw_event && seen_at.elapsed() >= ATTACH_FINAL_STATUS_GRACE {
-                break;
-            }
-            if !saw_event {
-                sleep(Duration::from_millis(50)).await;
-            }
-            continue;
-        }
-
-        // Check for server-backed interview request
-        if let Some(question) = client.list_run_questions(run_id).await?.into_iter().next() {
-            if json_output {
-                eprintln!("{JSON_INTERVIEW_MESSAGE}");
-                return Ok(ExitCode::from(1));
-            }
-
-            hide_progress(&mut progress_ui, json_output);
-            let interviewer = ConsoleInterviewer::new(styles);
-            let answer = fabro_interview::Interviewer::ask(
-                &interviewer,
-                api_question_to_question(&question),
-            )
-            .await;
-            show_progress(&mut progress_ui, json_output);
-
-            if answer_requires_reattach(&answer) {
-                eprintln!("{INTERVIEW_UNANSWERED_MESSAGE}");
-                return Ok(ExitCode::from(1));
-            }
-
-            submit_server_interview_answer(client, run_id, &question.id, &answer).await?;
-            continue;
-        }
-
-        let terminal_status = client
-            .get_run_state(run_id)
-            .await
-            .ok()
-            .and_then(|state| state.status.map(|record| record.status))
-            .filter(|status| status.is_terminal());
-
-        if terminal_status.is_some() && !saw_event {
-            flush_remaining_server_events(client, run_id, next_seq, &mut progress_ui, json_output)
-                .await?;
-            break;
-        }
-
-        if !saw_event {
-            sleep(Duration::from_millis(100)).await;
-        }
+        let line = event_payload_line(&event)?;
+        emit_progress_line(&mut progress_ui, &line, json_output)?;
     }
 
     finish_progress(&mut progress_ui, json_output);
@@ -231,6 +124,194 @@ async fn attach_run_server(
         Some(exit_code) => exit_code,
         None => determine_exit_code_with_server(client, run_id).await,
     })
+}
+
+async fn attach_live_run_with_client(
+    client: &server_client::ServerStoreClient,
+    run_id: &RunId,
+    verbose: bool,
+    existing_events: Vec<EventEnvelope>,
+    mut stream: server_client::RunAttachEventStream,
+    kill_on_detach: bool,
+    styles: &'static Styles,
+    json_output: bool,
+) -> Result<ExitCode> {
+    let is_tty = std::io::stderr().is_terminal();
+    let mut progress_ui = run_progress::ProgressUI::new(is_tty, verbose);
+    let ctrl_c_signal = ctrl_c();
+    tokio::pin!(ctrl_c_signal);
+
+    let mut next_seq = 1;
+    let mut terminal_exit_code = None;
+    let mut terminal_event_seen_at: Option<Instant> = None;
+
+    for event in existing_events {
+        next_seq = event.seq.saturating_add(1);
+        if let Some(exit_code) = event_exit_code(&event) {
+            terminal_exit_code = Some(exit_code);
+            terminal_event_seen_at = Some(Instant::now());
+        }
+        let line = event_payload_line(&event)?;
+        emit_progress_line(&mut progress_ui, &line, json_output)?;
+    }
+
+    if let Some(exit_code) =
+        handle_pending_server_interview(client, run_id, &mut progress_ui, styles, json_output)
+            .await?
+    {
+        return Ok(exit_code);
+    }
+
+    loop {
+        let next_event = if let Some(seen_at) = terminal_event_seen_at {
+            let remaining = ATTACH_FINAL_STATUS_GRACE.saturating_sub(seen_at.elapsed());
+            if remaining.is_zero() {
+                break;
+            }
+            tokio::select! {
+                _ = &mut ctrl_c_signal => {
+                    handle_detach_signal(client, run_id, kill_on_detach).await;
+                    break;
+                }
+                result = timeout(remaining, stream.next_event()) => {
+                    match result {
+                        Ok(result) => result?,
+                        Err(_) => break,
+                    }
+                }
+            }
+        } else {
+            tokio::select! {
+                _ = &mut ctrl_c_signal => {
+                    handle_detach_signal(client, run_id, kill_on_detach).await;
+                    break;
+                }
+                result = stream.next_event() => result?,
+            }
+        };
+
+        let Some(event) = next_event else {
+            break;
+        };
+
+        next_seq = event.seq.saturating_add(1);
+        if let Some(exit_code) = event_exit_code(&event) {
+            terminal_exit_code = Some(exit_code);
+            terminal_event_seen_at = Some(Instant::now());
+        }
+
+        let line = event_payload_line(&event)?;
+        emit_progress_line(&mut progress_ui, &line, json_output)?;
+
+        if event_starts_interview(&event) {
+            if let Some(exit_code) = handle_pending_server_interview(
+                client,
+                run_id,
+                &mut progress_ui,
+                styles,
+                json_output,
+            )
+            .await?
+            {
+                return Ok(exit_code);
+            }
+        }
+    }
+
+    if terminal_exit_code.is_none() {
+        let (_, trailing_exit_code) =
+            emit_server_events_from(client, run_id, next_seq, &mut progress_ui, json_output)
+                .await?;
+        terminal_exit_code = trailing_exit_code;
+    }
+
+    finish_progress(&mut progress_ui, json_output);
+
+    Ok(match terminal_exit_code {
+        Some(exit_code) => exit_code,
+        None => determine_exit_code_with_server(client, run_id).await,
+    })
+}
+
+async fn handle_pending_server_interview(
+    client: &server_client::ServerStoreClient,
+    run_id: &RunId,
+    progress_ui: &mut run_progress::ProgressUI,
+    styles: &'static Styles,
+    json_output: bool,
+) -> Result<Option<ExitCode>> {
+    let Some(question) = client.list_run_questions(run_id).await?.into_iter().next() else {
+        return Ok(None);
+    };
+
+    if json_output {
+        eprintln!("{JSON_INTERVIEW_MESSAGE}");
+        return Ok(Some(ExitCode::from(1)));
+    }
+
+    hide_progress(progress_ui, json_output);
+    let interviewer = ConsoleInterviewer::new(styles);
+    let answer =
+        fabro_interview::Interviewer::ask(&interviewer, api_question_to_question(&question)).await;
+    show_progress(progress_ui, json_output);
+
+    if answer_requires_reattach(&answer) {
+        eprintln!("{INTERVIEW_UNANSWERED_MESSAGE}");
+        return Ok(Some(ExitCode::from(1)));
+    }
+
+    submit_server_interview_answer(client, run_id, &question.id, &answer).await?;
+    Ok(None)
+}
+
+async fn handle_detach_signal(
+    client: &server_client::ServerStoreClient,
+    run_id: &RunId,
+    kill_on_detach: bool,
+) {
+    if kill_on_detach {
+        let _ = client.cancel_run(run_id).await;
+        for _ in 0..20 {
+            if client
+                .get_run_state(run_id)
+                .await
+                .ok()
+                .is_some_and(|state| state_is_terminal(&state))
+            {
+                break;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    } else {
+        eprintln!("Detached from run (engine continues in background)");
+    }
+}
+
+async fn emit_server_events_from(
+    client: &server_client::ServerStoreClient,
+    run_id: &RunId,
+    next_seq: u32,
+    progress_ui: &mut run_progress::ProgressUI,
+    json_output: bool,
+) -> Result<(u32, Option<ExitCode>)> {
+    let events = match client.list_run_events(run_id, Some(next_seq), None).await {
+        Ok(events) => events,
+        Err(err) if is_run_not_found_error(&err) => Vec::new(),
+        Err(err) => return Err(err),
+    };
+
+    let mut current_seq = next_seq;
+    let mut terminal_exit_code = None;
+    for event in events {
+        if let Some(exit_code) = event_exit_code(&event) {
+            terminal_exit_code = Some(exit_code);
+        }
+        let line = event_payload_line(&event)?;
+        emit_progress_line(progress_ui, &line, json_output)?;
+        current_seq = event.seq.saturating_add(1);
+    }
+
+    Ok((current_seq, terminal_exit_code))
 }
 
 fn api_question_to_question(question: &types::ApiQuestion) -> Question {
@@ -282,43 +363,17 @@ async fn submit_server_interview_answer(
     Ok(true)
 }
 
-async fn flush_remaining_server_events(
-    client: &server_client::ServerStoreClient,
-    run_id: &RunId,
-    mut next_seq: u32,
-    progress_ui: &mut run_progress::ProgressUI,
-    json_output: bool,
-) -> Result<()> {
-    let deadline = Instant::now() + ATTACH_FINAL_STATUS_GRACE;
-    loop {
-        let mut saw_new_event = false;
-        let events = match client.list_run_events(run_id, Some(next_seq), None).await {
-            Ok(events) => events,
-            Err(err) if is_run_not_found_error(&err) => break,
-            Err(err) => return Err(err),
-        };
-        for event in events {
-            let line = event_payload_line(&event)?;
-            emit_progress_line(progress_ui, &line, json_output)?;
-            next_seq = event.seq.saturating_add(1);
-            saw_new_event = true;
-        }
-
-        if Instant::now() >= deadline {
-            break;
-        }
-
-        if !saw_new_event {
-            sleep(Duration::from_millis(100)).await;
-        }
-    }
-
-    Ok(())
-}
-
 fn is_run_not_found_error(err: &anyhow::Error) -> bool {
     err.chain()
         .any(|cause| cause.to_string() == "Run not found.")
+}
+
+fn state_is_terminal(state: &server_client::RunProjection) -> bool {
+    state.conclusion.is_some()
+        || state
+            .status
+            .as_ref()
+            .is_some_and(|record| record.status.is_terminal())
 }
 
 fn emit_progress_line(
@@ -448,6 +503,13 @@ fn event_exit_code(event: &EventEnvelope) -> Option<ExitCode> {
         EventBody::RunFailed(_) => Some(ExitCode::from(1)),
         _ => None,
     }
+}
+
+fn event_starts_interview(event: &EventEnvelope) -> bool {
+    let Ok(run_event) = RunEvent::try_from(&event.payload) else {
+        return false;
+    };
+    matches!(run_event.body, EventBody::InterviewStarted(_))
 }
 
 #[cfg(test)]
