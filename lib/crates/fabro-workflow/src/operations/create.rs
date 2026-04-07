@@ -3,7 +3,7 @@ use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, Provider};
 use fabro_sandbox::SandboxProvider;
 use fabro_store::Database;
-use fabro_types::{RunId, Settings};
+use fabro_types::{RunId, RunProvenance, Settings};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -35,6 +35,7 @@ pub struct CreateRunInput {
     pub host_repo_path: Option<String>,
     pub repo_origin_url: Option<String>,
     pub base_branch: Option<String>,
+    pub provenance: Option<RunProvenance>,
 }
 
 #[derive(Debug)]
@@ -55,6 +56,7 @@ struct PersistCreateOptions {
     working_directory: PathBuf,
     host_repo_path: Option<String>,
     repo_origin_url: Option<String>,
+    provenance: Option<RunProvenance>,
 }
 
 /// Resolve workflow inputs, normalize settings, and persist a run directory.
@@ -81,6 +83,7 @@ pub async fn create(store: &Database, request: CreateRunInput) -> Result<Created
         host_repo_path,
         repo_origin_url,
         base_branch,
+        provenance,
     } = request;
 
     let settings = resolved.settings.clone();
@@ -118,6 +121,7 @@ pub async fn create(store: &Database, request: CreateRunInput) -> Result<Created
             working_directory,
             host_repo_path,
             repo_origin_url,
+            provenance,
         },
         current_dir,
         file_resolver,
@@ -183,6 +187,7 @@ async fn persist_created_run(
             base_branch: record.base_branch.clone(),
             workflow_slug: record.workflow_slug.clone(),
             db_prefix: None,
+            provenance: record.provenance.clone(),
         },
         record.run_id.created_at(),
     );
@@ -314,6 +319,7 @@ fn persist_validated(
         working_directory,
         host_repo_path,
         repo_origin_url,
+        provenance,
     } = options;
 
     let settings = resolve_run_settings(settings, validated.graph());
@@ -331,6 +337,7 @@ fn persist_validated(
         repo_origin_url,
         base_branch,
         labels,
+        provenance,
     };
 
     pipeline::persist(
@@ -689,6 +696,7 @@ mod tests {
                 host_repo_path: None,
                 repo_origin_url: None,
                 base_branch: None,
+                provenance: None,
             },
         )
         .await
@@ -736,6 +744,7 @@ mod tests {
                 host_repo_path: Some(dir.path().display().to_string()),
                 repo_origin_url: None,
                 base_branch: Some("main".to_string()),
+                provenance: None,
             },
         )
         .await
@@ -815,6 +824,7 @@ mod tests {
                 host_repo_path: None,
                 repo_origin_url: None,
                 base_branch: None,
+                provenance: None,
             },
         )
         .await
@@ -857,6 +867,7 @@ mod tests {
                 host_repo_path: None,
                 repo_origin_url: Some("https://github.com/acme/widgets".to_string()),
                 base_branch: None,
+                provenance: None,
             },
         )
         .await
@@ -896,6 +907,7 @@ mod tests {
                 host_repo_path: None,
                 repo_origin_url: None,
                 base_branch: None,
+                provenance: None,
             },
         )
         .await
@@ -906,6 +918,69 @@ mod tests {
         assert_eq!(
             events.first().unwrap().payload.as_value()["event"],
             "run.created"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_hydrates_provenance_into_store_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage_dir = dir.path().join("storage");
+        std::fs::create_dir_all(storage_dir.join("store")).unwrap();
+        let object_store =
+            Arc::new(LocalFileSystem::new_with_prefix(storage_dir.join("store")).unwrap());
+        let store = Arc::new(Database::new(object_store, "", Duration::from_millis(1)));
+        let created = create(
+            store.as_ref(),
+            CreateRunInput {
+                workflow: WorkflowInput::DotSource {
+                    source: MINIMAL_DOT.to_string(),
+                    base_dir: None,
+                },
+                settings: Settings {
+                    storage_dir: Some(storage_dir.clone()),
+                    dry_run: Some(true),
+                    ..Default::default()
+                },
+                cwd: dir.path().to_path_buf(),
+                workflow_slug: Some("slug".to_string()),
+                workflow_path: None,
+                workflow_bundle: None,
+                run_id: Some(fixtures::RUN_64),
+                host_repo_path: None,
+                repo_origin_url: None,
+                base_branch: None,
+                provenance: Some(fabro_types::RunProvenance {
+                    server: Some(fabro_types::RunServerProvenance {
+                        version: "0.9.0".to_string(),
+                    }),
+                    client: Some(fabro_types::RunClientProvenance {
+                        user_agent: Some("fabro-cli/0.9.0".to_string()),
+                        name: Some("fabro-cli".to_string()),
+                        version: Some("0.9.0".to_string()),
+                    }),
+                    subject: Some(fabro_types::RunSubjectProvenance {
+                        login: None,
+                        auth_method: fabro_types::RunAuthMethod::Disabled,
+                    }),
+                }),
+            },
+        )
+        .await
+        .unwrap();
+
+        let run_store = store.open_run_reader(&created.run_id).await.unwrap();
+        let state = run_store.state().await.unwrap();
+        let run = state.run.expect("run should be projected");
+        let provenance = run.provenance.expect("provenance should be projected");
+
+        assert_eq!(provenance.server.unwrap().version, "0.9.0");
+        assert_eq!(
+            provenance.client.unwrap().name.as_deref(),
+            Some("fabro-cli")
+        );
+        assert_eq!(
+            provenance.subject.unwrap().auth_method,
+            fabro_types::RunAuthMethod::Disabled
         );
     }
 }

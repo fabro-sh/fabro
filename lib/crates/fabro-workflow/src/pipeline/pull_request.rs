@@ -1093,6 +1093,7 @@ mod tests {
             repo_origin_url: None,
             base_branch: Some("main".to_string()),
             labels: HashMap::new(),
+            provenance: None,
         };
         append_event(
             &run_store,
@@ -1111,6 +1112,7 @@ mod tests {
                 base_branch: run_record.base_branch.clone(),
                 workflow_slug: run_record.workflow_slug.clone(),
                 db_prefix: None,
+                provenance: run_record.provenance.clone(),
             },
         )
         .await
@@ -1161,6 +1163,7 @@ mod tests {
             repo_origin_url: None,
             base_branch: Some("main".to_string()),
             labels: HashMap::new(),
+            provenance: None,
         };
         append_event(
             &run_store,
@@ -1179,6 +1182,7 @@ mod tests {
                 base_branch: run_record.base_branch.clone(),
                 workflow_slug: run_record.workflow_slug.clone(),
                 db_prefix: None,
+                provenance: run_record.provenance.clone(),
             },
         )
         .await
@@ -1382,6 +1386,7 @@ mod tests {
             repo_origin_url: None,
             base_branch: None,
             labels: std::collections::HashMap::new(),
+            provenance: None,
         };
         append_event(
             &run_store,
@@ -1400,6 +1405,7 @@ mod tests {
                 base_branch: None,
                 workflow_slug: None,
                 db_prefix: None,
+                provenance: run_record.provenance.clone(),
             },
         )
         .await

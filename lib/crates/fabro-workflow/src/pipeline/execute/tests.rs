@@ -144,6 +144,7 @@ fn persisted_workflow(graph: Graph, source: String, run_dir: &Path, run_id: RunI
             repo_origin_url: None,
             base_branch: Some("main".to_string()),
             labels: HashMap::new(),
+            provenance: None,
         },
     )
 }

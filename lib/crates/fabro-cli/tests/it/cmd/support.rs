@@ -796,6 +796,14 @@ pub(crate) fn compact_inspect(output: &Output) -> Value {
                         "workflow_slug": run_record.pointer("/workflow_slug"),
                         "sandbox_provider": run_record.pointer("/settings/sandbox/provider"),
                         "dry_run": run_record.pointer("/settings/dry_run"),
+                        "provenance": run_record.pointer("/provenance").as_ref().map(|_| {
+                            serde_json::json!({
+                                "server_version": "[VERSION]",
+                                "client_name": run_record.pointer("/provenance/client/name"),
+                                "client_version": "[VERSION]",
+                                "subject_auth_method": run_record.pointer("/provenance/subject/auth_method"),
+                            })
+                        }),
                     },
                     "start_record": item["start_record"].as_object().map(|record| {
                         serde_json::json!({
@@ -847,6 +855,14 @@ pub(crate) fn compact_git_inspect(output: &Output) -> Value {
                         "workflow_slug": run_record.pointer("/workflow_slug"),
                         "llm_provider": run_record.pointer("/settings/llm/provider"),
                         "sandbox_provider": run_record.pointer("/settings/sandbox/provider"),
+                        "provenance": run_record.pointer("/provenance").as_ref().map(|_| {
+                            serde_json::json!({
+                                "server_version": "[VERSION]",
+                                "client_name": run_record.pointer("/provenance/client/name"),
+                                "client_version": "[VERSION]",
+                                "subject_auth_method": run_record.pointer("/provenance/subject/auth_method"),
+                            })
+                        }),
                     },
                     "start_record": start_record.as_object().map(|_| {
                         serde_json::json!({

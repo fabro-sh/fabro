@@ -214,6 +214,7 @@ mod tests {
             repo_origin_url: None,
             base_branch: None,
             labels: HashMap::new(),
+            provenance: None,
         }
     }
 

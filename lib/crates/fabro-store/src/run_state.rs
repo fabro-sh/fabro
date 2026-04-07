@@ -99,6 +99,7 @@ impl RunProjection {
                     repo_origin_url: props.repo_origin_url.clone(),
                     base_branch: props.base_branch.clone(),
                     labels,
+                    provenance: props.provenance.clone(),
                 });
                 self.graph_source.clone_from(&props.workflow_source);
             }

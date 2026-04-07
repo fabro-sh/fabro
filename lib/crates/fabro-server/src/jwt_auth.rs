@@ -11,6 +11,7 @@ use tracing::warn;
 use crate::error::ApiError;
 use crate::web_auth::SessionCookie;
 use fabro_config::server::ApiSettings;
+use fabro_types::RunAuthMethod;
 
 /// JWT claims for service-to-service authentication.
 #[derive(Debug, Deserialize)]
@@ -292,16 +293,13 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedService {
     }
 }
 
-/// Axum extractor that authenticates and extracts the user's login.
-///
-/// - Demo mode → `login: "demo"`
-/// - JWT → login from the `sub` claim (last path segment of URL)
-/// - mTLS → CN from the peer certificate
-pub struct AuthenticatedUser {
-    pub login: String,
+/// Axum extractor that authenticates and extracts the request subject.
+pub struct AuthenticatedSubject {
+    pub login: Option<String>,
+    pub auth_method: RunAuthMethod,
 }
 
-impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedUser {
+impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedSubject {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
@@ -313,7 +311,8 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedUser {
         let strategies = match auth_mode {
             AuthMode::Disabled => {
                 return Ok(Self {
-                    login: "demo".to_string(),
+                    login: None,
+                    auth_method: RunAuthMethod::Disabled,
                 });
             }
             AuthMode::Strategies(strategies) => strategies,
@@ -330,7 +329,8 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedUser {
                 AuthStrategy::Cookie => {
                     if let Some(session) = parts.extensions.get::<SessionCookie>() {
                         return Ok(Self {
-                            login: session.login.clone(),
+                            login: Some(session.login.clone()),
+                            auth_method: RunAuthMethod::Cookie,
                         });
                     }
                     last_err = ApiError::unauthorized();
@@ -342,7 +342,10 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedUser {
                 } => {
                     if try_jwt(parts, key, validation, allowed_usernames).is_ok() {
                         if let Some(login) = extract_jwt_login(parts, key, validation) {
-                            return Ok(Self { login });
+                            return Ok(Self {
+                                login: Some(login),
+                                auth_method: RunAuthMethod::Jwt,
+                            });
                         }
                     }
                     last_err = ApiError::unauthorized();
@@ -350,7 +353,10 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedUser {
                 AuthStrategy::Mtls => {
                     if try_mtls(parts).is_ok() {
                         if let Some(login) = extract_mtls_cn(parts) {
-                            return Ok(Self { login });
+                            return Ok(Self {
+                                login: Some(login),
+                                auth_method: RunAuthMethod::Mtls,
+                            });
                         }
                     }
                     last_err = ApiError::unauthorized();
@@ -365,21 +371,42 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedUser {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::Json;
     use axum::Router;
-    use axum::body::Body;
+    use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
     use axum::response::IntoResponse;
     use axum::routing::get;
     use tower::ServiceExt;
 
+    use crate::web_auth::SessionCookie;
+
     async fn protected_handler(_auth: AuthenticatedService) -> impl IntoResponse {
         "ok"
+    }
+
+    async fn subject_handler(subject: AuthenticatedSubject) -> impl IntoResponse {
+        Json(serde_json::json!({
+            "login": subject.login,
+            "auth_method": subject.auth_method,
+        }))
     }
 
     fn test_router(mode: AuthMode) -> Router {
         Router::new()
             .route("/test", get(protected_handler))
             .layer(axum::Extension(mode))
+    }
+
+    fn subject_router(mode: AuthMode) -> Router {
+        Router::new()
+            .route("/subject", get(subject_handler))
+            .layer(axum::Extension(mode))
+    }
+
+    async fn response_json(response: axum::response::Response) -> serde_json::Value {
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice(&bytes).unwrap()
     }
 
     fn generate_test_keypair() -> (jsonwebtoken::EncodingKey, DecodingKey) {
@@ -715,6 +742,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn disabled_mode_extracts_disabled_subject() {
+        let app = subject_router(AuthMode::Disabled);
+
+        let req = Request::builder()
+            .uri("/subject")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["login"], serde_json::Value::Null);
+        assert_eq!(body["auth_method"], "disabled");
+    }
+
+    #[tokio::test]
+    async fn jwt_subject_extracts_login_and_auth_method() {
+        let (encoding, decoding) = generate_test_keypair();
+        let app = subject_router(jwt_mode(decoding, vec!["brynary"]));
+
+        let token = sign_token(
+            &encoding,
+            "fabro-web",
+            60,
+            Some("https://github.com/brynary"),
+        );
+
+        let req = Request::builder()
+            .uri("/subject")
+            .header("authorization", format!("Bearer {token}"))
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["login"], "brynary");
+        assert_eq!(body["auth_method"], "jwt");
+    }
+
+    #[tokio::test]
+    async fn cookie_subject_extracts_login_and_auth_method() {
+        let app = subject_router(AuthMode::Strategies(vec![AuthStrategy::Cookie]));
+
+        let mut req = Request::builder()
+            .uri("/subject")
+            .body(Body::empty())
+            .unwrap();
+        req.extensions_mut().insert(SessionCookie {
+            login: "brynary".to_string(),
+            name: "Brynary".to_string(),
+            email: "b@example.com".to_string(),
+            avatar_url: "https://example.com/avatar.png".to_string(),
+            user_url: "https://github.com/brynary".to_string(),
+            github_id: 1,
+            exp: 9999999999,
+        });
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["login"], "brynary");
+        assert_eq!(body["auth_method"], "cookie");
+    }
+
+    #[tokio::test]
     async fn empty_strategies_rejects() {
         let app = test_router(AuthMode::Strategies(vec![]));
 
@@ -766,6 +859,20 @@ mod tests {
 
         let response = app.oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn mtls_subject_extracts_login_and_auth_method() {
+        let app = subject_router(AuthMode::Strategies(vec![AuthStrategy::Mtls]));
+
+        let cert = generate_test_client_cert("brynary");
+        let req = request_with_peer_certs("/subject", Some(vec![cert]));
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_json(response).await;
+        assert_eq!(body["login"], "brynary");
+        assert_eq!(body["auth_method"], "mtls");
     }
 
     // --- Multi-strategy tests ---

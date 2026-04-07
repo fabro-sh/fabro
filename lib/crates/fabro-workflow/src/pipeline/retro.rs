@@ -227,6 +227,7 @@ mod tests {
             repo_origin_url: None,
             base_branch: None,
             labels: std::collections::HashMap::new(),
+            provenance: None,
         };
         append_event(
             &run_store,
@@ -245,6 +246,7 @@ mod tests {
                 base_branch: None,
                 workflow_slug: None,
                 db_prefix: None,
+                provenance: run_record.provenance.clone(),
             },
         )
         .await

@@ -549,7 +549,10 @@ mod tests {
 
         let disk_store = build_object_store_with_preference(&store_path, false)
             .expect("disk-backed store should build");
-        assert!(store_path.exists(), "disk-backed store should create store dir");
+        assert!(
+            store_path.exists(),
+            "disk-backed store should create store dir"
+        );
         drop(disk_store);
 
         let mem_path = temp.path().join("memory-store");
