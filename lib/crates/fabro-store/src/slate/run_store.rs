@@ -305,10 +305,19 @@ impl RunDatabase {
     }
 
     pub async fn read_blob(&self, id: &RunBlobId) -> Result<Option<Bytes>> {
-        Ok(self
+        let global = self
             .inner
             .db
             .get(keys::blob_key(&self.inner.run_id, id))
+            .await?;
+        if global.is_some() {
+            return Ok(global);
+        }
+
+        Ok(self
+            .inner
+            .db
+            .get(keys::legacy_blob_key(&self.inner.run_id, id))
             .await?)
     }
 
@@ -397,4 +406,52 @@ where
 fn key_to_string(key: &Bytes) -> Result<String> {
     String::from_utf8(key.to_vec())
         .map_err(|err| StoreError::Other(format!("stored key is not valid UTF-8: {err}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use object_store::memory::InMemory;
+
+    use crate::Database;
+    use crate::keys;
+
+    #[tokio::test]
+    async fn read_blob_falls_back_to_legacy_run_scoped_key() {
+        let object_store = Arc::new(InMemory::new());
+        let store = Database::new(object_store, "", Duration::from_millis(1));
+        let run_id = "01JT56VE4Z5NZ814GZN2JZD65A".parse().unwrap();
+        let run = store.create_run(&run_id).await.unwrap();
+        let blob = br#"{"legacy":true}"#;
+        let blob_id = fabro_types::RunBlobId::new(blob);
+
+        run.inner
+            .db
+            .put(keys::legacy_blob_key(&run_id, &blob_id), blob.as_slice())
+            .await
+            .unwrap();
+
+        let read = run.read_blob(&blob_id).await.unwrap().unwrap();
+
+        assert_eq!(read.as_ref(), blob);
+    }
+
+    #[tokio::test]
+    async fn list_blobs_reads_global_cas_namespace() {
+        let object_store = Arc::new(InMemory::new());
+        let store = Database::new(object_store, "", Duration::from_millis(1));
+        let run_id = "01JT56VE4Z5NZ814GZN2JZD65A".parse().unwrap();
+        let run = store.create_run(&run_id).await.unwrap();
+        let first_blob = br#"{"a":1}"#;
+        let second_blob = br#"{"b":2}"#;
+
+        let first_id = run.write_blob(first_blob).await.unwrap();
+        let second_id = run.write_blob(second_blob).await.unwrap();
+        let mut blob_ids = run.list_blobs().await.unwrap();
+        blob_ids.sort();
+
+        assert_eq!(blob_ids, vec![first_id, second_id]);
+    }
 }

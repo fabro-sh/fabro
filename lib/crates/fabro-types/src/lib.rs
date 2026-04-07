@@ -1,6 +1,7 @@
 extern crate self as fabro_types;
 
 pub mod billing;
+pub mod blob_ref;
 pub mod checkpoint;
 pub mod combine;
 pub mod conclusion;
@@ -25,6 +26,9 @@ pub use billing::{
     GeminiBillingFacts, GeminiModelPricing, GeminiStoragePricing, GeminiStorageSegment,
     ModelBillingFacts, ModelBillingInput, ModelPricing, ModelPricingPolicy, ModelRef, ModelUsage,
     OpenAiBillingFacts, OpenAiModelPricing, PricePerMTok, Speed, TokenCounts, UsdMicros,
+};
+pub use blob_ref::{
+    format_blob_ref, parse_blob_ref, parse_legacy_blob_file_ref, parse_managed_blob_file_ref,
 };
 pub use checkpoint::Checkpoint;
 pub use conclusion::{Conclusion, StageSummary};

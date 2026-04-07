@@ -489,7 +489,7 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    // Checkpoint should have a pointer rewritten for Daytona
+    // Checkpoint should persist a durable blob ref.
     let checkpoint =
         load_checkpoint(&dir.path().join("checkpoint.json")).expect("checkpoint should load");
     let pointer_value = checkpoint
@@ -497,24 +497,14 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
         .get("response.big_output")
         .expect("context should have response.big_output");
     let pointer_str = pointer_value.as_str().expect("pointer should be a string");
-    let expected_prefix = format!("file://{}/.fabro/artifacts/", env.working_directory());
-    assert!(
-        pointer_str.starts_with(&expected_prefix),
-        "pointer should reference Daytona path, got: {pointer_str}"
+    let expected_blob_id = fabro_types::RunBlobId::new(
+        &serde_json::to_vec(&serde_json::json!("x".repeat(150 * 1024)))
+            .expect("large value should serialize"),
     );
-
-    // Verify the artifact file is readable in the sandbox
-    let remote_path = pointer_str.strip_prefix("file://").unwrap();
-    assert!(
-        env.file_exists(remote_path).await.unwrap(),
-        "artifact should exist in Daytona sandbox at {remote_path}"
-    );
-
-    let remote_content = env.read_file(remote_path, None, None).await.unwrap();
-    assert!(
-        remote_content.len() > 100 * 1024,
-        "remote artifact should be >100KB, got {} bytes",
-        remote_content.len()
+    assert_eq!(
+        pointer_str,
+        fabro_types::format_blob_ref(&expected_blob_id),
+        "checkpoint should persist a blob ref"
     );
 
     env.cleanup().await.unwrap();

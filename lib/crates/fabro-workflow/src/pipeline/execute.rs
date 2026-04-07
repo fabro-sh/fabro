@@ -7,6 +7,7 @@ use fabro_core::state::ExecutionState;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
+use crate::artifact;
 use crate::context::{self, Context};
 use crate::error::FabroError;
 use crate::event::Event;
@@ -56,6 +57,11 @@ pub async fn execute(init: Initialized) -> Executed {
         model,
         provider,
     } = init;
+
+    let mut checkpoint = checkpoint;
+    if let Some(cp) = checkpoint.as_mut() {
+        artifact::normalize_checkpoint_for_resume(cp);
+    }
 
     let start = Instant::now();
     let graph_arc = Arc::new(graph.clone());

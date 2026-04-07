@@ -1,8 +1,11 @@
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use fabro_store::{ArtifactStore, RunDatabase, RunProjection};
+use fabro_types::{RunBlobId, parse_blob_ref, parse_legacy_blob_file_ref};
+use futures::future::BoxFuture;
 
 use crate::git::MetadataStore;
 
@@ -211,18 +214,6 @@ impl RunDump {
             );
         }
 
-        for blob_id in run_store.list_blobs().await? {
-            let blob_name = validate_single_path_segment("blob id", &blob_id.to_string())?;
-            let value = run_store
-                .read_blob(&blob_id)
-                .await?
-                .with_context(|| format!("blob {blob_id:?} is missing from the store"))?;
-            entries.push(RunDumpEntry::bytes_path(
-                &PathBuf::from("blobs").join(blob_name),
-                value.to_vec(),
-            ));
-        }
-
         if let Some(run_record) = run_record {
             for asset in artifact_store.list_for_run(&run_record.run_id).await? {
                 let node_id_segment =
@@ -249,6 +240,8 @@ impl RunDump {
                 ));
             }
         }
+
+        hydrate_referenced_blobs(&mut entries, run_store).await?;
 
         Ok(Self { entries })
     }
@@ -408,6 +401,63 @@ fn validate_relative_path(kind: &str, value: &str) -> Result<PathBuf> {
         bail!("{kind} {value:?} must not be empty");
     }
     Ok(normalized)
+}
+
+async fn hydrate_referenced_blobs(
+    entries: &mut [RunDumpEntry],
+    run_store: &RunDatabase,
+) -> Result<()> {
+    let mut cache = HashMap::new();
+    for entry in entries {
+        if let RunDumpContents::Json(value) = &mut entry.contents {
+            hydrate_blob_refs_in_value(value, run_store, &mut cache).await?;
+        }
+    }
+    Ok(())
+}
+
+fn hydrate_blob_refs_in_value<'a>(
+    value: &'a mut serde_json::Value,
+    run_store: &'a RunDatabase,
+    cache: &'a mut HashMap<RunBlobId, serde_json::Value>,
+) -> BoxFuture<'a, Result<()>> {
+    Box::pin(async move {
+        match value {
+            serde_json::Value::String(current) => {
+                let Some(blob_id) =
+                    parse_blob_ref(current).or_else(|| parse_legacy_blob_file_ref(current))
+                else {
+                    return Ok(());
+                };
+                if let Some(cached) = cache.get(&blob_id).cloned() {
+                    *value = cached;
+                    return Ok(());
+                }
+
+                let blob = run_store
+                    .read_blob(&blob_id)
+                    .await?
+                    .with_context(|| format!("blob {blob_id:?} is missing from the store"))?;
+                let hydrated: serde_json::Value = serde_json::from_slice(&blob)
+                    .with_context(|| format!("blob {blob_id:?} is not valid JSON"))?;
+                cache.insert(blob_id, hydrated.clone());
+                *value = hydrated;
+            }
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    hydrate_blob_refs_in_value(item, run_store, cache).await?;
+                }
+            }
+            serde_json::Value::Object(map) => {
+                for item in map.values_mut() {
+                    hydrate_blob_refs_in_value(item, run_store, cache).await?;
+                }
+            }
+            serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {
+            }
+        }
+        Ok(())
+    })
 }
 
 fn ensure_parent_dir(path: &Path) -> Result<()> {

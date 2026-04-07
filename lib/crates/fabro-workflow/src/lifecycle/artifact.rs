@@ -12,7 +12,7 @@ use fabro_core::lifecycle::{AttemptContext, AttemptResultContext, RunLifecycle};
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
 
-use crate::artifact::{offload_large_values, sync_artifacts_to_env};
+use crate::artifact::{normalize_durable_updates, offload_large_values, sync_artifacts_to_env};
 use crate::artifact_snapshot::{CapturedArtifactInfo, collect_artifacts};
 use crate::artifact_upload::StageArtifactUploader;
 use crate::event::{Emitter, Event, RunNoticeLevel};
@@ -187,6 +187,8 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
                 message: format!("[node: {node_id}] artifact offload failed: {e}"),
             });
         }
+
+        normalize_durable_updates(&mut result.outcome.context_updates);
 
         // Sync file-backed artifacts to sandbox environment
         if let Err(e) =

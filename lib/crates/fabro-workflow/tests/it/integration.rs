@@ -1525,6 +1525,31 @@ impl Handler for LargeOutputHandler {
     }
 }
 
+#[derive(Clone)]
+struct ContextValueCaptureHandler {
+    values: Arc<std::sync::Mutex<Vec<String>>>,
+    key: String,
+}
+
+#[async_trait::async_trait]
+impl Handler for ContextValueCaptureHandler {
+    async fn execute(
+        &self,
+        _node: &Node,
+        context: &Context,
+        _graph: &Graph,
+        _run_dir: &Path,
+        _services: &fabro_workflow::handler::EngineServices,
+    ) -> Result<Outcome, FabroError> {
+        let value = context
+            .get(&self.key)
+            .and_then(|value| value.as_str().map(ToOwned::to_owned))
+            .expect("captured context value should be a string");
+        self.values.lock().unwrap().push(value);
+        Ok(Outcome::success())
+    }
+}
+
 /// A handler that sets `context_updates` = {"`my_flag"`: "set"}.
 struct ContextSetterHandler;
 
@@ -5126,6 +5151,10 @@ async fn fidelity_stored_in_checkpoint_context() {
         Some(&serde_json::json!("summary:low")),
         "checkpoint should record the resolved fidelity"
     );
+    assert!(
+        !cp.context_values.contains_key("current.preamble"),
+        "checkpoint should exclude runtime-only preamble state"
+    );
 }
 
 #[tokio::test]
@@ -8586,7 +8615,7 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    // The checkpoint context should contain an artifact pointer, not the full value
+    // The checkpoint context should contain a durable blob ref, not the full value.
     let checkpoint =
         load_checkpoint(&dir.path().join("checkpoint.json")).expect("checkpoint should load");
     let pointer_value = checkpoint
@@ -8594,35 +8623,23 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
         .get("response.big_output")
         .expect("context should have response.big_output");
     let pointer_str = pointer_value.as_str().expect("pointer should be a string");
-    assert!(
-        pointer_str.starts_with("file://"),
-        "value should be an artifact pointer, got: {pointer_str}"
-    );
 
     let expected_blob_id = fabro_types::RunBlobId::new(
         &serde_json::to_vec(&serde_json::json!("x".repeat(150 * 1024)))
             .expect("large value should serialize"),
     );
-
-    // The artifact file should exist on disk
-    let artifact_file = RunScratch::new(dir.path())
-        .blob_cache_dir()
-        .join(format!("{expected_blob_id}.json"));
-    assert!(
-        artifact_file.exists(),
-        "artifact file should exist at {artifact_file:?}"
+    assert_eq!(
+        pointer_str,
+        fabro_types::format_blob_ref(&expected_blob_id),
+        "value should be a durable blob ref"
     );
 
-    // The artifact file should contain the original large value
-    let artifact_content =
-        std::fs::read_to_string(&artifact_file).expect("should read artifact file");
-    let artifact_value: serde_json::Value =
-        serde_json::from_str(&artifact_content).expect("should parse artifact JSON");
-    let artifact_str = artifact_value.as_str().expect("should be a string");
-    assert_eq!(
-        artifact_str.len(),
-        150 * 1024,
-        "artifact should contain the original 150KB value"
+    assert!(
+        !RunScratch::new(dir.path())
+            .blob_cache_dir()
+            .join(format!("{expected_blob_id}.json"))
+            .exists(),
+        "legacy host blob cache file should not exist"
     );
 
     // WorkflowRunCompleted artifact_count now tracks captured artifacts, not offloaded values.
@@ -8649,6 +8666,7 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
 struct RemoteMockEnv {
     working_dir: String,
     written: std::sync::Mutex<Vec<(String, String)>>,
+    existing_paths: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 impl RemoteMockEnv {
@@ -8656,6 +8674,7 @@ impl RemoteMockEnv {
         Self {
             working_dir: working_dir.to_string(),
             written: std::sync::Mutex::new(Vec::new()),
+            existing_paths: std::sync::Mutex::new(std::collections::HashSet::new()),
         }
     }
 }
@@ -8676,6 +8695,7 @@ impl fabro_agent::Sandbox for RemoteMockEnv {
             .lock()
             .unwrap()
             .push((path.to_string(), content.to_string()));
+        self.existing_paths.lock().unwrap().insert(path.to_string());
         Ok(())
     }
 
@@ -8683,8 +8703,8 @@ impl fabro_agent::Sandbox for RemoteMockEnv {
         Err("not implemented".to_string())
     }
 
-    async fn file_exists(&self, _path: &str) -> std::result::Result<bool, String> {
-        Ok(false)
+    async fn file_exists(&self, path: &str) -> std::result::Result<bool, String> {
+        Ok(self.existing_paths.lock().unwrap().contains(path))
     }
 
     async fn list_directory(
@@ -8807,7 +8827,7 @@ async fn artifact_pointers_rewritten_for_remote_sandbox() {
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    // The checkpoint context should contain a pointer rewritten for the remote env
+    // The checkpoint context should contain a durable blob ref.
     let checkpoint =
         load_checkpoint(&dir.path().join("checkpoint.json")).expect("checkpoint should load");
     let pointer_value = checkpoint
@@ -8815,14 +8835,190 @@ async fn artifact_pointers_rewritten_for_remote_sandbox() {
         .get("response.big_output")
         .expect("context should have response.big_output");
     let pointer_str = pointer_value.as_str().expect("pointer should be a string");
-    assert!(
-        pointer_str.starts_with("file:///sandbox/.fabro/artifacts/"),
-        "pointer should reference remote path, got: {pointer_str}"
+    let expected_blob_id = fabro_types::RunBlobId::new(
+        &serde_json::to_vec(&serde_json::json!("x".repeat(150 * 1024)))
+            .expect("large value should serialize"),
+    );
+    assert_eq!(
+        pointer_str,
+        fabro_types::format_blob_ref(&expected_blob_id),
+        "checkpoint should persist a blob ref"
     );
 
-    // The RemoteMockEnv should have received exactly one write with >100KB content
     let written = remote_env.written.lock().unwrap();
-    assert_eq!(written.len(), 1, "should have written 1 artifact");
+    assert!(
+        written.is_empty(),
+        "blob materialization should not happen until a downstream execution needs it"
+    );
+}
+
+#[tokio::test]
+async fn downstream_local_execution_materializes_blob_refs_to_runtime_files() {
+    let mut graph = make_graph_with_start_exit("ArtifactMaterializeLocal");
+    graph.attrs.insert(
+        "goal".to_string(),
+        AttrValue::String("Test local blob materialization".to_string()),
+    );
+
+    let mut big_output = Node::new("big_output");
+    big_output.attrs.insert(
+        "label".to_string(),
+        AttrValue::String("Big Output".to_string()),
+    );
+    graph.nodes.insert("big_output".to_string(), big_output);
+
+    let mut inspect = Node::new("inspect");
+    inspect.attrs.insert(
+        "label".to_string(),
+        AttrValue::String("Inspect".to_string()),
+    );
+    inspect.attrs.insert(
+        "type".to_string(),
+        AttrValue::String("capture_context".to_string()),
+    );
+    graph.nodes.insert("inspect".to_string(), inspect);
+
+    graph.edges.push(Edge::new("start", "big_output"));
+    graph.edges.push(Edge::new("big_output", "inspect"));
+    graph.edges.push(Edge::new("inspect", "exit"));
+
+    let dir = tempfile::tempdir().unwrap();
+    let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut registry = HandlerRegistry::new(Box::new(LargeOutputHandler));
+    registry.register("start", Box::new(StartHandler));
+    registry.register("exit", Box::new(ExitHandler));
+    registry.register(
+        "capture_context",
+        Box::new(ContextValueCaptureHandler {
+            values: Arc::clone(&captured),
+            key: "response.big_output".to_string(),
+        }),
+    );
+
+    let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
+    let run_options = RunOptions {
+        settings: Settings::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        display_base_sha: None,
+        host_repo_path: None,
+        git: None,
+    };
+    let (outcome, _state) = engine
+        .run_with_state(&graph, &run_options)
+        .await
+        .expect("pipeline should succeed");
+    assert_eq!(outcome.status, StageStatus::Success);
+
+    let expected_blob_id = fabro_types::RunBlobId::new(
+        &serde_json::to_vec(&serde_json::json!("x".repeat(150 * 1024)))
+            .expect("large value should serialize"),
+    );
+    let captured_value = captured.lock().unwrap().first().cloned().unwrap();
+    let expected_path = RunScratch::new(dir.path())
+        .runtime_dir()
+        .join("blobs")
+        .join(format!("{expected_blob_id}.json"));
+    assert_eq!(
+        captured_value,
+        format!("file://{}", expected_path.display()),
+        "downstream handlers should receive a local file ref"
+    );
+    let artifact_content = std::fs::read_to_string(&expected_path).expect("should read artifact");
+    let artifact_value: serde_json::Value =
+        serde_json::from_str(&artifact_content).expect("should parse artifact JSON");
+    let artifact_str = artifact_value
+        .as_str()
+        .expect("artifact should be a string");
+    assert_eq!(artifact_str.len(), 150 * 1024);
+}
+
+#[tokio::test]
+async fn downstream_remote_execution_materializes_blob_refs_to_sandbox_files() {
+    let mut graph = make_graph_with_start_exit("ArtifactMaterializeRemote");
+    graph.attrs.insert(
+        "goal".to_string(),
+        AttrValue::String("Test remote blob materialization".to_string()),
+    );
+
+    let mut big_output = Node::new("big_output");
+    big_output.attrs.insert(
+        "label".to_string(),
+        AttrValue::String("Big Output".to_string()),
+    );
+    graph.nodes.insert("big_output".to_string(), big_output);
+
+    let mut inspect = Node::new("inspect");
+    inspect.attrs.insert(
+        "label".to_string(),
+        AttrValue::String("Inspect".to_string()),
+    );
+    inspect.attrs.insert(
+        "type".to_string(),
+        AttrValue::String("capture_context".to_string()),
+    );
+    graph.nodes.insert("inspect".to_string(), inspect);
+
+    graph.edges.push(Edge::new("start", "big_output"));
+    graph.edges.push(Edge::new("big_output", "inspect"));
+    graph.edges.push(Edge::new("inspect", "exit"));
+
+    let dir = tempfile::tempdir().unwrap();
+    let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut registry = HandlerRegistry::new(Box::new(LargeOutputHandler));
+    registry.register("start", Box::new(StartHandler));
+    registry.register("exit", Box::new(ExitHandler));
+    registry.register(
+        "capture_context",
+        Box::new(ContextValueCaptureHandler {
+            values: Arc::clone(&captured),
+            key: "response.big_output".to_string(),
+        }),
+    );
+
+    let remote_env = Arc::new(RemoteMockEnv::new("/sandbox"));
+    let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), remote_env.clone());
+    let run_options = RunOptions {
+        settings: Settings::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
+        display_base_sha: None,
+        host_repo_path: None,
+        git: None,
+    };
+    let (outcome, _state) = engine
+        .run_with_state(&graph, &run_options)
+        .await
+        .expect("pipeline should succeed");
+    assert_eq!(outcome.status, StageStatus::Success);
+
+    let expected_blob_id = fabro_types::RunBlobId::new(
+        &serde_json::to_vec(&serde_json::json!("x".repeat(150 * 1024)))
+            .expect("large value should serialize"),
+    );
+    let captured_value = captured.lock().unwrap().first().cloned().unwrap();
+    assert_eq!(
+        captured_value,
+        format!("file:///sandbox/.fabro/blobs/{expected_blob_id}.json"),
+        "downstream handlers should receive a sandbox-local file ref"
+    );
+
+    let written = remote_env.written.lock().unwrap();
+    assert_eq!(written.len(), 1, "should materialize the blob once");
+    assert_eq!(
+        written[0].0,
+        format!("/sandbox/.fabro/blobs/{expected_blob_id}.json")
+    );
     assert!(
         written[0].1.len() > 100 * 1024,
         "written content should be >100KB, got {} bytes",

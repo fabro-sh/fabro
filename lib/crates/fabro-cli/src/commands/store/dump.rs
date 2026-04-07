@@ -305,11 +305,21 @@ mod tests {
         let run_record = sample_run_record(run_id, created_at);
         let start_record = sample_start_record(run_id, created_at);
         let status_record = sample_status();
-        let first_checkpoint = sample_checkpoint("plan", 1);
-        let second_checkpoint = sample_checkpoint("code", 2);
+        let mut first_checkpoint = sample_checkpoint("plan", 1);
+        let mut second_checkpoint = sample_checkpoint("code", 2);
         let conclusion = sample_conclusion();
         let retro = sample_retro(run_id);
         let sandbox = sample_sandbox();
+        let summary_blob = run.write_blob(br#"{"done":true}"#).await.unwrap();
+        let plan_blob = run.write_blob(br#"{"steps":3}"#).await.unwrap();
+        first_checkpoint.context_values.insert(
+            "artifact".to_string(),
+            serde_json::json!(fabro_types::format_blob_ref(&plan_blob)),
+        );
+        second_checkpoint.context_values.insert(
+            "artifact".to_string(),
+            serde_json::json!(fabro_types::format_blob_ref(&summary_blob)),
+        );
 
         let node = StageId::new("code", 2);
         append_event(
@@ -558,8 +568,6 @@ mod tests {
         )
         .await
         .unwrap();
-        let summary_blob = run.write_blob(br#"{"done":true}"#).await.unwrap();
-        let plan_blob = run.write_blob(br#"{"steps":3}"#).await.unwrap();
         artifact_store
             .put(&run_id, &node, "src/lib.rs", b"fn main() {}")
             .await
@@ -575,7 +583,7 @@ mod tests {
         let file_count = export_run(&run, &artifact_store, output.path())
             .await
             .unwrap();
-        assert_eq!(file_count, 22);
+        assert_eq!(file_count, 20);
 
         let exported_run: RunRecord = read_json(&output.path().join("run.json"));
         assert_eq!(exported_run.run_id, run_id);
@@ -588,6 +596,10 @@ mod tests {
 
         let exported_checkpoint: Checkpoint = read_json(&output.path().join("checkpoint.json"));
         assert_eq!(exported_checkpoint.current_node, "code");
+        assert_eq!(
+            exported_checkpoint.context_values.get("artifact"),
+            Some(&serde_json::json!({"done": true}))
+        );
         assert_eq!(
             std::fs::read_to_string(output.path().join("graph.fabro")).unwrap(),
             "digraph night_sky {}"
@@ -635,15 +647,15 @@ mod tests {
         let second_checkpoint: Checkpoint = read_json(&output.path().join("checkpoints/0005.json"));
         assert_eq!(first_checkpoint.current_node, "plan");
         assert_eq!(second_checkpoint.current_node, "code");
-
         assert_eq!(
-            std::fs::read(output.path().join("blobs").join(plan_blob.to_string())).unwrap(),
-            br#"{"steps":3}"#
+            first_checkpoint.context_values.get("artifact"),
+            Some(&serde_json::json!({"steps": 3}))
         );
         assert_eq!(
-            std::fs::read(output.path().join("blobs").join(summary_blob.to_string())).unwrap(),
-            br#"{"done":true}"#
+            second_checkpoint.context_values.get("artifact"),
+            Some(&serde_json::json!({"done": true}))
         );
+        assert!(!output.path().join("blobs").exists());
 
         assert_eq!(
             std::fs::read(

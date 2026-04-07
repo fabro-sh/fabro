@@ -196,15 +196,22 @@ Internal keys (prefixed with `internal.`, `current`, `graph.`, `thread.`, `respo
 
 ## Artifact offloading
 
-When a stage produces a large output (over 100KB of serialized JSON), Fabro automatically offloads it to a file-backed artifact on disk rather than keeping it in the in-memory context. The context value is replaced with a `file://` pointer:
+When a stage produces a large output (over 100KB of serialized JSON), Fabro stores the serialized bytes in a global content-addressed blob store and replaces the context value with a durable blob ref:
 
 ```
-response.plan → file:///tmp/logs/cache/artifacts/values/response.plan.json
+response.plan → blob://sha256/2cf24dba5fb0...
 ```
 
-The preamble renderer resolves these pointers and displays a reference to the file path. For remote sandboxes (Docker, Daytona), Fabro syncs artifact files to the sandbox at `{working_directory}/.fabro/artifacts/` so agents can read them.
+Checkpoints and checkpoint-completed events persist these `blob://` refs, not host-specific file paths.
 
-This keeps the context lean — large LLM responses, test output, and file listings don't bloat checkpoint files or overwhelm preamble summaries.
+Before Fabro builds a preamble or starts the next stage, it resolves any blob refs into execution-local files so handlers and agents still see normal `file://` references:
+
+- Local execution materializes blobs under `{run_dir}/runtime/blobs/{blob_id}.json`
+- Remote sandboxes materialize blobs under `{working_directory}/.fabro/blobs/{blob_id}.json`
+
+These materialized `file://` paths are runtime-only. They are not written back into durable context snapshots.
+
+This keeps the durable context lean and portable while still giving downstream stages a filesystem path they can read.
 
 ## Context compaction
 

@@ -1,10 +1,12 @@
 use std::path::Path;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use fabro_api::types;
 use fabro_config::RunScratch;
-use fabro_types::PullRequestRecord;
+use fabro_types::{
+    PullRequestRecord, RunBlobId, RunId, parse_blob_ref, parse_legacy_blob_file_ref,
+};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_util::terminal::Styles;
 use fabro_util::text::strip_goal_decoration;
@@ -149,7 +151,9 @@ pub(crate) async fn print_run_summary_with_client(
         pr_url.as_deref(),
         styles,
     );
-    print_final_output(checkpoint.as_ref(), styles);
+    let final_output =
+        resolve_final_output_with_client(client, run_id, checkpoint.as_ref()).await?;
+    print_final_output(final_output.as_deref(), styles);
     if let Some(run_dir) = local_run_dir {
         print_assets(run_dir, styles);
     }
@@ -254,22 +258,65 @@ pub(crate) fn print_run_conclusion(
     }
 }
 
-pub(crate) fn print_final_output(checkpoint: Option<&fabro_types::Checkpoint>, styles: &Styles) {
-    let Some(checkpoint) = checkpoint else {
+pub(crate) fn print_final_output(output: Option<&str>, styles: &Styles) {
+    let Some(output) = output else {
         return;
+    };
+    let text = output.trim();
+    if !text.is_empty() {
+        eprintln!("\n{}", styles.bold.apply_to("=== Output ==="));
+        eprintln!("{}", styles.render_markdown(text));
+    }
+}
+
+async fn resolve_final_output_with_client(
+    client: &server_client::ServerStoreClient,
+    run_id: &RunId,
+    checkpoint: Option<&fabro_types::Checkpoint>,
+) -> Result<Option<String>> {
+    let Some(checkpoint) = checkpoint else {
+        return Ok(None);
     };
 
     for node_id in checkpoint.completed_nodes.iter().rev() {
         let key = format!("response.{node_id}");
-        if let Some(serde_json::Value::String(response)) = checkpoint.context_values.get(&key) {
-            let text = response.trim();
-            if !text.is_empty() {
-                eprintln!("\n{}", styles.bold.apply_to("=== Output ==="));
-                eprintln!("{}", styles.render_markdown(text));
-            }
-            return;
+        let Some(serde_json::Value::String(response)) = checkpoint.context_values.get(&key) else {
+            continue;
+        };
+        let Some(output) = resolve_response_string(client, run_id, response).await? else {
+            continue;
+        };
+        if !output.trim().is_empty() {
+            return Ok(Some(output));
         }
     }
+
+    Ok(None)
+}
+
+async fn resolve_response_string(
+    client: &server_client::ServerStoreClient,
+    run_id: &RunId,
+    response: &str,
+) -> Result<Option<String>> {
+    let Some(blob_id) = blob_id_from_response(response) else {
+        return Ok(Some(response.to_string()));
+    };
+
+    let Some(bytes) = client.read_run_blob(run_id, &blob_id).await? else {
+        return Ok(None);
+    };
+    let value: serde_json::Value =
+        serde_json::from_slice(&bytes).context("blob-backed final output should be valid JSON")?;
+
+    Ok(Some(match value {
+        serde_json::Value::String(text) => text,
+        other => other.to_string(),
+    }))
+}
+
+fn blob_id_from_response(response: &str) -> Option<RunBlobId> {
+    parse_blob_ref(response).or_else(|| parse_legacy_blob_file_ref(response))
 }
 
 pub(crate) fn print_assets(run_dir: &Path, styles: &Styles) {

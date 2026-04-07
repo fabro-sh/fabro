@@ -1,24 +1,33 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use futures::future::BoxFuture;
 use serde_json::Value;
 
 use fabro_agent::Sandbox;
+use fabro_config::RunScratch;
+use fabro_types::{
+    RunBlobId, format_blob_ref, parse_blob_ref, parse_legacy_blob_file_ref,
+    parse_managed_blob_file_ref,
+};
 
+use crate::context::{self, Context};
 use crate::error::{FabroError, Result};
+use crate::outcome::Outcome;
+use crate::records::Checkpoint;
 use crate::runtime_store::RunStoreHandle;
 
-/// Threshold above which values are persisted as blobs and materialized to disk (100KB).
+/// Threshold above which values are persisted as blobs (100KB).
 const BLOB_OFFLOAD_THRESHOLD: usize = 100 * 1024;
 
 /// Prefix used to identify artifact pointer strings in context values.
 const ARTIFACT_POINTER_PREFIX: &str = "file://";
 
-/// Offload context values exceeding the blob threshold into SlateDB and materialize cache files.
+/// Offload context values exceeding the blob threshold into the blob store.
 ///
 /// For each entry in `updates` whose serialized JSON exceeds `BLOB_OFFLOAD_THRESHOLD`,
-/// the value is persisted as a blob in `run_store`, materialized in `cache_dir`, and
-/// replaced with a `"file://{path}"` pointer.
+/// the value is persisted as a blob in `run_store` and replaced with a
+/// `"blob://sha256/{blob_id}"` reference.
 /// Small values are left untouched.
 ///
 /// # Errors
@@ -29,7 +38,7 @@ pub async fn offload_large_values(
     run_store: &RunStoreHandle,
     cache_dir: &Path,
 ) -> Result<()> {
-    std::fs::create_dir_all(cache_dir)?;
+    let _ = cache_dir;
 
     for value in updates.values_mut() {
         let bytes = serde_json::to_vec(&*value)
@@ -40,11 +49,7 @@ pub async fn offload_large_values(
                 .write_blob(&bytes)
                 .await
                 .map_err(|e| FabroError::engine(format!("artifact blob write failed: {e}")))?;
-            let cache_path = cache_dir.join(format!("{blob_id}.json"));
-            if !cache_path.exists() {
-                std::fs::write(&cache_path, &bytes)?;
-            }
-            *value = Value::String(format!("{ARTIFACT_POINTER_PREFIX}{}", cache_path.display()));
+            *value = Value::String(format_blob_ref(&blob_id));
         }
     }
     Ok(())
@@ -74,6 +79,71 @@ pub fn is_artifact_pointer(value: &Value) -> bool {
 #[must_use]
 pub fn format_artifact_reference(path: &str) -> String {
     format!("See: {path}")
+}
+
+pub fn durable_context_snapshot(context: &Context) -> HashMap<String, Value> {
+    let mut snapshot = context.snapshot();
+    snapshot.remove(context::keys::CURRENT_PREAMBLE);
+    normalize_durable_updates(&mut snapshot);
+    snapshot
+}
+
+pub fn normalize_durable_updates(updates: &mut HashMap<String, Value>) {
+    for value in updates.values_mut() {
+        normalize_durable_value(value);
+    }
+}
+
+pub fn normalize_durable_outcomes(node_outcomes: &mut HashMap<String, Outcome>) {
+    for outcome in node_outcomes.values_mut() {
+        normalize_durable_updates(&mut outcome.context_updates);
+    }
+}
+
+pub fn normalize_checkpoint_for_resume(checkpoint: &mut Checkpoint) {
+    checkpoint
+        .context_values
+        .remove(context::keys::CURRENT_PREAMBLE);
+    normalize_durable_updates(&mut checkpoint.context_values);
+    normalize_durable_outcomes(&mut checkpoint.node_outcomes);
+}
+
+pub async fn resolve_context_for_execution(
+    context: &Context,
+    run_store: &RunStoreHandle,
+    env: &dyn Sandbox,
+    run_dir: &Path,
+) -> Result<Context> {
+    let values = resolved_context_snapshot(context, run_store, env, run_dir).await?;
+    let resolved = Context::new();
+    for (key, value) in values {
+        resolved.set(key, value);
+    }
+    Ok(resolved)
+}
+
+pub async fn resolve_outcomes_for_execution(
+    node_outcomes: &HashMap<String, Outcome>,
+    run_store: &RunStoreHandle,
+    env: &dyn Sandbox,
+    run_dir: &Path,
+) -> Result<HashMap<String, Outcome>> {
+    let mut resolved = node_outcomes.clone();
+    for outcome in resolved.values_mut() {
+        resolve_execution_values(&mut outcome.context_updates, run_store, env, run_dir).await?;
+    }
+    Ok(resolved)
+}
+
+pub async fn resolved_context_snapshot(
+    context: &Context,
+    run_store: &RunStoreHandle,
+    env: &dyn Sandbox,
+    run_dir: &Path,
+) -> Result<HashMap<String, Value>> {
+    let mut values = context.snapshot();
+    resolve_execution_values(&mut values, run_store, env, run_dir).await?;
+    Ok(values)
 }
 
 /// Sync artifact files to a remote sandbox.
@@ -126,6 +196,166 @@ pub async fn sync_artifacts_to_env(
     Ok(())
 }
 
+fn normalize_durable_value(value: &mut Value) {
+    match value {
+        Value::String(current) => {
+            if let Some(blob_id) =
+                parse_legacy_blob_file_ref(current).or_else(|| parse_managed_blob_file_ref(current))
+            {
+                *current = format_blob_ref(&blob_id);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                normalize_durable_value(item);
+            }
+        }
+        Value::Object(map) => {
+            for item in map.values_mut() {
+                normalize_durable_value(item);
+            }
+        }
+        Value::Null | Value::Bool(_) | Value::Number(_) => {}
+    }
+}
+
+fn resolve_execution_values<'a>(
+    values: &'a mut HashMap<String, Value>,
+    run_store: &'a RunStoreHandle,
+    env: &'a dyn Sandbox,
+    run_dir: &'a Path,
+) -> BoxFuture<'a, Result<()>> {
+    Box::pin(async move {
+        for value in values.values_mut() {
+            resolve_execution_value(value, run_store, env, run_dir).await?;
+        }
+        Ok(())
+    })
+}
+
+fn resolve_execution_value<'a>(
+    value: &'a mut Value,
+    run_store: &'a RunStoreHandle,
+    env: &'a dyn Sandbox,
+    run_dir: &'a Path,
+) -> BoxFuture<'a, Result<()>> {
+    Box::pin(async move {
+        match value {
+            Value::String(current) => {
+                if let Some(blob_id) =
+                    parse_blob_ref(current).or_else(|| parse_legacy_blob_file_ref(current))
+                {
+                    *current = materialize_blob_ref(&blob_id, run_store, env, run_dir).await?;
+                } else if current.starts_with(ARTIFACT_POINTER_PREFIX)
+                    && parse_managed_blob_file_ref(current).is_none()
+                {
+                    *current = resolve_explicit_file_ref(current, env).await?;
+                }
+            }
+            Value::Array(items) => {
+                for item in items {
+                    resolve_execution_value(item, run_store, env, run_dir).await?;
+                }
+            }
+            Value::Object(map) => {
+                for item in map.values_mut() {
+                    resolve_execution_value(item, run_store, env, run_dir).await?;
+                }
+            }
+            Value::Null | Value::Bool(_) | Value::Number(_) => {}
+        }
+        Ok(())
+    })
+}
+
+async fn materialize_blob_ref(
+    blob_id: &RunBlobId,
+    run_store: &RunStoreHandle,
+    env: &dyn Sandbox,
+    run_dir: &Path,
+) -> Result<String> {
+    let bytes = run_store
+        .read_blob(blob_id)
+        .await
+        .map_err(|e| FabroError::engine(format!("artifact blob read failed: {e}")))?
+        .ok_or_else(|| FabroError::engine(format!("artifact blob missing: {blob_id}")))?;
+
+    if is_local_execution(env, run_dir).await? {
+        let path = local_materialized_blob_path(run_dir, blob_id);
+        if !path.exists() {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&path, &bytes)?;
+        }
+        return Ok(format!("{ARTIFACT_POINTER_PREFIX}{}", path.display()));
+    }
+
+    let remote_path = format!("{}/.fabro/blobs/{blob_id}.json", env.working_directory());
+    if !env
+        .file_exists(&remote_path)
+        .await
+        .map_err(|e| FabroError::engine(format!("failed to check blob existence: {e}")))?
+    {
+        let content = String::from_utf8(bytes.to_vec()).map_err(|e| {
+            FabroError::engine(format!("artifact blob was not valid UTF-8 JSON: {e}"))
+        })?;
+        env.write_file(&remote_path, &content).await.map_err(|e| {
+            FabroError::engine(format!("failed to write artifact blob to sandbox: {e}"))
+        })?;
+    }
+
+    Ok(format!("{ARTIFACT_POINTER_PREFIX}{remote_path}"))
+}
+
+async fn resolve_explicit_file_ref(value: &str, env: &dyn Sandbox) -> Result<String> {
+    let local_path = value
+        .strip_prefix(ARTIFACT_POINTER_PREFIX)
+        .ok_or_else(|| FabroError::engine(format!("invalid artifact pointer: {value}")))?;
+
+    if env
+        .file_exists(local_path)
+        .await
+        .map_err(|e| FabroError::engine(format!("failed to check artifact existence: {e}")))?
+    {
+        return Ok(value.to_string());
+    }
+
+    let content = std::fs::read_to_string(local_path).map_err(|e| {
+        FabroError::engine(format!("failed to read local artifact {local_path}: {e}"))
+    })?;
+    let filename = Path::new(local_path)
+        .file_name()
+        .and_then(|file| file.to_str())
+        .unwrap_or("artifact.json");
+    let remote_path = format!("{}/.fabro/artifacts/{filename}", env.working_directory());
+
+    if !env
+        .file_exists(&remote_path)
+        .await
+        .map_err(|e| FabroError::engine(format!("failed to check artifact existence: {e}")))?
+    {
+        env.write_file(&remote_path, &content).await.map_err(|e| {
+            FabroError::engine(format!("failed to write artifact to remote env: {e}"))
+        })?;
+    }
+
+    Ok(format!("{ARTIFACT_POINTER_PREFIX}{remote_path}"))
+}
+
+async fn is_local_execution(env: &dyn Sandbox, run_dir: &Path) -> Result<bool> {
+    env.file_exists(&run_dir.to_string_lossy())
+        .await
+        .map_err(|e| FabroError::engine(format!("failed to inspect sandbox locality: {e}")))
+}
+
+fn local_materialized_blob_path(run_dir: &Path, blob_id: &RunBlobId) -> PathBuf {
+    RunScratch::new(run_dir)
+        .runtime_dir()
+        .join("blobs")
+        .join(format!("{blob_id}.json"))
+}
+
 #[cfg(test)]
 mod tests {
     use std::hash::{Hash, Hasher};
@@ -166,13 +396,9 @@ mod tests {
             .unwrap();
 
         let pointer = updates.get("response.plan").unwrap();
-        let path = artifact_path(pointer).expect("should be an artifact pointer");
         assert_eq!(
-            path,
-            dir.path()
-                .join(format!("{expected_blob_id}.json"))
-                .to_str()
-                .unwrap()
+            pointer,
+            &serde_json::json!(fabro_types::format_blob_ref(&expected_blob_id))
         );
 
         let blob = run_store
@@ -183,8 +409,8 @@ mod tests {
         let blob_value: serde_json::Value = serde_json::from_slice(&blob).unwrap();
         assert_eq!(blob_value, serde_json::json!(large_string));
         assert!(
-            dir.path().join(format!("{expected_blob_id}.json")).exists(),
-            "materialized cache file should exist"
+            std::fs::read_dir(dir.path()).unwrap().next().is_none(),
+            "offload should not materialize host cache files"
         );
     }
 
@@ -223,6 +449,93 @@ mod tests {
     fn artifact_path_returns_none_for_non_string() {
         let value = serde_json::json!(42);
         assert_eq!(artifact_path(&value), None);
+    }
+
+    #[test]
+    fn normalize_durable_updates_rewrites_managed_blob_file_refs_recursively() {
+        let blob_id = fabro_types::RunBlobId::new(b"hello");
+        let mut updates = HashMap::from([(
+            "nested".to_string(),
+            serde_json::json!({
+                "items": [
+                    format!("file:///tmp/run/runtime/blobs/{blob_id}.json"),
+                    format!("file:///sandbox/.fabro/blobs/{blob_id}.json"),
+                    "file:///tmp/report.json",
+                ]
+            }),
+        )]);
+
+        normalize_durable_updates(&mut updates);
+
+        assert_eq!(
+            updates["nested"],
+            serde_json::json!({
+                "items": [
+                    fabro_types::format_blob_ref(&blob_id),
+                    fabro_types::format_blob_ref(&blob_id),
+                    "file:///tmp/report.json",
+                ]
+            })
+        );
+    }
+
+    #[test]
+    fn normalize_checkpoint_for_resume_converts_legacy_blob_file_refs_and_drops_preamble() {
+        let blob_id = fabro_types::RunBlobId::new(b"legacy");
+        let mut checkpoint = crate::records::Checkpoint {
+            timestamp: chrono::Utc::now(),
+            current_node: "work".to_string(),
+            completed_nodes: vec!["work".to_string()],
+            node_retries: HashMap::new(),
+            context_values: HashMap::from([
+                (
+                    crate::context::keys::CURRENT_PREAMBLE.to_string(),
+                    serde_json::json!("runtime only"),
+                ),
+                (
+                    "response.work".to_string(),
+                    serde_json::json!(format!(
+                        "file:///tmp/run/cache/artifacts/values/{blob_id}.json"
+                    )),
+                ),
+            ]),
+            node_outcomes: HashMap::from([(
+                "work".to_string(),
+                crate::outcome::Outcome {
+                    context_updates: HashMap::from([(
+                        "response.work".to_string(),
+                        serde_json::json!(format!(
+                            "file:///sandbox/.fabro/artifacts/{blob_id}.json"
+                        )),
+                    )]),
+                    ..crate::outcome::Outcome::success()
+                },
+            )]),
+            next_node_id: Some("exit".to_string()),
+            git_commit_sha: None,
+            loop_failure_signatures: HashMap::new(),
+            restart_failure_signatures: HashMap::new(),
+            node_visits: HashMap::new(),
+        };
+
+        normalize_checkpoint_for_resume(&mut checkpoint);
+
+        assert!(
+            !checkpoint
+                .context_values
+                .contains_key(crate::context::keys::CURRENT_PREAMBLE)
+        );
+        assert_eq!(
+            checkpoint.context_values.get("response.work"),
+            Some(&serde_json::json!(fabro_types::format_blob_ref(&blob_id)))
+        );
+        assert_eq!(
+            checkpoint
+                .node_outcomes
+                .get("work")
+                .and_then(|outcome| outcome.context_updates.get("response.work")),
+            Some(&serde_json::json!(fabro_types::format_blob_ref(&blob_id)))
+        );
     }
 
     // --- sync_artifacts_to_env tests ---
