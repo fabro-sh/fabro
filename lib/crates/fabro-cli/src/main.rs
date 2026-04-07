@@ -9,6 +9,7 @@ mod server_runs;
 mod shared;
 #[cfg(feature = "sleep_inhibitor")]
 mod sleep_inhibitor;
+mod sse;
 mod user_config;
 
 use anyhow::Result;

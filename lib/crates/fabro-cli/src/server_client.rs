@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -13,6 +14,7 @@ use tokio::time::sleep;
 
 use crate::args::ServerTargetArgs;
 use crate::commands::server::start;
+use crate::sse;
 use crate::user_config;
 
 #[derive(Clone)]
@@ -24,6 +26,55 @@ pub(crate) struct ServerStoreClient {
 struct LocalServerRuntime {
     active_config_path: PathBuf,
     storage_dir: PathBuf,
+}
+
+pub(crate) struct RunAttachEventStream {
+    stream: progenitor_client::ByteStream,
+    pending_bytes: Vec<u8>,
+    buffered_events: VecDeque<EventEnvelope>,
+}
+
+pub(crate) enum RunAttachStreamError {
+    Gone,
+    Other(anyhow::Error),
+}
+
+impl RunAttachEventStream {
+    fn new(stream: progenitor_client::ByteStream) -> Self {
+        Self {
+            stream,
+            pending_bytes: Vec::new(),
+            buffered_events: VecDeque::new(),
+        }
+    }
+
+    pub(crate) async fn next_event(&mut self) -> Result<Option<EventEnvelope>> {
+        loop {
+            if let Some(event) = self.buffered_events.pop_front() {
+                return Ok(Some(event));
+            }
+
+            match self.stream.next().await {
+                Some(chunk) => {
+                    let chunk = chunk.map_err(|err| anyhow!("{err}"))?;
+                    self.pending_bytes.extend_from_slice(&chunk);
+                    self.buffer_sse_events(false)?;
+                }
+                None => {
+                    self.buffer_sse_events(true)?;
+                    return Ok(self.buffered_events.pop_front());
+                }
+            }
+        }
+    }
+
+    fn buffer_sse_events(&mut self, finalize: bool) -> Result<()> {
+        for payload in sse::drain_sse_payloads(&mut self.pending_bytes, finalize) {
+            let event: types::EventEnvelope = serde_json::from_str(&payload)?;
+            self.buffered_events.push_back(convert_type(event)?);
+        }
+        Ok(())
+    }
 }
 
 pub(crate) use fabro_store::RunProjection;
@@ -300,6 +351,19 @@ impl ServerStoreClient {
             .collect::<Result<Vec<_>>>()
     }
 
+    pub(crate) async fn attach_run_events(
+        &self,
+        run_id: &RunId,
+        since_seq: Option<u32>,
+    ) -> std::result::Result<RunAttachEventStream, RunAttachStreamError> {
+        let mut request = self.client.attach_run_events().id(run_id.to_string());
+        if let Some(seq) = since_seq.and_then(non_zero_u64_from_u32) {
+            request = request.since_seq(seq);
+        }
+        let response = request.send().await.map_err(map_attach_run_stream_error)?;
+        Ok(RunAttachEventStream::new(response.into_inner()))
+    }
+
     pub(crate) async fn list_run_questions(
         &self,
         run_id: &RunId,
@@ -517,6 +581,19 @@ where
             anyhow!("request failed with status {}", response.status())
         }
         other => anyhow!("{other}"),
+    }
+}
+
+fn map_attach_run_stream_error(
+    err: progenitor_client::Error<types::ErrorResponse>,
+) -> RunAttachStreamError {
+    match &err {
+        progenitor_client::Error::ErrorResponse(response)
+            if response.status() == reqwest::StatusCode::GONE =>
+        {
+            RunAttachStreamError::Gone
+        }
+        _ => RunAttachStreamError::Other(map_api_error(err)),
     }
 }
 

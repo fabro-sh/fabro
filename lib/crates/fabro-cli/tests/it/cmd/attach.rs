@@ -10,6 +10,48 @@ use super::support::{output_stdout, resolve_run, wait_for_status, write_gated_wo
 
 const SHARED_DAEMON_TIMEOUT: Duration = Duration::from_secs(30);
 
+fn live_run_state_response() -> serde_json::Value {
+    serde_json::json!({
+        "run": null,
+        "graph_source": null,
+        "start": null,
+        "status": {
+            "status": "running",
+            "reason": null,
+            "updated_at": "2026-04-05T12:00:01Z"
+        },
+        "checkpoint": null,
+        "checkpoints": [],
+        "conclusion": null,
+        "retro": null,
+        "retro_prompt": null,
+        "retro_response": null,
+        "sandbox": null,
+        "final_patch": null,
+        "pull_request": null,
+        "nodes": {}
+    })
+}
+
+fn run_sse_body(run_id: &str) -> String {
+    let completed = serde_json::json!({
+        "seq": 2,
+        "payload": {
+            "event": "run.completed",
+            "id": "evt-run-completed",
+            "run_id": run_id,
+            "ts": "2026-04-05T12:00:01Z",
+            "properties": {
+                "duration_ms": 12,
+                "artifact_count": 0,
+                "status": "success"
+            }
+        }
+    });
+
+    format!("data: {completed}\n\n")
+}
+
 #[test]
 fn help() {
     let context = test_context!();
@@ -76,7 +118,7 @@ fn attach_uses_configured_server_target_without_server_flag() {
                         "labels": {},
                         "host_repo_path": null,
                         "start_time": "2026-04-05T12:00:00Z",
-                        "status": "succeeded",
+                        "status": "running",
                         "status_reason": null,
                         "duration_ms": 12,
                         "total_cost": null
@@ -90,56 +132,46 @@ fn attach_uses_configured_server_target_without_server_flag() {
             .path(format!("/api/v1/runs/{run_id}/events"));
         then.status(200)
             .header("Content-Type", "application/json")
-            .body(r#"{"data":[],"meta":{"has_more":false}}"#);
-    });
-    server.mock(|when, then| {
-        when.method("GET")
-            .path(format!("/api/v1/runs/{run_id}/state"));
-        then.status(200)
-            .header("Content-Type", "application/json")
             .body(
                 serde_json::json!({
-                    "run": null,
-                    "graph_source": null,
-                    "start": null,
-                    "status": {
-                        "status": "succeeded",
-                        "reason": null,
-                        "updated_at": "2026-04-05T12:00:01Z"
-                    },
-                    "checkpoint": null,
-                    "checkpoints": [],
-                    "conclusion": {
-                        "timestamp": "2026-04-05T12:00:01Z",
-                        "status": "success",
-                        "duration_ms": 12,
-                        "stages": [],
-                        "total_cost": null,
-                        "total_retries": 0,
-                        "total_input_tokens": 0,
-                        "total_output_tokens": 0,
-                        "total_cache_read_tokens": 0,
-                        "total_cache_write_tokens": 0,
-                        "total_reasoning_tokens": 0,
-                        "has_pricing": false
-                    },
-                    "retro": null,
-                    "retro_prompt": null,
-                    "retro_response": null,
-                    "sandbox": null,
-                    "final_patch": null,
-                    "pull_request": null,
-                    "nodes": {}
+                    "data": [{
+                        "seq": 1,
+                        "payload": {
+                            "event": "run.running",
+                            "id": "evt-run-running",
+                            "run_id": run_id,
+                            "ts": "2026-04-05T12:00:00Z",
+                            "properties": {}
+                        }
+                    }],
+                    "meta": { "has_more": false }
                 })
                 .to_string(),
             );
     });
     server.mock(|when, then| {
         when.method("GET")
-            .path(format!("/api/v1/runs/{run_id}/questions"));
+            .path(format!("/api/v1/runs/{run_id}/state"));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(live_run_state_response().to_string());
+    });
+    server.mock(|when, then| {
+        when.method("GET")
+            .path(format!("/api/v1/runs/{run_id}/questions"))
+            .query_param("page[limit]", "100")
+            .query_param("page[offset]", "0");
         then.status(200)
             .header("Content-Type", "application/json")
             .body(r#"{"data":[],"meta":{"has_more":false}}"#);
+    });
+    let attach_mock = server.mock(|when, then| {
+        when.method("GET")
+            .path(format!("/api/v1/runs/{run_id}/attach"))
+            .query_param("since_seq", "2");
+        then.status(200)
+            .header("Content-Type", "text/event-stream")
+            .body(run_sse_body(run_id.as_str()));
     });
     context.write_home(
         ".fabro/settings.toml",
@@ -148,7 +180,7 @@ fn attach_uses_configured_server_target_without_server_flag() {
 
     let output = context
         .command()
-        .args(["attach", &run_id])
+        .args(["--json", "attach", &run_id])
         .output()
         .expect("attach should execute");
 
@@ -159,6 +191,9 @@ fn attach_uses_configured_server_target_without_server_flag() {
         String::from_utf8_lossy(&output.stderr)
     );
     list_mock.assert();
+    attach_mock.assert();
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+    assert!(stdout.contains("\"event\":\"run.completed\""), "{stdout}");
 }
 
 #[test]
