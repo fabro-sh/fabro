@@ -576,7 +576,7 @@ fn stop_test_server(server: &ServerPaths) {
     fabro_proc::sigterm(pid);
 
     let poll = std::time::Duration::from_millis(50);
-    let timeout = std::time::Duration::from_secs(3);
+    let timeout = test_server_stop_timeout();
     let mut elapsed = std::time::Duration::ZERO;
     while elapsed < timeout && fabro_proc::process_alive(pid) {
         std::thread::sleep(poll);
@@ -588,6 +588,12 @@ fn stop_test_server(server: &ServerPaths) {
 
     let _ = std::fs::remove_file(&server.socket_path);
     let _ = std::fs::remove_file(&record_path);
+}
+
+fn test_server_stop_timeout() -> std::time::Duration {
+    // Allow the real server to finish its own 5s worker-shutdown grace before
+    // we escalate and risk orphaning active run workers.
+    std::time::Duration::from_secs(8)
 }
 
 fn shared_server_paths(root: &Path) -> ServerPaths {
@@ -1735,6 +1741,14 @@ mod tests {
         assert_eq!(create_args[0], "create");
         assert!(create_args.contains(&context.test_run_label()));
         assert!(create_args.contains(&context.test_case_label()));
+    }
+
+    #[test]
+    fn stop_test_server_timeout_exceeds_server_worker_grace() {
+        assert!(
+            test_server_stop_timeout() >= std::time::Duration::from_secs(6),
+            "test harness must give the server longer than its 5s worker shutdown grace"
+        );
     }
 
     struct EnvGuard {
