@@ -575,6 +575,19 @@ fn attach_json_errors_without_prompting_for_human_input() {
             }
           },
           "host_repo_path": "[TEMP_DIR]",
+          "provenance": {
+            "client": {
+              "name": "fabro-cli",
+              "user_agent": "fabro-cli/0.176.2",
+              "version": "0.176.2"
+            },
+            "server": {
+              "version": "0.176.2"
+            },
+            "subject": {
+              "auth_method": "disabled"
+            }
+          },
           "run_dir": "[RUN_DIR]",
           "settings": {
             "goal": "Wait for approval",

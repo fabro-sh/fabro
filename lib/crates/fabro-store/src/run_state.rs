@@ -71,7 +71,7 @@ pub(crate) struct EventProjectionCache {
 }
 
 impl RunProjection {
-    pub(crate) fn apply_events(events: &[EventEnvelope]) -> Result<Self> {
+    pub fn apply_events(events: &[EventEnvelope]) -> Result<Self> {
         let mut state = Self::default();
         for event in events {
             state.apply_event(event)?;
@@ -79,7 +79,7 @@ impl RunProjection {
         Ok(state)
     }
 
-    pub(crate) fn apply_event(&mut self, event: &EventEnvelope) -> Result<()> {
+    pub fn apply_event(&mut self, event: &EventEnvelope) -> Result<()> {
         let stored = RunEvent::from_ref(event.payload.as_value())
             .map_err(|err| StoreError::InvalidEvent(format!("invalid stored event: {err}")))?;
         let ts = stored.ts;

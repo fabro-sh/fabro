@@ -769,7 +769,7 @@ mod tests {
                 run_store: {
                     let store = memory_store();
                     let inner = store.create_run(&test_run_id()).await.unwrap();
-                    inner
+                    inner.into()
                 },
                 dry_run: false,
                 emitter,
@@ -846,7 +846,7 @@ mod tests {
             persisted,
             InitOptions {
                 run_id: test_run_id(),
-                run_store,
+                run_store: run_store.into(),
                 dry_run: false,
                 emitter,
                 sandbox: SandboxSpec::Local {

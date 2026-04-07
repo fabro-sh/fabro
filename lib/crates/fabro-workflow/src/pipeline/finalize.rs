@@ -8,9 +8,9 @@ use crate::records::{Checkpoint, Conclusion, StageSummary};
 use crate::run_dump::RunDump;
 use crate::run_options::RunOptions;
 use crate::run_status::{RunStatus, StatusReason};
+use crate::runtime_store::RunStoreHandle;
 use crate::sandbox_git::git_push_host;
 use fabro_hooks::{HookContext, HookEvent, HookRunner};
-use fabro_store::RunDatabase;
 
 use super::types::{Concluded, FinalizeOptions, Retroed};
 
@@ -63,7 +63,7 @@ pub fn classify_engine_result(
 }
 
 pub(crate) async fn build_conclusion_from_store(
-    run_store: &RunDatabase,
+    run_store: &RunStoreHandle,
     status: StageStatus,
     failure_reason: Option<String>,
     run_duration_ms: u64,
@@ -169,7 +169,7 @@ fn build_conclusion_from_parts(
 ///
 /// This captures the last diff.patch (written after the final checkpoint) and retro.json.
 /// Best-effort: errors are logged as warnings.
-pub async fn write_finalize_commit(run_options: &RunOptions, run_store: &RunDatabase) {
+pub async fn write_finalize_commit(run_options: &RunOptions, run_store: &RunStoreHandle) {
     let (Some(meta_branch), Some(repo_path)) = (
         run_options
             .git
@@ -372,7 +372,7 @@ mod tests {
             graph: Graph::new("test"),
             outcome: Ok(Outcome::success()),
             run_options: test_run_options(&run_dir),
-            run_store: run_store.clone(),
+            run_store: run_store.clone().into(),
             hook_runner: None,
             emitter,
             sandbox: Arc::new(fabro_agent::LocalSandbox::new(
@@ -387,7 +387,7 @@ mod tests {
             &FinalizeOptions {
                 run_dir: run_dir.clone(),
                 run_id: test_run_id(),
-                run_store: run_store.clone(),
+                run_store: run_store.clone().into(),
                 workflow_name: "test".to_string(),
                 hook_runner: None,
                 preserve_sandbox: true,

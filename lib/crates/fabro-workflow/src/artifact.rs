@@ -4,9 +4,9 @@ use std::path::Path;
 use serde_json::Value;
 
 use fabro_agent::Sandbox;
-use fabro_store::RunDatabase;
 
 use crate::error::{FabroError, Result};
+use crate::runtime_store::RunStoreHandle;
 
 /// Threshold above which values are persisted as blobs and materialized to disk (100KB).
 const BLOB_OFFLOAD_THRESHOLD: usize = 100 * 1024;
@@ -26,7 +26,7 @@ const ARTIFACT_POINTER_PREFIX: &str = "file://";
 /// Returns an error if blob persistence or cache materialization fails.
 pub async fn offload_large_values(
     updates: &mut HashMap<String, Value>,
-    run_store: &RunDatabase,
+    run_store: &RunStoreHandle,
     cache_dir: &Path,
 ) -> Result<()> {
     std::fs::create_dir_all(cache_dir)?;
@@ -161,7 +161,7 @@ mod tests {
         let mut updates = HashMap::new();
         updates.insert("response.plan".to_string(), serde_json::json!(large_string));
 
-        offload_large_values(&mut updates, &run_store, dir.path())
+        offload_large_values(&mut updates, &run_store.clone().into(), dir.path())
             .await
             .unwrap();
 
@@ -196,7 +196,7 @@ mod tests {
         let mut updates = HashMap::new();
         updates.insert("small_key".to_string(), small_value.clone());
 
-        offload_large_values(&mut updates, &run_store, dir.path())
+        offload_large_values(&mut updates, &run_store.clone().into(), dir.path())
             .await
             .unwrap();
 

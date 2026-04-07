@@ -14,7 +14,6 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use fabro_config::RunScratch;
-use fabro_store::RunDatabase;
 use fabro_types::RunId;
 
 use fabro_core::error::Result as CoreResult;
@@ -33,6 +32,7 @@ use crate::graph::WorkflowNode;
 use crate::outcome::{Outcome, StageUsage};
 use crate::run_control::RunControlState;
 use crate::run_options::RunOptions;
+use crate::runtime_store::RunStoreHandle;
 use fabro_graphviz::graph::types::Graph as GvGraph;
 use fabro_hooks::HookRunner;
 use fabro_sandbox::Sandbox;
@@ -84,7 +84,7 @@ impl WorkflowLifecycle {
         sandbox: &Arc<dyn Sandbox>,
         graph: Arc<GvGraph>,
         run_dir: &PathBuf,
-        run_store: &RunDatabase,
+        run_store: &RunStoreHandle,
         run_options: &Arc<RunOptions>,
         is_resume: bool,
         on_node: crate::OnNodeCallback,

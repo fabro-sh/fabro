@@ -746,6 +746,19 @@ fn json_run_implies_auto_approve_for_human_gates() {
             }
           },
           "host_repo_path": "[TEMP_DIR]",
+          "provenance": {
+            "client": {
+              "name": "fabro-cli",
+              "user_agent": "fabro-cli/0.176.2",
+              "version": "0.176.2"
+            },
+            "server": {
+              "version": "0.176.2"
+            },
+            "subject": {
+              "auth_method": "disabled"
+            }
+          },
           "run_dir": "[RUN_DIR]",
           "settings": {
             "auto_approve": true,
