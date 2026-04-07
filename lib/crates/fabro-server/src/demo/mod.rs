@@ -1265,6 +1265,7 @@ mod runs {
             ApiQuestion {
                 id: "q-001".into(),
                 text: "Should we proceed with the proposed changes?".into(),
+                stage: "review".into(),
                 question_type: QuestionType::YesNo,
                 options: vec![
                     ApiQuestionOption {
@@ -1277,10 +1278,13 @@ mod runs {
                     },
                 ],
                 allow_freeform: false,
+                timeout_seconds: None,
+                context_display: None,
             },
             ApiQuestion {
                 id: "q-002".into(),
                 text: "Which approach do you prefer for the migration?".into(),
+                stage: "migration".into(),
                 question_type: QuestionType::MultipleChoice,
                 options: vec![
                     ApiQuestionOption {
@@ -1293,6 +1297,8 @@ mod runs {
                     },
                 ],
                 allow_freeform: true,
+                timeout_seconds: None,
+                context_display: None,
             },
         ]
     }

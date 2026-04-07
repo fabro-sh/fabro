@@ -5,8 +5,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
-use fabro_config::RunScratch;
-use fabro_interview::FileInterviewer;
+use fabro_interview::{
+    ControlInterviewer, InterviewBroker, WorkerControlEnvelope, WorkerControlMessage,
+};
 use fabro_store::{EventEnvelope, EventPayload, RunProjection};
 use fabro_types::{EventBody, RunBlobId, RunEvent, RunId, Settings, StatusReason};
 use fabro_workflow::artifact_snapshot::CapturedArtifactInfo;
@@ -15,6 +16,7 @@ use fabro_workflow::event::{Emitter, RunEventSink};
 use fabro_workflow::operations::{self, StartServices};
 use fabro_workflow::run_control::RunControlState;
 use fabro_workflow::runtime_store::{RunStoreBackend, RunStoreHandle};
+use tokio::io::{self, AsyncBufReadExt, AsyncRead, BufReader};
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::Mutex;
@@ -69,12 +71,9 @@ pub(crate) async fn execute(
         client.clone_for_reuse(),
         artifact_upload_token,
     );
-    let scratch = RunScratch::new(&run_dir);
-    let interviewer = Arc::new(FileInterviewer::new(
-        scratch.interview_request_path(),
-        scratch.interview_response_path(),
-        scratch.interview_claim_path(),
-    ));
+    let broker = Arc::new(InterviewBroker::new());
+    let interviewer = Arc::new(ControlInterviewer::new(Arc::clone(&broker)));
+    tokio::spawn(read_worker_control_stream(io::stdin(), broker));
     let run_control = RunControlState::new();
     let cancel_token = Arc::new(AtomicBool::new(false));
     install_signal_handlers(Arc::clone(&run_control), Arc::clone(&cancel_token))?;
@@ -109,6 +108,40 @@ pub(crate) async fn execute(
     }
 
     Ok(())
+}
+
+async fn read_worker_control_stream<R>(reader: R, broker: Arc<InterviewBroker>)
+where
+    R: AsyncRead + Unpin,
+{
+    let mut lines = BufReader::new(reader).lines();
+    loop {
+        match lines.next_line().await {
+            Ok(Some(line)) => {
+                apply_worker_control_line(&broker, &line).await;
+            }
+            Ok(None) | Err(_) => {
+                broker.abort_all().await;
+                break;
+            }
+        }
+    }
+}
+
+async fn apply_worker_control_line(broker: &InterviewBroker, line: &str) {
+    if line.trim().is_empty() {
+        return;
+    }
+
+    let Ok(message) = serde_json::from_str::<WorkerControlEnvelope>(line) else {
+        return;
+    };
+
+    match message.message {
+        WorkerControlMessage::InterviewAnswer { qid, answer } => {
+            let _ = broker.submit(&qid, answer.into()).await;
+        }
+    }
 }
 
 fn build_artifact_uploader(
@@ -445,14 +478,17 @@ fn install_signal_handlers(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use httpmock::MockServer;
     use serde_json::json;
 
     use super::{
-        WorkerTitlePhase, execute, initial_worker_title_phase, worker_title,
-        worker_title_phase_for_event,
+        WorkerTitlePhase, apply_worker_control_line, execute, initial_worker_title_phase,
+        read_worker_control_stream, worker_title, worker_title_phase_for_event,
     };
     use crate::args::RunWorkerMode;
+    use fabro_interview::{AnswerValue, InterviewBroker};
     use fabro_types::fixtures;
     use fabro_types::run_event::{
         InterviewCompletedProps, InterviewStartedProps, RunCompletedProps, RunControlEffectProps,
@@ -499,13 +535,20 @@ mod tests {
         );
         assert_eq!(
             worker_title_phase_for_event(&EventBody::InterviewStarted(InterviewStartedProps {
+                question_id: "q-1".to_string(),
                 question: "Approve?".to_string(),
+                stage: "gate".to_string(),
                 question_type: "yes_no".to_string(),
+                options: Vec::new(),
+                allow_freeform: false,
+                timeout_seconds: None,
+                context_display: None,
             })),
             Some(WorkerTitlePhase::Waiting)
         );
         assert_eq!(
             worker_title_phase_for_event(&EventBody::InterviewCompleted(InterviewCompletedProps {
+                question_id: "q-1".to_string(),
                 question: "Approve?".to_string(),
                 answer: "yes".to_string(),
                 duration_ms: 10,
@@ -601,5 +644,31 @@ mod tests {
         assert!(error.to_string().contains("has no run record"));
         state_mock.assert_async().await;
         assert_eq!(events_mock.calls_async().await, 0);
+    }
+
+    #[tokio::test]
+    async fn worker_control_line_routes_answer_by_question_id() {
+        let broker = Arc::new(InterviewBroker::new());
+        let receiver = broker.register("q-1".to_string()).await;
+
+        apply_worker_control_line(
+            &broker,
+            r#"{"v":1,"type":"interview.answer","qid":"q-1","answer":{"kind":"yes"}}"#,
+        )
+        .await;
+
+        let answer: fabro_interview::Answer = receiver.await.unwrap();
+        assert_eq!(answer.value, AnswerValue::Yes);
+    }
+
+    #[tokio::test]
+    async fn worker_control_stream_eof_aborts_pending_interviews() {
+        let broker = Arc::new(InterviewBroker::new());
+        let receiver = broker.register("q-1".to_string()).await;
+
+        read_worker_control_stream(tokio::io::empty(), Arc::clone(&broker)).await;
+
+        let answer: fabro_interview::Answer = receiver.await.unwrap();
+        assert_eq!(answer.value, AnswerValue::Aborted);
     }
 }

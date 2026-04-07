@@ -17,6 +17,7 @@ fabro-config = { path = "../fabro-config" }
 fabro-graphviz = { path = "../fabro-graphviz" }
 fabro-hooks = { path = "../fabro-hooks" }
 fabro-interview = { path = "../fabro-interview" }
+fabro-slack = { path = "../fabro-slack" }
 fabro-workflow = { path = "../fabro-workflow" }
 fabro-validate = { path = "../fabro-validate" }
 fabro-sandbox = { path = "../fabro-sandbox", features = ["daytona"] }

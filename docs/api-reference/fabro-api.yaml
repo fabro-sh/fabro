@@ -2516,6 +2516,7 @@ components:
       required:
         - id
         - text
+        - stage
         - question_type
         - options
         - allow_freeform
@@ -2528,6 +2529,10 @@ components:
           type: string
           description: The question text displayed to the user.
           example: Should we proceed with the proposed changes?
+        stage:
+          type: string
+          description: Workflow stage identifier that produced the question.
+          example: gate
         question_type:
           $ref: "#/components/schemas/QuestionType"
         options:
@@ -2539,6 +2544,17 @@ components:
           type: boolean
           description: Whether the user may provide freeform text in addition to selecting options.
           example: true
+        timeout_seconds:
+          type: number
+          format: double
+          nullable: true
+          description: Timeout for the question when configured by the workflow.
+          example: 30
+        context_display:
+          type: string
+          nullable: true
+          description: Optional contextual text shown alongside the question.
+          example: Latest draft
 
     QuestionType:
       description: The interaction type of a human-in-the-loop question.

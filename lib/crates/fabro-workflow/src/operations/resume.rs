@@ -1,7 +1,5 @@
 use std::path::Path;
 
-use fabro_config::RunScratch;
-
 use crate::error::FabroError;
 use crate::event::{Event, append_event_to_sink};
 use crate::outcome::StageStatus;
@@ -52,14 +50,5 @@ pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, 
 }
 
 fn cleanup_resume_artifacts(run_dir: &Path) {
-    let run_scratch = RunScratch::new(run_dir);
-    for path in [
-        run_scratch.interview_request_path(),
-        run_scratch.interview_response_path(),
-        run_scratch.interview_claim_path(),
-    ] {
-        let _ = std::fs::remove_file(path);
-    }
-
     let _ = std::fs::remove_file(run_dir.join("detached_failure.json"));
 }

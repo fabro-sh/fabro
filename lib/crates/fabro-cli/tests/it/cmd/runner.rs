@@ -4,6 +4,7 @@ use fabro_types::{EventBody, RunEvent};
 
 use super::support::{run_events, run_state, server_target};
 use crate::support::{fabro_json_snapshot, unique_run_id};
+use fabro_config::RunScratch;
 
 const SHARED_DAEMON_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -25,6 +26,61 @@ fn assert_worker_succeeded(run_dir: &std::path::Path, stdout: &[u8]) {
         &event.body,
         EventBody::RunCompleted(props) if props.status == "success"
     )));
+}
+
+fn server_endpoint(storage_dir: &std::path::Path) -> (reqwest::Client, String) {
+    let target = server_target(storage_dir);
+    if target.starts_with('/') {
+        (
+            reqwest::ClientBuilder::new()
+                .unix_socket(target)
+                .no_proxy()
+                .build()
+                .expect("test Unix-socket HTTP client should build"),
+            "http://fabro".to_string(),
+        )
+    } else {
+        (
+            reqwest::ClientBuilder::new()
+                .no_proxy()
+                .build()
+                .expect("test TCP HTTP client should build"),
+            target,
+        )
+    }
+}
+
+async fn wait_for_server_question(
+    client: &reqwest::Client,
+    base_url: &str,
+    run_id: &str,
+) -> serde_json::Value {
+    let deadline = std::time::Instant::now() + SHARED_DAEMON_TIMEOUT;
+    loop {
+        let response = client
+            .get(format!("{base_url}/api/v1/runs/{run_id}/questions"))
+            .query(&[("page[limit]", "100"), ("page[offset]", "0")])
+            .send()
+            .await
+            .expect("question request should succeed");
+        assert!(
+            response.status().is_success(),
+            "question request failed: {}",
+            response.status()
+        );
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .expect("question response should parse");
+        if let Some(question) = body["data"].as_array().and_then(|items| items.first()) {
+            return question.clone();
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for a pending question"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
 }
 
 #[test]
@@ -340,4 +396,102 @@ digraph Test {
     });
 
     assert_eq!(after_summary, before_summary);
+}
+
+#[test]
+fn detached_run_answers_pending_question_without_interview_scratch_files() {
+    let context = test_context!();
+    let run_id = unique_run_id();
+    let workflow_path = context.temp_dir.join("human-gate.fabro");
+
+    context.write_temp(
+        "human-gate.fabro",
+        r#"digraph HumanGate {
+  graph [goal="Approve the release"]
+  start [shape=Mdiamond, label="Start"]
+  exit  [shape=Msquare, label="Exit"]
+  work  [shape=parallelogram, script="echo ready"]
+  approve [shape=hexagon, label="Approve?"]
+  ship   [shape=parallelogram, script="echo shipped"]
+  revise [shape=parallelogram, script="echo revised"]
+  start -> work -> approve
+  approve -> ship   [label="[A] Approve"]
+  approve -> revise [label="[R] Revise"]
+  ship -> exit
+  revise -> exit
+}
+"#,
+    );
+
+    let output = context
+        .command()
+        .args([
+            "run",
+            "--detach",
+            "--run-id",
+            run_id.as_str(),
+            "--no-retro",
+            "--sandbox",
+            "local",
+            workflow_path.to_str().unwrap(),
+        ])
+        .timeout(SHARED_DAEMON_TIMEOUT)
+        .output()
+        .expect("detached run should execute");
+    assert!(
+        output.status.success(),
+        "detached run failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let run_dir = context.find_run_dir(&run_id);
+    let scratch = RunScratch::new(&run_dir);
+    let legacy_interview_request = scratch.runtime_dir().join("interview_request.json");
+    let legacy_interview_response = scratch.runtime_dir().join("interview_response.json");
+    let runtime = tokio::runtime::Runtime::new().expect("test runtime should build");
+    let question_id = runtime.block_on(async {
+        let (client, base_url) = server_endpoint(&context.storage_dir);
+        let question = wait_for_server_question(&client, &base_url, &run_id).await;
+        let question_id = question["id"]
+            .as_str()
+            .expect("question id should be present")
+            .to_string();
+
+        assert_eq!(question["stage"], "approve");
+        assert!(
+            !legacy_interview_request.exists(),
+            "worker should not create interview_request.json"
+        );
+        assert!(
+            !legacy_interview_response.exists(),
+            "worker should not create interview_response.json"
+        );
+
+        let response = client
+            .post(format!(
+                "{base_url}/api/v1/runs/{run_id}/questions/{question_id}/answer"
+            ))
+            .json(&serde_json::json!({ "selected_option_key": "A" }))
+            .send()
+            .await
+            .expect("answer submission should succeed");
+        assert_eq!(response.status(), reqwest::StatusCode::NO_CONTENT);
+
+        question_id
+    });
+
+    context
+        .command()
+        .args(["wait", &run_id])
+        .timeout(SHARED_DAEMON_TIMEOUT)
+        .assert()
+        .success();
+
+    let events = stored_worker_events(&run_dir);
+    assert!(events.iter().any(|event| matches!(
+        &event.body,
+        EventBody::InterviewCompleted(props)
+            if props.question_id == question_id && props.answer == "A"
+    )));
 }

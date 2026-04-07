@@ -28,7 +28,7 @@ pub use sandbox::{
 pub use server::{
     ApiAuthStrategy, ApiSettings, ArtifactStorageBackend, ArtifactStorageSettings, AuthProvider,
     AuthSettings, FeaturesSettings, GitAuthorSettings, GitProvider, GitSettings, LogSettings,
-    TlsSettings, WebSettings, WebhookSettings, WebhookStrategy,
+    SlackSettings, TlsSettings, WebSettings, WebhookSettings, WebhookStrategy,
 };
 pub use user::{ClientTlsSettings, ExecSettings, OutputFormat, PermissionLevel, ServerSettings};
 
@@ -94,6 +94,8 @@ pub struct Settings {
     pub artifact_storage: Option<ArtifactStorageSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub web: Option<WebSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slack: Option<SlackSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api: Option<ApiSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -186,6 +188,10 @@ impl Settings {
         self.storage_dir
             .clone()
             .unwrap_or_else(|| fabro_util::Home::from_env().storage_dir())
+    }
+
+    pub fn slack_settings(&self) -> Option<&SlackSettings> {
+        self.slack.as_ref()
     }
 }
 

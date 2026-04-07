@@ -7,8 +7,8 @@ use serde_json::Value;
 
 use crate::{EventEnvelope, Result, RunSummary, StageId, StoreError};
 use fabro_types::run_event::{
-    AgentCliStartedProps, AgentSessionStartedProps, CheckpointCompletedProps, RunCompletedProps,
-    RunFailedProps, StageCompletedProps, StagePromptProps,
+    AgentCliStartedProps, AgentSessionStartedProps, CheckpointCompletedProps, InterviewOption,
+    RunCompletedProps, RunFailedProps, StageCompletedProps, StagePromptProps,
 };
 use fabro_types::{
     BilledModelUsage, Checkpoint, Conclusion, EventBody, FailureSignature, NodeStatusRecord,
@@ -33,7 +33,21 @@ pub struct RunProjection {
     pub sandbox: Option<SandboxRecord>,
     pub final_patch: Option<String>,
     pub pull_request: Option<PullRequestRecord>,
+    pub pending_interviews: BTreeMap<String, PendingInterviewRecord>,
     nodes: HashMap<StageId, NodeState>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct PendingInterviewRecord {
+    pub question_id: String,
+    pub question: String,
+    pub stage: String,
+    pub question_type: String,
+    pub options: Vec<InterviewOption>,
+    pub allow_freeform: bool,
+    pub timeout_seconds: Option<f64>,
+    pub context_display: Option<String>,
+    pub started_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -132,11 +146,13 @@ impl RunProjection {
                 self.pending_control = None;
                 self.conclusion = Some(conclusion_from_completed(props, ts)?);
                 self.final_patch.clone_from(&props.final_patch);
+                self.pending_interviews.clear();
             }
             EventBody::RunFailed(props) => {
                 self.status = Some(run_status_record(RunStatus::Failed, props.reason, ts));
                 self.pending_control = None;
                 self.conclusion = Some(conclusion_from_failed(props, ts));
+                self.pending_interviews.clear();
             }
             EventBody::RunRewound(_) => {
                 self.reset_for_rewind();
@@ -189,6 +205,40 @@ impl RunProjection {
                     head_branch: props.head_branch.clone(),
                     title: props.title.clone(),
                 });
+            }
+            EventBody::InterviewStarted(props) => {
+                if props.question_id.is_empty() {
+                    return Ok(());
+                }
+                self.pending_interviews.insert(
+                    props.question_id.clone(),
+                    PendingInterviewRecord {
+                        question_id: props.question_id.clone(),
+                        question: props.question.clone(),
+                        stage: props.stage.clone(),
+                        question_type: props.question_type.clone(),
+                        options: props.options.clone(),
+                        allow_freeform: props.allow_freeform,
+                        timeout_seconds: props.timeout_seconds,
+                        context_display: props.context_display.clone(),
+                        started_at: Some(ts),
+                    },
+                );
+            }
+            EventBody::InterviewCompleted(props) => {
+                if !props.question_id.is_empty() {
+                    self.pending_interviews.remove(&props.question_id);
+                }
+            }
+            EventBody::InterviewTimeout(props) => {
+                if !props.question_id.is_empty() {
+                    self.pending_interviews.remove(&props.question_id);
+                }
+            }
+            EventBody::InterviewAborted(props) => {
+                if !props.question_id.is_empty() {
+                    self.pending_interviews.remove(&props.question_id);
+                }
             }
             EventBody::StagePrompt(props) => {
                 let Some(node_id) = stored.node_id.as_deref() else {
@@ -376,6 +426,7 @@ impl RunProjection {
         self.sandbox = None;
         self.final_patch = None;
         self.pull_request = None;
+        self.pending_interviews.clear();
         self.nodes.clear();
     }
 }
@@ -540,9 +591,31 @@ fn provider_used_from_agent_cli_started(props: &AgentCliStartedProps) -> Value {
 mod tests {
     use std::collections::HashMap;
 
+    use chrono::Utc;
+
     use super::{NodeState, RunProjection};
-    use crate::StageId;
-    use fabro_types::{Checkpoint, RunControlAction};
+    use crate::{EventEnvelope, EventPayload, StageId};
+    use fabro_types::run_event::{InterviewCompletedProps, InterviewOption, InterviewStartedProps};
+    use fabro_types::{Checkpoint, EventBody, RunControlAction, RunEvent, fixtures};
+
+    fn test_event(seq: u32, body: EventBody, node_id: Option<&str>) -> EventEnvelope {
+        let event = RunEvent {
+            id: format!("evt-{seq}"),
+            ts: Utc::now(),
+            run_id: fixtures::RUN_1,
+            node_id: node_id.map(ToOwned::to_owned),
+            node_label: None,
+            session_id: None,
+            parent_session_id: None,
+            body,
+        };
+
+        EventEnvelope {
+            seq,
+            payload: EventPayload::new(serde_json::to_value(event).unwrap(), &fixtures::RUN_1)
+                .unwrap(),
+        }
+    }
 
     #[test]
     fn deserialize_projection_defaults_missing_nodes_and_checkpoints() {
@@ -645,6 +718,65 @@ mod tests {
         assert_eq!(
             round_tripped.pending_control,
             Some(RunControlAction::Unpause)
+        );
+    }
+
+    #[test]
+    fn interview_events_populate_and_clear_pending_interviews() {
+        let mut state = RunProjection::default();
+        state
+            .apply_event(&test_event(
+                1,
+                EventBody::InterviewStarted(InterviewStartedProps {
+                    question_id: "q-1".to_string(),
+                    question: "Approve deploy?".to_string(),
+                    stage: "gate".to_string(),
+                    question_type: "multiple_choice".to_string(),
+                    options: vec![
+                        InterviewOption {
+                            key: "approve".to_string(),
+                            label: "Approve".to_string(),
+                        },
+                        InterviewOption {
+                            key: "revise".to_string(),
+                            label: "Revise".to_string(),
+                        },
+                    ],
+                    allow_freeform: true,
+                    timeout_seconds: Some(30.0),
+                    context_display: Some("Latest draft".to_string()),
+                }),
+                Some("gate"),
+            ))
+            .unwrap();
+
+        let pending = state
+            .pending_interviews
+            .get("q-1")
+            .expect("pending interview should be present");
+        assert_eq!(pending.question_id, "q-1");
+        assert_eq!(pending.stage, "gate");
+        assert_eq!(pending.options.len(), 2);
+        assert!(pending.allow_freeform);
+        assert_eq!(pending.timeout_seconds, Some(30.0));
+        assert_eq!(pending.context_display.as_deref(), Some("Latest draft"));
+
+        state
+            .apply_event(&test_event(
+                2,
+                EventBody::InterviewCompleted(InterviewCompletedProps {
+                    question_id: "q-1".to_string(),
+                    question: "Approve deploy?".to_string(),
+                    answer: "approve".to_string(),
+                    duration_ms: 42,
+                }),
+                Some("gate"),
+            ))
+            .unwrap();
+
+        assert!(
+            state.pending_interviews.is_empty(),
+            "completed interview should clear pending state"
         );
     }
 }

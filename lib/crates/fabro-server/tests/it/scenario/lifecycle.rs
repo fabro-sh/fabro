@@ -51,6 +51,24 @@ async fn wait_for_question_id(app: &axum::Router, run_id: &str) -> String {
     panic!("question should have appeared");
 }
 
+async fn wait_for_question(app: &axum::Router, run_id: &str) -> serde_json::Value {
+    for _ in 0..POLL_ATTEMPTS {
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{run_id}/questions")))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        let body = body_json(response.into_body()).await;
+        let arr = body["data"].as_array().unwrap();
+        if let Some(question) = arr.first() {
+            return question.clone();
+        }
+        sleep(POLL_INTERVAL).await;
+    }
+    panic!("question should have appeared");
+}
+
 const GATE_DOT: &str = r#"digraph GateTest {
     graph [goal="Test gate"]
     start [shape=Mdiamond]
@@ -98,7 +116,11 @@ async fn full_http_lifecycle_approve_and_complete() {
     assert_eq!(response.status(), StatusCode::OK);
 
     // 2. Poll for question to appear (run goes start -> work -> gate, then blocks)
-    let question_id = wait_for_question_id(&app, &run_id).await;
+    let question = wait_for_question(&app, &run_id).await;
+    let question_id = question["id"].as_str().unwrap().to_string();
+    assert_eq!(question["stage"], "gate");
+    assert!(question["timeout_seconds"].is_null());
+    assert!(question["context_display"].is_null() || question["context_display"].is_string());
 
     // 3. Submit answer selecting first option (Approve)
     let req = Request::builder()

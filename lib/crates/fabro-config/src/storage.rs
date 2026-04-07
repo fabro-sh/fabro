@@ -131,21 +131,6 @@ impl RunScratch {
     }
 
     #[must_use]
-    pub fn interview_request_path(&self) -> PathBuf {
-        self.runtime_dir().join("interview_request.json")
-    }
-
-    #[must_use]
-    pub fn interview_response_path(&self) -> PathBuf {
-        self.runtime_dir().join("interview_response.json")
-    }
-
-    #[must_use]
-    pub fn interview_claim_path(&self) -> PathBuf {
-        self.runtime_dir().join("interview_request.claim")
-    }
-
-    #[must_use]
     pub fn artifact_stage_dir(&self, node_slug: &str, attempt: u32) -> PathBuf {
         self.artifact_files_dir()
             .join(node_slug)
@@ -256,27 +241,6 @@ mod tests {
         assert_eq!(
             scratch.artifact_files_dir(),
             scratch.root().join("cache").join("artifacts").join("files")
-        );
-        assert_eq!(
-            scratch.interview_request_path(),
-            scratch
-                .root()
-                .join("runtime")
-                .join("interview_request.json")
-        );
-        assert_eq!(
-            scratch.interview_response_path(),
-            scratch
-                .root()
-                .join("runtime")
-                .join("interview_response.json")
-        );
-        assert_eq!(
-            scratch.interview_claim_path(),
-            scratch
-                .root()
-                .join("runtime")
-                .join("interview_request.claim")
         );
         assert_eq!(
             scratch.artifact_stage_dir("plan", 2),

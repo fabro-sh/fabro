@@ -1,13 +1,12 @@
-use fabro_interview::Answer;
-
 use crate::interaction;
+use crate::payload::SlackAnswerSubmission;
 use crate::socket::{SocketEnvelope, SocketEventKind, classify_envelope};
 use crate::threads::{self, ThreadRegistry};
 
 #[derive(Debug)]
 pub enum DispatchAction {
     Connected,
-    SubmitAnswer { question_id: String, answer: Answer },
+    SubmitAnswer(SlackAnswerSubmission),
     Reconnect,
     Ignored,
 }
@@ -20,10 +19,7 @@ pub fn dispatch(envelope: &SocketEnvelope, thread_registry: &ThreadRegistry) -> 
                 return DispatchAction::Ignored;
             };
             match interaction::parse_interaction(payload) {
-                Some((question_id, answer)) => DispatchAction::SubmitAnswer {
-                    question_id,
-                    answer,
-                },
+                Some(submission) => DispatchAction::SubmitAnswer(submission),
                 None => DispatchAction::Ignored,
             }
         }
@@ -34,13 +30,14 @@ pub fn dispatch(envelope: &SocketEnvelope, thread_registry: &ThreadRegistry) -> 
             let Some((thread_ts, text)) = threads::parse_thread_reply(payload) else {
                 return DispatchAction::Ignored;
             };
-            let Some(question_id) = thread_registry.resolve(&thread_ts) else {
+            let Some(question_ref) = thread_registry.resolve(&thread_ts) else {
                 return DispatchAction::Ignored;
             };
-            DispatchAction::SubmitAnswer {
-                question_id,
-                answer: Answer::text(text),
-            }
+            DispatchAction::SubmitAnswer(SlackAnswerSubmission {
+                run_id: question_ref.run_id,
+                qid: question_ref.qid,
+                answer: fabro_interview::Answer::text(text),
+            })
         }
         SocketEventKind::Disconnect => DispatchAction::Reconnect,
         SocketEventKind::Unknown => DispatchAction::Ignored,
@@ -73,20 +70,18 @@ mod tests {
             payload: Some(serde_json::json!({
                 "type": "block_actions",
                 "actions": [{
-                    "action_id": "q-1:yes",
+                    "action_id": "interview.answer",
                     "type": "button",
-                    "value": "yes"
+                    "value": "{\"kind\":\"yes\",\"run_id\":\"run-1\",\"qid\":\"q-1\"}"
                 }]
             })),
         };
         let action = dispatch(&envelope, &registry);
         match action {
-            DispatchAction::SubmitAnswer {
-                question_id,
-                answer,
-            } => {
-                assert_eq!(question_id, "q-1");
-                assert_eq!(answer.value, AnswerValue::Yes);
+            DispatchAction::SubmitAnswer(submission) => {
+                assert_eq!(submission.run_id, "run-1");
+                assert_eq!(submission.qid, "q-1");
+                assert_eq!(submission.answer.value, AnswerValue::Yes);
             }
             other => panic!("expected SubmitAnswer, got {other:?}"),
         }
@@ -147,7 +142,7 @@ mod tests {
     #[test]
     fn events_api_thread_reply_to_registered_question() {
         let registry = ThreadRegistry::new();
-        registry.register("1234.5678", "q-10");
+        registry.register("1234.5678", "run-10", "q-10");
         let envelope = SocketEnvelope {
             envelope_type: "events_api".to_string(),
             envelope_id: Some("env-5".to_string()),
@@ -162,13 +157,11 @@ mod tests {
         };
         let action = dispatch(&envelope, &registry);
         match action {
-            DispatchAction::SubmitAnswer {
-                question_id,
-                answer,
-            } => {
-                assert_eq!(question_id, "q-10");
+            DispatchAction::SubmitAnswer(submission) => {
+                assert_eq!(submission.run_id, "run-10");
+                assert_eq!(submission.qid, "q-10");
                 assert_eq!(
-                    answer.value,
+                    submission.answer.value,
                     AnswerValue::Text("https://github.com/org/repo".to_string())
                 );
             }

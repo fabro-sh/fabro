@@ -245,6 +245,7 @@ fn api_question_to_question(question: &types::ApiQuestion) -> Question {
         types::QuestionType::Confirmation => QuestionType::Confirmation,
     };
     let mut converted = Question::new(question.text.clone(), question_type);
+    converted.id = question.id.clone();
     converted.options = question
         .options
         .iter()
@@ -254,6 +255,9 @@ fn api_question_to_question(question: &types::ApiQuestion) -> Question {
         })
         .collect();
     converted.allow_freeform = question.allow_freeform;
+    converted.stage = question.stage.clone();
+    converted.timeout_seconds = question.timeout_seconds;
+    converted.context_display = question.context_display.clone();
     converted
 }
 

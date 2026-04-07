@@ -95,6 +95,8 @@ pub enum EventBody {
     InterviewCompleted(InterviewCompletedProps),
     #[serde(rename = "interview.timeout")]
     InterviewTimeout(InterviewTimeoutProps),
+    #[serde(rename = "interview.aborted")]
+    InterviewAborted(InterviewAbortedProps),
     #[serde(rename = "checkpoint.completed")]
     CheckpointCompleted(CheckpointCompletedProps),
     #[serde(rename = "checkpoint.failed")]
@@ -310,6 +312,7 @@ impl EventBody {
             Self::InterviewStarted(_) => "interview.started",
             Self::InterviewCompleted(_) => "interview.completed",
             Self::InterviewTimeout(_) => "interview.timeout",
+            Self::InterviewAborted(_) => "interview.aborted",
             Self::CheckpointCompleted(_) => "checkpoint.completed",
             Self::CheckpointFailed(_) => "checkpoint.failed",
             Self::GitCommit(_) => "git.commit",

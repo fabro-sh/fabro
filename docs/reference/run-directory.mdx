@@ -69,7 +69,7 @@ Manager nodes that run sub-workflows write a nested `child/` directory containin
 
 **`worktree/`** — When running in git checkpoint mode, Fabro creates a Git worktree here as the working directory for agents and commands.
 
-**`runtime/`** — Local-only runtime files, including interview IPC files used by detached runs and `fabro attach`.
+**`runtime/`** — Local-only runtime files such as materialized blob payloads under `runtime/blobs/`.
 
 **`cache/`** — Local filesystem cache for file-backed artifacts and captured test artifacts:
 
@@ -104,9 +104,8 @@ fabro ps --filter workflow=my-workflow
 │   ├── retro.json
 │   ├── cli.log
 │   ├── runtime/
-│   │   ├── interview_request.json
-│   │   ├── interview_response.json
-│   │   └── interview_request.claim
+│   │   └── blobs/
+│   │       └── 01JT5Y3KJ0N5S9E1Y7YFBR2G4D.json
 │   ├── cache/
 │   │   └── artifacts/
 │   │       ├── values/

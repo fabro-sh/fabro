@@ -30,7 +30,9 @@ use fabro_llm::types::{
     Response as LlmResponse, Role, StreamEvent, TokenCounts, ToolChoice, ToolDefinition,
 };
 use fabro_model::{BilledModelUsage, BilledTokenCounts};
-use fabro_store::{ArtifactStore, Database, EventEnvelope, EventPayload, StageId};
+use fabro_store::{
+    ArtifactStore, Database, EventEnvelope, EventPayload, PendingInterviewRecord, StageId,
+};
 use fabro_types::{
     EventBody, RunArtifactStorage, RunBlobId, RunClientProvenance, RunControlAction, RunEvent,
     RunId, RunProvenance, RunServerProvenance, RunSubjectProvenance, Settings,
@@ -48,7 +50,7 @@ use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{ChildStderr, Command};
+use tokio::process::{ChildStderr, ChildStdin, Command};
 use tokio::sync::Notify;
 use tokio::sync::RwLock as AsyncRwLock;
 use tokio::sync::broadcast;
@@ -74,10 +76,19 @@ use crate::run_manifest;
 use crate::secret_store::{SecretStore, SecretStoreError};
 use crate::static_files;
 use crate::web_auth;
-use fabro_interview::{Answer, Interviewer, Question, QuestionType, WebInterviewer};
+use fabro_interview::{
+    Answer, ControlInterviewer, InterviewBroker, Interviewer, Question, QuestionType,
+    WorkerControlEnvelope,
+};
 use fabro_sandbox::daytona::DaytonaSandbox;
 use fabro_sandbox::reconnect::reconnect;
 use fabro_sandbox::{Sandbox, SandboxProvider};
+use fabro_slack::blocks as slack_blocks;
+use fabro_slack::client::{PostedMessage as SlackPostedMessage, SlackClient};
+use fabro_slack::config::resolve_credentials as resolve_slack_credentials;
+use fabro_slack::connection as slack_connection;
+use fabro_slack::payload::SlackAnswerSubmission;
+use fabro_slack::threads::ThreadRegistry;
 use fabro_workflow::event::{self as workflow_event, Emitter};
 use fabro_workflow::operations::{self};
 use fabro_workflow::pipeline::Persisted;
@@ -214,7 +225,8 @@ struct ManagedRun {
     created_at: chrono::DateTime<chrono::Utc>,
     enqueued_at: Instant,
     // Populated when running:
-    interviewer: Option<Arc<WebInterviewer>>,
+    answer_transport: Option<RunAnswerTransport>,
+    accepted_questions: HashSet<String>,
     event_tx: Option<broadcast::Sender<RunEvent>>,
     checkpoint: Option<Checkpoint>,
     cancel_tx: Option<oneshot::Sender<()>>,
@@ -236,9 +248,10 @@ enum ExecutionResult {
     CancelledBySignal,
 }
 
-const FILE_INTERVIEW_QUESTION_ID: &str = "q-file";
 const WORKER_STDERR_LOG: &str = "worker.stderr.log";
 const WORKER_CANCEL_GRACE: Duration = Duration::from_secs(5);
+const WORKER_CONTROL_QUEUE_CAPACITY: usize = 8;
+const WORKER_CONTROL_ENQUEUE_TIMEOUT: Duration = Duration::from_secs(1);
 const ARTIFACT_UPLOAD_TOKEN_ISSUER: &str = "fabro-server-artifact-upload";
 const ARTIFACT_UPLOAD_TOKEN_SCOPE: &str = "stage_artifacts:upload";
 const ARTIFACT_UPLOAD_TOKEN_TTL_SECS: u64 = 24 * 60 * 60;
@@ -297,6 +310,205 @@ struct BillingAccumulator {
 
 type RegistryFactoryOverride = dyn Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync;
 
+#[derive(Clone)]
+enum RunAnswerTransport {
+    Subprocess {
+        control_tx: mpsc::Sender<WorkerControlEnvelope>,
+    },
+    InProcess {
+        broker: Arc<InterviewBroker>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AnswerTransportError {
+    Closed,
+    Timeout,
+}
+
+impl RunAnswerTransport {
+    async fn submit(&self, qid: &str, answer: Answer) -> Result<(), AnswerTransportError> {
+        match self {
+            Self::Subprocess { control_tx } => {
+                let message = WorkerControlEnvelope::interview_answer(qid.to_string(), answer);
+                tokio::time::timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
+                    .await
+                    .map_err(|_| AnswerTransportError::Timeout)?
+                    .map_err(|_| AnswerTransportError::Closed)
+            }
+            Self::InProcess { broker } => broker
+                .submit(qid, answer)
+                .await
+                .map_err(|_| AnswerTransportError::Closed),
+        }
+    }
+
+    async fn abort_pending(&self) {
+        if let Self::InProcess { broker } = self {
+            broker.abort_all().await;
+        }
+    }
+}
+
+#[derive(Clone)]
+struct SlackService {
+    client: SlackClient,
+    app_token: String,
+    default_channel: String,
+    posted_messages: Arc<Mutex<HashMap<(RunId, String), SlackPostedMessage>>>,
+    thread_registry: Arc<ThreadRegistry>,
+}
+
+impl SlackService {
+    fn new(bot_token: String, app_token: String, default_channel: String) -> Self {
+        Self {
+            client: SlackClient::new(bot_token),
+            app_token,
+            default_channel,
+            posted_messages: Arc::new(Mutex::new(HashMap::new())),
+            thread_registry: Arc::new(ThreadRegistry::new()),
+        }
+    }
+
+    async fn handle_event(&self, event: &RunEvent) {
+        match &event.body {
+            EventBody::InterviewStarted(props) => {
+                if props.question_id.is_empty() {
+                    return;
+                }
+                let key = (event.run_id, props.question_id.clone());
+                if self
+                    .posted_messages
+                    .lock()
+                    .expect("slack posted messages lock poisoned")
+                    .contains_key(&key)
+                {
+                    return;
+                }
+
+                let question = Question {
+                    id: props.question_id.clone(),
+                    text: props.question.clone(),
+                    question_type: parse_question_type(&props.question_type),
+                    options: props
+                        .options
+                        .iter()
+                        .map(|option| fabro_interview::QuestionOption {
+                            key: option.key.clone(),
+                            label: option.label.clone(),
+                        })
+                        .collect(),
+                    allow_freeform: props.allow_freeform,
+                    default: None,
+                    timeout_seconds: props.timeout_seconds,
+                    stage: props.stage.clone(),
+                    metadata: HashMap::new(),
+                    context_display: props.context_display.clone(),
+                };
+                let blocks = slack_blocks::question_to_blocks(
+                    &event.run_id.to_string(),
+                    &props.question_id,
+                    &question,
+                );
+
+                if let Ok(posted) = self
+                    .client
+                    .post_message(&self.default_channel, &blocks, None)
+                    .await
+                {
+                    if question.allow_freeform || question.question_type == QuestionType::Freeform {
+                        self.thread_registry.register(
+                            &posted.ts,
+                            &event.run_id.to_string(),
+                            &props.question_id,
+                        );
+                    }
+                    self.posted_messages
+                        .lock()
+                        .expect("slack posted messages lock poisoned")
+                        .insert(key, posted);
+                }
+            }
+            EventBody::InterviewCompleted(props) => {
+                self.finish_interview(
+                    event.run_id,
+                    &props.question_id,
+                    &props.question,
+                    &props.answer,
+                )
+                .await;
+            }
+            EventBody::InterviewTimeout(props) => {
+                self.finish_interview(
+                    event.run_id,
+                    &props.question_id,
+                    &props.question,
+                    "Timed out",
+                )
+                .await;
+            }
+            EventBody::InterviewAborted(props) => {
+                let answer_text = if props.reason == "skipped" {
+                    "Skipped"
+                } else {
+                    "Aborted"
+                };
+                self.finish_interview(
+                    event.run_id,
+                    &props.question_id,
+                    &props.question,
+                    answer_text,
+                )
+                .await;
+            }
+            _ => {}
+        }
+    }
+
+    async fn finish_interview(
+        &self,
+        run_id: RunId,
+        qid: &str,
+        question_text: &str,
+        answer_text: &str,
+    ) {
+        let key = (run_id, qid.to_string());
+        let posted = self
+            .posted_messages
+            .lock()
+            .expect("slack posted messages lock poisoned")
+            .remove(&key);
+        let Some(posted) = posted else {
+            return;
+        };
+
+        self.thread_registry.remove(&posted.ts);
+        let blocks = slack_blocks::answered_blocks(question_text, answer_text);
+        let _ = self
+            .client
+            .update_message(&posted.channel_id, &posted.ts, &blocks)
+            .await;
+    }
+
+    async fn submit_answer(&self, state: Arc<AppState>, submission: SlackAnswerSubmission) {
+        let run_id = match RunId::from_str(&submission.run_id) {
+            Ok(run_id) => run_id,
+            Err(_) => return,
+        };
+
+        let question =
+            match load_pending_interview_question(state.as_ref(), run_id, &submission.qid).await {
+                Ok(question) => question,
+                Err(_) => return,
+            };
+        if validate_answer_for_question(&question, &submission.answer).is_err() {
+            return;
+        }
+        let _ =
+            deliver_answer_to_run(state.as_ref(), run_id, &submission.qid, submission.answer).await;
+    }
+}
+
 /// Shared application state for the server.
 pub struct AppState {
     runs: Mutex<HashMap<RunId, ManagedRun>>,
@@ -315,6 +527,8 @@ pub struct AppState {
     pub(crate) local_daemon_mode: bool,
     shutting_down: AtomicBool,
     registry_factory_override: Option<Box<RegistryFactoryOverride>>,
+    slack_service: Option<Arc<SlackService>>,
+    slack_started: AtomicBool,
 }
 
 fn nonzero_i64(value: i64) -> Option<i64> {
@@ -526,8 +740,55 @@ fn decode_secret_pem(name: &str, raw: &str) -> Result<String, String> {
         .map_err(|err| format!("{name} base64 decoded to invalid UTF-8: {err}"))
 }
 
+fn start_optional_slack_service(state: &Arc<AppState>) {
+    let Some(service) = state.slack_service.clone() else {
+        return;
+    };
+    if state.slack_started.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    let event_state = Arc::clone(state);
+    let event_service = Arc::clone(&service);
+    tokio::spawn(async move {
+        let mut rx = event_state.global_event_tx.subscribe();
+        loop {
+            match rx.recv().await {
+                Ok(envelope) => {
+                    if let Ok(event) = RunEvent::try_from(&envelope.payload) {
+                        event_service.handle_event(&event).await;
+                    }
+                }
+                Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => break,
+            }
+        }
+    });
+
+    let socket_state = Arc::clone(state);
+    tokio::spawn(async move {
+        let submit_service = Arc::clone(&service);
+        let on_submit: Arc<dyn Fn(SlackAnswerSubmission) + Send + Sync> =
+            Arc::new(move |submission| {
+                let state = Arc::clone(&socket_state);
+                let service = Arc::clone(&submit_service);
+                tokio::spawn(async move {
+                    service.submit_answer(state, submission).await;
+                });
+            });
+        slack_connection::run(
+            &service.client,
+            &service.app_token,
+            &service.thread_registry,
+            on_submit,
+        )
+        .await;
+    });
+}
+
 /// Build the axum Router with all run endpoints and embedded static assets.
 pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
+    start_optional_slack_service(&state);
     let middleware_state = Arc::clone(&state);
     let api_common = Router::new()
         .route("/openapi.json", get(openapi_spec))
@@ -1703,6 +1964,21 @@ pub(crate) fn build_app_state_with_path(
 ) -> anyhow::Result<Arc<AppState>> {
     let secret_store = SecretStore::load(secret_store_path)?;
     let (global_event_tx, _) = broadcast::channel(4096);
+    let slack_service = {
+        let settings = settings.read().expect("settings lock poisoned");
+        settings
+            .slack_settings()
+            .and_then(|slack| slack.default_channel.clone())
+            .and_then(|default_channel| {
+                resolve_slack_credentials().map(|credentials| {
+                    Arc::new(SlackService::new(
+                        credentials.bot_token,
+                        credentials.app_token,
+                        default_channel,
+                    ))
+                })
+            })
+    };
     Ok(Arc::new(AppState {
         runs: Mutex::new(HashMap::new()),
         aggregate_billing: Mutex::new(BillingAccumulator::default()),
@@ -1719,6 +1995,8 @@ pub(crate) fn build_app_state_with_path(
         local_daemon_mode,
         shutting_down: AtomicBool::new(false),
         registry_factory_override,
+        slack_service,
+        slack_started: AtomicBool::new(false),
     }))
 }
 
@@ -1836,10 +2114,10 @@ async fn delete_run_internal(state: &Arc<AppState>, id: RunId) -> Result<(), Res
 
     if let Some(mut managed_run) = managed_run {
         if let Some(token) = &managed_run.cancel_token {
-            token.store(true, Ordering::Relaxed);
+            token.store(true, Ordering::SeqCst);
         }
-        if let Some(interviewer) = &managed_run.interviewer {
-            interviewer.abort_pending();
+        if let Some(answer_transport) = managed_run.answer_transport.clone() {
+            answer_transport.abort_pending().await;
         }
         if let Some(cancel_tx) = managed_run.cancel_tx.take() {
             let _ = cancel_tx.send(());
@@ -2049,12 +2327,57 @@ fn api_event_envelope_from_store(event: &EventEnvelope) -> Result<ApiEventEnvelo
 }
 
 fn clear_live_run_state(run: &mut ManagedRun) {
-    run.interviewer = None;
+    run.answer_transport = None;
+    run.accepted_questions.clear();
     run.event_tx = None;
     run.cancel_tx = None;
     run.cancel_token = None;
     run.worker_pid = None;
     run.worker_pgid = None;
+}
+
+fn reconcile_live_interview_state_for_event(run: &mut ManagedRun, event: &RunEvent) {
+    match &event.body {
+        EventBody::InterviewCompleted(props) => {
+            run.accepted_questions.remove(&props.question_id);
+        }
+        EventBody::InterviewTimeout(props) => {
+            run.accepted_questions.remove(&props.question_id);
+        }
+        EventBody::InterviewAborted(props) => {
+            run.accepted_questions.remove(&props.question_id);
+        }
+        EventBody::RunCompleted(_) | EventBody::RunFailed(_) | EventBody::RunRewound(_) => {
+            run.accepted_questions.clear();
+        }
+        _ => {}
+    }
+}
+
+fn claim_run_answer_transport(
+    state: &AppState,
+    run_id: RunId,
+    qid: &str,
+) -> Result<RunAnswerTransport, StatusCode> {
+    let mut runs = state.runs.lock().expect("runs lock poisoned");
+    let managed_run = runs.get_mut(&run_id).ok_or(StatusCode::NOT_FOUND)?;
+    let transport = managed_run
+        .answer_transport
+        .clone()
+        .ok_or(StatusCode::CONFLICT)?;
+
+    if !managed_run.accepted_questions.insert(qid.to_string()) {
+        return Err(StatusCode::CONFLICT);
+    }
+
+    Ok(transport)
+}
+
+fn release_run_answer_claim(state: &AppState, run_id: RunId, qid: &str) {
+    let mut runs = state.runs.lock().expect("runs lock poisoned");
+    if let Some(managed_run) = runs.get_mut(&run_id) {
+        managed_run.accepted_questions.remove(qid);
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -2252,13 +2575,20 @@ async fn persist_cancelled_run_status(state: &AppState, run_id: RunId) -> anyhow
 }
 
 async fn forward_run_events_to_global(
+    state: Arc<AppState>,
+    run_id: RunId,
     mut run_events: broadcast::Receiver<EventEnvelope>,
-    global_event_tx: broadcast::Sender<EventEnvelope>,
 ) {
     loop {
         match run_events.recv().await {
             Ok(event) => {
-                let _ = global_event_tx.send(event);
+                if let Ok(run_event) = RunEvent::try_from(&event.payload) {
+                    let mut runs = state.runs.lock().expect("runs lock poisoned");
+                    if let Some(managed_run) = runs.get_mut(&run_id) {
+                        reconcile_live_interview_state_for_event(managed_run, &run_event);
+                    }
+                }
+                let _ = state.global_event_tx.send(event);
             }
             Err(RecvError::Lagged(_)) => {}
             Err(RecvError::Closed) => break,
@@ -2279,7 +2609,8 @@ fn managed_run(
         error: None,
         created_at,
         enqueued_at: Instant::now(),
-        interviewer: None,
+        answer_transport: None,
+        accepted_questions: HashSet::new(),
         event_tx: None,
         checkpoint: None,
         cancel_tx: None,
@@ -2429,6 +2760,20 @@ async fn drain_worker_stderr(
     Ok(())
 }
 
+async fn pump_worker_control_jsonl(
+    mut stdin: ChildStdin,
+    mut control_rx: mpsc::Receiver<WorkerControlEnvelope>,
+) -> anyhow::Result<()> {
+    while let Some(message) = control_rx.recv().await {
+        let mut line = serde_json::to_vec(&message)?;
+        line.push(b'\n');
+        stdin.write_all(&line).await?;
+        stdin.flush().await?;
+    }
+
+    Ok(())
+}
+
 async fn append_worker_exit_failure(
     run_store: &fabro_store::RunDatabase,
     run_id: RunId,
@@ -2522,7 +2867,7 @@ fn worker_command(
         .arg(run_id.to_string())
         .arg("--mode")
         .arg(worker_mode_arg(mode))
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
 
@@ -2538,6 +2883,7 @@ fn api_question_from_interview_question(id: &str, question: &Question) -> ApiQue
     ApiQuestion {
         id: id.to_string(),
         text: question.text.clone(),
+        stage: question.stage.clone(),
         question_type: match question.question_type {
             QuestionType::YesNo => ApiQuestionType::YesNo,
             QuestionType::MultipleChoice => ApiQuestionType::MultipleChoice,
@@ -2554,6 +2900,162 @@ fn api_question_from_interview_question(id: &str, question: &Question) -> ApiQue
             })
             .collect(),
         allow_freeform: question.allow_freeform,
+        timeout_seconds: question.timeout_seconds,
+        context_display: question.context_display.clone(),
+    }
+}
+
+fn parse_question_type(question_type: &str) -> QuestionType {
+    match question_type {
+        "yes_no" => QuestionType::YesNo,
+        "multiple_choice" => QuestionType::MultipleChoice,
+        "multi_select" => QuestionType::MultiSelect,
+        "freeform" => QuestionType::Freeform,
+        "confirmation" => QuestionType::Confirmation,
+        _ => QuestionType::Freeform,
+    }
+}
+
+fn question_from_pending_interview(record: &PendingInterviewRecord) -> Question {
+    Question {
+        id: record.question_id.clone(),
+        text: record.question.clone(),
+        question_type: parse_question_type(&record.question_type),
+        options: record
+            .options
+            .iter()
+            .map(|option| fabro_interview::QuestionOption {
+                key: option.key.clone(),
+                label: option.label.clone(),
+            })
+            .collect(),
+        allow_freeform: record.allow_freeform,
+        default: None,
+        timeout_seconds: record.timeout_seconds,
+        stage: record.stage.clone(),
+        metadata: HashMap::new(),
+        context_display: record.context_display.clone(),
+    }
+}
+
+fn api_question_from_pending_interview(record: &PendingInterviewRecord) -> ApiQuestion {
+    api_question_from_interview_question(
+        &record.question_id,
+        &question_from_pending_interview(record),
+    )
+}
+
+#[allow(clippy::result_large_err)] // Axum handlers naturally propagate full `Response` errors.
+async fn load_pending_interview_question(
+    state: &AppState,
+    run_id: RunId,
+    qid: &str,
+) -> Result<Question, Response> {
+    let run_store = match state.store.open_run_reader(&run_id).await {
+        Ok(run_store) => run_store,
+        Err(fabro_store::StoreError::RunNotFound(_)) => {
+            return Err(ApiError::not_found("Run not found.").into_response());
+        }
+        Err(err) => {
+            return Err(
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+            );
+        }
+    };
+    let run_state = match run_store.state().await {
+        Ok(run_state) => run_state,
+        Err(err) => {
+            return Err(
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+            );
+        }
+    };
+    let Some(record) = run_state.pending_interviews.get(qid) else {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "Question no longer exists or was already answered.",
+        )
+        .into_response());
+    };
+
+    Ok(question_from_pending_interview(record))
+}
+
+#[allow(clippy::result_large_err)] // Axum handlers naturally propagate full `Response` errors.
+fn validate_answer_for_question(question: &Question, answer: &Answer) -> Result<(), Response> {
+    match (&question.question_type, &answer.value) {
+        (QuestionType::YesNo | QuestionType::Confirmation, fabro_interview::AnswerValue::Yes)
+        | (QuestionType::YesNo | QuestionType::Confirmation, fabro_interview::AnswerValue::No)
+        | (_, fabro_interview::AnswerValue::Aborted)
+        | (_, fabro_interview::AnswerValue::Skipped)
+        | (_, fabro_interview::AnswerValue::Timeout) => Ok(()),
+        (QuestionType::MultipleChoice, fabro_interview::AnswerValue::Selected(key)) => {
+            if question.options.iter().any(|option| option.key == *key) {
+                Ok(())
+            } else {
+                Err(ApiError::bad_request("Invalid option key.").into_response())
+            }
+        }
+        (QuestionType::MultiSelect, fabro_interview::AnswerValue::MultiSelected(keys)) => {
+            if keys
+                .iter()
+                .all(|key| question.options.iter().any(|option| option.key == *key))
+            {
+                Ok(())
+            } else {
+                Err(ApiError::bad_request("Invalid option key.").into_response())
+            }
+        }
+        (QuestionType::Freeform, fabro_interview::AnswerValue::Text(text))
+            if !text.trim().is_empty() =>
+        {
+            Ok(())
+        }
+        (_, fabro_interview::AnswerValue::Text(text))
+            if question.allow_freeform && !text.trim().is_empty() =>
+        {
+            Ok(())
+        }
+        _ => Err(ApiError::bad_request("Answer does not match question type.").into_response()),
+    }
+}
+
+#[allow(clippy::result_large_err)] // Axum handlers naturally propagate full `Response` errors.
+async fn deliver_answer_to_run(
+    state: &AppState,
+    run_id: RunId,
+    qid: &str,
+    answer: Answer,
+) -> Result<(), Response> {
+    let transport = match claim_run_answer_transport(state, run_id, qid) {
+        Ok(transport) => transport,
+        Err(StatusCode::NOT_FOUND) => {
+            return Err(ApiError::not_found("Run not found.").into_response());
+        }
+        Err(StatusCode::CONFLICT) => {
+            return Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "Question no longer exists or was already answered.",
+            )
+            .into_response());
+        }
+        Err(status) => {
+            return Err(
+                ApiError::new(status, "Run is not ready to accept answers.").into_response()
+            );
+        }
+    };
+
+    match transport.submit(qid, answer).await {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            release_run_answer_claim(state, run_id, qid);
+            Err(ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Failed to deliver answer to the active run.",
+            )
+            .into_response())
+        }
     }
 }
 
@@ -2585,25 +3087,6 @@ fn answer_from_request(req: SubmitAnswerRequest, question: &Question) -> Result<
         )
         .into_response())
     }
-}
-
-async fn load_file_question(run_dir: &std::path::Path) -> anyhow::Result<Option<Question>> {
-    let request_path = fabro_config::RunScratch::new(run_dir).interview_request_path();
-    match fs::read_to_string(&request_path).await {
-        Ok(data) => Ok(Some(serde_json::from_str(&data)?)),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(err) => Err(err.into()),
-    }
-}
-
-async fn write_file_answer(run_dir: &std::path::Path, answer: &Answer) -> anyhow::Result<()> {
-    let response_path = fabro_config::RunScratch::new(run_dir).interview_response_path();
-    if let Some(parent) = response_path.parent() {
-        fs::create_dir_all(parent).await?;
-    }
-    let data = serde_json::to_string_pretty(answer)?;
-    fs::write(response_path, data).await?;
-    Ok(())
 }
 
 async fn create_run(
@@ -2937,7 +3420,8 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
     let _ = queued_for;
 
     // Create interviewer and event plumbing (this is the "provisioning" phase)
-    let interviewer = Arc::new(WebInterviewer::new());
+    let broker = Arc::new(InterviewBroker::new());
+    let interviewer: Arc<dyn Interviewer> = Arc::new(ControlInterviewer::new(Arc::clone(&broker)));
     let emitter = Emitter::new(run_id);
     if let Some(tx_clone) = event_tx {
         emitter.on_event(move |event| {
@@ -2947,7 +3431,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
     let registry_override = state
         .registry_factory_override
         .as_ref()
-        .map(|factory| Arc::new(factory(Arc::clone(&interviewer) as Arc<dyn Interviewer>)));
+        .map(|factory| Arc::new(factory(Arc::clone(&interviewer))));
     let emitter = Arc::new(emitter);
 
     // Transition to Running, populate interviewer
@@ -2956,7 +3440,9 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         if let Some(managed_run) = runs.get_mut(&run_id) {
             if managed_run.status == RunStatus::Starting {
                 managed_run.status = RunStatus::Running;
-                managed_run.interviewer = Some(Arc::clone(&interviewer));
+                managed_run.answer_transport = Some(RunAnswerTransport::InProcess {
+                    broker: Arc::clone(&broker),
+                });
                 false
             } else {
                 // Was cancelled during setup
@@ -2990,8 +3476,9 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         }
     };
     tokio::spawn(forward_run_events_to_global(
+        Arc::clone(&state),
+        run_id,
         run_store.subscribe(),
-        state.global_event_tx.clone(),
     ));
     let persisted = match Persisted::load_from_store(&run_store.clone().into(), &run_dir).await {
         Ok(persisted) => persisted,
@@ -3028,7 +3515,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         run_id,
         cancel_token: Some(Arc::clone(&cancel_token)),
         emitter: Arc::clone(&emitter),
-        interviewer: Arc::clone(&interviewer) as Arc<dyn Interviewer>,
+        interviewer: Arc::clone(&interviewer),
         run_store: run_store.clone().into(),
         event_sink: workflow_event::RunEventSink::store(run_store.clone()),
         artifact_uploader: None,
@@ -3166,8 +3653,9 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         }
     };
     tokio::spawn(forward_run_events_to_global(
+        Arc::clone(&state),
+        run_id,
         run_store.subscribe(),
-        state.global_event_tx.clone(),
     ));
 
     let mut child = match worker_command(state.as_ref(), run_id, execution_mode, &run_dir)
@@ -3222,6 +3710,26 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         }
     }
 
+    let Some(stdin) = child.stdin.take() else {
+        let message = "Worker stdin pipe was unavailable".to_string();
+        tracing::error!(run_id = %run_id, "{message}");
+        let _ = child.start_kill();
+        let _ = workflow_event::append_event(
+            &run_store,
+            &run_id,
+            &workflow_event::Event::WorkflowRunFailed {
+                error: FabroError::engine(message.clone()),
+                duration_ms: 0,
+                reason: Some(WorkflowStatusReason::LaunchFailed),
+                git_commit_sha: None,
+            },
+        )
+        .await;
+        fail_managed_run(&state, run_id, message);
+        state.scheduler_notify.notify_one();
+        return;
+    };
+
     let Some(stderr) = child.stderr.take() else {
         let message = "Worker stderr pipe was unavailable".to_string();
         tracing::error!(run_id = %run_id, "{message}");
@@ -3242,6 +3750,15 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         return;
     };
 
+    let (control_tx, control_rx) = mpsc::channel(WORKER_CONTROL_QUEUE_CAPACITY);
+    {
+        let mut runs = state.runs.lock().expect("runs lock poisoned");
+        if let Some(managed_run) = runs.get_mut(&run_id) {
+            managed_run.answer_transport = Some(RunAnswerTransport::Subprocess { control_tx });
+        }
+    }
+
+    let control_task = tokio::spawn(pump_worker_control_jsonl(stdin, control_rx));
     let stderr_task = tokio::spawn(drain_worker_stderr(run_id, run_dir.clone(), stderr));
 
     let wait_status = match child.wait().await {
@@ -3265,6 +3782,9 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
             return;
         }
     };
+
+    control_task.abort();
+    let _ = control_task.await;
 
     match stderr_task.await {
         Ok(Ok(())) => {}
@@ -3417,44 +3937,23 @@ async fn get_questions(
         Ok(id) => id,
         Err(response) => return response,
     };
-    let (interviewer, run_dir) = {
-        let runs = state.runs.lock().expect("runs lock poisoned");
-        match runs.get(&id) {
-            Some(managed_run) => (managed_run.interviewer.clone(), managed_run.run_dir.clone()),
-            None => return ApiError::not_found("Run not found.").into_response(),
+    match state.store.open_run_reader(&id).await {
+        Ok(run_store) => match run_store.state().await {
+            Ok(run_state) => {
+                let questions = run_state
+                    .pending_interviews
+                    .values()
+                    .map(api_question_from_pending_interview)
+                    .collect::<Vec<_>>();
+                (StatusCode::OK, Json(ListResponse::new(questions))).into_response()
+            }
+            Err(err) => {
+                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+            }
+        },
+        Err(fabro_store::StoreError::RunNotFound(_)) => {
+            ApiError::not_found("Run not found.").into_response()
         }
-    };
-
-    if let Some(interviewer) = interviewer {
-        let questions: Vec<ApiQuestion> = interviewer
-            .pending_questions()
-            .into_iter()
-            .map(|pending| api_question_from_interview_question(&pending.id, &pending.question))
-            .collect();
-        return (StatusCode::OK, Json(ListResponse::new(questions))).into_response();
-    }
-
-    let Some(run_dir) = run_dir else {
-        return (
-            StatusCode::OK,
-            Json(ListResponse::new(Vec::<ApiQuestion>::new())),
-        )
-            .into_response();
-    };
-
-    match load_file_question(&run_dir).await {
-        Ok(Some(question)) => (
-            StatusCode::OK,
-            Json(ListResponse::new(vec![
-                api_question_from_interview_question(FILE_INTERVIEW_QUESTION_ID, &question),
-            ])),
-        )
-            .into_response(),
-        Ok(None) => (
-            StatusCode::OK,
-            Json(ListResponse::new(Vec::<ApiQuestion>::new())),
-        )
-            .into_response(),
         Err(err) => {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         }
@@ -3471,66 +3970,17 @@ async fn submit_answer(
         Ok(id) => id,
         Err(response) => return response,
     };
-    let (interviewer, run_dir) = {
-        let runs = state.runs.lock().expect("runs lock poisoned");
-        match runs.get(&id) {
-            Some(managed_run) => (managed_run.interviewer.clone(), managed_run.run_dir.clone()),
-            None => return ApiError::not_found("Run not found.").into_response(),
-        }
-    };
-
-    if let Some(interviewer) = interviewer {
-        let pending = interviewer.pending_questions();
-        let Some(question) = pending.iter().find(|pending| pending.id == qid) else {
-            return ApiError::new(
-                StatusCode::CONFLICT,
-                "Question no longer exists or was already answered.",
-            )
-            .into_response();
-        };
-        let answer = match answer_from_request(req, &question.question) {
-            Ok(answer) => answer,
-            Err(response) => return response,
-        };
-        if interviewer.submit_answer(&qid, answer) {
-            return StatusCode::NO_CONTENT.into_response();
-        }
-        return ApiError::new(
-            StatusCode::CONFLICT,
-            "Question no longer exists or was already answered.",
-        )
-        .into_response();
-    }
-
-    let Some(run_dir) = run_dir else {
-        return ApiError::new(StatusCode::CONFLICT, "Run is not yet running.").into_response();
-    };
-    if qid != FILE_INTERVIEW_QUESTION_ID {
-        return ApiError::new(
-            StatusCode::CONFLICT,
-            "Question no longer exists or was already answered.",
-        )
-        .into_response();
-    }
-    let question = match load_file_question(&run_dir).await {
-        Ok(Some(question)) => question,
-        Ok(None) => {
-            return ApiError::new(StatusCode::CONFLICT, "Run is not yet running.").into_response();
-        }
-        Err(err) => {
-            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                .into_response();
-        }
+    let question = match load_pending_interview_question(state.as_ref(), id, &qid).await {
+        Ok(question) => question,
+        Err(response) => return response,
     };
     let answer = match answer_from_request(req, &question) {
         Ok(answer) => answer,
         Err(response) => return response,
     };
-    match write_file_answer(&run_dir, &answer).await {
+    match deliver_answer_to_run(state.as_ref(), id, &qid, answer).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(err) => {
-            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
-        }
+        Err(response) => response,
     }
 }
 
@@ -4696,7 +5146,6 @@ async fn cancel_run(
         persist_cancelled_status,
         cancel_token,
         cancel_tx,
-        interviewer,
         worker_pid,
     ) = {
         let mut runs = state.runs.lock().expect("runs lock poisoned");
@@ -4721,7 +5170,6 @@ async fn cancel_run(
                         persist_cancelled_status,
                         managed_run.cancel_token.clone(),
                         managed_run.cancel_tx.take(),
-                        managed_run.interviewer.clone(),
                         managed_run.worker_pid,
                     )
                 }
@@ -4743,10 +5191,7 @@ async fn cancel_run(
     }
 
     if let Some(token) = &cancel_token {
-        token.store(true, Ordering::Relaxed);
-    }
-    if let Some(interviewer) = &interviewer {
-        interviewer.abort_pending();
+        token.store(true, Ordering::SeqCst);
     }
     if let Some(cancel_tx) = cancel_tx {
         let _ = cancel_tx.send(());

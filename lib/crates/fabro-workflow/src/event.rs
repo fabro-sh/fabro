@@ -212,18 +212,36 @@ pub enum Event {
         results: Vec<serde_json::Value>,
     },
     InterviewStarted {
+        question_id: String,
         question: String,
         stage: String,
         question_type: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        options: Vec<fabro_types::InterviewOption>,
+        #[serde(default)]
+        allow_freeform: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout_seconds: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context_display: Option<String>,
     },
     InterviewCompleted {
+        question_id: String,
         question: String,
         answer: String,
         duration_ms: u64,
     },
     InterviewTimeout {
+        question_id: String,
         question: String,
         stage: String,
+        duration_ms: u64,
+    },
+    InterviewAborted {
+        question_id: String,
+        question: String,
+        stage: String,
+        reason: String,
         duration_ms: u64,
     },
     CheckpointCompleted {
@@ -745,6 +763,14 @@ impl Event {
             } => {
                 warn!(stage, duration_ms, "Interview timeout");
             }
+            Self::InterviewAborted {
+                stage,
+                reason,
+                duration_ms,
+                ..
+            } => {
+                warn!(stage, reason, duration_ms, "Interview aborted");
+            }
             Self::CheckpointCompleted {
                 node_id,
                 status,
@@ -1120,6 +1146,7 @@ pub fn event_name(event: &Event) -> &'static str {
         Event::InterviewStarted { .. } => "interview.started",
         Event::InterviewCompleted { .. } => "interview.completed",
         Event::InterviewTimeout { .. } => "interview.timeout",
+        Event::InterviewAborted { .. } => "interview.aborted",
         Event::CheckpointCompleted { .. } => "checkpoint.completed",
         Event::CheckpointFailed { .. } => "checkpoint.failed",
         Event::GitCommit { .. } => "git.commit",
@@ -1318,6 +1345,7 @@ fn stored_event_fields(event: &Event) -> StoredEventFields {
         Event::Prompt { stage, .. }
         | Event::InterviewStarted { stage, .. }
         | Event::InterviewTimeout { stage, .. }
+        | Event::InterviewAborted { stage, .. }
         | Event::Failover { stage, .. } => {
             let node_id = Some(stage.clone());
             let node_label = default_node_label(node_id.as_ref(), None);
@@ -1594,28 +1622,57 @@ fn event_body_from_event(event: &Event) -> EventBody {
             results: results.clone(),
         }),
         Event::InterviewStarted {
+            question_id,
             question,
+            stage,
             question_type,
-            ..
+            options,
+            allow_freeform,
+            timeout_seconds,
+            context_display,
         } => EventBody::InterviewStarted(fabro_types::InterviewStartedProps {
+            question_id: question_id.clone(),
             question: question.clone(),
+            stage: stage.clone(),
             question_type: question_type.clone(),
+            options: options.clone(),
+            allow_freeform: *allow_freeform,
+            timeout_seconds: *timeout_seconds,
+            context_display: context_display.clone(),
         }),
         Event::InterviewCompleted {
+            question_id,
             question,
             answer,
             duration_ms,
         } => EventBody::InterviewCompleted(fabro_types::InterviewCompletedProps {
+            question_id: question_id.clone(),
             question: question.clone(),
             answer: answer.clone(),
             duration_ms: *duration_ms,
         }),
         Event::InterviewTimeout {
+            question_id,
             question,
+            stage,
             duration_ms,
-            ..
         } => EventBody::InterviewTimeout(fabro_types::InterviewTimeoutProps {
+            question_id: question_id.clone(),
             question: question.clone(),
+            stage: stage.clone(),
+            duration_ms: *duration_ms,
+        }),
+        Event::InterviewAborted {
+            question_id,
+            question,
+            stage,
+            reason,
+            duration_ms,
+        } => EventBody::InterviewAborted(fabro_types::InterviewAbortedProps {
+            question_id: question_id.clone(),
+            question: question.clone(),
+            stage: stage.clone(),
+            reason: reason.clone(),
             duration_ms: *duration_ms,
         }),
         Event::CheckpointCompleted {

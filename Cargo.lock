@@ -1873,6 +1873,7 @@ dependencies = [
  "fabro-proc",
  "fabro-retro",
  "fabro-sandbox",
+ "fabro-slack",
  "fabro-store",
  "fabro-types",
  "fabro-util",

@@ -24,10 +24,6 @@ tokio-tungstenite.workspace = true
 reqwest.workspace = true
 tracing.workspace = true
 
-[[example]]
-name = "slack-e2e"
-path = "examples/slack_e2e.rs"
-
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }
 toml.workspace = true

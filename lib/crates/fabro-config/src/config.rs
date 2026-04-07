@@ -11,7 +11,7 @@ use crate::run::{
     ArtifactsConfig, CheckpointConfig, GitHubConfig, LlmConfig, PullRequestConfig, SetupConfig,
 };
 use crate::sandbox::SandboxConfig;
-use crate::server::{ApiConfig, FeaturesConfig, GitConfig, LogConfig, WebConfig};
+use crate::server::{ApiConfig, FeaturesConfig, GitConfig, LogConfig, SlackConfig, WebConfig};
 use crate::user::{self, ExecConfig, ServerConfig};
 use fabro_types::Settings;
 
@@ -115,6 +115,9 @@ pub struct ConfigLayer {
     pub web: Option<WebConfig>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slack: Option<SlackConfig>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api: Option<ApiConfig>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -173,6 +176,7 @@ impl Combine for ConfigLayer {
             max_concurrent_runs: self.max_concurrent_runs.combine(other.max_concurrent_runs),
             artifact_storage: self.artifact_storage.combine(other.artifact_storage),
             web: self.web.combine(other.web),
+            slack: self.slack.combine(other.slack),
             api: self.api.combine(other.api),
             features: self.features.combine(other.features),
             log: self.log.combine(other.log),

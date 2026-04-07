@@ -34,9 +34,7 @@ These paths are local runtime state, not canonical event projections.
 | Path | Purpose |
 |---|---|
 | `worktree/` | Git worktree used by checkpointed runs |
-| `runtime/interview_request.json` | Detached-run interview request IPC file |
-| `runtime/interview_response.json` | Detached-run interview response IPC file |
-| `runtime/interview_request.claim` | Detached-run interview claim lock |
+| `runtime/blobs/` | Materialized local blob payloads for file-backed `fabro+blob://` references |
 | `cache/artifacts/values/` | Large context values spilled to the filesystem |
 | `cache/artifacts/files/` | Captured artifact files organized by node and retry |
 

@@ -1,6 +1,12 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InterviewOption {
+    pub key: String,
+    pub label: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParallelStartedProps {
     pub visit: u32,
@@ -34,12 +40,26 @@ pub struct ParallelCompletedProps {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InterviewStartedProps {
+    #[serde(default)]
+    pub question_id: String,
     pub question: String,
+    #[serde(default)]
+    pub stage: String,
     pub question_type: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<InterviewOption>,
+    #[serde(default)]
+    pub allow_freeform: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_seconds: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_display: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InterviewCompletedProps {
+    #[serde(default)]
+    pub question_id: String,
     pub question: String,
     pub answer: String,
     pub duration_ms: u64,
@@ -47,7 +67,22 @@ pub struct InterviewCompletedProps {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InterviewTimeoutProps {
+    #[serde(default)]
+    pub question_id: String,
     pub question: String,
+    #[serde(default)]
+    pub stage: String,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InterviewAbortedProps {
+    #[serde(default)]
+    pub question_id: String,
+    pub question: String,
+    #[serde(default)]
+    pub stage: String,
+    pub reason: String,
     pub duration_ms: u64,
 }
 

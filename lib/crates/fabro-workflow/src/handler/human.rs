@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use async_trait::async_trait;
@@ -12,6 +13,7 @@ use crate::millis_u64;
 use crate::outcome::{Outcome, OutcomeExt};
 use fabro_graphviz::graph::{Graph, Node};
 use fabro_interview::{Answer, AnswerValue, Interviewer, Question, QuestionOption, QuestionType};
+use ulid::Ulid;
 
 use super::{EngineServices, Handler};
 
@@ -85,9 +87,10 @@ impl HumanHandler {
         self
     }
 
-    fn emit(&self, event: &Event) {
-        if let Some(emitter) = &self.emitter {
-            emitter.emit(event);
+    fn emit(&self, default_emitter: &Arc<Emitter>, event: &Event) {
+        match &self.emitter {
+            Some(emitter) => emitter.emit(event),
+            None => default_emitter.emit(event),
         }
     }
 }
@@ -143,7 +146,7 @@ impl Handler for HumanHandler {
         context: &Context,
         graph: &Graph,
         _run_dir: &Path,
-        _services: &EngineServices,
+        services: &EngineServices,
     ) -> Result<Outcome, FabroError> {
         // 1. Derive choices from outgoing edges
         let edges = graph.outgoing_edges(&node.id);
@@ -185,6 +188,7 @@ impl Handler for HumanHandler {
             QuestionType::MultipleChoice
         };
         let mut question = Question::new(node.label(), question_type);
+        question.id = Ulid::new().to_string();
         question.options = options;
         question.allow_freeform = freeform_target.is_some();
         question.stage.clone_from(&node.id);
@@ -203,21 +207,41 @@ impl Handler for HumanHandler {
 
         // 3. Present to interviewer
         let question_text = node.label().to_string();
-        self.emit(&Event::InterviewStarted {
-            question: question_text.clone(),
-            stage: node.id.clone(),
-            question_type: question.question_type.to_string(),
-        });
+        let question_id = question.id.clone();
+        self.emit(
+            &services.emitter,
+            &Event::InterviewStarted {
+                question_id: question_id.clone(),
+                question: question_text.clone(),
+                stage: node.id.clone(),
+                question_type: question.question_type.to_string(),
+                options: question
+                    .options
+                    .iter()
+                    .map(|option| fabro_types::run_event::InterviewOption {
+                        key: option.key.clone(),
+                        label: option.label.clone(),
+                    })
+                    .collect(),
+                allow_freeform: question.allow_freeform,
+                timeout_seconds: question.timeout_seconds,
+                context_display: question.context_display.clone(),
+            },
+        );
         let interview_start = Instant::now();
         let answer = self.interviewer.ask(question).await;
 
         // 4. Handle timeout
         if answer.value == AnswerValue::Timeout {
-            self.emit(&Event::InterviewTimeout {
-                question: question_text,
-                stage: node.id.clone(),
-                duration_ms: millis_u64(interview_start.elapsed()),
-            });
+            self.emit(
+                &services.emitter,
+                &Event::InterviewTimeout {
+                    question_id: question_id.clone(),
+                    question: question_text,
+                    stage: node.id.clone(),
+                    duration_ms: millis_u64(interview_start.elapsed()),
+                },
+            );
             let default_choice = node
                 .attrs
                 .get("human.default_choice")
@@ -234,20 +258,51 @@ impl Handler for HumanHandler {
 
         // 5. Handle unanswered / aborted interview sessions.
         if answer.value == AnswerValue::Aborted {
+            if services
+                .cancel_requested
+                .as_ref()
+                .is_some_and(|flag| flag.load(Ordering::SeqCst))
+            {
+                return Err(FabroError::Cancelled);
+            }
+            self.emit(
+                &services.emitter,
+                &Event::InterviewAborted {
+                    question_id: question_id.clone(),
+                    question: question_text,
+                    stage: node.id.clone(),
+                    reason: "aborted".to_string(),
+                    duration_ms: millis_u64(interview_start.elapsed()),
+                },
+            );
             return Ok(unanswered_human_gate(
                 "human interaction aborted before an answer was provided",
             ));
         }
         if answer.value == AnswerValue::Skipped {
+            self.emit(
+                &services.emitter,
+                &Event::InterviewAborted {
+                    question_id: question_id.clone(),
+                    question: question_text,
+                    stage: node.id.clone(),
+                    reason: "skipped".to_string(),
+                    duration_ms: millis_u64(interview_start.elapsed()),
+                },
+            );
             return Ok(unanswered_human_gate("human skipped interaction"));
         }
 
         // Emit interview completed for successful interactions
-        self.emit(&Event::InterviewCompleted {
-            question: question_text,
-            answer: answer_text(&answer),
-            duration_ms: millis_u64(interview_start.elapsed()),
-        });
+        self.emit(
+            &services.emitter,
+            &Event::InterviewCompleted {
+                question_id,
+                question: question_text,
+                answer: answer_text(&answer),
+                duration_ms: millis_u64(interview_start.elapsed()),
+            },
+        );
 
         // 6. Try fixed-choice match
         if let Some(selected) = find_choice_match(&answer, &choices) {

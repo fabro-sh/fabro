@@ -7,7 +7,7 @@ use fabro_types::Settings;
 pub use fabro_types::settings::server::{
     ApiAuthStrategy, ApiSettings, ArtifactStorageBackend, ArtifactStorageSettings, AuthProvider,
     AuthSettings, FeaturesSettings, GitAuthorSettings, GitProvider, GitSettings, LogSettings,
-    TlsSettings, WebSettings, WebhookSettings, WebhookStrategy,
+    SlackSettings, TlsSettings, WebSettings, WebhookSettings, WebhookStrategy,
 };
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
@@ -147,6 +147,19 @@ impl From<WebConfig> for WebSettings {
         Self {
             url: value.url.unwrap_or_else(default_web_url),
             auth: value.auth.map(Into::into).unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
+pub struct SlackConfig {
+    pub default_channel: Option<String>,
+}
+
+impl From<SlackConfig> for SlackSettings {
+    fn from(value: SlackConfig) -> Self {
+        Self {
+            default_channel: value.default_channel,
         }
     }
 }

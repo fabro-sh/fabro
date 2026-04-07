@@ -116,6 +116,11 @@ impl Default for WebSettings {
     }
 }
 
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
+pub struct SlackSettings {
+    pub default_channel: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
 pub struct FeaturesSettings {
     #[serde(default)]

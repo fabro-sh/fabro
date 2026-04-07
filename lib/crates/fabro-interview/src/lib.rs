@@ -1,11 +1,11 @@
 mod auto_approve;
 mod callback;
 mod console;
-pub mod file;
+mod control;
+mod control_protocol;
 mod queue;
 mod recording;
 mod replay;
-mod web;
 
 use std::collections::HashMap;
 
@@ -45,6 +45,8 @@ pub struct QuestionOption {
 /// A question presented to the user.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Question {
+    #[serde(default)]
+    pub id: String,
     pub text: String,
     pub question_type: QuestionType,
     pub options: Vec<QuestionOption>,
@@ -60,6 +62,7 @@ pub struct Question {
 impl Question {
     pub fn new(text: impl Into<String>, question_type: QuestionType) -> Self {
         Self {
+            id: String::new(),
             text: text.into(),
             question_type,
             options: Vec::new(),
@@ -206,14 +209,19 @@ pub trait Interviewer: Send + Sync {
 pub use auto_approve::AutoApproveInterviewer;
 pub use callback::CallbackInterviewer;
 pub use console::ConsoleInterviewer;
-pub use file::FileInterviewer;
+pub use control::{ControlInterviewer, InterviewBroker, SubmitError};
+pub use control_protocol::{
+    WORKER_CONTROL_PROTOCOL_VERSION, WorkerControlAnswer, WorkerControlEnvelope,
+    WorkerControlMessage,
+};
 pub use queue::QueueInterviewer;
 pub use recording::RecordingInterviewer;
 pub use replay::ReplayInterviewer;
-pub use web::{PendingQuestion, WebInterviewer};
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use tokio::time;
 
@@ -229,6 +237,7 @@ mod tests {
     #[test]
     fn question_new() {
         let q = Question::new("Do you approve?", QuestionType::YesNo);
+        assert!(q.id.is_empty());
         assert_eq!(q.text, "Do you approve?");
         assert_eq!(q.question_type, QuestionType::YesNo);
         assert!(q.options.is_empty());
@@ -361,6 +370,23 @@ mod tests {
         let q = Question::new("approve?", QuestionType::YesNo);
 
         let answer = ask_with_timeout(&interviewer, q).await;
+        assert_eq!(answer.value, AnswerValue::Yes);
+    }
+
+    #[tokio::test]
+    async fn control_interviewer_routes_answers_by_question_id() {
+        let broker = Arc::new(InterviewBroker::new());
+        let interviewer = ControlInterviewer::new(Arc::clone(&broker));
+
+        let mut question = Question::new("Approve?", QuestionType::YesNo);
+        question.id = "q-1".to_string();
+
+        let ask = tokio::spawn(async move { interviewer.ask(question).await });
+
+        time::sleep(std::time::Duration::from_millis(10)).await;
+        broker.submit("q-1", Answer::yes()).await.unwrap();
+
+        let answer = ask.await.unwrap();
         assert_eq!(answer.value, AnswerValue::Yes);
     }
 }

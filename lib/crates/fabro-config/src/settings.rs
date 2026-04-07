@@ -35,6 +35,7 @@ impl TryFrom<ConfigLayer> for Settings {
             max_concurrent_runs: value.max_concurrent_runs,
             artifact_storage: value.artifact_storage,
             web: value.web.map(Into::into),
+            slack: value.slack.map(Into::into),
             api: value.api.map(TryInto::try_into).transpose()?,
             features: value.features.map(Into::into),
             log: value.log.map(Into::into),
