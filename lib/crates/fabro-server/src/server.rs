@@ -5870,13 +5870,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_aggregate_usage_returns_zeros_initially() {
+    async fn get_aggregate_billing_returns_zeros_initially() {
         let state = create_app_state();
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         let req = Request::builder()
             .method("GET")
-            .uri(api("/usage"))
+            .uri(api("/billing"))
             .body(Body::empty())
             .unwrap();
 
@@ -5887,8 +5887,8 @@ mod tests {
         assert_eq!(body["totals"]["runs"].as_i64().unwrap(), 0);
         assert_eq!(body["totals"]["input_tokens"].as_i64().unwrap(), 0);
         assert_eq!(body["totals"]["output_tokens"].as_i64().unwrap(), 0);
-        assert_eq!(body["totals"]["cost"].as_f64().unwrap(), 0.0);
         assert_eq!(body["totals"]["runtime_secs"].as_f64().unwrap(), 0.0);
+        assert!(body["totals"]["total_usd_micros"].is_null());
         assert!(body["by_model"].as_array().unwrap().is_empty());
     }
 
