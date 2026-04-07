@@ -80,8 +80,7 @@ pub(crate) async fn attach_run_with_client(
                 .or(state_exit_code)
                 .unwrap_or(ExitCode::from(1)),
             json_output,
-        )
-        .await;
+        );
     }
 
     let stream = client.attach_run_events(run_id, Some(next_seq)).await?;
@@ -98,7 +97,7 @@ pub(crate) async fn attach_run_with_client(
     .await
 }
 
-async fn replay_run_with_client(
+fn replay_run_with_client(
     verbose: bool,
     events: Vec<EventEnvelope>,
     exit_code: ExitCode,

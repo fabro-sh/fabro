@@ -567,7 +567,7 @@ impl CodergenBackend for AgentApiBackend {
         let mut total_usage = TokenCounts::default();
         for turn in &session.history().turns()[turns_before..] {
             if let Turn::Assistant { usage, .. } = turn {
-                total_usage = total_usage + *usage.clone();
+                total_usage += *usage.clone();
             }
         }
 

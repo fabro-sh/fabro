@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 use crate::bind::Bind;
+use axum::body::Body;
 #[cfg(test)]
 use axum::body::to_bytes;
 use axum::extract::{self as axum_extract, DefaultBodyLimit, Path, Query, State};
@@ -42,12 +43,12 @@ use fabro_workflow::handler::HandlerRegistry;
 use futures_util::stream;
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use object_store::memory::InMemory as MemoryObjectStore;
-use rand::RngCore;
+use rand::{RngCore, rngs::OsRng};
 use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::Command;
+use tokio::process::{ChildStderr, Command};
 use tokio::sync::Notify;
 use tokio::sync::RwLock as AsyncRwLock;
 use tokio::sync::broadcast;
@@ -108,6 +109,8 @@ use fabro_graphviz::render::GraphFormat;
 pub fn default_page_limit() -> u32 {
     20
 }
+
+const ATTACH_REPLAY_BATCH_LIMIT: usize = 256;
 
 #[derive(serde::Deserialize)]
 pub struct PaginationParams {
@@ -457,7 +460,7 @@ impl AppState {
 
 fn artifact_upload_token_keys() -> ArtifactUploadTokenKeys {
     let mut secret = [0_u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut secret);
+    OsRng.fill_bytes(&mut secret);
 
     let mut validation = Validation::new(Algorithm::HS256);
     validation.set_required_spec_claims(&["iss", "iat", "exp"]);
@@ -475,17 +478,15 @@ fn maybe_authorize_artifact_upload_token(
     run_id: &RunId,
     keys: &ArtifactUploadTokenKeys,
 ) -> Result<bool, ApiError> {
-    let header = match parts
+    let Some(header) = parts
         .headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
-    {
-        Some(header) => header,
-        None => return Ok(false),
+    else {
+        return Ok(false);
     };
-    let token = match header.strip_prefix("Bearer ") {
-        Some(token) => token,
-        None => return Ok(false),
+    let Some(token) = header.strip_prefix("Bearer ") else {
+        return Ok(false);
     };
 
     let claims =
@@ -1743,10 +1744,10 @@ async fn list_board_runs(
             .map(|(id, managed_run)| {
                 (
                     *id,
-                    managed_run.status.clone(),
+                    managed_run.status,
                     managed_run.error.clone(),
                     queue_positions.get(id).copied(),
-                    managed_run.created_at.clone(),
+                    managed_run.created_at,
                 )
             })
             .collect::<Vec<_>>()
@@ -1773,7 +1774,7 @@ async fn list_board_runs(
             let summary = summaries.get(id);
             RunStatusResponse {
                 id: id.to_string(),
-                status: status.clone(),
+                status: *status,
                 error: error.as_ref().map(|msg| RunError {
                     message: msg.clone(),
                 }),
@@ -1782,7 +1783,7 @@ async fn list_board_runs(
                     .and_then(|summary| summary.status_reason.map(api_status_reason)),
                 pending_control: summary
                     .and_then(|summary| summary.pending_control.map(api_pending_control)),
-                created_at: created_at.clone(),
+                created_at: *created_at,
             }
         })
         .collect();
@@ -1892,8 +1893,6 @@ async fn terminate_worker_for_deletion(worker_pid: Option<u32>, worker_pgid: Opt
                 sleep(Duration::from_millis(50)).await;
             }
         }
-
-        return;
     }
 
     #[cfg(not(unix))]
@@ -2387,7 +2386,7 @@ fn update_live_run_from_event(state: &Arc<AppState>, run_id: RunId, event: &RunE
     match &event.body {
         EventBody::RunStarting(_) => managed_run.status = RunStatus::Starting,
         EventBody::RunRunning(_) | EventBody::RunUnpaused(_) => {
-            managed_run.status = RunStatus::Running
+            managed_run.status = RunStatus::Running;
         }
         EventBody::RunPaused(_) => managed_run.status = RunStatus::Paused,
         EventBody::RunCompleted(_) => {
@@ -2409,7 +2408,7 @@ fn update_live_run_from_event(state: &Arc<AppState>, run_id: RunId, event: &RunE
 async fn drain_worker_stderr(
     run_id: RunId,
     run_dir: PathBuf,
-    stderr: tokio::process::ChildStderr,
+    stderr: ChildStderr,
 ) -> anyhow::Result<()> {
     let log_path = run_dir.join("runtime").join(WORKER_STDERR_LOG);
     if let Some(parent) = log_path.parent() {
@@ -2502,9 +2501,8 @@ fn worker_command(
     mode: RunExecutionMode,
     run_dir: &std::path::Path,
 ) -> anyhow::Result<Command> {
-    let exe = std::env::var_os("CARGO_BIN_EXE_fabro")
-        .map(PathBuf::from)
-        .unwrap_or(std::env::current_exe()?);
+    let exe =
+        std::env::var_os("CARGO_BIN_EXE_fabro").map_or(std::env::current_exe()?, PathBuf::from);
     let storage_dir = state
         .settings
         .read()
@@ -2561,6 +2559,7 @@ fn api_question_from_interview_question(id: &str, question: &Question) -> ApiQue
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn answer_from_request(req: SubmitAnswerRequest, question: &Question) -> Result<Answer, Response> {
     if let Some(key) = req.selected_option_key {
         let option = question
@@ -3664,19 +3663,16 @@ async fn attach_run_events(
             }
         },
     };
-    const ATTACH_REPLAY_BATCH_LIMIT: usize = 256;
-
     let (sender, receiver) = mpsc::unbounded_channel();
     tokio::spawn(async move {
         let mut next_seq = start_seq;
 
         loop {
-            let replay_batch = match run_store
+            let Ok(replay_batch) = run_store
                 .list_events_from_with_limit(next_seq, ATTACH_REPLAY_BATCH_LIMIT)
                 .await
-            {
-                Ok(events) => events,
-                Err(_) => return,
+            else {
+                return;
             };
             let replay_has_more = replay_batch.len() > ATTACH_REPLAY_BATCH_LIMIT;
 
@@ -3700,21 +3696,19 @@ async fn attach_run_events(
                 continue;
             }
 
-            let state = match run_store.state().await {
-                Ok(state) => state,
-                Err(_) => return,
+            let Ok(state) = run_store.state().await else {
+                return;
             };
 
             if run_projection_is_active(&state) {
                 break;
             }
 
-            let tail_batch = match run_store
+            let Ok(tail_batch) = run_store
                 .list_events_from_with_limit(next_seq, ATTACH_REPLAY_BATCH_LIMIT)
                 .await
-            {
-                Ok(events) => events,
-                Err(_) => return,
+            else {
+                return;
             };
             let tail_has_more = tail_batch.len() > ATTACH_REPLAY_BATCH_LIMIT;
 
@@ -3741,9 +3735,8 @@ async fn attach_run_events(
             return;
         }
 
-        let mut live_stream = match run_store.watch_events_from(next_seq) {
-            Ok(stream) => stream,
-            Err(_) => return,
+        let Ok(mut live_stream) = run_store.watch_events_from(next_seq) else {
+            return;
         };
 
         while let Some(result) = live_stream.next().await {
@@ -4071,8 +4064,7 @@ fn validate_artifact_batch_manifest(
     }
     if manifest.entries.len() > MAX_MULTIPART_ARTIFACTS {
         return Err(payload_too_large_response(format!(
-            "multipart upload exceeds the {} artifact limit",
-            MAX_MULTIPART_ARTIFACTS
+            "multipart upload exceeds the {MAX_MULTIPART_ARTIFACTS} artifact limit"
         )));
     }
 
@@ -4108,15 +4100,13 @@ fn validate_artifact_batch_manifest(
         if let Some(expected_bytes) = entry.expected_bytes {
             if expected_bytes > MAX_SINGLE_ARTIFACT_BYTES {
                 return Err(payload_too_large_response(format!(
-                    "artifact {} exceeds the {} byte limit",
-                    path, MAX_SINGLE_ARTIFACT_BYTES
+                    "artifact {path} exceeds the {MAX_SINGLE_ARTIFACT_BYTES} byte limit"
                 )));
             }
             expected_total_bytes = expected_total_bytes.saturating_add(expected_bytes);
             if expected_total_bytes > MAX_MULTIPART_REQUEST_BYTES {
                 return Err(payload_too_large_response(format!(
-                    "multipart upload exceeds the {} byte limit",
-                    MAX_MULTIPART_REQUEST_BYTES
+                    "multipart upload exceeds the {MAX_MULTIPART_REQUEST_BYTES} byte limit"
                 )));
             }
         }
@@ -4146,7 +4136,7 @@ async fn upload_stage_artifact_octet_stream(
     run_id: &RunId,
     stage_id: &StageId,
     filename: String,
-    body: axum::body::Body,
+    body: Body,
     content_length: Option<u64>,
 ) -> Response {
     let relative_path = match validate_relative_artifact_path("filename", &filename) {
@@ -4156,8 +4146,7 @@ async fn upload_stage_artifact_octet_stream(
 
     if content_length.is_some_and(|length| length > MAX_SINGLE_ARTIFACT_BYTES) {
         return payload_too_large_response(format!(
-            "artifact exceeds the {} byte limit",
-            MAX_SINGLE_ARTIFACT_BYTES
+            "artifact exceeds the {MAX_SINGLE_ARTIFACT_BYTES} byte limit"
         ));
     }
 
@@ -4185,8 +4174,7 @@ async fn upload_stage_artifact_octet_stream(
             bytes_written.saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
         if bytes_written > MAX_SINGLE_ARTIFACT_BYTES {
             return payload_too_large_response(format!(
-                "artifact exceeds the {} byte limit",
-                MAX_SINGLE_ARTIFACT_BYTES
+                "artifact exceeds the {MAX_SINGLE_ARTIFACT_BYTES} byte limit"
             ));
         }
         if let Err(err) = writer.write_all(&chunk).await {
@@ -4208,7 +4196,7 @@ async fn upload_stage_artifact_multipart(
     run_id: &RunId,
     stage_id: &StageId,
     boundary: String,
-    body: axum::body::Body,
+    body: Body,
 ) -> Response {
     let mut multipart = multer::Multipart::new(body.into_data_stream(), boundary);
     let Some(mut manifest_field) = (match multipart
@@ -4276,14 +4264,13 @@ async fn upload_stage_artifact_multipart(
 
             if bytes_written > MAX_SINGLE_ARTIFACT_BYTES {
                 return payload_too_large_response(format!(
-                    "artifact {} exceeds the {} byte limit",
-                    entry.path, MAX_SINGLE_ARTIFACT_BYTES
+                    "artifact {} exceeds the {MAX_SINGLE_ARTIFACT_BYTES} byte limit",
+                    entry.path
                 ));
             }
             if total_bytes > MAX_MULTIPART_REQUEST_BYTES {
                 return payload_too_large_response(format!(
-                    "multipart upload exceeds the {} byte limit",
-                    MAX_MULTIPART_REQUEST_BYTES
+                    "multipart upload exceeds the {MAX_MULTIPART_REQUEST_BYTES} byte limit"
                 ));
             }
 
@@ -4374,8 +4361,7 @@ async fn put_stage_artifact(
         Ok(ArtifactUploadContentType::Multipart { boundary }) => {
             if content_length.is_some_and(|length| length > MAX_MULTIPART_REQUEST_BYTES) {
                 return payload_too_large_response(format!(
-                    "multipart upload exceeds the {} byte limit",
-                    MAX_MULTIPART_REQUEST_BYTES
+                    "multipart upload exceeds the {MAX_MULTIPART_REQUEST_BYTES} byte limit"
                 ));
             }
             upload_stage_artifact_multipart(state.as_ref(), &id, &stage_id, boundary, body).await

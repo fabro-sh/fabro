@@ -11,6 +11,7 @@ use fabro_types::RunId;
 use regex::Regex;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
+use toml::{Value as TomlValue, map::Map as TomlMap};
 
 /// Walk up from `start` to find the repo-level `test/` fixtures directory.
 pub fn find_test_fixtures_dir(start: &Path) -> Option<PathBuf> {
@@ -373,9 +374,9 @@ fn write_settings_file(path: &Path, storage_dir: &Path, rest: &str) {
     .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
 }
 
-fn parse_settings_table(contents: &str, source: &Path) -> toml::map::Map<String, toml::Value> {
+fn parse_settings_table(contents: &str, source: &Path) -> TomlMap<String, TomlValue> {
     let stripped = strip_managed_storage_settings(contents);
-    let value = toml::from_str::<toml::Value>(stripped)
+    let value = toml::from_str::<TomlValue>(stripped)
         .unwrap_or_else(|err| panic!("failed to parse {}: {err}", source.display()));
     let Some(table) = value.as_table() else {
         panic!("expected {} to contain a TOML table", source.display());
@@ -383,7 +384,7 @@ fn parse_settings_table(contents: &str, source: &Path) -> toml::map::Map<String,
     table.clone()
 }
 
-fn write_settings_table(path: &Path, table: &toml::map::Map<String, toml::Value>) {
+fn write_settings_table(path: &Path, table: &TomlMap<String, TomlValue>) {
     ensure_parent_dir(path);
     let mut contents = toml::to_string(table)
         .unwrap_or_else(|err| panic!("failed to serialize {}: {err}", path.display()));
@@ -394,29 +395,29 @@ fn write_settings_table(path: &Path, table: &toml::map::Map<String, toml::Value>
         .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
 }
 
-fn server_target_from_table(table: &toml::map::Map<String, toml::Value>) -> Option<String> {
+fn server_target_from_table(table: &TomlMap<String, TomlValue>) -> Option<String> {
     table
         .get("server")
-        .and_then(toml::Value::as_table)
+        .and_then(TomlValue::as_table)
         .and_then(|server| server.get("target"))
-        .and_then(toml::Value::as_str)
+        .and_then(TomlValue::as_str)
         .map(ToOwned::to_owned)
 }
 
-fn set_server_target(table: &mut toml::map::Map<String, toml::Value>, socket_path: &Path) {
+fn set_server_target(table: &mut TomlMap<String, TomlValue>, socket_path: &Path) {
     let server_entry = table
         .entry("server".to_string())
-        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+        .or_insert_with(|| TomlValue::Table(TomlMap::new()));
     let Some(server_table) = server_entry.as_table_mut() else {
         panic!("expected [server] to be a TOML table");
     };
     server_table.insert(
         "target".to_string(),
-        toml::Value::String(socket_path.display().to_string()),
+        TomlValue::String(socket_path.display().to_string()),
     );
 }
 
-fn clear_server_target(table: &mut toml::map::Map<String, toml::Value>) {
+fn clear_server_target(table: &mut TomlMap<String, TomlValue>) {
     let Some(server_entry) = table.get_mut("server") else {
         return;
     };
@@ -446,7 +447,7 @@ fn sync_home_settings(
                 (table, had_explicit_storage, had_explicit_target)
             }
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                (toml::map::Map::new(), false, false)
+                (TomlMap::new(), false, false)
             }
             Err(err) => panic!("failed to read {}: {err}", settings_path.display()),
         };
@@ -454,7 +455,7 @@ fn sync_home_settings(
     if !had_explicit_storage {
         table.insert(
             "storage_dir".to_string(),
-            toml::Value::String(storage_dir.display().to_string()),
+            TomlValue::String(storage_dir.display().to_string()),
         );
         table.remove("data_dir");
     }
@@ -509,7 +510,7 @@ fn server_record_pid(storage_dir: &Path) -> Option<u32> {
 }
 
 fn server_running(server: &ServerPaths) -> bool {
-    server_record_pid(&server.storage_dir).is_some_and(|pid| fabro_proc::process_alive(pid))
+    server_record_pid(&server.storage_dir).is_some_and(fabro_proc::process_alive)
 }
 
 fn wait_for_server_running(server: &ServerPaths) {
@@ -558,13 +559,12 @@ fn ensure_server_running(fabro_bin: &Path, server: &ServerPaths, config_path: &P
         .unwrap_or_else(|err| panic!("failed to execute {}: {err}", fabro_bin.display()));
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    if !output.status.success() && !stderr.contains("Server already running") {
-        panic!(
-            "failed to start test server:\nstdout:\n{}\nstderr:\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            stderr
-        );
-    }
+    assert!(
+        output.status.success() || stderr.contains("Server already running"),
+        "failed to start test server:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        stderr
+    );
 
     wait_for_server_running(server);
 }
@@ -1073,8 +1073,8 @@ impl TestContext {
         if fabro_bin_exists(&self.fabro_bin) {
             ensure_server_running(&self.fabro_bin, &server, &settings_path);
         }
-        self.storage_dir = server.storage_dir.clone();
-        self.active_socket_path = server.socket_path.clone();
+        self.storage_dir.clone_from(&server.storage_dir);
+        self.active_socket_path.clone_from(&server.socket_path);
         self.isolated_server = Some(server);
         self
     }

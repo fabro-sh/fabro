@@ -221,7 +221,7 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError
                 }
             }
 
-            total_usage = total_usage + response.usage.clone();
+            total_usage += response.usage.clone();
 
             steps.push(StepResult {
                 response,

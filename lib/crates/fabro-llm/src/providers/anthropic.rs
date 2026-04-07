@@ -162,6 +162,7 @@ struct ApiResponse {
     usage: ApiUsage,
 }
 
+#[allow(clippy::struct_field_names)]
 #[derive(serde::Deserialize)]
 struct ApiUsage {
     input_tokens: i64,
@@ -1279,7 +1280,6 @@ impl ProviderAdapter for Adapter {
                 reasoning_tokens,
                 cache_read_tokens: api_resp.usage.cache_read_input_tokens.unwrap_or(0),
                 cache_write_tokens: api_resp.usage.cache_creation_input_tokens.unwrap_or(0),
-                ..TokenCounts::default()
             },
             raw: serde_json::from_str(&body).ok(),
             warnings: vec![],

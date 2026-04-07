@@ -180,7 +180,7 @@ pub(crate) fn print_run_conclusion(
     );
 
     if let Some(billing) = conclusion.billing.as_ref() {
-        let total_tokens = i64::try_from(billing.total_tokens).unwrap_or(i64::MAX);
+        let total_tokens = billing.total_tokens;
         if total_tokens > 0 {
             if let Some(total_usd_micros) = billing.total_usd_micros {
                 if total_usd_micros > 0 {
@@ -206,12 +206,8 @@ pub(crate) fn print_run_conclusion(
                     "{}",
                     styles.dim.apply_to(format!(
                         "Cache:     {} read, {} write",
-                        format_tokens_human(
-                            i64::try_from(billing.cache_read_tokens).unwrap_or(i64::MAX)
-                        ),
-                        format_tokens_human(
-                            i64::try_from(billing.cache_write_tokens).unwrap_or(i64::MAX)
-                        ),
+                        format_tokens_human(billing.cache_read_tokens),
+                        format_tokens_human(billing.cache_write_tokens),
                     )),
                 );
             }
@@ -220,9 +216,7 @@ pub(crate) fn print_run_conclusion(
                     "{}",
                     styles.dim.apply_to(format!(
                         "Reasoning: {} tokens",
-                        format_tokens_human(
-                            i64::try_from(billing.reasoning_tokens).unwrap_or(i64::MAX)
-                        ),
+                        format_tokens_human(billing.reasoning_tokens),
                     )),
                 );
             }

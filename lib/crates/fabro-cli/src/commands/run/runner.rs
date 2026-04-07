@@ -12,6 +12,7 @@ use fabro_types::{EventBody, RunBlobId, RunEvent, RunId, Settings, StatusReason}
 use fabro_workflow::artifact_snapshot::CapturedArtifactInfo;
 use fabro_workflow::artifact_upload::StageArtifactUploader;
 use fabro_workflow::event::{Emitter, RunEventSink};
+use fabro_workflow::operations::{self, StartServices};
 use fabro_workflow::run_control::RunControlState;
 use fabro_workflow::runtime_store::{RunStoreBackend, RunStoreHandle};
 #[cfg(unix)]
@@ -67,7 +68,7 @@ pub(crate) async fn execute(
         run_record,
         client.clone_for_reuse(),
         artifact_upload_token,
-    )?;
+    );
     let scratch = RunScratch::new(&run_dir);
     let interviewer = Arc::new(FileInterviewer::new(
         scratch.interview_request_path(),
@@ -78,7 +79,7 @@ pub(crate) async fn execute(
     let cancel_token = Arc::new(AtomicBool::new(false));
     install_signal_handlers(Arc::clone(&run_control), Arc::clone(&cancel_token))?;
     let github_app = maybe_build_github_app_credentials(&run_record.settings)?;
-    let services = fabro_workflow::operations::StartServices {
+    let services = StartServices {
         run_id,
         cancel_token: Some(Arc::clone(&cancel_token)),
         emitter: Arc::new(Emitter::new(run_id)),
@@ -100,10 +101,10 @@ pub(crate) async fn execute(
 
     match mode {
         RunWorkerMode::Start => {
-            fabro_workflow::operations::start(&run_dir, services).await?;
+            operations::start(&run_dir, services).await?;
         }
         RunWorkerMode::Resume => {
-            fabro_workflow::operations::resume(&run_dir, services).await?;
+            operations::resume(&run_dir, services).await?;
         }
     }
 
@@ -115,19 +116,21 @@ fn build_artifact_uploader(
     run_record: &fabro_types::RunRecord,
     client: server_client::ServerStoreClient,
     artifact_upload_token: Option<String>,
-) -> Result<Option<Arc<dyn StageArtifactUploader>>> {
+) -> Option<Arc<dyn StageArtifactUploader>> {
     if !run_record.uses_object_backed_artifacts() {
-        return Ok(None);
+        return None;
     }
 
-    let token = artifact_upload_token
-        .ok_or_else(|| anyhow!("run {run_id} is configured for object-backed artifacts but the worker did not receive an artifact upload token"))?;
+    let uploader: Arc<dyn StageArtifactUploader> = match artifact_upload_token {
+        Some(token) => Arc::new(HttpArtifactUploader {
+            run_id,
+            client,
+            bearer_token: token,
+        }),
+        None => Arc::new(MissingArtifactUploadTokenUploader { run_id }),
+    };
 
-    Ok(Some(Arc::new(HttpArtifactUploader {
-        run_id,
-        client,
-        bearer_token: token,
-    })))
+    Some(uploader)
 }
 
 struct HttpArtifactUploader {
@@ -171,6 +174,25 @@ impl StageArtifactUploader for HttpArtifactUploader {
                 &self.bearer_token,
             )
             .await
+    }
+}
+
+struct MissingArtifactUploadTokenUploader {
+    run_id: RunId,
+}
+
+#[async_trait]
+impl StageArtifactUploader for MissingArtifactUploadTokenUploader {
+    async fn upload_stage_artifacts(
+        &self,
+        _stage_id: &fabro_types::StageId,
+        _artifact_capture_dir: &Path,
+        _artifacts: &[CapturedArtifactInfo],
+    ) -> Result<()> {
+        Err(anyhow!(
+            "run {} is configured for object-backed artifacts but the worker did not receive an artifact upload token",
+            self.run_id
+        ))
     }
 }
 

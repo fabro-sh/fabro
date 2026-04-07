@@ -646,6 +646,7 @@ fn json_run_implies_auto_approve_for_human_gates() {
         "event": "run.created",
         "id": "[EVENT_ID]",
         "properties": {
+          "artifact_storage": "object_store_v1",
           "graph": {
             "attrs": {
               "goal": {

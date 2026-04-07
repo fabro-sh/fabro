@@ -270,7 +270,7 @@ impl RunDatabase {
                             }
                         }
                         Err(broadcast::error::TryRecvError::Empty) => break,
-                        Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
+                        Err(broadcast::error::TryRecvError::Lagged(_)) => {}
                         Err(broadcast::error::TryRecvError::Closed) => return,
                     }
                 }

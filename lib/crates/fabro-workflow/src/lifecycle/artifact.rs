@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use fabro_types::StageId;
+use tokio::time::sleep;
 
 use fabro_core::graph::NodeSpec;
 use fabro_core::lifecycle::{AttemptContext, AttemptResultContext, RunLifecycle};
@@ -12,7 +13,7 @@ use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
 
 use crate::artifact::{offload_large_values, sync_artifacts_to_env};
-use crate::artifact_snapshot::collect_artifacts;
+use crate::artifact_snapshot::{CapturedArtifactInfo, collect_artifacts};
 use crate::artifact_upload::StageArtifactUploader;
 use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::graph::WorkflowGraph;
@@ -207,7 +208,7 @@ impl ArtifactLifecycle {
         &self,
         stage_id: &StageId,
         artifact_capture_dir: &std::path::Path,
-        artifacts: &[crate::artifact_snapshot::CapturedArtifactInfo],
+        artifacts: &[CapturedArtifactInfo],
     ) -> Result<(), String> {
         let Some(uploader) = self.artifact_uploader.as_ref() else {
             return Ok(());
@@ -224,7 +225,7 @@ impl ArtifactLifecycle {
             }
 
             if let Some(delay) = ARTIFACT_UPLOAD_RETRY_DELAYS.get(attempt) {
-                tokio::time::sleep(*delay).await;
+                sleep(*delay).await;
             }
         }
 

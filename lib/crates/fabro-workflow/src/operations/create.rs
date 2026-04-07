@@ -703,6 +703,7 @@ mod tests {
                 host_repo_path: None,
                 repo_origin_url: None,
                 base_branch: None,
+                artifact_storage: None,
                 provenance: None,
             },
         )
@@ -751,6 +752,7 @@ mod tests {
                 host_repo_path: Some(dir.path().display().to_string()),
                 repo_origin_url: None,
                 base_branch: Some("main".to_string()),
+                artifact_storage: None,
                 provenance: None,
             },
         )
@@ -831,6 +833,7 @@ mod tests {
                 host_repo_path: None,
                 repo_origin_url: None,
                 base_branch: None,
+                artifact_storage: None,
                 provenance: None,
             },
         )
@@ -874,6 +877,7 @@ mod tests {
                 host_repo_path: None,
                 repo_origin_url: Some("https://github.com/acme/widgets".to_string()),
                 base_branch: None,
+                artifact_storage: None,
                 provenance: None,
             },
         )
@@ -914,6 +918,7 @@ mod tests {
                 host_repo_path: None,
                 repo_origin_url: None,
                 base_branch: None,
+                artifact_storage: None,
                 provenance: None,
             },
         )
@@ -956,6 +961,7 @@ mod tests {
                 host_repo_path: None,
                 repo_origin_url: None,
                 base_branch: None,
+                artifact_storage: None,
                 provenance: Some(fabro_types::RunProvenance {
                     server: Some(fabro_types::RunServerProvenance {
                         version: "0.9.0".to_string(),

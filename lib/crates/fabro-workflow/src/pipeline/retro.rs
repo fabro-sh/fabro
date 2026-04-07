@@ -34,7 +34,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
         return None;
     };
 
-    let completed_stages = crate::build_completed_stages(&cp, options.failed);
+    let completed_stages = crate::build_completed_stages(cp, options.failed);
     let stage_durations = match options.run_store.list_events().await {
         Ok(events) => crate::extract_stage_durations_from_events(&events),
         Err(err) => {

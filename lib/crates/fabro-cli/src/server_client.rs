@@ -11,8 +11,11 @@ use fabro_store::{EventEnvelope, RunSummary, StageId};
 use fabro_types::{RunBlobId, RunEvent, RunId, Settings};
 use fabro_workflow::artifact_snapshot::CapturedArtifactInfo;
 use futures::StreamExt;
+use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE};
+use reqwest::multipart::{Form, Part};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use tokio::fs::File;
 use tokio::time::sleep;
 use tokio_util::io::ReaderStream;
 
@@ -20,6 +23,7 @@ use crate::args::ServerTargetArgs;
 use crate::commands::server::start;
 use crate::sse;
 use crate::user_config;
+use crate::user_config::cli_http_client_builder;
 
 #[derive(Clone)]
 pub(crate) struct ServerStoreClient {
@@ -55,16 +59,13 @@ impl RunAttachEventStream {
                 return Ok(Some(event));
             }
 
-            match self.stream.next().await {
-                Some(chunk) => {
-                    let chunk = chunk.map_err(|err| anyhow!("{err}"))?;
-                    self.pending_bytes.extend_from_slice(&chunk);
-                    self.buffer_sse_events(false)?;
-                }
-                None => {
-                    self.buffer_sse_events(true)?;
-                    return Ok(self.buffered_events.pop_front());
-                }
+            if let Some(chunk) = self.stream.next().await {
+                let chunk = chunk.map_err(|err| anyhow!("{err}"))?;
+                self.pending_bytes.extend_from_slice(&chunk);
+                self.buffer_sse_events(false)?;
+            } else {
+                self.buffer_sse_events(true)?;
+                return Ok(self.buffered_events.pop_front());
             }
         }
     }
@@ -199,7 +200,7 @@ fn normalize_remote_server_target(api_url: &str) -> String {
 }
 
 async fn connect_unix_socket_api_client_bundle(path: &Path) -> Result<ServerStoreClient> {
-    let http_client = crate::user_config::cli_http_client_builder()
+    let http_client = cli_http_client_builder()
         .unix_socket(path)
         .no_proxy()
         .build()
@@ -552,7 +553,7 @@ impl ServerStoreClient {
         let mut url = reqwest::Url::parse(&self.base_url)
             .with_context(|| format!("invalid server base URL {}", self.base_url))?;
         url.path_segments_mut()
-            .map_err(|_| anyhow!("server base URL cannot accept path segments"))?
+            .map_err(|()| anyhow!("server base URL cannot accept path segments"))?
             .extend([
                 "api",
                 "v1",
@@ -576,7 +577,7 @@ impl ServerStoreClient {
         let mut url = self.stage_artifacts_url(run_id, stage_id)?;
         url.query_pairs_mut().append_pair("filename", filename);
 
-        let file = tokio::fs::File::open(path)
+        let file = File::open(path)
             .await
             .with_context(|| format!("failed to open artifact {}", path.display()))?;
         let content_length = file
@@ -590,8 +591,8 @@ impl ServerStoreClient {
             .http_client
             .post(url)
             .bearer_auth(bearer_token)
-            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
-            .header(reqwest::header::CONTENT_LENGTH, content_length.to_string())
+            .header(CONTENT_TYPE, "application/octet-stream")
+            .header(CONTENT_LENGTH, content_length.to_string())
             .body(body)
             .send()
             .await
@@ -614,7 +615,7 @@ impl ServerStoreClient {
         for (index, artifact) in artifacts.iter().enumerate() {
             let part_name = format!("file{}", index + 1);
             let path = artifact_capture_dir.join(&artifact.path);
-            let file = tokio::fs::File::open(&path)
+            let file = File::open(&path)
                 .await
                 .with_context(|| format!("failed to open artifact {}", path.display()))?;
             let content_length = file
@@ -633,7 +634,7 @@ impl ServerStoreClient {
 
             file_parts.push((
                 part_name,
-                reqwest::multipart::Part::stream_with_length(
+                Part::stream_with_length(
                     reqwest::Body::wrap_stream(ReaderStream::new(file)),
                     content_length,
                 )
@@ -644,9 +645,9 @@ impl ServerStoreClient {
         let manifest = ArtifactBatchUploadManifest {
             entries: manifest_entries,
         };
-        let manifest_part = reqwest::multipart::Part::text(serde_json::to_string(&manifest)?)
-            .mime_str("application/json")?;
-        let mut form = reqwest::multipart::Form::new().part("manifest", manifest_part);
+        let manifest_part =
+            Part::text(serde_json::to_string(&manifest)?).mime_str("application/json")?;
+        let mut form = Form::new().part("manifest", manifest_part);
         for (part_name, part) in file_parts {
             form = form.part(part_name, part);
         }

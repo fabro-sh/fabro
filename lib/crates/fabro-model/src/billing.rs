@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Model, Provider};
 
-const USD_MICROS_PER_USD: i128 = 1_000_000;
 const TOKENS_PER_MTOK: i128 = 1_000_000;
 const ANTHROPIC_FAST_MODE_MULTIPLIER_NUMERATOR: i64 = 6;
 const ANTHROPIC_FAST_MODE_MULTIPLIER_DENOMINATOR: i64 = 1;
@@ -12,6 +11,36 @@ const ANTHROPIC_CACHE_WRITE_5M_NUMERATOR: i64 = 5;
 const ANTHROPIC_CACHE_WRITE_5M_DENOMINATOR: i64 = 4;
 const ANTHROPIC_CACHE_WRITE_1H_NUMERATOR: i64 = 2;
 const ANTHROPIC_CACHE_WRITE_1H_DENOMINATOR: i64 = 1;
+const USD_MICROS_PER_USD_F64: f64 = 1_000_000.0;
+
+fn saturating_i128_to_i64(value: i128) -> i64 {
+    i64::try_from(value).unwrap_or_else(|_| {
+        if value.is_negative() {
+            i64::MIN
+        } else {
+            i64::MAX
+        }
+    })
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+fn saturating_rounded_f64_to_i64(value: f64) -> i64 {
+    if !value.is_finite() {
+        return if value.is_sign_negative() {
+            i64::MIN
+        } else {
+            i64::MAX
+        };
+    }
+
+    if value <= i64::MIN as f64 {
+        i64::MIN
+    } else if value >= i64::MAX as f64 {
+        i64::MAX
+    } else {
+        value as i64
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub struct UsdMicros(pub i64);
@@ -45,7 +74,7 @@ impl PricePerMTok {
     #[must_use]
     pub fn from_usd(usd: f64) -> Self {
         Self {
-            usd_micros: (usd * USD_MICROS_PER_USD as f64).round() as i64,
+            usd_micros: saturating_rounded_f64_to_i64((usd * USD_MICROS_PER_USD_F64).round()),
         }
     }
 
@@ -59,7 +88,7 @@ impl PricePerMTok {
     #[must_use]
     pub fn bill(self, tokens: i64) -> UsdMicros {
         let total = i128::from(tokens) * i128::from(self.usd_micros);
-        UsdMicros((total / TOKENS_PER_MTOK) as i64)
+        UsdMicros(saturating_i128_to_i64(total / TOKENS_PER_MTOK))
     }
 }
 
@@ -218,6 +247,7 @@ pub struct ModelPricing {
     pub policy: ModelPricingPolicy,
 }
 
+#[allow(clippy::empty_structs_with_brackets)]
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct OpenAiBillingFacts {}
 
@@ -533,10 +563,10 @@ fn bill_gemini(
             .map(|segment| {
                 let token_seconds =
                     i128::from(segment.cached_tokens) * i128::from(segment.ttl_seconds);
-                UsdMicros(
-                    (token_seconds * i128::from(storage.usd_micros_per_mtok_second)
-                        / TOKENS_PER_MTOK) as i64,
-                )
+                UsdMicros(saturating_i128_to_i64(
+                    token_seconds * i128::from(storage.usd_micros_per_mtok_second)
+                        / TOKENS_PER_MTOK,
+                ))
             })
             .sum::<UsdMicros>();
         total += storage_cost;
@@ -688,5 +718,21 @@ mod tests {
         };
 
         assert_eq!(pricing.bill(&input), None);
+    }
+
+    #[test]
+    fn price_per_mtok_bill_saturates_large_totals() {
+        let price = PricePerMTok {
+            usd_micros: i64::MAX,
+        };
+
+        assert_eq!(price.bill(i64::MAX), UsdMicros(i64::MAX));
+    }
+
+    #[test]
+    fn price_per_mtok_from_usd_saturates_large_inputs() {
+        let price = PricePerMTok::from_usd(f64::MAX);
+
+        assert_eq!(price.usd_micros, i64::MAX);
     }
 }

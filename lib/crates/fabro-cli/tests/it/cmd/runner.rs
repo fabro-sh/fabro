@@ -44,11 +44,11 @@ fn help() {
           --json               Output as JSON [env: FABRO_JSON=]
           --server <SERVER>    Fabro server target: http(s) URL or absolute Unix socket path
           --debug              Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --run-dir <RUN_DIR>  Run scratch directory
           --no-upgrade-check   Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --run-dir <RUN_DIR>  Run scratch directory
+          --quiet              Suppress non-essential output [env: FABRO_QUIET=]
           --run-id <RUN_ID>    Run ID
           --mode <MODE>        Worker mode [possible values: start, resume]
-          --quiet              Suppress non-essential output [env: FABRO_QUIET=]
           --verbose            Enable verbose output [env: FABRO_VERBOSE=]
       -h, --help               Print help
     ----- stderr -----

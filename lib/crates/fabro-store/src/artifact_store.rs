@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::StreamExt;
+use object_store::buffered::BufWriter;
 use object_store::{ObjectStore, path::Path as ObjectPath};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
 use tokio::io::AsyncWriteExt;
@@ -57,14 +58,9 @@ impl ArtifactStore {
         Ok(())
     }
 
-    pub fn writer(
-        &self,
-        run_id: &RunId,
-        node: &StageId,
-        filename: &str,
-    ) -> Result<object_store::buffered::BufWriter> {
+    pub fn writer(&self, run_id: &RunId, node: &StageId, filename: &str) -> Result<BufWriter> {
         let path = self.artifact_path(run_id, node, filename)?;
-        Ok(object_store::buffered::BufWriter::with_capacity(
+        Ok(BufWriter::with_capacity(
             Arc::clone(&self.object_store),
             path,
             STREAM_BUFFER_BYTES,

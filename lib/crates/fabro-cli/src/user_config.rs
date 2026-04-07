@@ -8,6 +8,7 @@ use fabro_types::Settings;
 use tracing::debug;
 
 use crate::args::ServerTargetArgs;
+use fabro_util::version::FABRO_VERSION;
 
 pub(crate) fn load_settings() -> anyhow::Result<Settings> {
     load_settings_with_config_and_storage_dir(None, None)
@@ -133,8 +134,7 @@ pub(crate) fn exec_server_target(
 }
 
 pub(crate) fn cli_http_client_builder() -> reqwest::ClientBuilder {
-    reqwest::Client::builder()
-        .user_agent(format!("fabro-cli/{}", fabro_util::version::FABRO_VERSION))
+    reqwest::Client::builder().user_agent(format!("fabro-cli/{FABRO_VERSION}"))
 }
 
 pub(crate) fn build_server_client(

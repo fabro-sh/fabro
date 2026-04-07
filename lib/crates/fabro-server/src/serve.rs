@@ -110,7 +110,7 @@ fn apply_runtime_settings(
 fn use_in_memory_store() -> bool {
     !matches!(
         std::env::var(TEST_IN_MEMORY_STORE_ENV).ok().as_deref(),
-        None | Some("") | Some("0") | Some("false") | Some("no")
+        None | Some("" | "0" | "false" | "no")
     )
 }
 
@@ -472,6 +472,7 @@ async fn wait_for_shutdown(mut shutdown_rx: watch::Receiver<bool>) {
     let _ = shutdown_rx.changed().await;
 }
 
+#[allow(clippy::print_stderr)]
 fn announce_server_ready(bind_addr: &Bind, styles: &'static Styles, dry_run_mode: bool) {
     set_server_title(ServerTitlePhase::Listening, Some(bind_addr));
     info!(bind = %bind_addr, dry_run = dry_run_mode, "API server started");
