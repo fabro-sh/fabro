@@ -9,13 +9,14 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::time::{Duration, Instant};
 
+use crate::support::unique_run_id;
 use fabro_config::Storage;
 use fabro_server::bind::Bind;
 use fabro_store::EventEnvelope;
 use fabro_test::TestContext;
 use fabro_types::{
     Checkpoint, Conclusion, NodeStatusRecord, PullRequestRecord, Retro, RunRecord, RunStatusRecord,
-    SandboxRecord, StageId, StartRecord,
+    RunId, SandboxRecord, StageId, StartRecord,
 };
 use serde_json::Value;
 use shlex::try_quote;
@@ -190,10 +191,13 @@ pub(crate) fn setup_completed_fast_dry_run(context: &TestContext) -> RunSetup {
 }
 
 fn run_completed_dry_run(context: &TestContext, workflow: &Path) -> RunSetup {
+    let run_id = unique_run_id();
     let mut cmd = context.run_cmd();
     cmd.current_dir(&context.temp_dir);
     cmd.timeout(COMMAND_TIMEOUT);
     cmd.args([
+        "--run-id",
+        run_id.as_str(),
         "--dry-run",
         "--auto-approve",
         "--no-retro",
@@ -210,7 +214,10 @@ fn run_completed_dry_run(context: &TestContext, workflow: &Path) -> RunSetup {
             stderr(&output)
         );
     }
-    only_run(context)
+    RunSetup {
+        run_dir: context.find_run_dir(&run_id),
+        run_id,
+    }
 }
 
 pub(crate) fn setup_created_dry_run(context: &TestContext) -> RunSetup {
@@ -224,10 +231,13 @@ pub(crate) fn setup_created_fast_dry_run(context: &TestContext) -> RunSetup {
 }
 
 fn run_created_dry_run(context: &TestContext, workflow: &Path) -> RunSetup {
+    let run_id = unique_run_id();
     let mut cmd = context.create_cmd();
     cmd.current_dir(&context.temp_dir);
     cmd.timeout(COMMAND_TIMEOUT);
     cmd.args([
+        "--run-id",
+        run_id.as_str(),
         "--dry-run",
         "--auto-approve",
         "--no-retro",
@@ -244,13 +254,11 @@ fn run_created_dry_run(context: &TestContext, workflow: &Path) -> RunSetup {
             stderr(&output)
         );
     }
-    let run_id = stdout(&output)
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .map(str::trim)
-        .expect("create should print a run ID")
-        .to_string();
-    resolve_run(context, &run_id)
+    assert_eq!(stdout(&output).trim(), run_id);
+    RunSetup {
+        run_dir: context.find_run_dir(&run_id),
+        run_id,
+    }
 }
 
 fn fast_simple_workflow(context: &TestContext) -> PathBuf {
@@ -278,10 +286,13 @@ fn fast_simple_workflow(context: &TestContext) -> PathBuf {
 
 pub(crate) fn setup_detached_dry_run(context: &TestContext) -> RunSetup {
     let workflow = fixture("simple.fabro");
+    let run_id = unique_run_id();
     let mut cmd = context.run_cmd();
     cmd.current_dir(&context.temp_dir);
     cmd.timeout(COMMAND_TIMEOUT);
     cmd.args([
+        "--run-id",
+        run_id.as_str(),
         "--detach",
         "--dry-run",
         "--auto-approve",
@@ -299,12 +310,7 @@ pub(crate) fn setup_detached_dry_run(context: &TestContext) -> RunSetup {
             stderr(&output)
         );
     }
-    let run_id = stdout(&output)
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .map(str::trim)
-        .expect("run --detach should print a run ID")
-        .to_string();
+    assert_eq!(stdout(&output).trim(), run_id);
     let run = resolve_run(context, &run_id);
     let deadline = Instant::now() + COMMAND_TIMEOUT;
     while run_events(&run.run_dir).is_empty() {
@@ -454,11 +460,14 @@ worktree_mode = "never"
 }
 
 fn run_local_workflow(context: &TestContext, workspace_dir: &Path, workflow: &str) -> RunSetup {
+    let run_id = unique_run_id();
     let mut cmd = context.run_cmd();
     cmd.current_dir(workspace_dir);
     cmd.timeout(COMMAND_TIMEOUT);
     cmd.env("OPENAI_API_KEY", "test");
     cmd.args([
+        "--run-id",
+        run_id.as_str(),
         "--auto-approve",
         "--no-retro",
         "--sandbox",
@@ -476,7 +485,10 @@ fn run_local_workflow(context: &TestContext, workspace_dir: &Path, workflow: &st
         );
     }
 
-    only_run(context)
+    RunSetup {
+        run_dir: context.find_run_dir(&run_id),
+        run_id,
+    }
 }
 
 pub(crate) fn add_project_workflow(
@@ -551,21 +563,6 @@ pub(crate) fn wait_for_status(run_dir: &Path, expected: &[&str]) -> String {
     }
 }
 
-pub(crate) fn only_run(context: &TestContext) -> RunSetup {
-    let entries = run_dirs_for_test_case(context);
-    let runs_dir = context.storage_dir.join("scratch");
-    assert_eq!(
-        entries.len(),
-        1,
-        "expected exactly one run for fabro_test_case={} under {}",
-        context.test_case_id(),
-        runs_dir.display(),
-    );
-    let run_dir = entries[0].clone();
-    let run_id = infer_run_id(&run_dir);
-    RunSetup { run_id, run_dir }
-}
-
 pub(crate) fn run_count_for_test_case(context: &TestContext) -> usize {
     run_dirs_for_test_case(context).len()
 }
@@ -624,6 +621,16 @@ pub(crate) fn resolve_run(context: &TestContext, run_id: &str) -> RunSetup {
 }
 
 pub(crate) fn find_run_dir(storage_dir: &Path, run_id: &str) -> Option<PathBuf> {
+    if let Ok(run_id) = run_id.parse::<RunId>() {
+        let run_dir = Storage::new(storage_dir)
+            .run_scratch(&run_id)
+            .root()
+            .to_path_buf();
+        if run_dir.is_dir() {
+            return Some(run_dir);
+        }
+    }
+
     let runs_dir = storage_dir.join("scratch");
     let entries = std::fs::read_dir(&runs_dir).ok()?;
     entries
@@ -992,11 +999,14 @@ fn setup_git_backed_run(context: &TestContext, workflow: GitWorkflowKind) -> Git
     let base_sha = git_stdout(&repo_dir, &["rev-parse", "HEAD"])
         .trim()
         .to_string();
+    let run_id = unique_run_id();
 
     let mut cmd = context.run_cmd();
     cmd.current_dir(&repo_dir);
     cmd.env("OPENAI_API_KEY", "test");
     cmd.args([
+        "--run-id",
+        run_id.as_str(),
         "--sandbox",
         "local",
         "--no-retro",
@@ -1013,7 +1023,10 @@ fn setup_git_backed_run(context: &TestContext, workflow: GitWorkflowKind) -> Git
         );
     }
 
-    let run = only_run(context);
+    let run = RunSetup {
+        run_dir: context.find_run_dir(&run_id),
+        run_id,
+    };
     let start = serde_json::to_value(
         run_state(&run.run_dir)
             .start

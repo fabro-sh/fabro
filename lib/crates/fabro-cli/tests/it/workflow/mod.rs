@@ -74,28 +74,7 @@ pub(super) fn store_dump_export(context: &TestContext, run_id: &str) -> PathBuf 
 
 /// Find the single run directory for this test context.
 pub(super) fn find_run_dir(context: &TestContext) -> PathBuf {
-    let runs_base = context.storage_dir.join("scratch");
-    let runs: Vec<RunSummaryRecord> = block_on(get_server_json_for_storage(
-        &context.storage_dir,
-        "/api/v1/runs",
-    ));
-    let entries: Vec<_> = runs
-        .into_iter()
-        .filter(|run| {
-            run.labels
-                .get("fabro_test_case")
-                .is_some_and(|value| value == context.test_case_id())
-        })
-        .filter_map(|run| find_run_dir_for_id(&context.storage_dir, &run.run_id))
-        .collect();
-    assert_eq!(
-        entries.len(),
-        1,
-        "expected exactly one run directory for fabro_test_case={} under {}",
-        context.test_case_id(),
-        runs_base.display()
-    );
-    entries[0].clone()
+    context.single_run_dir()
 }
 
 fn infer_run_id(run_dir: &Path) -> String {
@@ -108,13 +87,6 @@ fn infer_run_id(run_dir: &Path) -> String {
         .and_then(|name| name.rsplit('-').next().map(ToOwned::to_owned))
         .filter(|value| !value.is_empty())
         .expect("run directory name should contain run id suffix")
-}
-
-#[derive(Debug, Clone, Default, serde::Deserialize)]
-struct RunSummaryRecord {
-    run_id: String,
-    #[serde(default)]
-    labels: std::collections::HashMap<String, String>,
 }
 
 fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
@@ -174,20 +146,6 @@ async fn get_server_json_for_storage<T: serde::de::DeserializeOwned>(
         .json::<T>()
         .await
         .expect("server response should parse")
-}
-
-fn find_run_dir_for_id(storage_dir: &Path, run_id: &str) -> Option<PathBuf> {
-    let runs_dir = storage_dir.join("scratch");
-    let entries = std::fs::read_dir(&runs_dir).ok()?;
-    entries
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .find(|path| {
-            path.is_dir()
-                && path
-                    .file_name()
-                    .is_some_and(|name| name.to_string_lossy().ends_with(run_id))
-        })
 }
 
 fn run_state(run_dir: &Path) -> RunProjection {

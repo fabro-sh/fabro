@@ -8,6 +8,7 @@ use fabro_config::user::{active_settings_path, load_settings_config};
 use fabro_util::terminal::Styles;
 use object_store::ObjectStore;
 use object_store::local::LocalFileSystem;
+use object_store::memory::InMemory;
 use tokio::net::{TcpListener, UnixListener};
 use tokio::sync::watch;
 use tokio::time::interval;
@@ -28,6 +29,8 @@ use crate::server::{
 use crate::tls::{ClientAuth, build_rustls_config, serve_tls_with_shutdown};
 use fabro_llm::client::Client as LlmClient;
 use fabro_sandbox::SandboxProvider;
+
+const TEST_IN_MEMORY_STORE_ENV: &str = "FABRO_TEST_IN_MEMORY_STORE";
 
 #[derive(Clone, Copy)]
 enum ServerTitlePhase {
@@ -101,6 +104,29 @@ fn apply_runtime_settings(
     let mut settings = apply_serve_overrides(base, args, dry_run_mode);
     settings.storage_dir = Some(data_dir.to_path_buf());
     settings
+}
+
+fn use_in_memory_store() -> bool {
+    !matches!(
+        std::env::var(TEST_IN_MEMORY_STORE_ENV).ok().as_deref(),
+        None | Some("") | Some("0") | Some("false") | Some("no")
+    )
+}
+
+fn build_object_store_with_preference(
+    store_path: &Path,
+    use_in_memory: bool,
+) -> anyhow::Result<Arc<dyn ObjectStore>> {
+    if use_in_memory {
+        return Ok(Arc::new(InMemory::new()));
+    }
+
+    std::fs::create_dir_all(store_path)?;
+    Ok(Arc::new(LocalFileSystem::new_with_prefix(store_path)?))
+}
+
+fn build_object_store(store_path: &Path) -> anyhow::Result<Arc<dyn ObjectStore>> {
+    build_object_store_with_preference(store_path, use_in_memory_store())
 }
 
 /// Start the HTTP API server.
@@ -183,9 +209,7 @@ pub async fn serve_command(
     };
 
     let store_path = storage.store_dir();
-    std::fs::create_dir_all(&store_path)?;
-    let object_store: Arc<dyn ObjectStore> =
-        Arc::new(LocalFileSystem::new_with_prefix(&store_path)?);
+    let object_store = build_object_store(&store_path)?;
     let store = Arc::new(fabro_store::Database::new(
         Arc::clone(&object_store),
         "",
@@ -468,7 +492,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        ServeArgs, ServerTitlePhase, apply_runtime_settings, server_bind_title, server_title,
+        ServeArgs, ServerTitlePhase, apply_runtime_settings, build_object_store_with_preference,
+        server_bind_title, server_title,
     };
     use crate::bind::Bind;
     use fabro_types::Settings;
@@ -515,5 +540,25 @@ mod tests {
             server_title(ServerTitlePhase::Stopping, None),
             "fabro server stopping"
         );
+    }
+
+    #[test]
+    fn object_store_backend_switches_without_materializing_store_dir_for_memory() {
+        let temp = tempfile::tempdir().unwrap();
+        let store_path = temp.path().join("store");
+
+        let disk_store = build_object_store_with_preference(&store_path, false)
+            .expect("disk-backed store should build");
+        assert!(store_path.exists(), "disk-backed store should create store dir");
+        drop(disk_store);
+
+        let mem_path = temp.path().join("memory-store");
+        let mem_store = build_object_store_with_preference(&mem_path, true)
+            .expect("memory-backed store should build");
+        assert!(
+            !mem_path.exists(),
+            "memory-backed store should not create on-disk store dir"
+        );
+        drop(mem_store);
     }
 }

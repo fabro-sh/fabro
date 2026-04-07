@@ -91,6 +91,19 @@ fn ps_all_json_lists_created_and_completed_runs() {
 }
 
 #[test]
+fn setup_completed_fast_dry_run_preserves_handle_when_another_run_exists() {
+    let context = test_context!();
+
+    let created = setup_created_fast_dry_run(&context);
+    let completed = setup_completed_fast_dry_run(&context);
+
+    assert_ne!(created.run_id, completed.run_id);
+    assert_ne!(created.run_dir, completed.run_dir);
+    assert!(created.run_dir.exists(), "created run dir should exist");
+    assert!(completed.run_dir.exists(), "completed run dir should exist");
+}
+
+#[test]
 fn ps_quiet_outputs_run_ids_only() {
     let context = test_context!();
     setup_completed_fast_dry_run(&context);
