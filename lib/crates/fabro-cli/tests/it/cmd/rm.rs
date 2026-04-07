@@ -5,7 +5,8 @@ use serde_json::Value;
 use crate::support::unique_run_id;
 
 use super::support::{
-    setup_completed_fast_dry_run, setup_created_fast_dry_run, setup_local_sandbox_run,
+    output_stdout, resolve_run, setup_completed_fast_dry_run, setup_created_fast_dry_run,
+    setup_local_sandbox_run, wait_for_no_process_match, wait_for_status, write_gated_workflow,
 };
 
 #[test]
@@ -147,6 +148,55 @@ fn rm_force_deletes_run_without_sandbox_json_when_store_has_sandbox() {
         !setup.run.run_dir.exists(),
         "run directory should be deleted even without sandbox.json"
     );
+}
+
+#[test]
+fn rm_force_terminates_active_run_worker() {
+    let context = test_context!();
+    let _gate = write_gated_workflow(&context.temp_dir.join("slow.fabro"), "slow", "Run slowly");
+
+    let output = context
+        .run_cmd()
+        .env("OPENAI_API_KEY", "test")
+        .args([
+            "--detach",
+            "--provider",
+            "openai",
+            "--sandbox",
+            "local",
+            "--no-retro",
+            "slow.fabro",
+        ])
+        .output()
+        .expect("run --detach should execute");
+    assert!(
+        output.status.success(),
+        "run --detach failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let run_id = output_stdout(&output).trim().to_string();
+    let run = resolve_run(&context, &run_id);
+    wait_for_status(&run.run_dir, &["running"]);
+
+    let mut filters = context.filters();
+    filters.push((
+        r"\b[0-9A-HJKMNP-TV-Z]{12}\b".to_string(),
+        "[ULID]".to_string(),
+    ));
+    let mut cmd = context.command();
+    cmd.args(["rm", "--force", &run_id]);
+    fabro_snapshot!(filters, cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    [ULID]
+    ");
+
+    assert!(!run.run_dir.exists(), "run directory should be deleted");
+    wait_for_no_process_match(&format!("fabro {} ", &run_id[..12]));
 }
 
 #[test]

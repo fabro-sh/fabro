@@ -1710,6 +1710,7 @@ async fn delete_run_internal(state: &Arc<AppState>, id: RunId) -> Result<(), Res
         if let Some(cancel_tx) = managed_run.cancel_tx.take() {
             let _ = cancel_tx.send(());
         }
+        terminate_worker_for_deletion(managed_run.worker_pid, managed_run.worker_pgid).await;
         if let Some(run_dir) = managed_run.run_dir.take() {
             remove_run_dir(&run_dir).map_err(|err| {
                 ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
@@ -1734,6 +1735,50 @@ async fn delete_run_internal(state: &Arc<AppState>, id: RunId) -> Result<(), Res
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         })?;
     Ok(())
+}
+
+async fn terminate_worker_for_deletion(worker_pid: Option<u32>, worker_pgid: Option<u32>) {
+    #[cfg(unix)]
+    if let Some(process_group_id) = worker_pgid.or(worker_pid) {
+        fabro_proc::sigterm_process_group(process_group_id);
+
+        let deadline = Instant::now() + WORKER_CANCEL_GRACE;
+        while Instant::now() < deadline && fabro_proc::process_group_alive(process_group_id) {
+            sleep(Duration::from_millis(50)).await;
+        }
+
+        if fabro_proc::process_group_alive(process_group_id) {
+            fabro_proc::sigkill_process_group(process_group_id);
+
+            let kill_deadline = Instant::now() + Duration::from_secs(1);
+            while Instant::now() < kill_deadline
+                && fabro_proc::process_group_alive(process_group_id)
+            {
+                sleep(Duration::from_millis(50)).await;
+            }
+        }
+
+        return;
+    }
+
+    #[cfg(not(unix))]
+    if let Some(worker_pid) = worker_pid {
+        fabro_proc::sigterm(worker_pid);
+
+        let deadline = Instant::now() + WORKER_CANCEL_GRACE;
+        while Instant::now() < deadline && fabro_proc::process_alive(worker_pid) {
+            sleep(Duration::from_millis(50)).await;
+        }
+
+        if fabro_proc::process_alive(worker_pid) {
+            fabro_proc::sigkill(worker_pid);
+
+            let kill_deadline = Instant::now() + Duration::from_secs(1);
+            while Instant::now() < kill_deadline && fabro_proc::process_alive(worker_pid) {
+                sleep(Duration::from_millis(50)).await;
+            }
+        }
+    }
 }
 
 fn remove_run_dir(run_dir: &std::path::Path) -> std::io::Result<()> {
