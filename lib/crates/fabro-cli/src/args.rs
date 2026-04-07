@@ -730,6 +730,10 @@ pub(crate) struct RunWorkerArgs {
     #[arg(long)]
     pub(crate) server: String,
 
+    /// Short-lived bearer token for artifact uploads
+    #[arg(long, hide = true)]
+    pub(crate) artifact_upload_token: Option<String>,
+
     /// Run scratch directory
     #[arg(long)]
     pub(crate) run_dir: PathBuf,

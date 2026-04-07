@@ -22,6 +22,8 @@ models/api-question-option.ts
 models/api-question.ts
 models/api-settings.ts
 models/append-event-response.ts
+models/artifact-batch-upload-entry.ts
+models/artifact-batch-upload-manifest.ts
 models/artifact-entry.ts
 models/artifact-list-response.ts
 models/artifacts-settings.ts

@@ -3,10 +3,11 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use fabro_config::Storage;
-use fabro_config::server::resolve_storage_dir;
+use fabro_config::server::{ArtifactStorageBackend, resolve_storage_dir};
 use fabro_config::user::{active_settings_path, load_settings_config};
 use fabro_util::terminal::Styles;
 use object_store::ObjectStore;
+use object_store::aws::AmazonS3Builder;
 use object_store::local::LocalFileSystem;
 use object_store::memory::InMemory;
 use tokio::net::{TcpListener, UnixListener};
@@ -129,6 +130,43 @@ fn build_object_store(store_path: &Path) -> anyhow::Result<Arc<dyn ObjectStore>>
     build_object_store_with_preference(store_path, use_in_memory_store())
 }
 
+fn build_artifact_object_store(
+    settings: &Settings,
+    storage: &Storage,
+) -> anyhow::Result<(Arc<dyn ObjectStore>, String)> {
+    let artifact_settings = settings.artifact_storage.clone().unwrap_or_default();
+
+    if use_in_memory_store() {
+        return Ok((Arc::new(InMemory::new()), artifact_settings.prefix));
+    }
+
+    match artifact_settings.backend {
+        ArtifactStorageBackend::Local => {
+            std::fs::create_dir_all(storage.artifact_store_dir())?;
+            let object_store = Arc::new(LocalFileSystem::new_with_prefix(storage.root())?);
+            Ok((object_store, artifact_settings.prefix))
+        }
+        ArtifactStorageBackend::S3 => {
+            let bucket = artifact_settings
+                .bucket
+                .ok_or_else(|| anyhow::anyhow!("artifact_storage.bucket is required for s3"))?;
+            let region = artifact_settings
+                .region
+                .ok_or_else(|| anyhow::anyhow!("artifact_storage.region is required for s3"))?;
+
+            let mut builder = AmazonS3Builder::from_env()
+                .with_bucket_name(bucket)
+                .with_region(region)
+                .with_virtual_hosted_style_request(!artifact_settings.path_style.unwrap_or(false));
+            if let Some(endpoint) = artifact_settings.endpoint {
+                builder = builder.with_endpoint(endpoint);
+            }
+            let object_store = Arc::new(builder.build()?);
+            Ok((object_store, artifact_settings.prefix))
+        }
+    }
+}
+
 /// Start the HTTP API server.
 ///
 /// # Errors
@@ -215,7 +253,11 @@ pub async fn serve_command(
         "",
         Duration::from_millis(1),
     ));
-    let artifact_store = fabro_store::ArtifactStore::new(object_store, "artifacts");
+    let (artifact_object_store, artifact_prefix) = build_artifact_object_store(
+        &shared_settings.read().expect("config lock poisoned"),
+        &storage,
+    )?;
+    let artifact_store = fabro_store::ArtifactStore::new(artifact_object_store, artifact_prefix);
     let state = build_app_state_with_path(
         Arc::clone(&shared_settings),
         None,

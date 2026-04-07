@@ -9,9 +9,12 @@ use fabro_api::types;
 use fabro_server::bind::Bind;
 use fabro_store::{EventEnvelope, RunSummary, StageId};
 use fabro_types::{RunBlobId, RunEvent, RunId, Settings};
+use fabro_workflow::artifact_snapshot::CapturedArtifactInfo;
 use futures::StreamExt;
+use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::time::sleep;
+use tokio_util::io::ReaderStream;
 
 use crate::args::ServerTargetArgs;
 use crate::commands::server::start;
@@ -21,6 +24,8 @@ use crate::user_config;
 #[derive(Clone)]
 pub(crate) struct ServerStoreClient {
     client: fabro_api::Client,
+    http_client: reqwest::Client,
+    base_url: String,
 }
 
 #[derive(Debug, Clone)]
@@ -76,22 +81,19 @@ impl RunAttachEventStream {
 pub(crate) use fabro_store::RunProjection;
 
 pub(crate) async fn connect_server(storage_dir: &Path) -> Result<ServerStoreClient> {
-    Ok(ServerStoreClient {
-        client: connect_api_client(storage_dir).await?,
-    })
+    connect_api_client_bundle(storage_dir).await
 }
 
 pub(crate) async fn connect_server_target_direct(target: &str) -> Result<ServerStoreClient> {
-    let client = if target.starts_with("http://") || target.starts_with("https://") {
-        connect_remote_api_client(target, None)?
+    if target.starts_with("http://") || target.starts_with("https://") {
+        connect_remote_api_client_bundle(target, None)
     } else {
         let path = Path::new(target);
         if !path.is_absolute() {
             bail!("server target must be an http(s) URL or absolute Unix socket path");
         }
-        connect_unix_socket_api_client(path).await?
-    };
-    Ok(ServerStoreClient { client })
+        connect_unix_socket_api_client_bundle(path).await
+    }
 }
 
 pub(crate) async fn connect_server_only(args: &ServerTargetArgs) -> Result<ServerStoreClient> {
@@ -101,33 +103,46 @@ pub(crate) async fn connect_server_only(args: &ServerTargetArgs) -> Result<Serve
         active_config_path: user_config::active_settings_path(None),
         storage_dir: settings.storage_dir(),
     };
-    Ok(ServerStoreClient {
-        client: connect_target_api_client(&target, &runtime).await?,
-    })
+    connect_target_api_client_bundle(&target, &runtime).await
 }
 
-pub(crate) async fn connect_api_client(storage_dir: &Path) -> Result<fabro_api::Client> {
+async fn connect_api_client_bundle(storage_dir: &Path) -> Result<ServerStoreClient> {
     let config_path = user_config::active_settings_path(None);
     let bind = start::ensure_server_running_for_storage(storage_dir, &config_path)
         .with_context(|| format!("Failed to start fabro server for {}", storage_dir.display()))?;
     match bind {
-        Bind::Unix(path) => connect_unix_socket_api_client(&path).await,
+        Bind::Unix(path) => connect_unix_socket_api_client_bundle(&path).await,
         Bind::Tcp(addr) => Err(anyhow!(
             "Unsupported server bind for store client auto-connect: {addr}"
         )),
     }
 }
 
+pub(crate) async fn connect_api_client(storage_dir: &Path) -> Result<fabro_api::Client> {
+    connect_api_client_bundle(storage_dir)
+        .await
+        .map(|client| client.client)
+}
+
 async fn connect_target_api_client(
     target: &user_config::ServerTarget,
     runtime: &LocalServerRuntime,
 ) -> Result<fabro_api::Client> {
+    connect_target_api_client_bundle(target, runtime)
+        .await
+        .map(|client| client.client)
+}
+
+async fn connect_target_api_client_bundle(
+    target: &user_config::ServerTarget,
+    runtime: &LocalServerRuntime,
+) -> Result<ServerStoreClient> {
     match target {
         user_config::ServerTarget::HttpUrl { api_url, tls } => {
-            Ok(connect_remote_api_client(api_url, tls.as_ref())?)
+            connect_remote_api_client_bundle(api_url, tls.as_ref())
         }
         user_config::ServerTarget::UnixSocket(path) => {
-            if let Ok(client) = connect_unix_socket_api_client(path).await {
+            if let Ok(client) = connect_unix_socket_api_client_bundle(path).await {
                 Ok(client)
             } else {
                 start::ensure_server_running_on_socket(
@@ -136,7 +151,7 @@ async fn connect_target_api_client(
                     &runtime.storage_dir,
                 )
                 .with_context(|| format!("Failed to start fabro server for {}", path.display()))?;
-                connect_unix_socket_api_client(path).await
+                connect_unix_socket_api_client_bundle(path).await
             }
         }
     }
@@ -161,13 +176,18 @@ pub(crate) async fn connect_server_backed_api_client_with_storage_dir(
     connect_target_api_client(&target, &runtime).await
 }
 
-pub(crate) fn connect_remote_api_client(
+fn connect_remote_api_client_bundle(
     api_url: &str,
     tls: Option<&user_config::ClientTlsSettings>,
-) -> Result<fabro_api::Client> {
+) -> Result<ServerStoreClient> {
     let http_client = user_config::build_server_client(tls)?;
     let normalized = normalize_remote_server_target(api_url);
-    Ok(fabro_api::Client::new_with_client(&normalized, http_client))
+    let client = fabro_api::Client::new_with_client(&normalized, http_client.clone());
+    Ok(ServerStoreClient {
+        client,
+        http_client,
+        base_url: normalized,
+    })
 }
 
 fn normalize_remote_server_target(api_url: &str) -> String {
@@ -178,7 +198,7 @@ fn normalize_remote_server_target(api_url: &str) -> String {
         .to_string()
 }
 
-pub(crate) async fn connect_unix_socket_api_client(path: &Path) -> Result<fabro_api::Client> {
+async fn connect_unix_socket_api_client_bundle(path: &Path) -> Result<ServerStoreClient> {
     let http_client = crate::user_config::cli_http_client_builder()
         .unix_socket(path)
         .no_proxy()
@@ -186,10 +206,13 @@ pub(crate) async fn connect_unix_socket_api_client(path: &Path) -> Result<fabro_
         .context("Failed to build Unix-socket HTTP client for fabro server")?;
     wait_for_server_ready(&http_client).await?;
 
-    Ok(fabro_api::Client::new_with_client(
-        "http://fabro",
+    let base_url = "http://fabro".to_string();
+    let client = fabro_api::Client::new_with_client(&base_url, http_client.clone());
+    Ok(ServerStoreClient {
+        client,
         http_client,
-    ))
+        base_url,
+    })
 }
 
 async fn wait_for_server_ready(http_client: &reqwest::Client) -> Result<()> {
@@ -211,6 +234,23 @@ async fn wait_for_server_ready(http_client: &reqwest::Client) -> Result<()> {
     }
 
     Err(last_error.unwrap_or_else(|| anyhow!("server did not become ready in time")))
+}
+
+#[derive(Debug, Serialize)]
+struct ArtifactBatchUploadManifest {
+    entries: Vec<ArtifactBatchUploadEntry>,
+}
+
+#[derive(Debug, Serialize)]
+struct ArtifactBatchUploadEntry {
+    part: String,
+    path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sha256: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expected_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content_type: Option<String>,
 }
 
 impl ServerStoreClient {
@@ -508,6 +548,120 @@ impl ServerStoreClient {
         Ok(bytes)
     }
 
+    fn stage_artifacts_url(&self, run_id: &RunId, stage_id: &StageId) -> Result<reqwest::Url> {
+        let mut url = reqwest::Url::parse(&self.base_url)
+            .with_context(|| format!("invalid server base URL {}", self.base_url))?;
+        url.path_segments_mut()
+            .map_err(|_| anyhow!("server base URL cannot accept path segments"))?
+            .extend([
+                "api",
+                "v1",
+                "runs",
+                &run_id.to_string(),
+                "stages",
+                &stage_id.to_string(),
+                "artifacts",
+            ]);
+        Ok(url)
+    }
+
+    pub(crate) async fn upload_stage_artifact_file(
+        &self,
+        run_id: &RunId,
+        stage_id: &StageId,
+        filename: &str,
+        path: &Path,
+        bearer_token: &str,
+    ) -> Result<()> {
+        let mut url = self.stage_artifacts_url(run_id, stage_id)?;
+        url.query_pairs_mut().append_pair("filename", filename);
+
+        let file = tokio::fs::File::open(path)
+            .await
+            .with_context(|| format!("failed to open artifact {}", path.display()))?;
+        let content_length = file
+            .metadata()
+            .await
+            .with_context(|| format!("failed to stat artifact {}", path.display()))?
+            .len();
+        let body = reqwest::Body::wrap_stream(ReaderStream::new(file));
+
+        let response = self
+            .http_client
+            .post(url)
+            .bearer_auth(bearer_token)
+            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+            .header(reqwest::header::CONTENT_LENGTH, content_length.to_string())
+            .body(body)
+            .send()
+            .await
+            .with_context(|| format!("failed to upload artifact {}", path.display()))?;
+        ensure_raw_response_success(response).await
+    }
+
+    pub(crate) async fn upload_stage_artifact_batch(
+        &self,
+        run_id: &RunId,
+        stage_id: &StageId,
+        artifact_capture_dir: &Path,
+        artifacts: &[CapturedArtifactInfo],
+        bearer_token: &str,
+    ) -> Result<()> {
+        let url = self.stage_artifacts_url(run_id, stage_id)?;
+        let mut manifest_entries = Vec::with_capacity(artifacts.len());
+        let mut file_parts = Vec::with_capacity(artifacts.len());
+
+        for (index, artifact) in artifacts.iter().enumerate() {
+            let part_name = format!("file{}", index + 1);
+            let path = artifact_capture_dir.join(&artifact.path);
+            let file = tokio::fs::File::open(&path)
+                .await
+                .with_context(|| format!("failed to open artifact {}", path.display()))?;
+            let content_length = file
+                .metadata()
+                .await
+                .with_context(|| format!("failed to stat artifact {}", path.display()))?
+                .len();
+
+            manifest_entries.push(ArtifactBatchUploadEntry {
+                part: part_name.clone(),
+                path: artifact.path.clone(),
+                sha256: Some(artifact.content_sha256.clone()),
+                expected_bytes: Some(artifact.bytes),
+                content_type: Some(artifact.mime.clone()),
+            });
+
+            file_parts.push((
+                part_name,
+                reqwest::multipart::Part::stream_with_length(
+                    reqwest::Body::wrap_stream(ReaderStream::new(file)),
+                    content_length,
+                )
+                .file_name(artifact.path.clone()),
+            ));
+        }
+
+        let manifest = ArtifactBatchUploadManifest {
+            entries: manifest_entries,
+        };
+        let manifest_part = reqwest::multipart::Part::text(serde_json::to_string(&manifest)?)
+            .mime_str("application/json")?;
+        let mut form = reqwest::multipart::Form::new().part("manifest", manifest_part);
+        for (part_name, part) in file_parts {
+            form = form.part(part_name, part);
+        }
+
+        let response = self
+            .http_client
+            .post(url)
+            .bearer_auth(bearer_token)
+            .multipart(form)
+            .send()
+            .await
+            .context("failed to upload artifact batch")?;
+        ensure_raw_response_success(response).await
+    }
+
     pub(crate) async fn generate_preview_url(
         &self,
         run_id: &RunId,
@@ -627,6 +781,32 @@ where
         }
         other => anyhow!("{other}"),
     }
+}
+
+async fn ensure_raw_response_success(response: reqwest::Response) -> Result<()> {
+    if response.status().is_success() {
+        return Ok(());
+    }
+
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) {
+        if let Some(detail) = value
+            .get("errors")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|errors| errors.first())
+            .and_then(|entry| entry.get("detail"))
+            .and_then(serde_json::Value::as_str)
+        {
+            bail!("{detail}");
+        }
+    }
+
+    if body.is_empty() {
+        bail!("request failed with status {status}");
+    }
+
+    bail!("request failed with status {status}: {body}");
 }
 
 fn is_not_found_error<E>(err: &progenitor_client::Error<E>) -> bool

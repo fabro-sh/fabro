@@ -39,15 +39,15 @@ pub use retro::{
     OpenItemKind, Retro, RetroNarrative, SmoothnessRating, StageRetro,
 };
 pub use run::{
-    RunAuthMethod, RunClientProvenance, RunProvenance, RunRecord, RunServerProvenance,
-    RunSubjectProvenance,
+    RunArtifactStorage, RunAuthMethod, RunClientProvenance, RunProvenance, RunRecord,
+    RunServerProvenance, RunSubjectProvenance,
 };
 pub use run_blob_id::RunBlobId;
 pub use run_event::{EventBody, RunEvent, RunNoticeLevel};
 pub use run_id::RunId;
 pub use run_id::fixtures;
 pub use sandbox_record::SandboxRecord;
-pub use settings::Settings;
+pub use settings::{ArtifactStorageBackend, ArtifactStorageSettings, Settings};
 pub use stage_id::StageId;
 pub use start::StartRecord;
 pub use status::{

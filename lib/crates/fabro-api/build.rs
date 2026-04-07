@@ -64,6 +64,59 @@ fn patch_nullable(value: &mut serde_json::Value) {
     }
 }
 
+/// Progenitor currently panics when an operation advertises more than one request-body media type.
+///
+/// Keep the source OpenAPI spec accurate for docs, but collapse the generated-client view down to
+/// a single preferred media type so code generation can proceed.
+fn patch_codegen_request_body_media_types(value: &mut serde_json::Value) {
+    let Some(paths) = value
+        .get_mut("paths")
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return;
+    };
+
+    for path_item in paths.values_mut() {
+        let Some(item) = path_item.as_object_mut() else {
+            continue;
+        };
+
+        for method in ["get", "put", "post", "delete", "patch"] {
+            let Some(operation) = item
+                .get_mut(method)
+                .and_then(serde_json::Value::as_object_mut)
+            else {
+                continue;
+            };
+            let Some(content) = operation
+                .get_mut("requestBody")
+                .and_then(|request_body| request_body.get_mut("content"))
+                .and_then(serde_json::Value::as_object_mut)
+            else {
+                continue;
+            };
+            if content.len() <= 1 {
+                continue;
+            }
+
+            let preferred = content
+                .get("application/octet-stream")
+                .cloned()
+                .map(|value| ("application/octet-stream".to_string(), value))
+                .or_else(|| {
+                    content
+                        .iter()
+                        .next()
+                        .map(|(key, value)| (key.clone(), value.clone()))
+                });
+            if let Some((key, value)) = preferred {
+                content.clear();
+                content.insert(key, value);
+            }
+        }
+    }
+}
+
 fn main() {
     let spec_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -86,6 +139,7 @@ fn main() {
     // rely on any 3.1-only features that affect codegen.
     spec_value["openapi"] = serde_json::Value::String("3.0.3".to_string());
     patch_nullable(&mut spec_value);
+    patch_codegen_request_body_media_types(&mut spec_value);
 
     let spec: openapiv3::OpenAPI =
         serde_json::from_value(spec_value).expect("failed to deserialize OpenAPI spec");

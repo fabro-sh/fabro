@@ -24,6 +24,7 @@ use fabro_core::lifecycle::{
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
 
+use crate::artifact_upload::StageArtifactUploader;
 use crate::context;
 use crate::error::{FailureSignature, FailureSignatureExt};
 use crate::event::Emitter;
@@ -85,6 +86,7 @@ impl WorkflowLifecycle {
         graph: Arc<GvGraph>,
         run_dir: &PathBuf,
         run_store: &RunStoreHandle,
+        artifact_uploader: Option<Arc<dyn StageArtifactUploader>>,
         run_options: &Arc<RunOptions>,
         is_resume: bool,
         on_node: crate::OnNodeCallback,
@@ -163,6 +165,7 @@ impl WorkflowLifecycle {
             Arc::clone(emitter),
             run_scratch.artifact_files_dir(),
             run_options.artifact_globs().to_vec(),
+            artifact_uploader,
             captured_artifact_count,
         );
 

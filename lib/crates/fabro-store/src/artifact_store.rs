@@ -4,17 +4,20 @@ use bytes::Bytes;
 use futures::StreamExt;
 use object_store::{ObjectStore, path::Path as ObjectPath};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
+use tokio::io::AsyncWriteExt;
 
 use crate::{Result, StageId, StoreError};
 use fabro_types::RunId;
 
 const ARTIFACT_SEGMENT_ENCODE_SET: &AsciiSet =
     &NON_ALPHANUMERIC.remove(b'.').remove(b'_').remove(b'-');
+const STREAM_BUFFER_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NodeArtifact {
     pub node: StageId,
     pub filename: String,
+    pub size: u64,
 }
 
 #[derive(Clone)]
@@ -54,6 +57,45 @@ impl ArtifactStore {
         Ok(())
     }
 
+    pub fn writer(
+        &self,
+        run_id: &RunId,
+        node: &StageId,
+        filename: &str,
+    ) -> Result<object_store::buffered::BufWriter> {
+        let path = self.artifact_path(run_id, node, filename)?;
+        Ok(object_store::buffered::BufWriter::with_capacity(
+            Arc::clone(&self.object_store),
+            path,
+            STREAM_BUFFER_BYTES,
+        ))
+    }
+
+    pub async fn put_stream<S>(
+        &self,
+        run_id: &RunId,
+        node: &StageId,
+        filename: &str,
+        mut stream: S,
+    ) -> Result<()>
+    where
+        S: futures::Stream<Item = Result<Bytes>> + Unpin,
+    {
+        let mut writer = self.writer(run_id, node, filename)?;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            writer
+                .write_all(&chunk)
+                .await
+                .map_err(|err| StoreError::Other(format!("artifact write failed: {err}")))?;
+        }
+        writer
+            .shutdown()
+            .await
+            .map_err(|err| StoreError::Other(format!("artifact finalize failed: {err}")))?;
+        Ok(())
+    }
+
     pub async fn get(
         &self,
         run_id: &RunId,
@@ -73,7 +115,11 @@ impl ArtifactStore {
         let mut stream = self.object_store.list(Some(&prefix));
         let mut artifacts = Vec::new();
         while let Some(meta) = stream.next().await.transpose()? {
-            artifacts.push(decode_artifact_location(&prefix, &meta.location)?);
+            artifacts.push(decode_artifact_location(
+                &prefix,
+                &meta.location,
+                meta.size,
+            )?);
         }
         artifacts.sort();
         Ok(artifacts)
@@ -166,7 +212,11 @@ fn decode_path_segment(kind: &str, value: &str) -> Result<String> {
         .map_err(|err| StoreError::Other(format!("invalid {kind}: {err}")))
 }
 
-fn decode_artifact_location(prefix: &ObjectPath, location: &ObjectPath) -> Result<NodeArtifact> {
+fn decode_artifact_location(
+    prefix: &ObjectPath,
+    location: &ObjectPath,
+    size: u64,
+) -> Result<NodeArtifact> {
     let mut parts = location.prefix_match(prefix).ok_or_else(|| {
         StoreError::Other(format!(
             "artifact location {location} does not match expected prefix {prefix}"
@@ -199,6 +249,7 @@ fn decode_artifact_location(prefix: &ObjectPath, location: &ObjectPath) -> Resul
     Ok(NodeArtifact {
         node: StageId::new(node_id, visit),
         filename: filename_segments.join("/"),
+        size,
     })
 }
 
@@ -260,7 +311,34 @@ mod tests {
             vec![NodeArtifact {
                 node,
                 filename: filename.to_string(),
+                size: 5,
             }]
+        );
+    }
+
+    #[tokio::test]
+    async fn put_stream_round_trips_chunked_writes() {
+        let store = test_store();
+        let run_id = fixtures::RUN_1;
+        let node = StageId::new("build", 2);
+        let filename = "logs/output.txt";
+
+        store
+            .put_stream(
+                &run_id,
+                &node,
+                filename,
+                futures::stream::iter(vec![
+                    Ok(Bytes::from_static(b"hello ")),
+                    Ok(Bytes::from_static(b"world")),
+                ]),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            store.get(&run_id, &node, filename).await.unwrap(),
+            Some(Bytes::from_static(b"hello world"))
         );
     }
 

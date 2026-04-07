@@ -2,6 +2,10 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+fn default_artifact_storage_prefix() -> String {
+    "artifacts".to_string()
+}
+
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthProvider {
@@ -123,4 +127,41 @@ pub struct FeaturesSettings {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct LogSettings {
     pub level: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactStorageBackend {
+    #[default]
+    Local,
+    S3,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, crate::Combine)]
+pub struct ArtifactStorageSettings {
+    #[serde(default)]
+    pub backend: ArtifactStorageBackend,
+    #[serde(default = "default_artifact_storage_prefix")]
+    pub prefix: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bucket: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path_style: Option<bool>,
+}
+
+impl Default for ArtifactStorageSettings {
+    fn default() -> Self {
+        Self {
+            backend: ArtifactStorageBackend::Local,
+            prefix: default_artifact_storage_prefix(),
+            bucket: None,
+            region: None,
+            endpoint: None,
+            path_style: None,
+        }
+    }
 }

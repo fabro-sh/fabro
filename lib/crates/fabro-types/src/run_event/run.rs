@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Graph, RunControlAction, RunProvenance, Settings, StatusReason};
+use crate::{Graph, RunArtifactStorage, RunControlAction, RunProvenance, Settings, StatusReason};
 
 use super::{BilledTokenCounts, RunNoticeLevel};
 
@@ -28,6 +28,8 @@ pub struct RunCreatedProps {
     pub workflow_slug: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub db_prefix: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_storage: Option<RunArtifactStorage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<RunProvenance>,
 }

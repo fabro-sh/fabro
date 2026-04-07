@@ -498,6 +498,8 @@ mod tests {
             "__run-worker",
             "--server",
             "/tmp/fabro.sock",
+            "--artifact-upload-token",
+            "token-123",
             "--run-dir",
             "/tmp/run",
             "--run-id",
@@ -509,6 +511,7 @@ mod tests {
         match *cli.command {
             Commands::RunCmd(RunCommands::RunWorker(args)) => {
                 assert_eq!(args.server, "/tmp/fabro.sock");
+                assert_eq!(args.artifact_upload_token.as_deref(), Some("token-123"));
                 assert_eq!(args.run_dir, std::path::PathBuf::from("/tmp/run"));
                 assert_eq!(args.run_id, "01ARZ3NDEKTSV4RRFFQ69G5FAV".parse().unwrap());
                 assert!(matches!(args.mode, args::RunWorkerMode::Start));
@@ -535,6 +538,7 @@ mod tests {
         match *cli.command {
             Commands::RunCmd(RunCommands::RunWorker(args)) => {
                 assert_eq!(args.server, "http://127.0.0.1:3000");
+                assert!(args.artifact_upload_token.is_none());
                 assert_eq!(args.run_dir, std::path::PathBuf::from("/tmp/run"));
                 assert_eq!(args.run_id, "01ARZ3NDEKTSV4RRFFQ69G5FAV".parse().unwrap());
                 assert!(matches!(args.mode, args::RunWorkerMode::Resume));

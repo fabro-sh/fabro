@@ -131,6 +131,7 @@ pub(crate) fn create_run_input(prepared: PreparedManifest) -> CreateRunInput {
             .as_ref()
             .map(|git| fabro_github::normalize_repo_origin_url(&git.origin_url)),
         base_branch: prepared.git.as_ref().map(|git| git.branch.clone()),
+        artifact_storage: None,
         provenance: None,
     }
 }

@@ -71,6 +71,7 @@ rust-embed.workspace = true
 regex.workspace = true
 semver.workspace = true
 walkdir.workspace = true
+multer = "3"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }

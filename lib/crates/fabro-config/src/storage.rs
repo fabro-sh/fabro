@@ -58,6 +58,11 @@ impl Storage {
     pub fn store_dir(&self) -> PathBuf {
         self.root.join("store")
     }
+
+    #[must_use]
+    pub fn artifact_store_dir(&self) -> PathBuf {
+        self.root.join("artifacts")
+    }
 }
 
 impl ServerState {
@@ -192,6 +197,10 @@ mod tests {
         assert_eq!(
             storage.store_dir(),
             std::path::Path::new("/tmp/fabro-data/store")
+        );
+        assert_eq!(
+            storage.artifact_store_dir(),
+            std::path::Path::new("/tmp/fabro-data/artifacts")
         );
         assert_eq!(
             storage.server_state().record_path(),

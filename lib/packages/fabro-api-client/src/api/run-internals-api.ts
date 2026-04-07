@@ -45,6 +45,8 @@ import type { RunProjection } from '../models';
 import type { RunSettings } from '../models';
 // @ts-ignore
 import type { WriteBlobResponse } from '../models';
+// @ts-ignore
+import type { WriteRunBlobRequest } from '../models';
 /**
  * RunInternalsApi - axios parameter creator
  */
@@ -479,22 +481,20 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             };
         },
         /**
-         * Uploads an artifact for a stage. Intended for trusted internal callers.
+         * Uploads one or more artifacts for a stage. Intended for trusted internal callers.  The server accepts both: - `application/octet-stream` for single-file uploads with the `filename` query parameter - strict manifest-first `multipart/form-data` uploads documented by `ArtifactBatchUploadManifest`  The generated Rust client currently exposes the octet-stream variant because the OpenAPI code generator in this repo does not support multiple request media types on one operation.
          * @summary Put Stage Artifact
          * @param {string} id Unique run identifier (ULID).
          * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
-         * @param {string} filename Relative artifact path. &#x60;/&#x60; is allowed as a path separator. Backslash, empty segments, and traversal segments (&#x60;.&#x60; and &#x60;..&#x60;) are invalid.
          * @param {File} body 
+         * @param {string} [filename] Relative artifact path for &#x60;application/octet-stream&#x60; uploads. Ignored for multipart uploads.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        putStageArtifact: async (id: string, stageId: string, filename: string, body: File, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        putStageArtifact: async (id: string, stageId: string, body: File, filename?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'id' is not null or undefined
             assertParamExists('putStageArtifact', 'id', id)
             // verify required parameter 'stageId' is not null or undefined
             assertParamExists('putStageArtifact', 'stageId', stageId)
-            // verify required parameter 'filename' is not null or undefined
-            assertParamExists('putStageArtifact', 'filename', filename)
             // verify required parameter 'body' is not null or undefined
             assertParamExists('putStageArtifact', 'body', body)
             const localVarPath = `/api/v1/runs/{id}/stages/{stageId}/artifacts`
@@ -847,17 +847,17 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Uploads an artifact for a stage. Intended for trusted internal callers.
+         * Uploads one or more artifacts for a stage. Intended for trusted internal callers.  The server accepts both: - `application/octet-stream` for single-file uploads with the `filename` query parameter - strict manifest-first `multipart/form-data` uploads documented by `ArtifactBatchUploadManifest`  The generated Rust client currently exposes the octet-stream variant because the OpenAPI code generator in this repo does not support multiple request media types on one operation.
          * @summary Put Stage Artifact
          * @param {string} id Unique run identifier (ULID).
          * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
-         * @param {string} filename Relative artifact path. &#x60;/&#x60; is allowed as a path separator. Backslash, empty segments, and traversal segments (&#x60;.&#x60; and &#x60;..&#x60;) are invalid.
          * @param {File} body 
+         * @param {string} [filename] Relative artifact path for &#x60;application/octet-stream&#x60; uploads. Ignored for multipart uploads.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async putStageArtifact(id: string, stageId: string, filename: string, body: File, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.putStageArtifact(id, stageId, filename, body, options);
+        async putStageArtifact(id: string, stageId: string, body: File, filename?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.putStageArtifact(id, stageId, body, filename, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.putStageArtifact']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -1028,17 +1028,17 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
             return localVarFp.listStageTurns(id, stageId, pageLimit, pageOffset, options).then((request) => request(axios, basePath));
         },
         /**
-         * Uploads an artifact for a stage. Intended for trusted internal callers.
+         * Uploads one or more artifacts for a stage. Intended for trusted internal callers.  The server accepts both: - `application/octet-stream` for single-file uploads with the `filename` query parameter - strict manifest-first `multipart/form-data` uploads documented by `ArtifactBatchUploadManifest`  The generated Rust client currently exposes the octet-stream variant because the OpenAPI code generator in this repo does not support multiple request media types on one operation.
          * @summary Put Stage Artifact
          * @param {string} id Unique run identifier (ULID).
          * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
-         * @param {string} filename Relative artifact path. &#x60;/&#x60; is allowed as a path separator. Backslash, empty segments, and traversal segments (&#x60;.&#x60; and &#x60;..&#x60;) are invalid.
          * @param {File} body 
+         * @param {string} [filename] Relative artifact path for &#x60;application/octet-stream&#x60; uploads. Ignored for multipart uploads.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        putStageArtifact(id: string, stageId: string, filename: string, body: File, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.putStageArtifact(id, stageId, filename, body, options).then((request) => request(axios, basePath));
+        putStageArtifact(id: string, stageId: string, body: File, filename?: string, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.putStageArtifact(id, stageId, body, filename, options).then((request) => request(axios, basePath));
         },
         /**
          * Reads a previously stored blob by identifier.
@@ -1201,17 +1201,17 @@ export class RunInternalsApi extends BaseAPI {
     }
 
     /**
-     * Uploads an artifact for a stage. Intended for trusted internal callers.
+     * Uploads one or more artifacts for a stage. Intended for trusted internal callers.  The server accepts both: - `application/octet-stream` for single-file uploads with the `filename` query parameter - strict manifest-first `multipart/form-data` uploads documented by `ArtifactBatchUploadManifest`  The generated Rust client currently exposes the octet-stream variant because the OpenAPI code generator in this repo does not support multiple request media types on one operation.
      * @summary Put Stage Artifact
      * @param {string} id Unique run identifier (ULID).
      * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
-     * @param {string} filename Relative artifact path. &#x60;/&#x60; is allowed as a path separator. Backslash, empty segments, and traversal segments (&#x60;.&#x60; and &#x60;..&#x60;) are invalid.
      * @param {File} body 
+     * @param {string} [filename] Relative artifact path for &#x60;application/octet-stream&#x60; uploads. Ignored for multipart uploads.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public putStageArtifact(id: string, stageId: string, filename: string, body: File, options?: RawAxiosRequestConfig) {
-        return RunInternalsApiFp(this.configuration).putStageArtifact(id, stageId, filename, body, options).then((request) => request(this.axios, this.basePath));
+    public putStageArtifact(id: string, stageId: string, body: File, filename?: string, options?: RawAxiosRequestConfig) {
+        return RunInternalsApiFp(this.configuration).putStageArtifact(id, stageId, body, filename, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -1260,4 +1260,3 @@ export class RunInternalsApi extends BaseAPI {
         return RunInternalsApiFp(this.configuration).writeRunBlob(id, body, options).then((request) => request(this.axios, this.basePath));
     }
 }
-

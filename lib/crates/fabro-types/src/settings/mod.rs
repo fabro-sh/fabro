@@ -26,9 +26,9 @@ pub use sandbox::{
     LocalSandboxSettings, SandboxSettings, WorktreeMode,
 };
 pub use server::{
-    ApiAuthStrategy, ApiSettings, AuthProvider, AuthSettings, FeaturesSettings, GitAuthorSettings,
-    GitProvider, GitSettings, LogSettings, TlsSettings, WebSettings, WebhookSettings,
-    WebhookStrategy,
+    ApiAuthStrategy, ApiSettings, ArtifactStorageBackend, ArtifactStorageSettings, AuthProvider,
+    AuthSettings, FeaturesSettings, GitAuthorSettings, GitProvider, GitSettings, LogSettings,
+    TlsSettings, WebSettings, WebhookSettings, WebhookStrategy,
 };
 pub use user::{ClientTlsSettings, ExecSettings, OutputFormat, PermissionLevel, ServerSettings};
 
@@ -90,6 +90,8 @@ pub struct Settings {
     pub storage_dir: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_concurrent_runs: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_storage: Option<ArtifactStorageSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub web: Option<WebSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

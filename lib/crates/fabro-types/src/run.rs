@@ -48,6 +48,12 @@ pub struct RunProvenance {
     pub subject: Option<RunSubjectProvenance>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunArtifactStorage {
+    ObjectStoreV1,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunRecord {
     pub run_id: RunId,
@@ -65,5 +71,17 @@ pub struct RunRecord {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub labels: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_storage: Option<RunArtifactStorage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<RunProvenance>,
+}
+
+impl RunRecord {
+    #[must_use]
+    pub fn uses_object_backed_artifacts(&self) -> bool {
+        matches!(
+            self.artifact_storage,
+            Some(RunArtifactStorage::ObjectStoreV1)
+        )
+    }
 }

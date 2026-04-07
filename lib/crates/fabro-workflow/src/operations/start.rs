@@ -11,6 +11,7 @@ use fabro_model::{Catalog, FallbackTarget, Provider};
 use fabro_sandbox::{SandboxProvider, SandboxSpec};
 use fabro_types::{RunId, Settings};
 
+use crate::artifact_upload::StageArtifactUploader;
 use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::{
@@ -50,6 +51,7 @@ struct RunSession {
     seed_context: Option<Context>,
     run_store: RunStoreHandle,
     event_sink: RunEventSink,
+    artifact_uploader: Option<Arc<dyn StageArtifactUploader>>,
     git: Option<GitCheckpointOptions>,
     github_app: Option<fabro_github::GitHubAppCredentials>,
     worktree_mode: Option<WorktreeMode>,
@@ -72,6 +74,7 @@ pub struct StartServices {
     pub interviewer: Arc<dyn Interviewer>,
     pub run_store: RunStoreHandle,
     pub event_sink: RunEventSink,
+    pub artifact_uploader: Option<Arc<dyn StageArtifactUploader>>,
     pub run_control: Option<Arc<RunControlState>>,
     pub github_app: Option<fabro_github::GitHubAppCredentials>,
     pub on_node: crate::OnNodeCallback,
@@ -393,6 +396,7 @@ impl RunSession {
             devcontainer,
             seed_context: None,
             run_store: services.run_store,
+            artifact_uploader: services.artifact_uploader,
             git,
             github_app: services.github_app.clone(),
             worktree_mode: Some(resolve_worktree_mode(&settings)),
@@ -523,6 +527,7 @@ impl RunSession {
             git: self.git,
             worktree_mode: self.worktree_mode,
             registry_override: self.registry_override,
+            artifact_uploader: self.artifact_uploader,
             run_control: self.run_control,
             checkpoint,
             seed_context: self.seed_context,
@@ -869,6 +874,7 @@ mod tests {
             interviewer: Arc::new(fabro_interview::AutoApproveInterviewer),
             run_store: store.open_run(&fixtures::RUN_1).await.unwrap().into(),
             event_sink: RunEventSink::store(store.open_run(&fixtures::RUN_1).await.unwrap()),
+            artifact_uploader: None,
             run_control: None,
             github_app: None,
             on_node: None,

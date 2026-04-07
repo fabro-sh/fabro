@@ -253,43 +253,48 @@ fn try_cookie(parts: &Parts) -> Result<(), ApiError> {
 /// When auth is disabled, the extractor accepts all requests.
 pub struct AuthenticatedService;
 
+pub fn authenticate_service_parts(parts: &Parts) -> Result<(), ApiError> {
+    let auth_mode = parts
+        .extensions
+        .get::<AuthMode>()
+        .expect("AuthMode extension must be added to the router");
+
+    let strategies = match auth_mode {
+        AuthMode::Disabled => return Ok(()),
+        AuthMode::Strategies(strategies) => strategies,
+    };
+
+    if strategies.is_empty() {
+        return Err(ApiError::unauthorized());
+    }
+
+    let mut last_err = ApiError::unauthorized();
+
+    for strategy in strategies {
+        let result = match strategy {
+            AuthStrategy::Mtls => try_mtls(parts),
+            AuthStrategy::Cookie => try_cookie(parts),
+            AuthStrategy::Jwt {
+                key,
+                validation,
+                allowed_usernames,
+            } => try_jwt(parts, key, validation, allowed_usernames),
+        };
+        match result {
+            Ok(()) => return Ok(()),
+            Err(err) => last_err = err,
+        }
+    }
+
+    Err(last_err)
+}
+
 impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedService {
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        let auth_mode = parts
-            .extensions
-            .get::<AuthMode>()
-            .expect("AuthMode extension must be added to the router");
-
-        let strategies = match auth_mode {
-            AuthMode::Disabled => return Ok(Self),
-            AuthMode::Strategies(strategies) => strategies,
-        };
-
-        if strategies.is_empty() {
-            return Err(ApiError::unauthorized());
-        }
-
-        let mut last_err = ApiError::unauthorized();
-
-        for strategy in strategies {
-            let result = match strategy {
-                AuthStrategy::Mtls => try_mtls(parts),
-                AuthStrategy::Cookie => try_cookie(parts),
-                AuthStrategy::Jwt {
-                    key,
-                    validation,
-                    allowed_usernames,
-                } => try_jwt(parts, key, validation, allowed_usernames),
-            };
-            match result {
-                Ok(()) => return Ok(Self),
-                Err(e) => last_err = e,
-            }
-        }
-
-        Err(last_err)
+        authenticate_service_parts(parts)?;
+        Ok(Self)
     }
 }
 

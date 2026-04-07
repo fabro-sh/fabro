@@ -140,6 +140,7 @@ mod tests {
             repo_origin_url: None,
             base_branch: None,
             labels: HashMap::new(),
+            artifact_storage: None,
             provenance: None,
         }
     }
@@ -165,6 +166,7 @@ mod tests {
                 base_branch: None,
                 workflow_slug: Some("test".to_string()),
                 db_prefix: None,
+                artifact_storage: None,
                 provenance: None,
             },
         )

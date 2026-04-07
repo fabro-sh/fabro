@@ -562,6 +562,24 @@ paths:
             schema:
               type: string
               format: binary
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - manifest
+              properties:
+                manifest:
+                  $ref: "#/components/schemas/ArtifactBatchUploadManifest"
+              additionalProperties:
+                type: string
+                format: binary
+              description: |
+                Strict multipart upload format. The `manifest` part must arrive first with JSON
+                matching `ArtifactBatchUploadManifest`. Each subsequent file part name must match
+                a manifest entry `part` value.
+            encoding:
+              manifest:
+                contentType: application/json
       responses:
         "200":
           description: Blob written
@@ -758,11 +776,24 @@ paths:
       operationId: putStageArtifact
       tags: [Run Internals]
       summary: Put Stage Artifact
-      description: Uploads an artifact for a stage. Intended for trusted internal callers.
+      description: |
+        Uploads one or more artifacts for a stage. Intended for trusted internal callers.
+
+        The server accepts both:
+        - `application/octet-stream` for single-file uploads with the `filename` query parameter
+        - strict manifest-first `multipart/form-data` uploads documented by `ArtifactBatchUploadManifest`
+
+        The generated Rust client currently exposes the octet-stream variant because the OpenAPI
+        code generator in this repo does not support multiple request media types on one operation.
       parameters:
         - $ref: "#/components/parameters/RunId"
         - $ref: "#/components/parameters/StageId"
-        - $ref: "#/components/parameters/ArtifactFilename"
+        - name: filename
+          in: query
+          required: false
+          description: Relative artifact path for `application/octet-stream` uploads. Ignored for multipart uploads.
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -774,7 +805,7 @@ paths:
         "204":
           description: Artifact written
         "400":
-          description: Missing filename
+          description: Invalid filename, multipart manifest, checksum, or upload body
           content:
             application/json:
               schema:
@@ -2683,6 +2714,51 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ArtifactEntry"
+
+    ArtifactBatchUploadEntry:
+      description: One file entry in a strict multipart artifact upload manifest.
+      type: object
+      required:
+        - part
+        - path
+      properties:
+        part:
+          type: string
+          description: Multipart field name for the file part.
+          example: file1
+        path:
+          type: string
+          description: Relative artifact path to store.
+          example: src/lib.rs
+        sha256:
+          type: string
+          nullable: true
+          description: Optional lowercase hex SHA-256 checksum for the file contents.
+          example: 3f785df4c5b7d3f1f4c1f0ecb0f55f1d9f6f6a3d9f0a8a98f7a74f29d1f81a2c
+        expected_bytes:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+          description: Optional exact byte length expected for the file part.
+          example: 1234
+        content_type:
+          type: string
+          nullable: true
+          description: Optional client-supplied content type for the file part.
+          example: text/plain
+
+    ArtifactBatchUploadManifest:
+      description: Manifest for strict multipart artifact uploads.
+      type: object
+      required:
+        - entries
+      properties:
+        entries:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/ArtifactBatchUploadEntry"
 
     RunArtifactEntry:
       description: A captured artifact file for a run.

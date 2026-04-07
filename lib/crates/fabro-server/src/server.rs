@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::path::{Component, PathBuf};
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 use crate::bind::Bind;
 #[cfg(test)]
 use axum::body::to_bytes;
-use axum::extract::{self as axum_extract, Path, Query, State};
-use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
+use axum::extract::{self as axum_extract, DefaultBodyLimit, Path, Query, State};
+use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header, request::Parts};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
@@ -31,8 +31,8 @@ use fabro_llm::types::{
 use fabro_model::{BilledModelUsage, BilledTokenCounts};
 use fabro_store::{ArtifactStore, Database, EventEnvelope, EventPayload, StageId};
 use fabro_types::{
-    EventBody, RunBlobId, RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance,
-    RunServerProvenance, RunSubjectProvenance, Settings,
+    EventBody, RunArtifactStorage, RunBlobId, RunClientProvenance, RunControlAction, RunEvent,
+    RunId, RunProvenance, RunServerProvenance, RunSubjectProvenance, Settings,
 };
 use fabro_util::redact::redact_jsonl_line;
 use fabro_util::version::FABRO_VERSION;
@@ -40,7 +40,10 @@ use fabro_workflow::artifacts as workflow_artifacts;
 use fabro_workflow::error::FabroError;
 use fabro_workflow::handler::HandlerRegistry;
 use futures_util::stream;
+use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use object_store::memory::InMemory as MemoryObjectStore;
+use rand::RngCore;
+use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -63,7 +66,9 @@ use tracing::{error, info};
 use crate::demo;
 use crate::diagnostics;
 use crate::error::ApiError;
-use crate::jwt_auth::{AuthMode, AuthenticatedService, AuthenticatedSubject};
+use crate::jwt_auth::{
+    AuthMode, AuthenticatedService, AuthenticatedSubject, authenticate_service_parts,
+};
 use crate::run_manifest;
 use crate::secret_store::{SecretStore, SecretStoreError};
 use crate::static_files;
@@ -233,6 +238,46 @@ enum ExecutionResult {
 const FILE_INTERVIEW_QUESTION_ID: &str = "q-file";
 const WORKER_STDERR_LOG: &str = "worker.stderr.log";
 const WORKER_CANCEL_GRACE: Duration = Duration::from_secs(5);
+const ARTIFACT_UPLOAD_TOKEN_ISSUER: &str = "fabro-server-artifact-upload";
+const ARTIFACT_UPLOAD_TOKEN_SCOPE: &str = "stage_artifacts:upload";
+const ARTIFACT_UPLOAD_TOKEN_TTL_SECS: u64 = 24 * 60 * 60;
+const MAX_SINGLE_ARTIFACT_BYTES: u64 = 10 * 1024 * 1024;
+const MAX_MULTIPART_ARTIFACTS: usize = 100;
+const MAX_MULTIPART_REQUEST_BYTES: u64 = 50 * 1024 * 1024;
+const MAX_MULTIPART_MANIFEST_BYTES: usize = 256 * 1024;
+
+#[derive(Clone)]
+struct ArtifactUploadTokenKeys {
+    encoding: Arc<EncodingKey>,
+    decoding: Arc<DecodingKey>,
+    validation: Arc<Validation>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct ArtifactUploadClaims {
+    iss: String,
+    iat: u64,
+    exp: u64,
+    run_id: String,
+    scope: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct ArtifactBatchUploadManifest {
+    entries: Vec<ArtifactBatchUploadEntry>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct ArtifactBatchUploadEntry {
+    part: String,
+    path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expected_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    content_type: Option<String>,
+}
 
 /// Per-model billing totals.
 #[derive(Default)]
@@ -257,6 +302,7 @@ pub struct AppState {
     aggregate_billing: Mutex<BillingAccumulator>,
     store: Arc<Database>,
     artifact_store: ArtifactStore,
+    artifact_upload_tokens: ArtifactUploadTokenKeys,
     started_at: Instant,
     max_concurrent_runs: usize,
     scheduler_notify: Notify,
@@ -374,6 +420,31 @@ impl AppState {
         }))
     }
 
+    fn issue_artifact_upload_token(&self, run_id: &RunId) -> Result<String, ApiError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+        let claims = ArtifactUploadClaims {
+            iss: ARTIFACT_UPLOAD_TOKEN_ISSUER.to_string(),
+            iat: now,
+            exp: now + ARTIFACT_UPLOAD_TOKEN_TTL_SECS,
+            run_id: run_id.to_string(),
+            scope: ARTIFACT_UPLOAD_TOKEN_SCOPE.to_string(),
+        };
+        jsonwebtoken::encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &self.artifact_upload_tokens.encoding,
+        )
+        .map_err(|err| {
+            ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to sign artifact upload token: {err}"),
+            )
+        })
+    }
+
     fn begin_shutdown(&self) {
         self.shutting_down.store(true, Ordering::Relaxed);
         self.scheduler_notify.notify_waiters();
@@ -382,6 +453,67 @@ impl AppState {
     fn is_shutting_down(&self) -> bool {
         self.shutting_down.load(Ordering::Relaxed)
     }
+}
+
+fn artifact_upload_token_keys() -> ArtifactUploadTokenKeys {
+    let mut secret = [0_u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut secret);
+
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.set_required_spec_claims(&["iss", "iat", "exp"]);
+    validation.set_issuer(&[ARTIFACT_UPLOAD_TOKEN_ISSUER]);
+
+    ArtifactUploadTokenKeys {
+        encoding: Arc::new(EncodingKey::from_secret(&secret)),
+        decoding: Arc::new(DecodingKey::from_secret(&secret)),
+        validation: Arc::new(validation),
+    }
+}
+
+fn maybe_authorize_artifact_upload_token(
+    parts: &Parts,
+    run_id: &RunId,
+    keys: &ArtifactUploadTokenKeys,
+) -> Result<bool, ApiError> {
+    let header = match parts
+        .headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+    {
+        Some(header) => header,
+        None => return Ok(false),
+    };
+    let token = match header.strip_prefix("Bearer ") {
+        Some(token) => token,
+        None => return Ok(false),
+    };
+
+    let claims =
+        match jsonwebtoken::decode::<ArtifactUploadClaims>(token, &keys.decoding, &keys.validation)
+        {
+            Ok(token_data) => token_data.claims,
+            Err(_) => return Ok(false),
+        };
+
+    if claims.scope != ARTIFACT_UPLOAD_TOKEN_SCOPE {
+        return Err(ApiError::forbidden());
+    }
+    if claims.run_id != run_id.to_string() {
+        return Err(ApiError::forbidden());
+    }
+
+    Ok(true)
+}
+
+fn authorize_artifact_upload(
+    parts: &Parts,
+    state: &AppState,
+    run_id: &RunId,
+) -> Result<(), ApiError> {
+    if maybe_authorize_artifact_upload_token(parts, run_id, &state.artifact_upload_tokens)? {
+        return Ok(());
+    }
+    authenticate_service_parts(parts)
 }
 
 fn decode_secret_pem(name: &str, raw: &str) -> Result<String, String> {
@@ -553,7 +685,9 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/runs/{id}/stages/{stageId}/turns", get(not_implemented))
         .route(
             "/runs/{id}/stages/{stageId}/artifacts",
-            get(list_stage_artifacts).post(put_stage_artifact),
+            get(list_stage_artifacts)
+                .post(put_stage_artifact)
+                .layer(DefaultBodyLimit::disable()),
         )
         .route(
             "/runs/{id}/stages/{stageId}/artifacts/download",
@@ -1575,6 +1709,7 @@ pub(crate) fn build_app_state_with_path(
         aggregate_billing: Mutex::new(BillingAccumulator::default()),
         store,
         artifact_store,
+        artifact_upload_tokens: artifact_upload_token_keys(),
         started_at: Instant::now(),
         max_concurrent_runs,
         scheduler_notify: Notify::new(),
@@ -1829,24 +1964,43 @@ fn required_filename(params: ArtifactFilenameParams) -> Result<String, Response>
 }
 
 #[allow(clippy::result_large_err)]
-fn validate_relative_artifact_path(kind: &str, value: &str) -> Result<PathBuf, Response> {
-    let mut normalized = PathBuf::new();
-    for component in PathBuf::from(value).components() {
-        match component {
-            Component::Normal(part) => normalized.push(part),
-            Component::CurDir => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(ApiError::bad_request(format!(
-                    "{kind} must be a relative path without '..'"
-                ))
-                .into_response());
-            }
-        }
-    }
-    if normalized.as_os_str().is_empty() {
+fn validate_relative_artifact_path(kind: &str, value: &str) -> Result<String, Response> {
+    if value.is_empty() {
         return Err(ApiError::bad_request(format!("{kind} must not be empty")).into_response());
     }
-    Ok(normalized)
+
+    if value.contains('\\') {
+        return Err(
+            ApiError::bad_request(format!("{kind} must not contain backslashes")).into_response(),
+        );
+    }
+
+    let segments = value.split('/').collect::<Vec<_>>();
+    if segments.iter().any(|segment| segment.is_empty()) {
+        return Err(
+            ApiError::bad_request(format!("{kind} must not contain empty path segments"))
+                .into_response(),
+        );
+    }
+    if segments
+        .iter()
+        .any(|segment| matches!(*segment, "." | ".."))
+    {
+        return Err(ApiError::bad_request(format!(
+            "{kind} must be a relative path without '.' or '..' segments"
+        ))
+        .into_response());
+    }
+
+    Ok(segments.join("/"))
+}
+
+fn bad_request_response(detail: impl Into<String>) -> Response {
+    ApiError::bad_request(detail.into()).into_response()
+}
+
+fn payload_too_large_response(detail: impl Into<String>) -> Response {
+    ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, detail.into()).into_response()
 }
 
 #[allow(clippy::result_large_err)]
@@ -2357,10 +2511,15 @@ fn worker_command(
         .expect("settings lock poisoned")
         .storage_dir();
     let server_target = current_server_target(&storage_dir)?;
+    let artifact_upload_token = state
+        .issue_artifact_upload_token(&run_id)
+        .map_err(|_| anyhow::anyhow!("failed to sign artifact upload token"))?;
     let mut cmd = Command::new(exe);
     cmd.arg("__run-worker")
         .arg("--server")
         .arg(server_target)
+        .arg("--artifact-upload-token")
+        .arg(artifact_upload_token)
         .arg("--run-dir")
         .arg(run_dir)
         .arg("--run-id")
@@ -2469,6 +2628,7 @@ async fn create_run(
 
     let mut create_input = run_manifest::create_run_input(prepared.clone());
     create_input.run_id = Some(run_id);
+    create_input.artifact_storage = Some(RunArtifactStorage::ObjectStoreV1);
     create_input.provenance = Some(run_provenance(&headers, &subject));
 
     let created = match Box::pin(operations::create(state.store.as_ref(), create_input)).await {
@@ -2874,6 +3034,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         interviewer: Arc::clone(&interviewer) as Arc<dyn Interviewer>,
         run_store: run_store.clone().into(),
         event_sink: workflow_event::RunEventSink::store(run_store.clone()),
+        artifact_uploader: None,
         run_control: None,
         github_app,
         on_node: None,
@@ -3696,6 +3857,27 @@ async fn read_run_blob(
     }
 }
 
+async fn load_run_record(
+    state: &AppState,
+    run_id: &RunId,
+) -> Result<fabro_types::RunRecord, Response> {
+    let run_store = state
+        .store
+        .open_run_reader(run_id)
+        .await
+        .map_err(|_| ApiError::not_found("Run not found.").into_response())?;
+    let run_state = run_store.state().await.map_err(|err| {
+        ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+    })?;
+    run_state.run.ok_or_else(|| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "run record missing from store",
+        )
+        .into_response()
+    })
+}
+
 async fn list_run_artifacts(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
@@ -3705,39 +3887,47 @@ async fn list_run_artifacts(
         Ok(id) => id,
         Err(response) => return response,
     };
-    match state.store.open_run_reader(&id).await {
-        Ok(run_store) => match run_store.state().await {
-            Ok(run_state) => {
-                let Some(run) = run_state.run.as_ref() else {
-                    return ApiError::new(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "run record missing from store",
-                    )
-                    .into_response();
-                };
-                match scan_run_artifacts(run, &id, None, None) {
-                    Ok(entries) => Json(RunArtifactListResponse {
-                        data: entries
-                            .into_iter()
-                            .map(|entry| RunArtifactEntry {
-                                stage_id: StageId::new(entry.node_slug.clone(), entry.retry)
-                                    .to_string(),
-                                node_slug: entry.node_slug,
-                                retry: entry.retry.cast_signed(),
-                                relative_path: entry.relative_path,
-                                size: entry.size.cast_signed(),
-                            })
-                            .collect(),
+    let run = match load_run_record(state.as_ref(), &id).await {
+        Ok(run) => run,
+        Err(response) => return response,
+    };
+
+    if run.uses_object_backed_artifacts() {
+        return match state.artifact_store.list_for_run(&id).await {
+            Ok(entries) => Json(RunArtifactListResponse {
+                data: entries
+                    .into_iter()
+                    .map(|entry| RunArtifactEntry {
+                        stage_id: entry.node.to_string(),
+                        node_slug: entry.node.node_id().to_string(),
+                        retry: entry.node.visit().cast_signed(),
+                        relative_path: entry.filename,
+                        size: entry.size.cast_signed(),
                     })
-                    .into_response(),
-                    Err(response) => response,
-                }
-            }
+                    .collect(),
+            })
+            .into_response(),
             Err(err) => {
                 ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
             }
-        },
-        Err(_) => ApiError::not_found("Run not found.").into_response(),
+        };
+    }
+
+    match scan_run_artifacts(&run, &id, None, None) {
+        Ok(entries) => Json(RunArtifactListResponse {
+            data: entries
+                .into_iter()
+                .map(|entry| RunArtifactEntry {
+                    stage_id: StageId::new(entry.node_slug.clone(), entry.retry).to_string(),
+                    node_slug: entry.node_slug,
+                    retry: entry.retry.cast_signed(),
+                    relative_path: entry.relative_path,
+                    size: entry.size.cast_signed(),
+                })
+                .collect(),
+        })
+        .into_response(),
+        Err(response) => response,
     }
 }
 
@@ -3754,59 +3944,395 @@ async fn list_stage_artifacts(
         Ok(stage_id) => stage_id,
         Err(response) => return response,
     };
-    match state.store.open_run_reader(&id).await {
-        Ok(run_store) => match run_store.state().await {
-            Ok(run_state) => {
-                let Some(run) = run_state.run.as_ref() else {
-                    return ApiError::new(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "run record missing from store",
-                    )
-                    .into_response();
-                };
-                match state.artifact_store.list_for_node(&id, &stage_id).await {
-                    Ok(filenames) if !filenames.is_empty() => Json(ArtifactListResponse {
-                        data: filenames
-                            .into_iter()
-                            .map(|filename| ArtifactEntry { filename })
-                            .collect(),
-                    })
-                    .into_response(),
-                    Ok(_) => match scan_run_artifacts(
-                        run,
-                        &id,
-                        Some(stage_id.node_id()),
-                        Some(stage_id.visit()),
-                    ) {
-                        Ok(entries) => Json(ArtifactListResponse {
-                            data: entries
-                                .into_iter()
-                                .map(|entry| ArtifactEntry {
-                                    filename: entry.relative_path,
-                                })
-                                .collect(),
+    let run = match load_run_record(state.as_ref(), &id).await {
+        Ok(run) => run,
+        Err(response) => return response,
+    };
+
+    match state.artifact_store.list_for_node(&id, &stage_id).await {
+        Ok(filenames) if run.uses_object_backed_artifacts() || !filenames.is_empty() => {
+            Json(ArtifactListResponse {
+                data: filenames
+                    .into_iter()
+                    .map(|filename| ArtifactEntry { filename })
+                    .collect(),
+            })
+            .into_response()
+        }
+        Ok(_) => {
+            match scan_run_artifacts(&run, &id, Some(stage_id.node_id()), Some(stage_id.visit())) {
+                Ok(entries) => Json(ArtifactListResponse {
+                    data: entries
+                        .into_iter()
+                        .map(|entry| ArtifactEntry {
+                            filename: entry.relative_path,
                         })
-                        .into_response(),
-                        Err(response) => response,
-                    },
-                    Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                        .into_response(),
-                }
+                        .collect(),
+                })
+                .into_response(),
+                Err(response) => response,
             }
-            Err(err) => {
-                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
-            }
-        },
-        Err(_) => ApiError::not_found("Run not found.").into_response(),
+        }
+        Err(err) => {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        }
     }
 }
 
+enum ArtifactUploadContentType {
+    OctetStream,
+    Multipart { boundary: String },
+}
+
+struct ValidatedArtifactBatchEntry {
+    path: String,
+    sha256: Option<String>,
+    expected_bytes: Option<u64>,
+}
+
+#[allow(clippy::result_large_err)]
+fn artifact_upload_content_type(
+    headers: &HeaderMap,
+) -> Result<ArtifactUploadContentType, Response> {
+    let value = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| {
+            ApiError::new(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "artifact uploads require a supported Content-Type",
+            )
+            .into_response()
+        })?;
+
+    let mime = value.split(';').next().unwrap_or(value).trim();
+    match mime {
+        "application/octet-stream" => Ok(ArtifactUploadContentType::OctetStream),
+        "multipart/form-data" => multer::parse_boundary(value)
+            .map(|boundary| ArtifactUploadContentType::Multipart { boundary })
+            .map_err(|err| bad_request_response(format!("invalid multipart boundary: {err}"))),
+        _ => Err(ApiError::new(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "artifact uploads only support application/octet-stream or multipart/form-data",
+        )
+        .into_response()),
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn content_length_from_headers(headers: &HeaderMap) -> Result<Option<u64>, Response> {
+    headers
+        .get(header::CONTENT_LENGTH)
+        .map(|value| {
+            value
+                .to_str()
+                .map_err(|err| {
+                    bad_request_response(format!("invalid content-length header: {err}"))
+                })
+                .and_then(|value| {
+                    value.parse::<u64>().map_err(|err| {
+                        bad_request_response(format!("invalid content-length header: {err}"))
+                    })
+                })
+        })
+        .transpose()
+}
+
+#[allow(clippy::result_large_err)]
+async fn read_multipart_manifest(
+    field: &mut multer::Field<'_>,
+) -> Result<ArtifactBatchUploadManifest, Response> {
+    let mut manifest_bytes = Vec::new();
+    while let Some(chunk) = field
+        .chunk()
+        .await
+        .map_err(|err| bad_request_response(format!("invalid multipart body: {err}")))?
+    {
+        manifest_bytes.extend_from_slice(&chunk);
+        if manifest_bytes.len() > MAX_MULTIPART_MANIFEST_BYTES {
+            return Err(payload_too_large_response(
+                "multipart manifest exceeds the server limit",
+            ));
+        }
+    }
+
+    serde_json::from_slice(&manifest_bytes)
+        .map_err(|err| bad_request_response(format!("invalid multipart manifest: {err}")))
+}
+
+#[allow(clippy::result_large_err)]
+fn validate_artifact_batch_manifest(
+    manifest: ArtifactBatchUploadManifest,
+) -> Result<HashMap<String, ValidatedArtifactBatchEntry>, Response> {
+    if manifest.entries.is_empty() {
+        return Err(bad_request_response(
+            "multipart manifest must include at least one artifact entry",
+        ));
+    }
+    if manifest.entries.len() > MAX_MULTIPART_ARTIFACTS {
+        return Err(payload_too_large_response(format!(
+            "multipart upload exceeds the {} artifact limit",
+            MAX_MULTIPART_ARTIFACTS
+        )));
+    }
+
+    let mut entries = HashMap::with_capacity(manifest.entries.len());
+    let mut seen_paths = HashSet::new();
+    let mut expected_total_bytes = 0_u64;
+
+    for entry in manifest.entries {
+        if entry.part.is_empty() {
+            return Err(bad_request_response(
+                "multipart manifest part names must not be empty",
+            ));
+        }
+        if entry.part == "manifest" {
+            return Err(bad_request_response(
+                "multipart manifest part name 'manifest' is reserved",
+            ));
+        }
+        let path = validate_relative_artifact_path("manifest path", &entry.path)?;
+        if !seen_paths.insert(path.clone()) {
+            return Err(bad_request_response(format!(
+                "duplicate artifact path in multipart manifest: {path}"
+            )));
+        }
+        if let Some(sha256) = entry.sha256.as_ref() {
+            if sha256.len() != 64 || !sha256.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return Err(bad_request_response(format!(
+                    "invalid sha256 for multipart part {}",
+                    entry.part
+                )));
+            }
+        }
+        if let Some(expected_bytes) = entry.expected_bytes {
+            if expected_bytes > MAX_SINGLE_ARTIFACT_BYTES {
+                return Err(payload_too_large_response(format!(
+                    "artifact {} exceeds the {} byte limit",
+                    path, MAX_SINGLE_ARTIFACT_BYTES
+                )));
+            }
+            expected_total_bytes = expected_total_bytes.saturating_add(expected_bytes);
+            if expected_total_bytes > MAX_MULTIPART_REQUEST_BYTES {
+                return Err(payload_too_large_response(format!(
+                    "multipart upload exceeds the {} byte limit",
+                    MAX_MULTIPART_REQUEST_BYTES
+                )));
+            }
+        }
+        if entries
+            .insert(
+                entry.part.clone(),
+                ValidatedArtifactBatchEntry {
+                    path,
+                    sha256: entry.sha256.map(|value| value.to_ascii_lowercase()),
+                    expected_bytes: entry.expected_bytes,
+                },
+            )
+            .is_some()
+        {
+            return Err(bad_request_response(format!(
+                "duplicate multipart part name in manifest: {}",
+                entry.part
+            )));
+        }
+    }
+
+    Ok(entries)
+}
+
+async fn upload_stage_artifact_octet_stream(
+    state: &AppState,
+    run_id: &RunId,
+    stage_id: &StageId,
+    filename: String,
+    body: axum::body::Body,
+    content_length: Option<u64>,
+) -> Response {
+    let relative_path = match validate_relative_artifact_path("filename", &filename) {
+        Ok(path) => path,
+        Err(response) => return response,
+    };
+
+    if content_length.is_some_and(|length| length > MAX_SINGLE_ARTIFACT_BYTES) {
+        return payload_too_large_response(format!(
+            "artifact exceeds the {} byte limit",
+            MAX_SINGLE_ARTIFACT_BYTES
+        ));
+    }
+
+    let mut writer = match state
+        .artifact_store
+        .writer(run_id, stage_id, &relative_path)
+    {
+        Ok(writer) => writer,
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+
+    let mut bytes_written = 0_u64;
+    let mut data_stream = body.into_data_stream();
+    while let Some(chunk) = data_stream.next().await {
+        let chunk = match chunk
+            .map_err(|err| bad_request_response(format!("invalid request body: {err}")))
+        {
+            Ok(chunk) => chunk,
+            Err(response) => return response,
+        };
+        bytes_written =
+            bytes_written.saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
+        if bytes_written > MAX_SINGLE_ARTIFACT_BYTES {
+            return payload_too_large_response(format!(
+                "artifact exceeds the {} byte limit",
+                MAX_SINGLE_ARTIFACT_BYTES
+            ));
+        }
+        if let Err(err) = writer.write_all(&chunk).await {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    }
+
+    match writer.shutdown().await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(err) => {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        }
+    }
+}
+
+async fn upload_stage_artifact_multipart(
+    state: &AppState,
+    run_id: &RunId,
+    stage_id: &StageId,
+    boundary: String,
+    body: axum::body::Body,
+) -> Response {
+    let mut multipart = multer::Multipart::new(body.into_data_stream(), boundary);
+    let Some(mut manifest_field) = (match multipart
+        .next_field()
+        .await
+        .map_err(|err| bad_request_response(format!("invalid multipart body: {err}")))
+    {
+        Ok(field) => field,
+        Err(response) => return response,
+    }) else {
+        return bad_request_response("multipart upload must begin with a manifest part");
+    };
+
+    if manifest_field.name() != Some("manifest") {
+        return bad_request_response("multipart upload must begin with a manifest part");
+    }
+
+    let manifest = match read_multipart_manifest(&mut manifest_field).await {
+        Ok(manifest) => manifest,
+        Err(response) => return response,
+    };
+    drop(manifest_field);
+    let mut expected_parts = match validate_artifact_batch_manifest(manifest) {
+        Ok(entries) => entries,
+        Err(response) => return response,
+    };
+    let mut total_bytes = 0_u64;
+
+    while let Some(mut field) = match multipart
+        .next_field()
+        .await
+        .map_err(|err| bad_request_response(format!("invalid multipart body: {err}")))
+    {
+        Ok(field) => field,
+        Err(response) => return response,
+    } {
+        let Some(part_name) = field.name().map(ToOwned::to_owned) else {
+            return bad_request_response("multipart file parts must be named");
+        };
+        let Some(entry) = expected_parts.remove(&part_name) else {
+            return bad_request_response(format!("unexpected multipart part: {part_name}"));
+        };
+
+        let mut writer = match state.artifact_store.writer(run_id, stage_id, &entry.path) {
+            Ok(writer) => writer,
+            Err(err) => {
+                return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                    .into_response();
+            }
+        };
+        let mut bytes_written = 0_u64;
+        let mut sha256 = Sha256::new();
+
+        while let Some(chunk) = match field
+            .chunk()
+            .await
+            .map_err(|err| bad_request_response(format!("invalid multipart body: {err}")))
+        {
+            Ok(chunk) => chunk,
+            Err(response) => return response,
+        } {
+            let chunk_len = u64::try_from(chunk.len()).unwrap_or(u64::MAX);
+            bytes_written = bytes_written.saturating_add(chunk_len);
+            total_bytes = total_bytes.saturating_add(chunk_len);
+
+            if bytes_written > MAX_SINGLE_ARTIFACT_BYTES {
+                return payload_too_large_response(format!(
+                    "artifact {} exceeds the {} byte limit",
+                    entry.path, MAX_SINGLE_ARTIFACT_BYTES
+                ));
+            }
+            if total_bytes > MAX_MULTIPART_REQUEST_BYTES {
+                return payload_too_large_response(format!(
+                    "multipart upload exceeds the {} byte limit",
+                    MAX_MULTIPART_REQUEST_BYTES
+                ));
+            }
+
+            sha256.update(&chunk);
+            if let Err(err) = writer.write_all(&chunk).await {
+                return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                    .into_response();
+            }
+        }
+
+        if let Some(expected_bytes) = entry.expected_bytes {
+            if bytes_written != expected_bytes {
+                return bad_request_response(format!(
+                    "multipart part {part_name} expected {expected_bytes} bytes but received {bytes_written}"
+                ));
+            }
+        }
+        if let Some(expected_sha256) = entry.sha256.as_ref() {
+            let actual_sha256 = hex::encode(sha256.finalize());
+            if actual_sha256 != *expected_sha256 {
+                return bad_request_response(format!(
+                    "multipart part {part_name} sha256 did not match manifest"
+                ));
+            }
+        }
+
+        if let Err(err) = writer.shutdown().await {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    }
+
+    if !expected_parts.is_empty() {
+        let mut missing = expected_parts.into_keys().collect::<Vec<_>>();
+        missing.sort();
+        return bad_request_response(format!(
+            "multipart upload is missing part(s): {}",
+            missing.join(", ")
+        ));
+    }
+
+    StatusCode::NO_CONTENT.into_response()
+}
+
 async fn put_stage_artifact(
-    _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
     Path((id, stage_id)): Path<(String, String)>,
     Query(params): Query<ArtifactFilenameParams>,
-    body: Bytes,
+    request: axum_extract::Request,
 ) -> Response {
     let id = match parse_run_id_path(&id) {
         Ok(id) => id,
@@ -3816,22 +4342,45 @@ async fn put_stage_artifact(
         Ok(stage_id) => stage_id,
         Err(response) => return response,
     };
-    let filename = match required_filename(params) {
-        Ok(filename) => filename,
+    let (parts, body) = request.into_parts();
+
+    if let Err(err) = authorize_artifact_upload(&parts, state.as_ref(), &id) {
+        return err.into_response();
+    }
+    if let Err(response) = load_run_record(state.as_ref(), &id).await.map(|_| ()) {
+        return response;
+    }
+
+    let content_length = match content_length_from_headers(&parts.headers) {
+        Ok(length) => length,
         Err(response) => return response,
     };
-    match state.store.open_run_reader(&id).await {
-        Ok(_) => match state
-            .artifact_store
-            .put(&id, &stage_id, &filename, &body)
+    match artifact_upload_content_type(&parts.headers) {
+        Ok(ArtifactUploadContentType::OctetStream) => {
+            let filename = match required_filename(params) {
+                Ok(filename) => filename,
+                Err(response) => return response,
+            };
+            upload_stage_artifact_octet_stream(
+                state.as_ref(),
+                &id,
+                &stage_id,
+                filename,
+                body,
+                content_length,
+            )
             .await
-        {
-            Ok(()) => StatusCode::NO_CONTENT.into_response(),
-            Err(err) => {
-                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        }
+        Ok(ArtifactUploadContentType::Multipart { boundary }) => {
+            if content_length.is_some_and(|length| length > MAX_MULTIPART_REQUEST_BYTES) {
+                return payload_too_large_response(format!(
+                    "multipart upload exceeds the {} byte limit",
+                    MAX_MULTIPART_REQUEST_BYTES
+                ));
             }
-        },
-        Err(_) => ApiError::not_found("Run not found.").into_response(),
+            upload_stage_artifact_multipart(state.as_ref(), &id, &stage_id, boundary, body).await
+        }
+        Err(response) => response,
     }
 }
 
@@ -3853,48 +4402,41 @@ async fn get_stage_artifact(
         Ok(filename) => filename,
         Err(response) => return response,
     };
-    match state.store.open_run_reader(&id).await {
-        Ok(run_store) => match run_store.state().await {
-            Ok(run_state) => {
-                let Some(run) = run_state.run.as_ref() else {
-                    return ApiError::new(
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "run record missing from store",
-                    )
-                    .into_response();
-                };
-                match state.artifact_store.get(&id, &stage_id, &filename).await {
-                    Ok(Some(bytes)) => octet_stream_response(bytes),
-                    Ok(None) => {
-                        let relative_path =
-                            match validate_relative_artifact_path("filename", &filename) {
-                                Ok(path) => path,
-                                Err(response) => return response,
-                            };
-                        let artifact_path = run_artifacts_dir(run, &id)
-                            .join(stage_id.node_id())
-                            .join(format!("retry_{}", stage_id.visit()))
-                            .join(relative_path);
-                        match std::fs::read(&artifact_path) {
-                            Ok(bytes) => octet_stream_response(Bytes::from(bytes)),
-                            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                                ApiError::not_found("Artifact not found.").into_response()
-                            }
-                            Err(err) => {
-                                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                                    .into_response()
-                            }
-                        }
-                    }
-                    Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                        .into_response(),
+    let relative_path = match validate_relative_artifact_path("filename", &filename) {
+        Ok(path) => path,
+        Err(response) => return response,
+    };
+    let run = match load_run_record(state.as_ref(), &id).await {
+        Ok(run) => run,
+        Err(response) => return response,
+    };
+
+    match state
+        .artifact_store
+        .get(&id, &stage_id, &relative_path)
+        .await
+    {
+        Ok(Some(bytes)) => octet_stream_response(bytes),
+        Ok(None) if run.uses_object_backed_artifacts() => {
+            ApiError::not_found("Artifact not found.").into_response()
+        }
+        Ok(None) => {
+            let artifact_path = run_artifacts_dir(&run, &id)
+                .join(stage_id.node_id())
+                .join(format!("retry_{}", stage_id.visit()))
+                .join(&relative_path);
+            match std::fs::read(&artifact_path) {
+                Ok(bytes) => octet_stream_response(Bytes::from(bytes)),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                    ApiError::not_found("Artifact not found.").into_response()
                 }
+                Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                    .into_response(),
             }
-            Err(err) => {
-                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
-            }
-        },
-        Err(_) => ApiError::not_found("Run not found.").into_response(),
+        }
+        Err(err) => {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        }
     }
 }
 
@@ -4878,9 +5420,7 @@ mod tests {
         Body::from(serde_json::to_string(&minimal_manifest_json(dot_source)).unwrap())
     }
 
-    /// Create a run via POST /runs, then start it via POST /runs/{id}/start.
-    /// Returns the run_id string.
-    async fn create_and_start_run(app: &Router, dot_source: &str) -> String {
+    async fn create_run(app: &Router, dot_source: &str) -> String {
         let req = Request::builder()
             .method("POST")
             .uri(api("/runs"))
@@ -4889,7 +5429,42 @@ mod tests {
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap().to_string();
+        body["id"].as_str().unwrap().to_string()
+    }
+
+    fn multipart_body(
+        boundary: &str,
+        manifest: &serde_json::Value,
+        files: &[(&str, &str, &[u8])],
+    ) -> Body {
+        let mut body = Vec::new();
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(b"Content-Disposition: form-data; name=\"manifest\"\r\n");
+        body.extend_from_slice(b"Content-Type: application/json\r\n\r\n");
+        body.extend_from_slice(serde_json::to_string(manifest).unwrap().as_bytes());
+        body.extend_from_slice(b"\r\n");
+
+        for (part, filename, bytes) in files {
+            body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+            body.extend_from_slice(
+                format!(
+                    "Content-Disposition: form-data; name=\"{part}\"; filename=\"{filename}\"\r\n"
+                )
+                .as_bytes(),
+            );
+            body.extend_from_slice(b"Content-Type: application/octet-stream\r\n\r\n");
+            body.extend_from_slice(bytes);
+            body.extend_from_slice(b"\r\n");
+        }
+
+        body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+        Body::from(body)
+    }
+
+    /// Create a run via POST /runs, then start it via POST /runs/{id}/start.
+    /// Returns the run_id string.
+    async fn create_and_start_run(app: &Router, dot_source: &str) -> String {
+        let run_id = create_run(app, dot_source).await;
 
         let req = Request::builder()
             .method("POST")
@@ -4899,6 +5474,32 @@ mod tests {
         app.clone().oneshot(req).await.unwrap();
 
         run_id
+    }
+
+    async fn create_legacy_run(state: &Arc<AppState>, settings: &Settings) -> RunId {
+        operations::create(
+            state.store.as_ref(),
+            operations::CreateRunInput {
+                workflow: operations::WorkflowInput::DotSource {
+                    source: MINIMAL_DOT.to_string(),
+                    base_dir: None,
+                },
+                settings: settings.clone(),
+                cwd: PathBuf::from("/tmp"),
+                workflow_slug: None,
+                workflow_path: None,
+                workflow_bundle: None,
+                run_id: None,
+                host_repo_path: None,
+                repo_origin_url: None,
+                base_branch: None,
+                artifact_storage: None,
+                provenance: None,
+            },
+        )
+        .await
+        .unwrap()
+        .run_id
     }
 
     async fn create_durable_run_with_events(
@@ -5525,16 +6126,7 @@ mod tests {
         let state = create_app_state();
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
-        let req = Request::builder()
-            .method("POST")
-            .uri(api("/runs"))
-            .header("content-type", "application/json")
-            .body(manifest_body(MINIMAL_DOT))
-            .unwrap();
-
-        let response = app.clone().oneshot(req).await.unwrap();
-        let body = body_json(response.into_body()).await;
-        let run_id = body["id"].as_str().unwrap();
+        let run_id = create_run(&app, MINIMAL_DOT).await;
         let stage_id = "code@2";
 
         let req = Request::builder()
@@ -5546,7 +6138,11 @@ mod tests {
             .body(Body::from("fn main() {}"))
             .unwrap();
         let response = app.clone().oneshot(req).await.unwrap();
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        if response.status() != StatusCode::NO_CONTENT {
+            let status = response.status();
+            let body = body_json(response.into_body()).await;
+            panic!("expected 204, got {status}: {body}");
+        }
 
         let req = Request::builder()
             .method("GET")
@@ -5569,6 +6165,288 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         assert_eq!(&bytes[..], b"fn main() {}");
+    }
+
+    #[tokio::test]
+    async fn create_run_marks_object_backed_artifacts() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let run_id = create_run(&app, MINIMAL_DOT)
+            .await
+            .parse::<RunId>()
+            .unwrap();
+        let run_state = state
+            .store
+            .open_run_reader(&run_id)
+            .await
+            .unwrap()
+            .state()
+            .await
+            .unwrap();
+
+        assert!(
+            run_state
+                .run
+                .as_ref()
+                .unwrap()
+                .uses_object_backed_artifacts()
+        );
+    }
+
+    #[tokio::test]
+    async fn stage_artifact_upload_rejects_invalid_filename() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let run_id = create_run(&app, MINIMAL_DOT).await;
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api(&format!(
+                "/runs/{run_id}/stages/code@2/artifacts?filename=../escape.txt"
+            )))
+            .header("content-type", "application/octet-stream")
+            .body(Body::from("nope"))
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn stage_artifacts_multipart_round_trip() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let run_id = create_run(&app, MINIMAL_DOT).await;
+        let stage_id = "code@2";
+        let source_bytes = b"fn main() {}\n";
+        let log_bytes = b"build ok\n";
+        let manifest = serde_json::json!({
+            "entries": [
+                {
+                    "part": "file1",
+                    "path": "src/lib.rs",
+                    "sha256": hex::encode(Sha256::digest(source_bytes)),
+                    "expected_bytes": source_bytes.len(),
+                    "content_type": "text/plain"
+                },
+                {
+                    "part": "file2",
+                    "path": "logs/output.txt",
+                    "sha256": hex::encode(Sha256::digest(log_bytes)),
+                    "expected_bytes": log_bytes.len(),
+                    "content_type": "text/plain"
+                }
+            ]
+        });
+        let boundary = "fabro-test-boundary";
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api(&format!("/runs/{run_id}/stages/{stage_id}/artifacts")))
+            .header(
+                "content-type",
+                format!("multipart/form-data; boundary={boundary}"),
+            )
+            .body(multipart_body(
+                boundary,
+                &manifest,
+                &[
+                    ("file1", "src/lib.rs", source_bytes),
+                    ("file2", "logs/output.txt", log_bytes),
+                ],
+            ))
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        if response.status() != StatusCode::NO_CONTENT {
+            let status = response.status();
+            let body = body_json(response.into_body()).await;
+            panic!("expected 204, got {status}: {body}");
+        }
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{run_id}/stages/{stage_id}/artifacts")))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        assert_eq!(body["data"][0]["filename"], "logs/output.txt");
+        assert_eq!(body["data"][1]["filename"], "src/lib.rs");
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!(
+                "/runs/{run_id}/stages/{stage_id}/artifacts/download?filename=logs/output.txt"
+            )))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(&bytes[..], log_bytes);
+    }
+
+    #[tokio::test]
+    async fn stage_artifacts_multipart_requires_manifest_first() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let run_id = create_run(&app, MINIMAL_DOT).await;
+        let boundary = "fabro-test-boundary";
+        let body = format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"file1\"; filename=\"src/lib.rs\"\r\n\r\nfn main() {{}}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"manifest\"\r\nContent-Type: application/json\r\n\r\n{{\"entries\":[{{\"part\":\"file1\",\"path\":\"src/lib.rs\"}}]}}\r\n--{boundary}--\r\n"
+        );
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api(&format!("/runs/{run_id}/stages/code@2/artifacts")))
+            .header(
+                "content-type",
+                format!("multipart/form-data; boundary={boundary}"),
+            )
+            .body(Body::from(body))
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn object_backed_runs_do_not_fallback_to_scratch_artifacts() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = dry_run_settings();
+        settings.storage_dir = Some(temp.path().join("storage"));
+        let state = create_app_state_with_options(settings.clone(), 5);
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let run_id = create_run(&app, MINIMAL_DOT)
+            .await
+            .parse::<RunId>()
+            .unwrap();
+        let artifact_path = Storage::new(settings.storage_dir())
+            .run_scratch(&run_id)
+            .artifact_files_dir()
+            .join("code")
+            .join("retry_2")
+            .join("src/lib.rs");
+        std::fs::create_dir_all(artifact_path.parent().unwrap()).unwrap();
+        std::fs::write(&artifact_path, "legacy scratch only").unwrap();
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{run_id}/stages/code@2/artifacts")))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        assert_eq!(body["data"].as_array().unwrap().len(), 0);
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!(
+                "/runs/{run_id}/stages/code@2/artifacts/download?filename=src/lib.rs"
+            )))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn legacy_runs_fallback_to_scratch_artifacts() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut settings = dry_run_settings();
+        settings.storage_dir = Some(temp.path().join("storage"));
+        let state = create_app_state_with_options(settings.clone(), 5);
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let run_id = create_legacy_run(&state, &settings).await;
+        let artifact_path = Storage::new(settings.storage_dir())
+            .run_scratch(&run_id)
+            .artifact_files_dir()
+            .join("code")
+            .join("retry_2")
+            .join("src/lib.rs");
+        let retry_dir = artifact_path
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        std::fs::create_dir_all(artifact_path.parent().unwrap()).unwrap();
+        std::fs::write(&artifact_path, "legacy scratch only").unwrap();
+        std::fs::write(
+            retry_dir.join("manifest.json"),
+            serde_json::to_string(
+                &fabro_workflow::artifact_snapshot::ArtifactCollectionSummary {
+                    files_copied: 1,
+                    total_bytes: u64::try_from(b"legacy scratch only".len()).unwrap(),
+                    files_skipped: 0,
+                    download_errors: 0,
+                    hash_errors: 0,
+                    captured_assets: vec![
+                        fabro_workflow::artifact_snapshot::CapturedArtifactInfo {
+                            path: "src/lib.rs".to_string(),
+                            mime: "text/plain".to_string(),
+                            content_md5: "0".repeat(32),
+                            content_sha256: "0".repeat(64),
+                            bytes: u64::try_from(b"legacy scratch only".len()).unwrap(),
+                        },
+                    ],
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let run_state = state
+            .store
+            .open_run_reader(&run_id)
+            .await
+            .unwrap()
+            .state()
+            .await
+            .unwrap();
+        assert!(
+            !run_state
+                .run
+                .as_ref()
+                .unwrap()
+                .uses_object_backed_artifacts()
+        );
+        let scanned = workflow_artifacts::scan_artifacts(
+            &Storage::new(settings.storage_dir())
+                .run_scratch(&run_id)
+                .artifact_files_dir(),
+            Some("code"),
+            Some(2),
+        )
+        .unwrap();
+        assert_eq!(scanned.len(), 1);
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{run_id}/stages/code@2/artifacts")))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        assert_eq!(body["data"][0]["filename"], "src/lib.rs");
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!(
+                "/runs/{run_id}/stages/code@2/artifacts/download?filename=src/lib.rs"
+            )))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(&bytes[..], b"legacy scratch only");
     }
 
     #[tokio::test]

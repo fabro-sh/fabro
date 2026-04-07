@@ -33,6 +33,7 @@ impl TryFrom<ConfigLayer> for Settings {
             no_retro: value.no_retro,
             storage_dir: value.storage_dir,
             max_concurrent_runs: value.max_concurrent_runs,
+            artifact_storage: value.artifact_storage,
             web: value.web.map(Into::into),
             api: value.api.map(TryInto::try_into).transpose()?,
             features: value.features.map(Into::into),

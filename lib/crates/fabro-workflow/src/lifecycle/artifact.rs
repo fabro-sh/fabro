@@ -1,8 +1,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use async_trait::async_trait;
+use fabro_types::StageId;
 
 use fabro_core::graph::NodeSpec;
 use fabro_core::lifecycle::{AttemptContext, AttemptResultContext, RunLifecycle};
@@ -11,6 +13,7 @@ use fabro_core::state::ExecutionState;
 
 use crate::artifact::{offload_large_values, sync_artifacts_to_env};
 use crate::artifact_snapshot::collect_artifacts;
+use crate::artifact_upload::StageArtifactUploader;
 use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
@@ -23,6 +26,12 @@ type WfRunState = ExecutionState<Option<BilledModelUsage>>;
 type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
 type WfNodeDecision = NodeDecision<Option<BilledModelUsage>>;
 
+const ARTIFACT_UPLOAD_RETRY_DELAYS: [Duration; 3] = [
+    Duration::from_millis(100),
+    Duration::from_millis(250),
+    Duration::from_millis(500),
+];
+
 /// Sub-lifecycle responsible for artifact collection, offloading, and syncing.
 pub(crate) struct ArtifactLifecycle {
     pub sandbox: Arc<dyn fabro_sandbox::Sandbox>,
@@ -31,6 +40,7 @@ pub(crate) struct ArtifactLifecycle {
     pub emitter: Arc<Emitter>,
     pub artifacts_dir: PathBuf,
     pub artifact_globs: Vec<String>,
+    pub artifact_uploader: Option<Arc<dyn StageArtifactUploader>>,
     pub captured_artifact_count: Arc<AtomicUsize>,
     /// Per-attempt state: epoch seconds when the attempt started.
     attempt_start_epoch: std::sync::Mutex<Option<f64>>,
@@ -45,6 +55,7 @@ impl ArtifactLifecycle {
         emitter: Arc<Emitter>,
         artifacts_dir: PathBuf,
         artifact_globs: Vec<String>,
+        artifact_uploader: Option<Arc<dyn StageArtifactUploader>>,
         captured_artifact_count: Arc<AtomicUsize>,
     ) -> Self {
         Self {
@@ -54,6 +65,7 @@ impl ArtifactLifecycle {
             emitter,
             artifacts_dir,
             artifact_globs,
+            artifact_uploader,
             captured_artifact_count,
             attempt_start_epoch: std::sync::Mutex::new(None),
         }
@@ -113,6 +125,18 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         .await
         {
             Ok(summary) if summary.files_copied > 0 => {
+                let stage_id = StageId::new(node_id.to_string(), ctx.attempt);
+                if let Err(err) = self
+                    .upload_artifacts(&stage_id, &artifact_capture_dir, &summary.captured_assets)
+                    .await
+                {
+                    self.emitter.emit(&Event::RunNotice {
+                        level: RunNoticeLevel::Warn,
+                        code: "artifact_upload_failed".to_string(),
+                        message: format!("[node: {node_id}] artifact upload failed: {err}"),
+                    });
+                    return Ok(());
+                }
                 for asset in &summary.captured_assets {
                     self.captured_artifact_count.fetch_add(1, Ordering::Relaxed);
                     self.emitter.emit(&Event::ArtifactCaptured {
@@ -175,5 +199,35 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         }
 
         Ok(())
+    }
+}
+
+impl ArtifactLifecycle {
+    async fn upload_artifacts(
+        &self,
+        stage_id: &StageId,
+        artifact_capture_dir: &std::path::Path,
+        artifacts: &[crate::artifact_snapshot::CapturedArtifactInfo],
+    ) -> Result<(), String> {
+        let Some(uploader) = self.artifact_uploader.as_ref() else {
+            return Ok(());
+        };
+
+        let mut last_error = None;
+        for attempt in 0..=ARTIFACT_UPLOAD_RETRY_DELAYS.len() {
+            match uploader
+                .upload_stage_artifacts(stage_id, artifact_capture_dir, artifacts)
+                .await
+            {
+                Ok(()) => return Ok(()),
+                Err(err) => last_error = Some(err.to_string()),
+            }
+
+            if let Some(delay) = ARTIFACT_UPLOAD_RETRY_DELAYS.get(attempt) {
+                tokio::time::sleep(*delay).await;
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| "artifact upload failed".to_string()))
     }
 }

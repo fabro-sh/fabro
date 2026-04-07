@@ -109,6 +109,9 @@ pub struct ConfigLayer {
     pub max_concurrent_runs: Option<usize>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_storage: Option<fabro_types::ArtifactStorageSettings>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub web: Option<WebConfig>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -168,6 +171,7 @@ impl Combine for ConfigLayer {
             no_retro: self.no_retro.combine(other.no_retro),
             storage_dir: self.storage_dir.combine(other.storage_dir),
             max_concurrent_runs: self.max_concurrent_runs.combine(other.max_concurrent_runs),
+            artifact_storage: self.artifact_storage.combine(other.artifact_storage),
             web: self.web.combine(other.web),
             api: self.api.combine(other.api),
             features: self.features.combine(other.features),

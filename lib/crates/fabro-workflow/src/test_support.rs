@@ -91,6 +91,7 @@ async fn initialized(
             base_branch: run_options.base_branch.clone(),
             workflow_slug: run_options.workflow_slug.clone(),
             db_prefix: None,
+            artifact_storage: None,
             provenance: None,
         },
     )
@@ -113,6 +114,7 @@ async fn initialized(
             sandbox,
             registry: Arc::new(registry),
             on_node: None,
+            artifact_uploader: None,
             run_control: None,
             hook_runner: options.hook_runner,
             env: options.env,

@@ -1587,6 +1587,7 @@ dependencies = [
  "shlex",
  "tempfile",
  "tokio",
+ "tokio-util",
  "toml 0.8.23",
  "tracing",
  "tracing-appender",
@@ -1885,6 +1886,7 @@ dependencies = [
  "hyper-util",
  "jsonwebtoken",
  "mime_guess",
+ "multer",
  "object_store",
  "openapiv3",
  "rand 0.8.5",
@@ -3665,6 +3667,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "multer"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83e87776546dc87511aa5ee218730c92b666d7264ab6ed41f9d215af9cd5224b"
+dependencies = [
+ "bytes",
+ "encoding_rs",
+ "futures-util",
+ "http",
+ "httparse",
+ "memchr",
+ "mime",
+ "spin",
+ "version_check",
+]
+
+[[package]]
 name = "naive-timer"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4966,6 +4985,7 @@ dependencies = [
  "hyper-util",
  "js-sys",
  "log",
+ "mime_guess",
  "percent-encoding",
  "pin-project-lite",
  "quinn",

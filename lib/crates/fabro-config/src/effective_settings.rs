@@ -97,6 +97,7 @@ fn local_daemon_server_overrides_layer(settings: &Settings) -> Result<ConfigLaye
     Ok(ConfigLayer {
         storage_dir: layer.storage_dir,
         max_concurrent_runs: layer.max_concurrent_runs,
+        artifact_storage: layer.artifact_storage,
         web: layer.web,
         api: layer.api,
         features: layer.features,
@@ -109,6 +110,7 @@ fn strip_server_owned_fields(layer: &mut ConfigLayer) {
     layer.exec = None;
     layer.storage_dir = None;
     layer.max_concurrent_runs = None;
+    layer.artifact_storage = None;
     layer.web = None;
     layer.api = None;
     layer.features = None;

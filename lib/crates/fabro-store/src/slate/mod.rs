@@ -288,6 +288,7 @@ mod tests {
             repo_origin_url: Some("https://github.com/fabro-sh/fabro".to_string()),
             base_branch: Some("main".to_string()),
             labels: std::collections::HashMap::from([("team".to_string(), "infra".to_string())]),
+            artifact_storage: None,
             provenance: None,
         }
     }

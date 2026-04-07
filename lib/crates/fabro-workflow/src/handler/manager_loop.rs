@@ -258,6 +258,7 @@ impl Handler for SubWorkflowHandler {
                 sandbox,
                 registry,
                 on_node: None,
+                artifact_uploader: None,
                 run_control: None,
                 hook_runner,
                 env,

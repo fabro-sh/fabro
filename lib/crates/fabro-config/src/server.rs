@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 
 use fabro_types::Settings;
 pub use fabro_types::settings::server::{
-    ApiAuthStrategy, ApiSettings, AuthProvider, AuthSettings, FeaturesSettings, GitAuthorSettings,
-    GitProvider, GitSettings, LogSettings, TlsSettings, WebSettings, WebhookSettings,
-    WebhookStrategy,
+    ApiAuthStrategy, ApiSettings, ArtifactStorageBackend, ArtifactStorageSettings, AuthProvider,
+    AuthSettings, FeaturesSettings, GitAuthorSettings, GitProvider, GitSettings, LogSettings,
+    TlsSettings, WebSettings, WebhookSettings, WebhookStrategy,
 };
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize, crate::Combine)]

@@ -4,6 +4,8 @@ export * from './api-question';
 export * from './api-question-option';
 export * from './api-settings';
 export * from './append-event-response';
+export * from './artifact-batch-upload-entry';
+export * from './artifact-batch-upload-manifest';
 export * from './artifact-entry';
 export * from './artifact-list-response';
 export * from './artifacts-settings';

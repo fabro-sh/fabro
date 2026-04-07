@@ -241,6 +241,7 @@ mod tests {
             repo_origin_url: None,
             base_branch: None,
             labels: std::collections::HashMap::new(),
+            artifact_storage: None,
             provenance: None,
         };
         append_event(
@@ -260,6 +261,7 @@ mod tests {
                 base_branch: None,
                 workflow_slug: None,
                 db_prefix: None,
+                artifact_storage: run_record.artifact_storage,
                 provenance: run_record.provenance.clone(),
             },
         )
