@@ -41,7 +41,8 @@ pub use settings::Settings;
 pub use stage_id::StageId;
 pub use start::StartRecord;
 pub use status::{
-    InvalidTransition, ParseRunStatusError, RunStatus, RunStatusRecord, StatusReason,
+    InvalidTransition, ParseRunStatusError, RunControlAction, RunStatus, RunStatusRecord,
+    StatusReason,
 };
 pub use usage::StageUsage;
 

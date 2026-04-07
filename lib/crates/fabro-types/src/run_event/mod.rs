@@ -71,6 +71,16 @@ pub enum EventBody {
     RunRunning(RunStatusTransitionProps),
     #[serde(rename = "run.removing")]
     RunRemoving(RunStatusTransitionProps),
+    #[serde(rename = "run.cancel.requested")]
+    RunCancelRequested(RunControlRequestedProps),
+    #[serde(rename = "run.pause.requested")]
+    RunPauseRequested(RunControlRequestedProps),
+    #[serde(rename = "run.unpause.requested")]
+    RunUnpauseRequested(RunControlRequestedProps),
+    #[serde(rename = "run.paused")]
+    RunPaused(RunControlEffectProps),
+    #[serde(rename = "run.unpaused")]
+    RunUnpaused(RunControlEffectProps),
     #[serde(rename = "run.rewound")]
     RunRewound(RunRewoundProps),
     #[serde(rename = "run.completed")]
@@ -296,6 +306,11 @@ impl EventBody {
             Self::RunStarting(_) => "run.starting",
             Self::RunRunning(_) => "run.running",
             Self::RunRemoving(_) => "run.removing",
+            Self::RunCancelRequested(_) => "run.cancel.requested",
+            Self::RunPauseRequested(_) => "run.pause.requested",
+            Self::RunUnpauseRequested(_) => "run.unpause.requested",
+            Self::RunPaused(_) => "run.paused",
+            Self::RunUnpaused(_) => "run.unpaused",
             Self::RunRewound(_) => "run.rewound",
             Self::RunCompleted(_) => "run.completed",
             Self::RunFailed(_) => "run.failed",

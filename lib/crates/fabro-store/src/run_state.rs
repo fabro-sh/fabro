@@ -12,8 +12,8 @@ use fabro_types::run_event::{
 };
 use fabro_types::{
     Checkpoint, Conclusion, EventBody, FailureSignature, NodeStatusRecord, Outcome,
-    PullRequestRecord, Retro, RunEvent, RunId, RunRecord, RunStatus, RunStatusRecord,
-    SandboxRecord, StageStatus, StageUsage, StartRecord, StatusReason, TokenUsage,
+    PullRequestRecord, Retro, RunControlAction, RunEvent, RunId, RunRecord, RunStatus,
+    RunStatusRecord, SandboxRecord, StageStatus, StageUsage, StartRecord, StatusReason, TokenUsage,
 };
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -22,6 +22,7 @@ pub struct RunProjection {
     pub graph_source: Option<String>,
     pub start: Option<StartRecord>,
     pub status: Option<RunStatusRecord>,
+    pub pending_control: Option<RunControlAction>,
     pub checkpoint: Option<Checkpoint>,
     pub checkpoints: Vec<(u32, Checkpoint)>,
     pub conclusion: Option<Conclusion>,
@@ -120,13 +121,32 @@ impl RunProjection {
             EventBody::RunRemoving(props) => {
                 self.status = Some(run_status_record(RunStatus::Removing, props.reason, ts));
             }
+            EventBody::RunCancelRequested(_) => {
+                self.pending_control = Some(RunControlAction::Cancel);
+            }
+            EventBody::RunPauseRequested(_) => {
+                self.pending_control = Some(RunControlAction::Pause);
+            }
+            EventBody::RunUnpauseRequested(_) => {
+                self.pending_control = Some(RunControlAction::Unpause);
+            }
+            EventBody::RunPaused(_) => {
+                self.status = Some(run_status_record(RunStatus::Paused, None, ts));
+                self.pending_control = None;
+            }
+            EventBody::RunUnpaused(_) => {
+                self.status = Some(run_status_record(RunStatus::Running, None, ts));
+                self.pending_control = None;
+            }
             EventBody::RunCompleted(props) => {
                 self.status = Some(run_status_record(RunStatus::Succeeded, props.reason, ts));
+                self.pending_control = None;
                 self.conclusion = Some(conclusion_from_completed(props, ts)?);
                 self.final_patch.clone_from(&props.final_patch);
             }
             EventBody::RunFailed(props) => {
                 self.status = Some(run_status_record(RunStatus::Failed, props.reason, ts));
+                self.pending_control = None;
                 self.conclusion = Some(conclusion_from_failed(props, ts));
             }
             EventBody::RunRewound(_) => {
@@ -330,6 +350,7 @@ impl RunProjection {
             start_time: self.start.as_ref().map(|start| start.start_time),
             status: self.status.as_ref().map(|status| status.status),
             status_reason: self.status.as_ref().and_then(|status| status.reason),
+            pending_control: self.pending_control,
             duration_ms: self
                 .conclusion
                 .as_ref()
@@ -355,6 +376,7 @@ impl RunProjection {
 
     fn reset_for_rewind(&mut self) {
         self.status = None;
+        self.pending_control = None;
         self.checkpoint = None;
         self.checkpoints.clear();
         self.conclusion = None;

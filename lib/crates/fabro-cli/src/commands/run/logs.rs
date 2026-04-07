@@ -14,6 +14,8 @@ use crate::args::{GlobalArgs, LogsArgs};
 use crate::server_client;
 use crate::server_runs::ServerSummaryLookup;
 
+const FOLLOW_TERMINAL_GRACE: Duration = Duration::from_millis(500);
+
 pub(crate) async fn run(args: &LogsArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
     let lookup = ServerSummaryLookup::connect(&args.server).await?;
     let run = lookup.resolve(&args.run)?;
@@ -54,12 +56,6 @@ pub(crate) async fn run(args: &LogsArgs, styles: &Styles, globals: &GlobalArgs) 
     }
 
     if args.follow {
-        if events
-            .iter()
-            .any(|event| matches!(event_name(event), Some("run.completed" | "run.failed")))
-        {
-            return Ok(());
-        }
         follow_store_logs(
             client,
             &run_id,
@@ -149,6 +145,7 @@ async fn follow_store_logs(
     let stdout = io::stdout();
     let mut out = stdout.lock();
     let mut next_seq = seq;
+    let mut terminal_deadline = None;
 
     loop {
         match time::timeout(
@@ -158,6 +155,7 @@ async fn follow_store_logs(
         .await
         {
             Ok(Ok(events)) => {
+                let had_events = !events.is_empty();
                 let saw_terminal = events
                     .iter()
                     .any(|event| matches!(event_name(event), Some("run.completed" | "run.failed")));
@@ -173,27 +171,37 @@ async fn follow_store_logs(
                     out.flush()?;
                     next_seq = event.seq.saturating_add(1);
                 }
-                if saw_terminal {
-                    flush_remaining_store_events(
-                        client, run_id, next_seq, pretty, styles, &mut out,
-                    )
-                    .await?;
-                    debug!("Observed terminal event while following logs, stopping follow");
-                    break;
+                if saw_terminal || (terminal_deadline.is_some() && had_events) {
+                    terminal_deadline = Some(time::Instant::now() + FOLLOW_TERMINAL_GRACE);
                 }
             }
             Err(_) => {
                 if run_concluded(client, run_id).await? {
-                    flush_remaining_store_events(
-                        client, run_id, next_seq, pretty, styles, &mut out,
-                    )
-                    .await?;
-                    debug!("Run reached terminal status, stopping follow");
-                    break;
+                    terminal_deadline
+                        .get_or_insert_with(|| time::Instant::now() + FOLLOW_TERMINAL_GRACE);
                 }
             }
             Ok(Err(err)) => return Err(err),
         }
+
+        let Some(deadline) = terminal_deadline else {
+            continue;
+        };
+        if time::Instant::now() < deadline {
+            continue;
+        }
+
+        let flushed_next_seq =
+            flush_remaining_store_events(client, run_id, next_seq, pretty, styles, &mut out)
+                .await?;
+        if flushed_next_seq > next_seq {
+            next_seq = flushed_next_seq;
+            terminal_deadline = Some(time::Instant::now() + FOLLOW_TERMINAL_GRACE);
+            continue;
+        }
+
+        debug!("Run reached terminal status and log tail is quiet, stopping follow");
+        break;
     }
 
     Ok(())
@@ -220,12 +228,13 @@ async fn flush_remaining_store_events(
     pretty: bool,
     styles: &Styles,
     out: &mut dyn Write,
-) -> Result<()> {
+) -> Result<u32> {
     let events = client
         .list_run_events(run_id, Some(next_seq), None)
         .await
         .context("Failed to list server-backed run events while finalizing follow")?;
 
+    let mut next_seq = next_seq;
     for event in events {
         let line = event_payload_line(&event)?;
         if pretty {
@@ -235,9 +244,10 @@ async fn flush_remaining_store_events(
         } else {
             writeln!(out, "{line}")?;
         }
+        next_seq = event.seq.saturating_add(1);
     }
     out.flush()?;
-    Ok(())
+    Ok(next_seq)
 }
 
 fn event_payload_line(event: &fabro_store::EventEnvelope) -> Result<String> {

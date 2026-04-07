@@ -3,7 +3,7 @@ use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::{Context as _, Result, anyhow};
+use anyhow::{Context as _, Result, anyhow, bail};
 use fabro_api::types;
 use fabro_server::bind::Bind;
 use fabro_store::{EventEnvelope, RunSummary, StageId};
@@ -111,6 +111,19 @@ pub(crate) async fn connect_server(storage_dir: &Path) -> Result<ServerStoreClie
     Ok(ServerStoreClient {
         client: connect_api_client(storage_dir).await?,
     })
+}
+
+pub(crate) async fn connect_server_target_direct(target: &str) -> Result<ServerStoreClient> {
+    let client = if target.starts_with("http://") || target.starts_with("https://") {
+        connect_remote_api_client(target, None)?
+    } else {
+        let path = Path::new(target);
+        if !path.is_absolute() {
+            bail!("server target must be an http(s) URL or absolute Unix socket path");
+        }
+        connect_unix_socket_api_client(path).await?
+    };
+    Ok(ServerStoreClient { client })
 }
 
 pub(crate) async fn connect_server_only(args: &ServerTargetArgs) -> Result<ServerStoreClient> {

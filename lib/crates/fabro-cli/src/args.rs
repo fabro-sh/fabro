@@ -718,17 +718,29 @@ pub(crate) struct AttachArgs {
     pub(crate) run: String,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum RunWorkerMode {
+    Start,
+    Resume,
+}
+
 #[derive(Args)]
-pub(crate) struct RunnerArgs {
-    #[command(flatten)]
-    pub(crate) storage_dir: StorageDirArgs,
+pub(crate) struct RunWorkerArgs {
+    /// Fabro server target: http(s) URL or absolute Unix socket path
+    #[arg(long)]
+    pub(crate) server: String,
+
+    /// Run scratch directory
+    #[arg(long)]
+    pub(crate) run_dir: PathBuf,
 
     /// Run ID
     #[arg(long)]
     pub(crate) run_id: fabro_types::RunId,
-    /// Resume from checkpoint instead of fresh start
-    #[arg(long)]
-    pub(crate) resume: bool,
+
+    /// Worker mode
+    #[arg(long, value_enum)]
+    pub(crate) mode: RunWorkerMode,
 }
 
 #[derive(Args, Debug, Clone, Default)]
@@ -797,9 +809,9 @@ pub(crate) enum RunCommands {
     Start(StartArgs),
     /// Attach to a running or finished workflow run
     Attach(AttachArgs),
-    /// Internal: queue or resume a workflow run via the server
-    #[command(name = "__runner", hide = true)]
-    Runner(RunnerArgs),
+    /// Internal: execute a single workflow run locally
+    #[command(name = "__run-worker", hide = true)]
+    RunWorker(RunWorkerArgs),
     /// Show the diff of changes from a workflow run
     #[command(hide = true)]
     Diff(DiffArgs),
@@ -822,7 +834,7 @@ impl RunCommands {
             Self::Create(_) => "create",
             Self::Start(_) => "start",
             Self::Attach(_) => "attach",
-            Self::Runner(_) => "__runner",
+            Self::RunWorker(_) => "__run-worker",
             Self::Diff(_) => "diff",
             Self::Logs(_) => "logs",
             Self::Resume(_) => "resume",

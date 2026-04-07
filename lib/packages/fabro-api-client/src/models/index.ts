@@ -108,6 +108,7 @@ export * from './root-response-urls';
 export * from './run-artifact-entry';
 export * from './run-artifact-list-response';
 export * from './run-checkpoint';
+export * from './run-control-action';
 export * from './run-error';
 export * from './run-event';
 export * from './run-list-item';

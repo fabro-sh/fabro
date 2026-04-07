@@ -128,6 +128,7 @@ models/root-response.ts
 models/run-artifact-entry.ts
 models/run-artifact-list-response.ts
 models/run-checkpoint.ts
+models/run-control-action.ts
 models/run-error.ts
 models/run-event.ts
 models/run-list-item.ts

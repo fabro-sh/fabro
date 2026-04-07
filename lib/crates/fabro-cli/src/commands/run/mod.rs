@@ -1,7 +1,7 @@
 use anyhow::Result;
 use fabro_util::terminal::Styles;
 
-use crate::args::{AttachArgs, GlobalArgs, RunArgs, RunCommands, RunnerArgs, StartArgs};
+use crate::args::{AttachArgs, GlobalArgs, RunArgs, RunCommands, RunWorkerArgs, StartArgs};
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
 use crate::user_config::settings_layer_with_storage_dir;
@@ -76,11 +76,12 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             }
             Ok(())
         }
-        RunCommands::Runner(RunnerArgs {
-            storage_dir,
+        RunCommands::RunWorker(RunWorkerArgs {
+            server,
+            run_dir,
             run_id,
-            resume,
-        }) => runner::execute(run_id, storage_dir.clone_path(), resume).await,
+            mode,
+        }) => runner::execute(run_id, server, run_dir, mode).await,
         RunCommands::Diff(args) => diff::run(args, globals).await,
         RunCommands::Logs(args) => {
             let styles = Styles::detect_stdout();

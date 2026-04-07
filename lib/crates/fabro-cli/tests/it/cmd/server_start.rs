@@ -156,7 +156,7 @@ fn concurrent_autostart_converges_on_one_shared_daemon_and_cleans_up() {
         String::from_utf8(output.stdout)
             .expect("ps output should be UTF-8")
             .lines()
-            .filter(|line| line.contains("fabro: server") && line.contains(socket_path))
+            .filter(|line| line.contains("fabro server") && line.contains(socket_path))
             .count()
     }
 

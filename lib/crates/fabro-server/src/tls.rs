@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::sync::Arc;
+use std::{future::Future, pin::Pin};
 
 use rustls::ServerConfig;
 use rustls::server::WebPkiClientVerifier;
@@ -69,6 +70,19 @@ pub async fn serve_tls(
     tls_acceptor: tokio_rustls::TlsAcceptor,
     router: axum::Router,
 ) -> anyhow::Result<()> {
+    serve_tls_with_shutdown(listener, tls_acceptor, router, std::future::pending()).await
+}
+
+/// Serve requests over TLS until the supplied shutdown future resolves.
+pub async fn serve_tls_with_shutdown<F>(
+    listener: TcpListener,
+    tls_acceptor: tokio_rustls::TlsAcceptor,
+    router: axum::Router,
+    shutdown: F,
+) -> anyhow::Result<()>
+where
+    F: Future<Output = ()> + Send,
+{
     use hyper::body::Incoming;
     use hyper::service::service_fn;
     use hyper_util::rt::{TokioExecutor, TokioIo};
@@ -76,9 +90,14 @@ pub async fn serve_tls(
     use tower_service::Service;
 
     let builder = Builder::new(TokioExecutor::new());
+    let mut shutdown = Pin::from(Box::new(shutdown));
 
     loop {
-        let (tcp_stream, remote_addr) = listener.accept().await?;
+        let accepted = tokio::select! {
+            () = &mut shutdown => return Ok(()),
+            accepted = listener.accept() => accepted?,
+        };
+        let (tcp_stream, remote_addr) = accepted;
 
         let tls_acceptor = tls_acceptor.clone();
         let router = router.clone();

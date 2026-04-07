@@ -191,6 +191,8 @@ pub(crate) async fn get_run_status(
                 status: RunStatus::Running,
                 error: None,
                 queue_position: None,
+                status_reason: None,
+                pending_control: None,
                 created_at: item.created_at,
             }),
         )

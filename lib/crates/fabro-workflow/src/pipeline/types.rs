@@ -22,6 +22,7 @@ use crate::file_resolver::FileResolver;
 use crate::handler::HandlerRegistry;
 use crate::outcome::Outcome;
 use crate::records::{Checkpoint, Conclusion, RunRecord};
+use crate::run_control::RunControlState;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::transforms::Transform;
 use crate::workflow_bundle::WorkflowBundle;
@@ -245,6 +246,7 @@ pub struct InitOptions {
     pub git: Option<GitCheckpointOptions>,
     pub worktree_mode: Option<WorktreeMode>,
     pub registry_override: Option<Arc<HandlerRegistry>>,
+    pub run_control: Option<Arc<RunControlState>>,
     pub checkpoint: Option<Checkpoint>,
     pub seed_context: Option<Context>,
 }
@@ -264,6 +266,7 @@ pub struct Initialized {
     pub sandbox: Arc<dyn Sandbox>,
     pub registry: Arc<HandlerRegistry>,
     pub on_node: crate::OnNodeCallback,
+    pub run_control: Option<Arc<RunControlState>>,
     pub hook_runner: Option<Arc<HookRunner>>,
     pub env: HashMap<String, String>,
     pub dry_run: bool,

@@ -1,8 +1,10 @@
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use ::fabro_types::run_event as fabro_types;
-use ::fabro_types::{RunEvent, RunId, StageStatus, StatusReason};
+use ::fabro_types::{RunControlAction, RunEvent, RunId, StageStatus, StatusReason};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use fabro_store::{EventPayload, RunDatabase};
@@ -10,7 +12,8 @@ use fabro_util::json::normalize_json_value;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
-use tokio::sync::{mpsc, oneshot};
+use tokio::io::{AsyncWrite, AsyncWriteExt};
+use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot};
 use uuid::Uuid;
 
 use crate::error::FabroError;
@@ -77,6 +80,11 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<StatusReason>,
     },
+    RunCancelRequested,
+    RunPauseRequested,
+    RunUnpauseRequested,
+    RunPaused,
+    RunUnpaused,
     RunRewound {
         target_checkpoint_ordinal: usize,
         target_node_id: String,
@@ -528,6 +536,21 @@ impl Event {
             }
             Self::RunRemoving { reason } => {
                 info!(?reason, "Run removing");
+            }
+            Self::RunCancelRequested => {
+                info!("Run cancel requested");
+            }
+            Self::RunPauseRequested => {
+                info!("Run pause requested");
+            }
+            Self::RunUnpauseRequested => {
+                info!("Run unpause requested");
+            }
+            Self::RunPaused => {
+                info!("Run paused");
+            }
+            Self::RunUnpaused => {
+                info!("Run unpaused");
             }
             Self::RunRewound {
                 target_checkpoint_ordinal,
@@ -1069,6 +1092,11 @@ pub fn event_name(event: &Event) -> &'static str {
         Event::RunStarting { .. } => "run.starting",
         Event::RunRunning { .. } => "run.running",
         Event::RunRemoving { .. } => "run.removing",
+        Event::RunCancelRequested => "run.cancel.requested",
+        Event::RunPauseRequested => "run.pause.requested",
+        Event::RunUnpauseRequested => "run.unpause.requested",
+        Event::RunPaused => "run.paused",
+        Event::RunUnpaused => "run.unpaused",
         Event::RunRewound { .. } => "run.rewound",
         Event::WorkflowRunCompleted { .. } => "run.completed",
         Event::WorkflowRunFailed { .. } => "run.failed",
@@ -1370,6 +1398,23 @@ fn event_body_from_event(event: &Event) -> EventBody {
         Event::RunRemoving { reason } => {
             EventBody::RunRemoving(fabro_types::RunStatusTransitionProps { reason: *reason })
         }
+        Event::RunCancelRequested => {
+            EventBody::RunCancelRequested(fabro_types::RunControlRequestedProps {
+                action: RunControlAction::Cancel,
+            })
+        }
+        Event::RunPauseRequested => {
+            EventBody::RunPauseRequested(fabro_types::RunControlRequestedProps {
+                action: RunControlAction::Pause,
+            })
+        }
+        Event::RunUnpauseRequested => {
+            EventBody::RunUnpauseRequested(fabro_types::RunControlRequestedProps {
+                action: RunControlAction::Unpause,
+            })
+        }
+        Event::RunPaused => EventBody::RunPaused(fabro_types::RunControlEffectProps::default()),
+        Event::RunUnpaused => EventBody::RunUnpaused(fabro_types::RunControlEffectProps::default()),
         Event::RunRewound {
             target_checkpoint_ordinal,
             target_node_id,
@@ -2311,30 +2356,114 @@ pub async fn append_event(run_store: &RunDatabase, run_id: &RunId, event: &Event
         .map_err(anyhow::Error::from)
 }
 
-enum StoreProgressCommand {
-    Event(EventPayload),
+pub async fn append_event_to_sink(
+    sink: &RunEventSink,
+    run_id: &RunId,
+    event: &Event,
+) -> Result<()> {
+    let stored = to_run_event(run_id, event);
+    sink.write_run_event(&stored).await
+}
+
+#[derive(Clone)]
+pub enum RunEventSink {
+    Store(RunDatabase),
+    JsonLines(Arc<AsyncMutex<Pin<Box<dyn AsyncWrite + Send>>>>),
+    Callback(Arc<RunEventSinkCallback>),
+    Composite(Vec<RunEventSink>),
+}
+
+type RunEventSinkFuture = Pin<Box<dyn Future<Output = Result<()>> + Send + 'static>>;
+type RunEventSinkCallback = dyn Fn(RunEvent) -> RunEventSinkFuture + Send + Sync + 'static;
+
+impl RunEventSink {
+    #[must_use]
+    pub fn store(run_store: RunDatabase) -> Self {
+        Self::Store(run_store)
+    }
+
+    #[must_use]
+    pub fn json_lines<W>(writer: W) -> Self
+    where
+        W: AsyncWrite + Send + 'static,
+    {
+        Self::JsonLines(Arc::new(AsyncMutex::new(Box::pin(writer))))
+    }
+
+    #[must_use]
+    pub fn callback<F, Fut>(callback: F) -> Self
+    where
+        F: Fn(RunEvent) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<()>> + Send + 'static,
+    {
+        Self::Callback(Arc::new(move |event| Box::pin(callback(event))))
+    }
+
+    #[must_use]
+    pub fn fanout(sinks: Vec<Self>) -> Self {
+        let mut flattened = Vec::new();
+        for sink in sinks {
+            match sink {
+                Self::Composite(inner) => flattened.extend(inner),
+                other => flattened.push(other),
+            }
+        }
+        Self::Composite(flattened)
+    }
+
+    pub async fn write_run_event(&self, event: &RunEvent) -> Result<()> {
+        let mut pending = vec![self];
+        while let Some(sink) = pending.pop() {
+            match sink {
+                Self::Store(run_store) => {
+                    let payload = build_redacted_event_payload(event, &event.run_id)?;
+                    run_store
+                        .append_event(&payload)
+                        .await
+                        .map(|_| ())
+                        .map_err(anyhow::Error::from)?;
+                }
+                Self::JsonLines(writer) => {
+                    let line = redacted_event_json(event)?;
+                    let mut writer = writer.lock().await;
+                    writer.write_all(line.as_bytes()).await?;
+                    writer.write_all(b"\n").await?;
+                    writer.flush().await?;
+                }
+                Self::Callback(callback) => callback(event.clone()).await?,
+                Self::Composite(sinks) => {
+                    pending.extend(sinks.iter().rev());
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+enum RunEventCommand {
+    Event(RunEvent),
     Flush(oneshot::Sender<()>),
 }
 
 #[derive(Clone)]
-pub struct StoreProgressLogger {
-    tx: mpsc::UnboundedSender<StoreProgressCommand>,
+pub struct RunEventLogger {
+    tx: mpsc::UnboundedSender<RunEventCommand>,
 }
 
-impl StoreProgressLogger {
+impl RunEventLogger {
     #[must_use]
-    pub fn new(run_store: RunDatabase) -> Self {
+    pub fn new(sink: RunEventSink) -> Self {
         let (tx, mut rx) = mpsc::unbounded_channel();
 
         tokio::spawn(async move {
             while let Some(command) = rx.recv().await {
                 match command {
-                    StoreProgressCommand::Event(payload) => {
-                        if let Err(err) = run_store.append_event(&payload).await {
-                            tracing::warn!(error = %err, "Failed to append event to run store");
+                    RunEventCommand::Event(event) => {
+                        if let Err(err) = sink.write_run_event(&event).await {
+                            tracing::warn!(error = %err, "Failed to write run event");
                         }
                     }
-                    StoreProgressCommand::Flush(tx) => {
+                    RunEventCommand::Flush(tx) => {
                         let _ = tx.send(());
                     }
                 }
@@ -2346,31 +2475,44 @@ impl StoreProgressLogger {
 
     pub fn register(&self, emitter: &Emitter) {
         let tx = self.tx.clone();
-        emitter.on_event(
-            move |event| match build_redacted_event_payload(event, &event.run_id) {
-                Ok(payload) => {
-                    if tx.send(StoreProgressCommand::Event(payload)).is_err() {
-                        tracing::warn!(
-                            "Store progress logger channel closed while appending event"
-                        );
-                    }
-                }
-                Err(err) => {
-                    tracing::warn!(error = %err, "Failed to build store event payload");
-                }
-            },
-        );
+        emitter.on_event(move |event| {
+            if tx.send(RunEventCommand::Event(event.clone())).is_err() {
+                tracing::warn!("Run event logger channel closed while forwarding event");
+            }
+        });
     }
 
     pub async fn flush(&self) {
         let (tx, rx) = oneshot::channel();
-        if self.tx.send(StoreProgressCommand::Flush(tx)).is_err() {
-            tracing::warn!("Store progress logger channel closed before flush");
+        if self.tx.send(RunEventCommand::Flush(tx)).is_err() {
+            tracing::warn!("Run event logger channel closed before flush");
             return;
         }
         if rx.await.is_err() {
-            tracing::warn!("Store progress logger flush dropped before completion");
+            tracing::warn!("Run event logger flush dropped before completion");
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct StoreProgressLogger {
+    inner: RunEventLogger,
+}
+
+impl StoreProgressLogger {
+    #[must_use]
+    pub fn new(run_store: RunDatabase) -> Self {
+        Self {
+            inner: RunEventLogger::new(RunEventSink::store(run_store)),
+        }
+    }
+
+    pub fn register(&self, emitter: &Emitter) {
+        self.inner.register(emitter);
+    }
+
+    pub async fn flush(&self) {
+        self.inner.flush().await;
     }
 }
 
@@ -2723,6 +2865,46 @@ mod tests {
         assert!(line.get("id").is_some());
         assert_eq!(line["event"], "run.notice");
         assert_eq!(line["properties"]["code"], "example");
+    }
+
+    #[tokio::test]
+    async fn run_event_sink_json_lines_writes_canonical_event_lines() {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+
+        let (writer, reader) = tokio::io::duplex(4096);
+        let sink = RunEventSink::json_lines(writer);
+        let event = to_run_event(&fixtures::RUN_7, &Event::RunPauseRequested);
+
+        sink.write_run_event(&event).await.unwrap();
+
+        let mut reader = BufReader::new(reader);
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+
+        let payload = event_payload_from_redacted_json(line.trim_end(), &fixtures::RUN_7).unwrap();
+        assert_eq!(payload.as_value()["event"], "run.pause.requested");
+        assert_eq!(payload.as_value()["properties"]["action"], "pause");
+    }
+
+    #[tokio::test]
+    async fn run_event_logger_registers_emitter_events_to_json_lines() {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+
+        let (writer, reader) = tokio::io::duplex(4096);
+        let sink = RunEventSink::json_lines(writer);
+        let logger = RunEventLogger::new(sink);
+        let emitter = Emitter::new(fixtures::RUN_8);
+        logger.register(&emitter);
+
+        emitter.emit(&Event::RunPaused);
+        logger.flush().await;
+
+        let mut reader = BufReader::new(reader);
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+
+        let payload = event_payload_from_redacted_json(line.trim_end(), &fixtures::RUN_8).unwrap();
+        assert_eq!(payload.as_value()["event"], "run.paused");
     }
 
     #[test]

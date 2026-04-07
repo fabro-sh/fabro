@@ -15,9 +15,6 @@ pub(crate) async fn execute(
     storage_dir: Option<PathBuf>,
     styles: &'static Styles,
 ) -> Result<()> {
-    let _ = fabro_proc::title_init();
-    fabro_proc::title_set(&format!("fabro: server {bind}"));
-
     serve_args.bind = Some(bind.to_string());
 
     let _record_guard = scopeguard::guard(record_path, |path| {

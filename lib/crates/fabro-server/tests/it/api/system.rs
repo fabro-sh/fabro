@@ -3,7 +3,6 @@ use std::time::Duration;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fabro_config::Storage;
-use fabro_server::server::create_app_state_with_options;
 use fabro_types::{RunId, Settings};
 use http_body_util::BodyExt;
 use tempfile::tempdir;
@@ -11,8 +10,8 @@ use tokio::time::timeout;
 use tower::ServiceExt;
 
 use crate::helpers::{
-    MINIMAL_DOT, api, body_json, minimal_manifest_json_with_dry_run, test_app_with_scheduler,
-    test_settings, wait_for_run_status,
+    MINIMAL_DOT, api, body_json, minimal_manifest_json_with_dry_run, test_app_state_with_options,
+    test_app_with_scheduler, test_settings, wait_for_run_status,
 };
 
 fn temp_storage_settings() -> (tempfile::TempDir, Settings) {
@@ -50,7 +49,7 @@ async fn get_system_info_returns_runtime_fields() {
     let (_temp, settings) = temp_storage_settings();
     let expected_storage_dir = settings.storage_dir.clone().unwrap();
     let app = fabro_server::server::build_router(
-        create_app_state_with_options(settings, 5),
+        test_app_state_with_options(settings, 5),
         fabro_server::jwt_auth::AuthMode::Disabled,
     );
 
@@ -78,7 +77,7 @@ async fn get_system_info_returns_runtime_fields() {
 async fn get_system_disk_usage_returns_summary_and_verbose_rows() {
     let (_temp, settings) = temp_storage_settings();
     let storage_dir = settings.storage_dir.clone().unwrap();
-    let app = test_app_with_scheduler(create_app_state_with_options(settings, 5));
+    let app = test_app_with_scheduler(test_app_state_with_options(settings, 5));
 
     let run_id = create_run(&app, minimal_manifest_json_with_dry_run(MINIMAL_DOT)).await;
     start_run(&app, &run_id).await;
@@ -111,7 +110,7 @@ async fn get_system_disk_usage_returns_summary_and_verbose_rows() {
 async fn prune_runs_supports_dry_run_and_deletion() {
     let (_temp, settings) = temp_storage_settings();
     let storage_dir = settings.storage_dir.clone().unwrap();
-    let app = test_app_with_scheduler(create_app_state_with_options(settings, 5));
+    let app = test_app_with_scheduler(test_app_state_with_options(settings, 5));
 
     let run_id = create_run(&app, minimal_manifest_json_with_dry_run(MINIMAL_DOT)).await;
     start_run(&app, &run_id).await;
@@ -156,7 +155,7 @@ async fn prune_runs_supports_dry_run_and_deletion() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn attach_events_streams_only_matching_run_ids() {
     let (_temp, settings) = temp_storage_settings();
-    let app = test_app_with_scheduler(create_app_state_with_options(settings, 5));
+    let app = test_app_with_scheduler(test_app_state_with_options(settings, 5));
 
     let run_one = create_run(&app, minimal_manifest_json_with_dry_run(MINIMAL_DOT)).await;
     let run_two = create_run(&app, minimal_manifest_json_with_dry_run(MINIMAL_DOT)).await;

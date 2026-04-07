@@ -15,8 +15,7 @@ use fabro_types::{RunId, Settings};
 use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::{
-    Emitter, Event, EventBody, RunNoticeLevel, StoreProgressLogger, append_event,
-    event_payload_from_redacted_json, redacted_event_json, to_run_event,
+    Emitter, Event, EventBody, RunEventLogger, RunEventSink, RunNoticeLevel, append_event_to_sink,
 };
 use crate::git::MetadataStore;
 use crate::handler::HandlerRegistry;
@@ -27,6 +26,7 @@ use crate::pipeline::{
     classify_engine_result,
 };
 use crate::records::Checkpoint;
+use crate::run_control::RunControlState;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::run_status::{RunStatus, StatusReason};
 use crate::workflow_bundle::{StoredWorkflowBundle, WorkflowBundle};
@@ -49,6 +49,7 @@ struct RunSession {
     devcontainer: Option<DevcontainerSpec>,
     seed_context: Option<Context>,
     run_store: RunDatabase,
+    event_sink: RunEventSink,
     git: Option<GitCheckpointOptions>,
     github_app: Option<fabro_github::GitHubAppCredentials>,
     worktree_mode: Option<WorktreeMode>,
@@ -61,6 +62,7 @@ struct RunSession {
     pr_model: String,
     workflow_path: Option<PathBuf>,
     workflow_bundle: Option<Arc<WorkflowBundle>>,
+    run_control: Option<Arc<RunControlState>>,
 }
 
 pub struct StartServices {
@@ -69,6 +71,8 @@ pub struct StartServices {
     pub emitter: Arc<Emitter>,
     pub interviewer: Arc<dyn Interviewer>,
     pub run_store: RunDatabase,
+    pub event_sink: RunEventSink,
+    pub run_control: Option<Arc<RunControlState>>,
     pub github_app: Option<fabro_github::GitHubAppCredentials>,
     pub on_node: crate::OnNodeCallback,
     pub registry_override: Option<Arc<HandlerRegistry>>,
@@ -115,11 +119,12 @@ pub(super) async fn execute_persisted_run(
     let cancel_token = services.cancel_token.clone();
     let run_id = services.run_id;
     let run_store = services.run_store.clone();
+    let event_sink = services.event_sink.clone();
     if let Err(err) = run_store.state().await {
         let error = FabroError::engine(err.to_string());
         let _ = persist_detached_failure(
             run_id,
-            &run_store,
+            &event_sink,
             run_dir,
             "bootstrap",
             StatusReason::BootstrapFailed,
@@ -128,8 +133,8 @@ pub(super) async fn execute_persisted_run(
         .await;
         return Err(error);
     }
-    if let Err(err) = append_event(
-        &run_store,
+    if let Err(err) = append_event_to_sink(
+        &event_sink,
         &run_id,
         &Event::RunStarting {
             reason: Some(StatusReason::SandboxInitializing),
@@ -140,7 +145,7 @@ pub(super) async fn execute_persisted_run(
         let error = FabroError::engine(err.to_string());
         let _ = persist_detached_failure(
             run_id,
-            &run_store,
+            &event_sink,
             run_dir,
             "bootstrap",
             StatusReason::BootstrapFailed,
@@ -151,14 +156,14 @@ pub(super) async fn execute_persisted_run(
     }
 
     let mut bootstrap_guard =
-        DetachedRunBootstrapGuard::arm(run_id, run_dir, run_store.clone(), cancel_token.clone());
+        DetachedRunBootstrapGuard::arm(run_id, run_dir, event_sink.clone(), cancel_token.clone());
 
     let persisted = match Persisted::load_from_store(&services.run_store, run_dir).await {
         Ok(persisted) => persisted,
         Err(err) => {
             let _ = persist_detached_failure(
                 run_id,
-                &run_store,
+                &event_sink,
                 run_dir,
                 "bootstrap",
                 StatusReason::BootstrapFailed,
@@ -175,7 +180,7 @@ pub(super) async fn execute_persisted_run(
         Err(err) => {
             let _ = persist_detached_failure(
                 run_id,
-                &run_store,
+                &event_sink,
                 run_dir,
                 "bootstrap",
                 StatusReason::BootstrapFailed,
@@ -189,7 +194,7 @@ pub(super) async fn execute_persisted_run(
 
     bootstrap_guard.defuse();
     let mut completion_guard =
-        DetachedRunCompletionGuard::arm(run_id, run_store.clone(), cancel_token);
+        DetachedRunCompletionGuard::arm(run_id, event_sink.clone(), cancel_token);
     let run_start = Instant::now();
     let started = Box::pin(session.run(persisted, checkpoint)).await;
 
@@ -199,8 +204,15 @@ pub(super) async fn execute_persisted_run(
             Ok(started)
         }
         Err(err) => {
-            persist_terminal_engine_failure(run_id, &run_store, run_dir, &err, run_start.elapsed())
-                .await;
+            persist_terminal_engine_failure(
+                run_id,
+                &run_store,
+                &event_sink,
+                run_dir,
+                &err,
+                run_start.elapsed(),
+            )
+            .await;
             completion_guard.defuse();
             Err(err)
         }
@@ -210,6 +222,7 @@ pub(super) async fn execute_persisted_run(
 async fn persist_terminal_engine_failure(
     run_id: RunId,
     run_store: &RunDatabase,
+    event_sink: &RunEventSink,
     _run_dir: &Path,
     error: &FabroError,
     duration: Duration,
@@ -225,8 +238,8 @@ async fn persist_terminal_engine_failure(
         None,
     )
     .await;
-    if let Err(err) = append_event(
-        run_store,
+    if let Err(err) = append_event_to_sink(
+        event_sink,
         &run_id,
         &Event::WorkflowRunFailed {
             error: error.clone(),
@@ -356,6 +369,8 @@ impl RunSession {
         Ok(Self {
             cancel_token: services.cancel_token,
             emitter: services.emitter,
+            event_sink: services.event_sink,
+            run_control: services.run_control,
             sandbox,
             llm: LlmSpec {
                 model: model.clone(),
@@ -487,7 +502,7 @@ impl RunSession {
             });
         }
 
-        let store_progress_logger = StoreProgressLogger::new(self.run_store.clone());
+        let store_progress_logger = RunEventLogger::new(self.event_sink.clone());
         store_progress_logger.register(self.emitter.as_ref());
 
         let init_options = InitOptions {
@@ -508,6 +523,7 @@ impl RunSession {
             git: self.git,
             worktree_mode: self.worktree_mode,
             registry_override: self.registry_override,
+            run_control: self.run_control,
             checkpoint,
             seed_context: self.seed_context,
         };
@@ -590,7 +606,7 @@ impl RunSession {
 
 struct DetachedRunBootstrapGuard {
     run_id: RunId,
-    run_store: RunDatabase,
+    event_sink: RunEventSink,
     cancel_token: Option<Arc<AtomicBool>>,
     active: bool,
 }
@@ -599,12 +615,12 @@ impl DetachedRunBootstrapGuard {
     fn arm(
         run_id: RunId,
         _run_dir: &Path,
-        run_store: RunDatabase,
+        event_sink: RunEventSink,
         cancel_token: Option<Arc<AtomicBool>>,
     ) -> Self {
         Self {
             run_id,
-            run_store,
+            event_sink,
             cancel_token,
             active: true,
         }
@@ -628,11 +644,11 @@ impl Drop for DetachedRunBootstrapGuard {
                 StatusReason::SandboxInitFailed
             };
             let run_id = self.run_id;
-            let run_store = self.run_store.clone();
+            let event_sink = self.event_sink.clone();
             if let Ok(handle) = Handle::try_current() {
                 handle.spawn(async move {
-                    let _ = append_event(
-                        &run_store,
+                    let _ = append_event_to_sink(
+                        &event_sink,
                         &run_id,
                         &Event::WorkflowRunFailed {
                             error: FabroError::engine(format!("{reason:?}")),
@@ -652,16 +668,16 @@ const POSTRUN_ABORTED_MESSAGE: &str = "Run aborted before post-run finalization 
 const POSTRUN_CANCELLED_MESSAGE: &str = "Run cancelled before post-run finalization completed.";
 
 struct DetachedRunCompletionGuard {
-    run_store: RunDatabase,
+    event_sink: RunEventSink,
     run_id: RunId,
     cancel_token: Option<Arc<AtomicBool>>,
     active: bool,
 }
 
 impl DetachedRunCompletionGuard {
-    fn arm(run_id: RunId, run_store: RunDatabase, cancel_token: Option<Arc<AtomicBool>>) -> Self {
+    fn arm(run_id: RunId, event_sink: RunEventSink, cancel_token: Option<Arc<AtomicBool>>) -> Self {
         Self {
-            run_store,
+            event_sink,
             run_id,
             cancel_token,
             active: true,
@@ -698,35 +714,12 @@ impl Drop for DetachedRunCompletionGuard {
         } else {
             "postrun_aborted"
         };
-
-        let serialized_notice = {
-            let stored = to_run_event(
-                &self.run_id,
-                &Event::RunNotice {
-                    level: RunNoticeLevel::Error,
-                    code: code.to_string(),
-                    message: message.to_string(),
-                },
-            );
-            let line = match redacted_event_json(&stored) {
-                Ok(line) => line,
-                Err(err) => {
-                    tracing::warn!(error = %err, "Failed to serialize post-run abort event");
-                    String::new()
-                }
-            };
-            if line.is_empty() {
-                None
-            } else {
-                Some((self.run_id, line))
-            }
-        };
-        let run_store = self.run_store.clone();
+        let event_sink = self.event_sink.clone();
         let run_id = self.run_id;
         if let Ok(handle) = Handle::try_current() {
             handle.spawn(async move {
-                let _ = append_event(
-                    &run_store,
+                let _ = append_event_to_sink(
+                    &event_sink,
                     &run_id,
                     &Event::WorkflowRunFailed {
                         error: FabroError::engine(message.to_string()),
@@ -736,29 +729,16 @@ impl Drop for DetachedRunCompletionGuard {
                     },
                 )
                 .await;
-                if let Some((run_id, line)) = serialized_notice.or_else(|| {
-                    let stored = to_run_event(
-                        &run_id,
-                        &Event::RunNotice {
-                            level: RunNoticeLevel::Error,
-                            code: code.to_string(),
-                            message: message.to_string(),
-                        },
-                    );
-                    redacted_event_json(&stored).ok().map(|line| (run_id, line))
-                }) {
-                    match event_payload_from_redacted_json(&line, &run_id) {
-                        Ok(payload) => {
-                            let _ = run_store.append_event(&payload).await;
-                        }
-                        Err(err) => {
-                            tracing::warn!(
-                                error = %err,
-                                "Failed to build post-run abort event payload"
-                            );
-                        }
-                    }
-                }
+                let _ = append_event_to_sink(
+                    &event_sink,
+                    &run_id,
+                    &Event::RunNotice {
+                        level: RunNoticeLevel::Error,
+                        code: code.to_string(),
+                        message: message.to_string(),
+                    },
+                )
+                .await;
             });
         }
     }
@@ -766,7 +746,7 @@ impl Drop for DetachedRunCompletionGuard {
 
 async fn persist_detached_failure(
     run_id: RunId,
-    run_store: &RunDatabase,
+    event_sink: &RunEventSink,
     _run_dir: &Path,
     phase: &'static str,
     reason: StatusReason,
@@ -774,8 +754,8 @@ async fn persist_detached_failure(
 ) -> Result<(), FabroError> {
     let message = error.to_string();
 
-    if let Err(err) = append_event(
-        run_store,
+    if let Err(err) = append_event_to_sink(
+        event_sink,
         &run_id,
         &Event::WorkflowRunFailed {
             error: error.clone(),
@@ -794,17 +774,8 @@ async fn persist_detached_failure(
         code: format!("{phase}_failed"),
         message: message.clone(),
     };
-    let stored = to_run_event(&run_id, &event);
-    let line = redacted_event_json(&stored).map_err(|err| FabroError::Io(err.to_string()))?;
-    match event_payload_from_redacted_json(&line, &run_id) {
-        Ok(payload) => {
-            if let Err(err) = run_store.append_event(&payload).await {
-                tracing::warn!(error = %err, "Failed to append detached failure event to store");
-            }
-        }
-        Err(err) => {
-            tracing::warn!(error = %err, "Failed to build detached failure event payload");
-        }
+    if let Err(err) = append_event_to_sink(event_sink, &run_id, &event).await {
+        tracing::warn!(error = %err, "Failed to append detached failure notice");
     }
 
     Ok(())
@@ -896,6 +867,8 @@ mod tests {
             emitter,
             interviewer: Arc::new(fabro_interview::AutoApproveInterviewer),
             run_store: store.open_run(&fixtures::RUN_1).await.unwrap(),
+            event_sink: RunEventSink::store(store.open_run(&fixtures::RUN_1).await.unwrap()),
+            run_control: None,
             github_app: None,
             on_node: None,
             registry_override: Some(registry),
@@ -1030,7 +1003,7 @@ mod tests {
             restart_failure_signatures: HashMap::new(),
             node_visits: HashMap::new(),
         };
-        append_event(
+        crate::event::append_event(
             &services.run_store,
             &services.run_id,
             &Event::CheckpointCompleted {

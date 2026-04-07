@@ -1,33 +1,56 @@
+use fabro_store::EventEnvelope;
 use fabro_test::{fabro_snapshot, test_context};
+use fabro_types::{EventBody, RunEvent};
 
-use super::support::run_state;
+use super::support::{run_events, run_state, server_target};
 use crate::support::{fabro_json_snapshot, unique_run_id};
 
 const SHARED_DAEMON_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+fn stored_worker_events(run_dir: &std::path::Path) -> Vec<RunEvent> {
+    run_events(run_dir).iter().map(run_event).collect()
+}
+
+fn run_event(event: &EventEnvelope) -> RunEvent {
+    RunEvent::try_from(&event.payload).expect("stored event should parse")
+}
+
+fn assert_worker_succeeded(run_dir: &std::path::Path, stdout: &[u8]) {
+    assert!(
+        stdout.is_empty(),
+        "worker should not emit event transport on stdout"
+    );
+    let events = stored_worker_events(run_dir);
+    assert!(events.iter().any(|event| matches!(
+        &event.body,
+        EventBody::RunCompleted(props) if props.status == "success"
+    )));
+}
 
 #[test]
 fn help() {
     let context = test_context!();
     let mut cmd = context.command();
-    cmd.args(["__runner", "--help"]);
+    cmd.args(["__run-worker", "--help"]);
     fabro_snapshot!(context.filters(), cmd, @"
     success: true
     exit_code: 0
     ----- stdout -----
-    Internal: queue or resume a workflow run via the server
+    Internal: execute a single workflow run locally
 
-    Usage: fabro __runner [OPTIONS] --run-id <RUN_ID>
+    Usage: fabro __run-worker [OPTIONS] --server <SERVER> --run-dir <RUN_DIR> --run-id <RUN_ID> --mode <MODE>
 
     Options:
-          --json                       Output as JSON [env: FABRO_JSON=]
-          --storage-dir <STORAGE_DIR>  Local storage directory (default: ~/.fabro/storage) [env: FABRO_STORAGE_DIR=[STORAGE_DIR]]
-          --debug                      Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --run-id <RUN_ID>            Run ID
-          --no-upgrade-check           Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --resume                     Resume from checkpoint instead of fresh start
-          --quiet                      Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-      -h, --help                       Print help
+          --json               Output as JSON [env: FABRO_JSON=]
+          --server <SERVER>    Fabro server target: http(s) URL or absolute Unix socket path
+          --debug              Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
+          --run-dir <RUN_DIR>  Run scratch directory
+          --no-upgrade-check   Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
+          --run-id <RUN_ID>    Run ID
+          --mode <MODE>        Worker mode [possible values: start, resume]
+          --quiet              Suppress non-essential output [env: FABRO_QUIET=]
+          --verbose            Enable verbose output [env: FABRO_VERBOSE=]
+      -h, --help               Print help
     ----- stderr -----
     ");
 }
@@ -63,32 +86,30 @@ digraph CachedGraph {
         .success();
 
     let run_dir = context.find_run_dir(&run_id);
+    let server = server_target(&context.storage_dir);
     std::fs::remove_file(&workflow_path).unwrap();
 
-    context
+    let output = context
         .command()
-        .args(["__runner", "--run-id", run_id.as_str()])
+        .args([
+            "__run-worker",
+            "--server",
+            server.as_str(),
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            "--run-id",
+            run_id.as_str(),
+            "--mode",
+            "start",
+        ])
         .timeout(SHARED_DAEMON_TIMEOUT)
         .assert()
-        .success();
+        .success()
+        .get_output()
+        .stdout
+        .clone();
 
-    let conclusion = serde_json::to_value(
-        run_state(&run_dir)
-            .conclusion
-            .expect("conclusion should exist"),
-    )
-    .unwrap();
-    fabro_json_snapshot!(
-        context,
-        serde_json::json!({
-            "status": conclusion["status"],
-        }),
-        @r#"
-        {
-          "status": "success"
-        }
-        "#
-    );
+    assert_worker_succeeded(&run_dir, &output);
 }
 
 #[test]
@@ -147,16 +168,23 @@ digraph GitHubApp {
 
     context.write_home(".fabro/settings.toml", "version = 1\n");
 
+    let server = server_target(&context.storage_dir);
     let mut cmd = context.command();
     cmd.env("GITHUB_APP_PRIVATE_KEY", "%%%not-base64%%%");
-    cmd.args(["__runner", "--run-id", run_id.as_str()]);
+    cmd.args([
+        "__run-worker",
+        "--server",
+        server.as_str(),
+        "--run-dir",
+        run_dir.to_str().unwrap(),
+        "--run-id",
+        run_id.as_str(),
+        "--mode",
+        "start",
+    ]);
     cmd.timeout(SHARED_DAEMON_TIMEOUT);
-    fabro_snapshot!(context.filters(), cmd, @"
-    success: true
-    exit_code: 0
-    ----- stdout -----
-    ----- stderr -----
-    ");
+    let assert = cmd.assert().success();
+    assert_worker_succeeded(&run_dir, &assert.get_output().stdout);
 }
 
 #[test]
@@ -190,30 +218,28 @@ digraph DetachedStoreOnly {
         .success();
 
     let run_dir = context.find_run_dir(&run_id);
-    context
+    let server = server_target(&context.storage_dir);
+    let output = context
         .command()
-        .args(["__runner", "--run-id", run_id.as_str()])
+        .args([
+            "__run-worker",
+            "--server",
+            server.as_str(),
+            "--run-dir",
+            run_dir.to_str().unwrap(),
+            "--run-id",
+            run_id.as_str(),
+            "--mode",
+            "start",
+        ])
         .timeout(SHARED_DAEMON_TIMEOUT)
         .assert()
-        .success();
+        .success()
+        .get_output()
+        .stdout
+        .clone();
 
-    let conclusion = serde_json::to_value(
-        run_state(&run_dir)
-            .conclusion
-            .expect("conclusion should exist"),
-    )
-    .unwrap();
-    fabro_json_snapshot!(
-        context,
-        serde_json::json!({
-            "status": conclusion["status"],
-        }),
-        @r#"
-        {
-          "status": "success"
-        }
-        "#
-    );
+    assert_worker_succeeded(&run_dir, &output);
 }
 
 #[test]
@@ -246,6 +272,8 @@ digraph Test {
         .unwrap()
         .trim()
         .to_string();
+    let run_dir = context.find_run_dir(&run_id);
+    let server = server_target(&context.storage_dir);
 
     context
         .command()
@@ -277,13 +305,24 @@ digraph Test {
     "#);
 
     let mut cmd = context.command();
-    cmd.args(["__runner", "--run-id", &run_id, "--resume"]);
+    cmd.args([
+        "__run-worker",
+        "--server",
+        &server,
+        "--run-dir",
+        run_dir.to_str().unwrap(),
+        "--run-id",
+        &run_id,
+        "--mode",
+        "resume",
+    ]);
     cmd.timeout(SHARED_DAEMON_TIMEOUT);
     fabro_snapshot!(context.filters(), cmd, @"
-    success: true
-    exit_code: 0
+    success: false
+    exit_code: 1
     ----- stdout -----
     ----- stderr -----
+    error: Precondition failed: run already finished successfully — nothing to resume
     ");
 
     let inspect_after = context

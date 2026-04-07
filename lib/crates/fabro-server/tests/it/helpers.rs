@@ -5,7 +5,8 @@ use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode};
 use fabro_server::jwt_auth::AuthMode;
 use fabro_server::server::{
-    AppState, build_router, create_app_state, create_app_state_with_options, spawn_scheduler,
+    AppState, build_router, create_app_state, create_app_state_with_settings_and_registry_factory,
+    spawn_scheduler,
 };
 use fabro_types::Settings;
 use fabro_types::settings::{LocalSandboxSettings, SandboxSettings, WorktreeMode};
@@ -24,6 +25,16 @@ pub(crate) const POLL_ATTEMPTS: usize = 500;
 
 pub(crate) fn test_app_state() -> Arc<AppState> {
     create_app_state()
+}
+
+pub(crate) fn test_app_state_with_options(
+    settings: Settings,
+    max_concurrent_runs: usize,
+) -> Arc<AppState> {
+    let _ = max_concurrent_runs;
+    create_app_state_with_settings_and_registry_factory(settings, |interviewer| {
+        fabro_workflow::handler::default_registry(interviewer, || None)
+    })
 }
 
 pub(crate) fn test_settings() -> Settings {
@@ -46,7 +57,7 @@ pub(crate) fn dry_run_settings() -> Settings {
 }
 
 pub(crate) fn dry_run_app() -> axum::Router {
-    let state = create_app_state_with_options(dry_run_settings(), 5);
+    let state = test_app_state_with_options(dry_run_settings(), 5);
     spawn_scheduler(Arc::clone(&state));
     build_router(state, AuthMode::Disabled)
 }

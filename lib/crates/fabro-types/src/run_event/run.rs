@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Graph, Settings, StatusReason};
+use crate::{Graph, RunControlAction, Settings, StatusReason};
 
 use super::{RunNoticeLevel, TokenUsage};
 
@@ -50,6 +50,14 @@ pub struct RunStatusTransitionProps {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<StatusReason>,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunControlRequestedProps {
+    pub action: RunControlAction,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct RunControlEffectProps {}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunRewoundProps {

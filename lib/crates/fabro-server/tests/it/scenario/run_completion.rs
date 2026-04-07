@@ -1,17 +1,16 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use fabro_server::server::create_app_state_with_options;
 use tokio::time::sleep;
 use tower::ServiceExt;
 
 use crate::helpers::{
-    MINIMAL_DOT, api, create_and_start_run, dry_run_settings, test_app_with_scheduler,
-    wait_for_run_status,
+    MINIMAL_DOT, api, create_and_start_run, dry_run_settings, test_app_state_with_options,
+    test_app_with_scheduler, wait_for_run_status,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn run_completes_and_status_is_completed() {
-    let state = create_app_state_with_options(dry_run_settings(), 5);
+    let state = test_app_state_with_options(dry_run_settings(), 5);
     let app = test_app_with_scheduler(state);
 
     let run_id = create_and_start_run(&app, MINIMAL_DOT).await;
@@ -22,7 +21,7 @@ async fn run_completes_and_status_is_completed() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn attach_run_events_returns_sse_stream() {
-    let state = create_app_state_with_options(dry_run_settings(), 5);
+    let state = test_app_state_with_options(dry_run_settings(), 5);
     let app = test_app_with_scheduler(state);
 
     let run_id = create_and_start_run(&app, MINIMAL_DOT).await;

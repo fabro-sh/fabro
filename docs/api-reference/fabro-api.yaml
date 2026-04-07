@@ -2573,6 +2573,14 @@ components:
           type: integer
           description: Position in the queue (1-based). Only present when status is `queued`.
           example: 3
+        status_reason:
+          allOf:
+            - $ref: "#/components/schemas/StatusReason"
+          nullable: true
+        pending_control:
+          allOf:
+            - $ref: "#/components/schemas/RunControlAction"
+          nullable: true
         created_at:
           type: string
           format: date-time
@@ -2868,6 +2876,14 @@ components:
         - sandbox_init_failed
         - sandbox_initializing
 
+    RunControlAction:
+      description: Run control action requested by the API.
+      type: string
+      enum:
+        - cancel
+        - pause
+        - unpause
+
     RunStatusRecord:
       description: Internal run status record from the event projection.
       type: object
@@ -3047,6 +3063,10 @@ components:
           nullable: true
         status_reason:
           type: string
+          nullable: true
+        pending_control:
+          allOf:
+            - $ref: "#/components/schemas/RunControlAction"
           nullable: true
         duration_ms:
           type: integer

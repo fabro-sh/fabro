@@ -9,9 +9,11 @@ mod title;
 
 pub use title::{init as title_init, set as title_set};
 
-pub use signal::process_alive;
+pub use signal::{process_alive, process_group_alive};
 #[cfg(unix)]
-pub use signal::{sigkill, sigterm, sigterm_process_group};
+pub use signal::{
+    sigkill, sigkill_process_group, sigterm, sigterm_process_group, sigusr1, sigusr2,
+};
 
 #[cfg(unix)]
 pub use flock::{flock_unlock, try_flock_exclusive};

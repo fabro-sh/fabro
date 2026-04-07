@@ -47,6 +47,7 @@ pub async fn execute(init: Initialized) -> Executed {
         sandbox,
         registry,
         on_node,
+        run_control,
         hook_runner,
         env,
         dry_run,
@@ -101,6 +102,7 @@ pub async fn execute(init: Initialized) -> Executed {
         &settings_arc,
         checkpoint.is_some(),
         on_node,
+        run_control,
     );
 
     if let Some(ref cp) = checkpoint {

@@ -233,7 +233,9 @@ mod tests {
     use super::*;
 
     use chrono::{DateTime, Utc};
-    use fabro_types::{AttrValue, Graph, RunRecord, RunStatus, Settings, StatusReason};
+    use fabro_types::{
+        AttrValue, Graph, RunControlAction, RunRecord, RunStatus, Settings, StatusReason,
+    };
     use futures::TryStreamExt;
     use object_store::memory::InMemory;
     use object_store::path::Path;
@@ -347,6 +349,18 @@ mod tests {
         .unwrap();
     }
 
+    async fn append_running(run: &RunDatabase, label: &str, created_at: DateTime<Utc>) {
+        append_created(run, label, created_at).await;
+        run.append_event(&event_payload(
+            label,
+            "2026-03-27T12:00:01Z",
+            "run.running",
+            &serde_json::json!({}),
+        ))
+        .await
+        .unwrap();
+    }
+
     async fn list_paths(store: Arc<dyn ObjectStore>, prefix: &str) -> Vec<String> {
         let mut items = store
             .list(Some(&Path::from(prefix.to_string())))
@@ -404,6 +418,93 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, StoreError::ReadOnly));
+    }
+
+    #[tokio::test]
+    async fn control_request_events_set_pending_control_without_overwriting_status() {
+        let (_object_store, store) = make_store();
+        let run = store.create_run(&test_run_id("run-1")).await.unwrap();
+        append_running(&run, "run-1", dt("2026-03-27T12:00:00Z")).await;
+
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:02Z",
+            "run.pause.requested",
+            &serde_json::json!({ "action": "pause" }),
+        ))
+        .await
+        .unwrap();
+
+        let summary = store.list_runs(&ListRunsQuery::default()).await.unwrap();
+        assert_eq!(summary.len(), 1);
+        assert_eq!(summary[0].status, Some(RunStatus::Running));
+        assert_eq!(summary[0].pending_control, Some(RunControlAction::Pause));
+    }
+
+    #[tokio::test]
+    async fn control_effect_events_clear_pending_control_and_update_status() {
+        let (_object_store, store) = make_store();
+        let run = store.create_run(&test_run_id("run-1")).await.unwrap();
+        append_running(&run, "run-1", dt("2026-03-27T12:00:00Z")).await;
+
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:02Z",
+            "run.pause.requested",
+            &serde_json::json!({ "action": "pause" }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:03Z",
+            "run.paused",
+            &serde_json::json!({}),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:04Z",
+            "run.unpause.requested",
+            &serde_json::json!({ "action": "unpause" }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:05Z",
+            "run.unpaused",
+            &serde_json::json!({}),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:06Z",
+            "run.cancel.requested",
+            &serde_json::json!({ "action": "cancel" }),
+        ))
+        .await
+        .unwrap();
+        run.append_event(&event_payload(
+            "run-1",
+            "2026-03-27T12:00:07Z",
+            "run.failed",
+            &serde_json::json!({
+                "error": "cancelled",
+                "duration_ms": 1,
+                "reason": "cancelled",
+            }),
+        ))
+        .await
+        .unwrap();
+
+        let summary = store.list_runs(&ListRunsQuery::default()).await.unwrap();
+        assert_eq!(summary.len(), 1);
+        assert_eq!(summary[0].status, Some(RunStatus::Failed));
+        assert_eq!(summary[0].status_reason, Some(StatusReason::Cancelled));
+        assert_eq!(summary[0].pending_control, None);
     }
 
     #[tokio::test]

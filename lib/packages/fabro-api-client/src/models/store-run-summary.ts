@@ -13,6 +13,9 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { RunControlAction } from './run-control-action';
 
 /**
  * Durable run summary derived from the backing store.
@@ -27,7 +30,10 @@ export interface StoreRunSummary {
     'start_time'?: string;
     'status'?: string;
     'status_reason'?: string;
+    'pending_control'?: RunControlAction;
     'duration_ms'?: number;
     'total_cost'?: number;
 }
+
+
 

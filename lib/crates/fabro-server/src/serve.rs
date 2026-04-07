@@ -9,6 +9,7 @@ use fabro_util::terminal::Styles;
 use object_store::ObjectStore;
 use object_store::local::LocalFileSystem;
 use tokio::net::{TcpListener, UnixListener};
+use tokio::sync::watch;
 use tokio::time::interval;
 use tracing::{error, info, warn};
 
@@ -20,10 +21,20 @@ use crate::bind::{self, Bind};
 use crate::github_webhooks::WebhookManager;
 use crate::jwt_auth::{AuthMode, AuthStrategy, resolve_auth_mode_with_lookup};
 use crate::secret_store::SecretStore;
-use crate::server::{build_app_state_with_path, build_router, spawn_scheduler};
-use crate::tls::{ClientAuth, build_rustls_config, serve_tls};
+use crate::server::{
+    build_app_state_with_path, build_router, reconcile_incomplete_runs_on_startup,
+    shutdown_active_workers, spawn_scheduler,
+};
+use crate::tls::{ClientAuth, build_rustls_config, serve_tls_with_shutdown};
 use fabro_llm::client::Client as LlmClient;
 use fabro_sandbox::SandboxProvider;
+
+#[derive(Clone, Copy)]
+enum ServerTitlePhase {
+    Boot,
+    Listening,
+    Stopping,
+}
 
 #[derive(Args, Clone)]
 pub struct ServeArgs {
@@ -103,6 +114,9 @@ pub async fn serve_command(
     styles: &'static Styles,
     storage_dir_override: Option<PathBuf>,
 ) -> anyhow::Result<()> {
+    let _ = fabro_proc::title_init();
+    set_server_title(ServerTitlePhase::Boot, None);
+
     let config_path = args.config.clone();
     let disk_settings = load_settings(config_path.as_deref())?;
     let active_config_path = resolved_config_path(config_path.as_deref());
@@ -188,6 +202,13 @@ pub async fn serve_command(
         active_config_path,
         matches!(&auth_mode, AuthMode::Disabled),
     )?;
+    let reconciled = reconcile_incomplete_runs_on_startup(&state).await?;
+    if reconciled > 0 {
+        info!(
+            reconciled_runs = reconciled,
+            "Reconciled stale in-flight runs on startup"
+        );
+    }
     spawn_scheduler(Arc::clone(&state));
     let router = build_router(Arc::clone(&state), auth_mode);
 
@@ -195,19 +216,6 @@ pub async fn serve_command(
         Some(ref s) => bind::parse_bind(s)?,
         None => Bind::Tcp("127.0.0.1:3000".parse().unwrap()),
     };
-
-    info!(bind = %bind_addr, dry_run = dry_run_mode, "API server started");
-
-    eprintln!(
-        "{}",
-        styles.bold.apply_to(format!(
-            "Fabro server listening on {}",
-            styles.cyan.apply_to(&bind_addr)
-        )),
-    );
-    if dry_run_mode {
-        eprintln!("{}", styles.dim.apply_to("(dry-run mode)"));
-    }
 
     // Optionally start webhook listener
     let webhook_app_id = {
@@ -257,6 +265,17 @@ pub async fn serve_command(
         None => None,
     };
 
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let shutdown_state = Arc::clone(&state);
+    tokio::spawn(async move {
+        shutdown_signal().await;
+        set_server_title(ServerTitlePhase::Stopping, None);
+        if let Err(err) = shutdown_active_workers(&shutdown_state).await {
+            error!(error = %err, "Failed to stop active workers during shutdown");
+        }
+        let _ = shutdown_tx.send(true);
+    });
+
     // Spawn config polling task
     let settings_for_poll = Arc::clone(&shared_settings);
     let config_path_for_poll = config_path.clone();
@@ -300,8 +319,8 @@ pub async fn serve_command(
         .as_ref()
         .and_then(|a| a.tls.clone());
 
-    match bind_addr {
-        Bind::Unix(ref path) => {
+    match &bind_addr {
+        Bind::Unix(path) => {
             if tls_settings.is_some() {
                 warn!("TLS is configured but not supported on Unix sockets; ignoring TLS settings");
             }
@@ -312,8 +331,9 @@ pub async fn serve_command(
             }
 
             let listener = UnixListener::bind(path)?;
+            announce_server_ready(&bind_addr, styles, dry_run_mode);
             axum::serve(listener, router)
-                .with_graceful_shutdown(shutdown_signal())
+                .with_graceful_shutdown(wait_for_shutdown(shutdown_rx.clone()))
                 .await?;
         }
         Bind::Tcp(addr) => {
@@ -325,12 +345,19 @@ pub async fn serve_command(
                 let tls_acceptor = tokio_rustls::TlsAcceptor::from(rustls_config);
 
                 info!("TLS enabled");
+                announce_server_ready(&bind_addr, styles, dry_run_mode);
 
-                // TLS uses a manual accept loop and cannot use with_graceful_shutdown
-                serve_tls(listener, tls_acceptor, router).await?;
+                serve_tls_with_shutdown(
+                    listener,
+                    tls_acceptor,
+                    router,
+                    wait_for_shutdown(shutdown_rx.clone()),
+                )
+                .await?;
             } else {
+                announce_server_ready(&bind_addr, styles, dry_run_mode);
                 axum::serve(listener, router)
-                    .with_graceful_shutdown(shutdown_signal())
+                    .with_graceful_shutdown(wait_for_shutdown(shutdown_rx.clone()))
                     .await?;
             }
         }
@@ -372,6 +399,51 @@ async fn shutdown_signal() {
     info!("Shutdown signal received, stopping server");
 }
 
+async fn wait_for_shutdown(mut shutdown_rx: watch::Receiver<bool>) {
+    if *shutdown_rx.borrow() {
+        return;
+    }
+    let _ = shutdown_rx.changed().await;
+}
+
+fn announce_server_ready(bind_addr: &Bind, styles: &'static Styles, dry_run_mode: bool) {
+    set_server_title(ServerTitlePhase::Listening, Some(bind_addr));
+    info!(bind = %bind_addr, dry_run = dry_run_mode, "API server started");
+
+    eprintln!(
+        "{}",
+        styles.bold.apply_to(format!(
+            "Fabro server listening on {}",
+            styles.cyan.apply_to(bind_addr)
+        )),
+    );
+    if dry_run_mode {
+        eprintln!("{}", styles.dim.apply_to("(dry-run mode)"));
+    }
+}
+
+fn set_server_title(phase: ServerTitlePhase, bind: Option<&Bind>) {
+    fabro_proc::title_set(&server_title(phase, bind));
+}
+
+fn server_title(phase: ServerTitlePhase, bind: Option<&Bind>) -> String {
+    match phase {
+        ServerTitlePhase::Boot => "fabro server boot".to_string(),
+        ServerTitlePhase::Listening => {
+            let bind = bind.expect("listening server title requires a bind");
+            format!("fabro server {}", server_bind_title(bind))
+        }
+        ServerTitlePhase::Stopping => "fabro server stopping".to_string(),
+    }
+}
+
+fn server_bind_title(bind: &Bind) -> String {
+    match bind {
+        Bind::Unix(path) => format!("unix:{}", path.display()),
+        Bind::Tcp(addr) => format!("tcp:{addr}"),
+    }
+}
+
 /// Derive client certificate verification mode from the resolved auth strategies.
 fn client_auth_from_mode(auth_mode: &AuthMode) -> ClientAuth {
     let strategies = match auth_mode {
@@ -395,7 +467,10 @@ fn client_auth_from_mode(auth_mode: &AuthMode) -> ClientAuth {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{ServeArgs, apply_runtime_settings};
+    use super::{
+        ServeArgs, ServerTitlePhase, apply_runtime_settings, server_bind_title, server_title,
+    };
+    use crate::bind::Bind;
     use fabro_types::Settings;
 
     #[test]
@@ -417,6 +492,28 @@ mod tests {
         assert_eq!(
             resolved.storage_dir,
             Some(PathBuf::from("/srv/fabro-storage"))
+        );
+    }
+
+    #[test]
+    fn server_title_formats_boot_listening_and_stopping() {
+        let bind = Bind::Tcp("127.0.0.1:3000".parse().unwrap());
+
+        assert_eq!(
+            server_title(ServerTitlePhase::Boot, None),
+            "fabro server boot"
+        );
+        assert_eq!(
+            server_title(ServerTitlePhase::Listening, Some(&bind)),
+            "fabro server tcp:127.0.0.1:3000"
+        );
+        assert_eq!(
+            server_bind_title(&Bind::Unix(PathBuf::from("/tmp/fabro.sock"))),
+            "unix:/tmp/fabro.sock"
+        );
+        assert_eq!(
+            server_title(ServerTitlePhase::Stopping, None),
+            "fabro server stopping"
         );
     }
 }

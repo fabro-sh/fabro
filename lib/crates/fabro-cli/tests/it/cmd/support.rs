@@ -664,6 +664,18 @@ fn server_endpoint(storage_dir: &Path) -> Option<(reqwest::Client, String)> {
     }
 }
 
+pub(crate) fn server_target(storage_dir: &Path) -> String {
+    let record_path = Storage::new(storage_dir).server_state().record_path();
+    let record = std::fs::read_to_string(record_path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<TestServerRecord>(&content).ok())
+        .expect("server record should exist");
+    match record.bind {
+        Bind::Unix(path) => path.to_string_lossy().to_string(),
+        Bind::Tcp(addr) => format!("http://{addr}"),
+    }
+}
+
 async fn get_server_json<T: serde::de::DeserializeOwned>(run_dir: &Path, path: &str) -> T {
     let runs_dir = run_dir.parent().expect("run dir should have parent");
     let storage_dir = runs_dir.parent().expect("runs dir should have parent");

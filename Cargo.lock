@@ -1868,6 +1868,7 @@ dependencies = [
  "fabro-interview",
  "fabro-llm",
  "fabro-model",
+ "fabro-proc",
  "fabro-retro",
  "fabro-sandbox",
  "fabro-store",

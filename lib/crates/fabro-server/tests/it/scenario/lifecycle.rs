@@ -17,7 +17,7 @@ use tower::ServiceExt;
 
 use crate::helpers::{
     POLL_ATTEMPTS, POLL_INTERVAL, api, body_json, minimal_manifest_json, run_json, test_settings,
-    wait_for_run_status, wait_for_run_status_not_in,
+    wait_for_run_status,
 };
 
 fn gate_registry(interviewer: Arc<dyn Interviewer>) -> HandlerRegistry {
@@ -158,10 +158,9 @@ async fn full_http_lifecycle_cancel() {
         .unwrap();
     app.clone().oneshot(req).await.unwrap();
 
-    // Subscribe as soon as the scheduler has created the live event stream.
-    // Waiting past "starting" races with stage events because `/events`
-    // subscribes to future broadcast messages only; it does not replay.
-    wait_for_run_status_not_in(&app, &run_id, &["queued"]).await;
+    // Wait until the worker has reached the human gate so cancel exercises the
+    // live-running path rather than racing the in-memory queue transition.
+    let _question_id = wait_for_question_id(&app, &run_id).await;
 
     // Cancel it
     let req = Request::builder()
@@ -172,7 +171,8 @@ async fn full_http_lifecycle_cancel() {
     let response = app.clone().oneshot(req).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response.into_body()).await;
-    assert_eq!(body["status"], "cancelled");
+    assert_eq!(body["status"], "running");
+    assert_eq!(body["pending_control"], "cancel");
 
     // Verify the durable store view converges to cancelled failure.
     let status = wait_for_run_status(&app, &run_id, &["failed"]).await;

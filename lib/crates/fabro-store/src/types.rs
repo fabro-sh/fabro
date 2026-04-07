@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::{Result, StoreError};
-use fabro_types::{RunEvent, RunId, RunStatus, StatusReason};
+use fabro_types::{RunControlAction, RunEvent, RunId, RunStatus, StatusReason};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunSummary {
@@ -17,6 +17,7 @@ pub struct RunSummary {
     pub start_time: Option<DateTime<Utc>>,
     pub status: Option<RunStatus>,
     pub status_reason: Option<StatusReason>,
+    pub pending_control: Option<RunControlAction>,
     pub duration_ms: Option<u64>,
     pub total_cost: Option<f64>,
 }

@@ -31,6 +31,7 @@ use crate::event::Emitter;
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::{Outcome, StageUsage};
+use crate::run_control::RunControlState;
 use crate::run_options::RunOptions;
 use fabro_graphviz::graph::types::Graph as GvGraph;
 use fabro_hooks::HookRunner;
@@ -60,6 +61,8 @@ pub(crate) struct WorkflowLifecycle {
     git: GitLifecycle,
     artifact: ArtifactLifecycle,
     on_node: crate::OnNodeCallback,
+    emitter: Arc<Emitter>,
+    run_control: Option<Arc<RunControlState>>,
     /// Set in on_edge_selected when loop_restart approved; read+cleared by EventLifecycle::on_run_start
     restarted_from: Arc<Mutex<Option<(String, String)>>>,
     /// Shared git checkpoint result (written by git, read by event)
@@ -85,6 +88,7 @@ impl WorkflowLifecycle {
         run_options: &Arc<RunOptions>,
         is_resume: bool,
         on_node: crate::OnNodeCallback,
+        run_control: Option<Arc<RunControlState>>,
     ) -> Self {
         let run_scratch = RunScratch::new(run_dir);
         let restarted_from: Arc<Mutex<Option<(String, String)>>> = Arc::new(Mutex::new(None));
@@ -171,6 +175,8 @@ impl WorkflowLifecycle {
             git,
             artifact,
             on_node,
+            emitter: Arc::clone(emitter),
+            run_control,
             restarted_from,
             checkpoint_git_result,
             is_initial_resume: AtomicBool::new(is_resume),
@@ -254,6 +260,9 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
         node: &WorkflowNode,
         state: &WfRunState,
     ) -> CoreResult<WfNodeDecision> {
+        if let Some(run_control) = &self.run_control {
+            run_control.wait_if_paused(self.emitter.as_ref()).await;
+        }
         if let Some(on_node) = &self.on_node {
             on_node(node.id());
         }
@@ -282,6 +291,9 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
         ctx: &AttemptResultContext<'_, WorkflowGraph>,
         state: &WfRunState,
     ) -> CoreResult<()> {
+        if let Some(run_control) = &self.run_control {
+            run_control.wait_if_paused(self.emitter.as_ref()).await;
+        }
         self.artifact.after_attempt(ctx, state).await?;
         self.event.after_attempt(ctx, state).await?;
         Ok(())

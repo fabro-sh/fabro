@@ -491,37 +491,52 @@ mod tests {
     }
 
     #[test]
-    fn parse_runner_command() {
+    fn parse_run_worker_command() {
         let cli = Cli::try_parse_from([
             "fabro",
-            "__runner",
+            "__run-worker",
+            "--server",
+            "/tmp/fabro.sock",
+            "--run-dir",
+            "/tmp/run",
             "--run-id",
             "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "--mode",
+            "start",
         ])
         .expect("should parse");
         match *cli.command {
-            Commands::RunCmd(RunCommands::Runner(args)) => {
+            Commands::RunCmd(RunCommands::RunWorker(args)) => {
+                assert_eq!(args.server, "/tmp/fabro.sock");
+                assert_eq!(args.run_dir, std::path::PathBuf::from("/tmp/run"));
                 assert_eq!(args.run_id, "01ARZ3NDEKTSV4RRFFQ69G5FAV".parse().unwrap());
-                assert!(!args.resume);
+                assert!(matches!(args.mode, args::RunWorkerMode::Start));
             }
             _ => panic!("unexpected command variant"),
         }
     }
 
     #[test]
-    fn parse_runner_with_resume() {
+    fn parse_run_worker_with_resume_mode() {
         let cli = Cli::try_parse_from([
             "fabro",
-            "__runner",
+            "__run-worker",
+            "--server",
+            "http://127.0.0.1:3000",
+            "--run-dir",
+            "/tmp/run",
             "--run-id",
             "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-            "--resume",
+            "--mode",
+            "resume",
         ])
         .expect("should parse");
         match *cli.command {
-            Commands::RunCmd(RunCommands::Runner(args)) => {
+            Commands::RunCmd(RunCommands::RunWorker(args)) => {
+                assert_eq!(args.server, "http://127.0.0.1:3000");
+                assert_eq!(args.run_dir, std::path::PathBuf::from("/tmp/run"));
                 assert_eq!(args.run_id, "01ARZ3NDEKTSV4RRFFQ69G5FAV".parse().unwrap());
-                assert!(args.resume);
+                assert!(matches!(args.mode, args::RunWorkerMode::Resume));
             }
             _ => panic!("unexpected command variant"),
         }
