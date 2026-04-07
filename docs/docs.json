@@ -199,7 +199,6 @@
             "pages": [
               "GET /api/v1/runs/{id}/questions",
               "POST /api/v1/runs/{id}/questions/{qid}/answer",
-              "POST /api/v1/runs/{id}/steer",
               "POST /api/v1/runs/{id}/preview"
             ]
           },
@@ -219,15 +218,6 @@
                   "GET /api/v1/runs/{id}/settings"
                 ]
               }
-            ]
-          },
-          {
-            "group": "Workflows",
-            "icon": "diagram-project",
-            "pages": [
-              "GET /api/v1/workflows",
-              "GET /api/v1/workflows/{name}",
-              "GET /api/v1/workflows/{name}/runs"
             ]
           },
           {
