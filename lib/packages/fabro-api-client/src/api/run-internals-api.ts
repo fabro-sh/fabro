@@ -97,7 +97,7 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             };
         },
         /**
-         * Opens a server-sent event stream for a live run. Optionally replays stored events from `since_seq` before switching to live updates.
+         * Opens an ordered server-sent event stream starting at `since_seq`, replaying persisted events and continuing with live updates while the run remains active.
          * @summary Attach Run Events
          * @param {string} id Unique run identifier (ULID).
          * @param {number} [sinceSeq] First event sequence number to include.
@@ -732,7 +732,7 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Opens a server-sent event stream for a live run. Optionally replays stored events from `since_seq` before switching to live updates.
+         * Opens an ordered server-sent event stream starting at `since_seq`, replaying persisted events and continuing with live updates while the run remains active.
          * @summary Attach Run Events
          * @param {string} id Unique run identifier (ULID).
          * @param {number} [sinceSeq] First event sequence number to include.
@@ -937,7 +937,7 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
             return localVarFp.appendRunEvent(id, runEvent, options).then((request) => request(axios, basePath));
         },
         /**
-         * Opens a server-sent event stream for a live run. Optionally replays stored events from `since_seq` before switching to live updates.
+         * Opens an ordered server-sent event stream starting at `since_seq`, replaying persisted events and continuing with live updates while the run remains active.
          * @summary Attach Run Events
          * @param {string} id Unique run identifier (ULID).
          * @param {number} [sinceSeq] First event sequence number to include.
@@ -1102,7 +1102,7 @@ export class RunInternalsApi extends BaseAPI {
     }
 
     /**
-     * Opens a server-sent event stream for a live run. Optionally replays stored events from `since_seq` before switching to live updates.
+     * Opens an ordered server-sent event stream starting at `since_seq`, replaying persisted events and continuing with live updates while the run remains active.
      * @summary Attach Run Events
      * @param {string} id Unique run identifier (ULID).
      * @param {number} [sinceSeq] First event sequence number to include.

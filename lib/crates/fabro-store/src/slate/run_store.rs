@@ -240,6 +240,7 @@ impl RunDatabase {
         let inner = Arc::clone(&self.inner);
         let (sender, receiver) = mpsc::unbounded_channel();
         tokio::spawn(async move {
+            let mut rx = inner.event_tx.subscribe();
             let cached = {
                 let recent_events = inner.recent_events.lock().await;
                 recent_events
@@ -256,8 +257,29 @@ impl RunDatabase {
                 }
             }
 
-            let mut rx = inner.event_tx.subscribe();
-            while let Ok(event) = rx.recv().await {
+            loop {
+                loop {
+                    match rx.try_recv() {
+                        Ok(event) => {
+                            if event.seq < next_seq {
+                                continue;
+                            }
+                            next_seq = event.seq.saturating_add(1);
+                            if sender.send(Ok(event)).is_err() {
+                                return;
+                            }
+                        }
+                        Err(broadcast::error::TryRecvError::Empty) => break,
+                        Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
+                        Err(broadcast::error::TryRecvError::Closed) => return,
+                    }
+                }
+
+                let event = match rx.recv().await {
+                    Ok(event) => event,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => return,
+                };
                 if event.seq < next_seq {
                     continue;
                 }

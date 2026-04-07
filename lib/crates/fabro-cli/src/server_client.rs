@@ -34,11 +34,6 @@ pub(crate) struct RunAttachEventStream {
     buffered_events: VecDeque<EventEnvelope>,
 }
 
-pub(crate) enum RunAttachStreamError {
-    Gone,
-    Other(anyhow::Error),
-}
-
 impl RunAttachEventStream {
     fn new(stream: progenitor_client::ByteStream) -> Self {
         Self {
@@ -355,12 +350,12 @@ impl ServerStoreClient {
         &self,
         run_id: &RunId,
         since_seq: Option<u32>,
-    ) -> std::result::Result<RunAttachEventStream, RunAttachStreamError> {
+    ) -> Result<RunAttachEventStream> {
         let mut request = self.client.attach_run_events().id(run_id.to_string());
         if let Some(seq) = since_seq.and_then(non_zero_u64_from_u32) {
             request = request.since_seq(seq);
         }
-        let response = request.send().await.map_err(map_attach_run_stream_error)?;
+        let response = request.send().await.map_err(map_api_error)?;
         Ok(RunAttachEventStream::new(response.into_inner()))
     }
 
@@ -581,19 +576,6 @@ where
             anyhow!("request failed with status {}", response.status())
         }
         other => anyhow!("{other}"),
-    }
-}
-
-fn map_attach_run_stream_error(
-    err: progenitor_client::Error<types::ErrorResponse>,
-) -> RunAttachStreamError {
-    match &err {
-        progenitor_client::Error::ErrorResponse(response)
-            if response.status() == reqwest::StatusCode::GONE =>
-        {
-            RunAttachStreamError::Gone
-        }
-        _ => RunAttachStreamError::Other(map_api_error(err)),
     }
 }
 

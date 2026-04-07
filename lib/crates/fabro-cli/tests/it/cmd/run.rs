@@ -4,8 +4,8 @@ use httpmock::MockServer;
 use serde_json::Value;
 
 use super::support::{
-    output_stderr, resolve_run, run_state, wait_for_no_process_match, wait_for_status,
-    write_gated_workflow,
+    output_stderr, resolve_run, run_state, wait_for_event_names, wait_for_no_process_match,
+    wait_for_status, write_gated_workflow,
 };
 use crate::support::{example_fixture, fabro_json_snapshot, run_output_filters, unique_run_id};
 
@@ -483,7 +483,8 @@ fn dry_run_persists_event_history_in_store() {
         .assert()
         .success();
 
-    context.find_run_dir(&run_id);
+    let run_dir = context.find_run_dir(&run_id);
+    wait_for_event_names(&run_dir, &["run.completed", "sandbox.cleanup.completed"]);
     let output = context
         .command()
         .args(["logs", &run_id])
@@ -515,6 +516,12 @@ fn dry_run_persists_event_history_in_store() {
             .and_then(|event| event.pointer("/properties/settings/auto_approve"))
             .and_then(Value::as_bool),
         Some(true)
+    );
+    assert!(
+        progress
+            .iter()
+            .any(|event| event["event"].as_str() == Some("run.completed")),
+        "store-backed event history should include run.completed"
     );
     assert_eq!(
         progress.last().and_then(|event| event["event"].as_str()),
@@ -746,6 +753,19 @@ fn json_run_implies_auto_approve_for_human_gates() {
             }
           },
           "host_repo_path": "[TEMP_DIR]",
+          "provenance": {
+            "client": {
+              "name": "fabro-cli",
+              "user_agent": "fabro-cli/0.176.2",
+              "version": "0.176.2"
+            },
+            "server": {
+              "version": "0.176.2"
+            },
+            "subject": {
+              "auth_method": "disabled"
+            }
+          },
           "run_dir": "[RUN_DIR]",
           "settings": {
             "auto_approve": true,
@@ -1265,25 +1285,6 @@ fn json_run_implies_auto_approve_for_human_gates() {
           "duration_ms": "[DURATION_MS]",
           "reason": "completed",
           "status": "success"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "sandbox.cleanup.started",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "provider": "local"
-        },
-        "run_id": "[ULID]",
-        "ts": "[TIMESTAMP]"
-      },
-      {
-        "event": "sandbox.cleanup.completed",
-        "id": "[EVENT_ID]",
-        "properties": {
-          "duration_ms": "[DURATION_MS]",
-          "provider": "local"
         },
         "run_id": "[ULID]",
         "ts": "[TIMESTAMP]"
