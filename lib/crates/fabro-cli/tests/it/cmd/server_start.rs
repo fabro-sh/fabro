@@ -168,6 +168,22 @@ fn default_test_contexts_share_one_eager_session_server() {
 }
 
 #[test]
+fn default_test_context_server_keeps_object_store_off_disk() {
+    let context = test_context!();
+
+    context
+        .command()
+        .args(["server", "status", "--json"])
+        .assert()
+        .success();
+
+    assert!(
+        !context.storage_dir.join("store").exists(),
+        "shared test daemon should not materialize on-disk object store files"
+    );
+}
+
+#[test]
 fn isolated_server_switches_context_to_separate_daemon() {
     let mut context = test_context!();
     let shared_storage_dir = context.storage_dir.clone();
@@ -211,6 +227,7 @@ fn concurrent_autostart_converges_on_one_shared_daemon_and_cleans_up() {
     ) -> std::process::Output {
         std::process::Command::new(env!("CARGO_BIN_EXE_fabro"))
             .current_dir(temp_dir)
+            .env("FABRO_TEST_IN_MEMORY_STORE", "1")
             .env("NO_COLOR", "1")
             .env("HOME", home_dir)
             .env("FABRO_CONFIG", config_path)
@@ -303,6 +320,7 @@ fn concurrent_autostart_converges_on_one_shared_daemon_and_cleans_up() {
     );
 
     let stop = std::process::Command::new(env!("CARGO_BIN_EXE_fabro"))
+        .env("FABRO_TEST_IN_MEMORY_STORE", "1")
         .env("NO_COLOR", "1")
         .env("FABRO_CONFIG", &config_path)
         .env("FABRO_NO_UPGRADE_CHECK", "true")

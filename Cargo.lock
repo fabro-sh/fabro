@@ -1984,7 +1984,9 @@ version = "0.176.2"
 dependencies = [
  "assert_cmd",
  "axum",
+ "fabro-config",
  "fabro-proc",
+ "fabro-types",
  "insta",
  "regex",
  "reqwest 0.13.2",

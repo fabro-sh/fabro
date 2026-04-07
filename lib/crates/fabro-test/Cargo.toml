@@ -15,7 +15,9 @@ workspace = true
 [dependencies]
 assert_cmd = "2"
 axum = { workspace = true }
+fabro-config = { path = "../fabro-config" }
 fabro-proc = { path = "../fabro-proc" }
+fabro-types = { path = "../fabro-types" }
 insta = { workspace = true, features = ["filters"] }
 regex = { workspace = true }
 reqwest = { workspace = true }

@@ -6,6 +6,8 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use assert_cmd::Command;
+use fabro_config::Storage;
+use fabro_types::RunId;
 use regex::Regex;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
@@ -42,6 +44,7 @@ static INSTA_FILTERS: &[(&str, &str)] = &[
 ];
 
 const MANAGED_STORAGE_MARKER: &str = "# fabro-test managed storage_dir";
+const TEST_IN_MEMORY_STORE_ENV: &str = "FABRO_TEST_IN_MEMORY_STORE";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TestMode {
@@ -542,6 +545,7 @@ fn ensure_server_running(fabro_bin: &Path, server: &ServerPaths, config_path: &P
         .env("NO_COLOR", "1")
         .env("FABRO_NO_UPGRADE_CHECK", "true")
         .env("FABRO_SERVER_MAX_CONCURRENT_RUNS", "64")
+        .env(TEST_IN_MEMORY_STORE_ENV, "1")
         .env("FABRO_HOME", &server.root)
         .args(["server", "start"])
         .arg("--storage-dir")
@@ -856,6 +860,7 @@ impl TestContext {
         cmd.env("HOME", &self.home_dir);
         cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
         cmd.env("FABRO_SERVER_MAX_CONCURRENT_RUNS", "64");
+        cmd.env(TEST_IN_MEMORY_STORE_ENV, "1");
         cmd
     }
 
@@ -1086,6 +1091,16 @@ impl TestContext {
 
     /// Find a run directory whose name ends with `run_id_suffix`.
     pub fn find_run_dir(&self, run_id_suffix: &str) -> PathBuf {
+        if let Ok(run_id) = run_id_suffix.parse::<RunId>() {
+            let run_dir = Storage::new(&self.storage_dir)
+                .run_scratch(&run_id)
+                .root()
+                .to_path_buf();
+            if run_dir.is_dir() {
+                return run_dir;
+            }
+        }
+
         let scratch_dir = self.storage_dir.join("scratch");
         std::fs::read_dir(&scratch_dir)
             .expect("scratch directory should exist")

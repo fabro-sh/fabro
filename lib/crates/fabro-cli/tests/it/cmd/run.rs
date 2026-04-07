@@ -4,12 +4,10 @@ use httpmock::MockServer;
 use serde_json::Value;
 
 use super::support::{
-    only_run, output_stderr, run_count_for_test_case, run_state, wait_for_no_process_match,
-    wait_for_status, write_gated_workflow,
+    output_stderr, resolve_run, run_state, wait_for_no_process_match, wait_for_status,
+    write_gated_workflow,
 };
 use crate::support::{example_fixture, fabro_json_snapshot, run_output_filters, unique_run_id};
-
-const SHARED_DAEMON_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 fn run_status_response(run_id: &str, status: &str) -> serde_json::Value {
     serde_json::json!({
@@ -1358,17 +1356,21 @@ fn detach_creates_run_dir_with_detach_log() {
 fn ctrl_c_cancels_active_run_via_server() {
     let context = test_context!();
     let gate = write_gated_workflow(&context.temp_dir.join("slow.fabro"), "slow", "Run slowly");
+    let run_id = unique_run_id();
 
     let mut run_cmd = std::process::Command::new(env!("CARGO_BIN_EXE_fabro"));
     run_cmd.current_dir(&context.temp_dir);
     run_cmd.env("NO_COLOR", "1");
     run_cmd.env("HOME", &context.home_dir);
     run_cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
+    run_cmd.env("FABRO_TEST_IN_MEMORY_STORE", "1");
     run_cmd.env("FABRO_STORAGE_DIR", &context.storage_dir);
     run_cmd.env("FABRO_SERVER_MAX_CONCURRENT_RUNS", "64");
     run_cmd.env("OPENAI_API_KEY", "test");
     run_cmd.args([
         "run",
+        "--run-id",
+        run_id.as_str(),
         "--label",
         &context.test_run_label(),
         "--label",
@@ -1382,16 +1384,7 @@ fn ctrl_c_cancels_active_run_via_server() {
     ]);
     let child = run_cmd.spawn().expect("run should spawn");
 
-    let deadline = std::time::Instant::now() + SHARED_DAEMON_TIMEOUT;
-    while run_count_for_test_case(&context) == 0 {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "timed out waiting for run directory"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-
-    let run = only_run(&context);
+    let run = resolve_run(&context, &run_id);
     wait_for_status(&run.run_dir, &["running"]);
 
     let kill_status = std::process::Command::new("kill")
