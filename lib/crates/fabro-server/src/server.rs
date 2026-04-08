@@ -847,6 +847,7 @@ pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
 fn demo_routes() -> Router<Arc<AppState>> {
     Router::new()
         .route("/runs", get(demo::list_runs).post(demo::create_run_stub))
+        .route("/boards/runs", get(demo::list_board_runs))
         .route("/preflight", post(run_preflight))
         .route("/graph/render", post(render_graph_from_manifest))
         .route("/attach", get(demo::attach_events_stub))
@@ -2014,25 +2015,25 @@ fn test_config_path() -> PathBuf {
     std::env::temp_dir().join(format!("fabro-test-settings-{}.toml", Ulid::new()))
 }
 
+fn board_column(status: RunStatus) -> Option<&'static str> {
+    match status {
+        RunStatus::Running => Some("working"),
+        RunStatus::Paused => Some("pending"),
+        RunStatus::Completed => Some("merge"),
+        _ => None,
+    }
+}
+
 async fn list_board_runs(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
     Query(pagination): Query<PaginationParams>,
 ) -> Response {
-    let live_runs = {
+    let live_runs: Vec<(RunId, RunStatus, chrono::DateTime<chrono::Utc>)> = {
         let runs = state.runs.lock().expect("runs lock poisoned");
-        let queue_positions = compute_queue_positions(&runs);
         runs.iter()
-            .map(|(id, managed_run)| {
-                (
-                    *id,
-                    managed_run.status,
-                    managed_run.error.clone(),
-                    queue_positions.get(id).copied(),
-                    managed_run.created_at,
-                )
-            })
-            .collect::<Vec<_>>()
+            .map(|(id, managed_run)| (*id, managed_run.status, managed_run.created_at))
+            .collect()
     };
     let summaries = match state
         .store
@@ -2048,27 +2049,40 @@ async fn list_board_runs(
                 .into_response();
         }
     };
-    let limit = pagination.limit.clamp(1, 100) as usize;
-    let offset = pagination.offset as usize;
-    let all_items: Vec<RunStatusResponse> = live_runs
+    let all_items: Vec<serde_json::Value> = live_runs
         .iter()
-        .map(|(id, status, error, queue_position, created_at)| {
+        .filter_map(|(id, status, created_at)| {
+            let column = board_column(*status)?;
             let summary = summaries.get(id);
-            RunStatusResponse {
-                id: id.to_string(),
-                status: *status,
-                error: error.as_ref().map(|msg| RunError {
-                    message: msg.clone(),
-                }),
-                queue_position: *queue_position,
-                status_reason: summary
-                    .and_then(|summary| summary.status_reason.map(api_status_reason)),
-                pending_control: summary
-                    .and_then(|summary| summary.pending_control.map(api_pending_control)),
-                created_at: *created_at,
-            }
+            let title = summary
+                .and_then(|s| s.goal.as_deref())
+                .unwrap_or("Untitled run");
+            let workflow_slug = summary
+                .and_then(|s| s.workflow_slug.as_deref())
+                .unwrap_or("unknown");
+            let workflow_name = summary
+                .and_then(|s| s.workflow_name.as_deref())
+                .unwrap_or(workflow_slug);
+            let repo_name = summary
+                .and_then(|s| s.host_repo_path.as_deref())
+                .and_then(|p| p.rsplit('/').next())
+                .unwrap_or("unknown");
+            let elapsed_secs = summary
+                .and_then(|s| s.duration_ms)
+                .map(|ms| ms as f64 / 1000.0);
+            Some(serde_json::json!({
+                "id": id.to_string(),
+                "title": title,
+                "repository": { "name": repo_name },
+                "workflow": { "slug": workflow_slug, "name": workflow_name },
+                "status": column,
+                "created_at": created_at.to_rfc3339(),
+                "timings": elapsed_secs.map(|s| serde_json::json!({ "elapsed_secs": s })),
+            }))
         })
         .collect();
+    let limit = pagination.limit.clamp(1, 100) as usize;
+    let offset = pagination.offset as usize;
     let page: Vec<_> = all_items.into_iter().skip(offset).take(limit + 1).collect();
     let has_more = page.len() > limit;
     let data: Vec<_> = page.into_iter().take(limit).collect();
@@ -2228,6 +2242,7 @@ fn remove_run_dir(run_dir: &std::path::Path) -> std::io::Result<()> {
     }
 }
 
+#[cfg(test)]
 fn compute_queue_positions(runs: &HashMap<RunId, ManagedRun>) -> HashMap<RunId, i64> {
     let mut queued: Vec<(&RunId, &ManagedRun)> = runs
         .iter()
@@ -7458,6 +7473,7 @@ mod tests {
         assert_eq!(body["status"].as_str().unwrap(), "failed");
         assert_eq!(body["status_reason"].as_str().unwrap(), "cancelled");
 
+        // Cancelled (failed) runs are excluded from the board
         let req = Request::builder()
             .method("GET")
             .uri(api("/boards/runs"))
@@ -7466,14 +7482,12 @@ mod tests {
         let response = app.clone().oneshot(req).await.unwrap();
         let body = body_json(response.into_body()).await;
         let run_id_str = run_id.to_string();
-        let item = body["data"]
+        let found = body["data"]
             .as_array()
             .unwrap()
             .iter()
-            .find(|item| item["id"].as_str() == Some(run_id_str.as_str()))
-            .expect("board item should exist");
-        assert_eq!(item["status_reason"].as_str(), Some("cancelled"));
-        assert!(item["pending_control"].is_null());
+            .any(|item| item["id"].as_str() == Some(run_id_str.as_str()));
+        assert!(!found, "cancelled run should not appear on the board");
 
         let run_store = state.store.open_run_reader(&run_id).await.unwrap();
         let status = run_store.state().await.unwrap().status.unwrap();
@@ -7566,6 +7580,17 @@ mod tests {
         assert_eq!(body["status"].as_str(), Some("running"));
         assert_eq!(body["pending_control"].as_str(), Some("pause"));
 
+        // Verify pending_control via /runs/{id} (board no longer includes this field)
+        let req = Request::builder()
+            .method("GET")
+            .uri(api(&format!("/runs/{run_id}")))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
+        let body = body_json(response.into_body()).await;
+        assert_eq!(body["pending_control"].as_str(), Some("pause"));
+
+        // Verify the run appears on the board with "working" status
         let req = Request::builder()
             .method("GET")
             .uri(api("/boards/runs"))
@@ -7579,7 +7604,7 @@ mod tests {
             .iter()
             .find(|item| item["id"].as_str() == Some(run_id_str.as_str()))
             .expect("board item should exist");
-        assert_eq!(item["pending_control"].as_str(), Some("pause"));
+        assert_eq!(item["status"].as_str(), Some("working"));
     }
 
     #[tokio::test]
@@ -7860,39 +7885,26 @@ mod tests {
     #[tokio::test]
     async fn queue_position_reported_for_queued_runs() {
         let state = create_app_state();
-        let app = build_router(state, AuthMode::Disabled);
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         // Create and start two runs (no scheduler, both stay queued)
         let first_run_id = create_and_start_run(&app, MINIMAL_DOT).await;
         let second_run_id = create_and_start_run(&app, MINIMAL_DOT).await;
 
-        // Check queue positions via the live board endpoint.
-        let req = Request::builder()
-            .method("GET")
-            .uri(api("/boards/runs"))
-            .body(Body::empty())
-            .unwrap();
-        let response = app.clone().oneshot(req).await.unwrap();
-        let body = body_json(response.into_body()).await;
-        let items = body["data"].as_array().unwrap();
-
-        let first = items
-            .iter()
-            .find(|item| item["id"].as_str() == Some(first_run_id.as_str()))
-            .unwrap();
-        assert_eq!(first["queue_position"].as_i64().unwrap(), 1);
-
-        let second = items
-            .iter()
-            .find(|item| item["id"].as_str() == Some(second_run_id.as_str()))
-            .unwrap();
-        assert_eq!(second["queue_position"].as_i64().unwrap(), 2);
+        // Queued runs are excluded from the board, so verify queue positions
+        // via the in-memory state directly.
+        let runs = state.runs.lock().expect("runs lock poisoned");
+        let positions = compute_queue_positions(&runs);
+        let first_id = first_run_id.parse::<RunId>().unwrap();
+        let second_id = second_run_id.parse::<RunId>().unwrap();
+        assert_eq!(positions.get(&first_id).copied(), Some(1));
+        assert_eq!(positions.get(&second_id).copied(), Some(2));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrency_limit_respected() {
         let state = create_app_state_with_options(Settings::default(), 1);
-        let app = test_app_with_scheduler(state);
+        let app = test_app_with_scheduler(Arc::clone(&state));
 
         // Create and start two runs with max_concurrent_runs=1
         create_and_start_run(&app, MINIMAL_DOT).await;
@@ -7901,7 +7913,9 @@ mod tests {
         // Give scheduler time to pick up the first run
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-        // Check statuses: at most 1 should be starting/running, the other queued
+        // Board only shows runs with board-column statuses (Running -> "working",
+        // Paused -> "pending", Completed -> "merge"). Queued/Starting/Failed are excluded.
+        // With max_concurrent_runs=1, at most 1 should be active on the board.
         let req = Request::builder()
             .method("GET")
             .uri(api("/boards/runs"))
@@ -7912,16 +7926,11 @@ mod tests {
         let items = body["data"].as_array().unwrap();
         let active_count = items
             .iter()
-            .filter(|item| {
-                let s = item["status"].as_str().unwrap();
-                s == "starting" || s == "running"
-            })
+            .filter(|item| item["status"].as_str() == Some("working"))
             .count();
-        // With max_concurrent_runs=1, at most 1 should be active
-        // (the first one might have completed already, so active could be 0 or 1)
         assert!(
             active_count <= 1,
-            "expected at most 1 active run, got {active_count}"
+            "expected at most 1 active run on the board, got {active_count}"
         );
     }
 
@@ -8029,5 +8038,175 @@ mod tests {
 
         let response = app.oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn demo_boards_runs_returns_run_list_items() {
+        let state = create_app_state();
+        let app = build_router(state, AuthMode::Disabled);
+        let req = Request::builder()
+            .method("GET")
+            .uri(api("/boards/runs"))
+            .header("X-Fabro-Demo", "1")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        let data = body["data"].as_array().expect("data should be array");
+        assert!(!data.is_empty(), "demo should return runs");
+        let first = &data[0];
+        assert!(first["id"].is_string());
+        assert!(first["repository"].is_object());
+        assert!(first["title"].is_string());
+        assert!(first["workflow"].is_object());
+        assert!(first["status"].is_string());
+        assert!(first["created_at"].is_string());
+    }
+
+    #[tokio::test]
+    async fn demo_get_run_returns_store_run_summary_shape() {
+        let state = create_app_state();
+        let app = build_router(state, AuthMode::Disabled);
+        let req = Request::builder()
+            .method("GET")
+            .uri(api("/runs/run-1"))
+            .header("X-Fabro-Demo", "1")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        // Should have StoreRunSummary fields, not RunStatusResponse fields
+        assert!(body["run_id"].is_string(), "should have run_id field");
+        assert!(body["goal"].is_string(), "should have goal field");
+        assert!(
+            body["workflow_slug"].is_string(),
+            "should have workflow_slug field"
+        );
+        // Should NOT have RunStatusResponse-only fields
+        assert!(
+            body["queue_position"].is_null(),
+            "should not have queue_position"
+        );
+    }
+
+    #[tokio::test]
+    async fn demo_get_run_returns_404_for_unknown_run() {
+        let state = create_app_state();
+        let app = build_router(state, AuthMode::Disabled);
+        let req = Request::builder()
+            .method("GET")
+            .uri(api("/runs/nonexistent-run-id"))
+            .header("X-Fabro-Demo", "1")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn boards_runs_returns_run_list_items_with_board_columns() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id = create_and_start_run(&app, MINIMAL_DOT).await;
+
+        // Set run to running so it appears on the board
+        {
+            let id = run_id.parse::<RunId>().unwrap();
+            let mut runs = state.runs.lock().expect("runs lock poisoned");
+            let managed_run = runs.get_mut(&id).expect("run should exist");
+            managed_run.status = RunStatus::Running;
+        }
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api("/boards/runs"))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        let data = body["data"].as_array().expect("data should be array");
+        let item = data
+            .iter()
+            .find(|i| i["id"].as_str() == Some(&run_id))
+            .expect("run should be in board");
+        // Should have RunListItem fields
+        assert!(item["title"].is_string());
+        assert!(item["repository"].is_object());
+        assert!(item["workflow"].is_object());
+        // Status should be a board column, not a lifecycle status
+        let status = item["status"].as_str().unwrap();
+        assert!(
+            ["working", "pending", "review", "merge"].contains(&status),
+            "status should be a board column, got: {status}"
+        );
+        assert!(item["created_at"].is_string());
+    }
+
+    #[tokio::test]
+    async fn boards_runs_excludes_non_board_statuses() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let run_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
+        let run_id = run_id_str.parse::<RunId>().unwrap();
+
+        // Set run to Failed — should not appear on the board
+        {
+            let mut runs = state.runs.lock().expect("runs lock poisoned");
+            let managed_run = runs.get_mut(&run_id).expect("run should exist");
+            managed_run.status = RunStatus::Failed;
+        }
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api("/boards/runs"))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response.into_body()).await;
+        let data = body["data"].as_array().expect("data should be array");
+        let found = data.iter().any(|i| i["id"].as_str() == Some(&run_id_str));
+        assert!(!found, "failed run should not appear on the board");
+    }
+
+    #[tokio::test]
+    async fn boards_runs_maps_paused_to_pending_and_completed_to_merge() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let paused_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
+        let paused_id = paused_id_str.parse::<RunId>().unwrap();
+        let completed_id_str = create_and_start_run(&app, MINIMAL_DOT).await;
+        let completed_id = completed_id_str.parse::<RunId>().unwrap();
+
+        {
+            let mut runs = state.runs.lock().expect("runs lock poisoned");
+            runs.get_mut(&paused_id).unwrap().status = RunStatus::Paused;
+            runs.get_mut(&completed_id).unwrap().status = RunStatus::Completed;
+        }
+
+        let req = Request::builder()
+            .method("GET")
+            .uri(api("/boards/runs"))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(req).await.unwrap();
+        let body = body_json(response.into_body()).await;
+        let data = body["data"].as_array().expect("data should be array");
+
+        let paused_item = data
+            .iter()
+            .find(|i| i["id"].as_str() == Some(&paused_id_str))
+            .expect("paused run should be on board");
+        assert_eq!(paused_item["status"].as_str().unwrap(), "pending");
+
+        let completed_item = data
+            .iter()
+            .find(|i| i["id"].as_str() == Some(&completed_id_str))
+            .expect("completed run should be on board");
+        assert_eq!(completed_item["status"].as_str().unwrap(), "merge");
     }
 }

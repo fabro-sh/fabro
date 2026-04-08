@@ -9,7 +9,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
-use fabro_api::types::{RunArtifactListResponse, RunStatus, RunStatusResponse};
+use fabro_api::types::RunArtifactListResponse;
 use serde_json::json;
 
 use crate::error::ApiError;
@@ -40,6 +40,14 @@ pub(crate) async fn list_runs(
     Query(pagination): Query<PaginationParams>,
 ) -> Response {
     paginated_response(runs::list_items(), &pagination)
+}
+
+pub(crate) async fn list_board_runs(
+    auth: AuthenticatedService,
+    state: State<Arc<AppState>>,
+    pagination: Query<PaginationParams>,
+) -> Response {
+    list_runs(auth, state, pagination).await
 }
 
 pub(crate) async fn create_run_stub(
@@ -176,19 +184,30 @@ pub(crate) async fn get_run_status(
     Path(id): Path<String>,
 ) -> Response {
     match runs::list_items().into_iter().find(|r| r.id == id) {
-        Some(item) => (
-            StatusCode::OK,
-            Json(RunStatusResponse {
-                id: id.clone(),
-                status: RunStatus::Running,
-                error: None,
-                queue_position: None,
-                status_reason: None,
-                pending_control: None,
-                created_at: item.created_at,
-            }),
-        )
-            .into_response(),
+        Some(item) => {
+            let elapsed_ms = item
+                .timings
+                .as_ref()
+                .map(|t| (t.elapsed_secs * 1000.0) as u64);
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "run_id": item.id,
+                    "goal": item.title,
+                    "workflow_slug": item.workflow.slug,
+                    "workflow_name": item.workflow.slug,
+                    "host_repo_path": format!("/demo/{}", item.repository.name),
+                    "labels": {},
+                    "start_time": item.created_at.to_rfc3339(),
+                    "status": "running",
+                    "status_reason": null,
+                    "pending_control": null,
+                    "duration_ms": elapsed_ms,
+                    "total_usd_micros": null,
+                })),
+            )
+                .into_response()
+        }
         None => ApiError::not_found("Run not found.").into_response(),
     }
 }

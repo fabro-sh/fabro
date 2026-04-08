@@ -19,17 +19,22 @@ import {
 } from "@heroicons/react/24/outline";
 import { Form, Link, Outlet, redirect, useLocation, useMatches, useRevalidator } from "react-router";
 import { getAuthMe } from "../api";
+import { DemoModeProvider } from "../lib/demo-mode";
 import { useTheme } from "../lib/theme";
 
 export async function loader() {
   return getAuthMe();
 }
 
-const navigation = [
-  { name: "Workflows", href: "/workflows", icon: RectangleStackIcon },
-  { name: "Runs", href: "/runs", icon: PlayIcon },
-  { name: "Insights", href: "/insights", icon: ChartBarIcon },
+const allNavigation = [
+  { name: "Workflows", href: "/workflows", icon: RectangleStackIcon, demoOnly: true },
+  { name: "Runs", href: "/runs", icon: PlayIcon, demoOnly: false },
+  { name: "Insights", href: "/insights", icon: ChartBarIcon, demoOnly: true },
 ];
+
+export function getVisibleNavigation(demoMode: boolean) {
+  return allNavigation.filter((item) => !item.demoOnly || demoMode);
+}
 
 function classNames(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -41,6 +46,7 @@ export default function AppShell({ loaderData }: any) {
   const matches = useMatches();
   const revalidator = useRevalidator();
   const { theme, toggle } = useTheme();
+  const navigation = getVisibleNavigation(demoMode);
   const currentNav = navigation.find((item) => pathname.startsWith(item.href));
   const title = currentNav?.name ?? "";
   const lastMatch = matches[matches.length - 1];
@@ -63,6 +69,7 @@ export default function AppShell({ loaderData }: any) {
   }
 
   return (
+    <DemoModeProvider value={demoMode}>
     <div className="min-h-full">
       <Disclosure as="nav" className="bg-panel/50">
         <div className="px-4 sm:px-6 lg:px-8">
@@ -263,5 +270,6 @@ export default function AppShell({ loaderData }: any) {
         </div>
       </main>
     </div>
+    </DemoModeProvider>
   );
 }

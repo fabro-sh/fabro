@@ -2,29 +2,40 @@ import { useEffect } from "react";
 import { ChevronDownIcon, ChevronRightIcon } from "@heroicons/react/20/solid";
 import { Menu, MenuButton, MenuItem, MenuItems } from "@headlessui/react";
 import { Link, Outlet, useFetcher, useLocation } from "react-router";
-import { columnNames, mapRunListItem, statusColors } from "../data/runs";
-import type { ColumnStatus } from "../data/runs";
+import { columnNames, mapRunSummaryToRunItem, statusColors } from "../data/runs";
+import type { ColumnStatus, RunSummaryResponse } from "../data/runs";
 import { apiJson } from "../api";
-import type { PaginatedRunList, PreviewUrlResponse } from "@qltysh/fabro-api-client";
+import { useDemoMode } from "../lib/demo-mode";
+import type { PreviewUrlResponse } from "@qltysh/fabro-api-client";
 
-const tabs = [
-  { name: "Overview", path: "", count: null },
-  { name: "Stages", path: "/stages/detect-drift", count: null },
-  { name: "Files Changed", path: "/files", count: null },
-  { name: "Billing", path: "/billing", count: null },
+const allTabs = [
+  { name: "Overview", path: "", count: null, demoOnly: false, broken: false },
+  { name: "Stages", path: "/stages/detect-drift", count: null, demoOnly: true, broken: false },
+  { name: "Files Changed", path: "/files", count: null, demoOnly: false, broken: true },
+  { name: "Graph", path: "/graph", count: null, demoOnly: false, broken: false },
+  { name: "Billing", path: "/billing", count: null, demoOnly: false, broken: false },
 ];
 
 export const handle = { hideHeader: true };
 
 export async function loader({ request, params }: any) {
-  const response = await apiJson<PaginatedRunList>("/boards/runs", { request });
-  const apiRun = response.data.find((r) => r.id === params.id);
-  if (!apiRun) return { run: null };
+  const response = await fetch(`/api/v1/runs/${params.id}`, {
+    credentials: "include",
+  });
+  if (!response.ok) return { run: null };
+  const summary: RunSummaryResponse = await response.json();
+  const item = mapRunSummaryToRunItem(summary);
+  const statusMap: Record<string, ColumnStatus> = {
+    running: "working",
+    paused: "pending",
+    completed: "merge",
+  };
+  const status = statusMap[summary.status ?? ""] ?? "working";
   return {
     run: {
-      ...mapRunListItem(apiRun),
-      status: apiRun.status as ColumnStatus,
-      statusLabel: columnNames[apiRun.status as ColumnStatus] ?? apiRun.status,
+      ...item,
+      status,
+      statusLabel: columnNames[status] ?? summary.status ?? "Unknown",
     },
   };
 }
@@ -54,6 +65,8 @@ export default function RunDetail({ loaderData, params }: any) {
   const { pathname } = useLocation();
   const basePath = `/runs/${params.id}`;
   const previewFetcher = useFetcher<PreviewUrlResponse>();
+  const demoMode = useDemoMode();
+  const tabs = allTabs.filter((t) => !t.broken && (!t.demoOnly || demoMode));
 
   useEffect(() => {
     if (previewFetcher.data?.url) {
