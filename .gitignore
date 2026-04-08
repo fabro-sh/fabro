@@ -12,3 +12,4 @@ __pycache__
 .ai/tmp
 .worktrees/
 **/*.pending-snap
+.worktrees
