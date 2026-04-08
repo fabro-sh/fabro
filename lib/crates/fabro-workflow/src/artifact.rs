@@ -32,14 +32,11 @@ const ARTIFACT_POINTER_PREFIX: &str = "file://";
 ///
 /// # Errors
 ///
-/// Returns an error if blob persistence or cache materialization fails.
+/// Returns an error if blob persistence fails.
 pub async fn offload_large_values(
     updates: &mut HashMap<String, Value>,
     run_store: &RunStoreHandle,
-    cache_dir: &Path,
 ) -> Result<()> {
-    let _ = cache_dir;
-
     for value in updates.values_mut() {
         let bytes = serde_json::to_vec(&*value)
             .map_err(|e| FabroError::engine(format!("artifact serialize failed: {e}")))?;
@@ -381,7 +378,6 @@ mod tests {
 
     #[tokio::test]
     async fn offload_replaces_large_values_with_blob_backed_pointer() {
-        let dir = tempfile::tempdir().unwrap();
         let run_store = make_run_store("artifact-offload").await;
 
         let large_string = "x".repeat(BLOB_OFFLOAD_THRESHOLD + 1);
@@ -391,7 +387,7 @@ mod tests {
         let mut updates = HashMap::new();
         updates.insert("response.plan".to_string(), serde_json::json!(large_string));
 
-        offload_large_values(&mut updates, &run_store.clone().into(), dir.path())
+        offload_large_values(&mut updates, &run_store.clone().into())
             .await
             .unwrap();
 
@@ -408,26 +404,20 @@ mod tests {
             .expect("blob should exist");
         let blob_value: serde_json::Value = serde_json::from_slice(&blob).unwrap();
         assert_eq!(blob_value, serde_json::json!(large_string));
-        assert!(
-            std::fs::read_dir(dir.path()).unwrap().next().is_none(),
-            "offload should not materialize host cache files"
-        );
     }
 
     #[tokio::test]
     async fn offload_leaves_small_values_untouched() {
-        let dir = tempfile::tempdir().unwrap();
         let run_store = make_run_store("artifact-small").await;
         let small_value = serde_json::json!("hello world");
         let mut updates = HashMap::new();
         updates.insert("small_key".to_string(), small_value.clone());
 
-        offload_large_values(&mut updates, &run_store.clone().into(), dir.path())
+        offload_large_values(&mut updates, &run_store.clone().into())
             .await
             .unwrap();
 
         assert_eq!(updates.get("small_key").unwrap(), &small_value);
-        assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
     }
 
     #[test]

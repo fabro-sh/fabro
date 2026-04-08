@@ -408,7 +408,7 @@ fabro pr create <run-id> --model claude-opus-4-6
 | `<RUN_ID>` | Run ID or prefix (required) |
 | `--model <MODEL>` | LLM model for generating the PR description |
 
-The run must have completed successfully (or with partial success) and have a `final.patch` with changes.
+The run must have completed successfully (or with partial success) and have a stored diff with changes.
 
 ### `fabro pr list`
 
@@ -658,20 +658,17 @@ fabro repo deinit
 
 ## `fabro diff`
 
-Show the diff from a workflow run. Displays the `final.patch` for completed runs, or connects to the sandbox for a live diff from in-progress runs.
+Show the diff from a workflow run. Reads the stored diff for completed runs.
 
 ```bash
 fabro diff <run-id>
 fabro diff <run-id> --node work
-fabro diff <run-id> --stat
 ```
 
 | Argument / Flag | Description |
 |---|---|
 | `<RUN>` | Run ID or prefix (required) |
 | `--node <NODE>` | Show diff for a specific node instead of the full run |
-| `--stat` | Show diffstat instead of full patch (live diffs only) |
-| `--shortstat` | Show only files-changed/insertions/deletions summary (live diffs only) |
 
 Output is colorized when writing to a terminal.
 

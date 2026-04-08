@@ -20,7 +20,6 @@ The naming format is `YYYYMMDD-{run_id}`, where `run_id` is the ULID assigned to
 | File | Format | When written | Description |
 |---|---|---|---|
 | `workflow_bundle.json` | JSON | Run create | Bundled workflow input used to restart the run without re-reading the original workflow files. Includes the root workflow path plus bundled child workflow sources and inline files. |
-| `final.patch` | Diff | Run end | Git diff from `base_sha` to final HEAD. Only present in git checkpoint mode. |
 | `run.pid` | Text | Legacy only | Legacy process ID file from older runs. Current detached launches use launcher records instead, and current attach/resume no longer read `run.pid`. |
 
 ## Local-only directories
@@ -32,7 +31,7 @@ These paths are local runtime state and caches, not the canonical run record.
 - **`cache/artifacts/files/`** — Captured artifact files organized by node and retry, plus a `manifest.json` for each retry directory.
 - **`nodes/{manager_node}_{visit}/child/`** — Nested scratch directories for manager-loop child workflows.
 
-Large durable values, event streams, checkpoints, conclusions, and retros are no longer projected into live scratch by default. Use `fabro logs`, `fabro inspect`, the API, or `fabro store dump` for those surfaces.
+Large durable values, event streams, checkpoints, diffs, conclusions, and retros are no longer projected into live scratch by default. Use `fabro logs`, `fabro inspect`, the API, or `fabro store dump` for those surfaces.
 
 ## Reconstructed and export-only layouts
 
@@ -59,7 +58,6 @@ fabro ps --filter workflow=my-workflow
 ├── 20260307-01JQXYZ123ABC456DEF789/  # One directory per run
 │   ├── workflow_bundle.json
 │   ├── run.pid                      # Legacy only; older runs may contain this
-│   ├── final.patch
 │   ├── runtime/
 │   │   └── blobs/
 │   │       └── 01JT5Y3KJ0N5S9E1Y7YFBR2G4D.json

@@ -728,11 +728,12 @@ async fn daytona_git_checkpoint_remote_emits_events() {
         "checkpoint should have git_commit_sha"
     );
 
-    // Assert final.patch exists and contains changes from the run
+    // Assert scratch final.patch is no longer written
     let final_patch = dir.path().join("final.patch");
-    assert!(final_patch.exists(), "final.patch should exist in run_dir");
-    let patch_content = std::fs::read_to_string(&final_patch).unwrap();
-    assert!(!patch_content.is_empty(), "final.patch should not be empty");
+    assert!(
+        !final_patch.exists(),
+        "final.patch should not be written to scratch"
+    );
 
     env.cleanup().await.unwrap();
 }
@@ -1242,9 +1243,12 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
         "sandbox commit should have Fabro-Run trailer, got:\n{commit_msg}"
     );
 
-    // Assert final.patch exists
+    // Assert scratch final.patch is no longer written
     let final_patch = dir.path().join("final.patch");
-    assert!(final_patch.exists(), "final.patch should exist in run_dir");
+    assert!(
+        !final_patch.exists(),
+        "final.patch should not be written to scratch"
+    );
 
     env.cleanup().await.unwrap();
 }

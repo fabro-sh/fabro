@@ -121,11 +121,6 @@ impl RunScratch {
     }
 
     #[must_use]
-    pub fn blob_cache_dir(&self) -> PathBuf {
-        self.artifact_cache_dir().join("values")
-    }
-
-    #[must_use]
     pub fn artifact_files_dir(&self) -> PathBuf {
         self.artifact_cache_dir().join("files")
     }
@@ -137,15 +132,9 @@ impl RunScratch {
             .join(format!("retry_{attempt}"))
     }
 
-    #[must_use]
-    pub fn final_patch(&self) -> PathBuf {
-        self.root.join("final.patch")
-    }
-
     pub fn create(&self) -> std::io::Result<()> {
         std::fs::create_dir_all(self.worktree_dir())?;
         std::fs::create_dir_all(self.runtime_dir())?;
-        std::fs::create_dir_all(self.blob_cache_dir())?;
         std::fs::create_dir_all(self.artifact_files_dir())?;
         Ok(())
     }
@@ -231,14 +220,6 @@ mod tests {
             scratch.root().join("cache").join("artifacts")
         );
         assert_eq!(
-            scratch.blob_cache_dir(),
-            scratch
-                .root()
-                .join("cache")
-                .join("artifacts")
-                .join("values")
-        );
-        assert_eq!(
             scratch.artifact_files_dir(),
             scratch.root().join("cache").join("artifacts").join("files")
         );
@@ -252,14 +233,21 @@ mod tests {
                 .join("plan")
                 .join("retry_2")
         );
-        assert_eq!(scratch.final_patch(), scratch.root().join("final.patch"));
 
         scratch.create().unwrap();
         assert!(scratch.root().exists());
         assert!(scratch.worktree_dir().exists());
         assert!(scratch.runtime_dir().exists());
-        assert!(scratch.blob_cache_dir().exists());
         assert!(scratch.artifact_files_dir().exists());
+        assert!(
+            !scratch
+                .root()
+                .join("cache")
+                .join("artifacts")
+                .join("values")
+                .exists()
+        );
+        assert!(!scratch.root().join("final.patch").exists());
 
         scratch.remove().unwrap();
         assert!(!scratch.root().exists());

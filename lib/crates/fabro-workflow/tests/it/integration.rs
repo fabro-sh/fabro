@@ -8667,7 +8667,10 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
 
     assert!(
         !RunScratch::new(dir.path())
-            .blob_cache_dir()
+            .root()
+            .join("cache")
+            .join("artifacts")
+            .join("values")
             .join(format!("{expected_blob_id}.json"))
             .exists(),
         "legacy host blob cache file should not exist"
@@ -10384,13 +10387,11 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
         "checkpoint should have git_commit_sha"
     );
 
-    // 9. Assert final.patch exists and contains the changes
+    // 9. Assert scratch final.patch is no longer written
     let final_patch = run_dir.path().join("final.patch");
-    assert!(final_patch.exists(), "final.patch should exist in run_dir");
-    let patch_content = std::fs::read_to_string(&final_patch).unwrap();
     assert!(
-        patch_content.contains("hello.txt"),
-        "final.patch should contain hello.txt changes"
+        !final_patch.exists(),
+        "final.patch should not be written to scratch"
     );
 
     // Cleanup worktree
@@ -10827,17 +10828,11 @@ async fn parallel_git_branching_host_e2e() {
         "parallel branch ref should still exist for debugging"
     );
 
-    // 11. Verify final.patch contains the winner's changes
+    // 11. Verify scratch final.patch is no longer written
     let final_patch = run_dir.path().join("final.patch");
-    assert!(final_patch.exists(), "final.patch should exist in run_dir");
-    let patch_content = std::fs::read_to_string(&final_patch).unwrap();
     assert!(
-        patch_content.contains(&format!("{best_id}.txt")),
-        "final.patch should contain winner's file"
-    );
-    assert!(
-        !patch_content.contains(&format!("{loser_id}.txt")),
-        "final.patch should NOT contain loser's file"
+        !final_patch.exists(),
+        "final.patch should not be written to scratch"
     );
 
     // 12. Verify events

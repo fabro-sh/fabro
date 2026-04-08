@@ -51,7 +51,7 @@ pub(super) async fn create_command(
         .final_patch
         .context("Failed to load final patch from store — no diff available")?;
     if diff.trim().is_empty() {
-        bail!("final.patch is empty — nothing to create a PR for");
+        bail!("Stored diff is empty — nothing to create a PR for");
     }
 
     let cwd = std::env::current_dir().context("Failed to get current directory")?;

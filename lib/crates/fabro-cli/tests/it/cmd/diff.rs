@@ -43,7 +43,7 @@ fn diff_completed_run_without_changes_reports_no_patch() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-    error: Run completed but no final.patch exists — the run may not have produced any changes
+    error: Run completed but no stored diff exists — the run may not have produced any changes
     ");
 }
 

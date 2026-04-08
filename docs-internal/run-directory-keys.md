@@ -15,7 +15,6 @@ There is no `_init.json` anymore. Run existence in the database is determined by
 | File | Purpose | Source |
 |---|---|---|
 | `workflow_bundle.json` | Bundled workflow input used by `start` to restore `workflow_path` and bundled child workflows/files | Written during create from the resolved workflow bundle |
-| `final.patch` | Final git diff for checkpointed runs | Local git state at finalize time, not a direct event payload |
 | `run.pid` | Legacy detached-run pid file from older runs | Legacy only; current flows do not rely on it |
 
 ## Local-Only Directories
@@ -41,3 +40,4 @@ These names are still real, but they are no longer live scratch files by default
 ## Notes
 
 - Artifact binaries are no longer stored in the SlateDB keyspace. They live in `ArtifactStore`; the run scratch tree only contains local cached copies when a workflow stage writes them to disk.
+- Final diffs for checkpointed runs are projected from the run store; they are no longer written as scratch files.

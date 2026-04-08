@@ -153,7 +153,6 @@ impl WorkflowLifecycle {
         let git = GitLifecycle {
             sandbox: Arc::clone(sandbox),
             emitter: Arc::clone(emitter),
-            run_dir: run_dir.clone(),
             run_id: run_options.run_id,
             run_store: run_store.clone(),
             run_options: Arc::clone(run_options),
@@ -166,7 +165,6 @@ impl WorkflowLifecycle {
         let artifact = ArtifactLifecycle::new(
             Arc::clone(sandbox),
             run_store.clone(),
-            run_scratch.blob_cache_dir(),
             Arc::clone(emitter),
             run_scratch.artifact_files_dir(),
             run_options.artifact_globs().to_vec(),

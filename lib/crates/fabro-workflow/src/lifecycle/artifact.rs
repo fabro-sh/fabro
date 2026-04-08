@@ -37,7 +37,6 @@ const ARTIFACT_UPLOAD_RETRY_DELAYS: [Duration; 3] = [
 pub(crate) struct ArtifactLifecycle {
     pub sandbox: Arc<dyn fabro_sandbox::Sandbox>,
     pub run_store: RunStoreHandle,
-    pub blob_cache_dir: PathBuf,
     pub emitter: Arc<Emitter>,
     pub artifacts_dir: PathBuf,
     pub artifact_globs: Vec<String>,
@@ -52,7 +51,6 @@ impl ArtifactLifecycle {
     pub(crate) fn new(
         sandbox: Arc<dyn fabro_sandbox::Sandbox>,
         run_store: RunStoreHandle,
-        blob_cache_dir: PathBuf,
         emitter: Arc<Emitter>,
         artifacts_dir: PathBuf,
         artifact_globs: Vec<String>,
@@ -62,7 +60,6 @@ impl ArtifactLifecycle {
         Self {
             sandbox,
             run_store,
-            blob_cache_dir,
             emitter,
             artifacts_dir,
             artifact_globs,
@@ -174,12 +171,8 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         let node_id = node.id();
 
         // Offload large context_updates values to artifact store
-        if let Err(e) = offload_large_values(
-            &mut result.outcome.context_updates,
-            &self.run_store,
-            &self.blob_cache_dir,
-        )
-        .await
+        if let Err(e) =
+            offload_large_values(&mut result.outcome.context_updates, &self.run_store).await
         {
             self.emitter.emit(&Event::RunNotice {
                 level: RunNoticeLevel::Warn,

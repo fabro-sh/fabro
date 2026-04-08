@@ -1,11 +1,8 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use fabro_config::RunScratch;
 use fabro_types::RunId;
-use tokio::fs;
 
 use fabro_core::error::{CoreError, Result as CoreResult};
 use fabro_core::graph::NodeSpec;
@@ -67,7 +64,6 @@ pub(crate) struct GitCheckpointResult {
 pub(crate) struct GitLifecycle {
     pub sandbox: Arc<dyn fabro_sandbox::Sandbox>,
     pub emitter: Arc<Emitter>,
-    pub run_dir: PathBuf,
     pub run_id: RunId,
     pub run_store: RunStoreHandle,
     pub run_options: Arc<RunOptions>,
@@ -301,7 +297,7 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
     }
 
     async fn on_run_end(&self, outcome: &Outcome, _state: &WfRunState) {
-        // Write final.patch on success
+        // Capture the final diff on success for event/store projection.
         if (outcome.status == StageStatus::Success || outcome.status == StageStatus::PartialSuccess)
             && self.run_options.git.is_some()
         {
@@ -314,15 +310,6 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
                 match git_diff(&*self.sandbox, &base_sha).await {
                     Ok(patch) if !patch.is_empty() => {
                         *self.final_patch.lock().unwrap() = Some(patch.clone());
-                        if let Err(err) =
-                            fs::write(RunScratch::new(&self.run_dir).final_patch(), patch).await
-                        {
-                            self.emitter.emit(&Event::RunNotice {
-                                level: RunNoticeLevel::Warn,
-                                code: "final_patch_write_failed".to_string(),
-                                message: format!("failed to write final.patch: {err}"),
-                            });
-                        }
                     }
                     Ok(_) => {
                         *self.final_patch.lock().unwrap() = None;
