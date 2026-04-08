@@ -6,9 +6,10 @@ use std::time::Duration;
 
 use fabro_agent::Sandbox;
 use fabro_graphviz::graph::Graph as GvGraph;
-use fabro_store::{Database, RunProjection};
+use fabro_store::{ArtifactStore, Database, RunProjection};
 use object_store::local::LocalFileSystem;
 
+use crate::artifact_upload::ArtifactSink;
 use crate::error::{FabroError, Result};
 use crate::event::{Emitter, Event, StoreProgressLogger, append_event};
 use crate::handler::HandlerRegistry;
@@ -106,6 +107,13 @@ async fn initialized(
     let emitter = bound_emitter(run_options.run_id, &emitter);
     let store_logger = StoreProgressLogger::new(run_store.clone());
     store_logger.register(emitter.as_ref());
+    let artifact_store = ArtifactStore::new(
+        Arc::new(
+            LocalFileSystem::new_with_prefix(&store_dir)
+                .expect("failed to create local test artifact store"),
+        ),
+        "artifacts",
+    );
     InitializedState {
         initialized: Initialized {
             graph: graph.clone(),
@@ -120,7 +128,7 @@ async fn initialized(
             sandbox,
             registry: Arc::new(registry),
             on_node: None,
-            artifact_uploader: None,
+            artifact_sink: Some(ArtifactSink::Store(artifact_store)),
             run_control: None,
             hook_runner: options.hook_runner,
             env: options.env,

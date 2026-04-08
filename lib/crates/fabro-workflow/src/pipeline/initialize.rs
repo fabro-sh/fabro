@@ -19,7 +19,7 @@ use crate::error::FabroError;
 use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::git::{self, GitSyncStatus, MetadataStore};
 use crate::handler::llm::{AgentApiBackend, AgentCliBackend, BackendRouter};
-use crate::handler::{HandlerRegistry, default_registry};
+use crate::handler::{HandlerRegistry, default_registry, sandbox_cancel_token};
 use crate::run_options::GitCheckpointOptions;
 use tokio::process::Command as TokioCommand;
 use tokio::runtime::Handle;
@@ -589,8 +589,7 @@ pub async fn initialize(
                 index,
             });
             let cmd_start = Instant::now();
-            let cancel_token =
-                crate::handler::sandbox_cancel_token(options.run_options.cancel_token.clone());
+            let cancel_token = sandbox_cancel_token(options.run_options.cancel_token.clone());
             let result = sandbox
                 .exec_command(
                     command,
@@ -659,7 +658,7 @@ pub async fn initialize(
         sandbox,
         registry,
         on_node: None,
-        artifact_uploader: options.artifact_uploader,
+        artifact_sink: options.artifact_sink,
         run_control: options.run_control,
         hook_runner,
         env,
@@ -816,7 +815,7 @@ mod tests {
                 worktree_mode: None,
                 run_control: None,
                 registry_override: None,
-                artifact_uploader: None,
+                artifact_sink: None,
                 checkpoint: None,
                 seed_context: None,
             },
@@ -893,7 +892,7 @@ mod tests {
                 worktree_mode: None,
                 run_control: None,
                 registry_override: None,
-                artifact_uploader: None,
+                artifact_sink: None,
                 checkpoint: None,
                 seed_context: None,
             },
@@ -964,7 +963,7 @@ mod tests {
                 worktree_mode: None,
                 run_control: None,
                 registry_override: None,
-                artifact_uploader: None,
+                artifact_sink: None,
                 checkpoint: None,
                 seed_context: None,
             },
@@ -1030,7 +1029,7 @@ mod tests {
                 worktree_mode: None,
                 run_control: None,
                 registry_override: None,
-                artifact_uploader: None,
+                artifact_sink: None,
                 checkpoint: None,
                 seed_context: None,
             },

@@ -61,13 +61,13 @@ tokio-util.workspace = true
 tracing.workspace = true
 walkdir.workspace = true
 reqwest.workspace = true
+tempfile = "3"
 [dev-dependencies]
 base64.workspace = true
 toml.workspace = true
 fabro-mcp = { path = "../fabro-mcp" }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 object_store.workspace = true
-tempfile = "3"
 assert_cmd = "2"
 predicates = "3"
 fabro-macros = { path = "../fabro-macros" }

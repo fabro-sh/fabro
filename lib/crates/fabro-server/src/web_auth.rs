@@ -560,7 +560,7 @@ async fn setup_register(
     settings.git = Some(git.clone());
     if let Some(ref origin) = origin {
         let web = settings.web.get_or_insert_default();
-        web.url = origin.to_string();
+        web.url.clone_from(origin);
     }
 
     if let Some(parent) = settings_path.parent() {

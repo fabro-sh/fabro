@@ -24,8 +24,8 @@ use crate::github_webhooks::WebhookManager;
 use crate::jwt_auth::{AuthMode, AuthStrategy, resolve_auth_mode_with_lookup};
 use crate::secret_store::SecretStore;
 use crate::server::{
-    build_app_state_with_path, reconcile_incomplete_runs_on_startup, shutdown_active_workers,
-    spawn_scheduler,
+    RouterOptions, build_app_state_with_path, build_router_with_options,
+    reconcile_incomplete_runs_on_startup, shutdown_active_workers, spawn_scheduler,
 };
 use crate::tls::{ClientAuth, build_rustls_config, serve_tls_with_shutdown};
 use fabro_llm::client::Client as LlmClient;
@@ -266,8 +266,7 @@ where
         .expect("config lock poisoned")
         .web
         .as_ref()
-        .map(|web| web.enabled)
-        .unwrap_or(true);
+        .is_none_or(|web| web.enabled);
 
     let store_path = storage.store_dir();
     let object_store = build_object_store(&store_path)?;
@@ -299,11 +298,8 @@ where
         );
     }
     spawn_scheduler(Arc::clone(&state));
-    let router = crate::server::build_router_with_options(
-        Arc::clone(&state),
-        auth_mode,
-        crate::server::RouterOptions { web_enabled },
-    );
+    let router =
+        build_router_with_options(Arc::clone(&state), auth_mode, RouterOptions { web_enabled });
 
     let bind_request = match args.bind {
         Some(ref s) => bind::parse_bind(s)?,

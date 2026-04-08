@@ -40,6 +40,7 @@ use fabro_types::{
 };
 use fabro_util::redact::redact_jsonl_line;
 use fabro_util::version::FABRO_VERSION;
+use fabro_workflow::artifact_upload::ArtifactSink;
 use fabro_workflow::error::FabroError;
 use fabro_workflow::handler::HandlerRegistry;
 use futures_util::stream;
@@ -850,9 +851,7 @@ pub fn build_router_with_options(
             debug!(method = %req.method(), path = %req.uri().path(), "HTTP request");
         })
         .on_response(
-            |response: &axum::response::Response,
-             latency: std::time::Duration,
-             _span: &tracing::Span| {
+            |response: &Response, latency: std::time::Duration, _span: &tracing::Span| {
                 let status = response.status().as_u16();
                 let latency_ms = latency.as_millis();
                 if status >= 500 {
@@ -3609,7 +3608,7 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         interviewer: Arc::clone(&interview_runtime),
         run_store: run_store.clone().into(),
         event_sink: workflow_event::RunEventSink::store(run_store.clone()),
-        artifact_uploader: None,
+        artifact_sink: Some(ArtifactSink::Store(state.artifact_store.clone())),
         run_control: None,
         github_app,
         on_node: None,

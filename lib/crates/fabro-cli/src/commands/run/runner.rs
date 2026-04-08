@@ -9,7 +9,7 @@ use fabro_interview::{ControlInterviewer, WorkerControlEnvelope, WorkerControlMe
 use fabro_store::{EventEnvelope, EventPayload, RunProjection};
 use fabro_types::{EventBody, RunBlobId, RunEvent, RunId, Settings, StatusReason};
 use fabro_workflow::artifact_snapshot::CapturedArtifactInfo;
-use fabro_workflow::artifact_upload::StageArtifactUploader;
+use fabro_workflow::artifact_upload::{ArtifactSink, StageArtifactUploader};
 use fabro_workflow::event::{Emitter, RunEventSink};
 use fabro_workflow::operations::{self, StartServices};
 use fabro_workflow::run_control::RunControlState;
@@ -63,11 +63,11 @@ pub(crate) async fn execute(
         .run
         .as_ref()
         .ok_or_else(|| anyhow!("Run {run_id} has no run record in store"))?;
-    let artifact_uploader = Some(build_artifact_uploader(
+    let artifact_sink = Some(ArtifactSink::Uploader(build_artifact_uploader(
         run_id,
         client.clone_for_reuse(),
         artifact_upload_token,
-    ));
+    )));
     let interviewer = Arc::new(ControlInterviewer::new());
     let cancel_token = Arc::new(AtomicBool::new(false));
     tokio::spawn(read_worker_control_stream(
@@ -91,7 +91,7 @@ pub(crate) async fn execute(
                 async move { Ok(()) }
             }),
         ]),
-        artifact_uploader,
+        artifact_sink,
         run_control: Some(run_control),
         github_app,
         on_node: None,

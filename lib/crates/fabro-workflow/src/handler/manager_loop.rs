@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use crate::artifact_upload::ArtifactSink;
 use crate::condition::evaluate_condition;
 use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
@@ -16,7 +17,7 @@ use crate::run_dir::visit_from_context;
 use crate::run_options::RunOptions;
 use async_trait::async_trait;
 use fabro_graphviz::graph::{AttrValue, Graph, Node};
-use fabro_store::Database;
+use fabro_store::{ArtifactStore, Database};
 use fabro_types::Settings;
 use object_store::memory::InMemory;
 use tokio::time::{sleep, timeout};
@@ -233,8 +234,9 @@ impl Handler for SubWorkflowHandler {
         let env = services.env.clone();
         let dry_run = services.dry_run;
         let workflow_bundle = services.workflow_bundle.clone();
+        let object_store = Arc::new(InMemory::new());
         let store = Arc::new(Database::new(
-            Arc::new(InMemory::new()),
+            object_store.clone(),
             "",
             Duration::from_millis(1),
         ));
@@ -242,6 +244,7 @@ impl Handler for SubWorkflowHandler {
             .create_run(&child_run_options.run_id)
             .await
             .map_err(|err| FabroError::engine(err.to_string()))?;
+        let artifact_store = ArtifactStore::new(object_store, "artifacts");
 
         // Spawn child engine
         let mut child_handle = tokio::spawn(async move {
@@ -258,7 +261,7 @@ impl Handler for SubWorkflowHandler {
                 sandbox,
                 registry,
                 on_node: None,
-                artifact_uploader: None,
+                artifact_sink: Some(ArtifactSink::Store(artifact_store)),
                 run_control: None,
                 hook_runner,
                 env,

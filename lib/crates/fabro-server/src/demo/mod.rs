@@ -3,6 +3,7 @@
 #![allow(clippy::default_trait_access, clippy::unreadable_literal)]
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -188,7 +189,8 @@ pub(crate) async fn get_run_status(
             let elapsed_ms = item
                 .timings
                 .as_ref()
-                .map(|t| (t.elapsed_secs * 1000.0) as u64);
+                .and_then(|t| Duration::try_from_secs_f64(t.elapsed_secs).ok())
+                .and_then(|duration| u64::try_from(duration.as_millis()).ok());
             (
                 StatusCode::OK,
                 Json(json!({

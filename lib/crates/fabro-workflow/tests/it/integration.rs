@@ -25,8 +25,8 @@ use fabro_interview::{
     QueueInterviewer, RecordingInterviewer,
 };
 use fabro_llm::provider::Provider;
-use fabro_store::Database;
-use fabro_types::{RunEvent, RunId, Settings};
+use fabro_store::{ArtifactStore, Database};
+use fabro_types::{RunEvent, RunId, Settings, StageId};
 use fabro_validate::{Severity, validate, validate_or_raise};
 use fabro_workflow::context::Context;
 use fabro_workflow::error::{FabroError, FailureSignatureExt};
@@ -174,6 +174,14 @@ fn load_run_checkpoint(run_dir: &Path) -> Result<Checkpoint, Box<dyn std::error:
 
 fn save_checkpoint(path: &Path, checkpoint: &Checkpoint) {
     std::fs::write(path, serde_json::to_string_pretty(checkpoint).unwrap()).unwrap();
+}
+
+fn test_artifact_store(run_dir: &Path) -> ArtifactStore {
+    let object_store = Arc::new(
+        LocalFileSystem::new_with_prefix(test_store_dir(run_dir))
+            .expect("failed to create local artifact store"),
+    );
+    ArtifactStore::new(object_store, "artifacts")
 }
 
 // ---------------------------------------------------------------------------
@@ -12639,17 +12647,38 @@ async fn asset_collection_local_sandbox_success() {
         .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    // Check that artifact files were collected into the stage directory
-    let artifacts_dir = RunScratch::new(run_dir.path()).artifact_stage_dir("create_assets", 1);
-
-    let report_path = artifacts_dir.join("test-results/report.xml");
-    assert!(
-        report_path.exists(),
-        "report.xml should be collected at {}",
-        report_path.display()
+    let artifact_store = test_artifact_store(run_dir.path());
+    let artifacts = artifact_store
+        .list_for_run(&run_options.run_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        artifacts.len(),
+        2,
+        "expected stored artifacts for both files"
     );
-    let report_content = std::fs::read_to_string(&report_path).unwrap();
+    assert_eq!(artifacts[0].node, StageId::new("create_assets", 1));
+    assert_eq!(artifacts[0].filename, "test-results/output.txt");
+    assert_eq!(artifacts[1].node, StageId::new("create_assets", 1));
+    assert_eq!(artifacts[1].filename, "test-results/report.xml");
+    let report_content = String::from_utf8(
+        artifact_store
+            .get(
+                &run_options.run_id,
+                &StageId::new("create_assets", 1),
+                "test-results/report.xml",
+            )
+            .await
+            .unwrap()
+            .expect("artifact should be stored")
+            .to_vec(),
+    )
+    .unwrap();
     assert!(report_content.contains("testsuites"));
+    assert!(
+        !run_dir.path().join("cache").join("artifacts").exists(),
+        "artifact scratch cache should not be created"
+    );
 
     // Check that ArtifactCaptured events were emitted
     let captured_events = events.lock().unwrap();
@@ -12749,13 +12778,23 @@ async fn asset_collection_local_sandbox_on_failure() {
     // Assets should still be collected regardless of intermediate node failures.
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let artifacts_dir = RunScratch::new(run_dir.path()).artifact_stage_dir("create_assets", 1);
-
-    let report_path = artifacts_dir.join("test-results/report.xml");
+    let report_content = String::from_utf8(
+        test_artifact_store(run_dir.path())
+            .get(
+                &run_options.run_id,
+                &StageId::new("create_assets", 1),
+                "test-results/report.xml",
+            )
+            .await
+            .unwrap()
+            .expect("artifact should still be stored after handler failure")
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(report_content.contains("testsuites"));
     assert!(
-        report_path.exists(),
-        "report.xml should still be collected after handler failure, at {}",
-        report_path.display()
+        !run_dir.path().join("cache").join("artifacts").exists(),
+        "artifact scratch cache should not be created"
     );
 }
 
@@ -12838,16 +12877,24 @@ async fn asset_collection_docker_sandbox() {
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let artifacts_dir = RunScratch::new(run_dir.path()).artifact_stage_dir("create_assets", 1);
-
-    let report_path = artifacts_dir.join("test-results/report.xml");
-    assert!(
-        report_path.exists(),
-        "report.xml should be collected from Docker container at {}",
-        report_path.display()
-    );
-    let content = std::fs::read_to_string(&report_path).unwrap();
+    let content = String::from_utf8(
+        test_artifact_store(run_dir.path())
+            .get(
+                &run_options.run_id,
+                &StageId::new("create_assets", 1),
+                "test-results/report.xml",
+            )
+            .await
+            .unwrap()
+            .expect("artifact should be stored from Docker container")
+            .to_vec(),
+    )
+    .unwrap();
     assert!(content.contains("testsuites"));
+    assert!(
+        !run_dir.path().join("cache").join("artifacts").exists(),
+        "artifact scratch cache should not be created"
+    );
 
     sandbox.cleanup().await.unwrap();
 }

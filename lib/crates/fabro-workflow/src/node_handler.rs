@@ -12,6 +12,7 @@ use fabro_core::retry::RetryPolicy as CoreRetryPolicy;
 
 use crate::artifact;
 use crate::context::Context;
+use crate::error::FabroError;
 
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
@@ -103,7 +104,7 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
 
         match timed_result {
             Ok(Ok(wf_outcome)) => Ok(wf_outcome),
-            Ok(Err(crate::error::FabroError::Cancelled)) => Err(CoreError::Cancelled),
+            Ok(Err(FabroError::Cancelled)) => Err(CoreError::Cancelled),
             Ok(Err(fabro_err)) => {
                 let retryable = handler.should_retry(&fabro_err);
                 Err(CoreError::handler(HandlerErrorDetail {

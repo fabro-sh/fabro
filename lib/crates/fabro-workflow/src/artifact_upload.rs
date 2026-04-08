@@ -1,7 +1,10 @@
+use std::sync::Arc;
+
 use std::path::Path;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use fabro_store::ArtifactStore;
 use fabro_types::StageId;
 
 use crate::artifact_snapshot::CapturedArtifactInfo;
@@ -14,4 +17,9 @@ pub trait StageArtifactUploader: Send + Sync {
         artifact_capture_dir: &Path,
         artifacts: &[CapturedArtifactInfo],
     ) -> Result<()>;
+}
+
+pub enum ArtifactSink {
+    Store(ArtifactStore),
+    Uploader(Arc<dyn StageArtifactUploader>),
 }
