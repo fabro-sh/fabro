@@ -22,7 +22,6 @@ impl InterviewQuestionType {
             "yes_no" => Self::YesNo,
             "multiple_choice" => Self::MultipleChoice,
             "multi_select" => Self::MultiSelect,
-            "freeform" => Self::Freeform,
             "confirmation" => Self::Confirmation,
             _ => Self::Freeform,
         }

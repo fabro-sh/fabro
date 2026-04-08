@@ -63,8 +63,11 @@ pub(crate) async fn execute(
         .run
         .as_ref()
         .ok_or_else(|| anyhow!("Run {run_id} has no run record in store"))?;
-    let artifact_uploader =
-        build_artifact_uploader(run_id, client.clone_for_reuse(), artifact_upload_token);
+    let artifact_uploader = Some(build_artifact_uploader(
+        run_id,
+        client.clone_for_reuse(),
+        artifact_upload_token,
+    ));
     let interviewer = Arc::new(ControlInterviewer::new());
     let cancel_token = Arc::new(AtomicBool::new(false));
     tokio::spawn(read_worker_control_stream(
@@ -156,17 +159,15 @@ fn build_artifact_uploader(
     run_id: RunId,
     client: server_client::ServerStoreClient,
     artifact_upload_token: Option<String>,
-) -> Option<Arc<dyn StageArtifactUploader>> {
-    let uploader: Arc<dyn StageArtifactUploader> = match artifact_upload_token {
+) -> Arc<dyn StageArtifactUploader> {
+    match artifact_upload_token {
         Some(token) => Arc::new(HttpArtifactUploader {
             run_id,
             client,
             bearer_token: token,
         }),
         None => Arc::new(MissingArtifactUploadTokenUploader { run_id }),
-    };
-
-    Some(uploader)
+    }
 }
 
 struct HttpArtifactUploader {

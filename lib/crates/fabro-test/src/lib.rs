@@ -262,13 +262,22 @@ fn ensure_parent_dir(path: &Path) {
 }
 
 fn with_session_lock<T>(root: &Path, f: impl FnOnce() -> T) -> T {
-    std::fs::create_dir_all(root)
-        .unwrap_or_else(|err| panic!("failed to create {}: {err}", root.display()));
     let lock_path = session_lock_path(root);
-    ensure_parent_dir(&lock_path);
-    let lock_file = File::create(&lock_path)
-        .unwrap_or_else(|err| panic!("failed to create {}: {err}", lock_path.display()));
+    // Retry create-dir + create-file as a unit: another process's
+    // cleanup_session_root can remove_dir_all between the two calls.
     let deadline = std::time::Instant::now() + SESSION_LOCK_TIMEOUT;
+    let lock_file = loop {
+        std::fs::create_dir_all(root)
+            .unwrap_or_else(|err| panic!("failed to create {}: {err}", root.display()));
+        ensure_parent_dir(&lock_path);
+        match File::create(&lock_path) {
+            Ok(f) => break f,
+            Err(_) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(err) => panic!("failed to create {}: {err}", lock_path.display()),
+        }
+    };
     while !fabro_proc::try_flock_exclusive(&lock_file)
         .unwrap_or_else(|err| panic!("failed to lock {}: {err}", lock_path.display()))
     {

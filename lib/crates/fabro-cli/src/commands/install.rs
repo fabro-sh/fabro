@@ -139,16 +139,17 @@ fn generate_mtls_certs(dir: &Path) -> Result<()> {
     let server_key_path = dir.join("server.key");
     std::fs::write(&server_key_path, &server_key)?;
 
-    let csr = run_openssl_with_stdin(
+    let csr = run_openssl(
         &[
             "req",
             "-new",
             "-key",
-            "/dev/stdin",
+            server_key_path
+                .to_str()
+                .context("server key path is not valid UTF-8")?,
             "-subj",
             "/CN=localhost",
         ],
-        &server_key,
         "generate server CSR",
     )?;
 
