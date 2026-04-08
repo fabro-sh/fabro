@@ -248,7 +248,6 @@ enum ExecutionResult {
     CancelledBySignal,
 }
 
-const WORKER_STDERR_LOG: &str = "worker.stderr.log";
 const WORKER_CANCEL_GRACE: Duration = Duration::from_secs(5);
 const WORKER_CONTROL_QUEUE_CAPACITY: usize = 8;
 const WORKER_CONTROL_ENQUEUE_TIMEOUT: Duration = Duration::from_secs(1);
@@ -2731,29 +2730,13 @@ fn update_live_run_from_event(state: &Arc<AppState>, run_id: RunId, event: &RunE
     }
 }
 
-async fn drain_worker_stderr(
-    run_id: RunId,
-    run_dir: PathBuf,
-    stderr: ChildStderr,
-) -> anyhow::Result<()> {
-    let log_path = run_dir.join("runtime").join(WORKER_STDERR_LOG);
-    if let Some(parent) = log_path.parent() {
-        fs::create_dir_all(parent).await?;
-    }
-    let mut log_file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)
-        .await?;
+async fn drain_worker_stderr(run_id: RunId, stderr: ChildStderr) -> anyhow::Result<()> {
     let mut lines = BufReader::new(stderr).lines();
 
     while let Some(line) = lines.next_line().await? {
-        log_file.write_all(line.as_bytes()).await?;
-        log_file.write_all(b"\n").await?;
-        tracing::warn!(run_id = %run_id, worker_stderr = %line);
+        tracing::warn!(run_id = %run_id, "Worker stderr: {line}");
     }
 
-    log_file.flush().await?;
     Ok(())
 }
 
@@ -3786,7 +3769,7 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
     }
 
     let control_task = tokio::spawn(pump_worker_control_jsonl(stdin, control_rx));
-    let stderr_task = tokio::spawn(drain_worker_stderr(run_id, run_dir.clone(), stderr));
+    let stderr_task = tokio::spawn(drain_worker_stderr(run_id, stderr));
 
     let wait_status = match child.wait().await {
         Ok(status) => status,
