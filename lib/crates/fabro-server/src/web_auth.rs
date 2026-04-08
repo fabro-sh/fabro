@@ -94,7 +94,7 @@ struct GitHubManifestConversion {
     slug: String,
     client_id: String,
     client_secret: String,
-    webhook_secret: String,
+    webhook_secret: Option<String>,
     pem: String,
 }
 
@@ -453,8 +453,16 @@ async fn toggle_demo(Json(payload): Json<DemoToggleRequest>) -> Response {
 
 async fn setup_register(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(payload): Json<SetupRegisterRequest>,
 ) -> Response {
+    let origin = headers
+        .get(header::ORIGIN)
+        .or_else(|| headers.get(header::REFERER))
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| reqwest::Url::parse(s).ok())
+        .map(|url| format!("{}://{}", url.scheme(), url.authority()));
+
     let http = reqwest::Client::new();
     let response = match http
         .post(format!(
@@ -476,17 +484,34 @@ async fn setup_register(
     };
 
     if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        tracing::error!(status = %status, body = %body, "GitHub manifest conversion failed");
         return json_response(
             StatusCode::BAD_GATEWAY,
-            json!({"error": format!("GitHub manifest conversion failed: {}", response.status())}),
+            json!({"error": format!("GitHub manifest conversion failed: {status}")}),
         );
     }
 
-    let Ok(data) = response.json::<GitHubManifestConversion>().await else {
-        return json_response(
-            StatusCode::BAD_GATEWAY,
-            json!({"error": "Failed to parse GitHub manifest conversion response"}),
-        );
+    let body = match response.text().await {
+        Ok(body) => body,
+        Err(error) => {
+            tracing::error!(error = %error, "Failed to read GitHub manifest conversion response body");
+            return json_response(
+                StatusCode::BAD_GATEWAY,
+                json!({"error": "Failed to read GitHub manifest conversion response"}),
+            );
+        }
+    };
+    let data = match serde_json::from_str::<GitHubManifestConversion>(&body) {
+        Ok(data) => data,
+        Err(error) => {
+            tracing::error!(error = %error, body = %body, "Failed to parse GitHub manifest conversion response");
+            return json_response(
+                StatusCode::BAD_GATEWAY,
+                json!({"error": format!("Failed to parse GitHub manifest conversion response: {error}")}),
+            );
+        }
     };
 
     let settings_path = state.config_path.clone();
@@ -502,6 +527,10 @@ async fn setup_register(
     git.client_id = Some(data.client_id.clone());
     git.slug = Some(data.slug.clone());
     settings.git = Some(git.clone());
+    if let Some(ref origin) = origin {
+        let web = settings.web.get_or_insert_default();
+        web.url = origin.to_string();
+    }
 
     if let Some(parent) = settings_path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -520,7 +549,7 @@ async fn setup_register(
             }
         }
     };
-    if let Err(error) = merge_settings_keys(&mut doc, &settings, &git) {
+    if let Err(error) = merge_settings_keys(&mut doc, &settings, &git, origin.as_deref()) {
         return json_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             json!({"error": format!("Failed to update settings config: {error}")}),
@@ -537,12 +566,14 @@ async fn setup_register(
     }
 
     let session_secret = hex::encode(rand::random::<[u8; 32]>());
-    let secret_updates = [
+    let mut secret_updates = vec![
         ("SESSION_SECRET", session_secret),
         ("GITHUB_APP_CLIENT_SECRET", data.client_secret.clone()),
-        ("GITHUB_APP_WEBHOOK_SECRET", data.webhook_secret.clone()),
         ("GITHUB_APP_PRIVATE_KEY", data.pem.clone()),
     ];
+    if let Some(ref webhook_secret) = data.webhook_secret {
+        secret_updates.push(("GITHUB_APP_WEBHOOK_SECRET", webhook_secret.clone()));
+    }
 
     {
         let mut store = state.secret_store.write().await;
@@ -561,7 +592,7 @@ async fn setup_register(
         *shared = settings;
     }
 
-    Json(json!({"ok": true, "restart_required": true})).into_response()
+    Json(json!({"ok": true})).into_response()
 }
 
 fn root_table_mut(doc: &mut toml::Value) -> anyhow::Result<&mut toml::Table> {
@@ -581,11 +612,12 @@ fn merge_settings_keys(
     doc: &mut toml::Value,
     settings: &Settings,
     git: &GitSettings,
+    origin: Option<&str>,
 ) -> anyhow::Result<()> {
-    let web_url = settings.web.as_ref().map_or_else(
-        || "http://localhost:3000".to_string(),
-        |web| web.url.clone(),
-    );
+    let web_url = origin
+        .map(str::to_string)
+        .or_else(|| settings.web.as_ref().map(|web| web.url.clone()))
+        .unwrap_or_else(|| "http://localhost:3000".to_string());
     let allowed = settings
         .web
         .as_ref()
@@ -595,7 +627,7 @@ fn merge_settings_keys(
 
     let root = root_table_mut(doc)?;
     let web = ensure_table(root, "web")?;
-    web.insert("url".to_string(), toml::Value::String(web_url));
+    web.insert("url".to_string(), toml::Value::String(web_url.clone()));
     let auth = ensure_table(web, "auth")?;
     auth.insert(
         "provider".to_string(),
@@ -606,8 +638,9 @@ fn merge_settings_keys(
         toml::Value::Array(allowed.into_iter().map(toml::Value::String).collect()),
     );
 
+    let base_url = format!("{web_url}/api/v1");
     let api_table = ensure_table(root, "api")?;
-    api_table.insert("base_url".to_string(), toml::Value::String(api.base_url));
+    api_table.insert("base_url".to_string(), toml::Value::String(base_url));
     api_table.insert(
         "authentication_strategies".to_string(),
         toml::Value::Array(
@@ -672,7 +705,7 @@ strategy = "tailscale_funnel"
         settings.git.get_or_insert_default().client_id = Some("abc".to_string());
         settings.git.get_or_insert_default().slug = Some("fabro".to_string());
 
-        merge_settings_keys(&mut doc, &settings, settings.git.as_ref().unwrap()).unwrap();
+        merge_settings_keys(&mut doc, &settings, settings.git.as_ref().unwrap(), None).unwrap();
 
         let git = doc.get("git").and_then(toml::Value::as_table).unwrap();
         assert_eq!(git.get("app_id").and_then(toml::Value::as_str), Some("123"));
@@ -708,7 +741,7 @@ target = "https://fabro.example.com/api/v1"
         settings.git.get_or_insert_default().client_id = Some("abc".to_string());
         settings.git.get_or_insert_default().slug = Some("fabro".to_string());
 
-        merge_settings_keys(&mut doc, &settings, settings.git.as_ref().unwrap()).unwrap();
+        merge_settings_keys(&mut doc, &settings, settings.git.as_ref().unwrap(), None).unwrap();
 
         assert_eq!(
             doc.get("exec")

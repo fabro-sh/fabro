@@ -1,19 +1,21 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AuthLayout } from "../components/auth-layout";
 
-type SetupState = "registering" | "restart_required" | "ready" | "error";
+type SetupState = "registering" | "done" | "error";
 
 export default function SetupComplete() {
   const code = useMemo(() => new URLSearchParams(window.location.search).get("code"), []);
-  const [state, setState] = useState<SetupState>(code ? "registering" : "restart_required");
+  const [state, setState] = useState<SetupState>(code ? "registering" : "done");
   const [error, setError] = useState<string | null>(null);
+  const registeredRef = useRef(false);
 
   useEffect(() => {
-    let cancelled = false;
+    if (registeredRef.current) return;
+    registeredRef.current = true;
 
     async function register() {
       if (!code) {
-        setState("restart_required");
+        setState("done");
         return;
       }
 
@@ -26,47 +28,17 @@ export default function SetupComplete() {
 
       if (!response.ok) {
         const payload = await response.json().catch(() => ({}));
-        if (!cancelled) {
-          setError(payload.error ?? "Setup registration failed.");
-          setState("error");
-        }
+        setError(payload.error ?? "Setup registration failed.");
+        setState("error");
         return;
       }
 
-      if (!cancelled) {
-        setState("restart_required");
-        window.history.replaceState({}, "", "/setup/complete");
-      }
+      setState("done");
+      window.history.replaceState({}, "", "/setup/complete");
     }
 
     void register();
-
-    return () => {
-      cancelled = true;
-    };
   }, [code]);
-
-  useEffect(() => {
-    if (state !== "restart_required") {
-      return;
-    }
-
-    const timer = window.setInterval(async () => {
-      const response = await fetch("/api/v1/setup/status", { credentials: "include" });
-      if (!response.ok) {
-        return;
-      }
-
-      const payload = await response.json().catch(() => ({ configured: false }));
-      if (payload.configured) {
-        setState("ready");
-      }
-    }, 2000);
-
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [state]);
 
   return (
     <AuthLayout>
@@ -81,30 +53,13 @@ export default function SetupComplete() {
         </>
       )}
 
-      {state === "restart_required" && (
+      {state === "done" && (
         <>
           <h1 className="text-center text-lg font-semibold text-fg">
             Setup complete
           </h1>
           <p className="mt-2 text-center text-sm text-fg-3">
-            Fabro loads auth configuration at process start, so a restart is required before sign-in.
-          </p>
-          <pre className="mt-6 rounded-lg border border-line bg-panel/80 px-4 py-3 text-center font-mono text-sm text-fg">
-            fabro server start
-          </pre>
-          <p className="mt-4 text-center text-xs text-fg-muted">
-            Waiting for the restarted server to come back...
-          </p>
-        </>
-      )}
-
-      {state === "ready" && (
-        <>
-          <h1 className="text-center text-lg font-semibold text-fg">
-            Restart detected
-          </h1>
-          <p className="mt-2 text-center text-sm text-fg-3">
-            Authentication is ready.
+            Your GitHub App has been registered and configured.
           </p>
           <a
             href="/login"
