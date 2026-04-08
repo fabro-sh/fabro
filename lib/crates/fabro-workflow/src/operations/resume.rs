@@ -36,12 +36,16 @@ pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, 
     let checkpoint = state
         .checkpoint
         .ok_or_else(|| FabroError::Precondition("no checkpoint to resume from".to_string()))?;
+    let definition_blob = state.run.as_ref().and_then(|run| run.definition_blob);
 
     cleanup_resume_artifacts(run_dir);
     append_event_to_sink(
         &services.event_sink,
         &services.run_id,
-        &Event::RunSubmitted { reason: None },
+        &Event::RunSubmitted {
+            reason: None,
+            definition_blob,
+        },
     )
     .await
     .map_err(|err| FabroError::engine(err.to_string()))?;

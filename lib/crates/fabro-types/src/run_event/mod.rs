@@ -48,7 +48,7 @@ pub enum EventBody {
     #[serde(rename = "run.started")]
     RunStarted(RunStartedProps),
     #[serde(rename = "run.submitted")]
-    RunSubmitted(RunStatusTransitionProps),
+    RunSubmitted(RunSubmittedProps),
     #[serde(rename = "run.starting")]
     RunStarting(RunStatusTransitionProps),
     #[serde(rename = "run.running")]
@@ -682,7 +682,7 @@ mod tests {
 
     use serde_json::json;
 
-    use crate::{Edge, Graph, Node, Settings, fixtures};
+    use crate::{Edge, Graph, Node, RunBlobId, Settings, fixtures};
 
     use super::*;
 
@@ -763,6 +763,53 @@ mod tests {
 
         let parsed = RunEvent::from_value(line).unwrap();
         assert!(matches!(parsed.body, EventBody::RunCreated(_)));
+    }
+
+    #[test]
+    fn run_created_round_trip_preserves_manifest_blob() {
+        let line = json!({
+            "id": "evt_created_blob",
+            "ts": "2026-04-04T12:00:00.000Z",
+            "run_id": fixtures::RUN_1,
+            "event": "run.created",
+            "properties": {
+                "settings": Settings::default(),
+                "graph": Graph::new("test"),
+                "labels": {},
+                "run_dir": "/tmp/run",
+                "working_directory": "/tmp/run",
+                "manifest_blob": RunBlobId::new(br#"{"version":1}"#).to_string()
+            }
+        });
+
+        let parsed = RunEvent::from_value(line.clone()).unwrap();
+        let serialized = parsed.to_value().unwrap();
+
+        assert_eq!(
+            serialized["properties"]["manifest_blob"],
+            line["properties"]["manifest_blob"]
+        );
+    }
+
+    #[test]
+    fn run_submitted_round_trip_preserves_definition_blob() {
+        let line = json!({
+            "id": "evt_submitted_blob",
+            "ts": "2026-04-04T12:00:00.000Z",
+            "run_id": fixtures::RUN_1,
+            "event": "run.submitted",
+            "properties": {
+                "definition_blob": RunBlobId::new(br#"{"workflow_path":"workflow.fabro"}"#).to_string()
+            }
+        });
+
+        let parsed = RunEvent::from_value(line.clone()).unwrap();
+        let serialized = parsed.to_value().unwrap();
+
+        assert_eq!(
+            serialized["properties"]["definition_blob"],
+            line["properties"]["definition_blob"]
+        );
     }
 
     #[test]

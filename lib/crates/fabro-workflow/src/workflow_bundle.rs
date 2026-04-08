@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::FabroError;
 use crate::file_resolver::{BundleFileResolver, FileResolver, normalize_logical_path};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -61,16 +60,20 @@ impl WorkflowBundle {
     }
 }
 
+pub const ACCEPTED_RUN_DEFINITION_VERSION: u32 = 1;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct StoredWorkflowBundle {
+pub struct AcceptedRunDefinition {
+    pub version: u32,
     pub workflow_path: PathBuf,
     pub workflows: HashMap<PathBuf, BundledWorkflow>,
 }
 
-impl StoredWorkflowBundle {
+impl AcceptedRunDefinition {
     #[must_use]
     pub fn new(workflow_path: PathBuf, bundle: WorkflowBundle) -> Self {
         Self {
+            version: ACCEPTED_RUN_DEFINITION_VERSION,
             workflow_path,
             workflows: bundle.workflows,
         }
@@ -79,18 +82,5 @@ impl StoredWorkflowBundle {
     #[must_use]
     pub fn workflow_bundle(&self) -> WorkflowBundle {
         WorkflowBundle::new(self.workflows.clone())
-    }
-
-    pub fn load_from_run_dir(run_dir: &Path) -> Result<Option<Self>, FabroError> {
-        let path = run_dir.join("workflow_bundle.json");
-        if !path.exists() {
-            return Ok(None);
-        }
-
-        let payload =
-            std::fs::read_to_string(&path).map_err(|err| FabroError::Io(err.to_string()))?;
-        serde_json::from_str(&payload)
-            .map(Some)
-            .map_err(|err| FabroError::Parse(err.to_string()))
     }
 }

@@ -135,6 +135,8 @@ mod tests {
             ]),
             artifact_storage: None,
             provenance: None,
+            manifest_blob: None,
+            definition_blob: None,
         }
     }
 
@@ -160,6 +162,7 @@ mod tests {
                 db_prefix: None,
                 artifact_storage: record.artifact_storage,
                 provenance: record.provenance.clone(),
+                manifest_blob: None,
             },
         )
         .await

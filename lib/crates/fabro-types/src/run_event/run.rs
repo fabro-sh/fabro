@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Graph, RunArtifactStorage, RunControlAction, RunProvenance, Settings, StatusReason};
+use crate::{
+    Graph, RunArtifactStorage, RunBlobId, RunControlAction, RunProvenance, Settings, StatusReason,
+};
 
 use super::{BilledTokenCounts, RunNoticeLevel};
 
@@ -32,6 +34,8 @@ pub struct RunCreatedProps {
     pub artifact_storage: Option<RunArtifactStorage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<RunProvenance>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_blob: Option<RunBlobId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -53,6 +57,14 @@ pub struct RunStartedProps {
 pub struct RunStatusTransitionProps {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<StatusReason>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunSubmittedProps {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<StatusReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub definition_blob: Option<RunBlobId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

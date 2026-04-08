@@ -16,7 +16,7 @@ use crate::pipeline::{self, Persisted, TransformOptions, Validated};
 use crate::records::RunRecord;
 use crate::run_lookup::default_scratch_base;
 use crate::transforms::{Transform, expand_vars};
-use crate::workflow_bundle::{StoredWorkflowBundle, WorkflowBundle};
+use crate::workflow_bundle::{AcceptedRunDefinition, WorkflowBundle};
 use fabro_sandbox::daytona::detect_repo_info;
 use fabro_util::json::normalize_json_value;
 
@@ -31,6 +31,7 @@ pub struct CreateRunInput {
     pub workflow_slug: Option<String>,
     pub workflow_path: Option<PathBuf>,
     pub workflow_bundle: Option<WorkflowBundle>,
+    pub submitted_manifest_bytes: Option<Vec<u8>>,
     pub run_id: Option<RunId>,
     pub host_repo_path: Option<String>,
     pub repo_origin_url: Option<String>,
@@ -81,6 +82,7 @@ pub async fn create(store: &Database, request: CreateRunInput) -> Result<Created
         workflow_slug,
         workflow_path,
         workflow_bundle,
+        submitted_manifest_bytes,
         run_id,
         host_repo_path,
         repo_origin_url,
@@ -111,6 +113,13 @@ pub async fn create(store: &Database, request: CreateRunInput) -> Result<Created
     let goal_override = resolved.goal_override.clone();
     let current_dir = resolved.current_dir.clone();
     let file_resolver = resolved.file_resolver.clone();
+    let accepted_definition = match (&workflow_path, &workflow_bundle) {
+        (Some(workflow_path), Some(workflow_bundle)) => Some(AcceptedRunDefinition::new(
+            workflow_path.clone(),
+            workflow_bundle.clone(),
+        )),
+        _ => None,
+    };
 
     let persisted = create_from_source(
         &resolved.raw_source,
@@ -136,10 +145,15 @@ pub async fn create(store: &Database, request: CreateRunInput) -> Result<Created
         .workflow_toml_path
         .as_deref()
         .and_then(|path| std::fs::read_to_string(path).ok());
-    persist_created_run(store, &persisted, &resolved.raw_source, workflow_config).await?;
-    if let (Some(workflow_path), Some(workflow_bundle)) = (workflow_path, workflow_bundle) {
-        persist_workflow_bundle(persisted.run_dir(), workflow_path, workflow_bundle)?;
-    }
+    persist_created_run(
+        store,
+        &persisted,
+        &resolved.raw_source,
+        workflow_config,
+        submitted_manifest_bytes.as_deref(),
+        accepted_definition.as_ref(),
+    )
+    .await?;
 
     Ok(CreatedRun {
         persisted,
@@ -154,6 +168,8 @@ async fn persist_created_run(
     persisted: &Persisted,
     workflow_source: &str,
     workflow_config: Option<String>,
+    submitted_manifest_bytes: Option<&[u8]>,
+    accepted_definition: Option<&AcceptedRunDefinition>,
 ) -> Result<(), FabroError> {
     let record = persisted.run_record();
     let run_store = match store.create_run(&record.run_id).await {
@@ -163,6 +179,18 @@ async fn persist_created_run(
             .await
             .map_err(|open_err| FabroError::engine(open_err.to_string()))
             .map_err(|_| FabroError::engine(err.to_string()))?,
+    };
+    let manifest_blob = match submitted_manifest_bytes {
+        Some(bytes) => Some(run_store.write_blob(bytes).await.map_err(store_error)?),
+        None => None,
+    };
+    let definition_blob = match accepted_definition {
+        Some(definition) => {
+            let bytes = serde_json::to_vec(definition)
+                .map_err(|err| FabroError::engine(err.to_string()))?;
+            Some(run_store.write_blob(&bytes).await.map_err(store_error)?)
+        }
+        None => None,
     };
 
     let stored = to_run_event_at(
@@ -193,6 +221,7 @@ async fn persist_created_run(
             db_prefix: None,
             artifact_storage: record.artifact_storage,
             provenance: record.provenance.clone(),
+            manifest_blob,
         },
         record.run_id.created_at(),
     );
@@ -209,7 +238,10 @@ async fn persist_created_run(
     append_event(
         &run_store,
         &record.run_id,
-        &Event::RunSubmitted { reason: None },
+        &Event::RunSubmitted {
+            reason: None,
+            definition_blob,
+        },
     )
     .await
     .map_err(store_error)
@@ -217,18 +249,6 @@ async fn persist_created_run(
 
 fn store_error(err: impl std::fmt::Display) -> FabroError {
     FabroError::engine(err.to_string())
-}
-
-fn persist_workflow_bundle(
-    run_dir: &Path,
-    workflow_path: PathBuf,
-    workflow_bundle: WorkflowBundle,
-) -> Result<(), FabroError> {
-    let path = run_dir.join("workflow_bundle.json");
-    let payload =
-        serde_json::to_string_pretty(&StoredWorkflowBundle::new(workflow_path, workflow_bundle))
-            .map_err(|err| FabroError::engine(err.to_string()))?;
-    std::fs::write(&path, payload).map_err(|err| FabroError::Io(err.to_string()))
 }
 
 fn validate_sandbox_provider(settings: &Settings) -> Result<(), FabroError> {
@@ -345,6 +365,8 @@ fn persist_validated(
         labels,
         artifact_storage,
         provenance,
+        manifest_blob: None,
+        definition_blob: None,
     };
 
     pipeline::persist(
@@ -699,6 +721,7 @@ mod tests {
                 workflow_slug: None,
                 workflow_path: None,
                 workflow_bundle: None,
+                submitted_manifest_bytes: None,
                 run_id: None,
                 host_repo_path: None,
                 repo_origin_url: None,
@@ -748,6 +771,7 @@ mod tests {
                 workflow_slug: Some("slug".to_string()),
                 workflow_path: None,
                 workflow_bundle: None,
+                submitted_manifest_bytes: None,
                 run_id: Some(fixtures::RUN_1),
                 host_repo_path: Some(dir.path().display().to_string()),
                 repo_origin_url: None,
@@ -829,6 +853,7 @@ mod tests {
                 workflow_slug: None,
                 workflow_path: None,
                 workflow_bundle: None,
+                submitted_manifest_bytes: None,
                 run_id: Some(fixtures::RUN_2),
                 host_repo_path: None,
                 repo_origin_url: None,
@@ -873,6 +898,7 @@ mod tests {
                 workflow_slug: None,
                 workflow_path: None,
                 workflow_bundle: None,
+                submitted_manifest_bytes: None,
                 run_id: Some(fixtures::RUN_2),
                 host_repo_path: None,
                 repo_origin_url: Some("https://github.com/acme/widgets".to_string()),
@@ -914,6 +940,7 @@ mod tests {
                 workflow_slug: Some("slug".to_string()),
                 workflow_path: None,
                 workflow_bundle: None,
+                submitted_manifest_bytes: None,
                 run_id: Some(fixtures::RUN_3),
                 host_repo_path: None,
                 repo_origin_url: None,
@@ -957,6 +984,7 @@ mod tests {
                 workflow_slug: Some("slug".to_string()),
                 workflow_path: None,
                 workflow_bundle: None,
+                submitted_manifest_bytes: None,
                 run_id: Some(fixtures::RUN_64),
                 host_repo_path: None,
                 repo_origin_url: None,

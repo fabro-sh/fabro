@@ -30,12 +30,18 @@ use crate::run_control::RunControlState;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::run_status::{RunStatus, StatusReason};
 use crate::runtime_store::RunStoreHandle;
-use crate::workflow_bundle::{StoredWorkflowBundle, WorkflowBundle};
+use crate::workflow_bundle::{
+    ACCEPTED_RUN_DEFINITION_VERSION, AcceptedRunDefinition, WorkflowBundle,
+};
 use fabro_config::run::PullRequestSettings;
 use fabro_retro::retro::Retro;
 use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::daytona::detect_repo_info;
 use tokio::runtime::Handle;
+use tokio::time::sleep;
+
+const ACCEPTED_DEFINITION_BLOB_WAIT_TIMEOUT: Duration = Duration::from_secs(5);
+const ACCEPTED_DEFINITION_BLOB_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 struct RunSession {
     cancel_token: Option<Arc<AtomicBool>>,
@@ -274,12 +280,18 @@ impl RunSession {
                 meta_branch: Some(MetadataStore::branch_name(&record.run_id.to_string())),
             })
         });
-        let stored_workflow_bundle = StoredWorkflowBundle::load_from_run_dir(persisted.run_dir())?;
-        let workflow_path = stored_workflow_bundle
+        let definition_blob = state.run.as_ref().and_then(|run| run.definition_blob);
+        let accepted_definition = match definition_blob {
+            Some(blob_id) => {
+                Some(load_accepted_run_definition(&services.run_store, blob_id).await?)
+            }
+            None => None,
+        };
+        let workflow_path = accepted_definition
             .as_ref()
-            .map(|bundle| bundle.workflow_path.clone());
+            .map(|definition| definition.workflow_path.clone());
         let workflow_bundle =
-            stored_workflow_bundle.map(|bundle| Arc::new(bundle.workflow_bundle()));
+            accepted_definition.map(|definition| Arc::new(definition.workflow_bundle()));
 
         if let Some(env) = settings
             .sandbox
@@ -411,6 +423,37 @@ impl RunSession {
             workflow_bundle,
         })
     }
+}
+
+async fn load_accepted_run_definition(
+    run_store: &RunStoreHandle,
+    blob_id: fabro_types::RunBlobId,
+) -> Result<AcceptedRunDefinition, FabroError> {
+    let deadline = Instant::now() + ACCEPTED_DEFINITION_BLOB_WAIT_TIMEOUT;
+    let bytes = loop {
+        let blob = run_store
+            .read_blob(&blob_id)
+            .await
+            .map_err(|err| FabroError::engine(err.to_string()))?;
+        if let Some(blob) = blob {
+            break blob;
+        }
+        if Instant::now() >= deadline {
+            return Err(FabroError::engine(format!(
+                "accepted run definition blob is missing from the run store: {blob_id}"
+            )));
+        }
+        sleep(ACCEPTED_DEFINITION_BLOB_POLL_INTERVAL).await;
+    };
+    let definition: AcceptedRunDefinition =
+        serde_json::from_slice(&bytes).map_err(|err| FabroError::Parse(err.to_string()))?;
+    if definition.version != ACCEPTED_RUN_DEFINITION_VERSION {
+        return Err(FabroError::Parse(format!(
+            "unsupported accepted run definition version: {}",
+            definition.version
+        )));
+    }
+    Ok(definition)
 }
 
 fn resolve_sandbox_provider(settings: &Settings) -> Result<SandboxProvider, FabroError> {
@@ -803,9 +846,11 @@ mod tests {
     use crate::event::Emitter;
     use crate::handler::HandlerRegistry;
     use crate::handler::exit::ExitHandler;
+    use crate::handler::manager_loop::SubWorkflowHandler;
     use crate::handler::start::StartHandler;
     use crate::operations::resume;
     use crate::records::CheckpointExt;
+    use crate::workflow_bundle::{BundledWorkflow, WorkflowBundle};
 
     const MINIMAL_DOT: &str = r#"digraph Test {
         graph [goal="Build feature"]
@@ -842,6 +887,7 @@ mod tests {
                 workflow_slug: Some("test".to_string()),
                 workflow_path: None,
                 workflow_bundle: None,
+                submitted_manifest_bytes: None,
                 run_id: Some(fixtures::RUN_1),
                 host_repo_path: None,
                 repo_origin_url: None,
@@ -859,6 +905,7 @@ mod tests {
         let mut registry = HandlerRegistry::new(Box::new(StartHandler));
         registry.register("start", Box::new(StartHandler));
         registry.register("exit", Box::new(ExitHandler));
+        registry.register("stack.manager_loop", Box::new(SubWorkflowHandler));
         registry
     }
 
@@ -956,6 +1003,93 @@ mod tests {
         assert_eq!(started.finalized.conclusion.status, StageStatus::Success);
         let run_store = store.open_run(&fixtures::RUN_1).await.unwrap();
         assert!(run_store.state().await.unwrap().conclusion.is_some());
+    }
+
+    #[tokio::test]
+    async fn start_can_run_bundle_backed_child_workflow_without_workflow_bundle_json() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("run");
+        let emitter = Arc::new(Emitter::new(fixtures::RUN_1));
+        let registry = Arc::new(test_registry());
+        let store = memory_store();
+        let workflow_bundle = WorkflowBundle::new(HashMap::from([
+            (
+                PathBuf::from("workflow.fabro"),
+                BundledWorkflow {
+                    logical_path: PathBuf::from("workflow.fabro"),
+                    source: r#"digraph Root {
+                        graph [goal="Bundle child"]
+                        start [shape=Mdiamond]
+                        manager [
+                            type="stack.manager_loop",
+                            stack.child_workflow="./children/review.fabro",
+                            manager.max_cycles=100,
+                            manager.poll_interval="10ms"
+                        ]
+                        exit [shape=Msquare]
+                        start -> manager -> exit
+                    }"#
+                    .to_string(),
+                    files: HashMap::new(),
+                },
+            ),
+            (
+                PathBuf::from("children/review.fabro"),
+                BundledWorkflow {
+                    logical_path: PathBuf::from("children/review.fabro"),
+                    source: r#"digraph Review {
+                        start [shape=Mdiamond]
+                        exit [shape=Msquare]
+                        start -> exit
+                    }"#
+                    .to_string(),
+                    files: HashMap::new(),
+                },
+            ),
+        ]));
+
+        let created = crate::operations::create(
+            &store,
+            crate::operations::CreateRunInput {
+                workflow: crate::operations::WorkflowInput::Bundled(
+                    workflow_bundle
+                        .workflow(Path::new("workflow.fabro"))
+                        .unwrap()
+                        .clone(),
+                ),
+                settings: Settings {
+                    dry_run: Some(true),
+                    ..Default::default()
+                },
+                cwd: temp.path().to_path_buf(),
+                workflow_slug: Some("bundle-child".to_string()),
+                workflow_path: Some(PathBuf::from("workflow.fabro")),
+                workflow_bundle: Some(workflow_bundle),
+                submitted_manifest_bytes: None,
+                run_id: Some(fixtures::RUN_1),
+                host_repo_path: None,
+                repo_origin_url: None,
+                base_branch: None,
+                artifact_storage: None,
+                provenance: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let bundle_file = created.run_dir.join("workflow_bundle.json");
+        if bundle_file.exists() {
+            std::fs::remove_file(&bundle_file).unwrap();
+        }
+
+        let started = start(
+            &run_dir,
+            test_start_services(&store, &run_dir, emitter, registry).await,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(started.finalized.conclusion.status, StageStatus::Success);
     }
 
     #[tokio::test]

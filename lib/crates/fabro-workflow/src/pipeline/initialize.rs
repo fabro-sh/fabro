@@ -751,6 +751,8 @@ mod tests {
                 labels: HashMap::new(),
                 artifact_storage: None,
                 provenance: None,
+                manifest_blob: None,
+                definition_blob: None,
             },
         )
     }

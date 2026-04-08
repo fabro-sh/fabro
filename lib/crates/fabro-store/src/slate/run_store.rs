@@ -1,12 +1,14 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use chrono::Utc;
 use futures::Stream;
 use slatedb::{Db, DbRead};
 use tokio::sync::{Mutex, broadcast, mpsc};
+use tokio::time::sleep;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::keys;
@@ -15,6 +17,8 @@ use crate::{EventEnvelope, EventPayload, Result, RunProjection, RunSummary, Stor
 use fabro_types::{RunBlobId, RunId};
 
 const DEFAULT_EVENT_TAIL_LIMIT: usize = 1024;
+const BLOB_VISIBILITY_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
+const BLOB_VISIBILITY_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 #[derive(Clone)]
 pub struct RunDatabase {
@@ -297,32 +301,32 @@ impl RunDatabase {
             return Err(StoreError::ReadOnly);
         }
         let id = RunBlobId::new(data);
-        self.inner
-            .db
-            .put(keys::blob_key(&self.inner.run_id, &id), data)
-            .await?;
+        self.inner.db.put(keys::blob_key(&id), data).await?;
+        let deadline = Instant::now() + BLOB_VISIBILITY_WAIT_TIMEOUT;
+        loop {
+            if self.read_blob(&id).await?.is_some() {
+                break;
+            }
+            if Instant::now() >= deadline {
+                return Err(StoreError::Other(format!(
+                    "blob {id} remained unreadable after write"
+                )));
+            }
+            sleep(BLOB_VISIBILITY_POLL_INTERVAL).await;
+        }
         Ok(id)
     }
 
     pub async fn read_blob(&self, id: &RunBlobId) -> Result<Option<Bytes>> {
-        let global = self
-            .inner
-            .db
-            .get(keys::blob_key(&self.inner.run_id, id))
-            .await?;
+        let global = self.inner.db.get(keys::blob_key(id)).await?;
         if global.is_some() {
             return Ok(global);
         }
-
-        Ok(self
-            .inner
-            .db
-            .get(keys::legacy_blob_key(&self.inner.run_id, id))
-            .await?)
+        Ok(None)
     }
 
     pub async fn list_blobs(&self) -> Result<Vec<RunBlobId>> {
-        list_blobs(&self.inner.db, &self.inner.run_id).await
+        list_blobs(&self.inner.db).await
     }
 
     pub async fn state(&self) -> Result<RunProjection> {
@@ -384,13 +388,11 @@ where
     Ok(events)
 }
 
-async fn list_blobs<R>(db: &R, run_id: &RunId) -> Result<Vec<RunBlobId>>
+async fn list_blobs<R>(db: &R) -> Result<Vec<RunBlobId>>
 where
     R: DbRead + Sync,
 {
-    let mut iter = db
-        .scan_prefix(keys::blobs_prefix(run_id).as_bytes())
-        .await?;
+    let mut iter = db.scan_prefix(keys::blobs_prefix().as_bytes()).await?;
     let mut blob_ids = Vec::new();
     while let Some(entry) = iter.next().await? {
         let key = key_to_string(&entry.key)?;
@@ -416,28 +418,6 @@ mod tests {
     use object_store::memory::InMemory;
 
     use crate::Database;
-    use crate::keys;
-
-    #[tokio::test]
-    async fn read_blob_falls_back_to_legacy_run_scoped_key() {
-        let object_store = Arc::new(InMemory::new());
-        let store = Database::new(object_store, "", Duration::from_millis(1));
-        let run_id = "01JT56VE4Z5NZ814GZN2JZD65A".parse().unwrap();
-        let run = store.create_run(&run_id).await.unwrap();
-        let blob = br#"{"legacy":true}"#;
-        let blob_id = fabro_types::RunBlobId::new(blob);
-
-        run.inner
-            .db
-            .put(keys::legacy_blob_key(&run_id, &blob_id), blob.as_slice())
-            .await
-            .unwrap();
-
-        let read = run.read_blob(&blob_id).await.unwrap().unwrap();
-
-        assert_eq!(read.as_ref(), blob);
-    }
-
     #[tokio::test]
     async fn list_blobs_reads_global_cas_namespace() {
         let object_store = Arc::new(InMemory::new());

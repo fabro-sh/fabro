@@ -99,6 +99,7 @@ async fn initialized(
             db_prefix: None,
             artifact_storage: None,
             provenance: None,
+            manifest_blob: None,
         },
     )
     .await
