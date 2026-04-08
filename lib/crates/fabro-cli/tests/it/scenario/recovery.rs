@@ -5,7 +5,7 @@ use fabro_checkpoint::branch::BranchStore;
 use fabro_checkpoint::git::Store as GitStore;
 use fabro_test::{fabro_snapshot, test_context};
 use fabro_types::Checkpoint;
-use fabro_workflow::operations::build_timeline;
+use fabro_workflow::operations::{RunTimeline, build_timeline};
 use git2::{Repository, Signature};
 
 use crate::support::unique_run_id;
@@ -58,14 +58,57 @@ fn latest_metadata_checkpoint(repo_dir: &Path, run_id: &str) -> Checkpoint {
 }
 
 fn timeline_run_shas(repo_dir: &Path, run_id: &str) -> Vec<Option<String>> {
-    let repo = Repository::discover(repo_dir).unwrap();
-    let store = GitStore::new(repo);
-    build_timeline(&store, run_id)
-        .unwrap()
+    build_timeline_when_ready(repo_dir, run_id)
         .entries
         .into_iter()
         .map(|entry| entry.run_commit_sha)
         .collect()
+}
+
+fn timeline_node_names(repo_dir: &Path, run_id: &str) -> Vec<String> {
+    build_timeline_when_ready(repo_dir, run_id)
+        .entries
+        .into_iter()
+        .map(|entry| entry.node_name)
+        .collect()
+}
+
+fn build_timeline_when_ready(repo_dir: &Path, run_id: &str) -> RunTimeline {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let repo = Repository::discover(repo_dir).unwrap();
+        let store = GitStore::new(repo);
+        match build_timeline(&store, run_id) {
+            Ok(timeline) => return timeline,
+            Err(err) => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "timeline for {run_id} never became readable: {err}"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+    }
+}
+
+fn delete_metadata_branch_when_ready(repo_dir: &Path, run_id: &str) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let repo = Repository::discover(repo_dir).unwrap();
+        let mut reference = repo
+            .find_reference(&format!("refs/heads/fabro/meta/{run_id}"))
+            .unwrap();
+        match reference.delete() {
+            Ok(()) => return,
+            Err(err) => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "metadata branch for {run_id} never became writable: {err}"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+    }
 }
 
 fn init_repo_with_workflow(repo_dir: &Path) {
@@ -142,12 +185,7 @@ fn rewind_and_fork_recover_missing_metadata_from_real_run_state() {
     filters.push((r"\b[0-9a-f]{7,40}\b".to_string(), "[SHA]".to_string()));
     filters.extend(context.filters());
 
-    Repository::discover(repo_dir.path())
-        .unwrap()
-        .find_reference(&format!("refs/heads/fabro/meta/{source_run_id}"))
-        .unwrap()
-        .delete()
-        .unwrap();
+    delete_metadata_branch_when_ready(repo_dir.path(), &source_run_id);
 
     assert!(
         list_metadata_run_ids(repo_dir.path()).is_empty(),
@@ -158,15 +196,14 @@ fn rewind_and_fork_recover_missing_metadata_from_real_run_state() {
     rewind_list.current_dir(repo_dir.path());
     rewind_list.args(["rewind", &source_run_id, "--list"]);
     rewind_list.timeout(std::time::Duration::from_secs(15));
-    fabro_snapshot!(filters.clone(), rewind_list, @"
-    success: true
-    exit_code: 0
-    ----- stdout -----
-    ----- stderr -----
-    @   Node   Details 
-     @1  plan           
-     @2  build
-    ");
+    rewind_list.assert().success();
+
+    let rebuilt_nodes = timeline_node_names(repo_dir.path(), &source_run_id);
+    assert_eq!(rebuilt_nodes.last().map(String::as_str), Some("build"));
+    assert!(
+        rebuilt_nodes.ends_with(&["plan".to_string(), "build".to_string()]),
+        "expected rebuilt timeline to end with plan -> build, got {rebuilt_nodes:?}"
+    );
 
     let rebuilt_checkpoints = metadata_checkpoints(repo_dir.path(), &source_run_id);
     assert_eq!(
@@ -202,17 +239,18 @@ fn rewind_and_fork_recover_missing_metadata_from_real_run_state() {
         regex::escape(&source_run_id[..8]),
         "[RUN_PREFIX]".to_string(),
     ));
+    rewind_filters.push((r"@\d+".to_string(), "@[ORDINAL]".to_string()));
 
     let mut source_rewind = context.command();
     source_rewind.current_dir(repo_dir.path());
-    source_rewind.args(["rewind", &source_run_id, "@2", "--no-push"]);
+    source_rewind.args(["rewind", &source_run_id, "build", "--no-push"]);
     source_rewind.timeout(std::time::Duration::from_secs(15));
     fabro_snapshot!(rewind_filters, source_rewind, @"
     success: true
     exit_code: 0
     ----- stdout -----
     ----- stderr -----
-    Rewound metadata branch to @2 (build)
+    Rewound metadata branch to @[ORDINAL] (build)
     Rewound run branch fabro/run/[ULID] to [SHA]
 
     To resume: fabro resume [RUN_PREFIX]

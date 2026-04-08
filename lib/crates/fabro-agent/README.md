@@ -10,7 +10,7 @@ The crate is organized around a central `Session` that drives an agentic loop:
 2. The session builds a `Request` with system prompt, history, and tools
 3. An LLM generates a response (text and/or tool calls) via `unified-llm`
 4. Tool calls are executed through a `ToolRegistry` against a `Sandbox`
-5. Results are recorded and the loop continues until the LLM responds with text only (natural completion), a turn limit is reached, or the session is aborted
+5. Results are recorded and the loop continues until the LLM responds with text only (natural completion), a turn limit is reached, or the session is interrupted
 
 ```
 User Input
@@ -39,7 +39,7 @@ User Input
 
 ### Key Components
 
-- **`Session`** -- Manages the full agentic loop: LLM calls, tool execution, steering, follow-ups, abort handling, and event emission.
+- **`Session`** -- Manages the full agentic loop: LLM calls, tool execution, steering, follow-ups, interrupt handling, and event emission.
 - **`AgentProfile`** (trait) -- Defines how to build system prompts, which tools to register, and what capabilities a provider supports. Ships with `AnthropicProfile`, `OpenAiProfile`, and `GeminiProfile`.
 - **`Sandbox`** (trait) -- Abstracts filesystem, shell, grep, and glob operations. `LocalSandbox` provides a real implementation; the trait enables sandboxing and testing.
 - **`ToolRegistry`** -- Maps tool names to definitions and async executor functions. Tools are registered per-profile.
@@ -166,7 +166,7 @@ session.steer("Focus on the root cause, not symptoms".into());
 session.follow_up("Now run the test suite to verify".into());
 ```
 
-### Abort
+### Interrupt
 
 Cancel a running session from another thread:
 

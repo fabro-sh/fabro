@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use crate::{Answer, Interviewer, Question};
 
 /// Replays recorded answers in sequence. When recordings are exhausted,
-/// returns `Answer::aborted()`.
+/// returns `Answer::interrupted()`.
 pub struct ReplayInterviewer {
     answers: Mutex<Vec<Answer>>,
 }
@@ -27,7 +27,7 @@ impl Interviewer for ReplayInterviewer {
     async fn ask(&self, _question: Question) -> Answer {
         let mut answers = self.answers.lock().expect("answers lock poisoned");
         if answers.is_empty() {
-            Answer::aborted()
+            Answer::interrupted()
         } else {
             answers.remove(0)
         }
@@ -66,7 +66,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn returns_aborted_when_exhausted() {
+    async fn returns_interrupted_when_exhausted() {
         let recordings = vec![(
             Question::new("approve?", QuestionType::YesNo),
             Answer::yes(),
@@ -82,11 +82,11 @@ mod tests {
         let a2 = replayer
             .ask(Question::new("second", QuestionType::YesNo))
             .await;
-        assert_eq!(a2.value, AnswerValue::Aborted);
+        assert_eq!(a2.value, AnswerValue::Interrupted);
 
         let a3 = replayer
             .ask(Question::new("third", QuestionType::YesNo))
             .await;
-        assert_eq!(a3.value, AnswerValue::Aborted);
+        assert_eq!(a3.value, AnswerValue::Interrupted);
     }
 }

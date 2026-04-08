@@ -13,6 +13,7 @@ doctest = false
 workspace = true
 
 [dependencies]
+fabro-spa = { path = "../fabro-spa" }
 fabro-config = { path = "../fabro-config" }
 fabro-graphviz = { path = "../fabro-graphviz" }
 fabro-hooks = { path = "../fabro-hooks" }
@@ -38,6 +39,7 @@ axum-extra.workspace = true
 cookie.workspace = true
 dirs.workspace = true
 tower = "0.5"
+tower-http = { version = "0.6", features = ["trace"] }
 tokio-stream = { workspace = true, features = ["sync"] }
 base64.workspace = true
 jsonwebtoken.workspace = true
@@ -68,7 +70,6 @@ bytes = "1"
 tempfile = "3"
 object_store.workspace = true
 mime_guess.workspace = true
-rust-embed.workspace = true
 regex.workspace = true
 semver.workspace = true
 walkdir.workspace = true

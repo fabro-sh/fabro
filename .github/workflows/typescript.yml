@@ -5,17 +5,23 @@ on:
     branches: [main]
     paths:
       - "apps/**"
+      - "lib/crates/fabro-spa/**"
       - "lib/packages/**"
       - "package.json"
       - "bun.lock"
+      - ".gitattributes"
+      - "scripts/**"
       - ".github/workflows/typescript.yml"
   pull_request:
     branches: [main]
     paths:
       - "apps/**"
+      - "lib/crates/fabro-spa/**"
       - "lib/packages/**"
       - "package.json"
       - "bun.lock"
+      - ".gitattributes"
+      - "scripts/**"
       - ".github/workflows/typescript.yml"
   workflow_dispatch:
 
@@ -58,4 +64,9 @@ jobs:
           persist-credentials: false
       - uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2
       - run: bun install
-      - run: cd apps/fabro-web && bun run build
+      - run: scripts/refresh-fabro-spa.sh
+      - run: git diff --exit-code -- lib/crates/fabro-spa/assets
+      - run: scripts/check-fabro-spa-budgets.sh
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      - run: cargo build -p fabro-cli --release
+      - run: wc -c < target/release/fabro

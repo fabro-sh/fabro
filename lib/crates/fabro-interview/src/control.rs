@@ -14,7 +14,7 @@ pub enum SubmitError {
 struct ControlInterviewerState {
     pending: HashMap<String, oneshot::Sender<Answer>>,
     queued: HashMap<String, Answer>,
-    closed: bool,
+    terminal_answer: Option<Answer>,
 }
 
 #[derive(Default)]
@@ -30,9 +30,9 @@ impl ControlInterviewer {
 
     async fn register(&self, question_id: String) -> oneshot::Receiver<Answer> {
         let mut state = self.state.lock().await;
-        if state.closed {
+        if let Some(answer) = state.terminal_answer.clone() {
             let (tx, rx) = oneshot::channel();
-            let _ = tx.send(Answer::aborted());
+            let _ = tx.send(answer);
             return rx;
         }
         if let Some(answer) = state.queued.remove(&question_id) {
@@ -49,7 +49,7 @@ impl ControlInterviewer {
     pub async fn submit(&self, question_id: &str, answer: Answer) -> Result<(), SubmitError> {
         let pending_sender = {
             let mut state = self.state.lock().await;
-            if state.closed {
+            if state.terminal_answer.is_some() {
                 return Err(SubmitError::AlreadyResolved);
             }
             if let Some(sender) = state.pending.remove(question_id) {
@@ -70,10 +70,18 @@ impl ControlInterviewer {
         }
     }
 
-    pub async fn abort_all(&self) {
+    pub async fn interrupt_all(&self) {
+        self.resolve_all(Answer::interrupted()).await;
+    }
+
+    pub async fn cancel_all(&self) {
+        self.resolve_all(Answer::cancelled()).await;
+    }
+
+    async fn resolve_all(&self, answer: Answer) {
         let (pending, queued) = {
             let mut state = self.state.lock().await;
-            state.closed = true;
+            state.terminal_answer = Some(answer.clone());
             let pending = state
                 .pending
                 .drain()
@@ -85,13 +93,13 @@ impl ControlInterviewer {
         };
 
         for sender in pending {
-            let _ = sender.send(Answer::aborted());
+            let _ = sender.send(answer.clone());
         }
 
         if queued > 0 {
             tracing::debug!(
                 count = queued,
-                "Dropped queued interview answers while aborting control interviewer"
+                "Dropped queued interview answers while interrupting control interviewer"
             );
         }
     }
@@ -103,7 +111,7 @@ impl Interviewer for ControlInterviewer {
         let receiver = self.register(question.id.clone()).await;
         match receiver.await {
             Ok(answer) => answer,
-            Err(_) => Answer::aborted(),
+            Err(_) => Answer::interrupted(),
         }
     }
 
@@ -165,7 +173,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn abort_all_aborts_pending_questions() {
+    async fn interrupt_all_interrupts_pending_questions() {
         let interviewer = Arc::new(ControlInterviewer::new());
         let mut question = Question::new("approve?", QuestionType::YesNo);
         question.id = "q-1".to_string();
@@ -174,21 +182,49 @@ mod tests {
         let ask = tokio::spawn(async move { ask_interviewer.ask(question).await });
         tokio::task::yield_now().await;
 
-        interviewer.abort_all().await;
+        interviewer.interrupt_all().await;
 
         let answer = ask.await.unwrap();
-        assert_eq!(answer.value, AnswerValue::Aborted);
+        assert_eq!(answer.value, AnswerValue::Interrupted);
     }
 
     #[tokio::test]
-    async fn ask_after_abort_all_returns_aborted() {
+    async fn ask_after_interrupt_all_returns_interrupted() {
         let interviewer = ControlInterviewer::new();
-        interviewer.abort_all().await;
+        interviewer.interrupt_all().await;
 
         let mut question = Question::new("approve?", QuestionType::YesNo);
         question.id = "q-1".to_string();
 
         let answer = interviewer.ask(question).await;
-        assert_eq!(answer.value, AnswerValue::Aborted);
+        assert_eq!(answer.value, AnswerValue::Interrupted);
+    }
+
+    #[tokio::test]
+    async fn cancel_all_cancels_pending_questions() {
+        let interviewer = Arc::new(ControlInterviewer::new());
+        let mut question = Question::new("approve?", QuestionType::YesNo);
+        question.id = "q-1".to_string();
+
+        let ask_interviewer = Arc::clone(&interviewer);
+        let ask = tokio::spawn(async move { ask_interviewer.ask(question).await });
+        tokio::task::yield_now().await;
+
+        interviewer.cancel_all().await;
+
+        let answer = ask.await.unwrap();
+        assert_eq!(answer.value, AnswerValue::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn ask_after_cancel_all_returns_cancelled() {
+        let interviewer = ControlInterviewer::new();
+        interviewer.cancel_all().await;
+
+        let mut question = Question::new("approve?", QuestionType::YesNo);
+        question.id = "q-1".to_string();
+
+        let answer = interviewer.ask(question).await;
+        assert_eq!(answer.value, AnswerValue::Cancelled);
     }
 }

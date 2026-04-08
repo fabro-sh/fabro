@@ -1,3 +1,4 @@
+import { watch as fsWatch } from "node:fs";
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 
@@ -79,19 +80,37 @@ async function main() {
   }
 
   await buildOnce();
-  const watcher = Bun.watch({
-    paths: [join(rootPath, "app"), publicDir, templatePath],
-    async onChange() {
+  let building = false;
+  let rebuildQueued = false;
+
+  async function rebuild() {
+    if (building) {
+      rebuildQueued = true;
+      return;
+    }
+
+    building = true;
+    do {
+      rebuildQueued = false;
       try {
         await buildOnce();
       } catch (error) {
         console.error(error);
       }
-    },
-  });
+    } while (rebuildQueued);
+    building = false;
+  }
+
+  const watchers = [
+    fsWatch(join(rootPath, "app"), { recursive: true }, rebuild),
+    fsWatch(publicDir, { recursive: true }, rebuild),
+    fsWatch(templatePath, rebuild),
+  ];
 
   process.on("SIGINT", () => {
-    watcher.stop();
+    for (const watcher of watchers) {
+      watcher.close();
+    }
     process.exit(0);
   });
 }

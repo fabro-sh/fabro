@@ -6,15 +6,15 @@ use anyhow::{Result, bail};
 use chrono::Utc;
 use fabro_config::Storage;
 use fabro_config::user::default_socket_path;
-use fabro_server::bind::Bind;
+use fabro_server::bind::{Bind, BindRequest};
 use fabro_server::serve;
-use fabro_server::serve::ServeArgs;
+use fabro_server::serve::{DEFAULT_TCP_PORT, ServeArgs};
 use fabro_util::terminal::Styles;
 
 use super::record;
 
 pub(crate) async fn execute(
-    bind: Bind,
+    bind: BindRequest,
     foreground: bool,
     mut serve_args: ServeArgs,
     storage_dir: PathBuf,
@@ -69,6 +69,8 @@ fn ensure_server_running_with_bind(
 
     let serve_args = ServeArgs {
         bind: None,
+        web: false,
+        no_web: false,
         model: None,
         provider: None,
         dry_run: false,
@@ -77,7 +79,12 @@ fn ensure_server_running_with_bind(
         config: Some(config_path.to_path_buf()),
     };
 
-    match execute_daemon(&bind, &serve_args, storage_dir, false) {
+    let bind_request = match &bind {
+        Bind::Unix(path) => BindRequest::Unix(path.clone()),
+        Bind::Tcp(addr) => BindRequest::Tcp(*addr),
+    };
+
+    match execute_daemon(&bind_request, &serve_args, storage_dir, false) {
         Ok(()) => Ok(bind),
         Err(err) => {
             if let Some(existing) = record::active_server_record(storage_dir) {
@@ -101,7 +108,7 @@ fn server_max_concurrent_runs_override() -> Option<usize> {
 // ---------------------------------------------------------------------------
 
 async fn execute_foreground(
-    bind: Bind,
+    bind: BindRequest,
     serve_args: ServeArgs,
     storage_dir: PathBuf,
     styles: &'static Styles,
@@ -119,21 +126,14 @@ async fn execute_foreground(
 
     let server_state = Storage::new(&storage_dir).server_state();
     let record_path = server_state.record_path();
-    record::write_server_record(
-        &record_path,
-        &record::ServerRecord {
-            pid: std::process::id(),
-            bind: bind.clone(),
-            log_path: server_state.log_path(),
-            started_at: Utc::now(),
-        },
-    )?;
+    let log_path = server_state.log_path();
+    let pid = std::process::id();
 
-    let _record_guard = scopeguard::guard(record_path, |path| {
+    let _record_guard = scopeguard::guard(record_path.clone(), |path| {
         record::remove_server_record(&path);
     });
 
-    let _socket_guard = if let Bind::Unix(ref path) = bind {
+    let _socket_guard = if let BindRequest::Unix(ref path) = bind {
         let path = path.clone();
         Some(scopeguard::guard(path, |p| {
             let _ = std::fs::remove_file(p);
@@ -142,7 +142,23 @@ async fn execute_foreground(
         None
     };
 
-    serve::serve_command(serve_args, styles, Some(storage_dir)).await
+    serve::serve_command(
+        serve_args,
+        styles,
+        Some(storage_dir),
+        move |resolved_bind| {
+            record::write_server_record(
+                &record_path,
+                &record::ServerRecord {
+                    pid,
+                    bind: resolved_bind.clone(),
+                    log_path: log_path.clone(),
+                    started_at: Utc::now(),
+                },
+            )
+        },
+    )
+    .await
 }
 
 // ---------------------------------------------------------------------------
@@ -150,7 +166,7 @@ async fn execute_foreground(
 // ---------------------------------------------------------------------------
 
 fn execute_daemon(
-    bind: &Bind,
+    bind: &BindRequest,
     serve_args: &ServeArgs,
     storage_dir: &Path,
     announce: bool,
@@ -193,6 +209,12 @@ fn execute_daemon(
     if let Some(ref provider) = serve_args.provider {
         cmd.args(["--provider", provider]);
     }
+    if serve_args.web {
+        cmd.arg("--web");
+    }
+    if serve_args.no_web {
+        cmd.arg("--no-web");
+    }
     if serve_args.dry_run {
         cmd.arg("--dry-run");
     }
@@ -207,7 +229,7 @@ fn execute_daemon(
     }
 
     cmd.arg("--storage-dir").arg(storage_dir);
-    if matches!(bind, Bind::Unix(_)) {
+    if matches!(bind, BindRequest::Unix(_)) {
         cmd.env("FABRO_LOCAL_NO_AUTH", "1");
     }
 
@@ -220,16 +242,6 @@ fn execute_daemon(
     fabro_proc::pre_exec_setsid(&mut cmd);
 
     let mut child = cmd.spawn()?;
-
-    record::write_server_record(
-        &record_path,
-        &record::ServerRecord {
-            pid: child.id(),
-            bind: bind.clone(),
-            log_path: log_path.clone(),
-            started_at: Utc::now(),
-        },
-    )?;
 
     if let Ok(Some(status)) = child.try_wait() {
         record::remove_server_record(&record_path);
@@ -245,18 +257,18 @@ fn execute_daemon(
     let mut elapsed = Duration::ZERO;
 
     while elapsed < timeout {
-        if try_connect(bind) {
-            if announce {
-                eprintln!("Server started (pid {}) on {bind}", child.id());
+        if let Some(record) = record::read_server_record(&record_path) {
+            if try_connect(&record.bind) {
+                if announce {
+                    maybe_warn_host_port_fallback(bind, &record.bind);
+                    eprintln!("Server started (pid {}) on {}", child.id(), record.bind);
+                }
+                return Ok(());
             }
-            return Ok(());
         }
 
         if let Ok(Some(status)) = child.try_wait() {
             record::remove_server_record(&record_path);
-            if let Bind::Unix(ref path) = *bind {
-                let _ = std::fs::remove_file(path);
-            }
             let tail = read_log_tail(&log_path, 20);
             if !tail.is_empty() {
                 eprintln!("{tail}");
@@ -269,9 +281,6 @@ fn execute_daemon(
     }
 
     record::remove_server_record(&record_path);
-    if let Bind::Unix(ref path) = *bind {
-        let _ = std::fs::remove_file(path);
-    }
     let _ = child.kill();
     let _ = child.wait();
     let tail = read_log_tail(&log_path, 20);
@@ -317,6 +326,21 @@ fn try_connect(bind: &Bind) -> bool {
             std::net::TcpStream::connect_timeout(addr, Duration::from_millis(100)).is_ok()
         }
         Bind::Unix(path) => std::os::unix::net::UnixStream::connect(path).is_ok(),
+    }
+}
+
+fn maybe_warn_host_port_fallback(requested: &BindRequest, resolved: &Bind) {
+    let BindRequest::TcpHost(host) = requested else {
+        return;
+    };
+    let Bind::Tcp(addr) = resolved else {
+        return;
+    };
+    if addr.ip() == *host && addr.port() != DEFAULT_TCP_PORT {
+        eprintln!(
+            "Warning: TCP port {} is unavailable on {}; falling back to a random port.",
+            DEFAULT_TCP_PORT, host
+        );
     }
 }
 

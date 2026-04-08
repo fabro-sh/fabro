@@ -29,7 +29,7 @@ pub fn classify_sdk_error(err: &SdkError) -> FailureCategory {
         SdkError::RequestTimeout { .. } | SdkError::Network { .. } | SdkError::Stream { .. } => {
             FailureCategory::TransientInfra
         }
-        SdkError::Abort { .. } => FailureCategory::Canceled,
+        SdkError::Interrupt { .. } => FailureCategory::Canceled,
         SdkError::InvalidToolCall { .. }
         | SdkError::NoObjectGenerated { .. }
         | SdkError::Configuration { .. }
@@ -107,7 +107,7 @@ const STRUCTURAL_HINTS: &[&str] = &[
 pub fn classify_failure_reason(reason: &str) -> FailureCategory {
     let lower = reason.to_lowercase();
 
-    if lower.contains("cancel") || lower.contains("abort") {
+    if lower.contains("cancel") || lower.contains("interrupt") {
         return FailureCategory::Canceled;
     }
 
@@ -770,7 +770,7 @@ mod tests {
 
     #[test]
     fn failure_class_llm_abort() {
-        let err = FabroError::Llm(SdkError::Abort {
+        let err = FabroError::Llm(SdkError::Interrupt {
             message: "user cancelled".into(),
         });
         assert_eq!(err.failure_category(), FailureCategory::Canceled);
@@ -843,7 +843,7 @@ mod tests {
 
     #[test]
     fn classify_sdk_abort() {
-        let err = SdkError::Abort {
+        let err = SdkError::Interrupt {
             message: "cancelled".into(),
         };
         assert_eq!(classify_sdk_error(&err), FailureCategory::Canceled);
@@ -889,7 +889,7 @@ mod tests {
     #[test]
     fn classify_reason_abort() {
         assert_eq!(
-            classify_failure_reason("aborted by signal"),
+            classify_failure_reason("interrupted by signal"),
             FailureCategory::Canceled
         );
     }

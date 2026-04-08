@@ -103,6 +103,7 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
 
         match timed_result {
             Ok(Ok(wf_outcome)) => Ok(wf_outcome),
+            Ok(Err(crate::error::FabroError::Cancelled)) => Err(CoreError::Cancelled),
             Ok(Err(fabro_err)) => {
                 let retryable = handler.should_retry(&fabro_err);
                 Err(CoreError::handler(HandlerErrorDetail {

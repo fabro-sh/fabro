@@ -87,14 +87,14 @@ Out of scope:
 
 - `interview.completed` and `interview.timeout` gain `question_id`.
 
-- Add `interview.aborted`.
+- Add `interview.interrupted`.
   - Carry `question_id`, `question`, `stage`, `reason`, and `duration_ms`.
-  - Use it when the interviewer returns `Aborted` or `Skipped`, so pending interview cleanup stays event-driven.
+  - Use it when the interviewer returns `Interrupted`, while `Skipped` flows through `interview.completed`, so pending interview cleanup stays event-driven.
 
 - `RunProjection` becomes the only source of truth for pending interviews.
   - Add `pending_interviews: BTreeMap<String, PendingInterviewRecord>`.
   - Insert on `interview.started`.
-  - Remove on `interview.completed`, `interview.timeout`, `interview.aborted`, `run.rewound`, and terminal run events.
+  - Remove on `interview.completed`, `interview.timeout`, `interview.interrupted`, `run.rewound`, and terminal run events.
 
 - Keep the existing answer route contract.
   - `GET /runs/{id}/questions` and `POST /runs/{id}/questions/{qid}/answer` remain the public surface.
@@ -184,12 +184,13 @@ Update the workflow and event model so the pending interview can be reconstructe
 - Modify `lib/crates/fabro-workflow/src/handler/human.rs`:
   - generate `question.id`
   - emit the richer `interview.started`
-  - emit `interview.aborted` for `Aborted` and `Skipped`
+  - emit `interview.interrupted` for `Interrupted`
+  - emit `interview.completed` for `Skipped`
   - emit `question_id` on `interview.completed` and `interview.timeout`
 
 - Modify `lib/crates/fabro-workflow/src/event.rs` and `lib/crates/fabro-types/src/run_event/misc.rs`:
   - extend the interview event variants and payload props to carry the full pending-question surface
-  - keep event names stable except for adding `interview.aborted`
+  - keep event names stable except for adding `interview.interrupted`
 
 ### 2. Run projection and API question surface
 
@@ -286,7 +287,7 @@ Replace the current `WebInterviewer`-centric Slack path with a server-owned inte
 
 - Add server-side Slack wiring in `lib/crates/fabro-server/src/server.rs`:
   - create a single Slack service on startup when both tokens and `slack.default_channel` are configured
-  - subscribe it to the existing `state.global_event_tx` broadcast and filter `interview.started`, `interview.completed`, `interview.timeout`, and `interview.aborted`
+  - subscribe it to the existing `state.global_event_tx` broadcast and filter `interview.started`, `interview.completed`, `interview.timeout`, and `interview.interrupted`
   - post a Slack message for each fresh pending interview
   - use completion, timeout, and abort events for best-effort Slack message updates while the in-memory message metadata still exists
 
@@ -330,7 +331,7 @@ After replacement coverage is in place:
   - `interview.started` carries the full pending-question payload
   - `interview.completed` gains `question_id`
   - `interview.timeout` gains `question_id`
-  - `interview.aborted` is new
+  - `interview.interrupted` is new
 
 - Slack interactive payloads change from `question_id`-only routing to explicit `run_id + qid` routing in the action value payload.
 
@@ -338,13 +339,14 @@ After replacement coverage is in place:
 
 - `fabro-store`
   - add projection tests for pending interview insert and cleanup
-  - cover `completed`, `timeout`, `aborted`, rewind, and terminal run cleanup
+  - cover `completed`, `timeout`, `interrupted`, rewind, and terminal run cleanup
 
 - `fabro-workflow`
   - add handler tests that verify:
     - generated `question.id`
     - richer `interview.started`
-    - `interview.aborted` on `Aborted` and `Skipped`
+    - `interview.interrupted` on `Interrupted`
+    - `interview.completed` on `Skipped`
     - correlated `question_id` on completion and timeout
     - old interview events without the new fields still deserialize and replay safely
 

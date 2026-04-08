@@ -181,9 +181,9 @@ impl<G: Graph + 'static> Executor<G> {
                 }
                 NodeDecision::Continue => {
                     // Execute with retry, racing against stall token
-                    let mut result = if let Some(ref stall) = self.options.stall_token {
+                    let execution_result = if let Some(ref stall) = self.options.stall_token {
                         tokio::select! {
-                            r = self.execute_with_retry(&node, &state, graph) => r?,
+                            r = self.execute_with_retry(&node, &state, graph) => r,
                             () = stall.cancelled() => {
                                 return Err(CoreError::StallTimeout {
                                     node_id: node.id().to_string(),
@@ -191,7 +191,17 @@ impl<G: Graph + 'static> Executor<G> {
                             }
                         }
                     } else {
-                        self.execute_with_retry(&node, &state, graph).await?
+                        self.execute_with_retry(&node, &state, graph).await
+                    };
+                    let mut result = match execution_result {
+                        Ok(result) => result,
+                        Err(CoreError::Cancelled) => {
+                            state.cancelled = true;
+                            let outcome = Outcome::fail("run cancelled");
+                            self.lifecycle.on_run_end(&outcome, &state).await;
+                            return Err(CoreError::Cancelled);
+                        }
+                        Err(err) => return Err(err),
                     };
                     self.lifecycle
                         .after_node(&node, &mut result, &state)
@@ -328,8 +338,8 @@ impl<G: Graph + 'static> Executor<G> {
                     self.lifecycle.after_attempt(&ctx, state).await?;
                     sleep(delay).await;
                 }
-                Err(e) => {
-                    // Convert handler error to fail outcome so routing continues
+                Err(e @ CoreError::Handler { .. }) => {
+                    // Convert handler failures to fail outcomes so routing continues.
                     let outcome = e.to_fail_outcome();
                     let result =
                         NodeResult::new(outcome, start.elapsed(), attempt, policy.max_attempts);
@@ -343,6 +353,7 @@ impl<G: Graph + 'static> Executor<G> {
                     self.lifecycle.after_attempt(&ctx, state).await?;
                     return Ok(result);
                 }
+                Err(e) => return Err(e),
             }
         }
         unreachable!("loop always returns or continues")
@@ -906,6 +917,44 @@ mod tests {
         .build();
         let result = executor.run(&g, state).await;
         assert!(matches!(result, Err(CoreError::Cancelled)));
+    }
+
+    #[tokio::test]
+    async fn executor_preserves_handler_returned_cancellation() {
+        let handler = Arc::new(CountingHandler::new(vec![Err(CoreError::Cancelled)]));
+        let g = linear_graph(&["start", "end"]);
+        let state = ExecutionState::new(&g).unwrap();
+        let executor = ExecutorBuilder::new(handler as Arc<dyn NodeHandler<TestGraph>>).build();
+
+        let result = executor.run(&g, state).await;
+
+        assert!(matches!(result, Err(CoreError::Cancelled)));
+    }
+
+    #[tokio::test]
+    async fn executor_marks_state_cancelled_for_handler_returned_cancellation() {
+        let log = Arc::new(Mutex::new(Vec::<bool>::new()));
+
+        struct CancellationLifecycle(Arc<Mutex<Vec<bool>>>);
+
+        #[async_trait]
+        impl RunLifecycle<TestGraph> for CancellationLifecycle {
+            async fn on_run_end(&self, _outcome: &Outcome, state: &ExecutionState) {
+                self.0.lock().unwrap().push(state.cancelled);
+            }
+        }
+
+        let handler = Arc::new(CountingHandler::new(vec![Err(CoreError::Cancelled)]));
+        let g = linear_graph(&["start", "end"]);
+        let state = ExecutionState::new(&g).unwrap();
+        let executor = ExecutorBuilder::new(handler as Arc<dyn NodeHandler<TestGraph>>)
+            .lifecycle(Box::new(CancellationLifecycle(Arc::clone(&log))))
+            .build();
+
+        let result = executor.run(&g, state).await;
+
+        assert!(matches!(result, Err(CoreError::Cancelled)));
+        assert_eq!(log.lock().unwrap().as_slice(), &[true]);
     }
 
     // ---- Step 12: Retry integration ----

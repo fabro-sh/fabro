@@ -517,8 +517,9 @@ mod tests {
             "shape".to_string(),
             AttrValue::String("hexagon".to_string()),
         );
-        let outcome =
-            Outcome::fail_deterministic("human interaction aborted before an answer was provided");
+        let outcome = Outcome::fail_deterministic(
+            "human interaction interrupted before an answer was provided",
+        );
         let context = Context::new();
 
         assert!(select_edge(&node, &outcome, &context, &g, "deterministic").is_none());
@@ -538,8 +539,9 @@ mod tests {
             "shape".to_string(),
             AttrValue::String("hexagon".to_string()),
         );
-        let outcome =
-            Outcome::fail_deterministic("human interaction aborted before an answer was provided");
+        let outcome = Outcome::fail_deterministic(
+            "human interaction interrupted before an answer was provided",
+        );
         let context = Context::new();
 
         let sel = select_edge(&node, &outcome, &context, &g, "deterministic").unwrap();

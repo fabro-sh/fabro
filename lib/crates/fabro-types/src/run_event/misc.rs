@@ -76,7 +76,7 @@ pub struct InterviewTimeoutProps {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct InterviewAbortedProps {
+pub struct InterviewInterruptedProps {
     #[serde(default)]
     pub question_id: String,
     pub question: String,

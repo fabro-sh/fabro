@@ -691,7 +691,7 @@ impl Drop for DetachedRunBootstrapGuard {
     }
 }
 
-const POSTRUN_ABORTED_MESSAGE: &str = "Run aborted before post-run finalization completed.";
+const POSTRUN_INTERRUPTED_MESSAGE: &str = "Run interrupted before post-run finalization completed.";
 const POSTRUN_CANCELLED_MESSAGE: &str = "Run cancelled before post-run finalization completed.";
 
 struct DetachedRunCompletionGuard {
@@ -734,12 +734,12 @@ impl Drop for DetachedRunCompletionGuard {
         let message = if cancelled {
             POSTRUN_CANCELLED_MESSAGE
         } else {
-            POSTRUN_ABORTED_MESSAGE
+            POSTRUN_INTERRUPTED_MESSAGE
         };
         let code = if cancelled {
             "postrun_cancelled"
         } else {
-            "postrun_aborted"
+            "postrun_interrupted"
         };
         let event_sink = self.event_sink.clone();
         let run_id = self.run_id;

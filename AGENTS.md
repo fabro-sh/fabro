@@ -17,7 +17,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 macOS note: if `cargo nextest run` fails with `Too many open files (os error 24)` / `EMFILE`, raise the shell's soft FD limit before running tests, for example `ulimit -n 4096 && cargo nextest run --workspace`. Some terminals and inherited agent sessions start with `ulimit -n 256`, which is too low for the shared CLI test daemon under parallel nextest load.
 
 ### TypeScript (fabro-web)
-- `cd apps/fabro-web && bun run dev` — start React dev server
+- `cd apps/fabro-web && bun run dev` — rebuild web assets on change for the Rust server; refresh the browser manually
 - `cd apps/fabro-web && bun test` — run tests
 - `cd apps/fabro-web && bun run typecheck` — type check
 - `cd apps/fabro-web && bun run build` — production build
@@ -29,7 +29,7 @@ macOS note: if `cargo nextest run` fails with `Too many open files (os error 24)
 
 ### Dev servers
 1. `fabro server start` — starts the Rust API server (demo mode is per-request via `X-Fabro-Demo: 1` header)
-2. `cd apps/fabro-web && bun run dev` — starts the React dev server
+2. `cd apps/fabro-web && bun run dev` — rebuilds web assets on change; refresh the browser manually
 3. Mintlify docs dev server (requires Docker — `mintlify dev` needs Node LTS which may not match the host):
    ```
    docker run --rm -d -p 3333:3333 -v $(pwd)/docs:/docs -w /docs --name mintlify-dev node:22-slim \

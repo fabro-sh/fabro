@@ -239,7 +239,7 @@ pub enum Event {
         stage: String,
         duration_ms: u64,
     },
-    InterviewAborted {
+    InterviewInterrupted {
         question_id: String,
         question: String,
         stage: String,
@@ -768,13 +768,13 @@ impl Event {
             } => {
                 warn!(stage, duration_ms, "Interview timeout");
             }
-            Self::InterviewAborted {
+            Self::InterviewInterrupted {
                 stage,
                 reason,
                 duration_ms,
                 ..
             } => {
-                warn!(stage, reason, duration_ms, "Interview aborted");
+                warn!(stage, reason, duration_ms, "Interview interrupted");
             }
             Self::CheckpointCompleted {
                 node_id,
@@ -1151,7 +1151,7 @@ pub fn event_name(event: &Event) -> &'static str {
         Event::InterviewStarted { .. } => "interview.started",
         Event::InterviewCompleted { .. } => "interview.completed",
         Event::InterviewTimeout { .. } => "interview.timeout",
-        Event::InterviewAborted { .. } => "interview.aborted",
+        Event::InterviewInterrupted { .. } => "interview.interrupted",
         Event::CheckpointCompleted { .. } => "checkpoint.completed",
         Event::CheckpointFailed { .. } => "checkpoint.failed",
         Event::GitCommit { .. } => "git.commit",
@@ -1350,7 +1350,7 @@ fn stored_event_fields(event: &Event) -> StoredEventFields {
         Event::Prompt { stage, .. }
         | Event::InterviewStarted { stage, .. }
         | Event::InterviewTimeout { stage, .. }
-        | Event::InterviewAborted { stage, .. }
+        | Event::InterviewInterrupted { stage, .. }
         | Event::Failover { stage, .. } => {
             let node_id = Some(stage.clone());
             let node_label = default_node_label(node_id.as_ref(), None);
@@ -1671,13 +1671,13 @@ fn event_body_from_event(event: &Event) -> EventBody {
             stage: stage.clone(),
             duration_ms: *duration_ms,
         }),
-        Event::InterviewAborted {
+        Event::InterviewInterrupted {
             question_id,
             question,
             stage,
             reason,
             duration_ms,
-        } => EventBody::InterviewAborted(fabro_types::InterviewAbortedProps {
+        } => EventBody::InterviewInterrupted(fabro_types::InterviewInterruptedProps {
             question_id: question_id.clone(),
             question: question.clone(),
             stage: stage.clone(),

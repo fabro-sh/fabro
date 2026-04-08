@@ -4653,6 +4653,9 @@ components:
       description: Web UI configuration.
       type: object
       properties:
+        enabled:
+          type: boolean
+          description: Whether the embedded web UI and browser-oriented routes are enabled.
         url:
           type: string
           description: Web UI URL.

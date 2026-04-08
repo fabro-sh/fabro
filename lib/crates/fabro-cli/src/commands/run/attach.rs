@@ -91,15 +91,24 @@ pub(crate) async fn attach_run_with_client(
     attach_live_run_with_client(
         client,
         run_id,
-        auto_approve,
-        verbose,
         replay_events,
         stream,
-        kill_on_detach,
         styles,
-        json_output,
+        AttachOptions {
+            auto_approve,
+            verbose,
+            kill_on_detach,
+            json_output,
+        },
     )
     .await
+}
+
+struct AttachOptions {
+    auto_approve: bool,
+    verbose: bool,
+    kill_on_detach: bool,
+    json_output: bool,
 }
 
 fn replay_run_with_client(
@@ -124,31 +133,28 @@ fn replay_run_with_client(
 async fn attach_live_run_with_client(
     client: &server_client::ServerStoreClient,
     run_id: &RunId,
-    auto_approve: bool,
-    verbose: bool,
     existing_events: Vec<EventEnvelope>,
     mut stream: server_client::RunAttachEventStream,
-    kill_on_detach: bool,
     styles: &'static Styles,
-    json_output: bool,
+    opts: AttachOptions,
 ) -> Result<ExitCode> {
     let is_tty = std::io::stderr().is_terminal();
-    let mut progress_ui = run_progress::ProgressUI::new(is_tty, verbose);
+    let mut progress_ui = run_progress::ProgressUI::new(is_tty, opts.verbose);
     let ctrl_c_signal = ctrl_c();
     tokio::pin!(ctrl_c_signal);
 
     for event in existing_events {
         let line = event_payload_line(&event)?;
-        emit_progress_line(&mut progress_ui, &line, json_output)?;
+        emit_progress_line(&mut progress_ui, &line, opts.json_output)?;
     }
 
     if let Some(exit_code) = handle_pending_server_interview(
         client,
         run_id,
-        auto_approve,
+        opts.auto_approve,
         &mut progress_ui,
         styles,
-        json_output,
+        opts.json_output,
     )
     .await?
     {
@@ -158,23 +164,23 @@ async fn attach_live_run_with_client(
     loop {
         let next_event = tokio::select! {
             _ = &mut ctrl_c_signal => {
-                handle_detach_signal(client, run_id, kill_on_detach).await;
-                finish_progress(&mut progress_ui, json_output);
+                handle_detach_signal(client, run_id, opts.kill_on_detach).await;
+                finish_progress(&mut progress_ui, opts.json_output);
                 return Ok(ExitCode::from(1));
             }
             result = stream.next_event() => result?,
         };
 
         let Some(event) = next_event else {
-            finish_progress(&mut progress_ui, json_output);
+            finish_progress(&mut progress_ui, opts.json_output);
             return Err(anyhow::anyhow!(ATTACH_PREMATURE_EOF_MESSAGE));
         };
 
         let line = event_payload_line(&event)?;
-        emit_progress_line(&mut progress_ui, &line, json_output)?;
+        emit_progress_line(&mut progress_ui, &line, opts.json_output)?;
 
         if let Some(exit_code) = event_exit_code(&event) {
-            finish_progress(&mut progress_ui, json_output);
+            finish_progress(&mut progress_ui, opts.json_output);
             return Ok(exit_code);
         }
 
@@ -182,10 +188,10 @@ async fn attach_live_run_with_client(
             if let Some(exit_code) = handle_pending_server_interview(
                 client,
                 run_id,
-                auto_approve,
+                opts.auto_approve,
                 &mut progress_ui,
                 styles,
-                json_output,
+                opts.json_output,
             )
             .await?
             {
@@ -292,7 +298,10 @@ async fn submit_server_interview_answer(
         AnswerValue::MultiSelected(keys) => (None, None, keys.clone()),
         AnswerValue::Yes => (Some("yes".to_string()), None, Vec::new()),
         AnswerValue::No => (Some("no".to_string()), None, Vec::new()),
-        AnswerValue::Aborted | AnswerValue::Skipped | AnswerValue::Timeout => {
+        AnswerValue::Cancelled
+        | AnswerValue::Interrupted
+        | AnswerValue::Skipped
+        | AnswerValue::Timeout => {
             return Ok(false);
         }
     };
@@ -397,7 +406,10 @@ fn infer_run_id(run_dir: &Path) -> Option<RunId> {
 }
 
 fn answer_requires_reattach(answer: &fabro_interview::Answer) -> bool {
-    matches!(answer.value, AnswerValue::Aborted | AnswerValue::Skipped)
+    matches!(
+        answer.value,
+        AnswerValue::Interrupted | AnswerValue::Skipped
+    )
 }
 
 fn state_exit_code(state: &server_client::RunProjection) -> Option<ExitCode> {
@@ -534,9 +546,9 @@ mod tests {
     }
 
     #[test]
-    fn answer_requires_reattach_for_aborted_and_skipped_answers() {
-        let aborted = Answer {
-            value: AnswerValue::Aborted,
+    fn answer_requires_reattach_for_interrupted_and_skipped_answers() {
+        let interrupted = Answer {
+            value: AnswerValue::Interrupted,
             selected_option: None,
             text: None,
         };
@@ -547,7 +559,7 @@ mod tests {
         };
         let answered = Answer::yes();
 
-        assert!(answer_requires_reattach(&aborted));
+        assert!(answer_requires_reattach(&interrupted));
         assert!(answer_requires_reattach(&skipped));
         assert!(!answer_requires_reattach(&answered));
     }
@@ -580,10 +592,7 @@ mod tests {
                 .header("Content-Type", "application/json")
                 .body(terminal_run_state_response().to_string());
         });
-        let client =
-            server_client::connect_server_target_direct(&format!("{}/api/v1", server.base_url()))
-                .await
-                .unwrap();
+        let client = server_client::ServerStoreClient::new_no_proxy(&server.base_url()).unwrap();
 
         handle_detach_signal(&client, &run_id, true).await;
 

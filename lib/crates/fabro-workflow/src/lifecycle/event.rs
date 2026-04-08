@@ -370,9 +370,6 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
     }
 
     async fn on_run_end(&self, outcome: &Outcome, state: &WfRunState) {
-        if state.cancelled {
-            return;
-        }
         let duration_ms =
             u64::try_from(self.run_start.lock().unwrap().elapsed().as_millis()).unwrap();
         let artifact_count = self.captured_artifact_count.load(Ordering::Relaxed);
@@ -403,6 +400,16 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                 }
                 has_total.then_some(total)
             });
+
+        if state.cancelled {
+            self.emitter.emit(&Event::WorkflowRunFailed {
+                error: FabroError::Cancelled,
+                duration_ms,
+                reason: Some(StatusReason::Cancelled),
+                git_commit_sha: last_sha,
+            });
+            return;
+        }
 
         if outcome.status == StageStatus::Success || outcome.status == StageStatus::PartialSuccess {
             self.emitter.emit(&Event::WorkflowRunCompleted {

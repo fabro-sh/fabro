@@ -272,6 +272,18 @@ struct ArtifactBatchUploadEntry {
 }
 
 impl ServerStoreClient {
+    /// Build a client for tests that bypasses proxy discovery.
+    #[cfg(test)]
+    pub(crate) fn new_no_proxy(base_url: &str) -> Result<Self> {
+        let http_client = cli_http_client_builder().no_proxy().build()?;
+        let client = fabro_api::Client::new_with_client(base_url, http_client.clone());
+        Ok(Self {
+            client,
+            http_client,
+            base_url: base_url.to_string(),
+        })
+    }
+
     pub(crate) fn clone_for_reuse(&self) -> Self {
         self.clone()
     }

@@ -6,7 +6,7 @@ export default function Setup() {
     const suffix = Math.random().toString(16).slice(2, 8);
     return JSON.stringify({
       name: `Fabro-${suffix}`,
-      url: baseUrl,
+      url: "https://fabro.sh",
       redirect_url: `${baseUrl}/setup/complete`,
       callback_urls: [`${baseUrl}/auth/callback/github`],
       setup_url: `${baseUrl}/setup/complete`,

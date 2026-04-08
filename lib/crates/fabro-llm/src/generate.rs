@@ -138,9 +138,9 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError
         loop {
             if let Some(ref token) = abort_signal {
                 if token.is_cancelled() {
-                    warn!("Generation aborted by cancellation token");
-                    return Err(SdkError::Abort {
-                        message: "Generation aborted by cancellation token".into(),
+                    warn!("Generation interrupted by cancellation token");
+                    return Err(SdkError::Interrupt {
+                        message: "Generation interrupted by cancellation token".into(),
                     });
                 }
             }
@@ -241,8 +241,8 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError
 
             if let Some(ref token) = abort_signal {
                 if token.is_cancelled() {
-                    return Err(SdkError::Abort {
-                        message: "Generation aborted by cancellation token".into(),
+                    return Err(SdkError::Interrupt {
+                        message: "Generation interrupted by cancellation token".into(),
                     });
                 }
             }
@@ -305,7 +305,7 @@ pub struct GenerateParams {
     pub max_retries: u32,
     pub timeout: Option<TimeoutOptions>,
     pub client: Option<Arc<Client>>,
-    /// Cancellation token to abort generation (Section 4.8).
+    /// Cancellation token to interrupt generation (Section 4.8).
     pub abort_signal: Option<CancellationToken>,
     /// Custom stop condition checked after each tool round (Section 4.3).
     pub stop_when: Option<StopCondition>,
@@ -686,8 +686,8 @@ async fn stream_with_tool_loop(params: GenerateParams) -> Result<StreamEventStre
                 if let Some(ref token) = abort_signal {
                     if token.is_cancelled() {
                         let _ = tx
-                            .send(Err(SdkError::Abort {
-                                message: "Stream aborted by cancellation token".into(),
+                            .send(Err(SdkError::Interrupt {
+                                message: "Stream interrupted by cancellation token".into(),
                             }))
                             .await;
                         return;
@@ -733,8 +733,8 @@ async fn stream_with_tool_loop(params: GenerateParams) -> Result<StreamEventStre
                     if let Some(ref token) = abort_signal {
                         if token.is_cancelled() {
                             let _ = tx
-                                .send(Err(SdkError::Abort {
-                                    message: "Stream aborted by cancellation token".into(),
+                                .send(Err(SdkError::Interrupt {
+                                    message: "Stream interrupted by cancellation token".into(),
                                 }))
                                 .await;
                             return;
@@ -873,13 +873,13 @@ async fn stream_generate_raw(
         client.stream(&request).await?
     };
 
-    // Apply abort signal if present
+    // Apply interrupt signal if present
     let stream: StreamEventStream = if let Some(ref token) = params.abort_signal {
         let token = token.clone();
         let mapped = inner_stream.map(move |item| {
             if token.is_cancelled() {
-                return Err(SdkError::Abort {
-                    message: "Stream aborted by cancellation token".into(),
+                return Err(SdkError::Interrupt {
+                    message: "Stream interrupted by cancellation token".into(),
                 });
             }
             item
@@ -1770,7 +1770,7 @@ mod tests {
         .await;
 
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), SdkError::Abort { .. }));
+        assert!(matches!(result.unwrap_err(), SdkError::Interrupt { .. }));
     }
 
     #[tokio::test]
@@ -1848,7 +1848,7 @@ mod tests {
         .await;
 
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), SdkError::Abort { .. }));
+        assert!(matches!(result.unwrap_err(), SdkError::Interrupt { .. }));
         // Should have only made 1 call before aborting
         assert_eq!(call_count.load(Ordering::SeqCst), 1);
     }
@@ -1873,7 +1873,7 @@ mod tests {
 
         let first = stream_result.next().await.unwrap();
         assert!(first.is_err());
-        assert!(matches!(first.unwrap_err(), SdkError::Abort { .. }));
+        assert!(matches!(first.unwrap_err(), SdkError::Interrupt { .. }));
     }
 
     #[tokio::test]

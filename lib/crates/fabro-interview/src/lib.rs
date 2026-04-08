@@ -81,7 +81,8 @@ impl Question {
 pub enum AnswerValue {
     Yes,
     No,
-    Aborted,
+    Cancelled,
+    Interrupted,
     Skipped,
     Timeout,
     Selected(String),
@@ -117,9 +118,18 @@ impl Answer {
     }
 
     #[must_use]
-    pub fn aborted() -> Self {
+    pub fn cancelled() -> Self {
         Self {
-            value: AnswerValue::Aborted,
+            value: AnswerValue::Cancelled,
+            selected_option: None,
+            text: None,
+        }
+    }
+
+    #[must_use]
+    pub fn interrupted() -> Self {
+        Self {
+            value: AnswerValue::Interrupted,
             selected_option: None,
             text: None,
         }
@@ -263,15 +273,21 @@ mod tests {
     }
 
     #[test]
+    fn answer_cancelled() {
+        let a = Answer::cancelled();
+        assert_eq!(a.value, AnswerValue::Cancelled);
+    }
+
+    #[test]
     fn answer_skipped() {
         let a = Answer::skipped();
         assert_eq!(a.value, AnswerValue::Skipped);
     }
 
     #[test]
-    fn answer_aborted() {
-        let a = Answer::aborted();
-        assert_eq!(a.value, AnswerValue::Aborted);
+    fn answer_interrupted() {
+        let a = Answer::interrupted();
+        assert_eq!(a.value, AnswerValue::Interrupted);
     }
 
     #[test]
@@ -314,8 +330,9 @@ mod tests {
     #[test]
     fn answer_value_variants() {
         assert_ne!(AnswerValue::Yes, AnswerValue::No);
+        assert_ne!(AnswerValue::Cancelled, AnswerValue::Interrupted);
         assert_ne!(AnswerValue::Skipped, AnswerValue::Timeout);
-        assert_ne!(AnswerValue::Aborted, AnswerValue::Timeout);
+        assert_ne!(AnswerValue::Interrupted, AnswerValue::Timeout);
         assert_eq!(
             AnswerValue::Selected("x".to_string()),
             AnswerValue::Selected("x".to_string())

@@ -1,5 +1,5 @@
 use std::fmt;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -11,6 +11,13 @@ pub enum Bind {
     Tcp(SocketAddr),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum BindRequest {
+    Unix(PathBuf),
+    Tcp(SocketAddr),
+    TcpHost(IpAddr),
+}
+
 impl fmt::Display for Bind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -20,25 +27,38 @@ impl fmt::Display for Bind {
     }
 }
 
+impl fmt::Display for BindRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unix(path) => write!(f, "{}", path.display()),
+            Self::Tcp(addr) => write!(f, "{addr}"),
+            Self::TcpHost(host) => write!(f, "{host}"),
+        }
+    }
+}
+
 /// Parse a bind address string into a `Bind` value.
 ///
 /// If the string contains `/`, it is treated as a Unix socket path. Otherwise
-/// it is parsed as a TCP `host:port` address.
+/// it is parsed as either a TCP `ip:port` address or a host-only TCP IP.
 ///
 /// # Errors
 ///
 /// Returns an error if the TCP address cannot be parsed, or if a Unix socket
 /// path exceeds the OS limit (104 bytes on macOS, 108 on Linux).
-pub fn parse_bind(s: &str) -> anyhow::Result<Bind> {
+pub fn parse_bind(s: &str) -> anyhow::Result<BindRequest> {
     if s.contains('/') {
         let path = PathBuf::from(s);
         validate_unix_path_length(&path)?;
-        Ok(Bind::Unix(path))
+        Ok(BindRequest::Unix(path))
+    } else if let Ok(addr) = s.parse::<SocketAddr>() {
+        Ok(BindRequest::Tcp(addr))
+    } else if let Ok(host) = s.parse::<IpAddr>() {
+        Ok(BindRequest::TcpHost(host))
     } else {
-        let addr: SocketAddr = s
-            .parse()
-            .map_err(|e| anyhow::anyhow!("invalid TCP address '{s}': {e}"))?;
-        Ok(Bind::Tcp(addr))
+        Err(anyhow::anyhow!(
+            "invalid TCP address '{s}': invalid socket address syntax"
+        ))
     }
 }
 
@@ -61,17 +81,24 @@ fn validate_unix_path_length(path: &std::path::Path) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::{IpAddr, Ipv4Addr};
 
     #[test]
     fn parse_tcp_address() {
         let bind = parse_bind("127.0.0.1:3000").unwrap();
-        assert_eq!(bind, Bind::Tcp("127.0.0.1:3000".parse().unwrap()));
+        assert_eq!(bind, BindRequest::Tcp("127.0.0.1:3000".parse().unwrap()));
+    }
+
+    #[test]
+    fn parse_tcp_host_without_port() {
+        let bind = parse_bind("127.0.0.1").unwrap();
+        assert_eq!(bind, BindRequest::TcpHost(IpAddr::V4(Ipv4Addr::LOCALHOST)));
     }
 
     #[test]
     fn parse_unix_socket_path() {
         let bind = parse_bind("/tmp/fabro.sock").unwrap();
-        assert_eq!(bind, Bind::Unix(PathBuf::from("/tmp/fabro.sock")));
+        assert_eq!(bind, BindRequest::Unix(PathBuf::from("/tmp/fabro.sock")));
     }
 
     #[test]
@@ -108,5 +135,11 @@ mod tests {
     fn display_unix() {
         let bind = Bind::Unix(PathBuf::from("/run/fabro.sock"));
         assert_eq!(bind.to_string(), "/run/fabro.sock");
+    }
+
+    #[test]
+    fn display_tcp_host_request() {
+        let bind = BindRequest::TcpHost(IpAddr::V4(Ipv4Addr::LOCALHOST));
+        assert_eq!(bind.to_string(), "127.0.0.1");
     }
 }

@@ -44,6 +44,7 @@ ca = "/etc/fabro/tls/ca.pem"
 type = "Jwt"
 
 [web]
+enabled = true
 url = "https://fabro-web.example.com"
 
 [web.auth]
@@ -102,7 +103,9 @@ Several `settings.toml` settings can be overridden via `fabro server start` flag
 
 | Flag | Default | Description |
 |---|---|---|
-| `--bind` | `~/.fabro/fabro.sock` | Address to bind: `host:port` for TCP, or a path for Unix socket |
+| `--bind` | `~/.fabro/fabro.sock` | Address to bind: `IP` or `IP:port` for TCP, or a path for Unix socket |
+| `--web` | enabled | Enable the embedded web UI, browser auth routes, and web-only helper endpoints |
+| `--no-web` | disabled | Disable the embedded web UI, browser auth routes, and web-only helper endpoints |
 | `--foreground` | — | Run in the foreground instead of daemonizing |
 | `--model` | — | Override default LLM model |
 | `--provider` | — | Override default LLM provider |
@@ -112,6 +115,17 @@ Several `settings.toml` settings can be overridden via `fabro server start` flag
 | `--dry-run` | — | Execute with simulated LLM backend |
 
 CLI flags take precedence over `settings.toml` values. See [Run Configuration — Precedence](/execution/run-configuration#precedence) for the full resolution order.
+
+### `[web]` section
+
+Control the embedded SPA and browser-oriented routes.
+
+| Key | Description | Default |
+|---|---|---|
+| `enabled` | Serve the embedded SPA, `/auth/*`, and the web-only helper endpoints under `/api/v1` | `true` |
+| `url` | External web UI URL used for OAuth redirects | `http://localhost:3000` |
+
+When `enabled = false`, the server still exposes the machine API and `/health`, but `/`, `/auth/*`, SPA client routes, `/api/v1/auth/me`, `/api/v1/setup/*`, and `/api/v1/demo/toggle` all return `404`.
 
 ### Run defaults
 
