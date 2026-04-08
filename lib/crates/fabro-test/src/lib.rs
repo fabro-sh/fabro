@@ -596,9 +596,11 @@ fn stop_test_server(server: &ServerPaths) {
 }
 
 fn test_server_stop_timeout() -> std::time::Duration {
-    // Allow the real server to finish its own 5s worker-shutdown grace before
-    // we escalate and risk orphaning active run workers.
-    std::time::Duration::from_secs(8)
+    // Give the server a brief window to flush state, then escalate.
+    // The server's own 5s worker-shutdown grace is unnecessary in tests
+    // because no real work needs preserving — any lingering workers are
+    // from already-completed runs racing to exit.
+    std::time::Duration::from_millis(500)
 }
 
 fn shared_server_paths(root: &Path) -> ServerPaths {
@@ -1772,10 +1774,10 @@ mod tests {
     }
 
     #[test]
-    fn stop_test_server_timeout_exceeds_server_worker_grace() {
+    fn stop_test_server_timeout_is_short() {
         assert!(
-            test_server_stop_timeout() >= std::time::Duration::from_secs(6),
-            "test harness must give the server longer than its 5s worker shutdown grace"
+            test_server_stop_timeout() <= std::time::Duration::from_secs(1),
+            "test harness should SIGKILL quickly — no real work to preserve"
         );
     }
 
