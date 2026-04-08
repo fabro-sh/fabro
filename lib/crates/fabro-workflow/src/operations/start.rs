@@ -1026,7 +1026,7 @@ mod tests {
             ),
         ]));
 
-        let created = crate::operations::create(
+        crate::operations::create(
             &store,
             crate::operations::CreateRunInput {
                 workflow: crate::operations::WorkflowInput::Bundled(

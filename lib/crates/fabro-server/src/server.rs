@@ -5854,8 +5854,6 @@ async fn get_graph(
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use super::*;
     use axum::body::Body;
     use axum::http::Request;
