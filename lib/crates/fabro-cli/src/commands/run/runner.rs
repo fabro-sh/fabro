@@ -63,12 +63,8 @@ pub(crate) async fn execute(
         .run
         .as_ref()
         .ok_or_else(|| anyhow!("Run {run_id} has no run record in store"))?;
-    let artifact_uploader = build_artifact_uploader(
-        run_id,
-        run_record,
-        client.clone_for_reuse(),
-        artifact_upload_token,
-    );
+    let artifact_uploader =
+        build_artifact_uploader(run_id, client.clone_for_reuse(), artifact_upload_token);
     let interviewer = Arc::new(ControlInterviewer::new());
     tokio::spawn(read_worker_control_stream(
         io::stdin(),
@@ -146,14 +142,9 @@ async fn apply_worker_control_line(interviewer: &ControlInterviewer, line: &str)
 
 fn build_artifact_uploader(
     run_id: RunId,
-    run_record: &fabro_types::RunRecord,
     client: server_client::ServerStoreClient,
     artifact_upload_token: Option<String>,
 ) -> Option<Arc<dyn StageArtifactUploader>> {
-    if !run_record.uses_object_backed_artifacts() {
-        return None;
-    }
-
     let uploader: Arc<dyn StageArtifactUploader> = match artifact_upload_token {
         Some(token) => Arc::new(HttpArtifactUploader {
             run_id,
@@ -484,8 +475,9 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        WorkerTitlePhase, apply_worker_control_line, execute, initial_worker_title_phase,
-        read_worker_control_stream, worker_title, worker_title_phase_for_event,
+        WorkerTitlePhase, apply_worker_control_line, build_artifact_uploader, execute,
+        initial_worker_title_phase, read_worker_control_stream, worker_title,
+        worker_title_phase_for_event,
     };
     use crate::args::RunWorkerMode;
     use fabro_interview::{AnswerValue, ControlInterviewer, Interviewer, Question, QuestionType};
@@ -586,6 +578,24 @@ mod tests {
             })),
             Some(WorkerTitlePhase::Failed)
         );
+    }
+
+    #[tokio::test]
+    async fn build_artifact_uploader_does_not_depend_on_run_capability_flag() {
+        let server = MockServer::start_async().await;
+
+        let uploader = build_artifact_uploader(
+            fixtures::RUN_1,
+            crate::server_client::connect_server_target_direct(&format!(
+                "{}/api/v1",
+                server.base_url()
+            ))
+            .await
+            .unwrap(),
+            Some("token".to_string()),
+        );
+
+        assert!(uploader.is_some());
     }
 
     #[tokio::test]

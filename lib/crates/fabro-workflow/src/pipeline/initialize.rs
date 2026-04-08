@@ -749,7 +749,6 @@ mod tests {
                 repo_origin_url: None,
                 base_branch: Some("main".to_string()),
                 labels: HashMap::new(),
-                artifact_storage: None,
                 provenance: None,
             },
         )

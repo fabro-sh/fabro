@@ -97,7 +97,6 @@ async fn initialized(
             base_branch: run_options.base_branch.clone(),
             workflow_slug: run_options.workflow_slug.clone(),
             db_prefix: None,
-            artifact_storage: None,
             provenance: None,
         },
     )

@@ -34,9 +34,9 @@ use fabro_store::{
     ArtifactStore, Database, EventEnvelope, EventPayload, PendingInterviewRecord, StageId,
 };
 use fabro_types::{
-    EventBody, InterviewQuestionRecord, InterviewQuestionType, RunArtifactStorage, RunBlobId,
-    RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance, RunServerProvenance,
-    RunSubjectProvenance, Settings,
+    EventBody, InterviewQuestionRecord, InterviewQuestionType, RunBlobId, RunClientProvenance,
+    RunControlAction, RunEvent, RunId, RunProvenance, RunServerProvenance, RunSubjectProvenance,
+    Settings,
 };
 use fabro_util::redact::redact_jsonl_line;
 use fabro_util::version::FABRO_VERSION;
@@ -3097,7 +3097,6 @@ async fn create_run(
 
     let mut create_input = run_manifest::create_run_input(prepared.clone());
     create_input.run_id = Some(run_id);
-    create_input.artifact_storage = Some(RunArtifactStorage::ObjectStoreV1);
     create_input.provenance = Some(run_provenance(&headers, &subject));
 
     let created = match Box::pin(operations::create(state.store.as_ref(), create_input)).await {
@@ -5856,7 +5855,7 @@ mod tests {
         run_id
     }
 
-    async fn create_legacy_run(state: &Arc<AppState>, settings: &Settings) -> RunId {
+    async fn create_direct_run(state: &Arc<AppState>, settings: &Settings) -> RunId {
         operations::create(
             state.store.as_ref(),
             operations::CreateRunInput {
@@ -5873,7 +5872,6 @@ mod tests {
                 host_repo_path: None,
                 repo_origin_url: None,
                 base_branch: None,
-                artifact_storage: None,
                 provenance: None,
             },
         )
@@ -6580,7 +6578,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_run_marks_object_backed_artifacts() {
+    async fn create_run_persists_run_record() {
         let state = create_app_state();
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
@@ -6597,13 +6595,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(
-            run_state
-                .run
-                .as_ref()
-                .unwrap()
-                .uses_object_backed_artifacts()
-        );
+        assert!(run_state.run.is_some());
     }
 
     #[tokio::test]
@@ -6768,14 +6760,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn legacy_runs_do_not_fallback_to_scratch_artifacts() {
+    async fn directly_created_runs_do_not_fallback_to_scratch_artifacts() {
         let temp = tempfile::tempdir().unwrap();
         let mut settings = dry_run_settings();
         settings.storage_dir = Some(temp.path().join("storage"));
         let state = create_app_state_with_options(settings.clone(), 5);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
-        let run_id = create_legacy_run(&state, &settings).await;
+        let run_id = create_direct_run(&state, &settings).await;
         let artifact_path = Storage::new(settings.storage_dir())
             .run_scratch(&run_id)
             .artifact_files_dir()
@@ -6784,21 +6776,6 @@ mod tests {
             .join("src/lib.rs");
         std::fs::create_dir_all(artifact_path.parent().unwrap()).unwrap();
         std::fs::write(&artifact_path, "legacy scratch only").unwrap();
-        let run_state = state
-            .store
-            .open_run_reader(&run_id)
-            .await
-            .unwrap()
-            .state()
-            .await
-            .unwrap();
-        assert!(
-            !run_state
-                .run
-                .as_ref()
-                .unwrap()
-                .uses_object_backed_artifacts()
-        );
         let req = Request::builder()
             .method("GET")
             .uri(api(&format!("/runs/{run_id}/stages/code@2/artifacts")))

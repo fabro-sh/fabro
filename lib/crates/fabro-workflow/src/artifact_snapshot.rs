@@ -352,7 +352,6 @@ mod tests {
     use super::*;
     use fabro_agent::sandbox::ExecResult;
     use std::collections::HashMap;
-    use std::fs;
 
     /// Minimal mock sandbox for artifact_snapshot tests.
     struct AssetMockSandbox {

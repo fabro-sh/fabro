@@ -567,7 +567,6 @@ fn attach_json_errors_without_prompting_for_human_input() {
         "event": "run.created",
         "id": "[EVENT_ID]",
         "properties": {
-          "artifact_storage": "object_store_v1",
           "graph": {
             "attrs": {
               "goal": {

@@ -3,7 +3,7 @@ use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, Provider};
 use fabro_sandbox::SandboxProvider;
 use fabro_store::Database;
-use fabro_types::{RunArtifactStorage, RunId, RunProvenance, Settings};
+use fabro_types::{RunId, RunProvenance, Settings};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -35,7 +35,6 @@ pub struct CreateRunInput {
     pub host_repo_path: Option<String>,
     pub repo_origin_url: Option<String>,
     pub base_branch: Option<String>,
-    pub artifact_storage: Option<RunArtifactStorage>,
     pub provenance: Option<RunProvenance>,
 }
 
@@ -57,7 +56,6 @@ struct PersistCreateOptions {
     working_directory: PathBuf,
     host_repo_path: Option<String>,
     repo_origin_url: Option<String>,
-    artifact_storage: Option<RunArtifactStorage>,
     provenance: Option<RunProvenance>,
 }
 
@@ -85,7 +83,6 @@ pub async fn create(store: &Database, request: CreateRunInput) -> Result<Created
         host_repo_path,
         repo_origin_url,
         base_branch,
-        artifact_storage,
         provenance,
     } = request;
 
@@ -124,7 +121,6 @@ pub async fn create(store: &Database, request: CreateRunInput) -> Result<Created
             working_directory,
             host_repo_path,
             repo_origin_url,
-            artifact_storage,
             provenance,
         },
         current_dir,
@@ -191,7 +187,6 @@ async fn persist_created_run(
             base_branch: record.base_branch.clone(),
             workflow_slug: record.workflow_slug.clone(),
             db_prefix: None,
-            artifact_storage: record.artifact_storage,
             provenance: record.provenance.clone(),
         },
         record.run_id.created_at(),
@@ -324,7 +319,6 @@ fn persist_validated(
         working_directory,
         host_repo_path,
         repo_origin_url,
-        artifact_storage,
         provenance,
     } = options;
 
@@ -343,7 +337,6 @@ fn persist_validated(
         repo_origin_url,
         base_branch,
         labels,
-        artifact_storage,
         provenance,
     };
 
@@ -703,7 +696,6 @@ mod tests {
                 host_repo_path: None,
                 repo_origin_url: None,
                 base_branch: None,
-                artifact_storage: None,
                 provenance: None,
             },
         )
@@ -752,7 +744,6 @@ mod tests {
                 host_repo_path: Some(dir.path().display().to_string()),
                 repo_origin_url: None,
                 base_branch: Some("main".to_string()),
-                artifact_storage: None,
                 provenance: None,
             },
         )
@@ -833,7 +824,6 @@ mod tests {
                 host_repo_path: None,
                 repo_origin_url: None,
                 base_branch: None,
-                artifact_storage: None,
                 provenance: None,
             },
         )
@@ -877,7 +867,6 @@ mod tests {
                 host_repo_path: None,
                 repo_origin_url: Some("https://github.com/acme/widgets".to_string()),
                 base_branch: None,
-                artifact_storage: None,
                 provenance: None,
             },
         )
@@ -918,7 +907,6 @@ mod tests {
                 host_repo_path: None,
                 repo_origin_url: None,
                 base_branch: None,
-                artifact_storage: None,
                 provenance: None,
             },
         )
@@ -961,7 +949,6 @@ mod tests {
                 host_repo_path: None,
                 repo_origin_url: None,
                 base_branch: None,
-                artifact_storage: None,
                 provenance: Some(fabro_types::RunProvenance {
                     server: Some(fabro_types::RunServerProvenance {
                         version: "0.9.0".to_string(),

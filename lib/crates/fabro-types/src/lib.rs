@@ -45,8 +45,8 @@ pub use retro::{
     OpenItemKind, Retro, RetroNarrative, SmoothnessRating, StageRetro,
 };
 pub use run::{
-    RunArtifactStorage, RunAuthMethod, RunClientProvenance, RunProvenance, RunRecord,
-    RunServerProvenance, RunSubjectProvenance,
+    RunAuthMethod, RunClientProvenance, RunProvenance, RunRecord, RunServerProvenance,
+    RunSubjectProvenance,
 };
 pub use run_blob_id::RunBlobId;
 pub use run_event::{EventBody, RunEvent, RunNoticeLevel};

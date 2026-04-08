@@ -342,7 +342,6 @@ mod tests {
             repo_origin_url: Some("https://github.com/fabro-sh/fabro".to_string()),
             base_branch: Some("main".to_string()),
             labels: HashMap::from([("team".to_string(), "infra".to_string())]),
-            artifact_storage: None,
             provenance: None,
         }
     }
@@ -488,7 +487,6 @@ mod tests {
                 base_branch: run_record.base_branch.clone(),
                 workflow_slug: run_record.workflow_slug.clone(),
                 db_prefix: None,
-                artifact_storage: run_record.artifact_storage,
                 provenance: run_record.provenance.clone(),
             },
         )

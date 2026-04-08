@@ -1090,7 +1090,6 @@ mod tests {
             repo_origin_url: None,
             base_branch: Some("main".to_string()),
             labels: HashMap::new(),
-            artifact_storage: None,
             provenance: None,
         };
         append_event(
@@ -1110,7 +1109,6 @@ mod tests {
                 base_branch: run_record.base_branch.clone(),
                 workflow_slug: run_record.workflow_slug.clone(),
                 db_prefix: None,
-                artifact_storage: run_record.artifact_storage,
                 provenance: run_record.provenance.clone(),
             },
         )
@@ -1162,7 +1160,6 @@ mod tests {
             repo_origin_url: None,
             base_branch: Some("main".to_string()),
             labels: HashMap::new(),
-            artifact_storage: None,
             provenance: None,
         };
         append_event(
@@ -1182,7 +1179,6 @@ mod tests {
                 base_branch: run_record.base_branch.clone(),
                 workflow_slug: run_record.workflow_slug.clone(),
                 db_prefix: None,
-                artifact_storage: run_record.artifact_storage,
                 provenance: run_record.provenance.clone(),
             },
         )
@@ -1387,7 +1383,6 @@ mod tests {
             repo_origin_url: None,
             base_branch: None,
             labels: std::collections::HashMap::new(),
-            artifact_storage: None,
             provenance: None,
         };
         append_event(
@@ -1407,7 +1402,6 @@ mod tests {
                 base_branch: None,
                 workflow_slug: None,
                 db_prefix: None,
-                artifact_storage: run_record.artifact_storage,
                 provenance: run_record.provenance.clone(),
             },
         )
