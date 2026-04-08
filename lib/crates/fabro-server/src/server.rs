@@ -6718,7 +6718,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn object_backed_runs_do_not_fallback_to_scratch_artifacts() {
+    async fn api_created_runs_do_not_fallback_to_scratch_artifacts() {
         let temp = tempfile::tempdir().unwrap();
         let mut settings = dry_run_settings();
         settings.storage_dir = Some(temp.path().join("storage"));

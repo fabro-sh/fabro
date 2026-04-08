@@ -214,7 +214,7 @@ impl StageArtifactUploader for MissingArtifactUploadTokenUploader {
         _artifacts: &[CapturedArtifactInfo],
     ) -> Result<()> {
         Err(anyhow!(
-            "run {} is configured for object-backed artifacts but the worker did not receive an artifact upload token",
+            "run {} could not upload artifacts because the worker did not receive an artifact upload token",
             self.run_id
         ))
     }
@@ -475,9 +475,9 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        WorkerTitlePhase, apply_worker_control_line, build_artifact_uploader, execute,
-        initial_worker_title_phase, read_worker_control_stream, worker_title,
-        worker_title_phase_for_event,
+        MissingArtifactUploadTokenUploader, WorkerTitlePhase, apply_worker_control_line,
+        build_artifact_uploader, execute, initial_worker_title_phase, read_worker_control_stream,
+        worker_title, worker_title_phase_for_event,
     };
     use crate::args::RunWorkerMode;
     use fabro_interview::{AnswerValue, ControlInterviewer, Interviewer, Question, QuestionType};
@@ -487,6 +487,7 @@ mod tests {
         RunFailedProps, RunStatusTransitionProps,
     };
     use fabro_types::{EventBody, StatusReason};
+    use fabro_workflow::artifact_upload::StageArtifactUploader;
 
     #[test]
     fn worker_title_uses_short_run_id_and_phase() {
@@ -596,6 +597,26 @@ mod tests {
         );
 
         assert!(uploader.is_some());
+    }
+
+    #[tokio::test]
+    async fn missing_artifact_upload_token_error_does_not_mention_removed_storage_mode() {
+        let uploader = MissingArtifactUploadTokenUploader {
+            run_id: fixtures::RUN_1,
+        };
+        let temp = tempfile::tempdir().unwrap();
+
+        let error = uploader
+            .upload_stage_artifacts(&fabro_types::StageId::new("code", 2), temp.path(), &[])
+            .await
+            .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("worker did not receive an artifact upload token")
+        );
+        assert!(!error.to_string().contains("object-backed artifacts"));
     }
 
     #[tokio::test]

@@ -13,7 +13,6 @@
 - Add artifact storage configuration separate from the main run-store path:
   - default backend: local object store rooted under the existing storage directory
   - optional backend: S3 with bucket, region, prefix, optional endpoint override, and path-style toggle
-- Add an artifact-storage capability marker to new runs so the server can distinguish object-backed runs from legacy disk-backed runs when deciding whether local fallback is allowed.
 - Refactor server startup so `ArtifactStore` is constructed from artifact-storage config instead of being hardwired to `LocalFileSystem` in `serve.rs`.
 - Extend `ArtifactStore` with streaming writes:
   - add `put_stream(...)` that writes directly to the configured object store using `object_store::buffered::BufWriter`
@@ -39,7 +38,7 @@
   - single-file uploads may use raw octet-stream; batch upload should use multipart when multiple artifacts exist for the stage
   - the worker emits `artifact.captured` only after the server confirms durable upload
   - on repeated upload failure, the worker emits a warning-style run notice and continues
-- Update read paths so `ArtifactStore` is the primary source for list/download. Keep the current run-scratch fallback only for legacy runs created before this change; new runs should not rely on local disk artifacts being present on the server.
+- Update read paths so `ArtifactStore` is the only source for list/download; no run-scratch fallback is required.
 - Extend the worker spawn contract so the server provides:
   - internal server address or Unix-socket target
   - a short-lived bearer token scoped to artifact upload routes for that run
@@ -52,7 +51,6 @@
   - one file part per manifest entry
   - manifest fields: `part`, `path`, optional `sha256`, optional `expected_bytes`, optional `content_type`
 - Settings gain artifact object-store configuration, with local as the default and S3 as an explicit opt-in backend.
-- New runs record an artifact-storage capability/version marker so read paths can determine whether disk fallback is valid.
 
 ## Test Plan
 - Server integration: single-file octet-stream upload stores objects in local object store and returns `204`.
@@ -62,14 +60,14 @@
 - Limits: oversized single artifact, oversized batch byte total, and too many multipart entries all fail with the configured limit response and abort the active upload.
 - Retry behavior: partial multipart failure can be retried safely and produces the correct final artifact set.
 - Concurrency: concurrent uploads to the same run/stage/path converge safely to one correct durable object.
-- Read path: list/download returns artifacts from `ArtifactStore` for new runs and still falls back to disk for legacy runs.
+- Read path: list/download returns artifacts only from `ArtifactStore`.
 - Worker integration: worker uploads captured artifacts through the server route and emits `artifact.captured` only after success.
 - Failure behavior: repeated upload failure emits a warning notice and the run completes without failing.
 - Backend coverage: large artifact upload works against an S3-compatible backend such as MinIO and uses streaming/multipart object-store writes without buffering the full file in memory.
 
 ## Assumptions
 - Scope is limited to `ArtifactStore` stage artifacts. Large run blobs written by `RunDatabase::write_blob()` are unchanged.
-- New runs are expected to have durable artifacts in object storage; the server-side disk fallback exists only for backward compatibility with older runs.
+- Runs are expected to have durable artifacts in object storage; scratch copies are only local cache/state.
 - The server remains the sole durable artifact writer and owns all artifact object-store credentials.
 - Non-fatal artifact-upload failure is the chosen default for v1; if strict durability becomes required later, it can be added as a separate policy change.
 - The artifact object key remains scoped by run id, stage id, and relative artifact path, so same-key retries are naturally idempotent.
