@@ -10,6 +10,7 @@ use fabro_util::text::strip_goal_decoration;
 use fabro_workflow::run_status::RunStatus;
 
 use crate::args::{GlobalArgs, RunsListArgs};
+use crate::command_context::CommandContext;
 use crate::server_runs::{ServerSummaryLookup, filter_server_runs};
 use crate::shared::{color_if, format_duration_ms, tilde_path};
 
@@ -21,7 +22,8 @@ pub(crate) async fn list_command(
     styles: &Styles,
     globals: &GlobalArgs,
 ) -> Result<()> {
-    let lookup = ServerSummaryLookup::connect(&args.server).await?;
+    let ctx = CommandContext::for_target(&args.server)?;
+    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let label_filters = parse_label_filters(&args.filter.label);
     let filtered = filter_server_runs(
         lookup.runs(),

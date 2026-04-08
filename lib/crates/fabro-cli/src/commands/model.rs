@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, bail};
 use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_api::{self, types as api_types};
@@ -8,6 +8,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::args::{GlobalArgs, ModelListArgs, ModelTestArgs, ModelsCommand};
+use crate::command_context::CommandContext;
 use crate::server_client;
 
 #[derive(Serialize)]
@@ -42,9 +43,10 @@ pub(crate) async fn execute(command: Option<ModelsCommand>, globals: &GlobalArgs
         ModelsCommand::List(args) => &args.target,
         ModelsCommand::Test(args) => &args.target,
     };
-    let client = server_client::connect_server_backed_api_client(target_args).await?;
+    let ctx = CommandContext::for_target(target_args)?;
+    let server = ctx.server().await?;
 
-    run_models(command, client, globals.json).await
+    run_models(command, server.api(), globals.json).await
 }
 
 fn format_context_window(tokens: i64) -> String {
@@ -171,33 +173,6 @@ fn model_test_row_from_status(model: &Model, status: &str, result_color: Color) 
     }
 }
 
-fn map_api_error<E>(err: progenitor_client::Error<E>) -> anyhow::Error
-where
-    E: serde::Serialize + std::fmt::Debug,
-{
-    match err {
-        progenitor_client::Error::ErrorResponse(response) => {
-            let status = response.status();
-            if let Ok(value) = serde_json::to_value(response.into_inner()) {
-                if let Some(detail) = value
-                    .get("errors")
-                    .and_then(serde_json::Value::as_array)
-                    .and_then(|errors| errors.first())
-                    .and_then(|entry| entry.get("detail"))
-                    .and_then(serde_json::Value::as_str)
-                {
-                    return anyhow!("{detail}");
-                }
-            }
-            anyhow!("request failed with status {status}")
-        }
-        progenitor_client::Error::UnexpectedResponse(response) => {
-            anyhow!("request failed with status {}", response.status())
-        }
-        other => anyhow!("{other}"),
-    }
-}
-
 fn convert_type<TInput, TOutput>(value: TInput) -> Result<TOutput>
 where
     TInput: serde::Serialize,
@@ -223,7 +198,7 @@ async fn fetch_models_from_server(
             request = request.query(query.to_string());
         }
 
-        let response = request.send().await.map_err(map_api_error)?;
+        let response = request.send().await.map_err(server_client::map_api_error)?;
         let parsed = response.into_inner();
         let count = parsed.data.len() as u64;
         models.extend(convert_type::<_, Vec<Model>>(parsed.data)?);
@@ -245,7 +220,7 @@ async fn test_model_via_server(
     if let Some(mode) = mode {
         request = request.mode(mode);
     }
-    let response = request.send().await.map_err(map_api_error)?;
+    let response = request.send().await.map_err(server_client::map_api_error)?;
     Ok(response.into_inner())
 }
 
@@ -393,7 +368,7 @@ async fn test_models_via_server(
 #[allow(clippy::print_stdout)]
 async fn run_models(
     command: ModelsCommand,
-    client: fabro_api::Client,
+    client: &fabro_api::Client,
     json_output: bool,
 ) -> Result<()> {
     let styles = Styles::detect_stdout();
@@ -403,7 +378,7 @@ async fn run_models(
             provider, query, ..
         }) => {
             let models =
-                fetch_models_from_server(&client, provider.as_deref(), query.as_deref()).await?;
+                fetch_models_from_server(client, provider.as_deref(), query.as_deref()).await?;
 
             if json_output {
                 println!("{}", serde_json::to_string_pretty(&models)?);
@@ -418,7 +393,7 @@ async fn run_models(
             ..
         }) => {
             test_models_via_server(
-                &client,
+                client,
                 provider.as_deref(),
                 model.as_deref(),
                 deep,

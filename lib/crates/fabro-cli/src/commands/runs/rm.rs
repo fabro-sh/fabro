@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 
 use crate::args::{GlobalArgs, RunsRemoveArgs};
+use crate::command_context::CommandContext;
 use crate::server_client;
 use crate::server_runs::{
     ServerRunSummaryInfo, ServerSummaryLookup, resolve_server_run_from_summaries,
@@ -10,7 +11,8 @@ use crate::shared::print_json_pretty;
 use super::short_run_id;
 
 pub(crate) async fn remove_command(args: &RunsRemoveArgs, globals: &GlobalArgs) -> Result<()> {
-    let lookup = ServerSummaryLookup::connect(&args.server).await?;
+    let ctx = CommandContext::for_target(&args.server)?;
+    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     remove_from(args, lookup.client(), lookup.runs(), globals).await
 }
 

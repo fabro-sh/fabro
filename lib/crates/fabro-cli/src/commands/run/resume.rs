@@ -1,6 +1,7 @@
 use fabro_util::terminal::Styles;
 
 use crate::args::{GlobalArgs, ResumeArgs};
+use crate::command_context::CommandContext;
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
 
@@ -14,7 +15,8 @@ pub(crate) async fn resume_command(
     styles: &'static Styles,
     globals: &GlobalArgs,
 ) -> anyhow::Result<()> {
-    let lookup = ServerSummaryLookup::connect(&args.server).await?;
+    let ctx = CommandContext::for_target(&args.server)?;
+    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();
 

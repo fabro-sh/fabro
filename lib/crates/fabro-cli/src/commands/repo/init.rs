@@ -4,7 +4,7 @@ use anyhow::{Context, Result, bail};
 use tokio::task::spawn_blocking;
 
 use crate::args::{GlobalArgs, RepoInitArgs, ServerTargetArgs};
-use crate::server_client;
+use crate::command_context::CommandContext;
 
 pub(super) fn git_repo_root() -> Result<PathBuf> {
     let output = std::process::Command::new("git")
@@ -166,15 +166,24 @@ async fn check_github_app_installation(target: &ServerTargetArgs) {
         return; // Not a GitHub repo — skip silently
     };
 
-    let client = match server_client::connect_server_backed_api_client(target).await {
-        Ok(client) => client,
+    let ctx = match CommandContext::for_target(target) {
+        Ok(ctx) => ctx,
+        Err(err) => {
+            eprintln!("\n  Warning: could not resolve fabro server settings: {err}");
+            return;
+        }
+    };
+
+    let server = match ctx.server().await {
+        Ok(server) => server,
         Err(err) => {
             eprintln!("\n  Warning: could not connect to fabro server: {err}");
             return;
         }
     };
 
-    let check = match client
+    let check = match server
+        .api()
         .get_github_repo()
         .owner(owner.clone())
         .name(repo.clone())
@@ -214,7 +223,8 @@ async fn check_github_app_installation(target: &ServerTargetArgs) {
         })
         .await;
 
-        match client
+        match server
+            .api()
             .get_github_repo()
             .owner(owner.clone())
             .name(repo.clone())

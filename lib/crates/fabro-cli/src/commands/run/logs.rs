@@ -11,6 +11,7 @@ use tokio::time;
 use tracing::{debug, info};
 
 use crate::args::{GlobalArgs, LogsArgs};
+use crate::command_context::CommandContext;
 use crate::server_client;
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::format_usd_micros;
@@ -18,7 +19,8 @@ use crate::shared::format_usd_micros;
 const FOLLOW_TERMINAL_GRACE: Duration = Duration::from_millis(500);
 
 pub(crate) async fn run(args: &LogsArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
-    let lookup = ServerSummaryLookup::connect(&args.server).await?;
+    let ctx = CommandContext::for_target(&args.server)?;
+    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run)?;
     let client = lookup.client();
 

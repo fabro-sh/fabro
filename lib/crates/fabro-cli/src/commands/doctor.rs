@@ -18,7 +18,7 @@ use regex::Regex;
 use semver::Version;
 
 use crate::args::{DoctorArgs, GlobalArgs};
-use crate::server_client;
+use crate::command_context::CommandContext;
 use crate::shared::print_json_pretty;
 
 pub(crate) struct DepSpec {
@@ -357,8 +357,38 @@ pub(crate) async fn run_doctor(
         }],
     };
 
-    let client = match server_client::connect_server_backed_api_client(&args.target).await {
-        Ok(client) => client,
+    let ctx = match CommandContext::for_target(&args.target) {
+        Ok(ctx) => ctx,
+        Err(err) => {
+            report.sections.push(CheckSection {
+                title: "Server".to_string(),
+                checks: vec![CheckResult {
+                    name: "Fabro server".to_string(),
+                    status: CheckStatus::Error,
+                    summary: "settings resolution failed".to_string(),
+                    details: vec![CheckDetail::new(err.to_string())],
+                    remediation: Some(
+                        "Fix the local CLI settings or provide `--server`, then run doctor again."
+                            .to_string(),
+                    ),
+                }],
+            });
+
+            if let Some(spinner) = spinner {
+                spinner.finish_and_clear();
+            }
+
+            if globals.json {
+                print_json_pretty(&report)?;
+            } else {
+                render_report(&report, &styles, verbose);
+            }
+            return Ok(1);
+        }
+    };
+
+    let server = match ctx.server().await {
+        Ok(server) => server,
         Err(err) => {
             report.sections.push(CheckSection {
                 title: "Server".to_string(),
@@ -387,7 +417,7 @@ pub(crate) async fn run_doctor(
         }
     };
 
-    let health = match client.get_health().send().await {
+    let health = match server.api().get_health().send().await {
         Ok(response) => response.into_inner(),
         Err(err) => {
             report.sections.push(CheckSection {
@@ -420,7 +450,7 @@ pub(crate) async fn run_doctor(
         .checks
         .push(check_version_parity(&health.version));
 
-    match client.run_diagnostics().send().await {
+    match server.api().run_diagnostics().send().await {
         Ok(response) => {
             let diagnostics = response.into_inner();
             report

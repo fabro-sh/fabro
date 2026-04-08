@@ -1,14 +1,14 @@
 use std::path::PathBuf;
 
 use crate::args::RunArgs;
+use crate::command_context::CommandContext;
 use fabro_config::ConfigLayer;
 use fabro_config::Storage;
-use fabro_types::{RunId, Settings};
+use fabro_types::RunId;
 use fabro_util::terminal::Styles;
 
 use super::output::{api_diagnostics_to_local, print_preflight_workflow_summary};
 use crate::manifest_builder::{ManifestBuildInput, build_run_manifest, run_manifest_args};
-use crate::server_client;
 use crate::user_config::{self, ServerTarget};
 
 pub(crate) struct CreatedRun {
@@ -20,6 +20,7 @@ pub(crate) struct CreatedRun {
 ///
 /// This does NOT execute the workflow — it only prepares the run directory.
 pub(crate) async fn create_run(
+    ctx: &CommandContext,
     args: &RunArgs,
     cli_defaults: ConfigLayer,
     styles: &Styles,
@@ -30,13 +31,12 @@ pub(crate) async fn create_run(
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("--workflow is required"))?;
     let cli_args_config = ConfigLayer::try_from(args)?;
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let _settings: Settings = cli_args_config
+    let cwd = ctx.cwd().to_path_buf();
+    let _settings = cli_args_config
         .clone()
         .combine(ConfigLayer::for_workflow(workflow_path, &cwd)?)
         .combine(cli_defaults)
         .resolve()?;
-    let machine_settings = user_config::load_settings()?;
     let run_id = args
         .run_id
         .as_deref()
@@ -51,8 +51,8 @@ pub(crate) async fn create_run(
         args: run_manifest_args(args),
         run_id,
     })?;
-    let target = user_config::resolve_server_target(&args.target, &machine_settings)?;
-    let client = server_client::connect_server_only(&args.target).await?;
+    let target = user_config::resolve_server_target(&args.target, ctx.machine_settings())?;
+    let client = ctx.server().await?;
     if !quiet {
         let preflight = client.run_preflight(built.manifest.clone()).await?;
         let diagnostics = api_diagnostics_to_local(&preflight.workflow.diagnostics);
@@ -67,7 +67,7 @@ pub(crate) async fn create_run(
     let created_run_id = client.create_run_from_manifest(built.manifest).await?;
     let local_run_dir = match &target {
         ServerTarget::UnixSocket(_) => Some(
-            Storage::new(machine_settings.storage_dir())
+            Storage::new(ctx.machine_settings().storage_dir())
                 .run_scratch(&created_run_id)
                 .root()
                 .to_path_buf(),

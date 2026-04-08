@@ -6,6 +6,7 @@ use fabro_workflow::pull_request::maybe_open_pull_request;
 use tracing::info;
 
 use crate::args::{GlobalArgs, PrCreateArgs};
+use crate::command_context::CommandContext;
 use crate::commands::store::rebuild::rebuild_run_store;
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
@@ -16,7 +17,8 @@ pub(super) async fn create_command(
     github_app: Option<fabro_github::GitHubAppCredentials>,
     globals: &GlobalArgs,
 ) -> Result<()> {
-    let lookup = ServerSummaryLookup::connect(&args.server).await?;
+    let ctx = CommandContext::for_target(&args.server)?;
+    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run_id)?;
     let run_id = run.run_id();
     let events = lookup.client().list_run_events(&run_id, None, None).await?;

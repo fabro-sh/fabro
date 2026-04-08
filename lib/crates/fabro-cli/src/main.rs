@@ -1,6 +1,7 @@
 #![allow(clippy::print_stdout, clippy::print_stderr, clippy::exit)]
 
 mod args;
+mod command_context;
 mod commands;
 mod logging;
 mod manifest_builder;

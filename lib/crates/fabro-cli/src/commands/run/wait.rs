@@ -8,6 +8,7 @@ use fabro_workflow::run_status::RunStatus;
 use tracing::info;
 
 use crate::args::{GlobalArgs, WaitArgs};
+use crate::command_context::CommandContext;
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::{format_duration_ms, format_usd_micros};
 
@@ -17,7 +18,8 @@ const WAIT_STARTUP_GRACE: std::time::Duration = std::time::Duration::from_millis
 const WAIT_STARTUP_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
 
 pub(crate) async fn run(args: &WaitArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
-    let lookup = ServerSummaryLookup::connect(&args.server).await?;
+    let ctx = CommandContext::for_target(&args.server)?;
+    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run_info = lookup.resolve(&args.run)?;
     let client = lookup.client();
 

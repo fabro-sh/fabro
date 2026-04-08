@@ -2,6 +2,7 @@ use anyhow::Result;
 use fabro_api::{Client, types};
 
 use crate::args::{GlobalArgs, SecretSetArgs};
+use crate::server_client;
 use crate::shared::print_json_pretty;
 
 pub(super) async fn set_command(
@@ -17,7 +18,7 @@ pub(super) async fn set_command(
         })
         .send()
         .await
-        .map_err(super::map_api_error)?
+        .map_err(server_client::map_api_error)?
         .into_inner();
     if globals.json {
         print_json_pretty(&meta)?;

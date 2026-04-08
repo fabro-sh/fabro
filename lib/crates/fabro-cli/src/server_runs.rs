@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use std::collections::HashMap;
 
@@ -8,7 +9,6 @@ use fabro_store::RunSummary;
 use fabro_types::{RunId, RunStatus, StatusReason};
 use fabro_workflow::run_lookup::{RunInfo, resolve_run_from_summaries, scratch_base};
 
-use crate::args::ServerTargetArgs;
 use crate::server_client::{self, ServerStoreClient};
 
 pub(crate) struct ServerRunLookup {
@@ -105,13 +105,12 @@ impl ServerRunSummaryInfo {
 }
 
 pub(crate) struct ServerSummaryLookup {
-    client: ServerStoreClient,
+    client: Arc<ServerStoreClient>,
     runs: Vec<ServerRunSummaryInfo>,
 }
 
 impl ServerSummaryLookup {
-    pub(crate) async fn connect(args: &ServerTargetArgs) -> Result<Self> {
-        let client = server_client::connect_server_only(args).await?;
+    pub(crate) async fn from_client(client: Arc<ServerStoreClient>) -> Result<Self> {
         let summaries = client.list_store_runs().await?;
         let mut runs = summaries
             .into_iter()
@@ -126,7 +125,7 @@ impl ServerSummaryLookup {
     }
 
     pub(crate) fn client(&self) -> &ServerStoreClient {
-        &self.client
+        self.client.as_ref()
     }
 
     pub(crate) fn runs(&self) -> &[ServerRunSummaryInfo] {

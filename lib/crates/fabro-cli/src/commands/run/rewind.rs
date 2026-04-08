@@ -14,6 +14,7 @@ use git2::Repository;
 use serde::Serialize;
 
 use crate::args::{GlobalArgs, RewindArgs};
+use crate::command_context::CommandContext;
 use crate::commands::store::rebuild::rebuild_run_store;
 use crate::server_client::ServerStoreClient;
 use crate::server_runs::ServerSummaryLookup;
@@ -30,7 +31,8 @@ pub(crate) struct TimelineEntryJson {
 
 pub(crate) async fn run(args: &RewindArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
     let repo = Repository::discover(".").context("not in a git repository")?;
-    let lookup = ServerSummaryLookup::connect(&args.server).await?;
+    let ctx = CommandContext::for_target(&args.server)?;
+    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run_id)?;
     let run_id = run.run_id();
     let state = lookup.client().get_run_state(&run_id).await?;

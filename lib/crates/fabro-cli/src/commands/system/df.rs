@@ -5,16 +5,15 @@ use cli_table::{Cell, CellStruct, Style, Table};
 use fabro_api::types;
 
 use crate::args::{DfArgs, GlobalArgs};
+use crate::command_context::CommandContext;
 use crate::server_client;
 use crate::shared::{format_size, print_json_pretty};
 
 pub(super) async fn df_command(args: &DfArgs, globals: &GlobalArgs) -> Result<()> {
-    let client = server_client::connect_server_backed_api_client_with_storage_dir(
-        &args.connection.target,
-        args.connection.storage_dir.as_deref(),
-    )
-    .await?;
-    let output = client
+    let ctx = CommandContext::for_connection(&args.connection)?;
+    let server = ctx.server().await?;
+    let output = server
+        .api()
         .get_system_disk_usage()
         .verbose(args.verbose)
         .send()
@@ -25,7 +24,8 @@ pub(super) async fn df_command(args: &DfArgs, globals: &GlobalArgs) -> Result<()
     let storage_dir = if globals.json {
         None
     } else {
-        client
+        server
+            .api()
             .get_system_info()
             .send()
             .await

@@ -2,6 +2,7 @@ use anyhow::Result;
 use fabro_api::Client;
 
 use crate::args::{GlobalArgs, SecretRmArgs};
+use crate::server_client;
 use crate::shared::print_json_pretty;
 
 pub(super) async fn rm_command(
@@ -14,7 +15,7 @@ pub(super) async fn rm_command(
         .name(args.key.clone())
         .send()
         .await
-        .map_err(super::map_api_error)?;
+        .map_err(server_client::map_api_error)?;
     if globals.json {
         print_json_pretty(&serde_json::json!({ "key": args.key }))?;
     } else {

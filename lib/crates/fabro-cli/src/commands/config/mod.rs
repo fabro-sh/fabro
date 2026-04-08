@@ -2,7 +2,7 @@ use std::io::Write;
 use std::path::Path;
 
 use crate::args::{GlobalArgs, SettingsArgs};
-use crate::server_client;
+use crate::command_context::CommandContext;
 use crate::shared::print_json_pretty;
 use crate::user_config;
 use fabro_config::ConfigLayer;
@@ -11,13 +11,19 @@ use fabro_config::effective_settings::{EffectiveSettingsLayers, EffectiveSetting
 use fabro_config::project;
 use fabro_types::Settings;
 
-fn config_layers(workflow: Option<&Path>) -> anyhow::Result<EffectiveSettingsLayers> {
-    let cwd = std::env::current_dir()?;
+fn config_layers(
+    ctx: &CommandContext,
+    workflow: Option<&Path>,
+) -> anyhow::Result<EffectiveSettingsLayers> {
+    let cwd = ctx.cwd();
     let (workflow_layer, project_layer) = match workflow {
-        Some(path) => workflow_and_project_layers(path, &cwd)?,
-        None => (ConfigLayer::default(), ConfigLayer::project(&cwd)?),
+        Some(path) => workflow_and_project_layers(path, cwd)?,
+        None => (ConfigLayer::default(), ConfigLayer::project(cwd)?),
     };
-    let user_layer = user_config::settings_layer_with_storage_dir(None)?;
+    let user_layer = user_config::settings_layer_with_config_and_storage_dir(
+        Some(ctx.base_config_path()),
+        None,
+    )?;
     Ok(EffectiveSettingsLayers::new(
         ConfigLayer::default(),
         workflow_layer,
@@ -52,7 +58,8 @@ fn workflow_and_project_layers(
 }
 
 async fn merged_config(args: &SettingsArgs) -> anyhow::Result<Settings> {
-    let layers = config_layers(args.workflow.as_deref())?;
+    let base_ctx = CommandContext::base()?;
+    let layers = config_layers(&base_ctx, args.workflow.as_deref())?;
     if args.local {
         return effective_settings::resolve_settings(
             layers,
@@ -61,10 +68,9 @@ async fn merged_config(args: &SettingsArgs) -> anyhow::Result<Settings> {
         );
     }
 
-    let machine_settings = user_config::load_settings()?;
-    let target = user_config::resolve_server_target(&args.target, &machine_settings)?;
-    let client = server_client::connect_server_only(&args.target).await?;
-    let server_settings = client.retrieve_server_settings().await?;
+    let ctx = CommandContext::for_target(&args.target)?;
+    let target = user_config::resolve_server_target(&args.target, ctx.machine_settings())?;
+    let server_settings = ctx.server().await?.retrieve_server_settings().await?;
     let mode = match target {
         user_config::ServerTarget::HttpUrl { .. } => EffectiveSettingsMode::RemoteServer,
         user_config::ServerTarget::UnixSocket(_) => EffectiveSettingsMode::LocalDaemon,

@@ -3,28 +3,26 @@ use fabro_config::ConfigLayer;
 use fabro_util::terminal::Styles;
 
 use crate::args::{GlobalArgs, PreflightArgs};
+use crate::command_context::CommandContext;
 use crate::commands::run::output::{
     api_check_report_to_local, api_diagnostics_to_local, print_preflight_workflow_summary,
 };
 use crate::manifest_builder::{ManifestBuildInput, build_run_manifest, preflight_manifest_args};
-use crate::server_client;
 use crate::shared::print_json_pretty;
-use crate::user_config;
 
 pub(crate) async fn execute(mut args: PreflightArgs, globals: &GlobalArgs) -> anyhow::Result<()> {
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-    let cli_settings = user_config::load_settings()?;
-    args.verbose = args.verbose || cli_settings.verbose_enabled();
+    let ctx = CommandContext::for_target(&args.target)?;
+    args.verbose = args.verbose || ctx.machine_settings().verbose_enabled();
 
-    let cwd = std::env::current_dir()?;
     let manifest = build_run_manifest(ManifestBuildInput {
         workflow: args.workflow.clone(),
-        cwd,
+        cwd: ctx.cwd().to_path_buf(),
         args_layer: ConfigLayer::try_from(&args)?,
         args: preflight_manifest_args(&args),
         run_id: None,
     })?;
-    let client = server_client::connect_server_only(&args.target).await?;
+    let client = ctx.server().await?;
     let response = client.run_preflight(manifest.manifest).await?;
     let diagnostics = api_diagnostics_to_local(&response.workflow.diagnostics);
 

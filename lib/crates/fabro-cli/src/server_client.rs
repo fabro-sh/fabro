@@ -97,11 +97,14 @@ pub(crate) async fn connect_server_target_direct(target: &str) -> Result<ServerS
     }
 }
 
-pub(crate) async fn connect_server_only(args: &ServerTargetArgs) -> Result<ServerStoreClient> {
-    let settings = user_config::load_settings()?;
-    let target = user_config::resolve_server_target(args, &settings)?;
+pub(crate) async fn connect_server_with_settings(
+    args: &ServerTargetArgs,
+    settings: &Settings,
+    base_config_path: &Path,
+) -> Result<ServerStoreClient> {
+    let target = user_config::resolve_server_target(args, settings)?;
     let runtime = LocalServerRuntime {
-        active_config_path: user_config::active_settings_path(None),
+        active_config_path: base_config_path.to_path_buf(),
         storage_dir: settings.storage_dir(),
     };
     connect_target_api_client_bundle(&target, &runtime).await
@@ -121,15 +124,6 @@ async fn connect_api_client_bundle(storage_dir: &Path) -> Result<ServerStoreClie
 
 pub(crate) async fn connect_api_client(storage_dir: &Path) -> Result<fabro_api::Client> {
     connect_api_client_bundle(storage_dir)
-        .await
-        .map(|client| client.client)
-}
-
-async fn connect_target_api_client(
-    target: &user_config::ServerTarget,
-    runtime: &LocalServerRuntime,
-) -> Result<fabro_api::Client> {
-    connect_target_api_client_bundle(target, runtime)
         .await
         .map(|client| client.client)
 }
@@ -156,25 +150,6 @@ async fn connect_target_api_client_bundle(
             }
         }
     }
-}
-
-pub(crate) async fn connect_server_backed_api_client(
-    args: &ServerTargetArgs,
-) -> Result<fabro_api::Client> {
-    connect_server_backed_api_client_with_storage_dir(args, None).await
-}
-
-pub(crate) async fn connect_server_backed_api_client_with_storage_dir(
-    args: &ServerTargetArgs,
-    storage_dir: Option<&Path>,
-) -> Result<fabro_api::Client> {
-    let settings = user_config::load_settings_with_storage_dir(storage_dir)?;
-    let target = user_config::resolve_server_target(args, &settings)?;
-    let runtime = LocalServerRuntime {
-        active_config_path: user_config::active_settings_path(None),
-        storage_dir: settings.storage_dir(),
-    };
-    connect_target_api_client(&target, &runtime).await
 }
 
 fn connect_remote_api_client_bundle(
@@ -286,6 +261,20 @@ impl ServerStoreClient {
 
     pub(crate) fn clone_for_reuse(&self) -> Self {
         self.clone()
+    }
+
+    pub(crate) fn api(&self) -> &fabro_api::Client {
+        &self.client
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn http_client(&self) -> &reqwest::Client {
+        &self.http_client
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn base_url(&self) -> &str {
+        &self.base_url
     }
 
     pub(crate) async fn retrieve_server_settings(&self) -> Result<Settings> {

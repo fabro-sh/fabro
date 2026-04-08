@@ -2,6 +2,7 @@ use anyhow::Result;
 use fabro_util::terminal::Styles;
 
 use crate::args::{AttachArgs, GlobalArgs, RunArgs, RunCommands, RunWorkerArgs, StartArgs};
+use crate::command_context::CommandContext;
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
 use crate::user_config::settings_layer_with_storage_dir;
@@ -40,7 +41,8 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             apply_json_defaults(&mut args, globals);
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             let cli = settings_layer_with_storage_dir(None)?;
-            let created_run = Box::pin(create::create_run(&args, cli, styles, true)).await?;
+            let ctx = CommandContext::for_target(&args.target)?;
+            let created_run = Box::pin(create::create_run(&ctx, &args, cli, styles, true)).await?;
             if globals.json {
                 print_json_pretty(&serde_json::json!({ "run_id": created_run.run_id }))?;
             } else {
@@ -49,7 +51,8 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             Ok(())
         }
         RunCommands::Start(StartArgs { server, run }) => {
-            let lookup = ServerSummaryLookup::connect(&server).await?;
+            let ctx = CommandContext::for_target(&server)?;
+            let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
             let run_info = lookup.resolve(&run)?;
             let run_id = run_info.run_id();
             start::start_run_with_client(lookup.client(), &run_id, false).await?;
@@ -60,7 +63,8 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
         }
         RunCommands::Attach(AttachArgs { server, run }) => {
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-            let lookup = ServerSummaryLookup::connect(&server).await?;
+            let ctx = CommandContext::for_target(&server)?;
+            let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
             let run_info = lookup.resolve(&run)?;
             let run_id = run_info.run_id();
             let exit_code = attach::attach_run_with_client(
@@ -92,8 +96,8 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             #[cfg(feature = "sleep_inhibitor")]
             let _sleep_guard = {
-                let cli_settings = crate::user_config::load_settings()?;
-                crate::sleep_inhibitor::guard(cli_settings.prevent_idle_sleep_enabled())
+                let ctx = CommandContext::for_target(&args.server)?;
+                crate::sleep_inhibitor::guard(ctx.machine_settings().prevent_idle_sleep_enabled())
             };
             resume::resume_command(args, styles, globals).await
         }
@@ -103,7 +107,7 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
         }
         RunCommands::Fork(args) => {
             let styles = Styles::detect_stderr();
-            fork::run(&args, &styles, globals).await
+            Box::pin(fork::run(&args, &styles, globals)).await
         }
         RunCommands::Wait(args) => {
             let styles = Styles::detect_stderr();

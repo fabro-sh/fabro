@@ -2,6 +2,7 @@ use anyhow::Result;
 use fabro_api::Client;
 
 use crate::args::{GlobalArgs, SecretListArgs};
+use crate::server_client;
 use crate::shared::print_json_pretty;
 
 pub(super) async fn list_command(
@@ -13,7 +14,7 @@ pub(super) async fn list_command(
         .list_secrets()
         .send()
         .await
-        .map_err(super::map_api_error)?;
+        .map_err(server_client::map_api_error)?;
     let secrets = response.into_inner().data;
     if globals.json {
         print_json_pretty(&secrets)?;

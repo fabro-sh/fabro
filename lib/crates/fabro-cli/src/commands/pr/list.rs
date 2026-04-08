@@ -4,6 +4,7 @@ use serde::Serialize;
 use tracing::info;
 
 use crate::args::{GlobalArgs, PrListArgs};
+use crate::command_context::CommandContext;
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
 
@@ -24,7 +25,8 @@ pub(super) async fn list_command(
     let creds = github_app.context(
         "GitHub App credentials required — set GITHUB_APP_PRIVATE_KEY and configure app_id",
     )?;
-    let lookup = ServerSummaryLookup::connect(&args.server).await?;
+    let ctx = CommandContext::for_target(&args.server)?;
+    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
 
     let mut entries = Vec::new();
     for run in lookup.runs() {

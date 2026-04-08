@@ -4,13 +4,15 @@ use anyhow::{Context, Result, bail};
 use tracing::{debug, info};
 
 use crate::args::{DiffArgs, GlobalArgs};
+use crate::command_context::CommandContext;
 use crate::server_client::RunProjection;
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
 
 pub(crate) async fn run(args: DiffArgs, globals: &GlobalArgs) -> Result<()> {
     info!(run_id = %args.run, "Showing diff");
-    let lookup = ServerSummaryLookup::connect(&args.server).await?;
+    let ctx = CommandContext::for_target(&args.server)?;
+    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();
     let state = lookup.client().get_run_state(&run_id).await?;

@@ -2,17 +2,15 @@ use anyhow::Result;
 use futures::StreamExt;
 
 use crate::args::{GlobalArgs, SystemEventsArgs};
+use crate::command_context::CommandContext;
 use crate::server_client;
 use crate::sse;
 
 pub(super) async fn events_command(args: &SystemEventsArgs, globals: &GlobalArgs) -> Result<()> {
-    let client = server_client::connect_server_backed_api_client_with_storage_dir(
-        &args.connection.target,
-        args.connection.storage_dir.as_deref(),
-    )
-    .await?;
+    let ctx = CommandContext::for_connection(&args.connection)?;
+    let server = ctx.server().await?;
 
-    let mut request = client.attach_events();
+    let mut request = server.api().attach_events();
     if !args.run_ids.is_empty() {
         request = request.run_id(args.run_ids.join(","));
     }

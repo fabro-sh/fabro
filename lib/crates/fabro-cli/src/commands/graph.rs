@@ -7,9 +7,9 @@ use fabro_util::terminal::Styles;
 use tracing::debug;
 
 use crate::args::{GlobalArgs, GraphArgs, GraphDirection, GraphOutputFormat};
+use crate::command_context::CommandContext;
 use crate::commands::run::output::api_diagnostics_to_local;
 use crate::manifest_builder::{ManifestBuildInput, build_run_manifest};
-use crate::server_client;
 use crate::shared::{absolute_or_current, print_diagnostics, print_json_pretty, relative_path};
 
 pub(crate) async fn run(
@@ -21,15 +21,15 @@ pub(crate) async fn run(
         globals.require_no_json()?;
     }
 
-    let cwd = std::env::current_dir()?;
+    let ctx = CommandContext::for_target(&args.target)?;
     let built = build_run_manifest(ManifestBuildInput {
         workflow: args.workflow.clone(),
-        cwd,
+        cwd: ctx.cwd().to_path_buf(),
         args_layer: ConfigLayer::default(),
         args: None,
         run_id: None,
     })?;
-    let client = server_client::connect_server_only(&args.target).await?;
+    let client = ctx.server().await?;
     let preflight = client.run_preflight(built.manifest.clone()).await?;
     let diagnostics = api_diagnostics_to_local(&preflight.workflow.diagnostics);
 

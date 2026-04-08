@@ -9,37 +9,21 @@ use anyhow::{Context, Result};
 use fabro_types::PullRequestRecord;
 
 use crate::args::{GlobalArgs, PrCommand, PrNamespace, ServerTargetArgs};
+use crate::command_context::CommandContext;
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::github::build_github_app_credentials;
-use crate::user_config::load_settings;
 
 pub(crate) async fn dispatch(ns: PrNamespace, globals: &GlobalArgs) -> Result<()> {
+    let ctx = CommandContext::base()?;
+    let github_app = build_github_app_credentials(ctx.machine_settings().app_id())?;
     match ns.command {
         PrCommand::Create(args) => {
-            let cli_settings = load_settings()?;
-            let github_app = build_github_app_credentials(cli_settings.app_id())?;
             Box::pin(create::create_command(args, github_app, globals)).await
         }
-        PrCommand::List(args) => {
-            let cli_settings = load_settings()?;
-            let github_app = build_github_app_credentials(cli_settings.app_id())?;
-            list::list_command(args, github_app, globals).await
-        }
-        PrCommand::View(args) => {
-            let cli_settings = load_settings()?;
-            let github_app = build_github_app_credentials(cli_settings.app_id())?;
-            view::view_command(args, github_app, globals).await
-        }
-        PrCommand::Merge(args) => {
-            let cli_settings = load_settings()?;
-            let github_app = build_github_app_credentials(cli_settings.app_id())?;
-            merge::merge_command(args, github_app, globals).await
-        }
-        PrCommand::Close(args) => {
-            let cli_settings = load_settings()?;
-            let github_app = build_github_app_credentials(cli_settings.app_id())?;
-            close::close_command(args, github_app, globals).await
-        }
+        PrCommand::List(args) => list::list_command(args, github_app, globals).await,
+        PrCommand::View(args) => view::view_command(args, github_app, globals).await,
+        PrCommand::Merge(args) => merge::merge_command(args, github_app, globals).await,
+        PrCommand::Close(args) => close::close_command(args, github_app, globals).await,
     }
 }
 
@@ -47,7 +31,8 @@ pub(crate) async fn load_pr_record(
     server: &ServerTargetArgs,
     run_id: &str,
 ) -> Result<(PullRequestRecord, fabro_types::RunId)> {
-    let lookup = ServerSummaryLookup::connect(server).await?;
+    let ctx = CommandContext::for_target(server)?;
+    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(run_id)?;
     let run_id = run.run_id();
     let state = lookup.client().get_run_state(&run_id).await?;

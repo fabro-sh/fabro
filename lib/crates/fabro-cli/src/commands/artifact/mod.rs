@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use fabro_types::{RunId, StageId};
 
 use crate::args::{ArtifactCommand, ArtifactNamespace, GlobalArgs, ServerTargetArgs};
+use crate::command_context::CommandContext;
 use crate::server_client::ServerStoreClient;
 use crate::server_runs::ServerSummaryLookup;
 
@@ -24,7 +25,8 @@ pub(super) async fn resolve_artifacts(
     node: Option<&str>,
     retry: Option<u32>,
 ) -> Result<(RunId, ServerStoreClient, Vec<ArtifactEntry>)> {
-    let lookup = ServerSummaryLookup::connect(server).await?;
+    let ctx = CommandContext::for_target(server)?;
+    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(run_selector)?;
     let run_id = run.run_id();
     let mut entries = Vec::new();

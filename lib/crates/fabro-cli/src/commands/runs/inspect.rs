@@ -4,6 +4,7 @@ use serde::Serialize;
 use fabro_workflow::run_status::RunStatus;
 
 use crate::args::{GlobalArgs, InspectArgs};
+use crate::command_context::CommandContext;
 use crate::server_client::RunProjection;
 use crate::server_runs::{ServerRunSummaryInfo, ServerSummaryLookup};
 
@@ -19,7 +20,8 @@ pub(crate) struct InspectOutput {
 }
 
 pub(crate) async fn run(args: &InspectArgs, _globals: &GlobalArgs) -> Result<()> {
-    let lookup = ServerSummaryLookup::connect(&args.server).await?;
+    let ctx = CommandContext::for_target(&args.server)?;
+    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();
     let state = lookup.client().get_run_state(&run_id).await?;

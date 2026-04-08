@@ -6,13 +6,14 @@ use fabro_util::terminal::Styles;
 use tokio::task::spawn_blocking;
 
 use crate::args::{GlobalArgs, ProviderLoginArgs};
-use crate::server_client;
+use crate::command_context::CommandContext;
 use crate::shared::provider_auth;
 
 pub(super) async fn login_command(args: ProviderLoginArgs, globals: &GlobalArgs) -> Result<()> {
     globals.require_no_json()?;
     let s = Styles::detect_stderr();
-    let client = server_client::connect_server_backed_api_client(&args.target).await?;
+    let ctx = CommandContext::for_target(&args.target)?;
+    let server = ctx.server().await?;
 
     let use_oauth = args.provider == Provider::OpenAi
         && spawn_blocking(|| provider_auth::prompt_confirm("Log in via browser (OAuth)?", true))
@@ -36,7 +37,8 @@ pub(super) async fn login_command(args: ProviderLoginArgs, globals: &GlobalArgs)
     }
 
     for (name, value) in env_pairs {
-        client
+        server
+            .api()
             .set_secret()
             .name(name.clone())
             .body(types::SetSecretRequest { value })

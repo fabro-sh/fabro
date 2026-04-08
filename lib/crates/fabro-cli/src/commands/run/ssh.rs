@@ -2,6 +2,7 @@ use anyhow::{Result, bail};
 use tracing::info;
 
 use crate::args::{GlobalArgs, SshArgs};
+use crate::command_context::CommandContext;
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
 
@@ -10,7 +11,8 @@ pub(crate) async fn run(args: SshArgs, globals: &GlobalArgs) -> Result<()> {
         globals.require_no_json()?;
     }
 
-    let lookup = ServerSummaryLookup::connect(&args.server).await?;
+    let ctx = CommandContext::for_target(&args.server)?;
+    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();
     let ssh = lookup

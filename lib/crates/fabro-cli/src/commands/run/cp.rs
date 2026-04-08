@@ -5,6 +5,7 @@ use tokio::fs;
 use tracing::{debug, info};
 
 use crate::args::{CpArgs, GlobalArgs, ServerTargetArgs};
+use crate::command_context::CommandContext;
 use crate::server_client::ServerStoreClient;
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::{print_json_pretty, split_run_path};
@@ -117,7 +118,8 @@ async fn resolve_client_and_run_id(
     server: &ServerTargetArgs,
     run_prefix: &str,
 ) -> Result<(ServerStoreClient, fabro_types::RunId)> {
-    let lookup = ServerSummaryLookup::connect(server).await?;
+    let ctx = CommandContext::for_target(server)?;
+    let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(run_prefix)?;
     Ok((lookup.client().clone_for_reuse(), run.run_id()))
 }

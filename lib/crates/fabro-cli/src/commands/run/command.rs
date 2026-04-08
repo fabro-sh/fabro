@@ -2,19 +2,19 @@ use anyhow::Result;
 use fabro_util::terminal::Styles;
 
 use crate::args::{GlobalArgs, RunArgs};
-use crate::server_client;
+use crate::command_context::CommandContext;
 use crate::shared::print_json_pretty;
-use crate::user_config::{self, settings_layer_with_storage_dir};
+use crate::user_config::settings_layer_with_storage_dir;
 
 pub(crate) async fn execute(mut args: RunArgs, globals: &GlobalArgs) -> Result<()> {
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-    let cli_settings = user_config::load_settings()?;
+    let ctx = CommandContext::for_target(&args.target)?;
     let cli = settings_layer_with_storage_dir(None)?;
-    args.verbose = args.verbose || cli_settings.verbose_enabled();
+    args.verbose = args.verbose || ctx.machine_settings().verbose_enabled();
 
     let quiet = args.detach;
-    let prevent_idle_sleep = cli_settings.prevent_idle_sleep_enabled();
-    let created_run = Box::pin(super::create::create_run(&args, cli, styles, quiet)).await?;
+    let prevent_idle_sleep = ctx.machine_settings().prevent_idle_sleep_enabled();
+    let created_run = Box::pin(super::create::create_run(&ctx, &args, cli, styles, quiet)).await?;
 
     #[cfg(feature = "sleep_inhibitor")]
     let _sleep_guard = crate::sleep_inhibitor::guard(prevent_idle_sleep);
@@ -22,7 +22,7 @@ pub(crate) async fn execute(mut args: RunArgs, globals: &GlobalArgs) -> Result<(
     #[cfg(not(feature = "sleep_inhibitor"))]
     let _ = prevent_idle_sleep;
 
-    let client = server_client::connect_server_only(&args.target).await?;
+    let client = ctx.server().await?;
     super::start::start_run_with_client(&client, &created_run.run_id, false).await?;
 
     if args.detach {
