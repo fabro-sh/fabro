@@ -289,9 +289,21 @@ fn convert_diagnostics_sections(sections: Vec<api_types::DiagnosticsSection>) ->
         .collect()
 }
 
+fn render_report_text(
+    report: &CheckReport,
+    styles: &Styles,
+    verbose: bool,
+    max_width: Option<u16>,
+) -> String {
+    report.render(styles, verbose, None, max_width)
+}
+
 fn render_report(report: &CheckReport, styles: &Styles, verbose: bool) {
     let term_width = console::Term::stderr().size().1;
-    print!("{}", report.render(styles, verbose, None, Some(term_width)));
+    print!(
+        "{}",
+        render_report_text(report, styles, verbose, Some(term_width))
+    );
 }
 
 pub(crate) async fn run_doctor(
@@ -503,6 +515,33 @@ mod tests {
     fn parse_version_garbage_returns_none() {
         assert_eq!(parse_version(&OPENSSL_RE, "not a version"), None);
         assert_eq!(parse_version(&DOT_RE, "no version here"), None);
+    }
+
+    #[test]
+    fn render_report_text_without_color_has_no_ansi() {
+        let report = CheckReport {
+            title: "Fabro Doctor".to_string(),
+            sections: vec![CheckSection {
+                title: "Local".to_string(),
+                checks: vec![CheckResult {
+                    name: "Configuration".to_string(),
+                    status: CheckStatus::Pass,
+                    summary: "loaded".to_string(),
+                    details: vec![CheckDetail::new(
+                        "Loaded from ~/.fabro/settings.toml".into(),
+                    )],
+                    remediation: None,
+                }],
+            }],
+        };
+
+        let rendered = render_report_text(&report, &Styles::new(false), false, Some(80));
+        assert!(
+            !rendered.contains("\x1b["),
+            "rendered output should be plain text"
+        );
+        assert!(rendered.contains("Fabro Doctor"));
+        assert!(rendered.contains("[✓] Configuration (loaded)"));
     }
 
     fn spec(name: &'static str, required: bool, min_version: Version) -> DepSpec {

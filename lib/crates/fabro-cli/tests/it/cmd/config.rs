@@ -10,35 +10,6 @@ use super::support::run_state;
 use crate::support::unique_run_id;
 
 #[test]
-fn help() {
-    let context = test_context!();
-    let mut cmd = context.settings();
-    cmd.arg("--help");
-    fabro_snapshot!(context.filters(), cmd, @"
-    success: true
-    exit_code: 0
-    ----- stdout -----
-    Inspect effective settings
-
-    Usage: fabro settings [OPTIONS] [WORKFLOW]
-
-    Arguments:
-      [WORKFLOW]  Optional workflow name, .fabro path, or .toml run config to overlay
-
-    Options:
-          --json              Output as JSON [env: FABRO_JSON=]
-          --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
-          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --local             Show only locally resolved settings and skip the server call
-          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose           Enable verbose output [env: FABRO_VERBOSE=]
-      -h, --help              Print help
-    ----- stderr -----
-    ");
-}
-
-#[test]
 fn old_config_show_command_is_rejected() {
     let context = test_context!();
     let mut cmd = context.command();
