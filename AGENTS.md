@@ -14,6 +14,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `cargo fmt --check --all` — check formatting
 - `cargo clippy --workspace -- -D warnings` — lint
 
+macOS note: if `cargo nextest run` fails with `Too many open files (os error 24)` / `EMFILE`, raise the shell's soft FD limit before running tests, for example `ulimit -n 4096 && cargo nextest run --workspace`. Some terminals and inherited agent sessions start with `ulimit -n 256`, which is too low for the shared CLI test daemon under parallel nextest load.
+
 ### TypeScript (fabro-web)
 - `cd apps/fabro-web && bun run dev` — start React dev server
 - `cd apps/fabro-web && bun test` — run tests

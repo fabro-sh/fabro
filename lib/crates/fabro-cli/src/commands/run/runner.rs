@@ -116,14 +116,11 @@ where
 {
     let mut lines = BufReader::new(reader).lines();
     loop {
-        match lines.next_line().await {
-            Ok(Some(line)) => {
-                apply_worker_control_line(&broker, &line).await;
-            }
-            Ok(None) | Err(_) => {
-                broker.abort_all().await;
-                break;
-            }
+        if let Ok(Some(line)) = lines.next_line().await {
+            apply_worker_control_line(&broker, &line).await;
+        } else {
+            broker.abort_all().await;
+            break;
         }
     }
 }
