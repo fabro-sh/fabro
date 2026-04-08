@@ -1,9 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result};
 use fabro_api::types;
-use fabro_config::RunScratch;
 use fabro_types::{
     PullRequestRecord, RunBlobId, RunId, parse_blob_ref, parse_legacy_blob_file_ref,
 };
@@ -153,8 +152,8 @@ pub(crate) async fn print_run_summary_with_client(
     let final_output =
         resolve_final_output_with_client(client, run_id, checkpoint.as_ref()).await?;
     print_final_output(final_output.as_deref(), styles);
-    if let Some(run_dir) = local_run_dir {
-        print_assets_with_client(client, run_id, run_dir, styles).await?;
+    if local_run_dir.is_some() {
+        print_assets_with_client(client, run_id, styles).await?;
     }
     Ok(())
 }
@@ -318,49 +317,54 @@ fn blob_id_from_response(response: &str) -> Option<RunBlobId> {
     parse_blob_ref(response).or_else(|| parse_legacy_blob_file_ref(response))
 }
 
-async fn resolve_local_artifact_display_paths_with_client(
+async fn list_artifact_display_entries_with_client(
     client: &server_client::ServerStoreClient,
     run_id: &RunId,
-    run_dir: &Path,
-) -> Result<Vec<PathBuf>> {
-    let mut paths = Vec::new();
+) -> Result<Vec<(String, u32, String)>> {
+    let mut entries = Vec::new();
     for entry in client.list_run_artifacts(run_id).await? {
         let retry = u32::try_from(entry.retry)
             .context("server returned invalid negative artifact retry")?;
-        let path = RunScratch::new(run_dir)
-            .artifact_stage_dir(&entry.node_slug, retry)
-            .join(entry.relative_path);
-        paths.push(path);
+        entries.push((entry.node_slug, retry, entry.relative_path));
     }
-    paths.sort();
-    Ok(paths)
+    entries.sort();
+    Ok(entries)
 }
 
 async fn print_assets_with_client(
     client: &server_client::ServerStoreClient,
     run_id: &RunId,
-    run_dir: &Path,
     styles: &Styles,
 ) -> Result<()> {
-    let paths = resolve_local_artifact_display_paths_with_client(client, run_id, run_dir).await?;
-    if paths.is_empty() {
+    let entries = list_artifact_display_entries_with_client(client, run_id).await?;
+    if entries.is_empty() {
         return Ok(());
     }
-    let home = dirs::home_dir();
+
+    let node_width = entries
+        .iter()
+        .map(|(node_slug, _, _)| node_slug.len())
+        .max()
+        .unwrap_or(4)
+        .max(4);
+    let retry_width = entries
+        .iter()
+        .map(|(_, retry, _)| retry.to_string().len())
+        .max()
+        .unwrap_or(5)
+        .max(5);
+
     eprintln!("\n{}", styles.bold.apply_to("=== Artifacts ==="));
-    for path in &paths {
-        let display = match &home {
-            Some(home_dir) => {
-                let home_str = home_dir.to_string_lossy();
-                if let Some(rest) = path.to_string_lossy().strip_prefix(home_str.as_ref()) {
-                    format!("~{rest}")
-                } else {
-                    path.display().to_string()
-                }
-            }
-            None => path.display().to_string(),
-        };
-        eprintln!("{display}");
+    eprintln!("{:<node_width$}  {:>retry_width$}  PATH", "NODE", "RETRY");
+    for (node_slug, retry, relative_path) in &entries {
+        eprintln!("{node_slug:<node_width$}  {retry:>retry_width$}  {relative_path}");
     }
+    eprintln!();
+    eprintln!(
+        "{}",
+        styles.dim.apply_to(format!(
+            "Copy with: fabro artifact cp {run_id}:<path> <dest> --node <node_slug> --retry <retry>"
+        ))
+    );
     Ok(())
 }

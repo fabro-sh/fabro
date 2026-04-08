@@ -96,7 +96,9 @@ fn has_hashed_extension(path: &str) -> bool {
 }
 
 fn is_source_map(path: &str) -> bool {
-    path.ends_with(".map")
+    Path::new(path)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("map"))
 }
 
 #[cfg(test)]

@@ -18,12 +18,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use fabro_agent::Sandbox;
-use fabro_config::RunScratch;
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_llm::provider::Provider;
 use fabro_sandbox::daytona::{DaytonaConfig, DaytonaSandbox, DaytonaSnapshotConfig};
-use fabro_store::Database;
-use fabro_types::{RunId, Settings};
+use fabro_store::{ArtifactStore, Database};
+use fabro_types::{RunId, Settings, StageId};
 use fabro_workflow::artifact::sync_artifacts_to_env;
 use fabro_workflow::context::Context;
 use fabro_workflow::error::FabroError;
@@ -144,6 +143,14 @@ fn load_run_checkpoint(run_dir: &Path) -> Result<Checkpoint, Box<dyn std::error:
 async fn create_env() -> DaytonaSandbox {
     let creds = load_github_app_credentials();
     create_env_with_github_app(Some(creds)).await
+}
+
+fn test_artifact_store(run_dir: &Path) -> ArtifactStore {
+    let object_store = Arc::new(
+        LocalFileSystem::new_with_prefix(test_store_dir(run_dir))
+            .expect("failed to create local artifact store"),
+    );
+    ArtifactStore::new(object_store, "artifacts")
 }
 
 async fn create_env_with_github_app(
@@ -1342,16 +1349,24 @@ async fn daytona_asset_collection() {
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let artifacts_dir = RunScratch::new(dir.path()).artifact_stage_dir("create_assets", 1);
-
-    let report_path = artifacts_dir.join("test-results/report.xml");
-    assert!(
-        report_path.exists(),
-        "report.xml should be collected from Daytona sandbox at {}",
-        report_path.display()
-    );
-    let content = std::fs::read_to_string(&report_path).unwrap();
+    let content = String::from_utf8(
+        test_artifact_store(dir.path())
+            .get(
+                &run_options.run_id,
+                &StageId::new("create_assets", 1),
+                "test-results/report.xml",
+            )
+            .await
+            .unwrap()
+            .expect("artifact should be stored from Daytona sandbox")
+            .to_vec(),
+    )
+    .unwrap();
     assert!(content.contains("testsuites"));
+    assert!(
+        !dir.path().join("cache").join("artifacts").exists(),
+        "artifact scratch cache should not be created"
+    );
 
     env.cleanup().await.unwrap();
 }

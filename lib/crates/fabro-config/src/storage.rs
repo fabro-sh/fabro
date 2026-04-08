@@ -115,27 +115,9 @@ impl RunScratch {
         self.root.join("runtime")
     }
 
-    #[must_use]
-    pub fn artifact_cache_dir(&self) -> PathBuf {
-        self.root.join("cache").join("artifacts")
-    }
-
-    #[must_use]
-    pub fn artifact_files_dir(&self) -> PathBuf {
-        self.artifact_cache_dir().join("files")
-    }
-
-    #[must_use]
-    pub fn artifact_stage_dir(&self, node_slug: &str, attempt: u32) -> PathBuf {
-        self.artifact_files_dir()
-            .join(node_slug)
-            .join(format!("retry_{attempt}"))
-    }
-
     pub fn create(&self) -> std::io::Result<()> {
         std::fs::create_dir_all(self.worktree_dir())?;
         std::fs::create_dir_all(self.runtime_dir())?;
-        std::fs::create_dir_all(self.artifact_files_dir())?;
         Ok(())
     }
 
@@ -215,30 +197,12 @@ mod tests {
 
         assert_eq!(scratch.worktree_dir(), scratch.root().join("worktree"));
         assert_eq!(scratch.runtime_dir(), scratch.root().join("runtime"));
-        assert_eq!(
-            scratch.artifact_cache_dir(),
-            scratch.root().join("cache").join("artifacts")
-        );
-        assert_eq!(
-            scratch.artifact_files_dir(),
-            scratch.root().join("cache").join("artifacts").join("files")
-        );
-        assert_eq!(
-            scratch.artifact_stage_dir("plan", 2),
-            scratch
-                .root()
-                .join("cache")
-                .join("artifacts")
-                .join("files")
-                .join("plan")
-                .join("retry_2")
-        );
 
         scratch.create().unwrap();
         assert!(scratch.root().exists());
         assert!(scratch.worktree_dir().exists());
         assert!(scratch.runtime_dir().exists());
-        assert!(scratch.artifact_files_dir().exists());
+        assert!(!scratch.root().join("cache").join("artifacts").exists());
         scratch.remove().unwrap();
         assert!(!scratch.root().exists());
     }

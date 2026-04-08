@@ -1,26 +1,26 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use fabro_types::StageId;
-use tokio::time::sleep;
+use fabro_store::ArtifactStore;
+use fabro_types::{RunId, StageId};
 
+use fabro_core::error::{CoreError, Result as CoreResult};
 use fabro_core::graph::NodeSpec;
 use fabro_core::lifecycle::{AttemptContext, AttemptResultContext, RunLifecycle};
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
+use tokio::{fs, time::sleep};
 
 use crate::artifact::{normalize_durable_updates, offload_large_values, sync_artifacts_to_env};
 use crate::artifact_snapshot::{CapturedArtifactInfo, collect_artifacts};
-use crate::artifact_upload::StageArtifactUploader;
+use crate::artifact_upload::ArtifactSink;
 use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::BilledModelUsage;
 use crate::runtime_store::RunStoreHandle;
-use fabro_core::error::Result as CoreResult;
 use fabro_core::lifecycle::NodeDecision;
 
 type WfRunState = ExecutionState<Option<BilledModelUsage>>;
@@ -38,9 +38,9 @@ pub(crate) struct ArtifactLifecycle {
     pub sandbox: Arc<dyn fabro_sandbox::Sandbox>,
     pub run_store: RunStoreHandle,
     pub emitter: Arc<Emitter>,
-    pub artifacts_dir: PathBuf,
+    pub run_id: RunId,
     pub artifact_globs: Vec<String>,
-    pub artifact_uploader: Option<Arc<dyn StageArtifactUploader>>,
+    pub artifact_sink: Option<ArtifactSink>,
     pub captured_artifact_count: Arc<AtomicUsize>,
     /// Per-attempt state: epoch seconds when the attempt started.
     attempt_start_epoch: std::sync::Mutex<Option<f64>>,
@@ -52,18 +52,18 @@ impl ArtifactLifecycle {
         sandbox: Arc<dyn fabro_sandbox::Sandbox>,
         run_store: RunStoreHandle,
         emitter: Arc<Emitter>,
-        artifacts_dir: PathBuf,
+        run_id: RunId,
         artifact_globs: Vec<String>,
-        artifact_uploader: Option<Arc<dyn StageArtifactUploader>>,
+        artifact_sink: Option<ArtifactSink>,
         captured_artifact_count: Arc<AtomicUsize>,
     ) -> Self {
         Self {
             sandbox,
             run_store,
             emitter,
-            artifacts_dir,
+            run_id,
             artifact_globs,
-            artifact_uploader,
+            artifact_sink,
             captured_artifact_count,
             attempt_start_epoch: std::sync::Mutex::new(None),
         }
@@ -108,15 +108,12 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
         } else {
             format!("{node_id}-visit_{visit}")
         };
-        let artifact_capture_dir = self
-            .artifacts_dir
-            .join(&node_slug)
-            .join(format!("retry_{}", ctx.attempt));
-        let _ = std::fs::create_dir_all(&artifact_capture_dir);
+        let artifact_capture_dir =
+            tempfile::tempdir().map_err(|err| CoreError::Other(err.to_string()))?;
 
         match collect_artifacts(
             &*self.sandbox,
-            &artifact_capture_dir,
+            artifact_capture_dir.path(),
             &self.artifact_globs,
             epoch,
         )
@@ -125,7 +122,11 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
             Ok(summary) if summary.files_copied > 0 => {
                 let stage_id = StageId::new(node_id.to_string(), ctx.attempt);
                 if let Err(err) = self
-                    .upload_artifacts(&stage_id, &artifact_capture_dir, &summary.captured_assets)
+                    .persist_artifacts(
+                        &stage_id,
+                        artifact_capture_dir.path(),
+                        &summary.captured_assets,
+                    )
                     .await
                 {
                     self.emitter.emit(&Event::RunNotice {
@@ -199,24 +200,24 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
 }
 
 impl ArtifactLifecycle {
-    async fn upload_artifacts(
+    async fn persist_artifacts(
         &self,
         stage_id: &StageId,
         artifact_capture_dir: &std::path::Path,
         artifacts: &[CapturedArtifactInfo],
     ) -> Result<(), String> {
-        let Some(uploader) = self.artifact_uploader.as_ref() else {
-            return Ok(());
+        let Some(sink) = self.artifact_sink.as_ref() else {
+            return Err("artifact sink is not configured".to_string());
         };
 
         let mut last_error = None;
         for attempt in 0..=ARTIFACT_UPLOAD_RETRY_DELAYS.len() {
-            match uploader
-                .upload_stage_artifacts(stage_id, artifact_capture_dir, artifacts)
+            match self
+                .persist_artifacts_once(sink, stage_id, artifact_capture_dir, artifacts)
                 .await
             {
                 Ok(()) => return Ok(()),
-                Err(err) => last_error = Some(err.to_string()),
+                Err(err) => last_error = Some(err),
             }
 
             if let Some(delay) = ARTIFACT_UPLOAD_RETRY_DELAYS.get(attempt) {
@@ -225,5 +226,44 @@ impl ArtifactLifecycle {
         }
 
         Err(last_error.unwrap_or_else(|| "artifact upload failed".to_string()))
+    }
+
+    async fn persist_artifacts_once(
+        &self,
+        sink: &ArtifactSink,
+        stage_id: &StageId,
+        artifact_capture_dir: &std::path::Path,
+        artifacts: &[CapturedArtifactInfo],
+    ) -> Result<(), String> {
+        match sink {
+            ArtifactSink::Store(store) => {
+                self.store_artifacts(store, stage_id, artifact_capture_dir, artifacts)
+                    .await
+            }
+            ArtifactSink::Uploader(uploader) => uploader
+                .upload_stage_artifacts(stage_id, artifact_capture_dir, artifacts)
+                .await
+                .map_err(|err| err.to_string()),
+        }
+    }
+
+    async fn store_artifacts(
+        &self,
+        store: &ArtifactStore,
+        stage_id: &StageId,
+        artifact_capture_dir: &std::path::Path,
+        artifacts: &[CapturedArtifactInfo],
+    ) -> Result<(), String> {
+        for artifact in artifacts {
+            let local_path = artifact_capture_dir.join(&artifact.path);
+            let bytes = fs::read(&local_path).await.map_err(|err| {
+                format!("failed to read artifact {}: {err}", local_path.display())
+            })?;
+            store
+                .put(&self.run_id, stage_id, &artifact.path, &bytes)
+                .await
+                .map_err(|err| err.to_string())?;
+        }
+        Ok(())
     }
 }

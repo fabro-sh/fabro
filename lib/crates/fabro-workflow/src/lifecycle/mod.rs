@@ -7,13 +7,12 @@ pub(crate) mod git;
 pub(crate) mod hook;
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use async_trait::async_trait;
-use fabro_config::RunScratch;
 use fabro_types::RunId;
 
 use fabro_core::error::Result as CoreResult;
@@ -24,7 +23,7 @@ use fabro_core::lifecycle::{
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
 
-use crate::artifact_upload::StageArtifactUploader;
+use crate::artifact_upload::ArtifactSink;
 use crate::context;
 use crate::error::{FailureSignature, FailureSignatureExt};
 use crate::event::Emitter;
@@ -84,15 +83,14 @@ impl WorkflowLifecycle {
         hook_runner: Option<Arc<HookRunner>>,
         sandbox: &Arc<dyn Sandbox>,
         graph: Arc<GvGraph>,
-        run_dir: &PathBuf,
+        run_dir: &Path,
         run_store: &RunStoreHandle,
-        artifact_uploader: Option<Arc<dyn StageArtifactUploader>>,
+        artifact_sink: Option<ArtifactSink>,
         run_options: &Arc<RunOptions>,
         is_resume: bool,
         on_node: crate::OnNodeCallback,
         run_control: Option<Arc<RunControlState>>,
     ) -> Self {
-        let run_scratch = RunScratch::new(run_dir);
         let restarted_from: Arc<Mutex<Option<(String, String)>>> = Arc::new(Mutex::new(None));
         let loop_restart_signature_limit = graph.loop_restart_signature_limit();
         let checkpoint_git_result: Arc<Mutex<Option<GitCheckpointResult>>> =
@@ -145,7 +143,7 @@ impl WorkflowLifecycle {
             Arc::clone(&graph),
             Arc::clone(sandbox),
             run_store.clone(),
-            run_dir.clone(),
+            run_dir.to_path_buf(),
         );
 
         let start_node_id = graph.find_start_node().map(|n| n.id.clone());
@@ -166,9 +164,9 @@ impl WorkflowLifecycle {
             Arc::clone(sandbox),
             run_store.clone(),
             Arc::clone(emitter),
-            run_scratch.artifact_files_dir(),
+            run_options.run_id,
             run_options.artifact_globs().to_vec(),
-            artifact_uploader,
+            artifact_sink,
             captured_artifact_count,
         );
 

@@ -14,7 +14,7 @@ use fabro_sandbox::SandboxSpec;
 use fabro_types::RunId;
 use fabro_validate::Diagnostic;
 
-use crate::artifact_upload::StageArtifactUploader;
+use crate::artifact_upload::ArtifactSink;
 use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::Emitter;
@@ -248,7 +248,7 @@ pub struct InitOptions {
     pub git: Option<GitCheckpointOptions>,
     pub worktree_mode: Option<WorktreeMode>,
     pub registry_override: Option<Arc<HandlerRegistry>>,
-    pub artifact_uploader: Option<Arc<dyn StageArtifactUploader>>,
+    pub artifact_sink: Option<ArtifactSink>,
     pub run_control: Option<Arc<RunControlState>>,
     pub checkpoint: Option<Checkpoint>,
     pub seed_context: Option<Context>,
@@ -269,7 +269,7 @@ pub struct Initialized {
     pub sandbox: Arc<dyn Sandbox>,
     pub registry: Arc<HandlerRegistry>,
     pub on_node: crate::OnNodeCallback,
-    pub artifact_uploader: Option<Arc<dyn StageArtifactUploader>>,
+    pub artifact_sink: Option<ArtifactSink>,
     pub run_control: Option<Arc<RunControlState>>,
     pub hook_runner: Option<Arc<HookRunner>>,
     pub env: HashMap<String, String>,

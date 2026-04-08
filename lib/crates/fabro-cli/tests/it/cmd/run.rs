@@ -496,14 +496,11 @@ include = ["assets/**"]
     );
 
     let stderr = output_stderr(&output);
-    let expected_path = context
-        .find_run_dir(&run_id)
-        .join("cache/artifacts/files/create_assets/retry_1/assets/shared/report.txt");
     assert!(stderr.contains("=== Artifacts ==="), "{stderr}");
-    assert!(
-        stderr.contains(expected_path.to_string_lossy().as_ref()),
-        "{stderr}"
-    );
+    assert!(!stderr.contains("cache/artifacts"), "{stderr}");
+    assert!(stderr.contains("create_assets"), "{stderr}");
+    assert!(stderr.contains("assets/shared/report.txt"), "{stderr}");
+    assert!(stderr.contains("fabro artifact cp"), "{stderr}");
 }
 
 #[test]

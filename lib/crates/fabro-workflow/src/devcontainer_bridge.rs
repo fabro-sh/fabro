@@ -202,8 +202,7 @@ async fn run_single_lifecycle_command(
         });
         return Err(FabroError::engine(format!(
             "Devcontainer {phase} command failed (exit code {}): {command}\n{}",
-            result.exit_code,
-            result.stderr,
+            result.exit_code, result.stderr,
         )));
     }
     emitter.emit(&Event::DevcontainerLifecycleCommandCompleted {
@@ -499,15 +498,9 @@ mod tests {
         });
         let sandbox = TestSandbox::with_exit_code(1);
         let commands = vec![fabro_devcontainer::Command::Shell("false".to_string())];
-        let result = run_devcontainer_lifecycle(
-            &sandbox,
-            &emitter,
-            "on_create",
-            &commands,
-            300_000,
-            None,
-        )
-        .await;
+        let result =
+            run_devcontainer_lifecycle(&sandbox, &emitter, "on_create", &commands, 300_000, None)
+                .await;
         assert!(result.is_err());
         let events = events.lock().unwrap();
         assert!(events.iter().any(|event| {
