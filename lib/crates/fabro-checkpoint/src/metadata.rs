@@ -215,6 +215,8 @@ mod tests {
             base_branch: None,
             labels: HashMap::new(),
             provenance: None,
+            manifest_blob: None,
+            definition_blob: None,
         }
     }
 
