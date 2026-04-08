@@ -502,16 +502,11 @@ impl SlackService {
             return;
         };
 
-        let pending = match load_pending_interview(state.as_ref(), run_id, &submission.qid).await {
-            Ok(pending) => pending,
-            Err(_) => return,
-        };
-        if submit_pending_interview_answer(state.as_ref(), &pending, submission.answer)
-            .await
-            .is_err()
-        {
+        let Ok(pending) = load_pending_interview(state.as_ref(), run_id, &submission.qid).await
+        else {
             return;
-        }
+        };
+        let _ = submit_pending_interview_answer(state.as_ref(), &pending, submission.answer).await;
     }
 }
 

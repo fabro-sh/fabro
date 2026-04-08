@@ -63,8 +63,11 @@ pub(crate) async fn execute(
         .run
         .as_ref()
         .ok_or_else(|| anyhow!("Run {run_id} has no run record in store"))?;
-    let artifact_uploader =
-        build_artifact_uploader(run_id, client.clone_for_reuse(), artifact_upload_token);
+    let artifact_uploader = Some(build_artifact_uploader(
+        run_id,
+        client.clone_for_reuse(),
+        artifact_upload_token,
+    ));
     let interviewer = Arc::new(ControlInterviewer::new());
     let cancel_token = Arc::new(AtomicBool::new(false));
     tokio::spawn(read_worker_control_stream(
@@ -115,17 +118,10 @@ async fn read_worker_control_stream<R>(
     R: AsyncRead + Unpin,
 {
     let mut lines = BufReader::new(reader).lines();
-    loop {
-        match lines.next_line().await {
-            Ok(Some(line)) => {
-                apply_worker_control_line(&interviewer, &cancel_token, &line).await;
-            }
-            Ok(None) | Err(_) => {
-                interviewer.abort_all().await;
-                break;
-            }
-        }
+    while let Ok(Some(line)) = lines.next_line().await {
+        apply_worker_control_line(&interviewer, &cancel_token, &line).await;
     }
+    interviewer.abort_all().await;
 }
 
 async fn apply_worker_control_line(
@@ -156,17 +152,15 @@ fn build_artifact_uploader(
     run_id: RunId,
     client: server_client::ServerStoreClient,
     artifact_upload_token: Option<String>,
-) -> Option<Arc<dyn StageArtifactUploader>> {
-    let uploader: Arc<dyn StageArtifactUploader> = match artifact_upload_token {
+) -> Arc<dyn StageArtifactUploader> {
+    match artifact_upload_token {
         Some(token) => Arc::new(HttpArtifactUploader {
             run_id,
             client,
             bearer_token: token,
         }),
         None => Arc::new(MissingArtifactUploadTokenUploader { run_id }),
-    };
-
-    Some(uploader)
+    }
 }
 
 struct HttpArtifactUploader {

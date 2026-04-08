@@ -272,9 +272,8 @@ fn with_session_lock<T>(root: &Path, f: impl FnOnce() -> T) -> T {
         ensure_parent_dir(&lock_path);
         match File::create(&lock_path) {
             Ok(f) => break f,
-            Err(err) if std::time::Instant::now() < deadline => {
+            Err(_) if std::time::Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(10));
-                continue;
             }
             Err(err) => panic!("failed to create {}: {err}", lock_path.display()),
         }
