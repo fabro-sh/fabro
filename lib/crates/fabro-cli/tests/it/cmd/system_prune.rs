@@ -1,6 +1,7 @@
 use fabro_test::{fabro_snapshot, test_context};
+use httpmock::MockServer;
 
-use super::support::{setup_completed_fast_dry_run, setup_created_fast_dry_run};
+use super::support::setup_created_fast_dry_run;
 
 #[test]
 fn help() {
@@ -37,7 +38,37 @@ fn help() {
 #[test]
 fn system_prune_dry_run_lists_matching_runs_without_deleting() {
     let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
+    let server = MockServer::start();
+    let prune_mock = server.mock(|when, then| {
+        when.method("POST")
+            .path("/api/v1/system/prune/runs")
+            .json_body_obj(&serde_json::json!({
+                "dry_run": true,
+                "labels": {
+                    "fabro_test_case": context.test_case_id(),
+                },
+                "orphans": false,
+                "workflow": "Simple",
+            }));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "dry_run": true,
+                    "runs": [
+                        {
+                            "run_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+                            "dir_name": "20260407-01ARZ3NDEKTSV4RRFFQ69G5FAV",
+                            "workflow_name": "Simple",
+                            "size_bytes": 1024,
+                        }
+                    ],
+                    "total_count": 1,
+                    "total_size_bytes": 1024,
+                })
+                .to_string(),
+            );
+    });
     let mut filters = context.filters();
     filters.push((r"\b\d{8}-\[ULID\]".to_string(), "[DATE]-[ULID]".to_string()));
     filters.push((
@@ -49,6 +80,8 @@ fn system_prune_dry_run_lists_matching_runs_without_deleting() {
     cmd.args([
         "system",
         "prune",
+        "--server",
+        &format!("{}/api/v1", server.base_url()),
         "--workflow",
         "Simple",
         "--label",
@@ -63,16 +96,37 @@ fn system_prune_dry_run_lists_matching_runs_without_deleting() {
 
     1 run(s) would be deleted ([SIZE] freed). Pass --yes to confirm.
     ");
-    assert!(
-        run.run_dir.exists(),
-        "dry-run prune should not delete the run"
-    );
+    prune_mock.assert();
 }
 
 #[test]
-fn system_prune_yes_deletes_matching_runs() {
+fn system_prune_yes_uses_server_target_and_reports_deleted_runs() {
     let context = test_context!();
-    let run = setup_completed_fast_dry_run(&context);
+    let server = MockServer::start();
+    let prune_mock = server.mock(|when, then| {
+        when.method("POST")
+            .path("/api/v1/system/prune/runs")
+            .json_body_obj(&serde_json::json!({
+                "dry_run": false,
+                "labels": {
+                    "fabro_test_case": context.test_case_id(),
+                },
+                "orphans": false,
+                "workflow": "Simple",
+            }));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "dry_run": false,
+                    "deleted_count": 1,
+                    "freed_bytes": 1024,
+                    "total_count": 1,
+                    "total_size_bytes": 1024,
+                })
+                .to_string(),
+            );
+    });
     let mut filters = context.filters();
     filters.push((
         r"\b\d+(\.\d+)?\s(?:[KMGT]?B|B)\b".to_string(),
@@ -83,6 +137,8 @@ fn system_prune_yes_deletes_matching_runs() {
     cmd.args([
         "system",
         "prune",
+        "--server",
+        &format!("{}/api/v1", server.base_url()),
         "--workflow",
         "Simple",
         "--label",
@@ -96,17 +152,7 @@ fn system_prune_yes_deletes_matching_runs() {
     ----- stderr -----
     1 run(s) deleted ([SIZE] freed).
     ");
-    assert!(!run.run_dir.exists(), "matching run should be deleted");
-
-    let mut ps = context.ps();
-    ps.args(["-a", "--json", "--label", &context.test_case_label()]);
-    fabro_snapshot!(context.filters(), ps, @r###"
-    success: true
-    exit_code: 0
-    ----- stdout -----
-    []
-    ----- stderr -----
-    "###);
+    prune_mock.assert();
 }
 
 #[test]
