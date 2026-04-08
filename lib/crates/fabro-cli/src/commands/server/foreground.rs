@@ -32,15 +32,15 @@ pub(crate) async fn execute(
         None
     };
 
-    let log_path = storage_dir
-        .as_ref()
-        .map(|dir| Storage::new(dir).server_state().log_path())
-        .unwrap_or_else(|| {
-            record_path
-                .parent()
-                .map(|parent| parent.join("server.log"))
-                .unwrap_or_else(|| PathBuf::from("server.log"))
-        });
+    let log_path = storage_dir.as_ref().map_or_else(
+        || {
+            record_path.parent().map_or_else(
+                || PathBuf::from("server.log"),
+                |parent| parent.join("server.log"),
+            )
+        },
+        |dir| Storage::new(dir).server_state().log_path(),
+    );
     let pid = std::process::id();
 
     serve::serve_command(serve_args, styles, storage_dir, move |resolved_bind| {

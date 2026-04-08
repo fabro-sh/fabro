@@ -119,14 +119,11 @@ async fn read_worker_control_stream<R>(
 {
     let mut lines = BufReader::new(reader).lines();
     loop {
-        match lines.next_line().await {
-            Ok(Some(line)) => {
-                apply_worker_control_line(&interviewer, &cancel_token, &line).await;
-            }
-            Ok(None) | Err(_) => {
-                interviewer.interrupt_all().await;
-                break;
-            }
+        if let Ok(Some(line)) = lines.next_line().await {
+            apply_worker_control_line(&interviewer, &cancel_token, &line).await;
+        } else {
+            interviewer.interrupt_all().await;
+            break;
         }
     }
 }

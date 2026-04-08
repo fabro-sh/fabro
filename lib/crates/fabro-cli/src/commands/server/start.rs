@@ -338,8 +338,7 @@ fn maybe_warn_host_port_fallback(requested: &BindRequest, resolved: &Bind) {
     };
     if addr.ip() == *host && addr.port() != DEFAULT_TCP_PORT {
         eprintln!(
-            "Warning: TCP port {} is unavailable on {}; falling back to a random port.",
-            DEFAULT_TCP_PORT, host
+            "Warning: TCP port {DEFAULT_TCP_PORT} is unavailable on {host}; falling back to a random port."
         );
     }
 }
