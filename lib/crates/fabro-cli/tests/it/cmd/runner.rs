@@ -1,8 +1,9 @@
 use fabro_store::EventEnvelope;
 use fabro_test::{fabro_snapshot, test_context};
 use fabro_types::{EventBody, RunEvent};
+use httpmock::MockServer;
 
-use super::support::{run_events, run_state, server_target};
+use super::support::{output_stderr, run_events, run_state, server_target};
 use crate::support::{fabro_json_snapshot, unique_run_id};
 
 const SHARED_DAEMON_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
@@ -395,6 +396,78 @@ digraph Test {
     });
 
     assert_eq!(after_summary, before_summary);
+}
+
+#[test]
+fn runner_reports_missing_run_record_without_prefetching_events() {
+    let context = test_context!();
+    let server = MockServer::start();
+    let run_id = unique_run_id();
+    let run_dir = tempfile::tempdir().expect("temp run dir should exist");
+
+    let state_mock = server.mock(|when, then| {
+        when.method("GET")
+            .path(format!("/api/v1/runs/{run_id}/state"));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!({
+                    "run": null,
+                    "graph_source": null,
+                    "start": null,
+                    "status": null,
+                    "checkpoint": null,
+                    "checkpoints": [],
+                    "conclusion": null,
+                    "retro": null,
+                    "retro_prompt": null,
+                    "retro_response": null,
+                    "sandbox": null,
+                    "final_patch": null,
+                    "pull_request": null,
+                    "nodes": {}
+                })
+                .to_string(),
+            );
+    });
+    let events_mock = server.mock(|when, then| {
+        when.method("GET")
+            .path(format!("/api/v1/runs/{run_id}/events"));
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(r#"{"data":[],"meta":{"has_more":false}}"#);
+    });
+
+    let output = context
+        .command()
+        .args([
+            "__run-worker",
+            "--server",
+            &format!("{}/api/v1", server.base_url()),
+            "--run-dir",
+            run_dir.path().to_str().expect("run dir should be UTF-8"),
+            "--run-id",
+            &run_id,
+            "--mode",
+            "start",
+        ])
+        .timeout(SHARED_DAEMON_TIMEOUT)
+        .output()
+        .expect("worker should execute");
+
+    assert!(
+        !output.status.success(),
+        "worker should fail when run record is missing:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    state_mock.assert();
+    events_mock.assert_calls(0);
+    assert!(
+        output_stderr(&output).contains("has no run record in store"),
+        "{}",
+        output_stderr(&output)
+    );
 }
 
 #[test]

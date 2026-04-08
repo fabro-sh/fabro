@@ -484,13 +484,10 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    use httpmock::MockServer;
-    use serde_json::json;
-
     use super::{
         MissingArtifactUploadTokenUploader, WorkerTitlePhase, apply_worker_control_line,
-        build_artifact_uploader, execute, initial_worker_title_phase, read_worker_control_stream,
-        worker_title, worker_title_phase_for_event,
+        initial_worker_title_phase, read_worker_control_stream, worker_title,
+        worker_title_phase_for_event,
     };
     use crate::args::RunWorkerMode;
     use fabro_interview::{AnswerValue, ControlInterviewer, Interviewer, Question, QuestionType};
@@ -595,24 +592,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn build_artifact_uploader_does_not_depend_on_run_capability_flag() {
-        let server = MockServer::start_async().await;
-
-        let uploader = build_artifact_uploader(
-            fixtures::RUN_1,
-            crate::server_client::connect_server_target_direct(&format!(
-                "{}/api/v1",
-                server.base_url()
-            ))
-            .await
-            .unwrap(),
-            Some("token".to_string()),
-        );
-
-        assert!(uploader.is_some());
-    }
-
-    #[tokio::test]
     async fn missing_artifact_upload_token_error_does_not_mention_removed_storage_mode() {
         let uploader = MissingArtifactUploadTokenUploader {
             run_id: fixtures::RUN_1,
@@ -630,64 +609,6 @@ mod tests {
                 .contains("worker did not receive an artifact upload token")
         );
         assert!(!error.to_string().contains("object-backed artifacts"));
-    }
-
-    #[tokio::test]
-    async fn worker_bootstrap_loads_run_state_without_prefetching_run_events() {
-        let server = MockServer::start_async().await;
-        let run_id = fixtures::RUN_1;
-
-        let state_mock = server
-            .mock_async(|when, then| {
-                when.method("GET")
-                    .path(format!("/api/v1/runs/{run_id}/state"));
-                then.status(200)
-                    .header("Content-Type", "application/json")
-                    .body(
-                        json!({
-                            "run": null,
-                            "graph_source": null,
-                            "start": null,
-                            "status": null,
-                            "checkpoint": null,
-                            "checkpoints": [],
-                            "conclusion": null,
-                            "retro": null,
-                            "retro_prompt": null,
-                            "retro_response": null,
-                            "sandbox": null,
-                            "final_patch": null,
-                            "pull_request": null,
-                            "nodes": {}
-                        })
-                        .to_string(),
-                    );
-            })
-            .await;
-        let events_mock = server
-            .mock_async(|when, then| {
-                when.method("GET")
-                    .path(format!("/api/v1/runs/{run_id}/events"));
-                then.status(200)
-                    .header("Content-Type", "application/json")
-                    .body(json!({ "data": [], "meta": { "has_more": false } }).to_string());
-            })
-            .await;
-
-        let run_dir = tempfile::tempdir().unwrap();
-        let error = execute(
-            run_id,
-            format!("{}/api/v1", server.base_url()),
-            None,
-            run_dir.path().to_path_buf(),
-            RunWorkerMode::Start,
-        )
-        .await
-        .unwrap_err();
-
-        assert!(error.to_string().contains("has no run record"));
-        state_mock.assert_async().await;
-        assert_eq!(events_mock.calls_async().await, 0);
     }
 
     #[tokio::test]

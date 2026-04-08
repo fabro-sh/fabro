@@ -88,6 +88,19 @@ fn run_completed_event(run_id: &str) -> serde_json::Value {
     })
 }
 
+fn run_running_event(run_id: &str, seq: u32) -> serde_json::Value {
+    serde_json::json!({
+        "seq": seq,
+        "payload": {
+            "event": "run.running",
+            "id": format!("evt-run-running-{seq}"),
+            "run_id": run_id,
+            "ts": "2026-04-05T12:00:00Z",
+            "properties": {}
+        }
+    })
+}
+
 #[test]
 fn help() {
     let context = test_context!();
@@ -314,7 +327,7 @@ fn detach_cli_server_target_overrides_configured_server_target() {
 }
 
 #[test]
-fn remote_foreground_run_prints_server_backed_summary_without_local_run_dir() {
+fn remote_foreground_run_consumes_paginated_events_and_prints_server_backed_summary() {
     let context = test_context!();
     let server = MockServer::start();
     let run_id = unique_run_id();
@@ -337,7 +350,7 @@ fn remote_foreground_run_prints_server_backed_summary_without_local_run_dir() {
             .header("Content-Type", "application/json")
             .body(run_status_response(run_id.as_str(), "queued").to_string());
     });
-    server.mock(|when, then| {
+    let first_page = server.mock(|when, then| {
         when.method("GET")
             .path(format!("/api/v1/runs/{run_id}/events"))
             .query_param_missing("since_seq");
@@ -345,13 +358,13 @@ fn remote_foreground_run_prints_server_backed_summary_without_local_run_dir() {
             .header("Content-Type", "application/json")
             .body(
                 serde_json::json!({
-                    "data": [run_completed_event(run_id.as_str())],
-                    "meta": { "has_more": false }
+                    "data": [run_running_event(run_id.as_str(), 1)],
+                    "meta": { "has_more": true }
                 })
                 .to_string(),
             );
     });
-    server.mock(|when, then| {
+    let second_page = server.mock(|when, then| {
         when.method("GET")
             .path(format!("/api/v1/runs/{run_id}/events"))
             .query_param("since_seq", "2");
@@ -359,7 +372,7 @@ fn remote_foreground_run_prints_server_backed_summary_without_local_run_dir() {
             .header("Content-Type", "application/json")
             .body(
                 serde_json::json!({
-                    "data": [],
+                    "data": [run_completed_event(run_id.as_str())],
                     "meta": { "has_more": false }
                 })
                 .to_string(),
@@ -406,6 +419,8 @@ fn remote_foreground_run_prints_server_backed_summary_without_local_run_dir() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    first_page.assert();
+    second_page.assert();
 
     let stderr = output_stderr(&output);
     assert!(stderr.contains("=== Run Result ==="), "{stderr}");
@@ -419,6 +434,76 @@ fn remote_foreground_run_prints_server_backed_summary_without_local_run_dir() {
         "{stderr}"
     );
     assert!(!stderr.contains("=== Artifacts ==="), "{stderr}");
+}
+
+#[test]
+fn local_foreground_run_prints_artifact_paths_from_server_artifact_list() {
+    let context = test_context!();
+    let run_id = unique_run_id();
+    let workspace_dir = context.temp_dir.join("artifact-summary");
+    context.write_temp(
+        "artifact-summary/workflow.fabro",
+        r#"digraph ArtifactSummary {
+  graph [goal="Show stored artifacts"]
+  start [shape=Mdiamond]
+  exit [shape=Msquare]
+  create_assets [shape=parallelogram, script="mkdir -p assets/shared && printf one > assets/shared/report.txt"]
+  start -> create_assets -> exit
+}
+"#,
+    );
+    context.write_temp(
+        "artifact-summary/run.toml",
+        r#"version = 1
+graph = "workflow.fabro"
+goal = "Show stored artifacts"
+
+[sandbox]
+provider = "local"
+preserve = true
+
+[sandbox.local]
+worktree_mode = "never"
+
+[artifacts]
+include = ["assets/**"]
+"#,
+    );
+
+    let output = context
+        .run_cmd()
+        .current_dir(&workspace_dir)
+        .env("OPENAI_API_KEY", "test")
+        .args([
+            "--run-id",
+            run_id.as_str(),
+            "--auto-approve",
+            "--no-retro",
+            "--sandbox",
+            "local",
+            "--provider",
+            "openai",
+            "run.toml",
+        ])
+        .output()
+        .expect("command should execute");
+
+    assert!(
+        output.status.success(),
+        "command failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = output_stderr(&output);
+    let expected_path = context
+        .find_run_dir(&run_id)
+        .join("cache/artifacts/files/create_assets/retry_1/assets/shared/report.txt");
+    assert!(stderr.contains("=== Artifacts ==="), "{stderr}");
+    assert!(
+        stderr.contains(expected_path.to_string_lossy().as_ref()),
+        "{stderr}"
+    );
 }
 
 #[test]
