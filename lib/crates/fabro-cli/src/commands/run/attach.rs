@@ -62,6 +62,10 @@ pub(crate) async fn attach_run_with_client(
     json_output: bool,
 ) -> Result<ExitCode> {
     let state = client.get_run_state(run_id).await?;
+    let auto_approve = state
+        .run
+        .as_ref()
+        .is_some_and(|record| record.settings.auto_approve_enabled());
     let verbose = state
         .run
         .as_ref()
@@ -87,6 +91,7 @@ pub(crate) async fn attach_run_with_client(
     attach_live_run_with_client(
         client,
         run_id,
+        auto_approve,
         verbose,
         replay_events,
         stream,
@@ -119,6 +124,7 @@ fn replay_run_with_client(
 async fn attach_live_run_with_client(
     client: &server_client::ServerStoreClient,
     run_id: &RunId,
+    auto_approve: bool,
     verbose: bool,
     existing_events: Vec<EventEnvelope>,
     mut stream: server_client::RunAttachEventStream,
@@ -136,9 +142,15 @@ async fn attach_live_run_with_client(
         emit_progress_line(&mut progress_ui, &line, json_output)?;
     }
 
-    if let Some(exit_code) =
-        handle_pending_server_interview(client, run_id, &mut progress_ui, styles, json_output)
-            .await?
+    if let Some(exit_code) = handle_pending_server_interview(
+        client,
+        run_id,
+        auto_approve,
+        &mut progress_ui,
+        styles,
+        json_output,
+    )
+    .await?
     {
         return Ok(exit_code);
     }
@@ -170,6 +182,7 @@ async fn attach_live_run_with_client(
             if let Some(exit_code) = handle_pending_server_interview(
                 client,
                 run_id,
+                auto_approve,
                 &mut progress_ui,
                 styles,
                 json_output,
@@ -185,6 +198,7 @@ async fn attach_live_run_with_client(
 async fn handle_pending_server_interview(
     client: &server_client::ServerStoreClient,
     run_id: &RunId,
+    auto_approve: bool,
     progress_ui: &mut run_progress::ProgressUI,
     styles: &'static Styles,
     json_output: bool,
@@ -193,9 +207,12 @@ async fn handle_pending_server_interview(
         return Ok(None);
     };
 
-    if json_output {
+    if json_pending_interview_requires_manual_input(json_output, auto_approve) {
         eprintln!("{JSON_INTERVIEW_MESSAGE}");
         return Ok(Some(ExitCode::from(1)));
+    }
+    if json_output {
+        return Ok(None);
     }
 
     hide_progress(progress_ui, json_output);
@@ -245,7 +262,7 @@ fn api_question_to_question(question: &types::ApiQuestion) -> Question {
         types::QuestionType::Confirmation => QuestionType::Confirmation,
     };
     let mut converted = Question::new(question.text.clone(), question_type);
-    converted.id = question.id.clone();
+    converted.id.clone_from(&question.id);
     converted.options = question
         .options
         .iter()
@@ -255,9 +272,11 @@ fn api_question_to_question(question: &types::ApiQuestion) -> Question {
         })
         .collect();
     converted.allow_freeform = question.allow_freeform;
-    converted.stage = question.stage.clone();
+    converted.stage.clone_from(&question.stage);
     converted.timeout_seconds = question.timeout_seconds;
-    converted.context_display = question.context_display.clone();
+    converted
+        .context_display
+        .clone_from(&question.context_display);
     converted
 }
 
@@ -287,6 +306,10 @@ async fn submit_server_interview_answer(
         )
         .await?;
     Ok(true)
+}
+
+fn json_pending_interview_requires_manual_input(json_output: bool, auto_approve: bool) -> bool {
+    json_output && !auto_approve
 }
 
 fn state_is_terminal(state: &server_client::RunProjection) -> bool {
@@ -492,5 +515,15 @@ mod tests {
         assert!(answer_requires_reattach(&aborted));
         assert!(answer_requires_reattach(&skipped));
         assert!(!answer_requires_reattach(&answered));
+    }
+
+    #[test]
+    fn json_pending_interview_requires_manual_input_when_auto_approve_is_disabled() {
+        assert!(json_pending_interview_requires_manual_input(true, false));
+    }
+
+    #[test]
+    fn json_pending_interview_does_not_require_manual_input_when_auto_approve_is_enabled() {
+        assert!(!json_pending_interview_requires_manual_input(true, true));
     }
 }

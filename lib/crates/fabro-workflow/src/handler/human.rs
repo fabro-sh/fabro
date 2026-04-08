@@ -13,6 +13,7 @@ use crate::millis_u64;
 use crate::outcome::{Outcome, OutcomeExt};
 use fabro_graphviz::graph::{Graph, Node};
 use fabro_interview::{Answer, AnswerValue, Interviewer, Question, QuestionOption, QuestionType};
+use fabro_types::run_event::InterviewOption;
 use ulid::Ulid;
 
 use super::{EngineServices, Handler};
@@ -218,7 +219,7 @@ impl Handler for HumanHandler {
                 options: question
                     .options
                     .iter()
-                    .map(|option| fabro_types::run_event::InterviewOption {
+                    .map(|option| InterviewOption {
                         key: option.key.clone(),
                         label: option.label.clone(),
                     })

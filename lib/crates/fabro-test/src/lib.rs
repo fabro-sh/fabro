@@ -46,6 +46,7 @@ static INSTA_FILTERS: &[(&str, &str)] = &[
 
 const MANAGED_STORAGE_MARKER: &str = "# fabro-test managed storage_dir";
 const TEST_IN_MEMORY_STORE_ENV: &str = "FABRO_TEST_IN_MEMORY_STORE";
+const SESSION_LOCK_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TestMode {
@@ -267,7 +268,7 @@ fn with_session_lock<T>(root: &Path, f: impl FnOnce() -> T) -> T {
     ensure_parent_dir(&lock_path);
     let lock_file = File::create(&lock_path)
         .unwrap_or_else(|err| panic!("failed to create {}: {err}", lock_path.display()));
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + SESSION_LOCK_TIMEOUT;
     while !fabro_proc::try_flock_exclusive(&lock_file)
         .unwrap_or_else(|err| panic!("failed to lock {}: {err}", lock_path.display()))
     {

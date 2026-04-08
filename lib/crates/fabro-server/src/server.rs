@@ -59,7 +59,7 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task::spawn_blocking;
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::{BroadcastStream, UnboundedReceiverStream};
 use tower::{ServiceExt, service_fn};
@@ -331,7 +331,7 @@ impl RunAnswerTransport {
         match self {
             Self::Subprocess { control_tx } => {
                 let message = WorkerControlEnvelope::interview_answer(qid.to_string(), answer);
-                tokio::time::timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
+                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
                     .await
                     .map_err(|_| AnswerTransportError::Timeout)?
                     .map_err(|_| AnswerTransportError::Closed)
@@ -489,9 +489,8 @@ impl SlackService {
     }
 
     async fn submit_answer(&self, state: Arc<AppState>, submission: SlackAnswerSubmission) {
-        let run_id = match RunId::from_str(&submission.run_id) {
-            Ok(run_id) => run_id,
-            Err(_) => return,
+        let Ok(run_id) = RunId::from_str(&submission.run_id) else {
+            return;
         };
 
         let pending = match load_pending_interview(state.as_ref(), run_id, &submission.qid).await {
@@ -2991,15 +2990,14 @@ fn validate_answer_for_question(
     match (&question.question_type, &answer.value) {
         (
             InterviewQuestionType::YesNo | InterviewQuestionType::Confirmation,
-            fabro_interview::AnswerValue::Yes,
+            fabro_interview::AnswerValue::Yes | fabro_interview::AnswerValue::No,
         )
         | (
-            InterviewQuestionType::YesNo | InterviewQuestionType::Confirmation,
-            fabro_interview::AnswerValue::No,
-        )
-        | (_, fabro_interview::AnswerValue::Aborted)
-        | (_, fabro_interview::AnswerValue::Skipped)
-        | (_, fabro_interview::AnswerValue::Timeout) => Ok(()),
+            _,
+            fabro_interview::AnswerValue::Aborted
+            | fabro_interview::AnswerValue::Skipped
+            | fabro_interview::AnswerValue::Timeout,
+        ) => Ok(()),
         (InterviewQuestionType::MultipleChoice, fabro_interview::AnswerValue::Selected(key)) => {
             if question.options.iter().any(|option| option.key == *key) {
                 Ok(())
@@ -3067,16 +3065,15 @@ async fn deliver_answer_to_run(
         }
     };
 
-    match transport.submit(qid, answer).await {
-        Ok(()) => Ok(()),
-        Err(_) => {
-            release_run_answer_claim(state, run_id, qid);
-            Err(ApiError::new(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "Failed to deliver answer to the active run.",
-            )
-            .into_response())
-        }
+    if let Ok(()) = transport.submit(qid, answer).await {
+        Ok(())
+    } else {
+        release_run_answer_claim(state, run_id, qid);
+        Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Failed to deliver answer to the active run.",
+        )
+        .into_response())
     }
 }
 
@@ -3824,6 +3821,20 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         Err(err) => {
             tracing::warn!(run_id = %run_id, error = %err, "Worker stderr task panicked");
         }
+    }
+
+    let superseded = {
+        let runs = state.runs.lock().expect("runs lock poisoned");
+        runs.get(&run_id)
+            .is_some_and(|managed_run| managed_run.worker_pid != Some(worker_pid))
+    };
+    if superseded {
+        tracing::info!(
+            run_id = %run_id,
+            worker_pid,
+            "Skipping stale worker cleanup for superseded run execution"
+        );
+        return;
     }
 
     append_worker_exit_failure(&run_store, run_id, &wait_status).await;
