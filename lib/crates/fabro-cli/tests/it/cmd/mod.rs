@@ -60,6 +60,7 @@ mod system_info;
 mod system_prune;
 mod test_panic;
 mod top_level;
+mod uninstall;
 mod upgrade;
 mod validate;
 mod wait;

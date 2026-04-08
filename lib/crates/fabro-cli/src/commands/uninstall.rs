@@ -31,7 +31,7 @@ pub(crate) async fn run_uninstall(args: &UninstallArgs, globals: &GlobalArgs) ->
     let home = Home::from_env();
     let home_root = home.root().to_path_buf();
 
-    if !home_root.exists() {
+    if !looks_like_fabro_home(&home_root) {
         if globals.json {
             print_json_pretty(&serde_json::json!({ "status": "not_installed" }))?;
         } else {
@@ -370,6 +370,16 @@ fn execute_uninstall(inventory: &Inventory, json: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Returns true if the directory exists and contains Fabro artifacts
+/// (settings.toml, certs/, or storage/). An empty directory auto-created
+/// by the CLI's logging setup is not considered an installation.
+fn looks_like_fabro_home(path: &Path) -> bool {
+    path.exists()
+        && (path.join("settings.toml").exists()
+            || path.join("certs").exists()
+            || path.join("storage").exists())
 }
 
 fn validate_safe_to_delete(path: &Path) -> Result<()> {
