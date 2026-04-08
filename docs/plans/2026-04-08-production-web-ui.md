@@ -4,7 +4,7 @@
 
 **Goal:** Wire the fabro web UI to the real fabro server via HTTP, retain a demo mode toggle, and remove UI for server features that are not implemented in real mode.
 
-**Architecture:** The web UI already calls the fabro server's `/api/v1/` endpoints via `apiFetch`/`apiJson` helpers. Demo mode is toggled per-request via a `fabro-demo` cookie that the server middleware converts to an `X-Fabro-Demo: 1` header, dispatching to separate demo vs real route sets. The core work is: (1) fix the real `/boards/runs` handler to return the `RunListItem` shape the UI expects, (2) make the UI conditionally hide navigation and routes for features not implemented in real mode (workflows, insights, run files), and (3) add a demo `/boards/runs` handler so demo mode also works through this endpoint.
+**Architecture:** The web UI already calls the fabro server's `/api/v1/` endpoints via `apiFetch`/`apiJson` helpers. Demo mode is toggled per-request via a `fabro-demo` cookie that the server middleware converts to an `X-Fabro-Demo: 1` header, dispatching to separate demo vs real route sets. The core work is: (1) fix the real `/boards/runs` handler to return the `RunListItem` shape the UI expects, (2) make the UI conditionally hide navigation and routes for features not implemented in real mode (workflows, insights, run files), (3) add a demo `/boards/runs` handler so demo mode also works through this endpoint, and (4) fix the demo `get_run_status` to return `StoreRunSummary` shape matching the OpenAPI spec so the run-detail loader works in both modes.
 
 **Tech Stack:** Rust (Axum server), TypeScript (React 19 + React Router + Vite), Playwright (browser tests)
 
@@ -16,9 +16,11 @@
 
 The OpenAPI spec declares `/boards/runs` returns `PaginatedRunList` containing `RunListItem` objects. However, the real `list_board_runs` handler currently returns `RunStatusResponse` objects (id, status, error, queue_position, created_at). The UI's runs board, run-detail, and run-overview loaders all consume `/boards/runs` and expect `RunListItem` fields (repository, title, workflow, status as `BoardColumn`, pull_request, timings, sandbox, question).
 
-**Decision:** Enrich the real `list_board_runs` handler to return `RunListItem`-shaped data by pulling `goal` (as title), `workflow_slug`/`workflow_name`, `host_repo_path` (as repository name), `duration_ms` (as timing), and `total_usd_micros` from `RunSummary`. Map `RunStatus` lifecycle values to `BoardColumn` values: `running` -> `working`, `paused` -> `pending`, `completed` -> `merge`, everything else (`submitted`, `queued`, `starting`, `failed`, `cancelled`) -> excluded from the board (they are not actionable board items).
+**Decision:** Enrich the real `list_board_runs` handler to return `RunListItem`-shaped data by pulling `goal` (as title), `workflow_slug`/`workflow_name`, `host_repo_path` (as repository name), `duration_ms` (as timing), and `total_usd_micros` from `RunSummary`. Map `RunStatus` lifecycle values to `BoardColumn` values: `Running` -> `"working"`, `Paused` -> `"pending"`, `Completed` -> `"merge"`, everything else (`Submitted`, `Queued`, `Starting`, `Failed`, `Cancelled`) -> excluded from the board (they are not actionable board items).
 
 **Justification:** This aligns the real handler with the OpenAPI spec and avoids bifurcating the UI's data layer into two incompatible response shapes. The store already has the needed fields. Fields not available from the store (pull_request, sandbox, checks, question) are left `null`/absent -- the UI already handles their optionality with `?.` chains.
+
+**Impact on existing tests:** Several existing integration tests (e.g., `cancel_run_sets_status_reason`, `cancel_run_overwrites_pending_pause_request`, queue position tests) assert on `status_reason` and `pending_control` fields from `/boards/runs` responses. These fields exist on `RunStatusResponse` but not on `RunListItem`. These tests use `/boards/runs` as a secondary assertion to verify server state -- they should be updated to assert those fields via `/runs/{id}` (which returns `StoreRunSummary` containing both fields) instead, then assert the board-specific shape from `/boards/runs`.
 
 ### Decision 2: Add `/boards/runs` to demo routes
 
@@ -26,38 +28,47 @@ The demo routes currently have `/runs` but NOT `/boards/runs`. The UI exclusivel
 
 **Decision:** Add a `demo::list_board_runs` handler that returns the same `RunListItem` data the existing `demo::list_runs` returns, but under the `/boards/runs` path.
 
-### Decision 3: Conditionally hide unimplemented features based on demo mode
+### Decision 3: Fix demo `get_run_status` to return `StoreRunSummary` shape
 
-The real server returns `not_implemented` (501) for: `/workflows`, `/workflows/{name}`, `/workflows/{name}/runs`, `/insights/*`, `/runs/{id}/stages`, `/runs/{id}/stages/{stageId}/turns`, `/runs/{id}/settings`, and `/runs/{id}/files` (doesn't exist at all).
+The OpenAPI spec says `GET /runs/{id}` returns `StoreRunSummary` (with fields `run_id`, `goal`, `workflow_slug`, `workflow_name`, `host_repo_path`, `status`, `duration_ms`, etc.). The real handler correctly returns `RunSummary` (the Rust type that maps to `StoreRunSummary`). But the demo handler returns `RunStatusResponse` (with fields `id`, `status`, `error`, `queue_position`, `created_at`) -- a completely different shape that violates the spec.
+
+**Decision:** Change `demo::get_run_status` to return `StoreRunSummary`-shaped JSON by constructing it from the matching `RunListItem` in the demo data. This makes the run-detail loader work identically in both demo and real modes.
+
+### Decision 4: Conditionally hide unimplemented features based on demo mode
+
+The real server returns `not_implemented` (501) for: `/workflows`, `/workflows/{name}`, `/workflows/{name}/runs`, `/insights/*`, `/runs/{id}/stages`, `/runs/{id}/stages/{stageId}/turns`, `/runs/{id}/settings`.
+
+The "Files Changed" tab calls `/runs/{id}/files` which does not exist in either demo or real routes -- it has no server endpoint at all.
 
 **Decision:** The `auth/me` response already includes `demoMode: boolean`. Use this flag in the UI to:
 - Hide the "Workflows" and "Insights" nav items when not in demo mode
-- Remove the "Stages", "Files Changed", and "Settings" tabs from the run detail view when not in demo mode (keep Overview, Graph, Billing which all use real endpoints)
+- Remove the "Stages" and "Settings" tabs from the run detail view when not in demo mode (keep Overview, Graph, Billing which all use real endpoints)
+- Remove the "Files Changed" tab always (the endpoint does not exist in either mode)
 - Redirect away from workflow/insight routes when not in demo mode
 
 This avoids showing users broken pages. The routes remain in the router for demo mode.
 
 **Justification:** Per user instruction: "for functionality that has been removed from fabro server, remove the corresponding UI from fabro web for now." Using `demoMode` from the existing auth response is the simplest mechanism -- no new API call needed.
 
-### Decision 4: Run overview graceful degradation
+### Decision 5: Run overview graceful degradation
 
 The run-overview loader fetches both `/runs/{id}/stages` (501 in real mode) and `/boards/runs`. It also tries to fetch `/workflows/{name}` for the graph dot source.
 
-**Decision:** Make the run-overview loader resilient: catch 501 errors from `/runs/{id}/stages` and return an empty stages list. Catch errors from `/workflows/{name}` (already caught) and leave `graphDot` null. The overview page already renders conditionally when these are missing.
+**Decision:** Make the run-overview loader resilient: catch 501 errors from `/runs/{id}/stages` and return an empty stages list. Remove the `/boards/runs` and `/workflows/{name}` fetches entirely -- the overview doesn't need the workflow slug (it got it just to fetch the graph dot, but that's redundant with the Graph tab), and the graph dot source is only useful for Graphviz rendering which the Graph tab already handles.
 
-### Decision 5: Run detail loader -- use `/runs/{id}` instead of searching `/boards/runs`
+### Decision 6: Run detail loader -- use `/runs/{id}` instead of searching `/boards/runs`
 
 The run-detail loader currently fetches ALL board runs via `/boards/runs` and finds the run by ID. This is wasteful and won't scale.
 
-**Decision:** Change run-detail loader to fetch `/runs/{id}` directly. The real handler returns `RunSummary` (which contains `run_id`, `goal`, `workflow_slug`, `workflow_name`, `host_repo_path`, `status`, `duration_ms`). Map this to the same shape the component expects. For demo mode, this endpoint (`demo::get_run_status`) already returns compatible data.
+**Decision:** Change run-detail loader to fetch `/runs/{id}` directly. The real handler returns `RunSummary` (which contains `run_id`, `goal`, `workflow_slug`, `workflow_name`, `host_repo_path`, `status`, `duration_ms`). Map this to the same shape the component expects. After fixing the demo handler (Decision 3), the demo `/runs/{id}` also returns `StoreRunSummary`-shaped data, so the same mapping works in both modes.
 
-### Decision 6: Propagate `demoMode` via React context
+### Decision 7: Propagate `demoMode` via React context
 
 Currently `demoMode` is only available in the app-shell loader data. Child routes need it to conditionally render features.
 
-**Decision:** The app-shell already passes `demoMode` from `getAuthMe()`. Add it to React Router's `useRouteLoaderData` pattern -- child routes can access the app shell's loader data through `useMatches()` or a dedicated hook. Implement a small `useDemoMode()` hook that reads from the nearest parent match.
+**Decision:** The app-shell already passes `demoMode` from `getAuthMe()`. Add a `DemoModeProvider` React context so child components can access it via `useDemoMode()`.
 
-### Decision 7: Workflow-definition uses hardcoded static data
+### Decision 8: Workflow-definition uses hardcoded static data
 
 `workflow-definition.tsx` imports `workflowData` from `workflow-detail.tsx` and reads from the static record by name, ignoring the loader data. This is a demo-only artifact.
 
@@ -70,22 +81,22 @@ Currently `demoMode` is only available in the app-shell loader data. Child route
 ### Files to modify
 
 - `lib/crates/fabro-server/src/server.rs` -- Enrich real `list_board_runs` to return `RunListItem` shape; no changes to routes
-- `lib/crates/fabro-server/src/demo/mod.rs` -- Add `list_board_runs` handler reusing existing run data
+- `lib/crates/fabro-server/src/demo/mod.rs` -- Add `list_board_runs` handler reusing existing run data; fix `get_run_status` to return `StoreRunSummary` shape
 - `apps/fabro-web/app/layouts/app-shell.tsx` -- Conditionally hide nav items based on `demoMode`; export demo mode via context
 - `apps/fabro-web/app/lib/demo-mode.tsx` -- New file: `DemoModeProvider` context and `useDemoMode()` hook
 - `apps/fabro-web/app/routes/runs.tsx` -- Use `/boards/runs` (already does); no structural changes needed
-- `apps/fabro-web/app/routes/run-detail.tsx` -- Change loader to use `/runs/{id}` instead of searching `/boards/runs`; conditionally hide tabs
+- `apps/fabro-web/app/routes/run-detail.tsx` -- Change loader to use `/runs/{id}` instead of searching `/boards/runs`; conditionally hide tabs; always hide "Files Changed"
 - `apps/fabro-web/app/routes/run-overview.tsx` -- Make loader resilient to 501 from stages endpoint; remove `/boards/runs` dependency
 - `apps/fabro-web/app/routes/run-stages.tsx` -- No loader changes; route hidden in non-demo mode
 - `apps/fabro-web/app/routes/run-graph.tsx` -- Make loader resilient to 501 from stages endpoint; use `/runs/{id}/graph` (real, works)
 - `apps/fabro-web/app/routes/run-settings.tsx` -- No loader changes; route hidden in non-demo mode
-- `apps/fabro-web/app/routes/run-files.tsx` -- No loader changes; route hidden in non-demo mode
+- `apps/fabro-web/app/routes/run-files.tsx` -- No loader changes; tab always hidden (endpoint doesn't exist)
 - `apps/fabro-web/app/routes/run-billing.tsx` -- No changes; uses `/runs/{id}/billing` which is implemented in real mode
 - `apps/fabro-web/app/routes/workflows.tsx` -- No changes; route hidden in non-demo mode
 - `apps/fabro-web/app/routes/workflow-detail.tsx` -- No changes; route hidden in non-demo mode
 - `apps/fabro-web/app/routes/insights.tsx` -- No changes; route hidden in non-demo mode
 - `apps/fabro-web/app/routes/settings.tsx` -- No changes; uses `/settings` which is implemented in real mode
-- `apps/fabro-web/app/data/runs.ts` -- Add `mapRunStatusToRunItem()` for mapping `/runs/{id}` response
+- `apps/fabro-web/app/data/runs.ts` -- Add `mapRunSummaryToRunItem()` for mapping `/runs/{id}` response
 - `apps/fabro-web/app/api.ts` -- Add `apiJsonOrNull()` helper for graceful 501 handling
 
 ### Files to create
@@ -178,7 +189,101 @@ git commit -m "feat(server): add /boards/runs to demo routes"
 
 ---
 
-## Task 2: Enrich real `/boards/runs` to return `RunListItem` shape
+## Task 2: Fix demo `get_run_status` to return `StoreRunSummary` shape
+
+**Files:**
+- Modify: `lib/crates/fabro-server/src/demo/mod.rs:173-194` (get_run_status function)
+
+The demo `get_run_status` currently returns `RunStatusResponse` (with `id`, `status`, `error`, `queue_position`, `created_at`). The OpenAPI spec says `GET /runs/{id}` returns `StoreRunSummary` (with `run_id`, `goal`, `workflow_slug`, `workflow_name`, `host_repo_path`, `status`, `duration_ms`, etc.). The real handler already returns the correct shape. The demo must match so the UI can use a single mapping function.
+
+- [ ] **Step 1: Write failing test**
+
+```rust
+#[tokio::test]
+async fn demo_get_run_returns_store_run_summary_shape() {
+    let state = create_app_state();
+    let app = build_router(state, AuthMode::Disabled);
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/v1/runs/run-1")
+        .header("X-Fabro-Demo", "1")
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response.into_body()).await;
+    // Should have StoreRunSummary fields, not RunStatusResponse fields
+    assert!(body["run_id"].is_string(), "should have run_id field");
+    assert!(body["goal"].is_string(), "should have goal field");
+    assert!(body["workflow_slug"].is_string(), "should have workflow_slug field");
+    // Should NOT have RunStatusResponse-only fields
+    assert!(body["queue_position"].is_null(), "should not have queue_position");
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd /Users/bhelmkamp/p/fabro-sh/fabro-3/.worktrees/production-web-ui && cargo nextest run -p fabro-server -- demo_get_run_returns_store_run_summary_shape`
+Expected: FAIL (currently returns `id` not `run_id`, has `queue_position`, lacks `goal`/`workflow_slug`)
+
+- [ ] **Step 3: Rewrite demo `get_run_status` to return `StoreRunSummary` shape**
+
+Replace the handler body to construct a `StoreRunSummary`-shaped JSON response from the matching `RunListItem`:
+
+```rust
+pub(crate) async fn get_run_status(
+    _auth: AuthenticatedService,
+    State(_state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    match runs::list_items().into_iter().find(|r| r.id == id) {
+        Some(item) => {
+            let elapsed_ms = item.timings.as_ref().map(|t| (t.elapsed_secs * 1000.0) as u64);
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "run_id": item.id,
+                    "goal": item.title,
+                    "workflow_slug": item.workflow.slug,
+                    "workflow_name": item.workflow.slug,
+                    "host_repo_path": format!("/demo/{}", item.repository.name),
+                    "labels": {},
+                    "start_time": item.created_at.to_rfc3339(),
+                    "status": "running",
+                    "status_reason": null,
+                    "pending_control": null,
+                    "duration_ms": elapsed_ms,
+                    "total_usd_micros": null,
+                })),
+            )
+                .into_response()
+        }
+        None => ApiError::not_found("Run not found.").into_response(),
+    }
+}
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd /Users/bhelmkamp/p/fabro-sh/fabro-3/.worktrees/production-web-ui && cargo nextest run -p fabro-server -- demo_get_run_returns_store_run_summary_shape`
+Expected: PASS
+
+- [ ] **Step 5: Refactor and verify**
+
+Run full server test suite:
+Run: `cd /Users/bhelmkamp/p/fabro-sh/fabro-3/.worktrees/production-web-ui && ulimit -n 4096 && cargo nextest run -p fabro-server`
+Expected: all PASS
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add lib/crates/fabro-server/src/demo/mod.rs
+git commit -m "fix(server): demo get_run_status returns StoreRunSummary shape matching OpenAPI spec"
+```
+
+---
+
+## Task 3: Enrich real `/boards/runs` to return `RunListItem` shape
 
 **Files:**
 - Modify: `lib/crates/fabro-server/src/server.rs:2017-2083` (list_board_runs function)
@@ -236,7 +341,6 @@ Expected: FAIL (current handler returns RunStatusResponse shape without title/re
 - [ ] **Step 3: Rewrite `list_board_runs` to return enriched `RunListItem` data**
 
 Replace the `list_board_runs` handler body with logic that:
-
 1. Collects live run data from `state.runs` (id, status, created_at)
 2. Fetches `RunSummary` data from `state.store.list_runs()`
 3. Maps `RunStatus` to `BoardColumn`:
@@ -337,7 +441,7 @@ Expected: PASS
 
 - [ ] **Step 5: Refactor and verify**
 
-Check that existing tests still pass. The existing tests that call `/boards/runs` and assert on `status_reason`/`pending_control` will need to be updated -- they assert on the old `RunStatusResponse` shape. Update those tests to assert on the new `RunListItem` shape, or adjust assertions to check fields that both shapes share.
+Some existing tests assert on `status_reason` and `pending_control` fields from `/boards/runs` responses (e.g., tests for cancel and pause flows). These fields no longer exist in the `RunListItem` shape. Update those tests to assert `status_reason`/`pending_control` via `GET /runs/{id}` (which returns `StoreRunSummary` containing both fields) instead. The `/boards/runs` assertions in those tests should be updated to check for the new `RunListItem` fields or removed if redundant.
 
 Run: `cd /Users/bhelmkamp/p/fabro-sh/fabro-3/.worktrees/production-web-ui && ulimit -n 4096 && cargo nextest run -p fabro-server`
 Expected: all PASS
@@ -351,7 +455,7 @@ git commit -m "feat(server): enrich /boards/runs to return RunListItem shape wit
 
 ---
 
-## Task 3: Fix run-detail loader to use `/runs/{id}` directly
+## Task 4: Fix run-detail loader to use `/runs/{id}` directly
 
 **Files:**
 - Modify: `apps/fabro-web/app/routes/run-detail.tsx:19-30`
@@ -359,7 +463,7 @@ git commit -m "feat(server): enrich /boards/runs to return RunListItem shape wit
 
 - [ ] **Step 1: Write failing test**
 
-Add a TypeScript test in `apps/fabro-web/app/data/runs.test.ts` that tests a new `mapRunSummaryToRunItem()` function which maps the `/runs/{id}` response shape (a `RunSummary` with `run_id`, `goal`, `workflow_slug`, `workflow_name`, `host_repo_path`, `status`, `duration_ms`) to the `RunItem` shape.
+Add a TypeScript test in `apps/fabro-web/app/data/runs.test.ts` that tests a new `mapRunSummaryToRunItem()` function which maps the `/runs/{id}` response shape (a `StoreRunSummary` with `run_id`, `goal`, `workflow_slug`, `workflow_name`, `host_repo_path`, `status`, `duration_ms`) to the `RunItem` shape.
 
 ```typescript
 import { describe, expect, test } from "bun:test";
@@ -456,6 +560,10 @@ export function mapRunSummaryToRunItem(summary: RunSummaryResponse): RunItem {
 In `apps/fabro-web/app/routes/run-detail.tsx`, change the loader:
 
 ```typescript
+import { RunSummaryResponse, mapRunSummaryToRunItem, columnNames } from "../data/runs";
+import type { ColumnStatus } from "../data/runs";
+import { apiJson } from "../api";
+
 export async function loader({ request, params }: any) {
   const summary = await apiJson<RunSummaryResponse>(`/runs/${params.id}`, { request });
   const item = mapRunSummaryToRunItem(summary);
@@ -475,7 +583,9 @@ export async function loader({ request, params }: any) {
 }
 ```
 
-Also import `RunSummaryResponse` and `mapRunSummaryToRunItem` from `../data/runs`, and remove the `PaginatedRunList` import and the find-by-id logic.
+Remove the `PaginatedRunList` import and the find-by-id logic. Remove the `mapRunListItem` import if no longer needed here.
+
+Note: This works for both real and demo modes because Task 2 ensures the demo `get_run_status` returns `StoreRunSummary`-shaped data with the same fields (`run_id`, `goal`, `workflow_slug`, `host_repo_path`, `duration_ms`, etc.).
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -497,7 +607,7 @@ git commit -m "feat(web): use /runs/{id} directly in run-detail loader instead o
 
 ---
 
-## Task 4: Create `useDemoMode()` hook and `DemoModeProvider` context
+## Task 5: Create `useDemoMode()` hook and `DemoModeProvider` context
 
 **Files:**
 - Create: `apps/fabro-web/app/lib/demo-mode.tsx`
@@ -602,7 +712,7 @@ git commit -m "feat(web): add DemoModeProvider context and useDemoMode hook"
 
 ---
 
-## Task 5: Conditionally hide nav items and routes based on demo mode
+## Task 6: Conditionally hide nav items and routes based on demo mode
 
 **Files:**
 - Modify: `apps/fabro-web/app/layouts/app-shell.tsx`
@@ -610,7 +720,7 @@ git commit -m "feat(web): add DemoModeProvider context and useDemoMode hook"
 
 - [ ] **Step 1: Write failing test**
 
-This is a visual behavior change. We will verify with the Playwright browser test in Task 8. For now, write a unit test verifying the navigation filtering logic.
+This is a visual behavior change. We will verify with the Playwright browser test in Task 9. For now, write a unit test verifying the navigation filtering logic.
 
 Create `apps/fabro-web/app/layouts/app-shell.test.tsx`:
 
@@ -664,19 +774,26 @@ export function getVisibleNavigation(demoMode: boolean) {
 
 2. In the component, use `getVisibleNavigation(demoMode)` instead of the static `navigation` array.
 
-In `run-detail.tsx`, conditionally filter the tabs array based on demo mode. Remove "Stages", "Files Changed" tabs when not in demo mode. Keep "Overview", "Graph" (which will gracefully degrade), and "Billing":
+In `run-detail.tsx`, conditionally filter the tabs array based on demo mode. Remove "Stages" and "Settings" tabs when not in demo mode. Remove "Files Changed" tab always (the `/runs/{id}/files` endpoint does not exist in either mode). Keep "Overview", "Graph", and "Billing":
 
 ```typescript
 import { useDemoMode } from "../lib/demo-mode";
 
+// Define all tabs
+const allTabs = [
+  { name: "Overview", path: "", count: null, demoOnly: false, broken: false },
+  { name: "Stages", path: "/stages/detect-drift", count: null, demoOnly: true, broken: false },
+  { name: "Files Changed", path: "/files", count: null, demoOnly: false, broken: true },
+  { name: "Graph", path: "/graph", count: null, demoOnly: false, broken: false },
+  { name: "Billing", path: "/billing", count: null, demoOnly: false, broken: false },
+];
+
 // In component:
 const demoMode = useDemoMode();
-const visibleTabs = demoMode
-  ? tabs
-  : tabs.filter((t) => !["Stages", "Files Changed"].includes(t.name));
+const visibleTabs = allTabs.filter((t) => !t.broken && (!t.demoOnly || demoMode));
 ```
 
-Note: The "Settings" tab for run-settings also calls `/runs/{id}/settings` (not_implemented). Remove it from non-demo tabs too.
+Note: The original tabs array has "Overview", "Stages", "Files Changed", "Billing" -- it does not include "Graph". Add "Graph" to the tabs since the graph tab route exists and works in real mode. The "Settings" tab is not listed in the current tabs array (the route exists but has no tab link), so it is already effectively hidden.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -697,7 +814,7 @@ git commit -m "feat(web): hide Workflows, Insights nav and demo-only run tabs in
 
 ---
 
-## Task 6: Add `apiJsonOrNull` helper and make run-overview/run-graph loaders resilient
+## Task 7: Add `apiJsonOrNull` helper and make run-overview/run-graph loaders resilient
 
 **Files:**
 - Modify: `apps/fabro-web/app/api.ts`
@@ -756,36 +873,44 @@ export async function apiJsonOrNull<T>(path: string, options?: ApiOptions): Prom
 }
 ```
 
-In `run-overview.tsx`, change the loader to use `apiJsonOrNull` for stages:
+In `run-overview.tsx`, simplify the loader to only fetch stages (gracefully) and set `graphDot` to null:
 
 ```typescript
-import { apiJson, apiJsonOrNull } from "../api";
+import { apiJsonOrNull } from "../api";
 
 export async function loader({ request, params }: any) {
-  const [stagesResult, response] = await Promise.all([
-    apiJsonOrNull<PaginatedRunStageList>(`/runs/${params.id}/stages`, { request }),
-    apiJson<PaginatedRunList>("/boards/runs", { request }),
-  ]);
+  const stagesResult = await apiJsonOrNull<PaginatedRunStageList>(
+    `/runs/${params.id}/stages`,
+    { request },
+  );
   const stages: Stage[] = (stagesResult?.data ?? []).map((s) => ({
     id: s.id,
     name: s.name,
     status: s.status as StageStatus,
     duration: s.duration_secs != null ? formatDurationSecs(s.duration_secs) : "--",
   }));
-  // ... rest unchanged
+  return { stages, graphDot: null };
 }
 ```
 
-In `run-graph.tsx`, similarly use `apiJsonOrNull` for stages:
+Remove the imports for `PaginatedRunList`, `WorkflowDetailResponse`, and `apiJson` (if no longer needed). Keep `apiJsonOrNull`.
+
+In `run-graph.tsx`, use `apiJsonOrNull` for stages:
 
 ```typescript
+import { apiJsonOrNull } from "../api";
+
 export async function loader({ request, params }: any) {
   const [stagesResult, graphRes] = await Promise.all([
     apiJsonOrNull<PaginatedRunStageList>(`/runs/${params.id}/stages`, { request }),
     apiFetch(`/runs/${params.id}/graph`, { request }),
   ]);
   const stages: Stage[] = (stagesResult?.data ?? []).map((s) => ({
-    // ... same as before
+    id: s.id,
+    name: s.name,
+    dotId: s.dot_id ?? s.id,
+    status: s.status as StageStatus,
+    duration: s.duration_secs != null ? formatDurationSecs(s.duration_secs) : "--",
   }));
   const graphSvg = graphRes.ok ? await graphRes.text() : null;
   return { stages, graphSvg };
@@ -807,58 +932,6 @@ Expected: all PASS
 ```bash
 git add apps/fabro-web/app/api.ts apps/fabro-web/app/api.test.ts apps/fabro-web/app/routes/run-overview.tsx apps/fabro-web/app/routes/run-graph.tsx
 git commit -m "feat(web): add apiJsonOrNull for graceful 501 handling in run-overview and run-graph"
-```
-
----
-
-## Task 7: Fix run-overview loader to not depend on `/boards/runs` for the current run
-
-**Files:**
-- Modify: `apps/fabro-web/app/routes/run-overview.tsx:24-46`
-
-The run-overview loader currently fetches `/boards/runs` to find the current run and get its `workflow` slug for the graph. Since run-detail now fetches `/runs/{id}` directly, the overview can use `useRouteLoaderData` or receive the run from the parent layout (run-detail), OR it can fetch `/runs/{id}` itself.
-
-- [ ] **Step 1: Identify the issue**
-
-The run-overview loader fetches `/boards/runs` just to find the current run's workflow slug so it can fetch `/workflows/{name}` for the graph dot source. But `/workflows/{name}` is `not_implemented` in real mode anyway. And the run graph is available at `/runs/{id}/graph` (which IS implemented in real mode).
-
-So the overview loader should:
-1. Fetch stages via `apiJsonOrNull` (done in Task 6)
-2. NOT fetch `/boards/runs` at all
-3. NOT fetch `/workflows/{name}` -- the graph dot source is only useful for Graphviz rendering, and the run-graph tab already handles this
-
-- [ ] **Step 2: Simplify run-overview loader**
-
-Remove the `/boards/runs` fetch and the `/workflows/{name}` fetch from the run-overview loader. Set `graphDot` to `null` -- the overview page's mini graph section will simply not render when `graphDot` is null (it already has conditional rendering).
-
-```typescript
-export async function loader({ request, params }: any) {
-  const stagesResult = await apiJsonOrNull<PaginatedRunStageList>(
-    `/runs/${params.id}/stages`,
-    { request },
-  );
-  const stages: Stage[] = (stagesResult?.data ?? []).map((s) => ({
-    id: s.id,
-    name: s.name,
-    status: s.status as StageStatus,
-    duration: s.duration_secs != null ? formatDurationSecs(s.duration_secs) : "--",
-  }));
-  return { stages, graphDot: null };
-}
-```
-
-Remove the imports for `PaginatedRunList`, `WorkflowDetailResponse`, and `apiJson` (if no longer needed). Keep `apiJsonOrNull`.
-
-- [ ] **Step 3: Run tests and typecheck**
-
-Run: `cd /Users/bhelmkamp/p/fabro-sh/fabro-3/.worktrees/production-web-ui/apps/fabro-web && bun run typecheck && bun test`
-Expected: all PASS
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add apps/fabro-web/app/routes/run-overview.tsx
-git commit -m "refactor(web): simplify run-overview loader to remove /boards/runs and /workflows dependencies"
 ```
 
 ---
@@ -890,7 +963,7 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   webServer: {
-    command: "cd ../.. && cargo run -p fabro-server -- serve --port 8080",
+    command: "cd ../.. && FABRO_TEST_IN_MEMORY_STORE=1 cargo run -p fabro-cli -- server foreground --bind 127.0.0.1:8080",
     port: 8080,
     reuseExistingServer: true,
     timeout: 120000,
@@ -898,7 +971,10 @@ export default defineConfig({
 });
 ```
 
-Note: The exact server start command may need adjustment. The fabro server serves the built SPA via static file handler. The test should build the web app first, then start the server with auth disabled.
+Note: The exact server start command may need adjustment. The fabro server serves the built SPA via static file handler when `FABRO_STATIC_DIR` points to the built web app. The test should build the web app first, then start the server with auth disabled. Check the `ServeArgs` in `serve.rs` and the CLI subcommand in `commands/server/` for the correct invocation. If `server foreground` does not work, try `fabro serve` or adjust. The key settings are:
+- `FABRO_TEST_IN_MEMORY_STORE=1` for an ephemeral store
+- Auth mode defaults to `AuthMode::Disabled` when no auth configuration is present
+- The static file handler serves from the configured static directory
 
 - [ ] **Step 2: Write browser smoke tests**
 
@@ -976,8 +1052,8 @@ test.describe("Demo mode toggle", () => {
     const nav = page.locator("nav");
     await expect(nav).not.toContainText("Workflows");
 
-    // Toggle demo mode on
-    const demoToggle = page.locator('button[title*="demo"]');
+    // Toggle demo mode on via the beaker button
+    const demoToggle = page.locator('button[title*="demo"], button[title*="Demo"]');
     await demoToggle.click();
 
     // Wait for revalidation
@@ -1008,9 +1084,7 @@ Then run the browser tests (this requires the fabro server to be running or the 
 cd /Users/bhelmkamp/p/fabro-sh/fabro-3/.worktrees/production-web-ui/apps/fabro-web && bun run test:browser
 ```
 
-Expected: Tests may fail on first run due to auth requirements. Adjust the Playwright config and tests to handle `AuthMode::Disabled`. The server must be started with auth disabled for the tests to work. Iterate until all smoke tests pass.
-
-Note: The exact server startup command and auth handling will need adjustment. The key insight is that in `AuthMode::Disabled`, the server skips authentication, and `getAuthMe()` should still return a response (it returns a disabled-mode user). Verify this works, and if `getAuthMe()` returns 401 in disabled mode, handle the redirect in tests.
+Expected: Tests may fail on first run due to the server startup command or auth configuration. Iterate on the Playwright config's `webServer.command` until the server starts correctly with auth disabled and serves the built SPA. The server's `AuthMode::Disabled` skips authentication, and `getAuthMe()` should still return a response (it returns a disabled-mode user). If `getAuthMe()` returns 401 in disabled mode, that indicates the server auth isn't properly disabled -- check the environment variables and CLI flags.
 
 - [ ] **Step 5: Refactor and verify**
 
@@ -1073,19 +1147,15 @@ git commit -m "chore: final integration cleanup for production web UI"
 | Endpoint | Real mode | Demo mode | UI behavior |
 |---|---|---|---|
 | `/boards/runs` | Enriched to return `RunListItem` with board columns | New handler delegates to `list_runs` | Runs board works in both modes |
-| `/runs/{id}` | Returns `RunSummary` (already works) | Returns demo run status | Run detail uses this directly |
+| `/runs/{id}` | Returns `RunSummary` (already works) | Fixed to return `StoreRunSummary` shape (was returning `RunStatusResponse`) | Run detail uses this directly |
 | `/runs/{id}/graph` | Returns SVG (already works) | Returns SVG | Graph tab works in both modes |
 | `/runs/{id}/billing` | Returns billing (already works) | Returns billing | Billing tab works in both modes |
 | `/runs/{id}/stages` | Returns 501 | Returns demo stages | Graceful null in real mode; full data in demo |
 | `/runs/{id}/stages/{stageId}/turns` | Returns 501 | Returns demo turns | Tab hidden in real mode |
 | `/runs/{id}/settings` | Returns 501 | Returns demo settings | Tab hidden in real mode |
-| `/runs/{id}/files` | Does not exist | Does not exist | Tab hidden always (remove) |
+| `/runs/{id}/files` | Does not exist | Does not exist | Tab always hidden (endpoint missing in both modes) |
 | `/workflows` | Returns 501 | Returns demo workflows | Nav hidden in real mode |
 | `/workflows/{name}` | Returns 501 | Returns demo detail | Nav hidden in real mode |
 | `/workflows/{name}/runs` | Returns 501 | Returns demo runs | Nav hidden in real mode |
 | `/insights/*` | Returns 501 | Returns demo data | Nav hidden in real mode |
 | `/settings` | Returns settings (works) | Returns demo settings | Works in both modes |
-| `/models` | Returns models (works) | Returns models | Works in both modes |
-| `/secrets` | Returns secrets (works) | Returns demo secrets | Works in both modes |
-| `/demo/toggle` | Sets cookie | Sets cookie | Toggle works in both modes |
-| `/auth/me` | Returns user + demoMode | Returns user + demoMode | Used for auth and demo mode flag |
