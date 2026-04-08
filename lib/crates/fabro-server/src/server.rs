@@ -58,7 +58,7 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task::spawn_blocking;
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::{BroadcastStream, UnboundedReceiverStream};
 use tower::{ServiceExt, service_fn};
@@ -331,7 +331,7 @@ impl RunAnswerTransport {
         match self {
             Self::Subprocess { control_tx } => {
                 let message = WorkerControlEnvelope::interview_answer(qid.to_string(), answer);
-                tokio::time::timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
+                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
                     .await
                     .map_err(|_| AnswerTransportError::Timeout)?
                     .map_err(|_| AnswerTransportError::Closed)
@@ -491,16 +491,15 @@ impl SlackService {
     }
 
     async fn submit_answer(&self, state: Arc<AppState>, submission: SlackAnswerSubmission) {
-        let run_id = match RunId::from_str(&submission.run_id) {
-            Ok(run_id) => run_id,
-            Err(_) => return,
+        let Ok(run_id) = RunId::from_str(&submission.run_id) else {
+            return;
         };
 
-        let question =
-            match load_pending_interview_question(state.as_ref(), run_id, &submission.qid).await {
-                Ok(question) => question,
-                Err(_) => return,
-            };
+        let Ok(question) =
+            load_pending_interview_question(state.as_ref(), run_id, &submission.qid).await
+        else {
+            return;
+        };
         if validate_answer_for_question(&question, &submission.answer).is_err() {
             return;
         }
@@ -2910,7 +2909,6 @@ fn parse_question_type(question_type: &str) -> QuestionType {
         "yes_no" => QuestionType::YesNo,
         "multiple_choice" => QuestionType::MultipleChoice,
         "multi_select" => QuestionType::MultiSelect,
-        "freeform" => QuestionType::Freeform,
         "confirmation" => QuestionType::Confirmation,
         _ => QuestionType::Freeform,
     }
@@ -2984,11 +2982,16 @@ async fn load_pending_interview_question(
 #[allow(clippy::result_large_err)] // Axum handlers naturally propagate full `Response` errors.
 fn validate_answer_for_question(question: &Question, answer: &Answer) -> Result<(), Response> {
     match (&question.question_type, &answer.value) {
-        (QuestionType::YesNo | QuestionType::Confirmation, fabro_interview::AnswerValue::Yes)
-        | (QuestionType::YesNo | QuestionType::Confirmation, fabro_interview::AnswerValue::No)
-        | (_, fabro_interview::AnswerValue::Aborted)
-        | (_, fabro_interview::AnswerValue::Skipped)
-        | (_, fabro_interview::AnswerValue::Timeout) => Ok(()),
+        (
+            QuestionType::YesNo | QuestionType::Confirmation,
+            fabro_interview::AnswerValue::Yes | fabro_interview::AnswerValue::No,
+        )
+        | (
+            _,
+            fabro_interview::AnswerValue::Aborted
+            | fabro_interview::AnswerValue::Skipped
+            | fabro_interview::AnswerValue::Timeout,
+        ) => Ok(()),
         (QuestionType::MultipleChoice, fabro_interview::AnswerValue::Selected(key)) => {
             if question.options.iter().any(|option| option.key == *key) {
                 Ok(())
@@ -3046,16 +3049,15 @@ async fn deliver_answer_to_run(
         }
     };
 
-    match transport.submit(qid, answer).await {
-        Ok(()) => Ok(()),
-        Err(_) => {
-            release_run_answer_claim(state, run_id, qid);
-            Err(ApiError::new(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "Failed to deliver answer to the active run.",
-            )
-            .into_response())
-        }
+    if let Ok(()) = transport.submit(qid, answer).await {
+        Ok(())
+    } else {
+        release_run_answer_claim(state, run_id, qid);
+        Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Failed to deliver answer to the active run.",
+        )
+        .into_response())
     }
 }
 
