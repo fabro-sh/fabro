@@ -3796,6 +3796,20 @@ async fn execute_run_subprocess(state: Arc<AppState>, run_id: RunId) {
         }
     }
 
+    let superseded = {
+        let runs = state.runs.lock().expect("runs lock poisoned");
+        runs.get(&run_id)
+            .is_some_and(|managed_run| managed_run.worker_pid != Some(worker_pid))
+    };
+    if superseded {
+        tracing::info!(
+            run_id = %run_id,
+            worker_pid,
+            "Skipping stale worker cleanup for superseded run execution"
+        );
+        return;
+    }
+
     append_worker_exit_failure(&run_store, run_id, &wait_status).await;
 
     let final_state = match run_store.state().await {

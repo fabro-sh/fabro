@@ -878,6 +878,31 @@ fn attach_json_errors_without_prompting_for_human_input() {
         },
         "run_id": "[ULID]",
         "ts": "[TIMESTAMP]"
+      },
+      {
+        "event": "interview.started",
+        "id": "[EVENT_ID]",
+        "node_id": "approve",
+        "node_label": "approve",
+        "properties": {
+          "allow_freeform": false,
+          "options": [
+            {
+              "key": "A",
+              "label": "[A] Approve"
+            },
+            {
+              "key": "R",
+              "label": "[R] Revise"
+            }
+          ],
+          "question": "Approve?",
+          "question_id": "[ULID]",
+          "question_type": "multiple_choice",
+          "stage": "approve"
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
       }
     ]
     "#);
