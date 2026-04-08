@@ -69,6 +69,24 @@ async fn wait_for_question(app: &axum::Router, run_id: &str) -> serde_json::Valu
     panic!("question should have appeared");
 }
 
+async fn wait_for_run_state(
+    app: &axum::Router,
+    run_id: &str,
+    expected_status: &str,
+    expected_reason: &str,
+) -> serde_json::Value {
+    for _ in 0..POLL_ATTEMPTS {
+        let body = run_json(app, run_id).await;
+        if body["status"].as_str() == Some(expected_status)
+            && body["status_reason"].as_str() == Some(expected_reason)
+        {
+            return body;
+        }
+        sleep(POLL_INTERVAL).await;
+    }
+    panic!("run {run_id} did not reach status={expected_status} reason={expected_reason}");
+}
+
 const GATE_DOT: &str = r#"digraph GateTest {
     graph [goal="Test gate"]
     start [shape=Mdiamond]
@@ -197,8 +215,6 @@ async fn full_http_lifecycle_cancel() {
     assert_eq!(body["pending_control"], "cancel");
 
     // Verify the durable store view converges to cancelled failure.
-    let status = wait_for_run_status(&app, &run_id, &["failed"]).await;
-    assert_eq!(status, "failed");
-    let body = run_json(&app, &run_id).await;
+    let body = wait_for_run_state(&app, &run_id, "failed", "cancelled").await;
     assert_eq!(body["status_reason"], "cancelled");
 }

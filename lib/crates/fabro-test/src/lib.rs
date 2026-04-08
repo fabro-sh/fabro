@@ -1735,12 +1735,21 @@ mod tests {
 
     #[test]
     fn run_and_create_commands_include_test_labels() {
-        let _lock = env_lock().lock().expect("env lock poisoned");
-        let _guard = EnvGuard::set("NEXTEST_RUN_ID", Some("run-cmd-labels"));
-        let missing_bin_root = tempfile::tempdir().expect("failed to create temp dir");
-        // Keep the binary path missing so this unit test never bootstraps a
-        // shared server based on ambient filesystem state at /tmp/fabro.
-        let context = TestContext::new(missing_bin_root.path().join("fabro"));
+        let context_root = tempfile::tempdir().expect("failed to create temp dir");
+        let context = TestContext {
+            temp_dir: context_root.path().join("temp"),
+            home_dir: context_root.path().join("home"),
+            storage_dir: context_root.path().join("storage"),
+            test_case_id: "case-123".to_string(),
+            test_run_id: "run-cmd-labels".to_string(),
+            session_root: context_root.path().join("session"),
+            fabro_bin: context_root.path().join("fabro"),
+            filters: Vec::new(),
+            active_socket_path: context_root.path().join("fabro.sock"),
+            isolated_server: None,
+            managed_storage_dirs: Vec::new(),
+            _context_root: context_root,
+        };
 
         let run_args = context
             .run_cmd()

@@ -5182,11 +5182,17 @@ async fn cancel_run(
     if let Some(token) = &cancel_token {
         token.store(true, Ordering::SeqCst);
     }
-    if let Some(cancel_tx) = cancel_tx {
+    let sent_cancel_signal = if let Some(cancel_tx) = cancel_tx {
         let _ = cancel_tx.send(());
-    }
+        true
+    } else {
+        false
+    };
     if let Some(answer_transport) = answer_transport {
-        let _ = answer_transport.cancel_run().await;
+        if !(sent_cancel_signal && matches!(answer_transport, RunAnswerTransport::InProcess { .. }))
+        {
+            let _ = answer_transport.cancel_run().await;
+        }
     }
     if let Some(worker_pid) = worker_pid {
         #[cfg(unix)]
