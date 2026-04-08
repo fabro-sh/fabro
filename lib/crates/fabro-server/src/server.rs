@@ -40,7 +40,6 @@ use fabro_types::{
 };
 use fabro_util::redact::redact_jsonl_line;
 use fabro_util::version::FABRO_VERSION;
-use fabro_workflow::artifacts as workflow_artifacts;
 use fabro_workflow::error::FabroError;
 use fabro_workflow::handler::HandlerRegistry;
 use futures_util::stream;
@@ -2274,26 +2273,6 @@ fn payload_too_large_response(detail: impl Into<String>) -> Response {
     ApiError::new(StatusCode::PAYLOAD_TOO_LARGE, detail.into()).into_response()
 }
 
-#[allow(clippy::result_large_err)]
-fn run_artifacts_dir(run: &fabro_types::RunRecord, run_id: &RunId) -> PathBuf {
-    Storage::new(run.settings.storage_dir())
-        .run_scratch(run_id)
-        .artifact_files_dir()
-}
-
-#[allow(clippy::result_large_err)]
-fn scan_run_artifacts(
-    run: &fabro_types::RunRecord,
-    run_id: &RunId,
-    node_filter: Option<&str>,
-    retry_filter: Option<u32>,
-) -> Result<Vec<workflow_artifacts::ArtifactEntry>, Response> {
-    workflow_artifacts::scan_artifacts(&run_artifacts_dir(run, run_id), node_filter, retry_filter)
-        .map_err(|err| {
-            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
-        })
-}
-
 fn octet_stream_response(bytes: Bytes) -> Response {
     (
         StatusCode::OK,
@@ -4354,47 +4333,27 @@ async fn list_run_artifacts(
         Ok(id) => id,
         Err(response) => return response,
     };
-    let run = match load_run_record(state.as_ref(), &id).await {
-        Ok(run) => run,
-        Err(response) => return response,
-    };
-
-    if run.uses_object_backed_artifacts() {
-        return match state.artifact_store.list_for_run(&id).await {
-            Ok(entries) => Json(RunArtifactListResponse {
-                data: entries
-                    .into_iter()
-                    .map(|entry| RunArtifactEntry {
-                        stage_id: entry.node.to_string(),
-                        node_slug: entry.node.node_id().to_string(),
-                        retry: entry.node.visit().cast_signed(),
-                        relative_path: entry.filename,
-                        size: entry.size.cast_signed(),
-                    })
-                    .collect(),
-            })
-            .into_response(),
-            Err(err) => {
-                ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
-            }
-        };
+    if let Err(response) = load_run_record(state.as_ref(), &id).await {
+        return response;
     }
 
-    match scan_run_artifacts(&run, &id, None, None) {
+    match state.artifact_store.list_for_run(&id).await {
         Ok(entries) => Json(RunArtifactListResponse {
             data: entries
                 .into_iter()
                 .map(|entry| RunArtifactEntry {
-                    stage_id: StageId::new(entry.node_slug.clone(), entry.retry).to_string(),
-                    node_slug: entry.node_slug,
-                    retry: entry.retry.cast_signed(),
-                    relative_path: entry.relative_path,
+                    stage_id: entry.node.to_string(),
+                    node_slug: entry.node.node_id().to_string(),
+                    retry: entry.node.visit().cast_signed(),
+                    relative_path: entry.filename,
                     size: entry.size.cast_signed(),
                 })
                 .collect(),
         })
         .into_response(),
-        Err(response) => response,
+        Err(err) => {
+            ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+        }
     }
 }
 
@@ -4411,35 +4370,18 @@ async fn list_stage_artifacts(
         Ok(stage_id) => stage_id,
         Err(response) => return response,
     };
-    let run = match load_run_record(state.as_ref(), &id).await {
-        Ok(run) => run,
-        Err(response) => return response,
-    };
+    if let Err(response) = load_run_record(state.as_ref(), &id).await {
+        return response;
+    }
 
     match state.artifact_store.list_for_node(&id, &stage_id).await {
-        Ok(filenames) if run.uses_object_backed_artifacts() || !filenames.is_empty() => {
-            Json(ArtifactListResponse {
-                data: filenames
-                    .into_iter()
-                    .map(|filename| ArtifactEntry { filename })
-                    .collect(),
-            })
-            .into_response()
-        }
-        Ok(_) => {
-            match scan_run_artifacts(&run, &id, Some(stage_id.node_id()), Some(stage_id.visit())) {
-                Ok(entries) => Json(ArtifactListResponse {
-                    data: entries
-                        .into_iter()
-                        .map(|entry| ArtifactEntry {
-                            filename: entry.relative_path,
-                        })
-                        .collect(),
-                })
-                .into_response(),
-                Err(response) => response,
-            }
-        }
+        Ok(filenames) => Json(ArtifactListResponse {
+            data: filenames
+                .into_iter()
+                .map(|filename| ArtifactEntry { filename })
+                .collect(),
+        })
+        .into_response(),
         Err(err) => {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         }
@@ -4866,10 +4808,9 @@ async fn get_stage_artifact(
         Ok(path) => path,
         Err(response) => return response,
     };
-    let run = match load_run_record(state.as_ref(), &id).await {
-        Ok(run) => run,
-        Err(response) => return response,
-    };
+    if let Err(response) = load_run_record(state.as_ref(), &id).await {
+        return response;
+    }
 
     match state
         .artifact_store
@@ -4877,23 +4818,7 @@ async fn get_stage_artifact(
         .await
     {
         Ok(Some(bytes)) => octet_stream_response(bytes),
-        Ok(None) if run.uses_object_backed_artifacts() => {
-            ApiError::not_found("Artifact not found.").into_response()
-        }
-        Ok(None) => {
-            let artifact_path = run_artifacts_dir(&run, &id)
-                .join(stage_id.node_id())
-                .join(format!("retry_{}", stage_id.visit()))
-                .join(&relative_path);
-            match std::fs::read(&artifact_path) {
-                Ok(bytes) => octet_stream_response(Bytes::from(bytes)),
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                    ApiError::not_found("Artifact not found.").into_response()
-                }
-                Err(err) => ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
-                    .into_response(),
-            }
-        }
+        Ok(None) => ApiError::not_found("Artifact not found.").into_response(),
         Err(err) => {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         }
@@ -5981,7 +5906,7 @@ mod tests {
             .body(Body::empty())
             .unwrap();
 
-        let response = app.oneshot(req).await.unwrap();
+        let response = app.clone().oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
@@ -6843,7 +6768,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn legacy_runs_fallback_to_scratch_artifacts() {
+    async fn legacy_runs_do_not_fallback_to_scratch_artifacts() {
         let temp = tempfile::tempdir().unwrap();
         let mut settings = dry_run_settings();
         settings.storage_dir = Some(temp.path().join("storage"));
@@ -6857,37 +6782,8 @@ mod tests {
             .join("code")
             .join("retry_2")
             .join("src/lib.rs");
-        let retry_dir = artifact_path
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .to_path_buf();
         std::fs::create_dir_all(artifact_path.parent().unwrap()).unwrap();
         std::fs::write(&artifact_path, "legacy scratch only").unwrap();
-        std::fs::write(
-            retry_dir.join("manifest.json"),
-            serde_json::to_string(
-                &fabro_workflow::artifact_snapshot::ArtifactCollectionSummary {
-                    files_copied: 1,
-                    total_bytes: u64::try_from(b"legacy scratch only".len()).unwrap(),
-                    files_skipped: 0,
-                    download_errors: 0,
-                    hash_errors: 0,
-                    captured_assets: vec![
-                        fabro_workflow::artifact_snapshot::CapturedArtifactInfo {
-                            path: "src/lib.rs".to_string(),
-                            mime: "text/plain".to_string(),
-                            content_md5: "0".repeat(32),
-                            content_sha256: "0".repeat(64),
-                            bytes: u64::try_from(b"legacy scratch only".len()).unwrap(),
-                        },
-                    ],
-                },
-            )
-            .unwrap(),
-        )
-        .unwrap();
         let run_state = state
             .store
             .open_run_reader(&run_id)
@@ -6903,16 +6799,6 @@ mod tests {
                 .unwrap()
                 .uses_object_backed_artifacts()
         );
-        let scanned = workflow_artifacts::scan_artifacts(
-            &Storage::new(settings.storage_dir())
-                .run_scratch(&run_id)
-                .artifact_files_dir(),
-            Some("code"),
-            Some(2),
-        )
-        .unwrap();
-        assert_eq!(scanned.len(), 1);
-
         let req = Request::builder()
             .method("GET")
             .uri(api(&format!("/runs/{run_id}/stages/code@2/artifacts")))
@@ -6921,7 +6807,7 @@ mod tests {
         let response = app.clone().oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let body = body_json(response.into_body()).await;
-        assert_eq!(body["data"][0]["filename"], "src/lib.rs");
+        assert_eq!(body["data"].as_array().unwrap().len(), 0);
 
         let req = Request::builder()
             .method("GET")
@@ -6931,9 +6817,7 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         let response = app.oneshot(req).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-        assert_eq!(&bytes[..], b"legacy scratch only");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

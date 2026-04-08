@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context as _, Result};
@@ -10,7 +10,6 @@ use fabro_types::{
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_util::terminal::Styles;
 use fabro_util::text::strip_goal_decoration;
-use fabro_workflow::artifact_snapshot::collect_artifact_paths;
 use fabro_workflow::outcome::StageStatus;
 use fabro_workflow::records::Conclusion;
 use indicatif::HumanDuration;
@@ -155,7 +154,7 @@ pub(crate) async fn print_run_summary_with_client(
         resolve_final_output_with_client(client, run_id, checkpoint.as_ref()).await?;
     print_final_output(final_output.as_deref(), styles);
     if let Some(run_dir) = local_run_dir {
-        print_assets(run_dir, styles);
+        print_assets_with_client(client, run_id, run_dir, styles).await?;
     }
     Ok(())
 }
@@ -319,11 +318,33 @@ fn blob_id_from_response(response: &str) -> Option<RunBlobId> {
     parse_blob_ref(response).or_else(|| parse_legacy_blob_file_ref(response))
 }
 
-pub(crate) fn print_assets(run_dir: &Path, styles: &Styles) {
-    let run_scratch = RunScratch::new(run_dir);
-    let paths = collect_artifact_paths(&run_scratch.artifact_files_dir());
+async fn resolve_local_artifact_display_paths_with_client(
+    client: &server_client::ServerStoreClient,
+    run_id: &RunId,
+    run_dir: &Path,
+) -> Result<Vec<PathBuf>> {
+    let mut paths = Vec::new();
+    for entry in client.list_run_artifacts(run_id).await? {
+        let retry = u32::try_from(entry.retry)
+            .context("server returned invalid negative artifact retry")?;
+        let path = RunScratch::new(run_dir)
+            .artifact_stage_dir(&entry.node_slug, retry)
+            .join(entry.relative_path);
+        paths.push(path);
+    }
+    paths.sort();
+    Ok(paths)
+}
+
+async fn print_assets_with_client(
+    client: &server_client::ServerStoreClient,
+    run_id: &RunId,
+    run_dir: &Path,
+    styles: &Styles,
+) -> Result<()> {
+    let paths = resolve_local_artifact_display_paths_with_client(client, run_id, run_dir).await?;
     if paths.is_empty() {
-        return;
+        return Ok(());
     }
     let home = dirs::home_dir();
     eprintln!("\n{}", styles.bold.apply_to("=== Artifacts ==="));
@@ -331,14 +352,70 @@ pub(crate) fn print_assets(run_dir: &Path, styles: &Styles) {
         let display = match &home {
             Some(home_dir) => {
                 let home_str = home_dir.to_string_lossy();
-                if let Some(rest) = path.strip_prefix(home_str.as_ref()) {
+                if let Some(rest) = path.to_string_lossy().strip_prefix(home_str.as_ref()) {
                     format!("~{rest}")
                 } else {
-                    path.clone()
+                    path.display().to_string()
                 }
             }
-            None => path.clone(),
+            None => path.display().to_string(),
         };
         eprintln!("{display}");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use httpmock::MockServer;
+
+    #[tokio::test]
+    async fn local_artifact_display_paths_come_from_server_artifact_list() {
+        let server = MockServer::start();
+        let run_id: RunId = "01JT56VE4Z5NZ814GZN2JZD65A".parse().unwrap();
+        let run_dir = tempfile::tempdir().unwrap();
+
+        server.mock(|when, then| {
+            when.method("GET")
+                .path(format!("/api/v1/runs/{run_id}/artifacts"));
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .body(
+                    serde_json::json!({
+                        "data": [
+                            {
+                                "stage_id": "test@2",
+                                "node_slug": "test",
+                                "retry": 2,
+                                "relative_path": "reports/junit.xml",
+                                "size": 123
+                            }
+                        ]
+                    })
+                    .to_string(),
+                );
+        });
+
+        let client = crate::server_client::connect_server_target_direct(&format!(
+            "{}/api/v1",
+            server.base_url()
+        ))
+        .await
+        .unwrap();
+
+        let paths =
+            resolve_local_artifact_display_paths_with_client(&client, &run_id, run_dir.path())
+                .await
+                .unwrap();
+
+        assert_eq!(
+            paths,
+            vec![
+                RunScratch::new(run_dir.path())
+                    .artifact_stage_dir("test", 2)
+                    .join("reports/junit.xml")
+            ]
+        );
     }
 }

@@ -223,34 +223,12 @@ Collected assets are written to the run's directory, organized by node and retry
 ~/.fabro/scratch/{run_id}/
   cache/
     artifacts/
-      assets/
+      files/
         {node_slug}/
           retry_1/
             test-results/
               screenshot.png
               video.webm
-            manifest.json
-```
-
-Each collection writes a `manifest.json` summarizing what was captured:
-
-```json
-{
-  "files_copied": 3,
-  "total_bytes": 245760,
-  "files_skipped": 0,
-  "download_errors": 0,
-  "hash_errors": 0,
-  "captured_assets": [
-    {
-      "path": "test-results/screenshot.png",
-      "mime": "image/png",
-      "content_md5": "a1b2c3...",
-      "content_sha256": "d4e5f6...",
-      "bytes": 81920
-    }
-  ]
-}
 ```
 
 ## Observability

@@ -12683,16 +12683,13 @@ async fn asset_collection_local_sandbox_success() {
     let report_content = std::fs::read_to_string(&report_path).unwrap();
     assert!(report_content.contains("testsuites"));
 
-    // Check manifest.json was written
+    // Check manifest.json is no longer written
     let manifest_path = artifacts_dir.join("manifest.json");
     assert!(
-        manifest_path.exists(),
-        "manifest.json should exist at {}",
+        !manifest_path.exists(),
+        "manifest.json should not exist at {}",
         manifest_path.display()
     );
-    let manifest: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
-    assert!(manifest["files_copied"].as_u64().unwrap() >= 1);
 
     // Check that ArtifactCaptured events were emitted
     let captured_events = events.lock().unwrap();
@@ -12893,7 +12890,7 @@ async fn asset_collection_docker_sandbox() {
     assert!(content.contains("testsuites"));
 
     let manifest_path = artifacts_dir.join("manifest.json");
-    assert!(manifest_path.exists(), "manifest.json should exist");
+    assert!(!manifest_path.exists(), "manifest.json should not exist");
 
     sandbox.cleanup().await.unwrap();
 }

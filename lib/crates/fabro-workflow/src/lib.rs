@@ -115,7 +115,6 @@ pub fn extract_stage_durations_from_events(events: &[EventEnvelope]) -> HashMap<
 pub mod artifact;
 pub mod artifact_snapshot;
 pub mod artifact_upload;
-pub mod artifacts;
 pub(crate) mod condition;
 pub mod context;
 pub mod devcontainer_bridge;

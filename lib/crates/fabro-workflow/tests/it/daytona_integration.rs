@@ -1368,7 +1368,7 @@ async fn daytona_asset_collection() {
     assert!(content.contains("testsuites"));
 
     let manifest_path = artifacts_dir.join("manifest.json");
-    assert!(manifest_path.exists(), "manifest.json should exist");
+    assert!(!manifest_path.exists(), "manifest.json should not exist");
 
     env.cleanup().await.unwrap();
 }

@@ -275,34 +275,6 @@ fn compute_artifact_info(
     })
 }
 
-fn write_artifact_manifest(
-    artifact_capture_dir: &Path,
-    summary: &ArtifactCollectionSummary,
-) -> Result<(), String> {
-    let json = serde_json::to_string_pretty(summary)
-        .map_err(|e| format!("failed to serialize manifest: {e}"))?;
-    let manifest_path = artifact_capture_dir.join("manifest.json");
-    if let Some(parent) = manifest_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            format!(
-                "failed to create manifest directory {}: {e}",
-                parent.display()
-            )
-        })?;
-    }
-    std::fs::write(&manifest_path, json)
-        .map_err(|e| format!("failed to write {}: {e}", manifest_path.display()))?;
-    Ok(())
-}
-
-fn cleanup_artifact_capture_dir(artifact_capture_dir: &Path) -> Result<(), String> {
-    if !artifact_capture_dir.exists() {
-        return Ok(());
-    }
-    std::fs::remove_dir_all(artifact_capture_dir)
-        .map_err(|e| format!("failed to clean up {}: {e}", artifact_capture_dir.display()))
-}
-
 /// Collect artifact files matching the configured globs that were created during this stage.
 pub async fn collect_artifacts(
     sandbox: &dyn Sandbox,
@@ -365,61 +337,14 @@ pub async fn collect_artifacts(
         }
     }
 
-    // Write manifest.json
-    let summary = ArtifactCollectionSummary {
+    Ok(ArtifactCollectionSummary {
         files_copied,
         total_bytes,
         files_skipped,
         download_errors,
         hash_errors,
         captured_assets,
-    };
-
-    if files_copied > 0 {
-        if let Err(e) = write_artifact_manifest(artifact_capture_dir, &summary) {
-            let cleanup_suffix = match cleanup_artifact_capture_dir(artifact_capture_dir) {
-                Ok(()) => String::new(),
-                Err(cleanup_err) => format!("; cleanup failed: {cleanup_err}"),
-            };
-            return Err(format!("{e}{cleanup_suffix}"));
-        }
-    }
-
-    Ok(summary)
-}
-
-/// Collect all artifact paths from manifest files under `{artifacts_dir}/*/retry_*/manifest.json`.
-///
-/// Returns the full on-disk paths to the downloaded artifact files.
-pub fn collect_artifact_paths(artifacts_dir: &Path) -> Vec<String> {
-    let Ok(nodes) = std::fs::read_dir(artifacts_dir) else {
-        return Vec::new();
-    };
-
-    let mut all_paths = Vec::new();
-    for node_entry in nodes.flatten() {
-        if !node_entry.path().is_dir() {
-            continue;
-        }
-        let Ok(retries) = std::fs::read_dir(node_entry.path()) else {
-            continue;
-        };
-        for retry_entry in retries.flatten() {
-            let manifest = retry_entry.path().join("manifest.json");
-            let Ok(contents) = std::fs::read_to_string(&manifest) else {
-                continue;
-            };
-            let Ok(summary) = serde_json::from_str::<ArtifactCollectionSummary>(&contents) else {
-                continue;
-            };
-            let retry_dir = retry_entry.path();
-            for asset in &summary.captured_assets {
-                let full_path = retry_dir.join(&asset.path);
-                all_paths.push(full_path.to_string_lossy().into_owned());
-            }
-        }
-    }
-    all_paths
+    })
 }
 
 #[cfg(test)]
@@ -743,9 +668,9 @@ mod tests {
         let content = std::fs::read_to_string(&dest).unwrap();
         assert_eq!(content, "<test/>");
 
-        // Check manifest
+        // No manifest is written; the durable artifact record lives elsewhere.
         let manifest = stage_dir.path().join("manifest.json");
-        assert!(manifest.exists());
+        assert!(!manifest.exists());
     }
 
     #[tokio::test]
@@ -785,123 +710,6 @@ mod tests {
         assert_eq!(summary.files_copied, 0);
         assert_eq!(summary.download_errors, 2);
         assert_eq!(summary.hash_errors, 0);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn write_artifact_manifest_failure_cleans_up_artifact_capture_dir() {
-        use std::fs::Permissions;
-        use std::os::unix::fs::PermissionsExt;
-
-        let parent = tempfile::tempdir().unwrap();
-        let stage_dir = parent.path().join("stage");
-        fs::create_dir_all(stage_dir.join("test-results")).unwrap();
-        fs::write(stage_dir.join("test-results/report.xml"), "<test/>").unwrap();
-        fs::set_permissions(&stage_dir, Permissions::from_mode(0o555)).unwrap();
-
-        let summary = ArtifactCollectionSummary {
-            files_copied: 1,
-            total_bytes: 7,
-            files_skipped: 0,
-            download_errors: 0,
-            hash_errors: 0,
-            captured_assets: vec![CapturedArtifactInfo {
-                path: "test-results/report.xml".to_string(),
-                mime: "text/xml".to_string(),
-                content_md5: "f1430934c390c118ed2f148e1d44d36c".to_string(),
-                content_sha256: "28e51ddac37391b99c2b9053f1122d0bf84b02365e6fd8c6e8667378bd00f436"
-                    .to_string(),
-                bytes: 7,
-            }],
-        };
-
-        let err = write_artifact_manifest(&stage_dir, &summary).unwrap_err();
-        assert!(err.contains("failed to write"));
-
-        fs::set_permissions(&stage_dir, Permissions::from_mode(0o755)).unwrap();
-        cleanup_artifact_capture_dir(&stage_dir).unwrap();
-        assert!(!stage_dir.exists());
-    }
-
-    #[test]
-    fn collect_artifact_paths_from_manifests() {
-        let tmp = tempfile::tempdir().unwrap();
-        let base = tmp.path();
-        let artifacts_dir = base.join("cache/artifacts/files");
-
-        // Create two node directories with manifests
-        let node_a = artifacts_dir.join("node_a/retry_1");
-        std::fs::create_dir_all(&node_a).unwrap();
-        std::fs::write(
-            node_a.join("manifest.json"),
-            serde_json::to_string(&ArtifactCollectionSummary {
-                files_copied: 2,
-                total_bytes: 2048,
-                files_skipped: 0,
-                download_errors: 0,
-                hash_errors: 0,
-                captured_assets: vec![
-                    CapturedArtifactInfo {
-                        path: "test-results/report.xml".to_string(),
-                        mime: "text/xml".to_string(),
-                        content_md5: "md5-report".to_string(),
-                        content_sha256: "sha256-report".to_string(),
-                        bytes: 1024,
-                    },
-                    CapturedArtifactInfo {
-                        path: "test-results/screenshot.png".to_string(),
-                        mime: "image/png".to_string(),
-                        content_md5: "md5-screenshot".to_string(),
-                        content_sha256: "sha256-screenshot".to_string(),
-                        bytes: 1024,
-                    },
-                ],
-            })
-            .unwrap(),
-        )
-        .unwrap();
-
-        let node_b = artifacts_dir.join("node_b/retry_1");
-        std::fs::create_dir_all(&node_b).unwrap();
-        std::fs::write(
-            node_b.join("manifest.json"),
-            serde_json::to_string(&ArtifactCollectionSummary {
-                files_copied: 1,
-                total_bytes: 512,
-                files_skipped: 0,
-                download_errors: 0,
-                hash_errors: 0,
-                captured_assets: vec![CapturedArtifactInfo {
-                    path: "coverage/lcov.info".to_string(),
-                    mime: "application/octet-stream".to_string(),
-                    content_md5: "md5-lcov".to_string(),
-                    content_sha256: "sha256-lcov".to_string(),
-                    bytes: 512,
-                }],
-            })
-            .unwrap(),
-        )
-        .unwrap();
-
-        let paths = collect_artifact_paths(&artifacts_dir);
-        assert_eq!(paths.len(), 3);
-        let base_str = base.to_string_lossy();
-        assert!(paths.contains(&format!(
-            "{base_str}/cache/artifacts/files/node_a/retry_1/test-results/report.xml"
-        )));
-        assert!(paths.contains(&format!(
-            "{base_str}/cache/artifacts/files/node_a/retry_1/test-results/screenshot.png"
-        )));
-        assert!(paths.contains(&format!(
-            "{base_str}/cache/artifacts/files/node_b/retry_1/coverage/lcov.info"
-        )));
-    }
-
-    #[test]
-    fn collect_asset_paths_empty_when_no_assets() {
-        let tmp = tempfile::tempdir().unwrap();
-        let paths = collect_artifact_paths(&tmp.path().join("cache/artifacts/files"));
-        assert!(paths.is_empty());
     }
 
     #[test]

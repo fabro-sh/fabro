@@ -348,7 +348,7 @@ include = ["assets/**"]
     let run = run_local_workflow(context, &workspace_dir, "run.toml");
     assert!(
         run.run_dir
-            .join("cache/artifacts/files/retry_assets/retry_2/manifest.json")
+            .join("cache/artifacts/files/retry_assets/retry_2/assets/retry/report.txt")
             .exists(),
         "setup_artifact_run should materialize retry_2 assets"
     );
