@@ -28,7 +28,7 @@ The naming format is `YYYYMMDD-{run_id}`, where `run_id` is the ULID assigned to
 These paths are local runtime state and caches, not the canonical run record.
 
 - **`worktree/`** — When running in worktree mode, Fabro creates a Git worktree here as the working directory for agents and commands.
-- **`runtime/`** — Local runtime files. Today this is mainly materialized blob payloads under `runtime/blobs/` and worker stderr logs for server-managed subprocesses.
+- **`runtime/`** — Local runtime files. Today this is mainly materialized blob payloads under `runtime/blobs/`.
 - **`cache/artifacts/files/`** — Captured artifact files organized by node and retry, plus a `manifest.json` for each retry directory.
 - **`nodes/{manager_node}_{visit}/child/`** — Nested scratch directories for manager-loop child workflows.
 
