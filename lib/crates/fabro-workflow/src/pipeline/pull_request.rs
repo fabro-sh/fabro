@@ -1092,6 +1092,8 @@ mod tests {
             labels: HashMap::new(),
             artifact_storage: None,
             provenance: None,
+            manifest_blob: None,
+            definition_blob: None,
         };
         append_event(
             &run_store,
@@ -1112,6 +1114,7 @@ mod tests {
                 db_prefix: None,
                 artifact_storage: run_record.artifact_storage,
                 provenance: run_record.provenance.clone(),
+                manifest_blob: None,
             },
         )
         .await
@@ -1164,6 +1167,8 @@ mod tests {
             labels: HashMap::new(),
             artifact_storage: None,
             provenance: None,
+            manifest_blob: None,
+            definition_blob: None,
         };
         append_event(
             &run_store,
@@ -1184,6 +1189,7 @@ mod tests {
                 db_prefix: None,
                 artifact_storage: run_record.artifact_storage,
                 provenance: run_record.provenance.clone(),
+                manifest_blob: None,
             },
         )
         .await
@@ -1389,6 +1395,8 @@ mod tests {
             labels: std::collections::HashMap::new(),
             artifact_storage: None,
             provenance: None,
+            manifest_blob: None,
+            definition_blob: None,
         };
         append_event(
             &run_store,
@@ -1409,6 +1417,7 @@ mod tests {
                 db_prefix: None,
                 artifact_storage: run_record.artifact_storage,
                 provenance: run_record.provenance.clone(),
+                manifest_blob: None,
             },
         )
         .await

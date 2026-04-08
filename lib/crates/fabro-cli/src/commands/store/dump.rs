@@ -344,6 +344,8 @@ mod tests {
             labels: HashMap::from([("team".to_string(), "infra".to_string())]),
             artifact_storage: None,
             provenance: None,
+            manifest_blob: None,
+            definition_blob: None,
         }
     }
 
@@ -490,6 +492,7 @@ mod tests {
                 db_prefix: None,
                 artifact_storage: run_record.artifact_storage,
                 provenance: run_record.provenance.clone(),
+                manifest_blob: None,
             },
         )
         .await

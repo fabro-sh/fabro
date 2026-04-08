@@ -2,8 +2,7 @@ use fabro_types::{RunBlobId, RunId};
 
 const RUNS_PREFIX: &str = "runs#";
 const RUNS_INDEX_BY_START_PREFIX: &str = "runs#_index#by-start#";
-const BLOBS_PREFIX: &str = "blobs#";
-const GLOBAL_BLOBS_PREFIX: &str = "blobs#sha256#";
+const BLOBS_PREFIX: &str = "blobs#sha256#";
 
 pub(crate) fn runs_index_by_start_prefix() -> &'static str {
     RUNS_INDEX_BY_START_PREFIX
@@ -28,18 +27,12 @@ pub(crate) fn run_event_key(run_id: &RunId, seq: u32, epoch_ms: i64) -> String {
     format!("{}{seq:06}-{epoch_ms}", run_events_prefix(run_id))
 }
 
-pub(crate) fn blobs_prefix(run_id: &RunId) -> String {
-    let _ = run_id;
-    GLOBAL_BLOBS_PREFIX.to_string()
+pub(crate) fn blobs_prefix() -> &'static str {
+    BLOBS_PREFIX
 }
 
-pub(crate) fn blob_key(run_id: &RunId, id: &RunBlobId) -> String {
-    let _ = run_id;
-    format!("{GLOBAL_BLOBS_PREFIX}{id}")
-}
-
-pub(crate) fn legacy_blob_key(run_id: &RunId, id: &RunBlobId) -> String {
-    format!("{BLOBS_PREFIX}{run_id}#{id}")
+pub(crate) fn blob_key(id: &RunBlobId) -> String {
+    format!("{BLOBS_PREFIX}{id}")
 }
 
 pub(crate) fn parse_event_seq(key: &str) -> Option<u32> {
@@ -52,13 +45,7 @@ pub(crate) fn parse_event_seq(key: &str) -> Option<u32> {
 }
 
 pub(crate) fn parse_blob_id(key: &str) -> Option<RunBlobId> {
-    if let Some(blob_id) = key.strip_prefix(GLOBAL_BLOBS_PREFIX) {
-        return blob_id.parse().ok();
-    }
-
-    let rest = key.strip_prefix(BLOBS_PREFIX)?;
-    let (_, blob_id) = rest.split_once('#')?;
-    blob_id.parse().ok()
+    key.strip_prefix(BLOBS_PREFIX)?.parse().ok()
 }
 
 pub(crate) fn parse_run_id_from_index_key(key: &str) -> Option<RunId> {
@@ -99,12 +86,8 @@ mod tests {
 
     #[test]
     fn blob_keys_match_spec() {
-        let run_id: RunId = "01JT56VE4Z5NZ814GZN2JZD65A".parse().unwrap();
         let blob_id = RunBlobId::new(b"summary");
-        assert_eq!(
-            blob_key(&run_id, &blob_id),
-            format!("blobs#sha256#{blob_id}")
-        );
+        assert_eq!(blob_key(&blob_id), format!("blobs#sha256#{blob_id}"));
     }
 
     #[test]
@@ -119,10 +102,6 @@ mod tests {
             Some(blob_id)
         );
         assert_eq!(
-            parse_blob_id(&format!("blobs#01JT56VE4Z5NZ814GZN2JZD65A#{blob_id}")),
-            Some(blob_id)
-        );
-        assert_eq!(
             parse_run_id_from_index_key(
                 "runs#_index#by-start#2026-03-27#01JT56VE4Z5NZ814GZN2JZD65A"
             ),
@@ -134,5 +113,9 @@ mod tests {
     fn parse_helpers_reject_invalid_keys() {
         assert_eq!(parse_event_seq("runs#not-a-run#events#not-a-seq"), None);
         assert_eq!(parse_blob_id("blobs#not-a-uuid"), None);
+        assert_eq!(
+            parse_blob_id("blobs#01JT56VE4Z5NZ814GZN2JZD65A#not-a-blob"),
+            None
+        );
     }
 }

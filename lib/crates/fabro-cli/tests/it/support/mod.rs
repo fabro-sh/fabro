@@ -19,6 +19,14 @@ macro_rules! fabro_json_snapshot {
             r#""duration_ms": "[DURATION_MS]""#.to_string(),
         ));
         filters.push((
+            r#""manifest_blob":\s*"[0-9a-f]{64}""#.to_string(),
+            r#""manifest_blob": "[BLOB_ID]""#.to_string(),
+        ));
+        filters.push((
+            r#""definition_blob":\s*"[0-9a-f]{64}""#.to_string(),
+            r#""definition_blob": "[BLOB_ID]""#.to_string(),
+        ));
+        filters.push((
             r#""run_dir":\s*"\[STORAGE_DIR\]/scratch/\d{8}-\[ULID\]""#.to_string(),
             r#""run_dir": "[RUN_DIR]""#.to_string(),
         ));

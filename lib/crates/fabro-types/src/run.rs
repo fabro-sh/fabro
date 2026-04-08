@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::graph::Graph;
+use crate::run_blob_id::RunBlobId;
 use crate::run_id::RunId;
 use crate::settings::Settings;
 
@@ -74,6 +75,10 @@ pub struct RunRecord {
     pub artifact_storage: Option<RunArtifactStorage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provenance: Option<RunProvenance>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_blob: Option<RunBlobId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub definition_blob: Option<RunBlobId>,
 }
 
 impl RunRecord {
