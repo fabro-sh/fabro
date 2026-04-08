@@ -540,7 +540,7 @@ impl CodergenBackend for AgentApiBackend {
                             last_err = FabroError::Llm(err);
                         }
                         Err(fabro_agent::AgentError::Llm(err)) => return Err(FabroError::Llm(err)),
-                        Err(fabro_agent::AgentError::Aborted(_)) => {
+                        Err(fabro_agent::AgentError::Interrupted(_)) => {
                             return Err(FabroError::Cancelled);
                         }
                         Err(other) => {
@@ -554,7 +554,7 @@ impl CodergenBackend for AgentApiBackend {
                 if succeeded { Ok(()) } else { Err(last_err) }
             }
             Err(fabro_agent::AgentError::Llm(sdk_err)) => Err(FabroError::Llm(sdk_err)),
-            Err(fabro_agent::AgentError::Aborted(_)) => Err(FabroError::Cancelled),
+            Err(fabro_agent::AgentError::Interrupted(_)) => Err(FabroError::Cancelled),
             Err(other) => Err(FabroError::handler(format!(
                 "Agent session failed: {other}"
             ))),

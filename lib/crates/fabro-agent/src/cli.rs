@@ -1,5 +1,5 @@
 use crate::config::{ToolApprovalAdapter, ToolApprovalFn, ToolHookCallback};
-use crate::error::AbortReason;
+use crate::error::InterruptReason;
 use crate::tools::WebFetchSummarizer;
 use crate::truncation;
 use crate::{
@@ -490,15 +490,15 @@ pub async fn run_with_args_and_client(
 
     // SIGINT handler
     let cancel_token = session.cancel_token();
-    let abort_reason = session.abort_reason_handle();
+    let interrupt_reason = session.interrupt_reason_handle();
     tokio::spawn(async move {
         signal::ctrl_c().await.ok();
         {
-            let mut guard = abort_reason
+            let mut guard = interrupt_reason
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             if guard.is_none() {
-                *guard = Some(AbortReason::Cancelled);
+                *guard = Some(InterruptReason::Cancelled);
             }
         }
         cancel_token.cancel();

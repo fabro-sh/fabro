@@ -69,10 +69,10 @@ async fn read_line(prompt: &str) -> PromptRead {
 
 fn parse_non_tty_choice_response(question: &Question, prompt_read: PromptRead) -> Answer {
     let PromptRead::Line(response) = prompt_read else {
-        return Answer::aborted();
+        return Answer::interrupted();
     };
     if response.trim().is_empty() {
-        return Answer::aborted();
+        return Answer::interrupted();
     }
     if let Some(answer) = find_matching_option(&response, &question.options) {
         return answer;
@@ -80,26 +80,26 @@ fn parse_non_tty_choice_response(question: &Question, prompt_read: PromptRead) -
     if question.allow_freeform {
         return Answer::text(response);
     }
-    find_matching_option(&response, &question.options).unwrap_or_else(Answer::aborted)
+    find_matching_option(&response, &question.options).unwrap_or_else(Answer::interrupted)
 }
 
 fn parse_non_tty_confirm_response(prompt_read: PromptRead) -> Answer {
     let PromptRead::Line(response) = prompt_read else {
-        return Answer::aborted();
+        return Answer::interrupted();
     };
     match response.trim().to_lowercase().as_str() {
         "y" | "yes" => Answer::yes(),
         "n" | "no" => Answer::no(),
-        _ => Answer::aborted(),
+        _ => Answer::interrupted(),
     }
 }
 
 fn parse_non_tty_freeform_response(prompt_read: PromptRead) -> Answer {
     let PromptRead::Line(response) = prompt_read else {
-        return Answer::aborted();
+        return Answer::interrupted();
     };
     if response.trim().is_empty() {
-        Answer::aborted()
+        Answer::interrupted()
     } else {
         Answer::text(response)
     }
@@ -132,10 +132,10 @@ fn ask_select_interactive(question: &Question) -> Answer {
                 .with_prompt("Enter your response")
                 .interact_on(&Term::stderr())
                 .map_or_else(
-                    |_| Answer::aborted(),
+                    |_| Answer::interrupted(),
                     |response| {
                         if response.trim().is_empty() {
-                            Answer::aborted()
+                            Answer::interrupted()
                         } else {
                             Answer::text(response)
                         }
@@ -150,7 +150,7 @@ fn ask_select_interactive(question: &Question) -> Answer {
                 text: None,
             }
         }
-        _ => Answer::aborted(),
+        _ => Answer::interrupted(),
     }
 }
 
@@ -175,7 +175,7 @@ fn ask_multi_select_interactive(question: &Question) -> Answer {
                 .collect();
             Answer::multi_selected(keys)
         }
-        _ => Answer::aborted(),
+        _ => Answer::interrupted(),
     }
 }
 
@@ -189,7 +189,7 @@ fn ask_confirm_interactive(question: &Question) -> Answer {
     match confirmed {
         Ok(Some(true)) => Answer::yes(),
         Ok(Some(false)) => Answer::no(),
-        _ => Answer::aborted(),
+        _ => Answer::interrupted(),
     }
 }
 
@@ -199,10 +199,10 @@ fn ask_freeform_interactive(question: &Question) -> Answer {
         .with_prompt(&question.text)
         .interact_on(&Term::stderr())
         .map_or_else(
-            |_| Answer::aborted(),
+            |_| Answer::interrupted(),
             |response| {
                 if response.trim().is_empty() {
-                    Answer::aborted()
+                    Answer::interrupted()
                 } else {
                     Answer::text(response)
                 }
@@ -229,7 +229,7 @@ impl Interviewer for ConsoleInterviewer {
                 QuestionType::Freeform => ask_freeform_interactive(&q),
             })
             .await
-            .unwrap_or_else(|_| Answer::aborted());
+            .unwrap_or_else(|_| Answer::interrupted());
         }
 
         // Non-TTY fallback: line-based stdin reading
@@ -338,7 +338,7 @@ mod tests {
     }
 
     #[test]
-    fn non_tty_multiple_choice_eof_returns_aborted() {
+    fn non_tty_multiple_choice_eof_returns_interrupted() {
         let mut question = Question::new("Approve?", QuestionType::MultipleChoice);
         question.options = vec![crate::QuestionOption {
             key: "A".to_string(),
@@ -346,18 +346,18 @@ mod tests {
         }];
 
         let answer = parse_non_tty_choice_response(&question, PromptRead::Eof);
-        assert_eq!(answer.value, AnswerValue::Aborted);
+        assert_eq!(answer.value, AnswerValue::Interrupted);
     }
 
     #[test]
-    fn non_tty_confirmation_invalid_response_returns_aborted() {
+    fn non_tty_confirmation_invalid_response_returns_interrupted() {
         let answer = parse_non_tty_confirm_response(PromptRead::Line(String::new()));
-        assert_eq!(answer.value, AnswerValue::Aborted);
+        assert_eq!(answer.value, AnswerValue::Interrupted);
     }
 
     #[test]
-    fn non_tty_freeform_blank_response_returns_aborted() {
+    fn non_tty_freeform_blank_response_returns_interrupted() {
         let answer = parse_non_tty_freeform_response(PromptRead::Line("   ".to_string()));
-        assert_eq!(answer.value, AnswerValue::Aborted);
+        assert_eq!(answer.value, AnswerValue::Interrupted);
     }
 }

@@ -49,7 +49,8 @@ pub enum WorkerControlMessage {
 pub enum WorkerControlAnswer {
     Yes,
     No,
-    Aborted,
+    Cancelled,
+    Interrupted,
     Skipped,
     Timeout,
     Selected { key: String },
@@ -62,7 +63,8 @@ impl From<Answer> for WorkerControlAnswer {
         match answer.value {
             AnswerValue::Yes => Self::Yes,
             AnswerValue::No => Self::No,
-            AnswerValue::Aborted => Self::Aborted,
+            AnswerValue::Cancelled => Self::Cancelled,
+            AnswerValue::Interrupted => Self::Interrupted,
             AnswerValue::Skipped => Self::Skipped,
             AnswerValue::Timeout => Self::Timeout,
             AnswerValue::Selected(key) => Self::Selected { key },
@@ -77,7 +79,8 @@ impl From<WorkerControlAnswer> for Answer {
         match answer {
             WorkerControlAnswer::Yes => Self::yes(),
             WorkerControlAnswer::No => Self::no(),
-            WorkerControlAnswer::Aborted => Self::aborted(),
+            WorkerControlAnswer::Cancelled => Self::cancelled(),
+            WorkerControlAnswer::Interrupted => Self::interrupted(),
             WorkerControlAnswer::Skipped => Self::skipped(),
             WorkerControlAnswer::Timeout => Self::timeout(),
             WorkerControlAnswer::Selected { key } => Self {

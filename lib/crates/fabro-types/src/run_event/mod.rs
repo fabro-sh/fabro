@@ -95,8 +95,8 @@ pub enum EventBody {
     InterviewCompleted(InterviewCompletedProps),
     #[serde(rename = "interview.timeout")]
     InterviewTimeout(InterviewTimeoutProps),
-    #[serde(rename = "interview.aborted")]
-    InterviewAborted(InterviewAbortedProps),
+    #[serde(rename = "interview.interrupted")]
+    InterviewInterrupted(InterviewInterruptedProps),
     #[serde(rename = "checkpoint.completed")]
     CheckpointCompleted(CheckpointCompletedProps),
     #[serde(rename = "checkpoint.failed")]
@@ -312,7 +312,7 @@ impl EventBody {
             Self::InterviewStarted(_) => "interview.started",
             Self::InterviewCompleted(_) => "interview.completed",
             Self::InterviewTimeout(_) => "interview.timeout",
-            Self::InterviewAborted(_) => "interview.aborted",
+            Self::InterviewInterrupted(_) => "interview.interrupted",
             Self::CheckpointCompleted(_) => "checkpoint.completed",
             Self::CheckpointFailed(_) => "checkpoint.failed",
             Self::GitCommit(_) => "git.commit",
@@ -438,6 +438,7 @@ fn is_known_event_name(event: &str) -> bool {
             | "interview.started"
             | "interview.completed"
             | "interview.timeout"
+            | "interview.interrupted"
             | "checkpoint.completed"
             | "checkpoint.failed"
             | "git.commit"
@@ -789,6 +790,19 @@ mod tests {
             serialized["properties"]["manifest_blob"],
             line["properties"]["manifest_blob"]
         );
+    }
+
+    #[test]
+    fn interview_interrupted_kind_matches_event_name() {
+        let body = EventBody::InterviewInterrupted(InterviewInterruptedProps {
+            question_id: "q-1".to_string(),
+            question: "approve?".to_string(),
+            stage: "gate".to_string(),
+            reason: "interrupted".to_string(),
+            duration_ms: 12,
+        });
+
+        assert_eq!(body.event_name(), "interview.interrupted");
     }
 
     #[test]

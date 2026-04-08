@@ -121,7 +121,7 @@ async fn read_worker_control_stream<R>(
                 apply_worker_control_line(&interviewer, &cancel_token, &line).await;
             }
             Ok(None) | Err(_) => {
-                interviewer.abort_all().await;
+                interviewer.interrupt_all().await;
                 break;
             }
         }
@@ -147,7 +147,7 @@ async fn apply_worker_control_line(
         }
         WorkerControlMessage::RunCancel => {
             cancel_token.store(true, Ordering::SeqCst);
-            interviewer.abort_all().await;
+            interviewer.interrupt_all().await;
         }
     }
 }
@@ -633,7 +633,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn worker_control_line_cancel_sets_cancel_token_and_aborts_pending_interviews() {
+    async fn worker_control_line_cancel_sets_cancel_token_and_interrupts_pending_interviews() {
         let interviewer = Arc::new(ControlInterviewer::new());
         let cancel_token = Arc::new(AtomicBool::new(false));
         let mut question = Question::new("Approve?", QuestionType::YesNo);
@@ -650,12 +650,12 @@ mod tests {
         .await;
 
         let answer: fabro_interview::Answer = answer_task.await.unwrap();
-        assert_eq!(answer.value, AnswerValue::Aborted);
+        assert_eq!(answer.value, AnswerValue::Interrupted);
         assert!(cancel_token.load(Ordering::SeqCst));
     }
 
     #[tokio::test]
-    async fn worker_control_stream_eof_aborts_pending_interviews() {
+    async fn worker_control_stream_eof_interrupts_pending_interviews() {
         let interviewer = Arc::new(ControlInterviewer::new());
         let cancel_token = Arc::new(AtomicBool::new(false));
         let mut question = Question::new("Approve?", QuestionType::YesNo);
@@ -671,7 +671,7 @@ mod tests {
         .await;
 
         let answer: fabro_interview::Answer = answer_task.await.unwrap();
-        assert_eq!(answer.value, AnswerValue::Aborted);
+        assert_eq!(answer.value, AnswerValue::Interrupted);
         assert!(!cancel_token.load(Ordering::SeqCst));
     }
 }

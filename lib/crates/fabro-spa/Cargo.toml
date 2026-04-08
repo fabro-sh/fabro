@@ -1,0 +1,16 @@
+[package]
+name = "fabro-spa"
+edition.workspace = true
+version.workspace = true
+publish = false
+license.workspace = true
+description = "Embedded production SPA assets for Fabro"
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+rust-embed = { workspace = true, features = ["compression", "include-exclude", "debug-embed", "deterministic-timestamps"] }

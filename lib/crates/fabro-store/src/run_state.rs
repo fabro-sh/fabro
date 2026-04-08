@@ -237,7 +237,7 @@ impl RunProjection {
                     self.pending_interviews.remove(&props.question_id);
                 }
             }
-            EventBody::InterviewAborted(props) => {
+            EventBody::InterviewInterrupted(props) => {
                 if !props.question_id.is_empty() {
                     self.pending_interviews.remove(&props.question_id);
                 }

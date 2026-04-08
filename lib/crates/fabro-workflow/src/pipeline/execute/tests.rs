@@ -27,6 +27,7 @@ use crate::pipeline::initialize;
 use crate::pipeline::types::{InitOptions, LlmSpec, Persisted, SandboxEnvSpec};
 use crate::records::RunRecord;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
+use crate::run_status::{RunStatus, StatusReason};
 use crate::test_support::run_graph;
 
 fn local_env() -> Arc<dyn Sandbox> {
@@ -749,6 +750,40 @@ async fn execute_cancelled_mid_run() {
     )
     .await;
     assert!(matches!(result, Err(FabroError::Cancelled)));
+}
+
+#[tokio::test]
+async fn execute_cancelled_mid_run_persists_cancelled_status() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut g = simple_graph();
+    let mut work = Node::new("work");
+    work.attrs
+        .insert("type".to_string(), AttrValue::String("slow".to_string()));
+    work.attrs
+        .insert("max_retries".to_string(), AttrValue::Integer(0));
+    g.nodes.insert("work".to_string(), work);
+    g.edges.clear();
+    g.edges.push(Edge::new("start", "work"));
+    g.edges.push(Edge::new("work", "exit"));
+
+    let cancel_token = Arc::new(AtomicBool::new(false));
+    let cancel_token_clone = Arc::clone(&cancel_token);
+    let mut registry = make_registry();
+    registry.register("slow", Box::new(SlowHandler { sleep_ms: 200 }));
+    let mut run_options = test_run_options(dir.path(), "test-run");
+    run_options.cancel_token = Some(cancel_token);
+
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        cancel_token_clone.store(true, Ordering::Relaxed);
+    });
+
+    let executed = execute_test_run_with_options(run_options, g, Some(Arc::new(registry))).await;
+
+    assert!(matches!(executed.outcome, Err(FabroError::Cancelled)));
+    let status = executed.run_store.state().await.unwrap().status.unwrap();
+    assert_eq!(status.status, RunStatus::Failed);
+    assert_eq!(status.reason, Some(StatusReason::Cancelled));
 }
 
 #[tokio::test]

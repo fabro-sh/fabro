@@ -353,7 +353,7 @@ impl RunAnswerTransport {
                     .map_err(|_| AnswerTransportError::Closed)
             }
             Self::InProcess { interviewer } => {
-                interviewer.abort_all().await;
+                interviewer.cancel_all().await;
                 Ok(())
             }
         }
@@ -455,17 +455,12 @@ impl SlackService {
                 )
                 .await;
             }
-            EventBody::InterviewAborted(props) => {
-                let answer_text = if props.reason == "skipped" {
-                    "Skipped"
-                } else {
-                    "Aborted"
-                };
+            EventBody::InterviewInterrupted(props) => {
                 self.finish_interview(
                     event.run_id,
                     &props.question_id,
                     &props.question,
-                    answer_text,
+                    "Interrupted",
                 )
                 .await;
             }
@@ -2393,7 +2388,7 @@ fn reconcile_live_interview_state_for_event(run: &mut ManagedRun, event: &RunEve
         EventBody::InterviewTimeout(props) => {
             run.accepted_questions.remove(&props.question_id);
         }
-        EventBody::InterviewAborted(props) => {
+        EventBody::InterviewInterrupted(props) => {
             run.accepted_questions.remove(&props.question_id);
         }
         EventBody::RunCompleted(_) | EventBody::RunFailed(_) | EventBody::RunRewound(_) => {
@@ -3030,7 +3025,7 @@ fn validate_answer_for_question(
         )
         | (
             _,
-            fabro_interview::AnswerValue::Aborted
+            fabro_interview::AnswerValue::Interrupted
             | fabro_interview::AnswerValue::Skipped
             | fabro_interview::AnswerValue::Timeout,
         ) => Ok(()),
@@ -5184,6 +5179,10 @@ async fn cancel_run(
                 | RunStatus::Starting
                 | RunStatus::Running
                 | RunStatus::Paused => {
+                    let use_cancel_signal = !matches!(
+                        managed_run.answer_transport,
+                        Some(RunAnswerTransport::InProcess { .. })
+                    );
                     let persist_cancelled_status =
                         matches!(managed_run.status, RunStatus::Submitted | RunStatus::Queued);
                     let response_status = if persist_cancelled_status {
@@ -5198,7 +5197,9 @@ async fn cancel_run(
                         persist_cancelled_status,
                         managed_run.answer_transport.clone(),
                         managed_run.cancel_token.clone(),
-                        managed_run.cancel_tx.take(),
+                        use_cancel_signal
+                            .then(|| managed_run.cancel_tx.take())
+                            .flatten(),
                         managed_run.worker_pid,
                     )
                 }
@@ -5879,7 +5880,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn in_process_answer_transport_cancel_run_aborts_pending_interviews() {
+    async fn in_process_answer_transport_cancel_run_cancels_pending_interviews() {
         let interviewer = Arc::new(ControlInterviewer::new());
         let transport = RunAnswerTransport::InProcess {
             interviewer: Arc::clone(&interviewer),
@@ -5893,7 +5894,7 @@ mod tests {
         transport.cancel_run().await.unwrap();
 
         let answer = answer_task.await.unwrap();
-        assert_eq!(answer.value, AnswerValue::Aborted);
+        assert_eq!(answer.value, AnswerValue::Cancelled);
     }
 
     fn minimal_manifest_json(dot_source: &str) -> serde_json::Value {
