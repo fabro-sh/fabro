@@ -248,6 +248,7 @@ enum ExecutionResult {
 }
 
 const WORKER_CANCEL_GRACE: Duration = Duration::from_secs(5);
+const TERMINAL_DELETE_WORKER_GRACE: Duration = Duration::from_millis(50);
 const WORKER_CONTROL_QUEUE_CAPACITY: usize = 8;
 const WORKER_CONTROL_ENQUEUE_TIMEOUT: Duration = Duration::from_secs(1);
 const ARTIFACT_UPLOAD_TOKEN_ISSUER: &str = "fabro-server-artifact-upload";
@@ -2117,7 +2118,26 @@ async fn delete_run_internal(state: &Arc<AppState>, id: RunId) -> Result<(), Res
         if let Some(cancel_tx) = managed_run.cancel_tx.take() {
             let _ = cancel_tx.send(());
         }
-        terminate_worker_for_deletion(managed_run.worker_pid, managed_run.worker_pgid).await;
+        // Terminal runs can still carry a stale worker PID briefly after their
+        // completion events land, so avoid paying the full cancellation grace.
+        let delete_grace = if matches!(
+            managed_run.status,
+            RunStatus::Submitted
+                | RunStatus::Queued
+                | RunStatus::Starting
+                | RunStatus::Running
+                | RunStatus::Paused
+        ) {
+            WORKER_CANCEL_GRACE
+        } else {
+            TERMINAL_DELETE_WORKER_GRACE
+        };
+        terminate_worker_for_deletion(
+            managed_run.worker_pid,
+            managed_run.worker_pgid,
+            delete_grace,
+        )
+        .await;
         if let Some(run_dir) = managed_run.run_dir.take() {
             remove_run_dir(&run_dir).map_err(|err| {
                 ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
@@ -2144,12 +2164,16 @@ async fn delete_run_internal(state: &Arc<AppState>, id: RunId) -> Result<(), Res
     Ok(())
 }
 
-async fn terminate_worker_for_deletion(worker_pid: Option<u32>, worker_pgid: Option<u32>) {
+async fn terminate_worker_for_deletion(
+    worker_pid: Option<u32>,
+    worker_pgid: Option<u32>,
+    grace: Duration,
+) {
     #[cfg(unix)]
     if let Some(process_group_id) = worker_pgid.or(worker_pid) {
         fabro_proc::sigterm_process_group(process_group_id);
 
-        let deadline = Instant::now() + WORKER_CANCEL_GRACE;
+        let deadline = Instant::now() + grace;
         while Instant::now() < deadline && fabro_proc::process_group_alive(process_group_id) {
             sleep(Duration::from_millis(50)).await;
         }
@@ -2170,7 +2194,7 @@ async fn terminate_worker_for_deletion(worker_pid: Option<u32>, worker_pgid: Opt
     if let Some(worker_pid) = worker_pid {
         fabro_proc::sigterm(worker_pid);
 
-        let deadline = Instant::now() + WORKER_CANCEL_GRACE;
+        let deadline = Instant::now() + grace;
         while Instant::now() < deadline && fabro_proc::process_alive(worker_pid) {
             sleep(Duration::from_millis(50)).await;
         }
