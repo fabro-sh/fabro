@@ -35,14 +35,18 @@ fn help() {
               Address to bind to (IP or IP:port for TCP, or path containing / for Unix socket)
           --no-upgrade-check
               Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --model <MODEL>
-              Override default LLM model
           --quiet
               Suppress non-essential output [env: FABRO_QUIET=]
-          --provider <PROVIDER>
-              Override default LLM provider
+          --web
+              Enable the embedded web UI and browser auth routes
+          --no-web
+              Disable the embedded web UI, browser auth routes, and web-only helper endpoints
           --verbose
               Enable verbose output [env: FABRO_VERBOSE=]
+          --model <MODEL>
+              Override default LLM model
+          --provider <PROVIDER>
+              Override default LLM provider
           --dry-run
               Execute with simulated LLM backend
           --sandbox <SANDBOX>
@@ -188,8 +192,11 @@ fn start_with_tcp_host_only_bind_warns_and_falls_back_when_default_port_is_unava
     let context = test_context!();
     let storage_root = isolated_storage_dir();
     let storage_dir = storage_root.path().join("storage");
-    let occupied = std::net::TcpListener::bind(("127.0.0.1", 32276))
-        .expect("test requires default TCP port 32276 to be free before occupying it");
+    let occupied = match std::net::TcpListener::bind(("127.0.0.1", 32276)) {
+        Ok(listener) => Some(listener),
+        Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => None,
+        Err(error) => panic!("failed to bind default TCP port 32276: {error}"),
+    };
 
     let mut filters = context.filters();
     filters.push((r"pid \d+".to_string(), "pid [PID]".to_string()));

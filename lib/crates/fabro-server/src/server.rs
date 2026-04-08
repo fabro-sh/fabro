@@ -785,20 +785,46 @@ fn start_optional_slack_service(state: &Arc<AppState>) {
 
 /// Build the axum Router with all run endpoints and embedded static assets.
 pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
+    build_router_with_options(state, auth_mode, RouterOptions::default())
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RouterOptions {
+    pub web_enabled: bool,
+}
+
+impl Default for RouterOptions {
+    fn default() -> Self {
+        Self { web_enabled: true }
+    }
+}
+
+/// Build the axum Router with configurable web surface routing.
+pub fn build_router_with_options(
+    state: Arc<AppState>,
+    auth_mode: AuthMode,
+    options: RouterOptions,
+) -> Router {
     start_optional_slack_service(&state);
     let middleware_state = Arc::clone(&state);
-    let api_common = Router::new()
-        .route("/openapi.json", get(openapi_spec))
-        .merge(web_auth::api_routes());
+    let api_common = if options.web_enabled {
+        Router::new()
+            .route("/openapi.json", get(openapi_spec))
+            .merge(web_auth::api_routes())
+    } else {
+        Router::new().route("/openapi.json", get(openapi_spec))
+    };
 
     let demo_router = Router::new()
         .nest("/api/v1", api_common.clone().merge(demo_routes()))
         .layer(axum::Extension(AuthMode::Disabled))
         .with_state(state.clone());
 
-    let real_router = Router::new()
-        .nest("/api/v1", api_common.merge(real_routes()))
-        .nest("/auth", web_auth::routes())
+    let mut real_router = Router::new().nest("/api/v1", api_common.merge(real_routes()));
+    if options.web_enabled {
+        real_router = real_router.nest("/auth", web_auth::routes());
+    }
+    let real_router = real_router
         .layer(axum::Extension(auth_mode))
         .with_state(state);
 
@@ -806,7 +832,7 @@ pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
         let demo = demo_router.clone();
         let real = real_router.clone();
         async move {
-            if req.headers().get("x-fabro-demo").is_some_and(|v| v == "1") {
+            if options.web_enabled && req.headers().get("x-fabro-demo").is_some_and(|v| v == "1") {
                 demo.oneshot(req).await
             } else {
                 real.oneshot(req).await
@@ -837,19 +863,27 @@ pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
             },
         );
 
-    Router::new()
-        .route("/health", get(health))
-        .layer(middleware::from_fn_with_state(
+    let mut router = Router::new().route("/health", get(health));
+    if options.web_enabled {
+        router = router.layer(middleware::from_fn_with_state(
             middleware_state,
             cookie_and_demo_middleware,
-        ))
+        ));
+    }
+
+    router
         .fallback_service(service_fn(move |req: axum_extract::Request| {
             let dispatch = dispatch.clone();
             async move {
                 let path = req.uri().path().to_string();
-                if path.starts_with("/api/v1/") || path.starts_with("/auth/") || path == "/health" {
+                let dispatch_path = path.starts_with("/api/v1/")
+                    || path == "/health"
+                    || (options.web_enabled && path.starts_with("/auth/"));
+                if dispatch_path {
                     dispatch.oneshot(req).await
-                } else if matches!(req.method(), &Method::GET | &Method::HEAD) {
+                } else if options.web_enabled
+                    && matches!(req.method(), &Method::GET | &Method::HEAD)
+                {
                     Ok::<_, std::convert::Infallible>(static_files::serve(&path))
                 } else {
                     Ok::<_, std::convert::Infallible>(StatusCode::NOT_FOUND.into_response())
@@ -6156,6 +6190,7 @@ mod tests {
     async fn auth_login_github_redirects_to_github() {
         let mut settings = Settings::default();
         settings.web = Some(WebSettings {
+            enabled: true,
             url: "http://localhost:3000".to_string(),
             auth: AuthSettings {
                 provider: AuthProvider::Github,
