@@ -27,6 +27,27 @@ export async function apiJson<T>(path: string, options?: ApiOptions): Promise<T>
   return response.json() as Promise<T>;
 }
 
+export function isNotImplemented(status: number): boolean {
+  return status === 501;
+}
+
+export async function apiJsonOrNull<T>(
+  path: string,
+  options?: ApiOptions,
+): Promise<T | null> {
+  const response = await apiFetch(path, options);
+  if (isNotImplemented(response.status)) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Response(null, {
+      status: response.status,
+      statusText: response.statusText,
+    });
+  }
+  return response.json() as Promise<T>;
+}
+
 export async function getSetupStatus(): Promise<{ configured: boolean }> {
   const response = await fetch("/api/v1/setup/status", { credentials: "include" });
   if (!response.ok) {

@@ -421,6 +421,7 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
 
     async fn on_run_end(&self, outcome: &Outcome, state: &WfRunState) {
         if state.cancelled {
+            self.event.on_run_end(outcome, state).await;
             return;
         }
         self.git.on_run_end(outcome, state).await;

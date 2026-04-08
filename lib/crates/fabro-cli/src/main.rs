@@ -225,6 +225,9 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::Install(args) => {
                 commands::install::run_install(&args, &globals).await?;
             }
+            Commands::Uninstall(args) => {
+                commands::uninstall::run_uninstall(&args, &globals).await?;
+            }
             Commands::Pr(ns) => Box::pin(commands::pr::dispatch(ns, &globals)).await?,
             Commands::Secret(ns) => commands::secret::dispatch(ns, &globals).await?,
             Commands::Settings(args) => commands::config::execute(&args, &globals).await?,

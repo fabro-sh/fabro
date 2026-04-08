@@ -298,7 +298,10 @@ async fn submit_server_interview_answer(
         AnswerValue::MultiSelected(keys) => (None, None, keys.clone()),
         AnswerValue::Yes => (Some("yes".to_string()), None, Vec::new()),
         AnswerValue::No => (Some("no".to_string()), None, Vec::new()),
-        AnswerValue::Aborted | AnswerValue::Skipped | AnswerValue::Timeout => {
+        AnswerValue::Cancelled
+        | AnswerValue::Interrupted
+        | AnswerValue::Skipped
+        | AnswerValue::Timeout => {
             return Ok(false);
         }
     };
@@ -403,7 +406,10 @@ fn infer_run_id(run_dir: &Path) -> Option<RunId> {
 }
 
 fn answer_requires_reattach(answer: &fabro_interview::Answer) -> bool {
-    matches!(answer.value, AnswerValue::Aborted | AnswerValue::Skipped)
+    matches!(
+        answer.value,
+        AnswerValue::Interrupted | AnswerValue::Skipped
+    )
 }
 
 fn state_exit_code(state: &server_client::RunProjection) -> Option<ExitCode> {
@@ -540,9 +546,9 @@ mod tests {
     }
 
     #[test]
-    fn answer_requires_reattach_for_aborted_and_skipped_answers() {
-        let aborted = Answer {
-            value: AnswerValue::Aborted,
+    fn answer_requires_reattach_for_interrupted_and_skipped_answers() {
+        let interrupted = Answer {
+            value: AnswerValue::Interrupted,
             selected_option: None,
             text: None,
         };
@@ -553,7 +559,7 @@ mod tests {
         };
         let answered = Answer::yes();
 
-        assert!(answer_requires_reattach(&aborted));
+        assert!(answer_requires_reattach(&interrupted));
         assert!(answer_requires_reattach(&skipped));
         assert!(!answer_requires_reattach(&answered));
     }

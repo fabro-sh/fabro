@@ -19,19 +19,20 @@ use clap::Args;
 
 use fabro_types::Settings;
 
-use crate::bind::{self, Bind};
+use crate::bind::{self, Bind, BindRequest};
 use crate::github_webhooks::WebhookManager;
 use crate::jwt_auth::{AuthMode, AuthStrategy, resolve_auth_mode_with_lookup};
 use crate::secret_store::SecretStore;
 use crate::server::{
-    build_app_state_with_path, build_router, reconcile_incomplete_runs_on_startup,
-    shutdown_active_workers, spawn_scheduler,
+    build_app_state_with_path, reconcile_incomplete_runs_on_startup, shutdown_active_workers,
+    spawn_scheduler,
 };
 use crate::tls::{ClientAuth, build_rustls_config, serve_tls_with_shutdown};
 use fabro_llm::client::Client as LlmClient;
 use fabro_sandbox::SandboxProvider;
 
 const TEST_IN_MEMORY_STORE_ENV: &str = "FABRO_TEST_IN_MEMORY_STORE";
+pub const DEFAULT_TCP_PORT: u16 = 32276;
 
 #[derive(Clone, Copy)]
 enum ServerTitlePhase {
@@ -42,9 +43,17 @@ enum ServerTitlePhase {
 
 #[derive(Args, Clone)]
 pub struct ServeArgs {
-    /// Address to bind to (host:port for TCP, or path containing / for Unix socket)
+    /// Address to bind to (IP or IP:port for TCP, or path containing / for Unix socket)
     #[arg(long)]
     pub bind: Option<String>,
+
+    /// Enable the embedded web UI and browser auth routes
+    #[arg(long, conflicts_with = "no_web")]
+    pub web: bool,
+
+    /// Disable the embedded web UI, browser auth routes, and web-only helper endpoints
+    #[arg(long, conflicts_with = "web")]
+    pub no_web: bool,
 
     /// Override default LLM model
     #[arg(long)]
@@ -83,6 +92,9 @@ fn apply_serve_overrides(base: &Settings, args: &ServeArgs, dry_run_mode: bool) 
     let mut settings = base.clone();
     if dry_run_mode {
         settings.dry_run = Some(true);
+    }
+    if args.web || args.no_web {
+        settings.web.get_or_insert_default().enabled = args.web;
     }
     if let Some(ref model) = args.model {
         settings.llm.get_or_insert_default().model = Some(model.clone());
@@ -173,11 +185,15 @@ fn build_artifact_object_store(
 ///
 /// Returns an error if the server fails to bind or encounters a fatal error.
 #[allow(clippy::print_stderr)]
-pub async fn serve_command(
+pub async fn serve_command<F>(
     args: ServeArgs,
     styles: &'static Styles,
     storage_dir_override: Option<PathBuf>,
-) -> anyhow::Result<()> {
+    mut on_ready: F,
+) -> anyhow::Result<()>
+where
+    F: FnMut(&Bind) -> anyhow::Result<()>,
+{
     let _ = fabro_proc::title_init();
     set_server_title(ServerTitlePhase::Boot, None);
 
@@ -245,6 +261,13 @@ pub async fn serve_command(
             .unwrap_or(5);
         (auth_mode, client_auth, max_concurrent_runs)
     };
+    let web_enabled = shared_settings
+        .read()
+        .expect("config lock poisoned")
+        .web
+        .as_ref()
+        .map(|web| web.enabled)
+        .unwrap_or(true);
 
     let store_path = storage.store_dir();
     let object_store = build_object_store(&store_path)?;
@@ -276,11 +299,15 @@ pub async fn serve_command(
         );
     }
     spawn_scheduler(Arc::clone(&state));
-    let router = build_router(Arc::clone(&state), auth_mode);
+    let router = crate::server::build_router_with_options(
+        Arc::clone(&state),
+        auth_mode,
+        crate::server::RouterOptions { web_enabled },
+    );
 
-    let bind_addr = match args.bind {
+    let bind_request = match args.bind {
         Some(ref s) => bind::parse_bind(s)?,
-        None => Bind::Tcp("127.0.0.1:3000".parse().unwrap()),
+        None => BindRequest::Tcp("127.0.0.1:3000".parse().unwrap()),
     };
 
     // Optionally start webhook listener
@@ -385,26 +412,37 @@ pub async fn serve_command(
         .as_ref()
         .and_then(|a| a.tls.clone());
 
-    match &bind_addr {
-        Bind::Unix(path) => {
+    let bound_listener = bind_listener(&bind_request).await?;
+    let bind_addr = bound_listener.bind.clone();
+    if bound_listener.used_random_port_fallback {
+        if let BindRequest::TcpHost(host) = bind_request {
+            warn!(
+                host = %host,
+                preferred_port = DEFAULT_TCP_PORT,
+                "Preferred TCP port unavailable; falling back to a random port"
+            );
+            eprintln!(
+                "{} TCP port {} is unavailable on {}; falling back to a random port.",
+                styles.yellow.apply_to("Warning:"),
+                DEFAULT_TCP_PORT,
+                host
+            );
+        }
+    }
+
+    on_ready(&bind_addr)?;
+
+    match bound_listener.listener {
+        BoundListener::Unix(listener) => {
             if tls_settings.is_some() {
                 warn!("TLS is configured but not supported on Unix sockets; ignoring TLS settings");
             }
-
-            // Remove stale socket file before binding
-            if path.exists() {
-                std::fs::remove_file(path)?;
-            }
-
-            let listener = UnixListener::bind(path)?;
             announce_server_ready(&bind_addr, styles, dry_run_mode);
             axum::serve(listener, router)
                 .with_graceful_shutdown(wait_for_shutdown(shutdown_rx.clone()))
                 .await?;
         }
-        Bind::Tcp(addr) => {
-            let listener = TcpListener::bind(addr).await?;
-
+        BoundListener::Tcp(listener) => {
             if let Some(ref tls_settings) = tls_settings {
                 let client_auth = client_auth.unwrap();
                 let rustls_config = build_rustls_config(tls_settings, client_auth);
@@ -435,6 +473,71 @@ pub async fn serve_command(
     }
 
     Ok(())
+}
+
+struct BoundServerListener {
+    listener: BoundListener,
+    bind: Bind,
+    used_random_port_fallback: bool,
+}
+
+enum BoundListener {
+    Unix(UnixListener),
+    Tcp(TcpListener),
+}
+
+async fn bind_listener(requested: &BindRequest) -> anyhow::Result<BoundServerListener> {
+    match requested {
+        BindRequest::Unix(path) => {
+            if path.exists() {
+                std::fs::remove_file(path)?;
+            }
+
+            let listener = UnixListener::bind(path)?;
+            Ok(BoundServerListener {
+                listener: BoundListener::Unix(listener),
+                bind: Bind::Unix(path.clone()),
+                used_random_port_fallback: false,
+            })
+        }
+        BindRequest::Tcp(addr) => {
+            let listener = TcpListener::bind(addr).await?;
+            let resolved = listener.local_addr()?;
+            Ok(BoundServerListener {
+                listener: BoundListener::Tcp(listener),
+                bind: Bind::Tcp(resolved),
+                used_random_port_fallback: false,
+            })
+        }
+        BindRequest::TcpHost(host) => bind_tcp_host_with_fallback(*host, DEFAULT_TCP_PORT).await,
+    }
+}
+
+async fn bind_tcp_host_with_fallback(
+    host: std::net::IpAddr,
+    preferred_port: u16,
+) -> anyhow::Result<BoundServerListener> {
+    let preferred = std::net::SocketAddr::new(host, preferred_port);
+    match TcpListener::bind(preferred).await {
+        Ok(listener) => {
+            let resolved = listener.local_addr()?;
+            Ok(BoundServerListener {
+                listener: BoundListener::Tcp(listener),
+                bind: Bind::Tcp(resolved),
+                used_random_port_fallback: false,
+            })
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::AddrInUse => {
+            let listener = TcpListener::bind(std::net::SocketAddr::new(host, 0)).await?;
+            let resolved = listener.local_addr()?;
+            Ok(BoundServerListener {
+                listener: BoundListener::Tcp(listener),
+                bind: Bind::Tcp(resolved),
+                used_random_port_fallback: true,
+            })
+        }
+        Err(err) => Err(err.into()),
+    }
 }
 
 async fn shutdown_signal() {
@@ -535,8 +638,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        ServeArgs, ServerTitlePhase, apply_runtime_settings, build_object_store_with_preference,
-        server_bind_title, server_title,
+        ServeArgs, ServerTitlePhase, apply_runtime_settings, bind_tcp_host_with_fallback,
+        build_object_store_with_preference, server_bind_title, server_title,
     };
     use crate::bind::Bind;
     use fabro_types::Settings;
@@ -550,6 +653,8 @@ mod tests {
             provider: None,
             dry_run: false,
             sandbox: None,
+            web: false,
+            no_web: false,
             max_concurrent_runs: None,
             config: None,
         };
@@ -561,6 +666,52 @@ mod tests {
             resolved.storage_dir,
             Some(PathBuf::from("/srv/fabro-storage"))
         );
+    }
+
+    #[test]
+    fn apply_runtime_settings_enables_web_from_cli_flag() {
+        let base: Settings = toml::from_str(
+            r#"
+[web]
+enabled = false
+"#,
+        )
+        .unwrap();
+        let args = ServeArgs {
+            bind: None,
+            model: None,
+            provider: None,
+            dry_run: false,
+            sandbox: None,
+            web: true,
+            no_web: false,
+            max_concurrent_runs: None,
+            config: None,
+        };
+
+        let resolved = apply_runtime_settings(&base, &args, false, &PathBuf::from("/srv/fabro"));
+
+        assert!(resolved.web.expect("web settings should exist").enabled);
+    }
+
+    #[test]
+    fn apply_runtime_settings_disables_web_from_cli_flag() {
+        let base = Settings::default();
+        let args = ServeArgs {
+            bind: None,
+            model: None,
+            provider: None,
+            dry_run: false,
+            sandbox: None,
+            web: false,
+            no_web: true,
+            max_concurrent_runs: None,
+            config: None,
+        };
+
+        let resolved = apply_runtime_settings(&base, &args, false, &PathBuf::from("/srv/fabro"));
+
+        assert!(!resolved.web.expect("web settings should exist").enabled);
     }
 
     #[test]
@@ -606,5 +757,45 @@ mod tests {
             "memory-backed store should not create on-disk store dir"
         );
         drop(mem_store);
+    }
+
+    #[tokio::test]
+    async fn tcp_host_request_uses_preferred_port_when_available() {
+        let preferred = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = preferred.local_addr().unwrap().port();
+        drop(preferred);
+
+        let bound = bind_tcp_host_with_fallback("127.0.0.1".parse().unwrap(), port)
+            .await
+            .unwrap();
+        let resolved = match bound.bind {
+            Bind::Tcp(addr) => addr,
+            Bind::Unix(_) => panic!("expected tcp bind"),
+        };
+        assert_eq!(
+            resolved,
+            std::net::SocketAddr::new("127.0.0.1".parse().unwrap(), port)
+        );
+        assert!(
+            !bound.used_random_port_fallback,
+            "preferred port should be used when available"
+        );
+    }
+
+    #[tokio::test]
+    async fn tcp_host_request_falls_back_when_preferred_port_is_occupied() {
+        let occupied = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let occupied_port = occupied.local_addr().unwrap().port();
+        let bound = bind_tcp_host_with_fallback("127.0.0.1".parse().unwrap(), occupied_port)
+            .await
+            .unwrap();
+
+        let resolved = match bound.bind {
+            Bind::Tcp(addr) => addr,
+            Bind::Unix(_) => panic!("expected tcp bind"),
+        };
+
+        assert_ne!(resolved.port(), occupied_port);
+        assert!(bound.used_random_port_fallback);
     }
 }

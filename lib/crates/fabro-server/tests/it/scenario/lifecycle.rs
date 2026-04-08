@@ -218,3 +218,76 @@ async fn full_http_lifecycle_cancel() {
     let body = wait_for_run_state(&app, &run_id, "failed", "cancelled").await;
     assert_eq!(body["status_reason"], "cancelled");
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancel_at_human_gate_persists_cancelled_terminal_event() {
+    let state = create_app_state_with_settings_and_registry_factory(test_settings(), gate_registry);
+    spawn_scheduler(Arc::clone(&state));
+    let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api("/runs"))
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::to_string(&minimal_manifest_json(GATE_DOT)).unwrap(),
+        ))
+        .unwrap();
+    let response = app.clone().oneshot(req).await.unwrap();
+    let body = body_json(response.into_body()).await;
+    let run_id = body["id"].as_str().unwrap().to_string();
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api(&format!("/runs/{run_id}/start")))
+        .body(Body::empty())
+        .unwrap();
+    app.clone().oneshot(req).await.unwrap();
+
+    let _question_id = wait_for_question_id(&app, &run_id).await;
+
+    let req = Request::builder()
+        .method("POST")
+        .uri(api(&format!("/runs/{run_id}/cancel")))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let status = wait_for_run_status(&app, &run_id, &["failed"]).await;
+    assert_eq!(status, "failed");
+
+    let req = Request::builder()
+        .method("GET")
+        .uri(api(&format!("/runs/{run_id}/events")))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(req).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_json(response.into_body()).await;
+    let failed_reasons = body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|event| {
+            (event["payload"]["event"] == "run.failed").then(|| {
+                (
+                    event["payload"]["properties"]["reason"]
+                        .as_str()
+                        .map(ToOwned::to_owned),
+                    event["payload"]["properties"]["error"]
+                        .as_str()
+                        .map(ToOwned::to_owned),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        failed_reasons,
+        vec![(
+            Some("cancelled".to_string()),
+            Some("Pipeline cancelled".to_string())
+        )]
+    );
+}

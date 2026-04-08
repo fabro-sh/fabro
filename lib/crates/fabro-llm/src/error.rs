@@ -70,8 +70,8 @@ pub enum SdkError {
         source: Option<Arc<dyn std::error::Error + Send + Sync>>,
     },
 
-    #[error("Request aborted: {message}")]
-    Abort { message: String },
+    #[error("Request interrupted: {message}")]
+    Interrupt { message: String },
 
     #[error("Network error: {message}")]
     Network {
@@ -163,7 +163,7 @@ impl SdkError {
             ),
             Self::InvalidToolCall { .. }
             | Self::NoObjectGenerated { .. }
-            | Self::Abort { .. }
+            | Self::Interrupt { .. }
             | Self::Configuration { .. }
             | Self::UnsupportedToolChoice { .. }
             | Self::RequestTimeout { .. } => false,
@@ -248,7 +248,7 @@ impl SdkError {
             Self::RequestTimeout { .. } => format!("api_transient|{provider}|timeout"),
             Self::Network { .. } => format!("api_transient|{provider}|network"),
             Self::Stream { .. } => format!("api_transient|{provider}|stream"),
-            Self::Abort { .. } => format!("api_canceled|{provider}|abort"),
+            Self::Interrupt { .. } => format!("api_canceled|{provider}|interrupt"),
             Self::Configuration { .. } => format!("api_deterministic|{provider}|configuration"),
             Self::InvalidToolCall { .. } => {
                 format!("api_deterministic|{provider}|invalid_tool_call")
@@ -468,10 +468,10 @@ mod tests {
         };
         assert!(!no_object.retryable());
 
-        let abort = SdkError::Abort {
-            message: "aborted".into(),
+        let interrupt = SdkError::Interrupt {
+            message: "interrupted".into(),
         };
-        assert!(!abort.retryable());
+        assert!(!interrupt.retryable());
     }
 
     #[test]
@@ -999,7 +999,7 @@ mod tests {
         );
 
         assert!(
-            !SdkError::Abort {
+            !SdkError::Interrupt {
                 message: "cancelled".into()
             }
             .failover_eligible()
@@ -1141,11 +1141,11 @@ mod tests {
             "api_transient|unknown|stream"
         );
         assert_eq!(
-            SdkError::Abort {
+            SdkError::Interrupt {
                 message: "cancelled".into()
             }
             .failure_signature_hint(),
-            "api_canceled|unknown|abort"
+            "api_canceled|unknown|interrupt"
         );
         assert_eq!(
             SdkError::Configuration {

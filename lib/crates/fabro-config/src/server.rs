@@ -134,6 +134,7 @@ impl TryFrom<GitConfig> for GitSettings {
 
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
 pub struct WebConfig {
+    pub enabled: Option<bool>,
     pub url: Option<String>,
     pub auth: Option<AuthConfig>,
 }
@@ -145,6 +146,7 @@ fn default_web_url() -> String {
 impl From<WebConfig> for WebSettings {
     fn from(value: WebConfig) -> Self {
         Self {
+            enabled: value.enabled.unwrap_or(true),
             url: value.url.unwrap_or_else(default_web_url),
             auth: value.auth.map(Into::into).unwrap_or_default(),
         }

@@ -79,7 +79,7 @@ pub fn new(
 | `initialize().await` | Discovers project docs, skills, and MCP servers. Call before `process_input`. |
 | `process_input(input).await` | Sends user input and runs the agent loop until the model stops or a limit is hit. |
 | `close()` | Ends the session and emits `SessionEnded`. |
-| `abort()` | Cancels the current `process_input` call. |
+| `interrupt()` | Cancels the current `process_input` call. |
 | `cancel_token()` | Returns a `CancellationToken` for external cancellation. |
 
 **Inspection:**
@@ -111,7 +111,7 @@ All fields are public. Key settings with their defaults:
 | `enable_context_compaction` | `true` | Automatically summarize old turns when approaching the context window limit. |
 | `compaction_threshold_percent` | `80` | Context window usage percentage that triggers compaction. |
 | `max_subagent_depth` | `1` | Maximum nesting depth for sub-agents. |
-| `wall_clock_timeout` | `None` | Hard timeout for `process_input`. Triggers `AbortReason::WallClockTimeout`. |
+| `wall_clock_timeout` | `None` | Hard timeout for `process_input`. Triggers `InterruptReason::WallClockTimeout`. |
 | `tool_hooks` | `None` | Pre/post hooks around tool execution (see [Tool hooks](#tool-hooks)). |
 | `mcp_servers` | `[]` | MCP server configurations to connect on startup. |
 | `skill_dirs` | `None` | Directories to discover `SKILL.md` files. `None` uses convention defaults. |
@@ -287,7 +287,7 @@ All fallible `Session` methods return `Result<T, AgentError>`:
 | `SessionClosed` | `process_input` was called on a closed session. |
 | `InvalidState(String)` | The session is in an unexpected state. |
 | `ToolExecution(String)` | A tool execution failed. |
-| `Aborted(AbortReason)` | The session was cancelled (`Cancelled`) or timed out (`WallClockTimeout`). |
+| `Interrupted(InterruptReason)` | The session was cancelled (`Cancelled`) or timed out (`WallClockTimeout`). |
 
 ---
 
@@ -757,7 +757,7 @@ match result {
     }
     Err(SdkError::RequestTimeout { message, .. }) => println!("Timeout: {message}"),
     Err(SdkError::Network { message, .. }) => println!("Network: {message}"),
-    Err(SdkError::Abort { message }) => println!("Cancelled: {message}"),
+    Err(SdkError::Interrupt { message }) => println!("Cancelled: {message}"),
     Err(e) => println!("Other: {e}"),
     Ok(_) => {}
 }
@@ -817,7 +817,7 @@ Retry only fires when `error.retryable()` returns `true` and respects `Retry-Aft
 
 ### Cancellation
 
-Pass a `CancellationToken` to abort long-running generation:
+Pass a `CancellationToken` to interrupt long-running generation:
 
 ```rust
 use tokio_util::sync::CancellationToken;
@@ -836,7 +836,7 @@ let result = generate(
         .prompt("Write a novel")
         .abort_signal(token)
 ).await;
-// Returns SdkError::Abort if cancelled
+// Returns SdkError::Interrupt if cancelled
 ```
 
 ### Provider adapters

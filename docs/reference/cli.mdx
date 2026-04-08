@@ -326,14 +326,18 @@ Start the Fabro server daemon. By default, the server launches as a background p
 
 ```bash
 fabro server start                                # background daemon on Unix socket
+fabro server start --bind 127.0.0.1              # TCP on 32276, or random port if 32276 is busy
 fabro server start --bind 127.0.0.1:8080          # TCP on a specific port
+fabro server start --no-web                       # API and /health only
 fabro server start --foreground                   # blocking foreground mode
 fabro server start --sandbox daytona --max-concurrent-runs 4
 ```
 
 | Flag | Description | Default |
 |---|---|---|
-| `--bind <ADDR>` | Address to bind: `host:port` for TCP, or a path for Unix socket | `~/.fabro/fabro.sock` |
+| `--bind <ADDR>` | Address to bind: `IP` or `IP:port` for TCP, or a path for Unix socket | `~/.fabro/fabro.sock` |
+| `--web` | Enable the embedded web UI, browser auth routes, and web-only helper endpoints | Enabled |
+| `--no-web` | Disable the embedded web UI, browser auth routes, and web-only helper endpoints | Disabled |
 | `--foreground` | Run in the foreground instead of daemonizing | — |
 | `--model <MODEL>` | Override default LLM model | — |
 | `--provider <PROVIDER>` | Override default LLM provider | — |
@@ -343,6 +347,8 @@ fabro server start --sandbox daytona --max-concurrent-runs 4
 | `--config <PATH>` | Path to server config file | `~/.fabro/settings.toml` |
 
 Demo mode is per-request: send the `X-Fabro-Demo: 1` header to get static demo data with auth disabled.
+
+When `--no-web` is set, the server still exposes the machine API under `/api/v1` and `/health`, but it returns `404` for `/`, `/auth/*`, SPA client routes, and the web-only helper endpoints under `/api/v1`.
 
 ## `fabro server stop`
 

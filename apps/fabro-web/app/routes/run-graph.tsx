@@ -5,7 +5,7 @@ import { CheckCircleIcon, ArrowPathIcon, PauseCircleIcon, XCircleIcon } from "@h
 import { DocumentTextIcon, MapIcon } from "@heroicons/react/24/outline";
 import { useTheme } from "../lib/theme";
 import { getGraphTheme } from "../lib/graph-theme";
-import { apiFetch, apiJson } from "../api";
+import { apiFetch, apiJsonOrNull } from "../api";
 import { formatDurationSecs } from "../lib/format";
 import type { PaginatedRunStageList } from "@qltysh/fabro-api-client";
 
@@ -22,11 +22,11 @@ interface Stage {
 }
 
 export async function loader({ request, params }: any) {
-  const [{ data: apiStages }, graphRes] = await Promise.all([
-    apiJson<PaginatedRunStageList>(`/runs/${params.id}/stages`, { request }),
+  const [stagesResult, graphRes] = await Promise.all([
+    apiJsonOrNull<PaginatedRunStageList>(`/runs/${params.id}/stages`, { request }),
     apiFetch(`/runs/${params.id}/graph`, { request }),
   ]);
-  const stages: Stage[] = apiStages.map((s) => ({
+  const stages: Stage[] = (stagesResult?.data ?? []).map((s) => ({
     id: s.id,
     name: s.name,
     dotId: s.dot_id ?? s.id,

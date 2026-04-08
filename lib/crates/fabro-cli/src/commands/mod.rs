@@ -17,6 +17,7 @@ pub(crate) mod secret;
 pub(crate) mod server;
 pub(crate) mod store;
 pub(crate) mod system;
+pub(crate) mod uninstall;
 pub(crate) mod upgrade;
 pub(crate) mod validate;
 pub(crate) mod workflow;

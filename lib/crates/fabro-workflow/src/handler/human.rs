@@ -257,8 +257,12 @@ impl Handler for HumanHandler {
             return Ok(Outcome::retry_classify("human gate timeout, no default"));
         }
 
-        // 5. Handle unanswered / aborted interview sessions.
-        if answer.value == AnswerValue::Aborted {
+        if answer.value == AnswerValue::Cancelled {
+            return Err(FabroError::Cancelled);
+        }
+
+        // 5. Handle unanswered / interrupted interview sessions.
+        if answer.value == AnswerValue::Interrupted {
             if services
                 .cancel_requested
                 .as_ref()
@@ -268,26 +272,25 @@ impl Handler for HumanHandler {
             }
             self.emit(
                 &services.emitter,
-                &Event::InterviewAborted {
+                &Event::InterviewInterrupted {
                     question_id: question_id.clone(),
                     question: question_text,
                     stage: node.id.clone(),
-                    reason: "aborted".to_string(),
+                    reason: "interrupted".to_string(),
                     duration_ms: millis_u64(interview_start.elapsed()),
                 },
             );
             return Ok(unanswered_human_gate(
-                "human interaction aborted before an answer was provided",
+                "human interaction interrupted before an answer was provided",
             ));
         }
         if answer.value == AnswerValue::Skipped {
             self.emit(
                 &services.emitter,
-                &Event::InterviewAborted {
-                    question_id: question_id.clone(),
+                &Event::InterviewCompleted {
+                    question_id,
                     question: question_text,
-                    stage: node.id.clone(),
-                    reason: "skipped".to_string(),
+                    answer: answer_text(&answer),
                     duration_ms: millis_u64(interview_start.elapsed()),
                 },
             );
@@ -382,7 +385,8 @@ fn answer_text(answer: &Answer) -> String {
         AnswerValue::MultiSelected(keys) => keys.join(", "),
         AnswerValue::Yes => "yes".to_string(),
         AnswerValue::No => "no".to_string(),
-        AnswerValue::Aborted => "aborted".to_string(),
+        AnswerValue::Cancelled => "cancelled".to_string(),
+        AnswerValue::Interrupted => "interrupted".to_string(),
         AnswerValue::Skipped => "skipped".to_string(),
         AnswerValue::Timeout => "timeout".to_string(),
     }
@@ -390,12 +394,28 @@ fn answer_text(answer: &Answer) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use super::*;
+    use crate::event::EventBody;
     use fabro_graphviz::graph::{AttrValue, Edge};
     use fabro_interview::{AutoApproveInterviewer, CallbackInterviewer, RecordingInterviewer};
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
+    }
+
+    fn make_services_with_events(events: Arc<Mutex<Vec<fabro_types::RunEvent>>>) -> EngineServices {
+        let mut services = EngineServices::test_default();
+        let emitter = Arc::new(Emitter::default());
+        emitter.on_event(move |event| {
+            events
+                .lock()
+                .expect("event log lock poisoned")
+                .push(event.clone());
+        });
+        services.emitter = emitter;
+        services
     }
 
     fn build_graph_with_human_gate() -> Graph {
@@ -499,8 +519,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn wait_human_aborted_returns_fail_without_routing_hints() {
-        let interviewer = Arc::new(CallbackInterviewer::new(|_| Answer::aborted()));
+    async fn wait_human_interrupted_returns_fail_without_routing_hints() {
+        let interviewer = Arc::new(CallbackInterviewer::new(|_| Answer::interrupted()));
         let handler = HumanHandler::new(interviewer);
         let graph = build_graph_with_human_gate();
         let node = graph.nodes.get("gate").unwrap();
@@ -517,8 +537,25 @@ mod tests {
         assert!(outcome.suggested_next_ids.is_empty());
         assert_eq!(
             outcome.failure_reason(),
-            Some("human interaction aborted before an answer was provided")
+            Some("human interaction interrupted before an answer was provided")
         );
+    }
+
+    #[tokio::test]
+    async fn wait_human_cancelled_returns_cancelled_error() {
+        let interviewer = Arc::new(CallbackInterviewer::new(|_| Answer::cancelled()));
+        let handler = HumanHandler::new(interviewer);
+        let graph = build_graph_with_human_gate();
+        let node = graph.nodes.get("gate").unwrap();
+        let context = Context::new();
+        let run_dir = Path::new("/tmp/test");
+
+        let error = handler
+            .execute(node, &context, &graph, run_dir, &make_services())
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, FabroError::Cancelled));
     }
 
     #[tokio::test]
@@ -539,6 +576,74 @@ mod tests {
         assert!(outcome.preferred_label.is_none());
         assert!(outcome.suggested_next_ids.is_empty());
         assert_eq!(outcome.failure_reason(), Some("human skipped interaction"));
+    }
+
+    #[tokio::test]
+    async fn wait_human_interrupted_emits_interview_interrupted_event() {
+        let interviewer = Arc::new(CallbackInterviewer::new(|_| Answer::interrupted()));
+        let handler = HumanHandler::new(interviewer);
+        let graph = build_graph_with_human_gate();
+        let node = graph.nodes.get("gate").unwrap();
+        let context = Context::new();
+        let run_dir = Path::new("/tmp/test");
+        let events = Arc::new(Mutex::new(Vec::new()));
+
+        let _ = handler
+            .execute(
+                node,
+                &context,
+                &graph,
+                run_dir,
+                &make_services_with_events(Arc::clone(&events)),
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            events
+                .lock()
+                .expect("event log lock poisoned")
+                .iter()
+                .any(|event| matches!(
+                    &event.body,
+                    EventBody::InterviewInterrupted(props)
+                        if props.reason == "interrupted"
+                ))
+        );
+    }
+
+    #[tokio::test]
+    async fn wait_human_skipped_emits_interview_completed_event() {
+        let interviewer = Arc::new(CallbackInterviewer::new(|_| Answer::skipped()));
+        let handler = HumanHandler::new(interviewer);
+        let graph = build_graph_with_human_gate();
+        let node = graph.nodes.get("gate").unwrap();
+        let context = Context::new();
+        let run_dir = Path::new("/tmp/test");
+        let events = Arc::new(Mutex::new(Vec::new()));
+
+        let _ = handler
+            .execute(
+                node,
+                &context,
+                &graph,
+                run_dir,
+                &make_services_with_events(Arc::clone(&events)),
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            events
+                .lock()
+                .expect("event log lock poisoned")
+                .iter()
+                .any(|event| matches!(
+                    &event.body,
+                    EventBody::InterviewCompleted(props)
+                        if props.answer == "skipped"
+                ))
+        );
     }
 
     #[tokio::test]

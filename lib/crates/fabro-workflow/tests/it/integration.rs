@@ -606,8 +606,8 @@ async fn end_to_end_human_gate_pipeline() {
 }
 
 #[tokio::test]
-async fn human_gate_aborted_input_fails_closed_without_fail_route() {
-    let mut graph = Graph::new("HumanGateAbortedClosed");
+async fn human_gate_interrupted_input_fails_closed_without_fail_route() {
+    let mut graph = Graph::new("HumanGateInterruptedClosed");
 
     let mut start = Node::new("start");
     start.attrs.insert(
@@ -661,7 +661,7 @@ async fn human_gate_aborted_input_fails_closed_without_fail_route() {
     graph.edges.push(Edge::new("approve", "exit"));
     graph.edges.push(Edge::new("revise", "exit"));
 
-    let interviewer = Arc::new(CallbackInterviewer::new(|_| Answer::aborted()));
+    let interviewer = Arc::new(CallbackInterviewer::new(|_| Answer::interrupted()));
 
     let dir = tempfile::tempdir().unwrap();
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
@@ -690,7 +690,7 @@ async fn human_gate_aborted_input_fails_closed_without_fail_route() {
     assert_eq!(
         outcome.status,
         StageStatus::Fail,
-        "aborted human gate should fail closed"
+        "interrupted human gate should fail closed"
     );
     assert!(
         outcome
@@ -707,17 +707,17 @@ async fn human_gate_aborted_input_fails_closed_without_fail_route() {
     );
     assert!(
         !checkpoint.completed_nodes.contains(&"approve".to_string()),
-        "approval path must not execute on aborted input"
+        "approval path must not execute on interrupted input"
     );
     assert!(
         !checkpoint.completed_nodes.contains(&"revise".to_string()),
-        "other unconditional choice edges must not execute on aborted input"
+        "other unconditional choice edges must not execute on interrupted input"
     );
 }
 
 #[tokio::test]
-async fn human_gate_aborted_input_routes_via_outcome_fail_condition() {
-    let mut graph = Graph::new("HumanGateAbortedFailRoute");
+async fn human_gate_interrupted_input_routes_via_outcome_fail_condition() {
+    let mut graph = Graph::new("HumanGateInterruptedFailRoute");
 
     let mut start = Node::new("start");
     start.attrs.insert(
@@ -771,7 +771,7 @@ async fn human_gate_aborted_input_routes_via_outcome_fail_condition() {
     graph.edges.push(Edge::new("approve", "exit"));
     graph.edges.push(Edge::new("manual_review", "exit"));
 
-    let interviewer = Arc::new(CallbackInterviewer::new(|_| Answer::aborted()));
+    let interviewer = Arc::new(CallbackInterviewer::new(|_| Answer::interrupted()));
 
     let dir = tempfile::tempdir().unwrap();
     let mut registry = HandlerRegistry::new(Box::new(StartHandler));
@@ -796,7 +796,7 @@ async fn human_gate_aborted_input_routes_via_outcome_fail_condition() {
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
         .await
-        .expect("aborted human gate should follow explicit fail route");
+        .expect("interrupted human gate should follow explicit fail route");
     assert_eq!(outcome.status, StageStatus::Success);
 
     let checkpoint = state.checkpoint.expect("checkpoint should be captured");
@@ -808,7 +808,7 @@ async fn human_gate_aborted_input_routes_via_outcome_fail_condition() {
     );
     assert!(
         !checkpoint.completed_nodes.contains(&"approve".to_string()),
-        "approval path must not execute on aborted input"
+        "approval path must not execute on interrupted input"
     );
 }
 

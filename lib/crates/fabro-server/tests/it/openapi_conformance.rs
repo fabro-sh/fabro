@@ -262,6 +262,7 @@ fn fully_populated_server_config() -> Settings {
         storage_dir: Some("/data".into()),
         max_concurrent_runs: Some(10),
         web: Some(WebSettings {
+            enabled: true,
             url: "https://example.com".into(),
             auth: AuthSettings {
                 provider: AuthProvider::Github,

@@ -30,7 +30,7 @@ pub use agent_profile::AgentProfile;
 pub use config::{SessionOptions, ToolApprovalAdapter, ToolHookCallback, ToolHookDecision};
 #[cfg(feature = "docker")]
 pub use docker_sandbox::{DockerSandbox, DockerSandboxOptions};
-pub use error::{AbortReason, AgentError};
+pub use error::{AgentError, InterruptReason};
 pub use event::Emitter;
 pub use fabro_mcp::config::McpServerSettings;
 pub use history::History;

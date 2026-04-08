@@ -932,6 +932,8 @@ pub(crate) enum Commands {
     Doctor(DoctorArgs),
     /// Set up the Fabro environment (LLMs, certs, GitHub)
     Install(InstallArgs),
+    /// Uninstall Fabro from this machine
+    Uninstall(UninstallArgs),
     /// Pull request operations
     Pr(PrNamespace),
     /// Manage server-owned secrets
@@ -1014,6 +1016,7 @@ impl Commands {
                 RepoCommand::Deinit => "repo deinit",
             },
             Self::Install(_) => "install",
+            Self::Uninstall(_) => "uninstall",
             Self::Pr(ns) => match &ns.command {
                 PrCommand::Create(_) => "pr create",
                 PrCommand::List(_) => "pr list",
@@ -1256,6 +1259,13 @@ pub(crate) struct InstallArgs {
     /// Base URL for the web UI (used for OAuth callback URLs)
     #[arg(long, default_value = "http://localhost:3000")]
     pub(crate) web_url: String,
+}
+
+#[derive(Args)]
+pub(crate) struct UninstallArgs {
+    /// Skip confirmation prompt
+    #[arg(long)]
+    pub(crate) yes: bool,
 }
 
 #[derive(Args)]

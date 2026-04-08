@@ -1,7 +1,7 @@
 use crate::agent_profile::AgentProfile;
 use crate::compaction::{check_context_usage, compact_context};
 use crate::config::SessionOptions;
-use crate::error::{AbortReason, AgentError};
+use crate::error::{AgentError, InterruptReason};
 use crate::event::Emitter;
 use crate::file_tracker::FileTracker;
 use crate::history::History;
@@ -47,7 +47,7 @@ pub struct Session {
     steering_queue: Arc<Mutex<VecDeque<String>>>,
     followup_queue: Arc<Mutex<VecDeque<String>>>,
     cancel_token: CancellationToken,
-    abort_reason: Arc<Mutex<Option<AbortReason>>>,
+    interrupt_reason: Arc<Mutex<Option<InterruptReason>>>,
     memory: Vec<String>,
     env_context: EnvContext,
     skills: Vec<Skill>,
@@ -78,7 +78,7 @@ impl Session {
             steering_queue: Arc::new(Mutex::new(VecDeque::new())),
             followup_queue: Arc::new(Mutex::new(VecDeque::new())),
             cancel_token: CancellationToken::new(),
-            abort_reason: Arc::new(Mutex::new(None)),
+            interrupt_reason: Arc::new(Mutex::new(None)),
             memory: Vec::new(),
             env_context: EnvContext::default(),
             skills: Vec::new(),
@@ -386,20 +386,20 @@ impl Session {
             .push_back(message);
     }
 
-    pub fn abort(&self) {
-        self.set_abort_reason(AbortReason::Cancelled);
+    pub fn interrupt(&self) {
+        self.set_interrupt_reason(InterruptReason::Cancelled);
         self.cancel_token.cancel();
     }
 
-    /// Returns a handle that can set the abort reason from another task.
+    /// Returns a handle that can set the interrupt reason from another task.
     #[must_use]
-    pub fn abort_reason_handle(&self) -> Arc<Mutex<Option<AbortReason>>> {
-        self.abort_reason.clone()
+    pub fn interrupt_reason_handle(&self) -> Arc<Mutex<Option<InterruptReason>>> {
+        self.interrupt_reason.clone()
     }
 
-    fn set_abort_reason(&self, reason: AbortReason) {
+    fn set_interrupt_reason(&self, reason: InterruptReason) {
         let mut guard = self
-            .abort_reason
+            .interrupt_reason
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if guard.is_none() {
@@ -407,14 +407,14 @@ impl Session {
         }
     }
 
-    fn aborted_error(&self) -> AgentError {
+    fn interrupted_error(&self) -> AgentError {
         let reason = self
-            .abort_reason
+            .interrupt_reason
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
-            .unwrap_or(AbortReason::Cancelled);
-        AgentError::Aborted(reason)
+            .unwrap_or(InterruptReason::Cancelled);
+        AgentError::Interrupted(reason)
     }
 
     fn emit_llm_error(&mut self, err: SdkError) -> AgentError {
@@ -494,7 +494,7 @@ impl Session {
     /// - Thinking → Closed (emits SessionEnded)
     /// - Executing → Closed (emits SessionEnded)
     /// - Idle → Closed (emits SessionEnded)
-    /// - any → Closed (abort/error — emits SessionEnded)
+    /// - any → Closed (interrupt/error — emits SessionEnded)
     fn transition(&mut self, to: SessionState) {
         let from = self.state;
         if from == to {
@@ -570,7 +570,7 @@ impl Session {
         // Spawn wall-clock timeout task if configured
         let timer_handle = self.config.wall_clock_timeout.map(|duration| {
             let token = self.cancel_token.clone();
-            let reason_handle = self.abort_reason.clone();
+            let reason_handle = self.interrupt_reason.clone();
             tokio::spawn(async move {
                 time::sleep(duration).await;
                 {
@@ -578,7 +578,7 @@ impl Session {
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                     if guard.is_none() {
-                        *guard = Some(AbortReason::WallClockTimeout);
+                        *guard = Some(InterruptReason::WallClockTimeout);
                     }
                 }
                 token.cancel();
@@ -603,7 +603,7 @@ impl Session {
             }
         }
 
-        // Abort the timer so it doesn't fire after we're done
+        // Stop the timer so it doesn't fire after we're done.
         if let Some(handle) = timer_handle {
             handle.abort();
         }
@@ -689,7 +689,7 @@ impl Session {
             // Check cancellation
             if self.cancel_token.is_cancelled() {
                 self.close();
-                return Err(self.aborted_error());
+                return Err(self.interrupted_error());
             }
 
             // Pre-turn compaction: trim context before building the request
@@ -775,12 +775,12 @@ impl Session {
                     }
                 }
 
-                // If aborted during streaming, drop the stream to cancel the HTTP
+                // If interrupted during streaming, drop the stream to cancel the HTTP
                 // connection, then close the session before returning.
                 if self.cancel_token.is_cancelled() {
                     drop(event_stream);
                     self.close();
-                    return Err(self.aborted_error());
+                    return Err(self.interrupted_error());
                 }
 
                 if let Some(resp) = accumulator.response().cloned() {
@@ -886,7 +886,7 @@ impl Session {
                     timestamp: SystemTime::now(),
                 });
                 self.close();
-                return Err(self.aborted_error());
+                return Err(self.interrupted_error());
             }
 
             // Record tool results turn
@@ -1442,12 +1442,12 @@ mod tests {
         };
 
         let mut session = make_session_with_tools_and_config(responses, registry, config).await;
-        // Set abort before processing
-        session.abort();
+        // Set interrupt before processing
+        session.interrupt();
         let result = session.process_input("Do something").await;
 
-        // Should return Aborted error and transition to Closed
-        assert!(matches!(result, Err(AgentError::Aborted(_))));
+        // Should return Interrupted error and transition to Closed
+        assert!(matches!(result, Err(AgentError::Interrupted(_))));
         assert_eq!(session.state(), SessionState::Closed);
 
         // Should have stopped immediately: User turn only, no LLM call
@@ -1465,7 +1465,7 @@ mod tests {
         let abort_tool = RegisteredTool {
             definition: ToolDefinition {
                 name: "set_abort".into(),
-                description: "Sets abort flag".into(),
+                description: "Sets interrupt flag".into(),
                 parameters: serde_json::json!({"type": "object"}),
             },
             executor: Arc::new(move |_args, _ctx| {
@@ -1500,8 +1500,8 @@ mod tests {
 
         let result = session.process_input("Do something").await;
 
-        // Should return Aborted error and transition to Closed
-        assert!(matches!(result, Err(AgentError::Aborted(_))));
+        // Should return Interrupted error and transition to Closed
+        assert!(matches!(result, Err(AgentError::Interrupted(_))));
         assert_eq!(session.state(), SessionState::Closed);
 
         // Should have processed: User + Assistant(tool_call) + ToolResults = 3 turns
@@ -2709,9 +2709,9 @@ mod tests {
         assert!(
             matches!(
                 result,
-                Err(AgentError::Aborted(AbortReason::WallClockTimeout))
+                Err(AgentError::Interrupted(InterruptReason::WallClockTimeout))
             ),
-            "expected Aborted(WallClockTimeout), got {result:?}"
+            "expected Interrupted(WallClockTimeout), got {result:?}"
         );
         assert_eq!(session.state(), SessionState::Closed);
     }
