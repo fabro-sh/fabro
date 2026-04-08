@@ -1,8 +1,6 @@
-mod artifact;
 mod artifact_cp;
 mod artifact_list;
 mod attach;
-mod completion;
 mod config;
 mod create;
 mod diff;

@@ -469,7 +469,7 @@ pub(crate) fn write_gated_workflow(path: &Path, name: &str, goal: &str) -> Workf
     write_text_file(
         path,
         &format!(
-            "digraph {} {{\n  graph [goal={goal:?}]\n  start [shape=Mdiamond]\n  exit [shape=Msquare]\n  wait [shape=parallelogram, script=\"while [ ! -f {quoted_gate_path} ]; do sleep 0.01; done; sleep 0.2\"]\n  start -> wait -> exit\n}}\n",
+            "digraph {} {{\n  graph [goal={goal:?}]\n  start [shape=Mdiamond]\n  exit [shape=Msquare]\n  wait [shape=parallelogram, script=\"while [ ! -f {quoted_gate_path} ]; do sleep 0.01; done\"]\n  start -> wait -> exit\n}}\n",
             to_pascal_case(name),
         ),
     );

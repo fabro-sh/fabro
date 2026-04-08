@@ -143,7 +143,7 @@ async fn connect_target_api_client_bundle(
             connect_remote_api_client_bundle(api_url, tls.as_ref())
         }
         user_config::ServerTarget::UnixSocket(path) => {
-            if let Ok(client) = connect_unix_socket_api_client_bundle(path).await {
+            if let Ok(client) = try_connect_unix_socket_api_client_bundle(path).await {
                 Ok(client)
             } else {
                 start::ensure_server_running_on_socket(
@@ -199,21 +199,42 @@ fn normalize_remote_server_target(api_url: &str) -> String {
         .to_string()
 }
 
-async fn connect_unix_socket_api_client_bundle(path: &Path) -> Result<ServerStoreClient> {
-    let http_client = cli_http_client_builder()
+fn build_unix_socket_http_client(path: &Path) -> Result<reqwest::Client> {
+    cli_http_client_builder()
         .unix_socket(path)
         .no_proxy()
         .build()
-        .context("Failed to build Unix-socket HTTP client for fabro server")?;
-    wait_for_server_ready(&http_client).await?;
+        .context("Failed to build Unix-socket HTTP client for fabro server")
+}
 
+fn unix_socket_api_client_bundle(http_client: reqwest::Client) -> ServerStoreClient {
     let base_url = "http://fabro".to_string();
     let client = fabro_api::Client::new_with_client(&base_url, http_client.clone());
-    Ok(ServerStoreClient {
+    ServerStoreClient {
         client,
         http_client,
         base_url,
-    })
+    }
+}
+
+async fn try_connect_unix_socket_api_client_bundle(path: &Path) -> Result<ServerStoreClient> {
+    let http_client = build_unix_socket_http_client(path)?;
+    check_server_ready(&http_client).await?;
+    Ok(unix_socket_api_client_bundle(http_client))
+}
+
+async fn connect_unix_socket_api_client_bundle(path: &Path) -> Result<ServerStoreClient> {
+    let http_client = build_unix_socket_http_client(path)?;
+    wait_for_server_ready(&http_client).await?;
+    Ok(unix_socket_api_client_bundle(http_client))
+}
+
+async fn check_server_ready(http_client: &reqwest::Client) -> Result<()> {
+    match http_client.get("http://fabro/health").send().await {
+        Ok(response) if response.status().is_success() => Ok(()),
+        Ok(response) => bail!("server health check returned status {}", response.status()),
+        Err(err) => Err(anyhow!(err)),
+    }
 }
 
 async fn wait_for_server_ready(http_client: &reqwest::Client) -> Result<()> {
@@ -221,15 +242,11 @@ async fn wait_for_server_ready(http_client: &reqwest::Client) -> Result<()> {
     let mut last_error = None;
 
     while std::time::Instant::now() < deadline {
-        match http_client.get("http://fabro/health").send().await {
-            Ok(response) if response.status().is_success() => return Ok(()),
-            Ok(response) => {
-                last_error = Some(anyhow!(
-                    "server health check returned status {}",
-                    response.status()
-                ));
+        match check_server_ready(http_client).await {
+            Ok(()) => return Ok(()),
+            Err(err) => {
+                last_error = Some(err);
             }
-            Err(err) => last_error = Some(anyhow!(err)),
         }
         sleep(Duration::from_millis(50)).await;
     }

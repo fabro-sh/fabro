@@ -5,6 +5,7 @@ mod exec;
 mod lifecycle;
 mod recovery;
 mod server_lifecycle;
+mod smoke;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;

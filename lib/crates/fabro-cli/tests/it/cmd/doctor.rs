@@ -3,7 +3,6 @@
 use std::process::Output;
 
 use fabro_test::{fabro_snapshot, test_context, twin_openai};
-use predicates::prelude::*;
 
 async fn run_success_output(mut cmd: assert_cmd::Command) -> Output {
     tokio::task::spawn_blocking(move || cmd.assert().success().get_output().clone())
@@ -84,13 +83,4 @@ async fn twin_doctor() {
         stdout.to_lowercase().contains("openai connectivity: ok"),
         "expected verbose doctor output to include openai probe success, got: {stdout}"
     );
-}
-
-#[test]
-fn doctor_no_color_when_no_color_set() {
-    let context = test_context!();
-    let mut cmd = context.doctor();
-    cmd.env_clear();
-    cmd.env("NO_COLOR", "1");
-    cmd.assert().stdout(predicate::str::contains("\x1b[").not());
 }
