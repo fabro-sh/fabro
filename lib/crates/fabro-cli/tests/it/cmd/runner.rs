@@ -4,7 +4,6 @@ use fabro_types::{EventBody, RunEvent};
 
 use super::support::{run_events, run_state, server_target};
 use crate::support::{fabro_json_snapshot, unique_run_id};
-use fabro_config::RunScratch;
 
 const SHARED_DAEMON_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
@@ -446,9 +445,6 @@ fn detached_run_answers_pending_question_without_interview_scratch_files() {
     );
 
     let run_dir = context.find_run_dir(&run_id);
-    let scratch = RunScratch::new(&run_dir);
-    let legacy_interview_request = scratch.runtime_dir().join("interview_request.json");
-    let legacy_interview_response = scratch.runtime_dir().join("interview_response.json");
     let runtime = tokio::runtime::Runtime::new().expect("test runtime should build");
     let question_id = runtime.block_on(async {
         let (client, base_url) = server_endpoint(&context.storage_dir);
@@ -459,14 +455,6 @@ fn detached_run_answers_pending_question_without_interview_scratch_files() {
             .to_string();
 
         assert_eq!(question["stage"], "approve");
-        assert!(
-            !legacy_interview_request.exists(),
-            "worker should not create interview_request.json"
-        );
-        assert!(
-            !legacy_interview_response.exists(),
-            "worker should not create interview_response.json"
-        );
 
         let response = client
             .post(format!(

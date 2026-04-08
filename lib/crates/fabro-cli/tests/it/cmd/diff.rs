@@ -137,7 +137,6 @@ fn diff_node_outputs_specific_patch() {
 fn diff_node_reads_store_patch_without_disk_file() {
     let context = test_context!();
     let setup = setup_git_backed_changed_run(&context);
-    let _ = std::fs::remove_file(setup.run.run_dir.join("nodes/step_one/diff.patch"));
 
     let mut cmd = context.command();
     cmd.args(["diff", &setup.run.run_id, "--node", "step_one"]);

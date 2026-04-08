@@ -388,9 +388,10 @@ fn infer_storage_dir(run_dir: &Path) -> Option<PathBuf> {
 
 #[cfg(test)]
 fn infer_run_id(run_dir: &Path) -> Option<RunId> {
-    std::fs::read_to_string(run_dir.join("id.txt"))
-        .ok()
-        .map(|run_id| run_id.trim().to_string())
+    run_dir
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .and_then(|name| name.rsplit('-').next().map(ToOwned::to_owned))
         .filter(|run_id| !run_id.is_empty())
         .and_then(|run_id| run_id.parse().ok())
 }
@@ -484,18 +485,16 @@ mod tests {
     }
 
     #[test]
-    fn infer_run_id_reads_id_txt() {
+    fn infer_run_id_reads_run_dir_suffix() {
         let dir = tempfile::tempdir().unwrap();
         let storage_dir = dir.path().join("storage");
-        let run_dir = storage_dir.join("scratch").join("20260401-test");
+        let run_id = fabro_types::fixtures::RUN_1;
+        let run_dir = storage_dir
+            .join("scratch")
+            .join(format!("20260401-{run_id}"));
         std::fs::create_dir_all(&run_dir).unwrap();
-        std::fs::write(
-            run_dir.join("id.txt"),
-            format!("{}\n", fabro_types::fixtures::RUN_1),
-        )
-        .unwrap();
 
-        assert_eq!(infer_run_id(&run_dir), Some(fabro_types::fixtures::RUN_1));
+        assert_eq!(infer_run_id(&run_dir), Some(run_id));
     }
 
     #[test]

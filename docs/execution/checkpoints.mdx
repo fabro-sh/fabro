@@ -3,7 +3,7 @@ title: "Checkpoints"
 description: "How Fabro uses Git to checkpoint and resume workflow runs"
 ---
 
-Fabro checkpoints every workflow run using Git. After each node completes, Fabro commits the file changes and execution state so that interrupted runs can be resumed exactly where they left off. This happens automatically — no configuration required beyond running inside a Git repository.
+Fabro checkpoints every workflow run using Git plus the durable run store. After each node completes, Fabro commits the file changes and execution state so that interrupted runs can be resumed exactly where they left off. This happens automatically — no configuration required beyond running inside a Git repository.
 
 ## Two branches, two purposes
 
@@ -69,7 +69,7 @@ The `checkpoint.json` captures everything needed to resume a run:
 | `loop_failure_signatures` | Failure signature counts for loop detection |
 | `restart_failure_signatures` | Failure signature counts across loop-restart edges |
 
-The checkpoint is also saved to `checkpoint.json` in the run directory for quick local access.
+The durable run store also keeps the current checkpoint so `resume`, `inspect`, and API reads do not need to rely on scratch files.
 
 ## Worktrees
 
@@ -90,20 +90,20 @@ For Daytona sandboxes, the worktree is created inside the remote sandbox instead
 
 ## Resuming a run
 
-Resume an interrupted run from its checkpoint on disk:
+Resume an interrupted run from its durable checkpoint:
 
 ```bash
 fabro resume 01JKXYZ
 ```
 
-Fabro looks up the run directory by ID prefix, loads `checkpoint.json` and `run.json` from the run directory, and spawns a new engine process to continue execution. No workflow file or override flags are needed — all configuration is read from the persisted run state.
+Fabro resolves the run by ID prefix, validates that durable state contains a checkpoint, and asks the server to continue execution. No workflow file or override flags are needed — all configuration is restored from persisted state.
 
 <Accordion title="What happens during resume">
 1. Fabro looks up the run directory by ID prefix
-2. Validates that `checkpoint.json` exists and no engine process is already running
-3. Cleans stale artifacts from the previous execution (conclusion, PID file, etc.)
+2. Validates that a checkpoint exists in durable state and no engine process is already running
+3. Cleans stale local artifacts from the previous execution
 4. Resets status to `Submitted` and spawns a new engine subprocess with `--resume`
-5. The engine loads `run.json` and `checkpoint.json`, restores the full context, completed node list, retry counts, and failure signatures
+5. The engine restores the full context, completed node list, retry counts, and failure signatures from durable state
 6. If the checkpointed node used `full` fidelity, downgrades the first resumed node to `summary:high` (since the original conversation thread no longer exists in memory)
 7. Continues execution from `next_node_id`
 </Accordion>
@@ -112,12 +112,12 @@ Fabro looks up the run directory by ID prefix, loads `checkpoint.json` and `run.
 
 Here's the full sequence that runs after every node completes:
 
-1. **Save checkpoint to disk** — Write `checkpoint.json` to the run directory
+1. **Append checkpoint event** — Persist the new checkpoint into durable run state
 2. **Write metadata branch** — Serialize the checkpoint and any new artifacts to the metadata branch (shadow commit)
 3. **Commit to run branch** — Stage all file changes, commit with structured trailers linking to the shadow commit SHA
-4. **Update checkpoint** — Re-save `checkpoint.json` with the `git_commit_sha` field set
+4. **Update durable checkpoint** — Persist the `git_commit_sha` associated with the run-branch commit
 
-Steps 2-4 are best-effort — if any Git operation fails, the run continues and emits a `RunNotice` warning event. The disk checkpoint from step 1 is always available as a fallback.
+Steps 2-4 are best-effort — if any Git operation fails, the run continues and emits a `RunNotice` warning event. Resume still uses the durable checkpoint in the run store.
 
 ## Inspecting run history
 

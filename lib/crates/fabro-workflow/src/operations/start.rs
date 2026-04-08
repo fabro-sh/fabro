@@ -1099,12 +1099,6 @@ mod tests {
             HashMap::new(),
             HashMap::new(),
         );
-        std::fs::write(
-            run_dir.join("checkpoint.json"),
-            serde_json::to_string_pretty(&checkpoint).unwrap(),
-        )
-        .unwrap();
-
         let conclusion = crate::records::Conclusion {
             timestamp: Utc::now(),
             status: StageStatus::Success,
@@ -1115,10 +1109,51 @@ mod tests {
             billing: None,
             total_retries: 0,
         };
-        std::fs::write(
-            run_dir.join("conclusion.json"),
-            serde_json::to_string_pretty(&conclusion).unwrap(),
+        let run_store = store.open_run(&fixtures::RUN_1).await.unwrap();
+        crate::event::append_event(
+            &run_store,
+            &fixtures::RUN_1,
+            &Event::CheckpointCompleted {
+                node_id: checkpoint.current_node.clone(),
+                status: "success".to_string(),
+                current_node: checkpoint.current_node.clone(),
+                completed_nodes: checkpoint.completed_nodes.clone(),
+                node_retries: checkpoint.node_retries.clone().into_iter().collect(),
+                context_values: checkpoint.context_values.clone().into_iter().collect(),
+                node_outcomes: checkpoint.node_outcomes.clone().into_iter().collect(),
+                next_node_id: checkpoint.next_node_id.clone(),
+                git_commit_sha: checkpoint.git_commit_sha.clone(),
+                loop_failure_signatures: checkpoint
+                    .loop_failure_signatures
+                    .iter()
+                    .map(|(sig, count)| (sig.to_string(), *count))
+                    .collect(),
+                restart_failure_signatures: checkpoint
+                    .restart_failure_signatures
+                    .iter()
+                    .map(|(sig, count)| (sig.to_string(), *count))
+                    .collect(),
+                node_visits: checkpoint.node_visits.clone().into_iter().collect(),
+                diff: None,
+            },
         )
+        .await
+        .unwrap();
+        crate::event::append_event(
+            &run_store,
+            &fixtures::RUN_1,
+            &Event::WorkflowRunCompleted {
+                duration_ms: conclusion.duration_ms,
+                artifact_count: 0,
+                status: "success".to_string(),
+                reason: None,
+                total_usd_micros: None,
+                final_git_commit_sha: None,
+                final_patch: None,
+                billing: None,
+            },
+        )
+        .await
         .unwrap();
 
         let result = resume(

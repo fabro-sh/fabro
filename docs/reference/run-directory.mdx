@@ -4,13 +4,13 @@ description: "Structure of Fabro's per-run directory"
 ---
 
 <Warning>
-  The run directory structure and file formats described here are internal implementation details and subject to change without notice. Do not build tooling that relies on them. The authoritative source of run state is the event-sourced run store — files in the scratch directory are disk projections for debugging convenience.
+  The run directory structure and file formats described here are internal implementation details and subject to change without notice. Do not build tooling that relies on them. The authoritative source of run state is the event-sourced run store; the scratch directory is now mostly local runtime state and caches.
 </Warning>
 
-Each `fabro run` invocation creates a timestamped directory under `~/.fabro/scratch/`:
+Each `fabro run` invocation creates a timestamped directory under `~/.fabro/storage/scratch/`:
 
 ```
-~/.fabro/scratch/20260307-01JQXYZ123ABC456DEF789/
+~/.fabro/storage/scratch/20260307-01JQXYZ123ABC456DEF789/
 ```
 
 The naming format is `YYYYMMDD-{run_id}`, where `run_id` is the ULID assigned to the run. You can override the base storage directory with the global `--storage-dir` flag (the scratch directory will be `<storage-dir>/scratch/`).
@@ -19,62 +19,28 @@ The naming format is `YYYYMMDD-{run_id}`, where `run_id` is the ULID assigned to
 
 | File | Format | When written | Description |
 |---|---|---|---|
-| `run.json` | JSON | Run create | Run metadata — `run_id`, `created_at`, `config` (resolved configuration), `graph` (Graph), `workflow_slug`, `working_directory`, `host_repo_path`, `base_branch`, `labels` |
-| `start.json` | JSON | Run start | Start metadata — `run_id`, `start_time`, `run_branch`, `base_sha` |
-| `workflow.fabro` | Graphviz | Run create | Copy of the original workflow graph when the raw DOT source is available |
-| `run.pid` | Text | Legacy only | Legacy process ID file from older runs. Current detached launches use launcher records instead, and current attach/resume no longer read `run.pid`. |
-| `workflow.toml` | TOML | Run create | Copy of the original workflow file (only when the workflow is defined in TOML) |
-| `progress.jsonl` | JSONL | Continuous | Event stream — one JSON object per line for every significant event (stage starts, completions, tool calls, retries, etc.). See [Observability](/execution/observability) for the full event catalog. |
-| `live.json` | JSON | Continuous | Current execution state snapshot, overwritten on each event. Used for live monitoring. |
-| `checkpoint.json` | JSON | After each node | Crash recovery state — `current_node`, `completed_nodes`, `node_retries`, `context_values`, `node_outcomes`, `next_node_id`, `git_commit_sha`, failure signatures. See [Checkpoints](/execution/checkpoints). |
-| `conclusion.json` | JSON | Run end | Final result — `status`, `duration_ms`, `failure_reason`, `final_git_commit_sha`. Only present when the run completes (not for crashed or interrupted runs). |
+| `workflow_bundle.json` | JSON | Run create | Bundled workflow input used to restart the run without re-reading the original workflow files. Includes the root workflow path plus bundled child workflow sources and inline files. |
 | `final.patch` | Diff | Run end | Git diff from `base_sha` to final HEAD. Only present in git checkpoint mode. |
-| `retro.json` | JSON | Run end | Post-run retrospective analysis — `smoothness_rating`, `learnings`, `friction_points`, `stages`. Omitted if `--no-retro` is passed. See [Retros](/execution/retros). |
-| `cli.log` | Text | Continuous | Per-run tracing log. Contains the same tracing output as the daily log file, scoped to this run. |
+| `run.pid` | Text | Legacy only | Legacy process ID file from older runs. Current detached launches use launcher records instead, and current attach/resume no longer read `run.pid`. |
 
-## `nodes/` subdirectory
+## Local-only directories
 
-Each node execution writes artifacts into `nodes/{node_id}/`. When a node is retried, subsequent visits use `nodes/{node_id}-visit_{N}/` (where N starts at 2).
+These paths are local runtime state and caches, not the canonical run record.
 
-Every node gets a `status.json` after completion containing `status`, `notes`, `failure_reason`, and `timestamp`. The remaining files depend on the handler type:
+- **`worktree/`** — When running in worktree mode, Fabro creates a Git worktree here as the working directory for agents and commands.
+- **`runtime/`** — Local runtime files. Today this is mainly materialized blob payloads under `runtime/blobs/` and worker stderr logs for server-managed subprocesses.
+- **`cache/artifacts/files/`** — Captured artifact files organized by node and retry, plus a `manifest.json` for each retry directory.
+- **`nodes/{manager_node}_{visit}/child/`** — Nested scratch directories for manager-loop child workflows.
 
-**Agent and prompt nodes:**
+Large durable values, event streams, checkpoints, conclusions, and retros are no longer projected into live scratch by default. Use `fabro logs`, `fabro inspect`, the API, or `fabro store dump` for those surfaces.
 
-| File | Description |
-|---|---|
-| `prompt.md` | The full prompt sent to the LLM |
-| `response.md` | The LLM's response text |
-| `status.json` | Execution status with routing outcome |
+## Reconstructed and export-only layouts
 
-**Command nodes:**
+Some file names you may have seen in older runs or older docs still exist in reconstructed metadata branches or `fabro store dump` exports:
 
-| File | Description |
-|---|---|
-| `script_invocation.json` | Command metadata — `command`, `language`, `timeout_ms` |
-| `stdout.log` | Standard output |
-| `stderr.log` | Standard error |
-| `script_timing.json` | Timing info — `duration_ms`, `exit_code`, `timed_out` |
-
-**Nodes with git checkpointing:**
-
-| File | Description |
-|---|---|
-| `diff.patch` | Git diff of changes made during this stage |
-
-**Manager loop nodes:**
-
-Manager nodes that run sub-workflows write a nested `child/` directory containing a full run structure (run.json, start.json, checkpoint, nodes, etc.).
-
-## Other directories
-
-**`worktree/`** — When running in git checkpoint mode, Fabro creates a Git worktree here as the working directory for agents and commands.
-
-**`runtime/`** — Local-only runtime files such as materialized blob payloads under `runtime/blobs/`.
-
-**`cache/`** — Local filesystem cache for file-backed artifacts and captured test artifacts:
-
-- `cache/artifacts/values/` — large context values offloaded to file-backed artifacts
-- `cache/artifacts/files/` — captured test artifacts organized by node and retry
+- `run.json`, `start.json`, and `checkpoint.json` on metadata branches for rewind and fork
+- `run.json`, `start.json`, `checkpoint.json`, `conclusion.json`, `retro.json`, and `events.jsonl` in `fabro store dump` output
+- Per-node prompt, response, status, stdout, and stderr files in `fabro store dump` output and metadata rebuilds
 
 ## Browsing runs
 
@@ -89,28 +55,16 @@ fabro ps --filter workflow=my-workflow
 ## Full directory tree
 
 ```
-~/.fabro/scratch/
+~/.fabro/storage/scratch/
 ├── 20260307-01JQXYZ123ABC456DEF789/  # One directory per run
-│   ├── run.json
-│   ├── start.json
-│   ├── workflow.fabro
+│   ├── workflow_bundle.json
 │   ├── run.pid                      # Legacy only; older runs may contain this
-│   ├── workflow.toml
-│   ├── progress.jsonl
-│   ├── live.json
-│   ├── checkpoint.json
-│   ├── conclusion.json
 │   ├── final.patch
-│   ├── retro.json
-│   ├── cli.log
 │   ├── runtime/
 │   │   └── blobs/
 │   │       └── 01JT5Y3KJ0N5S9E1Y7YFBR2G4D.json
 │   ├── cache/
 │   │   └── artifacts/
-│   │       ├── values/
-│   │       │   ├── response.plan.json
-│   │       │   └── command.output.json
 │   │       └── files/
 │   │           └── test/
 │   │               └── retry_1/
@@ -118,32 +72,11 @@ fabro ps --filter workflow=my-workflow
 │   │                   │   └── screenshot.png
 │   │                   └── manifest.json
 │   ├── nodes/
-│   │   ├── plan/
-│   │   │   ├── prompt.md
-│   │   │   ├── response.md
-│   │   │   └── status.json
-│   │   ├── work/
-│   │   │   ├── prompt.md
-│   │   │   ├── response.md
-│   │   │   ├── status.json
-│   │   │   └── diff.patch
-│   │   ├── work-visit_2/             # Retry of "work" node
-│   │   │   ├── prompt.md
-│   │   │   ├── response.md
-│   │   │   ├── status.json
-│   │   │   └── diff.patch
-│   │   ├── test/
-│   │   │   ├── script_invocation.json
-│   │   │   ├── stdout.log
-│   │   │   ├── stderr.log
-│   │   │   ├── script_timing.json
-│   │   │   └── status.json
 │   │   └── manager/
-│   │       ├── status.json
 │   │       └── child/
-│   │           ├── run.json
-│   │           ├── start.json
-│   │           ├── checkpoint.json
-│   │           └── nodes/
+│   │           ├── workflow_bundle.json
+│   │           ├── runtime/
+│   │           ├── cache/
+│   │           └── worktree/
 │   └── worktree/                     # Git worktree (git checkpoint mode)
 ```

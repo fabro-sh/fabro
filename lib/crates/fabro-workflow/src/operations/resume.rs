@@ -50,5 +50,5 @@ pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, 
 }
 
 fn cleanup_resume_artifacts(run_dir: &Path) {
-    let _ = std::fs::remove_file(run_dir.join("detached_failure.json"));
+    let _ = run_dir;
 }

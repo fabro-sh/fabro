@@ -182,8 +182,10 @@ mod tests {
         .unwrap();
 
         assert!(run_dir.is_dir());
-        assert!(!run_dir.join("workflow.fabro").exists());
-        assert!(!run_dir.join("run.json").exists());
+        assert!(
+            std::fs::read_dir(&run_dir).unwrap().next().is_none(),
+            "persist should not project files into the scratch dir"
+        );
         assert_eq!(persisted.run_dir(), run_dir.as_path());
         assert_eq!(
             serde_json::to_value(persisted.run_record().graph.clone()).unwrap(),

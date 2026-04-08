@@ -579,9 +579,6 @@ pub(crate) fn find_run_dir(storage_dir: &Path, run_id: &str) -> Option<PathBuf> 
 }
 
 fn infer_run_id(run_dir: &Path) -> String {
-    if let Ok(id) = std::fs::read_to_string(run_dir.join("id.txt")) {
-        return id.trim().to_string();
-    }
     run_dir
         .file_name()
         .map(|name| name.to_string_lossy().to_string())

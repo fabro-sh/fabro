@@ -138,15 +138,6 @@ fn inspect_json_omits_run_dir() {
 fn inspect_completed_run_reads_store_without_disk_metadata_files() {
     let context = test_context!();
     let run = setup_completed_fast_dry_run(&context);
-    for name in [
-        "run.json",
-        "start.json",
-        "conclusion.json",
-        "checkpoint.json",
-        "sandbox.json",
-    ] {
-        let _ = std::fs::remove_file(run.run_dir.join(name));
-    }
     let output = run_success(&context, &["inspect", &run.run_id]);
 
     assert_snapshot!(serde_json::to_string_pretty(&compact_inspect(&output)).unwrap(), @r#"

@@ -119,7 +119,7 @@ The tracked paths are stored as `files_touched` on the stage outcome:
 
 | Location | How it's used |
 |---|---|
-| `StageCompleted` event | Emitted with `files_touched` in the event stream and `progress.jsonl` |
+| `StageCompleted` event | Emitted with `files_touched` in the event stream and surfaced by `fabro logs` / exported event streams |
 | Preambles | Listed under each completed stage so downstream agents know what changed |
 | Retros | Included per-stage and aggregated across the full run |
 | `status.json` | Written to the stage's logs directory after each node completes |

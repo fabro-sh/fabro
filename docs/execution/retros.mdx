@@ -30,7 +30,7 @@ The quantitative layer is extracted directly from the [checkpoint](/execution/ch
 
 ### Narrative layer
 
-An LLM agent reads the run's `progress.jsonl` event stream and produces a structured analysis:
+An LLM agent reads the run's full event stream and produces a structured analysis:
 
 | Field | Description |
 |---|---|
@@ -99,9 +99,9 @@ Open items capture follow-up work identified during the run:
 
 Retro generation happens in two phases after a run completes:
 
-1. **Derive** — Fabro extracts stage durations from `progress.jsonl` and builds a retro from the checkpoint data. This is deterministic, fast, and produces the quantitative layer. The retro is saved immediately as `retro.json` in the run's directory.
+1. **Derive** — Fabro extracts stage durations from durable run events and builds a retro from the checkpoint data. This is deterministic, fast, and produces the quantitative layer.
 
-2. **Narrate** — An LLM agent session analyzes the run data. The agent has read access to `progress.jsonl`, `checkpoint.json`, `run.json`, and `start.json`. It uses grep and read tools to find interesting signals — failures, retries, errors, approach changes — then calls a `submit_retro` tool with its structured analysis. The narrative fields are merged into the existing retro and saved.
+2. **Narrate** — An LLM agent session analyzes the run data. The agent receives temp files named `progress.jsonl`, `checkpoint.json`, `run.json`, and `start.json` inside its sandbox so it can grep and read the event stream and run state. The narrative fields are merged back into durable retro state.
 
 Both phases run automatically at the end of every CLI run. The API server derives the quantitative layer but does not currently run the narrative agent.
 
@@ -112,13 +112,6 @@ Both phases run automatically at the end of every CLI run. The API server derive
 ## Accessing retros
 
 ### CLI
-
-Retros are saved to `{run_dir}/retro.json` after every run. The path is printed at the end of the run output:
-
-```
-Retro: smooth — Successfully implemented the feature
-  Retro saved to ~/fabro-logs/01JKXYZ.../retro.json
-```
 
 To enable retros for your project, set `retros = true` in the `[features]` section of your `fabro.toml`:
 
@@ -148,4 +141,4 @@ Retros are also available via the REST API. See the [list retros](/api-reference
 
 ## Storage
 
-Retros are stored as `retro.json` in the run's directory alongside `checkpoint.json` and `progress.jsonl`. They are plain JSON files — easy to parse, query, or pipe into other tools.
+Retros are stored in durable run state. If you need files on disk, `fabro store dump` materializes the retro as `retro.json` alongside other exported run data.

@@ -34,7 +34,7 @@ use fabro_workflow::handler::{Handler, HandlerRegistry};
 use fabro_workflow::outcome::{Outcome, OutcomeExt, StageStatus};
 use fabro_workflow::records::Checkpoint;
 use fabro_workflow::run_options::{GitCheckpointOptions, RunOptions};
-use fabro_workflow::test_support::WorkflowRunner;
+use fabro_workflow::test_support::{WorkflowRunner, test_store_dir};
 use object_store::local::LocalFileSystem;
 use ulid::Ulid;
 
@@ -44,83 +44,101 @@ fn test_run_id(label: &str) -> RunId {
     RunId::from(Ulid(u128::from(hasher.finish())))
 }
 
-fn load_checkpoint(path: &Path) -> Result<Checkpoint, Box<dyn std::error::Error>> {
-    if !path.exists()
-        && path
-            .file_name()
-            .is_some_and(|name| name == "checkpoint.json")
-    {
-        let run_dir = path
-            .parent()
-            .ok_or("checkpoint path should have a parent")?;
-        let local_store_dir = run_dir.join("store");
-        let (store_dir, run_id) =
-            if let Ok(run_id_text) = std::fs::read_to_string(run_dir.join("id.txt")) {
-                (local_store_dir, run_id_text.trim().parse()?)
-            } else {
-                let runs_dir = run_dir.parent().ok_or("run dir should have parent")?;
-                let storage_dir = runs_dir.parent().ok_or("runs dir should have parent")?;
-                let run_id: RunId = run_dir
-                    .file_name()
-                    .ok_or("run dir should have file name")?
-                    .to_string_lossy()
-                    .rsplit('-')
-                    .next()
-                    .ok_or("run dir should contain run id suffix")?
-                    .parse()?;
-                (storage_dir.join("store"), run_id)
-            };
-        let object_store = Arc::new(LocalFileSystem::new_with_prefix(store_dir)?);
-        let store = Arc::new(Database::new(
-            object_store,
-            "",
-            std::time::Duration::from_millis(1),
-        ));
-        let state = if tokio::runtime::Handle::try_current().is_ok() {
-            std::thread::spawn(
-                move || -> Result<_, Box<dyn std::error::Error + Send + Sync>> {
-                    let runtime = tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()?;
-                    let run = runtime.block_on(store.open_run_reader(&run_id))?;
-                    let state = runtime.block_on(async {
-                        for attempt in 0..20 {
-                            let state = run.state().await?;
-                            if state.checkpoint.is_some() || attempt == 19 {
-                                return Ok::<_, fabro_store::StoreError>(state);
-                            }
-                            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+fn load_run_checkpoint(run_dir: &Path) -> Result<Checkpoint, Box<dyn std::error::Error>> {
+    let run_dir = run_dir.to_path_buf();
+    let uses_shared_store = run_dir
+        .parent()
+        .and_then(Path::file_name)
+        .is_some_and(|name| name == "scratch");
+    let store_dir = if uses_shared_store {
+        let runs_dir = run_dir.parent().ok_or("run dir should have parent")?;
+        let storage_dir = runs_dir.parent().ok_or("runs dir should have parent")?;
+        storage_dir.join("store")
+    } else {
+        test_store_dir(&run_dir)
+    };
+    let object_store = Arc::new(LocalFileSystem::new_with_prefix(store_dir)?);
+    let store = Arc::new(Database::new(
+        object_store,
+        "",
+        std::time::Duration::from_millis(1),
+    ));
+    let state = if tokio::runtime::Handle::try_current().is_ok() {
+        std::thread::spawn(
+            move || -> Result<_, Box<dyn std::error::Error + Send + Sync>> {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()?;
+                let run_id = if uses_shared_store {
+                    run_dir
+                        .file_name()
+                        .ok_or("run dir should have file name")?
+                        .to_string_lossy()
+                        .rsplit('-')
+                        .next()
+                        .ok_or("run dir should contain run id suffix")?
+                        .parse()?
+                } else {
+                    runtime
+                        .block_on(store.list_runs(&fabro_store::ListRunsQuery::default()))?
+                        .into_iter()
+                        .next()
+                        .ok_or("test store should contain one run")?
+                        .run_id
+                };
+                let run = runtime.block_on(store.open_run_reader(&run_id))?;
+                let state = runtime.block_on(async {
+                    for attempt in 0..20 {
+                        let state = run.state().await?;
+                        if state.checkpoint.is_some() || attempt == 19 {
+                            return Ok::<_, fabro_store::StoreError>(state);
                         }
-                        unreachable!()
-                    })?;
-                    Ok(state)
-                },
-            )
-            .join()
-            .map_err(|_| "checkpoint loader thread panicked")?
-            .map_err(|err| err.to_string())?
-        } else {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()?;
-            let run = runtime.block_on(store.open_run_reader(&run_id))?;
-            runtime.block_on(async {
-                for attempt in 0..20 {
-                    let state = run.state().await?;
-                    if state.checkpoint.is_some() || attempt == 19 {
-                        return Ok::<_, fabro_store::StoreError>(state);
+                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                     }
-                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                }
-                unreachable!()
-            })?
+                    unreachable!()
+                })?;
+                Ok(state)
+            },
+        )
+        .join()
+        .map_err(|_| "checkpoint loader thread panicked")?
+        .map_err(|err| err.to_string())?
+    } else {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        let run_id = if uses_shared_store {
+            run_dir
+                .file_name()
+                .ok_or("run dir should have file name")?
+                .to_string_lossy()
+                .rsplit('-')
+                .next()
+                .ok_or("run dir should contain run id suffix")?
+                .parse()?
+        } else {
+            runtime
+                .block_on(store.list_runs(&fabro_store::ListRunsQuery::default()))?
+                .into_iter()
+                .next()
+                .ok_or("test store should contain one run")?
+                .run_id
         };
-        return state
-            .checkpoint
-            .ok_or_else(|| "checkpoint should exist in run store".into());
-    }
-    let data = std::fs::read_to_string(path)?;
-    Ok(serde_json::from_str(&data)?)
+        let run = runtime.block_on(store.open_run_reader(&run_id))?;
+        runtime.block_on(async {
+            for attempt in 0..20 {
+                let state = run.state().await?;
+                if state.checkpoint.is_some() || attempt == 19 {
+                    return Ok::<_, fabro_store::StoreError>(state);
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            unreachable!()
+        })?
+    };
+    return state
+        .checkpoint
+        .ok_or_else(|| "checkpoint should exist in run store".into());
 }
 
 async fn create_env() -> DaytonaSandbox {
@@ -490,8 +508,7 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
     assert_eq!(outcome.status, StageStatus::Success);
 
     // Checkpoint should persist a durable blob ref.
-    let checkpoint =
-        load_checkpoint(&dir.path().join("checkpoint.json")).expect("checkpoint should load");
+    let checkpoint = load_run_checkpoint(dir.path()).expect("checkpoint should load");
     let pointer_value = checkpoint
         .context_values
         .get("response.big_output")
@@ -705,8 +722,7 @@ async fn daytona_git_checkpoint_remote_emits_events() {
     }
 
     // Verify checkpoint.json has git_commit_sha
-    let checkpoint =
-        load_checkpoint(&dir.path().join("checkpoint.json")).expect("checkpoint should load");
+    let checkpoint = load_run_checkpoint(dir.path()).expect("checkpoint should load");
     assert!(
         checkpoint.git_commit_sha.is_some(),
         "checkpoint should have git_commit_sha"
@@ -856,8 +872,7 @@ async fn daytona_parallel_git_branching_e2e() {
     );
 
     // Verify parallel.results has head_sha for each branch
-    let checkpoint =
-        load_checkpoint(&run_tmp.path().join("checkpoint.json")).expect("checkpoint should load");
+    let checkpoint = load_run_checkpoint(run_tmp.path()).expect("checkpoint should load");
     let parallel_results = checkpoint
         .context_values
         .get("parallel.results")

@@ -73,7 +73,6 @@ fn resume_rewound_run_succeeds() {
         &setup.repo_dir,
         &["rev-parse", &format!("fabro/run/{}", setup.run.run_id)],
     );
-    let _ = std::fs::remove_file(setup.run.run_dir.join("run.json"));
 
     let mut resume_cmd = context.command();
     resume_cmd.current_dir(&setup.repo_dir);
