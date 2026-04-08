@@ -639,9 +639,9 @@ pub async fn initialize(
             phase,
             commands,
             options.lifecycle.setup_command_timeout_ms,
+            options.run_options.cancel_token.clone(),
         )
-        .await
-        .map_err(|e| FabroError::engine(e.to_string()))?;
+        .await?;
     }
 
     scopeguard::ScopeGuard::into_inner(cleanup_guard);
@@ -674,6 +674,7 @@ pub async fn initialize(
 mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
     use std::time::Duration;
 
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
@@ -908,5 +909,134 @@ mod tests {
                 .iter()
                 .any(|event| event == "sandbox.initialized")
         );
+    }
+
+    #[tokio::test]
+    async fn initialize_cancelled_setup_command_returns_cancelled() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("run");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        let (graph, source) = simple_graph();
+        let persisted = test_persisted(graph, source, &run_dir);
+        let cancel_token = Arc::new(AtomicBool::new(true));
+        let mut run_options = test_settings(&run_dir);
+        run_options.cancel_token = Some(cancel_token);
+
+        let result = initialize(
+            persisted,
+            InitOptions {
+                run_id: test_run_id(),
+                run_store: {
+                    let store = memory_store();
+                    let inner = store.create_run(&test_run_id()).await.unwrap();
+                    inner.into()
+                },
+                dry_run: false,
+                emitter: Arc::new(crate::event::Emitter::new(test_run_id())),
+                sandbox: SandboxSpec::Local {
+                    working_directory: std::env::current_dir().unwrap(),
+                },
+                llm: LlmSpec {
+                    model: "test-model".to_string(),
+                    provider: fabro_llm::Provider::Anthropic,
+                    fallback_chain: Vec::new(),
+                    mcp_servers: Vec::new(),
+                    dry_run: true,
+                },
+                interviewer: Arc::new(AutoApproveInterviewer),
+                lifecycle: crate::run_options::LifecycleOptions {
+                    setup_commands: vec!["sleep 5".to_string()],
+                    setup_command_timeout_ms: 5_000,
+                    devcontainer_phases: vec![],
+                },
+                run_options,
+                workflow_path: None,
+                workflow_bundle: None,
+                hooks: fabro_hooks::HookSettings { hooks: vec![] },
+                sandbox_env: SandboxEnvSpec {
+                    devcontainer_env: HashMap::new(),
+                    toml_env: HashMap::new(),
+                    github_permissions: None,
+                    origin_url: None,
+                },
+                devcontainer: None,
+                git: None,
+                worktree_mode: None,
+                run_control: None,
+                registry_override: None,
+                artifact_uploader: None,
+                checkpoint: None,
+                seed_context: None,
+            },
+        )
+        .await;
+
+        assert!(matches!(result, Err(FabroError::Cancelled)));
+    }
+
+    #[tokio::test]
+    async fn initialize_cancelled_devcontainer_phase_returns_cancelled() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join("run");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        let (graph, source) = simple_graph();
+        let persisted = test_persisted(graph, source, &run_dir);
+        let cancel_token = Arc::new(AtomicBool::new(true));
+        let mut run_options = test_settings(&run_dir);
+        run_options.cancel_token = Some(cancel_token);
+
+        let result = initialize(
+            persisted,
+            InitOptions {
+                run_id: test_run_id(),
+                run_store: {
+                    let store = memory_store();
+                    let inner = store.create_run(&test_run_id()).await.unwrap();
+                    inner.into()
+                },
+                dry_run: false,
+                emitter: Arc::new(crate::event::Emitter::new(test_run_id())),
+                sandbox: SandboxSpec::Local {
+                    working_directory: std::env::current_dir().unwrap(),
+                },
+                llm: LlmSpec {
+                    model: "test-model".to_string(),
+                    provider: fabro_llm::Provider::Anthropic,
+                    fallback_chain: Vec::new(),
+                    mcp_servers: Vec::new(),
+                    dry_run: true,
+                },
+                interviewer: Arc::new(AutoApproveInterviewer),
+                lifecycle: crate::run_options::LifecycleOptions {
+                    setup_commands: vec![],
+                    setup_command_timeout_ms: 5_000,
+                    devcontainer_phases: vec![(
+                        "on_create".to_string(),
+                        vec![fabro_devcontainer::Command::Shell("sleep 5".to_string())],
+                    )],
+                },
+                run_options,
+                workflow_path: None,
+                workflow_bundle: None,
+                hooks: fabro_hooks::HookSettings { hooks: vec![] },
+                sandbox_env: SandboxEnvSpec {
+                    devcontainer_env: HashMap::new(),
+                    toml_env: HashMap::new(),
+                    github_permissions: None,
+                    origin_url: None,
+                },
+                devcontainer: None,
+                git: None,
+                worktree_mode: None,
+                run_control: None,
+                registry_override: None,
+                artifact_uploader: None,
+                checkpoint: None,
+                seed_context: None,
+            },
+        )
+        .await;
+
+        assert!(matches!(result, Err(FabroError::Cancelled)));
     }
 }
