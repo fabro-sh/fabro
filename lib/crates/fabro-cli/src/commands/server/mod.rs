@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use fabro_server::bind;
-use fabro_server::bind::Bind;
+use fabro_server::bind::BindRequest;
 use fabro_server::serve::ServeArgs;
 use fabro_util::terminal::Styles;
 
@@ -31,7 +31,7 @@ pub(crate) async fn dispatch(command: ServerCommand, _globals: &GlobalArgs) -> R
             let storage_dir = settings.storage_dir();
             let bind_addr = match serve_args.bind.as_deref() {
                 Some(s) => bind::parse_bind(s)?,
-                None => Bind::Unix(user_config::default_socket_path()),
+                None => BindRequest::Unix(user_config::default_socket_path()),
             };
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             start::execute(bind_addr, foreground, serve_args, storage_dir, styles).await
@@ -66,7 +66,7 @@ pub(crate) async fn dispatch(command: ServerCommand, _globals: &GlobalArgs) -> R
             } else {
                 // __serve should always receive an explicit --bind from the parent,
                 // but fall back to the storage dir default if missing.
-                Bind::Unix(user_config::default_socket_path())
+                BindRequest::Unix(user_config::default_socket_path())
             };
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
             foreground::execute(

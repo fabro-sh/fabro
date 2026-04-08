@@ -32,7 +32,7 @@ fn help() {
           --foreground
               Run in the foreground instead of daemonizing
           --bind <BIND>
-              Address to bind to (host:port for TCP, or path containing / for Unix socket)
+              Address to bind to (IP or IP:port for TCP, or path containing / for Unix socket)
           --no-upgrade-check
               Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --model <MODEL>
@@ -124,6 +124,107 @@ fn start_without_bind_uses_home_socket_instead_of_storage_socket() {
 
     assert_eq!(json["bind"].as_str(), expected_socket.to_str());
     assert_ne!(json["bind"].as_str(), storage_socket.to_str());
+
+    context
+        .command()
+        .env("FABRO_STORAGE_DIR", &storage_dir)
+        .args(["server", "stop"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn start_with_tcp_host_only_bind_resolves_to_host_and_port() {
+    let context = test_context!();
+    let storage_root = isolated_storage_dir();
+    let storage_dir = storage_root.path().join("storage");
+
+    let mut cmd = context.command();
+    cmd.env("FABRO_STORAGE_DIR", &storage_dir);
+    cmd.args(["server", "start", "--dry-run", "--bind", "127.0.0.1"]);
+    let output = cmd.output().expect("server start command should run");
+    assert!(
+        output.status.success(),
+        "server start should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Server started (pid "),
+        "expected startup message, got {stderr}"
+    );
+    let bind_regex = regex::Regex::new(r"127\.0\.0\.1:\d+").unwrap();
+    assert!(
+        bind_regex.is_match(&stderr),
+        "expected resolved tcp bind in stderr, got {stderr}"
+    );
+
+    let output = context
+        .command()
+        .env("FABRO_STORAGE_DIR", &storage_dir)
+        .args(["server", "status", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    let bind = json["bind"].as_str().expect("bind should be a string");
+    assert!(
+        bind.starts_with("127.0.0.1:"),
+        "expected resolved tcp bind, got {bind}"
+    );
+
+    context
+        .command()
+        .env("FABRO_STORAGE_DIR", &storage_dir)
+        .args(["server", "stop"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn start_with_tcp_host_only_bind_warns_and_falls_back_when_default_port_is_unavailable() {
+    let context = test_context!();
+    let storage_root = isolated_storage_dir();
+    let storage_dir = storage_root.path().join("storage");
+    let occupied = std::net::TcpListener::bind(("127.0.0.1", 32276))
+        .expect("test requires default TCP port 32276 to be free before occupying it");
+
+    let mut filters = context.filters();
+    filters.push((r"pid \d+".to_string(), "pid [PID]".to_string()));
+    filters.push((r"127\.0\.0\.1:\d+".to_string(), "[TCP_BIND]".to_string()));
+
+    let mut cmd = context.command();
+    cmd.env("FABRO_STORAGE_DIR", &storage_dir);
+    cmd.args(["server", "start", "--dry-run", "--bind", "127.0.0.1"]);
+    fabro_snapshot!(filters, cmd, @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    ----- stderr -----
+    Warning: TCP port 32276 is unavailable on 127.0.0.1; falling back to a random port.
+    Server started (pid [PID]) on [TCP_BIND]
+    ");
+
+    let output = context
+        .command()
+        .env("FABRO_STORAGE_DIR", &storage_dir)
+        .args(["server", "status", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    let bind = json["bind"].as_str().expect("bind should be a string");
+    assert_ne!(bind, "127.0.0.1:32276");
+    assert!(
+        bind.starts_with("127.0.0.1:"),
+        "expected resolved tcp bind, got {bind}"
+    );
+
+    drop(occupied);
 
     context
         .command()
