@@ -389,20 +389,35 @@ impl ServerStoreClient {
         since_seq: Option<u32>,
         limit: Option<usize>,
     ) -> Result<Vec<EventEnvelope>> {
-        let mut request = self.client.list_run_events().id(run_id.to_string());
-        if let Some(seq) = since_seq.and_then(non_zero_u64_from_u32) {
-            request = request.since_seq(seq);
+        let mut next_since_seq = since_seq;
+        let mut all_events = Vec::new();
+
+        loop {
+            let mut request = self.client.list_run_events().id(run_id.to_string());
+            if let Some(seq) = next_since_seq.and_then(non_zero_u64_from_u32) {
+                request = request.since_seq(seq);
+            }
+            if let Some(limit) = limit.and_then(non_zero_u64_from_usize) {
+                request = request.limit(limit);
+            }
+
+            let response = request.send().await.map_err(map_api_error)?;
+            let parsed = response.into_inner();
+            let page_events = parsed
+                .data
+                .into_iter()
+                .map(convert_type)
+                .collect::<Result<Vec<EventEnvelope>>>()?;
+            let next_page_since_seq = page_events.last().map(|event| event.seq.saturating_add(1));
+            all_events.extend(page_events);
+
+            if limit.is_some() || !parsed.meta.has_more || next_page_since_seq.is_none() {
+                break;
+            }
+            next_since_seq = next_page_since_seq;
         }
-        if let Some(limit) = limit.and_then(non_zero_u64_from_usize) {
-            request = request.limit(limit);
-        }
-        let response = request.send().await.map_err(map_api_error)?;
-        response
-            .into_inner()
-            .data
-            .into_iter()
-            .map(convert_type)
-            .collect::<Result<Vec<_>>>()
+
+        Ok(all_events)
     }
 
     pub(crate) async fn attach_run_events(
@@ -855,4 +870,112 @@ fn non_zero_u64_from_u32(value: u32) -> Option<NonZeroU64> {
 
 fn non_zero_u64_from_usize(value: usize) -> Option<NonZeroU64> {
     u64::try_from(value).ok().and_then(NonZeroU64::new)
+}
+
+#[cfg(test)]
+mod tests {
+    use httpmock::MockServer;
+
+    use super::*;
+
+    fn test_event(run_id: &str, seq: u32, event: &str) -> serde_json::Value {
+        serde_json::json!({
+            "seq": seq,
+            "payload": {
+                "event": event,
+                "id": format!("evt-{seq}"),
+                "run_id": run_id,
+                "ts": "2026-04-05T12:00:00Z",
+                "properties": {}
+            }
+        })
+    }
+
+    fn test_client(base_url: &str) -> ServerStoreClient {
+        connect_remote_api_client_bundle(base_url, None).unwrap()
+    }
+
+    #[tokio::test]
+    async fn list_run_events_follows_pagination_when_limit_unspecified() {
+        let server = MockServer::start_async().await;
+        let run_id: RunId = "01ARZ3NDEKTSV4RRFFQ69G5FAV".parse().unwrap();
+        let run_id_str = run_id.to_string();
+
+        let first_page = server
+            .mock_async(|when, then| {
+                when.method("GET")
+                    .path(format!("/api/v1/runs/{run_id_str}/events"))
+                    .query_param_missing("since_seq")
+                    .query_param_missing("limit");
+                then.status(200)
+                    .header("Content-Type", "application/json")
+                    .body(
+                        serde_json::json!({
+                            "data": [test_event(&run_id_str, 1, "run.running")],
+                            "meta": { "has_more": true }
+                        })
+                        .to_string(),
+                    );
+            })
+            .await;
+
+        let second_page = server
+            .mock_async(|when, then| {
+                when.method("GET")
+                    .path(format!("/api/v1/runs/{run_id_str}/events"))
+                    .query_param("since_seq", "2")
+                    .query_param_missing("limit");
+                then.status(200)
+                    .header("Content-Type", "application/json")
+                    .body(
+                        serde_json::json!({
+                            "data": [test_event(&run_id_str, 2, "run.completed")],
+                            "meta": { "has_more": false }
+                        })
+                        .to_string(),
+                    );
+            })
+            .await;
+
+        let client = test_client(&server.url("/api/v1"));
+        let events = client.list_run_events(&run_id, None, None).await.unwrap();
+
+        first_page.assert_async().await;
+        second_page.assert_async().await;
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].seq, 1);
+        assert_eq!(events[1].seq, 2);
+    }
+
+    #[tokio::test]
+    async fn list_run_events_with_explicit_limit_keeps_single_page_behavior() {
+        let server = MockServer::start_async().await;
+        let run_id: RunId = "01ARZ3NDEKTSV4RRFFQ69G5FAV".parse().unwrap();
+        let run_id_str = run_id.to_string();
+
+        let first_page = server
+            .mock_async(|when, then| {
+                when.method("GET")
+                    .path(format!("/api/v1/runs/{run_id_str}/events"))
+                    .query_param_missing("since_seq")
+                    .query_param("limit", "1");
+                then.status(200)
+                    .header("Content-Type", "application/json")
+                    .body(
+                        serde_json::json!({
+                            "data": [test_event(&run_id_str, 1, "run.running")],
+                            "meta": { "has_more": true }
+                        })
+                        .to_string(),
+                    );
+            })
+            .await;
+
+        let client = test_client(&server.url("/api/v1"));
+        let events = client.list_run_events(&run_id, None, Some(1)).await.unwrap();
+
+        first_page.assert_async().await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].seq, 1);
+    }
 }
