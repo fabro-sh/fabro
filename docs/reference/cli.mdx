@@ -198,7 +198,7 @@ The table shows run ID, status, workflow name, goal, and timing.
 | `--before <DATE>` | Only show runs started before this date (YYYY-MM-DD prefix match) |
 | `--workflow <NAME>` | Filter by workflow name (substring match) |
 | `--label <KEY=VALUE>` | Filter by label (repeatable, AND semantics) |
-| `--orphans` | Include orphan directories (no `run.json`) |
+| `--orphans` | Include orphan directories (no matching durable run) |
 | `--json` | Output as JSON |
 | `-q, --quiet` | Only display full run IDs, one per line (no headers or footers). Takes precedence over `--json`. |
 
@@ -255,7 +255,7 @@ fabro system prune --orphans --yes
 | `--older-than <DURATION>` | Only prune runs older than this duration (e.g. `24h`, `7d`). Default when no explicit filters are set: `24h` |
 | `--workflow <NAME>` | Filter by workflow name (substring match) |
 | `--label <KEY=VALUE>` | Filter by label (repeatable, AND semantics) |
-| `--orphans` | Include orphan directories (no `run.json`) |
+| `--orphans` | Include orphan directories (no matching durable run) |
 | `--yes` | Actually delete (default is dry-run) |
 
 ---

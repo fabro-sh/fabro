@@ -1,6 +1,6 @@
 # Events
 
-Every event in `progress.jsonl` is a JSON object with this envelope structure:
+Every serialized run event envelope, whether streamed over SSE, returned by `fabro logs`, or written to a JSONL sink, uses this structure:
 
 ```json
 {

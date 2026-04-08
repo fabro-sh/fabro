@@ -16,6 +16,7 @@ use std::time::Duration;
 use crate::cmd::support::RunProjection;
 use fabro_config::Storage;
 use fabro_server::bind::Bind;
+use fabro_store::EventEnvelope;
 use fabro_test::TestContext;
 use serde_json::Value;
 
@@ -25,15 +26,22 @@ pub(super) fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
-pub(super) fn read_json(path: &Path) -> Value {
-    let content = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
-    serde_json::from_str(&content)
-        .unwrap_or_else(|e| panic!("failed to parse {}: {e}", path.display()))
+pub(super) fn read_conclusion(run_dir: &Path) -> Value {
+    serde_json::to_value(
+        run_state(run_dir)
+            .conclusion
+            .expect("run store conclusion should exist"),
+    )
+    .expect("conclusion should serialize")
 }
 
-pub(super) fn read_conclusion(run_dir: &Path) -> Value {
-    read_json(&run_dir.join("conclusion.json"))
+pub(super) fn read_run_record(run_dir: &Path) -> Value {
+    serde_json::to_value(
+        run_state(run_dir)
+            .run
+            .expect("run store run record should exist"),
+    )
+    .expect("run record should serialize")
 }
 
 pub(super) fn completed_nodes(run_dir: &Path) -> Vec<String> {
@@ -44,15 +52,13 @@ pub(super) fn completed_nodes(run_dir: &Path) -> Vec<String> {
 }
 
 pub(super) fn has_event(run_dir: &Path, event_name: &str) -> bool {
-    let path = run_dir.join("progress.jsonl");
-    let content = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("failed to read progress.jsonl: {e}"));
-    content.lines().any(|line| {
-        if let Ok(v) = serde_json::from_str::<Value>(line) {
-            v["event"].as_str() == Some(event_name)
-        } else {
-            false
-        }
+    run_events(run_dir).into_iter().any(|event| {
+        event
+            .payload
+            .as_value()
+            .get("event")
+            .and_then(Value::as_str)
+            == Some(event_name)
     })
 }
 
@@ -77,10 +83,11 @@ pub(super) fn find_run_dir(context: &TestContext) -> PathBuf {
     context.single_run_dir()
 }
 
+pub(super) fn run_id_for(run_dir: &Path) -> String {
+    infer_run_id(run_dir)
+}
+
 fn infer_run_id(run_dir: &Path) -> String {
-    if let Ok(id) = std::fs::read_to_string(run_dir.join("id.txt")) {
-        return id.trim().to_string();
-    }
     run_dir
         .file_name()
         .map(|name| name.to_string_lossy().to_string())
@@ -156,6 +163,17 @@ fn run_state(run_dir: &Path) -> RunProjection {
         storage_dir,
         &format!("/api/v1/runs/{run_id}/state"),
     ))
+}
+
+fn run_events(run_dir: &Path) -> Vec<EventEnvelope> {
+    let run_id = infer_run_id(run_dir);
+    let runs_dir = run_dir.parent().expect("run dir should have parent");
+    let storage_dir = runs_dir.parent().expect("runs dir should have parent");
+    let response: serde_json::Value = block_on(get_server_json_for_storage(
+        storage_dir,
+        &format!("/api/v1/runs/{run_id}/events"),
+    ));
+    serde_json::from_value(response["data"].clone()).expect("event list should parse")
 }
 
 macro_rules! sandbox_tests {
