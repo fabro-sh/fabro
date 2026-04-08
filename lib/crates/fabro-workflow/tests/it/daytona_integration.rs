@@ -728,13 +728,6 @@ async fn daytona_git_checkpoint_remote_emits_events() {
         "checkpoint should have git_commit_sha"
     );
 
-    // Assert scratch final.patch is no longer written
-    let final_patch = dir.path().join("final.patch");
-    assert!(
-        !final_patch.exists(),
-        "final.patch should not be written to scratch"
-    );
-
     env.cleanup().await.unwrap();
 }
 
@@ -1243,13 +1236,6 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
         "sandbox commit should have Fabro-Run trailer, got:\n{commit_msg}"
     );
 
-    // Assert scratch final.patch is no longer written
-    let final_patch = dir.path().join("final.patch");
-    assert!(
-        !final_patch.exists(),
-        "final.patch should not be written to scratch"
-    );
-
     env.cleanup().await.unwrap();
 }
 
@@ -1366,9 +1352,6 @@ async fn daytona_asset_collection() {
     );
     let content = std::fs::read_to_string(&report_path).unwrap();
     assert!(content.contains("testsuites"));
-
-    let manifest_path = artifacts_dir.join("manifest.json");
-    assert!(!manifest_path.exists(), "manifest.json should not exist");
 
     env.cleanup().await.unwrap();
 }

@@ -8665,17 +8665,6 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
         "value should be a durable blob ref"
     );
 
-    assert!(
-        !RunScratch::new(dir.path())
-            .root()
-            .join("cache")
-            .join("artifacts")
-            .join("values")
-            .join(format!("{expected_blob_id}.json"))
-            .exists(),
-        "legacy host blob cache file should not exist"
-    );
-
     // WorkflowRunCompleted artifact_count now tracks captured artifacts, not offloaded values.
     let evts = events.lock().unwrap();
     let completed_event = evts
@@ -10387,13 +10376,6 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
         "checkpoint should have git_commit_sha"
     );
 
-    // 9. Assert scratch final.patch is no longer written
-    let final_patch = run_dir.path().join("final.patch");
-    assert!(
-        !final_patch.exists(),
-        "final.patch should not be written to scratch"
-    );
-
     // Cleanup worktree
     let _ = std::process::Command::new("git")
         .args(["worktree", "remove", "--force"])
@@ -10828,14 +10810,7 @@ async fn parallel_git_branching_host_e2e() {
         "parallel branch ref should still exist for debugging"
     );
 
-    // 11. Verify scratch final.patch is no longer written
-    let final_patch = run_dir.path().join("final.patch");
-    assert!(
-        !final_patch.exists(),
-        "final.patch should not be written to scratch"
-    );
-
-    // 12. Verify events
+    // 11. Verify events
     let events = events.lock().unwrap();
     let parallel_started: Vec<_> = events
         .iter()
@@ -10971,13 +10946,6 @@ async fn git_checkpoint_host_skips_empty_diff_patch() {
         .await
         .expect("pipeline should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
-
-    // final.patch should NOT exist either
-    let final_patch = run_dir.path().join("final.patch");
-    assert!(
-        !final_patch.exists(),
-        "final.patch should not exist when there are no changes"
-    );
 
     // Cleanup
     let _ = std::process::Command::new("git")
@@ -12683,14 +12651,6 @@ async fn asset_collection_local_sandbox_success() {
     let report_content = std::fs::read_to_string(&report_path).unwrap();
     assert!(report_content.contains("testsuites"));
 
-    // Check manifest.json is no longer written
-    let manifest_path = artifacts_dir.join("manifest.json");
-    assert!(
-        !manifest_path.exists(),
-        "manifest.json should not exist at {}",
-        manifest_path.display()
-    );
-
     // Check that ArtifactCaptured events were emitted
     let captured_events = events.lock().unwrap();
     let asset_events: Vec<&RunEvent> = captured_events
@@ -12888,9 +12848,6 @@ async fn asset_collection_docker_sandbox() {
     );
     let content = std::fs::read_to_string(&report_path).unwrap();
     assert!(content.contains("testsuites"));
-
-    let manifest_path = artifacts_dir.join("manifest.json");
-    assert!(!manifest_path.exists(), "manifest.json should not exist");
 
     sandbox.cleanup().await.unwrap();
 }

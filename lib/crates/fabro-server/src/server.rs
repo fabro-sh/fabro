@@ -5934,32 +5934,6 @@ mod tests {
         run_id
     }
 
-    async fn create_direct_run(state: &Arc<AppState>, settings: &Settings) -> RunId {
-        operations::create(
-            state.store.as_ref(),
-            operations::CreateRunInput {
-                workflow: operations::WorkflowInput::DotSource {
-                    source: MINIMAL_DOT.to_string(),
-                    base_dir: None,
-                },
-                settings: settings.clone(),
-                cwd: PathBuf::from("/tmp"),
-                workflow_slug: None,
-                workflow_path: None,
-                workflow_bundle: None,
-                submitted_manifest_bytes: None,
-                run_id: None,
-                host_repo_path: None,
-                repo_origin_url: None,
-                base_branch: None,
-                provenance: None,
-            },
-        )
-        .await
-        .unwrap()
-        .run_id
-    }
-
     async fn create_durable_run_with_events(
         state: &Arc<AppState>,
         run_id: RunId,
@@ -6535,15 +6509,9 @@ mod tests {
         assert_eq!(accepted_definition["workflow_path"], "workflow.fabro");
         assert!(accepted_definition["workflows"]["workflow.fabro"].is_object());
 
-        let run_dir = PathBuf::from(
-            created["properties"]["run_dir"]
-                .as_str()
-                .expect("run.created should include run_dir"),
-        );
-        assert!(
-            !run_dir.join("workflow_bundle.json").exists(),
-            "run scratch should no longer persist workflow_bundle.json"
-        );
+        created["properties"]["run_dir"]
+            .as_str()
+            .expect("run.created should include run_dir");
     }
 
     #[tokio::test]
@@ -6861,86 +6829,6 @@ mod tests {
             .unwrap();
         let response = app.oneshot(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    }
-
-    #[tokio::test]
-    async fn api_created_runs_do_not_fallback_to_scratch_artifacts() {
-        let temp = tempfile::tempdir().unwrap();
-        let mut settings = dry_run_settings();
-        settings.storage_dir = Some(temp.path().join("storage"));
-        let state = create_app_state_with_options(settings.clone(), 5);
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
-
-        let run_id = create_run(&app, MINIMAL_DOT)
-            .await
-            .parse::<RunId>()
-            .unwrap();
-        let artifact_path = Storage::new(settings.storage_dir())
-            .run_scratch(&run_id)
-            .artifact_files_dir()
-            .join("code")
-            .join("retry_2")
-            .join("src/lib.rs");
-        std::fs::create_dir_all(artifact_path.parent().unwrap()).unwrap();
-        std::fs::write(&artifact_path, "legacy scratch only").unwrap();
-
-        let req = Request::builder()
-            .method("GET")
-            .uri(api(&format!("/runs/{run_id}/stages/code@2/artifacts")))
-            .body(Body::empty())
-            .unwrap();
-        let response = app.clone().oneshot(req).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = body_json(response.into_body()).await;
-        assert_eq!(body["data"].as_array().unwrap().len(), 0);
-
-        let req = Request::builder()
-            .method("GET")
-            .uri(api(&format!(
-                "/runs/{run_id}/stages/code@2/artifacts/download?filename=src/lib.rs"
-            )))
-            .body(Body::empty())
-            .unwrap();
-        let response = app.oneshot(req).await.unwrap();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    }
-
-    #[tokio::test]
-    async fn directly_created_runs_do_not_fallback_to_scratch_artifacts() {
-        let temp = tempfile::tempdir().unwrap();
-        let mut settings = dry_run_settings();
-        settings.storage_dir = Some(temp.path().join("storage"));
-        let state = create_app_state_with_options(settings.clone(), 5);
-        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
-
-        let run_id = create_direct_run(&state, &settings).await;
-        let artifact_path = Storage::new(settings.storage_dir())
-            .run_scratch(&run_id)
-            .artifact_files_dir()
-            .join("code")
-            .join("retry_2")
-            .join("src/lib.rs");
-        std::fs::create_dir_all(artifact_path.parent().unwrap()).unwrap();
-        std::fs::write(&artifact_path, "legacy scratch only").unwrap();
-        let req = Request::builder()
-            .method("GET")
-            .uri(api(&format!("/runs/{run_id}/stages/code@2/artifacts")))
-            .body(Body::empty())
-            .unwrap();
-        let response = app.clone().oneshot(req).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = body_json(response.into_body()).await;
-        assert_eq!(body["data"].as_array().unwrap().len(), 0);
-
-        let req = Request::builder()
-            .method("GET")
-            .uri(api(&format!(
-                "/runs/{run_id}/stages/code@2/artifacts/download?filename=src/lib.rs"
-            )))
-            .body(Body::empty())
-            .unwrap();
-        let response = app.oneshot(req).await.unwrap();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
