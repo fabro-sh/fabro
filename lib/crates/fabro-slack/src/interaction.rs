@@ -40,7 +40,6 @@ pub fn parse_interaction(payload: &Value) -> Option<SlackAnswerSubmission> {
             // Ignore checkbox toggle events — wait for Submit button
             return None;
         }
-        "plain_text_input" => return None,
         _ => return None,
     };
 
