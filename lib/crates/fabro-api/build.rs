@@ -1,4 +1,7 @@
-use std::{env, fs, path::Path};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
 
 use progenitor::{GenerationSettings, Generator, InterfaceStyle};
 
@@ -117,15 +120,22 @@ fn patch_codegen_request_body_media_types(value: &mut serde_json::Value) {
     }
 }
 
+fn spec_path_from_manifest_dir(manifest_dir: &Path) -> PathBuf {
+    manifest_dir
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("docs/api-reference/fabro-api.yaml")
+}
+
 fn main() {
-    let spec_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("docs/api-reference/fabro-api.yaml");
+    let manifest_dir = env::var_os("CARGO_MANIFEST_DIR")
+        .map(PathBuf::from)
+        .expect("CARGO_MANIFEST_DIR should be set for build scripts");
+    let spec_path = spec_path_from_manifest_dir(&manifest_dir);
 
     println!("cargo::rerun-if-changed={}", spec_path.display());
 

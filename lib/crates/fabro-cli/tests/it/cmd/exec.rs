@@ -125,7 +125,9 @@ fn exec_server_target_uses_remote_transport_instead_of_local_api_key_resolution(
     let server = MockServer::start();
     server.mock(|when, then| {
         when.method("POST").path("/api/v1/completions");
-        then.status(500).body("server-routed-marker");
+        // Use a non-retriable error so this test covers transport routing
+        // without paying the retry backoff cost of a 5xx response.
+        then.status(400).body("server-routed-marker");
     });
 
     let mut cmd = context.exec_cmd();
@@ -202,7 +204,9 @@ fn exec_cli_server_target_overrides_configured_server_target() {
     let cli_server = MockServer::start();
     cli_server.mock(|when, then| {
         when.method("POST").path("/api/v1/completions");
-        then.status(500).body("cli-override-marker");
+        // Use a non-retriable error so this test covers target precedence
+        // without paying the retry backoff cost of a 5xx response.
+        then.status(400).body("cli-override-marker");
     });
     context.write_home(
         ".fabro/settings.toml",

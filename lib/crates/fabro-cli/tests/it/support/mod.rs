@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use assert_cmd::Command;
 use fabro_test::TestContext;
 use fabro_types::RunId;
 macro_rules! fabro_json_snapshot {
@@ -57,4 +58,29 @@ pub(crate) fn run_output_filters(context: &TestContext) -> Vec<(String, String)>
 
 pub(crate) fn unique_run_id() -> String {
     RunId::new().to_string()
+}
+
+pub(crate) struct LightweightCli {
+    home_dir: tempfile::TempDir,
+}
+
+impl LightweightCli {
+    pub(crate) fn new() -> Self {
+        Self {
+            home_dir: tempfile::tempdir().expect("temp home dir should exist"),
+        }
+    }
+
+    pub(crate) fn command(&self) -> Command {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_fabro"));
+        cmd.env_clear();
+        if let Some(path) = std::env::var_os("PATH") {
+            cmd.env("PATH", path);
+        }
+        cmd.env("HOME", self.home_dir.path());
+        cmd.env("NO_COLOR", "1");
+        cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
+        cmd.current_dir(self.home_dir.path());
+        cmd
+    }
 }

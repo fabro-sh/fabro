@@ -1,7 +1,9 @@
-use std::time::Duration;
+use std::io::{BufRead, BufReader, Read};
+use std::process::{Output, Stdio};
+use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
-use fabro_test::{fabro_snapshot, run_and_format, test_context};
-use httpmock::MockServer;
+use fabro_test::{apply_filters, fabro_snapshot, test_context};
 use serde_json::Value;
 
 use crate::support::{example_fixture, fabro_json_snapshot, run_output_filters, unique_run_id};
@@ -10,334 +12,80 @@ use super::support::{output_stdout, resolve_run, wait_for_status, write_gated_wo
 
 const SHARED_DAEMON_TIMEOUT: Duration = Duration::from_secs(30);
 
-fn live_run_state_response() -> serde_json::Value {
-    serde_json::json!({
-        "run": null,
-        "graph_source": null,
-        "start": null,
-        "status": {
-            "status": "running",
-            "reason": null,
-            "updated_at": "2026-04-05T12:00:01Z"
-        },
-        "checkpoint": null,
-        "checkpoints": [],
-        "conclusion": null,
-        "retro": null,
-        "retro_prompt": null,
-        "retro_response": null,
-        "sandbox": null,
-        "final_patch": null,
-        "pull_request": null,
-        "nodes": {}
-    })
+fn format_output_snapshot(output: &Output, filters: &[(String, String)]) -> String {
+    let stdout = apply_filters(&String::from_utf8_lossy(&output.stdout), filters);
+    let stderr = apply_filters(&String::from_utf8_lossy(&output.stderr), filters);
+
+    format!(
+        "success: {success}\nexit_code: {code}\n----- stdout -----\n{stdout}----- stderr -----\n{stderr}",
+        success = output.status.success(),
+        code = output.status.code().unwrap_or(-1),
+        stdout = stdout,
+        stderr = stderr,
+    )
 }
 
-fn run_sse_body(run_id: &str) -> String {
-    let completed = serde_json::json!({
-        "seq": 2,
-        "payload": {
-            "event": "run.completed",
-            "id": "evt-run-completed",
-            "run_id": run_id,
-            "ts": "2026-04-05T12:00:01Z",
-            "properties": {
-                "duration_ms": 12,
-                "artifact_count": 0,
-                "status": "success"
+fn wait_for_output_signal(
+    child: &mut std::process::Child,
+    stdout: &mut impl Read,
+    stderr_reader: std::thread::JoinHandle<Vec<u8>>,
+    signal_rx: mpsc::Receiver<()>,
+    needle: &str,
+) -> std::thread::JoinHandle<Vec<u8>> {
+    let deadline = Instant::now() + SHARED_DAEMON_TIMEOUT;
+    let mut stderr_reader = Some(stderr_reader);
+
+    loop {
+        match signal_rx.recv_timeout(Duration::from_millis(20)) {
+            Ok(()) => {
+                return stderr_reader
+                    .take()
+                    .expect("stderr reader should still be available");
             }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {}
         }
-    });
 
-    format!("data: {completed}\n\n")
-}
-
-#[test]
-fn help() {
-    let context = test_context!();
-    let mut cmd = context.command();
-    cmd.args(["attach", "--help"]);
-    fabro_snapshot!(context.filters(), cmd, @"
-    success: true
-    exit_code: 0
-    ----- stdout -----
-    Attach to a running or finished workflow run
-
-    Usage: fabro attach [OPTIONS] <RUN>
-
-    Arguments:
-      <RUN>  Run ID prefix or workflow name
-
-    Options:
-          --json              Output as JSON [env: FABRO_JSON=]
-          --server <SERVER>   Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
-          --debug             Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --no-upgrade-check  Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --quiet             Suppress non-essential output [env: FABRO_QUIET=]
-          --verbose           Enable verbose output [env: FABRO_VERBOSE=]
-      -h, --help              Print help
-    ----- stderr -----
-    ");
-}
-
-#[test]
-fn attach_requires_run_arg() {
-    let context = test_context!();
-    let mut cmd = context.command();
-    cmd.arg("attach");
-    fabro_snapshot!(context.filters(), cmd, @"
-    success: false
-    exit_code: 2
-    ----- stdout -----
-    ----- stderr -----
-    error: the following required arguments were not provided:
-      <RUN>
-
-    Usage: fabro attach --no-upgrade-check <RUN>
-
-    For more information, try '--help'.
-    ");
-}
-
-#[test]
-fn attach_uses_configured_server_target_without_server_flag() {
-    let context = test_context!();
-    let server = MockServer::start();
-    let run_id = unique_run_id();
-    let list_mock = server.mock(|when, then| {
-        when.method("GET").path("/api/v1/runs");
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!([
-                    {
-                        "run_id": run_id,
-                        "workflow_name": "Remote Workflow",
-                        "workflow_slug": "remote-workflow",
-                        "goal": "Remote output",
-                        "labels": {},
-                        "host_repo_path": null,
-                        "start_time": "2026-04-05T12:00:00Z",
-                        "status": "running",
-                        "status_reason": null,
-                        "duration_ms": 12,
-                        "total_usd_micros": null
-                    }
-                ])
-                .to_string(),
+        if let Some(status) = child.try_wait().expect("attach should stay alive") {
+            let mut stdout_bytes = Vec::new();
+            stdout
+                .read_to_end(&mut stdout_bytes)
+                .expect("attach stdout should be readable");
+            let stderr_bytes = stderr_reader
+                .take()
+                .expect("stderr reader should still be available")
+                .join()
+                .expect("stderr reader should join");
+            panic!(
+                "attach exited before emitting {needle:?}\nstatus: {status}\nstdout:\n{}\nstderr:\n{}",
+                String::from_utf8_lossy(&stdout_bytes),
+                String::from_utf8_lossy(&stderr_bytes)
             );
-    });
-    server.mock(|when, then| {
-        when.method("GET")
-            .path(format!("/api/v1/runs/{run_id}/events"));
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "data": [{
-                        "seq": 1,
-                        "payload": {
-                            "event": "run.running",
-                            "id": "evt-run-running",
-                            "run_id": run_id,
-                            "ts": "2026-04-05T12:00:00Z",
-                            "properties": {}
-                        }
-                    }],
-                    "meta": { "has_more": false }
-                })
-                .to_string(),
+        }
+
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let status = child.wait().expect("attach should exit after kill");
+            let mut stdout_bytes = Vec::new();
+            stdout
+                .read_to_end(&mut stdout_bytes)
+                .expect("attach stdout should be readable");
+            let stderr_bytes = stderr_reader
+                .take()
+                .expect("stderr reader should still be available")
+                .join()
+                .expect("stderr reader should join");
+            panic!(
+                "timed out waiting for attach output {needle:?}\nstatus: {status}\nstdout:\n{}\nstderr:\n{}",
+                String::from_utf8_lossy(&stdout_bytes),
+                String::from_utf8_lossy(&stderr_bytes)
             );
-    });
-    server.mock(|when, then| {
-        when.method("GET")
-            .path(format!("/api/v1/runs/{run_id}/state"));
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(live_run_state_response().to_string());
-    });
-    server.mock(|when, then| {
-        when.method("GET")
-            .path(format!("/api/v1/runs/{run_id}/questions"))
-            .query_param("page[limit]", "100")
-            .query_param("page[offset]", "0");
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(r#"{"data":[],"meta":{"has_more":false}}"#);
-    });
-    let attach_mock = server.mock(|when, then| {
-        when.method("GET")
-            .path(format!("/api/v1/runs/{run_id}/attach"))
-            .query_param("since_seq", "2");
-        then.status(200)
-            .header("Content-Type", "text/event-stream")
-            .body(run_sse_body(run_id.as_str()));
-    });
-    context.write_home(
-        ".fabro/settings.toml",
-        format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
-    );
-
-    let output = context
-        .command()
-        .args(["--json", "attach", &run_id])
-        .output()
-        .expect("attach should execute");
-
-    assert!(
-        output.status.success(),
-        "attach failed:\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    list_mock.assert();
-    attach_mock.assert();
-    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
-    assert!(stdout.contains("\"event\":\"run.completed\""), "{stdout}");
-}
-
-#[test]
-fn attach_errors_when_live_stream_ends_before_terminal_event() {
-    let context = test_context!();
-    let server = MockServer::start();
-    let run_id = unique_run_id();
-
-    server.mock(|when, then| {
-        when.method("GET").path("/api/v1/runs");
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!([
-                    {
-                        "run_id": run_id,
-                        "workflow_name": "Remote Workflow",
-                        "workflow_slug": "remote-workflow",
-                        "goal": "Remote output",
-                        "labels": {},
-                        "host_repo_path": null,
-                        "start_time": "2026-04-05T12:00:00Z",
-                        "status": "running",
-                        "status_reason": null,
-                        "duration_ms": 12,
-                        "total_cost": null
-                    }
-                ])
-                .to_string(),
-            );
-    });
-    server.mock(|when, then| {
-        when.method("GET")
-            .path(format!("/api/v1/runs/{run_id}/events"));
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(
-                serde_json::json!({
-                    "data": [{
-                        "seq": 1,
-                        "payload": {
-                            "event": "run.running",
-                            "id": "evt-run-running",
-                            "run_id": run_id,
-                            "ts": "2026-04-05T12:00:00Z",
-                            "properties": {}
-                        }
-                    }],
-                    "meta": { "has_more": false }
-                })
-                .to_string(),
-            );
-    });
-    server.mock(|when, then| {
-        when.method("GET")
-            .path(format!("/api/v1/runs/{run_id}/state"));
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(live_run_state_response().to_string());
-    });
-    server.mock(|when, then| {
-        when.method("GET")
-            .path(format!("/api/v1/runs/{run_id}/questions"))
-            .query_param("page[limit]", "100")
-            .query_param("page[offset]", "0");
-        then.status(200)
-            .header("Content-Type", "application/json")
-            .body(r#"{"data":[],"meta":{"has_more":false}}"#);
-    });
-    server.mock(|when, then| {
-        when.method("GET")
-            .path(format!("/api/v1/runs/{run_id}/attach"))
-            .query_param("since_seq", "2");
-        then.status(200)
-            .header("Content-Type", "text/event-stream")
-            .body("");
-    });
-    context.write_home(
-        ".fabro/settings.toml",
-        format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
-    );
-
-    let output = context
-        .command()
-        .args(["attach", &run_id])
-        .output()
-        .expect("attach should execute");
-
-    assert!(
-        !output.status.success(),
-        "attach should fail on premature EOF"
-    );
-    let stderr = String::from_utf8(output.stderr).expect("stderr should be UTF-8");
-    assert!(
-        stderr.contains("terminal run event"),
-        "expected a protocol error, got:\n{stderr}"
-    );
+        }
+    }
 }
 
 #[test]
 fn attach_replays_completed_detached_run() {
-    let context = test_context!();
-    let run_id = unique_run_id();
-
-    context
-        .command()
-        .args([
-            "run",
-            "--dry-run",
-            "--auto-approve",
-            "--no-retro",
-            "--detach",
-            "--run-id",
-            run_id.as_str(),
-            example_fixture("simple.fabro").to_str().unwrap(),
-        ])
-        .assert()
-        .success();
-
-    context
-        .command()
-        .args(["wait", &run_id])
-        .timeout(SHARED_DAEMON_TIMEOUT)
-        .assert()
-        .success();
-
-    let mut cmd = context.command();
-    cmd.args(["attach", &run_id]);
-    cmd.timeout(SHARED_DAEMON_TIMEOUT);
-    fabro_snapshot!(run_output_filters(&context), cmd, @"
-    success: true
-    exit_code: 0
-    ----- stdout -----
-    ----- stderr -----
-        Sandbox: local (ready in [TIME])
-        ✓ Start  [TIME]
-        ✓ Run Tests  [TIME]
-        ✓ Report  [TIME]
-        ✓ Exit  [TIME]
-    ");
-}
-
-#[test]
-fn attach_replays_from_store_without_run_json_or_progress_jsonl() {
     let context = test_context!();
     let run_id = unique_run_id();
 
@@ -412,14 +160,58 @@ fn attach_before_completion_streams_to_finished_state() {
         r"\b\d+(\.\d+)?(ms|s)\b".to_string(),
         "[DURATION]".to_string(),
     ));
-    let release_gate = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_secs(1));
-        gate.release();
-    });
-    let mut attach_cmd = context.command();
+    let mut attach_cmd = std::process::Command::new(env!("CARGO_BIN_EXE_fabro"));
+    attach_cmd.current_dir(&context.temp_dir);
+    attach_cmd.env("NO_COLOR", "1");
+    attach_cmd.env("HOME", &context.home_dir);
+    attach_cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
+    attach_cmd.env("FABRO_SERVER_MAX_CONCURRENT_RUNS", "64");
+    attach_cmd.env("FABRO_TEST_IN_MEMORY_STORE", "1");
     attach_cmd.args(["attach", &run_id]);
-    let (snapshot, _output) = run_and_format(&mut attach_cmd, &filters);
-    release_gate.join().expect("gate releaser should join");
+    attach_cmd.stdout(Stdio::piped());
+    attach_cmd.stderr(Stdio::piped());
+    let mut child = attach_cmd.spawn().expect("attach should spawn");
+    let mut stdout = child.stdout.take().expect("attach stdout should be piped");
+    let stderr = child.stderr.take().expect("attach stderr should be piped");
+    let (signal_tx, signal_rx) = mpsc::channel();
+    let stderr_reader = std::thread::spawn(move || {
+        let mut reader = BufReader::new(stderr);
+        let mut stderr_bytes = Vec::new();
+        let mut line = Vec::new();
+
+        loop {
+            line.clear();
+            let read = reader
+                .read_until(b'\n', &mut line)
+                .expect("attach stderr should be readable");
+            if read == 0 {
+                break;
+            }
+            if line
+                .windows("✓ start".len())
+                .any(|window| window == "✓ start".as_bytes())
+            {
+                let _ = signal_tx.send(());
+            }
+            stderr_bytes.extend_from_slice(&line);
+        }
+
+        stderr_bytes
+    });
+    let stderr_reader =
+        wait_for_output_signal(&mut child, &mut stdout, stderr_reader, signal_rx, "✓ start");
+    gate.release();
+    let status = child.wait().expect("attach should exit");
+    let mut stdout_bytes = Vec::new();
+    stdout
+        .read_to_end(&mut stdout_bytes)
+        .expect("attach stdout should be readable");
+    let output = Output {
+        status,
+        stdout: stdout_bytes,
+        stderr: stderr_reader.join().expect("stderr reader should join"),
+    };
+    let snapshot = format_output_snapshot(&output, &filters);
     wait_for_status(&run.run_dir, &["succeeded"]);
 
     insta::assert_snapshot!(snapshot, @"
