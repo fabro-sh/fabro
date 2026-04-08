@@ -112,7 +112,7 @@ mod tests {
     use fabro_graphviz::graph::Graph;
     use fabro_store::Database;
     use fabro_types::fixtures;
-    use fabro_types::run_event::RunStatusTransitionProps;
+    use fabro_types::run_event::RunSubmittedProps;
     use fabro_types::{EventBody, RunEvent, Settings};
     use object_store::memory::InMemory;
 
@@ -141,6 +141,8 @@ mod tests {
             base_branch: None,
             labels: HashMap::new(),
             provenance: None,
+            manifest_blob: None,
+            definition_blob: None,
         }
     }
 
@@ -166,6 +168,7 @@ mod tests {
                 workflow_slug: Some("test".to_string()),
                 db_prefix: None,
                 provenance: None,
+                manifest_blob: None,
             },
         )
         .await
@@ -192,7 +195,10 @@ mod tests {
             node_label: None,
             session_id: None,
             parent_session_id: None,
-            body: EventBody::RunSubmitted(RunStatusTransitionProps { reason: None }),
+            body: EventBody::RunSubmitted(RunSubmittedProps {
+                reason: None,
+                definition_blob: None,
+            }),
         };
         handle.append_run_event(&event).await.unwrap();
 

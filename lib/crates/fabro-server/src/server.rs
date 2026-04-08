@@ -3082,8 +3082,12 @@ async fn create_run(
     subject: AuthenticatedSubject,
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(req): Json<RunManifest>,
+    body: Bytes,
 ) -> Response {
+    let req = match serde_json::from_slice::<RunManifest>(&body) {
+        Ok(req) => req,
+        Err(err) => return ApiError::bad_request(err.to_string()).into_response(),
+    };
     let prepared = match run_manifest::prepare_manifest_with_mode(
         &state.settings.read().unwrap(),
         &req,
@@ -3098,6 +3102,7 @@ async fn create_run(
     let mut create_input = run_manifest::create_run_input(prepared.clone());
     create_input.run_id = Some(run_id);
     create_input.provenance = Some(run_provenance(&headers, &subject));
+    create_input.submitted_manifest_bytes = Some(body.to_vec());
 
     let created = match Box::pin(operations::create(state.store.as_ref(), create_input)).await {
         Ok(created) => created,
@@ -5734,13 +5739,15 @@ async fn get_graph(
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
     use axum::body::Body;
     use axum::http::Request;
     use fabro_config::server::{
         AuthProvider, AuthSettings, GitAuthorSettings, GitProvider, GitSettings, WebSettings,
     };
-    use fabro_types::{InterviewQuestionRecord, InterviewQuestionType, fixtures};
+    use fabro_types::{InterviewQuestionRecord, InterviewQuestionType, RunBlobId, RunId, fixtures};
     #[cfg(unix)]
     use std::process::Stdio;
     use tower::ServiceExt;
@@ -5868,6 +5875,7 @@ mod tests {
                 workflow_slug: None,
                 workflow_path: None,
                 workflow_bundle: None,
+                submitted_manifest_bytes: None,
                 run_id: None,
                 host_repo_path: None,
                 repo_origin_url: None,
@@ -6398,6 +6406,72 @@ mod tests {
             "disabled"
         );
         assert!(body["run"]["provenance"]["subject"]["login"].is_null());
+    }
+
+    #[tokio::test]
+    async fn create_run_persists_manifest_and_definition_blobs_without_bundle_file() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+        let raw_manifest =
+            serde_json::to_string_pretty(&minimal_manifest_json(MINIMAL_DOT)).unwrap();
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api("/runs"))
+            .header("content-type", "application/json")
+            .body(Body::from(raw_manifest.clone()))
+            .unwrap();
+
+        let response = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = body_json(response.into_body()).await;
+        let run_id = body["id"].as_str().unwrap().parse::<RunId>().unwrap();
+
+        let run_store = state.store.open_run_reader(&run_id).await.unwrap();
+        let events = run_store.list_events().await.unwrap();
+        let created = events[0].payload.as_value();
+        let submitted = events[1].payload.as_value();
+        let manifest_blob = created["properties"]["manifest_blob"]
+            .as_str()
+            .expect("run.created should carry manifest_blob")
+            .parse::<RunBlobId>()
+            .unwrap();
+        let definition_blob = submitted["properties"]["definition_blob"]
+            .as_str()
+            .expect("run.submitted should carry definition_blob")
+            .parse::<RunBlobId>()
+            .unwrap();
+
+        let submitted_manifest_bytes = run_store
+            .read_blob(&manifest_blob)
+            .await
+            .unwrap()
+            .expect("submitted manifest blob should exist");
+        assert_eq!(submitted_manifest_bytes.as_ref(), raw_manifest.as_bytes());
+
+        let accepted_definition_bytes = run_store
+            .read_blob(&definition_blob)
+            .await
+            .unwrap()
+            .expect("accepted definition blob should exist");
+        let accepted_definition: serde_json::Value =
+            serde_json::from_slice(&accepted_definition_bytes).unwrap();
+        assert!(
+            accepted_definition.get("version").is_none(),
+            "accepted run definition should not carry compatibility versioning"
+        );
+        assert_eq!(accepted_definition["workflow_path"], "workflow.fabro");
+        assert!(accepted_definition["workflows"]["workflow.fabro"].is_object());
+
+        let run_dir = PathBuf::from(
+            created["properties"]["run_dir"]
+                .as_str()
+                .expect("run.created should include run_dir"),
+        );
+        assert!(
+            !run_dir.join("workflow_bundle.json").exists(),
+            "run scratch should no longer persist workflow_bundle.json"
+        );
     }
 
     #[tokio::test]
@@ -7473,14 +7547,20 @@ mod tests {
         create_durable_run_with_events(
             &state,
             fixtures::RUN_1,
-            &[workflow_event::Event::RunSubmitted { reason: None }],
+            &[workflow_event::Event::RunSubmitted {
+                reason: None,
+                definition_blob: None,
+            }],
         )
         .await;
         create_durable_run_with_events(
             &state,
             fixtures::RUN_2,
             &[
-                workflow_event::Event::RunSubmitted { reason: None },
+                workflow_event::Event::RunSubmitted {
+                    reason: None,
+                    definition_blob: None,
+                },
                 workflow_event::Event::RunStarting { reason: None },
                 workflow_event::Event::RunRunning { reason: None },
             ],
@@ -7490,7 +7570,10 @@ mod tests {
             &state,
             fixtures::RUN_3,
             &[
-                workflow_event::Event::RunSubmitted { reason: None },
+                workflow_event::Event::RunSubmitted {
+                    reason: None,
+                    definition_blob: None,
+                },
                 workflow_event::Event::RunStarting { reason: None },
                 workflow_event::Event::RunRunning { reason: None },
                 workflow_event::Event::RunPaused,
@@ -7548,7 +7631,10 @@ mod tests {
             &state,
             run_id,
             &[
-                workflow_event::Event::RunSubmitted { reason: None },
+                workflow_event::Event::RunSubmitted {
+                    reason: None,
+                    definition_blob: None,
+                },
                 workflow_event::Event::RunStarting { reason: None },
                 workflow_event::Event::RunRunning { reason: None },
             ],

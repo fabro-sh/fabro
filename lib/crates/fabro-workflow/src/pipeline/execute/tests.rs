@@ -145,6 +145,8 @@ fn persisted_workflow(graph: Graph, source: String, run_dir: &Path, run_id: RunI
             base_branch: Some("main".to_string()),
             labels: HashMap::new(),
             provenance: None,
+            manifest_blob: None,
+            definition_blob: None,
         },
     )
 }

@@ -379,6 +379,8 @@ mod tests {
             base_branch: None,
             labels: HashMap::new(),
             provenance: None,
+            manifest_blob: None,
+            definition_blob: None,
         }
     }
 
@@ -453,6 +455,7 @@ mod tests {
                 workflow_slug: run_record.workflow_slug.clone(),
                 db_prefix: None,
                 provenance: run_record.provenance.clone(),
+                manifest_blob: None,
             },
         )
         .await

@@ -3,7 +3,7 @@ use anyhow::Result;
 use cli_table::format::{Border, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_checkpoint::git::Store;
-use fabro_types::run_event::{CheckpointCompletedProps, RunRewoundProps, RunStatusTransitionProps};
+use fabro_types::run_event::{CheckpointCompletedProps, RunRewoundProps, RunSubmittedProps};
 use fabro_types::{EventBody, RunEvent};
 use fabro_util::terminal::Styles;
 use fabro_workflow::git::MetadataStore;
@@ -104,6 +104,7 @@ async fn reset_rewound_run_state(
         anyhow::anyhow!("failed to load durable store state before rewind: {err}")
     })?;
 
+    let definition_blob = state.run.as_ref().and_then(|run| run.definition_blob);
     let _run_record = state
         .run
         .context("failed to restore run record after rewind: missing run metadata")?;
@@ -138,7 +139,10 @@ async fn reset_rewound_run_state(
             &run_event(
                 *run_id,
                 None,
-                EventBody::RunSubmitted(RunStatusTransitionProps { reason: None }),
+                EventBody::RunSubmitted(RunSubmittedProps {
+                    reason: None,
+                    definition_blob,
+                }),
             ),
         )
         .await

@@ -124,6 +124,7 @@ pub(crate) fn create_run_input(prepared: PreparedManifest) -> CreateRunInput {
         workflow_slug: None,
         workflow_path: Some(prepared.target_path),
         workflow_bundle: Some(prepared.workflow_bundle),
+        submitted_manifest_bytes: None,
         run_id: prepared.run_id,
         host_repo_path: Some(prepared.working_directory.display().to_string()),
         repo_origin_url: prepared

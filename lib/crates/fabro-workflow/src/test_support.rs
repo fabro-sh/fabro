@@ -98,6 +98,7 @@ async fn initialized(
             workflow_slug: run_options.workflow_slug.clone(),
             db_prefix: None,
             provenance: None,
+            manifest_blob: None,
         },
     )
     .await

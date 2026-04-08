@@ -94,6 +94,8 @@ impl RunProjection {
                     base_branch: props.base_branch.clone(),
                     labels,
                     provenance: props.provenance.clone(),
+                    manifest_blob: props.manifest_blob,
+                    definition_blob: None,
                 });
                 self.graph_source.clone_from(&props.workflow_source);
             }
@@ -106,6 +108,9 @@ impl RunProjection {
                 });
             }
             EventBody::RunSubmitted(props) => {
+                if let Some(run) = self.run.as_mut() {
+                    run.definition_blob = props.definition_blob;
+                }
                 self.status = Some(run_status_record(RunStatus::Submitted, props.reason, ts));
             }
             EventBody::RunStarting(props) => {
@@ -589,12 +594,14 @@ mod tests {
     use std::collections::HashMap;
 
     use chrono::Utc;
+    use serde_json::json;
 
     use super::{NodeState, RunProjection};
     use crate::{EventEnvelope, EventPayload, StageId};
     use fabro_types::run_event::{InterviewCompletedProps, InterviewOption, InterviewStartedProps};
     use fabro_types::{
-        Checkpoint, EventBody, InterviewQuestionType, RunControlAction, RunEvent, fixtures,
+        Checkpoint, EventBody, InterviewQuestionType, RunBlobId, RunControlAction, RunEvent,
+        Settings, fixtures,
     };
 
     fn test_event(seq: u32, body: EventBody, node_id: Option<&str>) -> EventEnvelope {
@@ -783,6 +790,69 @@ mod tests {
         assert!(
             state.pending_interviews.is_empty(),
             "completed interview should clear pending state"
+        );
+    }
+
+    #[test]
+    fn projection_serialization_includes_manifest_and_definition_blob_refs() {
+        let manifest_blob = RunBlobId::new(br#"{"version":1}"#).to_string();
+        let definition_blob =
+            RunBlobId::new(br#"{"version":1,"workflow_path":"workflow.fabro"}"#).to_string();
+        let events = vec![
+            EventEnvelope {
+                seq: 1,
+                payload: EventPayload::new(
+                    json!({
+                        "id": "evt-run-created",
+                        "ts": "2026-04-07T12:00:00Z",
+                        "run_id": fixtures::RUN_1,
+                        "event": "run.created",
+                        "properties": {
+                            "settings": Settings::default(),
+                            "graph": {
+                                "name": "test",
+                                "nodes": {},
+                                "edges": [],
+                                "attrs": {}
+                            },
+                            "labels": {},
+                            "run_dir": "/tmp/run",
+                            "working_directory": "/tmp/run",
+                            "manifest_blob": manifest_blob
+                        }
+                    }),
+                    &fixtures::RUN_1,
+                )
+                .unwrap(),
+            },
+            EventEnvelope {
+                seq: 2,
+                payload: EventPayload::new(
+                    json!({
+                        "id": "evt-run-submitted",
+                        "ts": "2026-04-07T12:00:01Z",
+                        "run_id": fixtures::RUN_1,
+                        "event": "run.submitted",
+                        "properties": {
+                            "definition_blob": definition_blob
+                        }
+                    }),
+                    &fixtures::RUN_1,
+                )
+                .unwrap(),
+            },
+        ];
+
+        let state = RunProjection::apply_events(&events).unwrap();
+        let value = serde_json::to_value(&state).unwrap();
+
+        assert_eq!(
+            value["run"]["manifest_blob"],
+            events[0].payload.as_value()["properties"]["manifest_blob"]
+        );
+        assert_eq!(
+            value["run"]["definition_blob"],
+            events[1].payload.as_value()["properties"]["definition_blob"]
         );
     }
 }
