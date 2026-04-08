@@ -74,8 +74,8 @@ pub fn is_artifact_pointer(value: &Value) -> bool {
 
 /// Resolve an artifact pointer to the base name displayed in preamble rendering.
 ///
-/// Given `"file:///tmp/logs/cache/artifacts/values/response.plan.json"`, returns
-/// `"See: /tmp/logs/cache/artifacts/values/response.plan.json"`.
+/// Given `"file:///tmp/logs/runtime/blobs/response.plan.json"`, returns
+/// `"See: /tmp/logs/runtime/blobs/response.plan.json"`.
 #[must_use]
 pub fn format_artifact_reference(path: &str) -> String {
     format!("See: {path}")
@@ -432,10 +432,10 @@ mod tests {
 
     #[test]
     fn artifact_path_extracts_path_from_pointer() {
-        let value = serde_json::json!("file:///tmp/logs/cache/artifacts/values/response.plan.json");
+        let value = serde_json::json!("file:///tmp/logs/runtime/blobs/response.plan.json");
         assert_eq!(
             artifact_path(&value),
-            Some("/tmp/logs/cache/artifacts/values/response.plan.json")
+            Some("/tmp/logs/runtime/blobs/response.plan.json")
         );
     }
 
@@ -494,9 +494,7 @@ mod tests {
                 ),
                 (
                     "response.work".to_string(),
-                    serde_json::json!(format!(
-                        "file:///tmp/run/cache/artifacts/values/{blob_id}.json"
-                    )),
+                    serde_json::json!(format!("file:///sandbox/.fabro/artifacts/{blob_id}.json")),
                 ),
             ]),
             node_outcomes: HashMap::from([(

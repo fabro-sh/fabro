@@ -115,7 +115,8 @@ pub(crate) struct PersistOptions {
     pub run_record: RunRecord,
 }
 
-/// Output of the PERSIST phase. Run directory created, run.json and workflow.fabro written.
+/// Output of the PERSIST phase. Run directory created and the validated workflow
+/// is persisted into the durable run record.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Persisted {

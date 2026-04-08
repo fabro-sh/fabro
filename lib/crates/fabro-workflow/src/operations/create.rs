@@ -803,7 +803,7 @@ mod tests {
             crate::run_status::RunStatus::Submitted
         );
         assert_eq!(created.run_dir, default_run_dir(&fixtures::RUN_1));
-        assert!(!created.run_dir.join("id.txt").exists());
+        assert!(created.run_dir.is_dir());
     }
 
     #[tokio::test]

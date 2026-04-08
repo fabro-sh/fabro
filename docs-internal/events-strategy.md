@@ -1,6 +1,6 @@
 # Fabro Events Strategy
 
-Fabro emits structured **workflow run events** during execution for observability. Events are the durable audit trail for a run: they drive `progress.jsonl`, `live.json`, the run store, SSE streaming, CLI progress rendering, and retro analysis.
+Fabro emits structured **workflow run events** during execution for observability. Events are the durable audit trail for a run: they drive the run store, SSE streaming, CLI progress rendering, retro analysis, and optional JSONL sinks.
 
 Events are distinct from tracing logs. Tracing is developer diagnostics; events are product-facing state transitions and activity records that other systems consume.
 
@@ -10,12 +10,12 @@ Detached runs rely on this distinction. If something needs to be visible after r
 
 ```text
 Engine/Handler -> Event -> Emitter::emit()
-                                       |- trace(raw event)
-                                       |- canonicalize -> RunEvent
-                                       `- on_event(&RunEvent)
-                                             |- progress.jsonl + live.json
+                                             |- trace(raw event)
+                                             |- canonicalize -> RunEvent
+                                             `- on_event(&RunEvent)
                                              |- run store
                                              |- SSE
+                                             |- optional JSONL/debug sinks
                                              `- CLI / tests / metrics listeners
 ```
 
@@ -29,7 +29,7 @@ The canonical `RunEvent` is built exactly once in `fabro-workflow/src/event.rs`.
 
 ## Canonical Envelope
 
-Each line in `progress.jsonl` is a serialized `RunEvent`:
+Each serialized `RunEvent` uses this canonical envelope:
 
 ```json
 {
@@ -171,6 +171,6 @@ Do not rebuild or mutate the `RunEvent` in downstream listeners.
 
 ## Bypass And Persistence Guarantees
 
-`progress.jsonl`, the run store, and SSE should reflect the same canonical envelope bytes after redaction.
+Any JSONL sink, the run store, and SSE should reflect the same canonical envelope bytes after redaction.
 
 `status.json` remains the authoritative completion signal for detached runs. Terminal run status should only be written after all post-run work is finished.

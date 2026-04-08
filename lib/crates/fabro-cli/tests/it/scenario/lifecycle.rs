@@ -134,16 +134,17 @@ fn dry_run_create_start_attach_works_with_default_run_lookup() {
         .success();
 
     let run_dir = context.find_run_dir(&run_id);
+    let state = run_state(&run_dir);
     fabro_json_snapshot!(
         context,
         serde_json::json!({
-            "run_json_exists": run_dir.join("run.json").exists(),
-            "conclusion_json_exists": run_dir.join("conclusion.json").exists(),
+            "status": state.status.map(|status| status.status),
+            "has_conclusion": state.conclusion.is_some(),
         }),
         @r#"
         {
-          "run_json_exists": false,
-          "conclusion_json_exists": false
+          "status": "succeeded",
+          "has_conclusion": true
         }
         "#
     );
@@ -176,16 +177,17 @@ fn dry_run_detach_attach_works_with_default_run_lookup() {
         .success();
 
     let run_dir = context.find_run_dir(&run_id);
+    let state = run_state(&run_dir);
     fabro_json_snapshot!(
         context,
         serde_json::json!({
             "run_dir": run_dir,
-            "conclusion_json_exists": run_dir.join("conclusion.json").exists(),
+            "has_conclusion": state.conclusion.is_some(),
         }),
         @r#"
     {
       "run_dir": "[RUN_DIR]",
-      "conclusion_json_exists": false
+      "has_conclusion": true
     }
     "#
     );
@@ -247,16 +249,17 @@ digraph BarBaz {
         .success();
 
     let run_dir = context.find_run_dir(&run_id);
+    let state = run_state(&run_dir);
     fabro_json_snapshot!(
         context,
         serde_json::json!({
             "run_dir_exists": run_dir.exists(),
-            "conclusion_json_exists": run_dir.join("conclusion.json").exists(),
+            "has_conclusion": state.conclusion.is_some(),
         }),
         @r#"
         {
           "run_dir_exists": true,
-          "conclusion_json_exists": false
+          "has_conclusion": true
         }
         "#
     );

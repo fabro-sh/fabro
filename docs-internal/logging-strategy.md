@@ -23,7 +23,7 @@ Production runs at INFO level. INFO should be low-volume and high-signal — the
 
 - Hot loops or per-token streaming events (use DEBUG only if truly needed for diagnosis)
 - Data that belongs in user-facing output (`eprintln!` for interactive CLI feedback, not tracing)
-- Detached user-visible warnings or errors that need to survive `attach`/`logs` (`detach.log` is debug-only; emit a `Event` into `progress.jsonl` instead)
+- Detached user-visible warnings or errors that need to survive `attach`/`logs` (`detach.log` is debug-only; emit an `Event` into the run event stream instead)
 - Redundant information already captured by a parent event (if you logged "starting X", you don't need to log every sub-step at the same level)
 - Events that are already traced via `EventEnum::trace()` — the event enums (`AgentEvent`, `PipelineEvent`, `ExecutionEnvEvent`) each have a `trace()` method called automatically at their emit site; do not add manual `info!`/`debug!` calls that duplicate what `trace()` already emits
 - Wrapper/forwarding variants that re-emit an inner event — `PipelineEvent::Agent`, `PipelineEvent::ExecutionEnv`, and `AgentEvent::SubAgentEvent` are no-ops in `trace()` because the inner event is already traced at its origin

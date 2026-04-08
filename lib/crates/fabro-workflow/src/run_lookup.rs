@@ -160,19 +160,15 @@ fn scan_orphan_runs(base: &Path) -> Result<Vec<RunInfo>> {
         }
 
         let dir_name = entry.file_name().to_string_lossy().to_string();
+        if parse_run_id(&dir_name).is_none() {
+            continue;
+        }
+
         let mtime_dt = entry
             .metadata()
             .ok()
             .and_then(|m| m.modified().ok())
             .map(|time| -> DateTime<Utc> { time.into() });
-
-        let run_id = std::fs::read_to_string(path.join("id.txt"))
-            .ok()
-            .and_then(|s| parse_run_id(&s))
-            .or_else(|| parse_run_id(&dir_name));
-        if run_id.is_none() {
-            continue;
-        }
 
         runs.push(RunInfo::new(
             None,
@@ -437,7 +433,6 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = make_run_dir(temp.path(), &fixtures::RUN_1);
         std::fs::create_dir_all(&run_dir).unwrap();
-        std::fs::write(run_dir.join("id.txt"), format!("{}\n", fixtures::RUN_1)).unwrap();
 
         let store = memory_store();
         let run_record = sample_run_record();

@@ -1122,29 +1122,29 @@ impl TestContext {
 
     /// Return the only run directory currently present under storage.
     pub fn single_run_dir(&self) -> PathBuf {
-        let scratch_dir = self.storage_dir.join("scratch");
-        let entries: Vec<_> = std::fs::read_dir(&scratch_dir)
-            .expect("scratch directory should exist")
-            .flatten()
-            .map(|entry| entry.path())
-            .filter(|path| path.is_dir())
-            .filter(|path| {
-                let Ok(contents) = std::fs::read_to_string(path.join("run.json")) else {
-                    return false;
-                };
-                serde_json::from_str::<Value>(&contents)
-                    .ok()
-                    .and_then(|value| {
-                        value
-                            .get("labels")
-                            .and_then(Value::as_object)
-                            .and_then(|labels| labels.get("fabro_test_case"))
-                            .and_then(Value::as_str)
-                            .map(|value| value == self.test_case_id())
-                    })
-                    .unwrap_or(false)
+        let output = self
+            .ps()
+            .args(["-a", "--json", "--label", &self.test_case_label()])
+            .output()
+            .expect("ps should execute");
+        assert!(
+            output.status.success(),
+            "ps should succeed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let runs: Vec<Value> =
+            serde_json::from_slice(&output.stdout).expect("ps JSON should parse");
+        let entries: Vec<_> = runs
+            .into_iter()
+            .filter_map(|run| {
+                run.get("run_id")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
             })
+            .map(|run_id| self.find_run_dir(&run_id))
             .collect();
+        let scratch_dir = self.storage_dir.join("scratch");
         assert_eq!(
             entries.len(),
             1,

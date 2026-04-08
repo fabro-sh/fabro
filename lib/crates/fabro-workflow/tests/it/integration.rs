@@ -44,7 +44,7 @@ use fabro_workflow::handler::{Handler, HandlerRegistry};
 use fabro_workflow::outcome::{Outcome, OutcomeExt, StageStatus};
 use fabro_workflow::records::{Checkpoint, CheckpointExt};
 use fabro_workflow::run_options::{GitCheckpointOptions, RunOptions};
-use fabro_workflow::test_support::{WorkflowRunner, run_graph_with_hooks};
+use fabro_workflow::test_support::{WorkflowRunner, run_graph_with_hooks, test_store_dir};
 use fabro_workflow::transforms::stylesheet::{apply_stylesheet, parse_stylesheet};
 use fabro_workflow::transforms::{
     StylesheetApplicationTransform, Transform, VariableExpansionTransform,
@@ -73,70 +73,103 @@ fn load_checkpoint(path: &Path) -> Result<Checkpoint, Box<dyn std::error::Error>
         let run_dir = path
             .parent()
             .ok_or("checkpoint path should have a parent")?;
-        let local_store_dir = run_dir.join("store");
-        let (store_dir, run_id) =
-            if let Ok(run_id_text) = std::fs::read_to_string(run_dir.join("id.txt")) {
-                (local_store_dir, run_id_text.trim().parse()?)
-            } else {
-                let runs_dir = run_dir.parent().ok_or("run dir should have parent")?;
-                let storage_dir = runs_dir.parent().ok_or("runs dir should have parent")?;
-                let run_id: RunId = run_dir
-                    .file_name()
-                    .ok_or("run dir should have file name")?
-                    .to_string_lossy()
-                    .rsplit('-')
-                    .next()
-                    .ok_or("run dir should contain run id suffix")?
-                    .parse()?;
-                (storage_dir.join("store"), run_id)
-            };
-        let object_store = Arc::new(LocalFileSystem::new_with_prefix(store_dir)?);
-        let store = Arc::new(Database::new(object_store, "", Duration::from_millis(1)));
-        let state = if tokio::runtime::Handle::try_current().is_ok() {
-            std::thread::spawn(
-                move || -> Result<_, Box<dyn std::error::Error + Send + Sync>> {
-                    let runtime = tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()?;
-                    let run = runtime.block_on(store.open_run_reader(&run_id))?;
-                    let state = runtime.block_on(async {
-                        for attempt in 0..20 {
-                            let state = run.state().await?;
-                            if state.checkpoint.is_some() || attempt == 19 {
-                                return Ok::<_, fabro_store::StoreError>(state);
-                            }
-                            tokio::time::sleep(Duration::from_millis(10)).await;
-                        }
-                        unreachable!()
-                    })?;
-                    Ok(state)
-                },
-            )
-            .join()
-            .map_err(|_| "checkpoint loader thread panicked")?
-            .map_err(|err| err.to_string())?
-        } else {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()?;
-            let run = runtime.block_on(store.open_run_reader(&run_id))?;
-            runtime.block_on(async {
-                for attempt in 0..20 {
-                    let state = run.state().await?;
-                    if state.checkpoint.is_some() || attempt == 19 {
-                        return Ok::<_, fabro_store::StoreError>(state);
-                    }
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                }
-                unreachable!()
-            })?
-        };
-        return state
-            .checkpoint
-            .ok_or_else(|| "checkpoint should exist in run store".into());
+        return load_run_checkpoint(run_dir);
     }
     let data = std::fs::read_to_string(path)?;
     Ok(serde_json::from_str(&data)?)
+}
+
+fn load_run_checkpoint(run_dir: &Path) -> Result<Checkpoint, Box<dyn std::error::Error>> {
+    let run_dir = run_dir.to_path_buf();
+    let uses_shared_store = run_dir
+        .parent()
+        .and_then(Path::file_name)
+        .is_some_and(|name| name == "scratch");
+    let store_dir = if uses_shared_store {
+        let runs_dir = run_dir.parent().ok_or("run dir should have parent")?;
+        let storage_dir = runs_dir.parent().ok_or("runs dir should have parent")?;
+        storage_dir.join("store")
+    } else {
+        test_store_dir(&run_dir)
+    };
+    let object_store = Arc::new(LocalFileSystem::new_with_prefix(store_dir)?);
+    let store = Arc::new(Database::new(object_store, "", Duration::from_millis(1)));
+    let state = if tokio::runtime::Handle::try_current().is_ok() {
+        std::thread::spawn(
+            move || -> Result<_, Box<dyn std::error::Error + Send + Sync>> {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()?;
+                let run_id = if uses_shared_store {
+                    run_dir
+                        .file_name()
+                        .ok_or("run dir should have file name")?
+                        .to_string_lossy()
+                        .rsplit('-')
+                        .next()
+                        .ok_or("run dir should contain run id suffix")?
+                        .parse()?
+                } else {
+                    runtime
+                        .block_on(store.list_runs(&fabro_store::ListRunsQuery::default()))?
+                        .into_iter()
+                        .next()
+                        .ok_or("test store should contain one run")?
+                        .run_id
+                };
+                let run = runtime.block_on(store.open_run_reader(&run_id))?;
+                let state = runtime.block_on(async {
+                    for attempt in 0..20 {
+                        let state = run.state().await?;
+                        if state.checkpoint.is_some() || attempt == 19 {
+                            return Ok::<_, fabro_store::StoreError>(state);
+                        }
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                    unreachable!()
+                })?;
+                Ok(state)
+            },
+        )
+        .join()
+        .map_err(|_| "checkpoint loader thread panicked")?
+        .map_err(|err| err.to_string())?
+    } else {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        let run_id = if uses_shared_store {
+            run_dir
+                .file_name()
+                .ok_or("run dir should have file name")?
+                .to_string_lossy()
+                .rsplit('-')
+                .next()
+                .ok_or("run dir should contain run id suffix")?
+                .parse()?
+        } else {
+            runtime
+                .block_on(store.list_runs(&fabro_store::ListRunsQuery::default()))?
+                .into_iter()
+                .next()
+                .ok_or("test store should contain one run")?
+                .run_id
+        };
+        let run = runtime.block_on(store.open_run_reader(&run_id))?;
+        runtime.block_on(async {
+            for attempt in 0..20 {
+                let state = run.state().await?;
+                if state.checkpoint.is_some() || attempt == 19 {
+                    return Ok::<_, fabro_store::StoreError>(state);
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            unreachable!()
+        })?
+    };
+    return state
+        .checkpoint
+        .ok_or_else(|| "checkpoint should exist in run store".into());
 }
 
 fn save_checkpoint(path: &Path, checkpoint: &Checkpoint) {
@@ -313,8 +346,7 @@ async fn end_to_end_linear_pipeline() {
         .expect("run should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let checkpoint =
-        load_checkpoint(&dir.path().join("checkpoint.json")).expect("checkpoint should load");
+    let checkpoint = load_run_checkpoint(dir.path()).expect("checkpoint should load");
     assert!(checkpoint.completed_nodes.contains(&"start".to_string()));
     assert!(
         checkpoint
@@ -1729,7 +1761,7 @@ async fn smoke_test_with_mock_codergen_backend() {
         .expect("smoke test should succeed");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let checkpoint = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
+    let checkpoint = load_run_checkpoint(dir.path()).unwrap();
     assert!(
         checkpoint.completed_nodes.contains(&"plan".to_string()),
         "plan should have executed"
@@ -2254,7 +2286,7 @@ async fn tool_handler_e2e() {
         .expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_run_checkpoint(dir.path()).unwrap();
     let command_output = cp
         .context_values
         .get("command.output")
@@ -2328,7 +2360,7 @@ async fn auto_approve_interviewer_e2e() {
         .expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_run_checkpoint(dir.path()).unwrap();
     assert!(cp.completed_nodes.contains(&"approve".to_string()));
     assert!(!cp.completed_nodes.contains(&"reject".to_string()));
 }
@@ -2471,7 +2503,7 @@ async fn branching_loop_back_on_failure() {
         .expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_run_checkpoint(dir.path()).unwrap();
     let implement_count = cp
         .completed_nodes
         .iter()
@@ -2556,7 +2588,7 @@ async fn human_gate_loops_back() {
         .expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_run_checkpoint(dir.path()).unwrap();
     let gate_count = cp.completed_nodes.iter().filter(|n| *n == "gate").count();
     assert!(
         gate_count >= 2,
@@ -2616,7 +2648,7 @@ async fn scenario_ship_a_feature() {
         .expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_run_checkpoint(dir.path()).unwrap();
     let command_output = cp
         .context_values
         .get("command.output")
@@ -3686,7 +3718,7 @@ async fn integration_smoke_plan_implement_review_done() {
         .expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
 
-    let cp = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
+    let cp = load_run_checkpoint(dir.path()).unwrap();
     assert!(cp.completed_nodes.contains(&"plan".to_string()));
     assert!(cp.completed_nodes.contains(&"implement".to_string()));
     assert!(cp.completed_nodes.contains(&"review".to_string()));
@@ -6096,7 +6128,7 @@ mod real_llm {
         })
     }
 
-    use super::{load_checkpoint, local_env, test_run_id};
+    use super::{load_run_checkpoint, local_env, test_run_id};
     use fabro_graphviz::graph::{AttrValue, Edge, Graph};
     use fabro_interview::AutoApproveInterviewer;
     use fabro_workflow::event::Emitter;
@@ -6193,7 +6225,7 @@ mod real_llm {
 
         assert_eq!(outcome.status, StageStatus::Success);
 
-        let checkpoint = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
+        let checkpoint = load_run_checkpoint(dir.path()).unwrap();
         assert!(checkpoint.completed_nodes.contains(&"plan".to_string()));
         assert!(checkpoint.completed_nodes.contains(&"review".to_string()));
 
@@ -6301,7 +6333,7 @@ mod real_llm {
 
         assert_eq!(outcome.status, StageStatus::Success);
 
-        let checkpoint = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
+        let checkpoint = load_run_checkpoint(dir.path()).unwrap();
         let last_stage = checkpoint
             .context_values
             .get("last_stage")
@@ -6433,7 +6465,7 @@ mod real_llm {
 
         assert_eq!(outcome.status, StageStatus::Success);
 
-        let checkpoint = load_checkpoint(&dir.path().join("checkpoint.json")).unwrap();
+        let checkpoint = load_run_checkpoint(dir.path()).unwrap();
         assert!(
             checkpoint.completed_nodes.contains(&"write".to_string()),
             "write should be completed"
@@ -8616,8 +8648,7 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
     assert_eq!(outcome.status, StageStatus::Success);
 
     // The checkpoint context should contain a durable blob ref, not the full value.
-    let checkpoint =
-        load_checkpoint(&dir.path().join("checkpoint.json")).expect("checkpoint should load");
+    let checkpoint = load_run_checkpoint(dir.path()).expect("checkpoint should load");
     let pointer_value = checkpoint
         .context_values
         .get("response.big_output")
@@ -8828,8 +8859,7 @@ async fn artifact_pointers_rewritten_for_remote_sandbox() {
     assert_eq!(outcome.status, StageStatus::Success);
 
     // The checkpoint context should contain a durable blob ref.
-    let checkpoint =
-        load_checkpoint(&dir.path().join("checkpoint.json")).expect("checkpoint should load");
+    let checkpoint = load_run_checkpoint(dir.path()).expect("checkpoint should load");
     let pointer_value = checkpoint
         .context_values
         .get("response.big_output")
@@ -10348,8 +10378,7 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
     );
 
     // 7. Verify checkpoint has git_commit_sha
-    let checkpoint =
-        load_checkpoint(&run_dir.path().join("checkpoint.json")).expect("checkpoint should load");
+    let checkpoint = load_run_checkpoint(run_dir.path()).expect("checkpoint should load");
     assert!(
         checkpoint.git_commit_sha.is_some(),
         "checkpoint should have git_commit_sha"
@@ -10693,8 +10722,7 @@ async fn parallel_git_branching_host_e2e() {
     );
 
     // 6. Verify parallel.results has head_sha for each branch
-    let checkpoint =
-        load_checkpoint(&run_dir.path().join("checkpoint.json")).expect("checkpoint should load");
+    let checkpoint = load_run_checkpoint(run_dir.path()).expect("checkpoint should load");
     let parallel_results = checkpoint
         .context_values
         .get("parallel.results")

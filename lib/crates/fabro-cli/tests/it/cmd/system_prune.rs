@@ -26,7 +26,7 @@ fn help() {
           --workflow <WORKFLOW>        Filter by workflow name (substring match)
           --label <KEY=VALUE>          Filter by label (KEY=VALUE, repeatable, AND semantics)
           --verbose                    Enable verbose output [env: FABRO_VERBOSE=]
-          --orphans                    Include orphan directories (no run.json)
+          --orphans                    Include orphan directories (no matching durable run)
           --older-than <DURATION>      Only prune runs older than this duration (e.g. 24h, 7d). Default: 24h when no explicit filters are set
           --yes                        Actually delete (default is dry-run)
       -h, --help                       Print help

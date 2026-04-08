@@ -113,11 +113,6 @@ fn pr_view_reads_pull_request_from_store_without_pull_request_json() {
             .unwrap();
     });
 
-    let pr_path = run.run_dir.join("pull_request.json");
-    if pr_path.exists() {
-        std::fs::remove_file(pr_path).unwrap();
-    }
-
     let mut cmd = context.command();
     cmd.args(["pr", "view", &run.run_id]);
 

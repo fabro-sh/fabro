@@ -27,7 +27,7 @@ fn help() {
           --no-upgrade-check     Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --workflow <WORKFLOW>  Filter by workflow name (substring match)
           --label <KEY=VALUE>    Filter by label (KEY=VALUE, repeatable, AND semantics)
-          --orphans              Include orphan directories (no run.json)
+          --orphans              Include orphan directories (no matching durable run)
           --verbose              Enable verbose output [env: FABRO_VERBOSE=]
       -a, --all                  Show all runs, not just running (like docker ps -a)
       -q, --quiet                Only display run IDs

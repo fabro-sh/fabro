@@ -219,7 +219,7 @@ pub(crate) struct RunFilterArgs {
     #[arg(long = "label", value_name = "KEY=VALUE")]
     pub(crate) label: Vec<String>,
 
-    /// Include orphan directories (no run.json)
+    /// Include orphan directories (no matching durable run)
     #[arg(long)]
     pub(crate) orphans: bool,
 }

@@ -95,7 +95,7 @@ export default function RunSettingsPage({ loaderData }: any) {
 
       <div className="min-w-0 flex-1">
         <CollapsibleFile
-          file={{ name: "run.json", contents: JSON.stringify(settings, null, 2), lang: "json" }}
+          file={{ name: "settings.json", contents: JSON.stringify(settings, null, 2), lang: "json" }}
         />
       </div>
     </div>

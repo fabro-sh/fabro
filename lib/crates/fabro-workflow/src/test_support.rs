@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,6 +17,15 @@ use crate::pipeline;
 use crate::pipeline::types::Initialized;
 use crate::records::Checkpoint;
 use crate::run_options::RunOptions;
+
+pub fn test_store_dir(run_dir: &std::path::Path) -> PathBuf {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    std::process::id().hash(&mut hasher);
+    run_dir.hash(&mut hasher);
+    std::env::temp_dir()
+        .join("fabro-test-run-stores")
+        .join(format!("{:016x}", hasher.finish()))
+}
 
 struct InitializedOptions {
     hook_runner: Option<Arc<fabro_hooks::HookRunner>>,
@@ -44,16 +54,12 @@ async fn initialized(
     options: InitializedOptions,
 ) -> InitializedState {
     std::fs::create_dir_all(&run_options.run_dir).expect("failed to create run dir");
-    std::fs::create_dir_all(run_options.run_dir.join("store"))
-        .expect("failed to create local test run store dir");
-    std::fs::write(
-        run_options.run_dir.join("id.txt"),
-        run_options.run_id.to_string(),
-    )
-    .expect("failed to write run id marker");
+    let store_dir = test_store_dir(&run_options.run_dir);
+    let _ = std::fs::remove_dir_all(&store_dir);
+    std::fs::create_dir_all(&store_dir).expect("failed to create local test run store dir");
     let store = Arc::new(Database::new(
         Arc::new(
-            LocalFileSystem::new_with_prefix(run_options.run_dir.join("store"))
+            LocalFileSystem::new_with_prefix(&store_dir)
                 .expect("failed to create local test run store"),
         ),
         "",

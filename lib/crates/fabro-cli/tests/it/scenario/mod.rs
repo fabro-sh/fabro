@@ -27,15 +27,10 @@ fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
 }
 
 fn infer_run_id(run_dir: &Path) -> String {
-    std::fs::read_to_string(run_dir.join("id.txt"))
-        .ok()
-        .map(|id| id.trim().to_string())
-        .or_else(|| {
-            run_dir
-                .file_name()
-                .map(|name| name.to_string_lossy().to_string())
-                .and_then(|name| name.rsplit('-').next().map(ToOwned::to_owned))
-        })
+    run_dir
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .and_then(|name| name.rsplit('-').next().map(ToOwned::to_owned))
         .expect("run dir should contain resolvable run id")
 }
 
