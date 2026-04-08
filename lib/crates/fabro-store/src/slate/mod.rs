@@ -173,7 +173,7 @@ impl Database {
 
         let db = self.open_db().await?;
         let mut keys_to_delete = Vec::new();
-        for prefix in [keys::run_data_prefix(run_id), keys::blobs_prefix(run_id)] {
+        for prefix in [keys::run_data_prefix(run_id)] {
             let mut iter = db.scan_prefix(prefix.as_bytes()).await?;
             while let Some(entry) = iter.next().await? {
                 keys_to_delete.push(String::from_utf8(entry.key.to_vec()).map_err(|err| {
@@ -289,6 +289,8 @@ mod tests {
             base_branch: Some("main".to_string()),
             labels: std::collections::HashMap::from([("team".to_string(), "infra".to_string())]),
             provenance: None,
+            manifest_blob: None,
+            definition_blob: None,
         }
     }
 
@@ -400,6 +402,24 @@ mod tests {
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].run_id, test_run_id("run-2"));
         assert!(!list_paths(object_store, "runs/db").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn delete_run_keeps_global_cas_blobs() {
+        let (_object_store, store) = make_store();
+        let run_1 = store.create_run(&test_run_id("run-1")).await.unwrap();
+        let run_2 = store.create_run(&test_run_id("run-2")).await.unwrap();
+        append_created(&run_1, "run-1", dt("2026-03-27T12:00:00Z")).await;
+        append_created(&run_2, "run-2", dt("2026-03-27T12:00:10Z")).await;
+
+        let shared_blob = br#"{"summary":"shared"}"#;
+        let shared_blob_id = run_1.write_blob(shared_blob).await.unwrap();
+
+        store.delete_run(&test_run_id("run-1")).await.unwrap();
+
+        let reopened = store.open_run(&test_run_id("run-2")).await.unwrap();
+        let read = reopened.read_blob(&shared_blob_id).await.unwrap();
+        assert_eq!(read.as_deref(), Some(shared_blob.as_slice()));
     }
 
     #[tokio::test]

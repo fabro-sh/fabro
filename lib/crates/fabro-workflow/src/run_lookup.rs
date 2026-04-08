@@ -424,6 +424,8 @@ mod tests {
             base_branch: Some("main".to_string()),
             labels: HashMap::new(),
             provenance: None,
+            manifest_blob: None,
+            definition_blob: None,
         }
     }
 
@@ -454,6 +456,7 @@ mod tests {
                 workflow_slug: run_record.workflow_slug.clone(),
                 db_prefix: None,
                 provenance: run_record.provenance.clone(),
+                manifest_blob: None,
             },
         )
         .await
@@ -461,7 +464,10 @@ mod tests {
         append_event(
             &run_store,
             &fixtures::RUN_1,
-            &Event::RunSubmitted { reason: None },
+            &Event::RunSubmitted {
+                reason: None,
+                definition_blob: None,
+            },
         )
         .await
         .unwrap();

@@ -134,6 +134,8 @@ mod tests {
                 ("team".to_string(), "workflow".to_string()),
             ]),
             provenance: None,
+            manifest_blob: None,
+            definition_blob: None,
         }
     }
 
@@ -158,6 +160,7 @@ mod tests {
                 workflow_slug: record.workflow_slug.clone(),
                 db_prefix: None,
                 provenance: record.provenance.clone(),
+                manifest_blob: None,
             },
         )
         .await

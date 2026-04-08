@@ -343,6 +343,8 @@ mod tests {
             base_branch: Some("main".to_string()),
             labels: HashMap::from([("team".to_string(), "infra".to_string())]),
             provenance: None,
+            manifest_blob: None,
+            definition_blob: None,
         }
     }
 
@@ -488,6 +490,7 @@ mod tests {
                 workflow_slug: run_record.workflow_slug.clone(),
                 db_prefix: None,
                 provenance: run_record.provenance.clone(),
+                manifest_blob: None,
             },
         )
         .await

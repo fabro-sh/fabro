@@ -174,6 +174,11 @@ fn rewind_preserves_event_history_and_clears_terminal_snapshot_state() {
         after_events[before_events.len() + 2].payload.as_value()["event"],
         "run.submitted"
     );
+    assert!(
+        after_events[before_events.len() + 2].payload.as_value()["properties"]["definition_blob"]
+            .is_string(),
+        "rewind should re-emit run.submitted with the definition_blob"
+    );
 
     let state = run_state(&setup.run.run_dir);
     assert_eq!(

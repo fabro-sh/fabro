@@ -242,6 +242,8 @@ mod tests {
             base_branch: None,
             labels: std::collections::HashMap::new(),
             provenance: None,
+            manifest_blob: None,
+            definition_blob: None,
         };
         append_event(
             &run_store,
@@ -261,6 +263,7 @@ mod tests {
                 workflow_slug: None,
                 db_prefix: None,
                 provenance: run_record.provenance.clone(),
+                manifest_blob: None,
             },
         )
         .await

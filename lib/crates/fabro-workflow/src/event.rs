@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use ::fabro_types::run_event as fabro_types;
 use ::fabro_types::{
-    BilledTokenCounts, RunControlAction, RunEvent, RunId, StageStatus, StatusReason,
+    BilledTokenCounts, RunBlobId, RunControlAction, RunEvent, RunId, StageStatus, StatusReason,
 };
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -55,6 +55,8 @@ pub enum Event {
         db_prefix: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         provenance: Option<::fabro_types::RunProvenance>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        manifest_blob: Option<RunBlobId>,
     },
     WorkflowRunStarted {
         name: String,
@@ -73,6 +75,8 @@ pub enum Event {
     RunSubmitted {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<StatusReason>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        definition_blob: Option<RunBlobId>,
     },
     RunStarting {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -549,8 +553,11 @@ impl Event {
             Self::WorkflowRunStarted { name, run_id, .. } => {
                 info!(workflow = name.as_str(), run_id = %run_id, "Workflow run started");
             }
-            Self::RunSubmitted { reason } => {
-                info!(?reason, "Run submitted");
+            Self::RunSubmitted {
+                reason,
+                definition_blob,
+            } => {
+                info!(?reason, ?definition_blob, "Run submitted");
             }
             Self::RunStarting { reason } => {
                 info!(?reason, "Run starting");
@@ -1389,6 +1396,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             workflow_slug,
             db_prefix,
             provenance,
+            manifest_blob,
             ..
         } => EventBody::RunCreated(fabro_types::RunCreatedProps {
             settings: serde_json::from_value(settings.clone()).expect("run.created settings"),
@@ -1404,6 +1412,7 @@ fn event_body_from_event(event: &Event) -> EventBody {
             workflow_slug: workflow_slug.clone(),
             db_prefix: db_prefix.clone(),
             provenance: provenance.clone(),
+            manifest_blob: *manifest_blob,
         }),
         Event::WorkflowRunStarted {
             name,
@@ -1421,9 +1430,13 @@ fn event_body_from_event(event: &Event) -> EventBody {
             worktree_dir: worktree_dir.clone(),
             goal: goal.clone(),
         }),
-        Event::RunSubmitted { reason } => {
-            EventBody::RunSubmitted(fabro_types::RunStatusTransitionProps { reason: *reason })
-        }
+        Event::RunSubmitted {
+            reason,
+            definition_blob,
+        } => EventBody::RunSubmitted(fabro_types::RunSubmittedProps {
+            reason: *reason,
+            definition_blob: *definition_blob,
+        }),
         Event::RunStarting { reason } => {
             EventBody::RunStarting(fabro_types::RunStatusTransitionProps { reason: *reason })
         }

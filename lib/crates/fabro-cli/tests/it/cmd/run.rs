@@ -625,6 +625,20 @@ fn json_run_implies_auto_approve_for_human_gates() {
         .map(|line| serde_json::from_str(line).expect("run JSON output should be JSONL"))
         .collect();
     for event in &mut progress {
+        if let Some(properties) = event.get_mut("properties").and_then(Value::as_object_mut) {
+            if properties.contains_key("manifest_blob") {
+                properties.insert(
+                    "manifest_blob".to_string(),
+                    Value::String("[BLOB_ID]".to_string()),
+                );
+            }
+            if properties.contains_key("definition_blob") {
+                properties.insert(
+                    "definition_blob".to_string(),
+                    Value::String("[BLOB_ID]".to_string()),
+                );
+            }
+        }
         let Some(llm) = event.pointer_mut("/properties/settings/llm") else {
             continue;
         };
@@ -747,6 +761,7 @@ fn json_run_implies_auto_approve_for_human_gates() {
             }
           },
           "host_repo_path": "[TEMP_DIR]",
+          "manifest_blob": "[BLOB_ID]",
           "provenance": {
             "client": {
               "name": "fabro-cli",
@@ -790,7 +805,9 @@ fn json_run_implies_auto_approve_for_human_gates() {
       {
         "event": "run.submitted",
         "id": "[EVENT_ID]",
-        "properties": {},
+        "properties": {
+          "definition_blob": "[BLOB_ID]"
+        },
         "run_id": "[ULID]",
         "ts": "[TIMESTAMP]"
       },

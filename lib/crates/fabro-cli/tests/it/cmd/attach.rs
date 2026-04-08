@@ -560,6 +560,23 @@ fn attach_json_errors_without_prompting_for_human_input() {
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| serde_json::from_str(line).expect("attach JSON output should be JSONL"))
+        .map(|mut event: Value| {
+            if let Some(properties) = event.get_mut("properties").and_then(Value::as_object_mut) {
+                if properties.contains_key("manifest_blob") {
+                    properties.insert(
+                        "manifest_blob".to_string(),
+                        Value::String("[BLOB_ID]".to_string()),
+                    );
+                }
+                if properties.contains_key("definition_blob") {
+                    properties.insert(
+                        "definition_blob".to_string(),
+                        Value::String("[BLOB_ID]".to_string()),
+                    );
+                }
+            }
+            event
+        })
         .collect();
     fabro_json_snapshot!(context, &progress, @r#"
     [
@@ -668,6 +685,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
             }
           },
           "host_repo_path": "[TEMP_DIR]",
+          "manifest_blob": "[BLOB_ID]",
           "provenance": {
             "client": {
               "name": "fabro-cli",
@@ -710,7 +728,9 @@ fn attach_json_errors_without_prompting_for_human_input() {
       {
         "event": "run.submitted",
         "id": "[EVENT_ID]",
-        "properties": {},
+        "properties": {
+          "definition_blob": "[BLOB_ID]"
+        },
         "run_id": "[ULID]",
         "ts": "[TIMESTAMP]"
       },

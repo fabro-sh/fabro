@@ -750,6 +750,8 @@ mod tests {
                 base_branch: Some("main".to_string()),
                 labels: HashMap::new(),
                 provenance: None,
+                manifest_blob: None,
+                definition_blob: None,
             },
         )
     }
