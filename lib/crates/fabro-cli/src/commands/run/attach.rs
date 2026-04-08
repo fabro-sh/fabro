@@ -586,10 +586,7 @@ mod tests {
                 .header("Content-Type", "application/json")
                 .body(terminal_run_state_response().to_string());
         });
-        let client =
-            server_client::connect_server_target_direct(&format!("{}/api/v1", server.base_url()))
-                .await
-                .unwrap();
+        let client = server_client::ServerStoreClient::new_no_proxy(&server.base_url()).unwrap();
 
         handle_detach_signal(&client, &run_id, true).await;
 

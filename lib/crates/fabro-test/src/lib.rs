@@ -596,9 +596,11 @@ fn stop_test_server(server: &ServerPaths) {
 }
 
 fn test_server_stop_timeout() -> std::time::Duration {
-    // Allow the real server to finish its own 5s worker-shutdown grace before
-    // we escalate and risk orphaning active run workers.
-    std::time::Duration::from_secs(8)
+    // Give the server a brief window to flush state, then escalate.
+    // The server's own 5s worker-shutdown grace is unnecessary in tests
+    // because no real work needs preserving — any lingering workers are
+    // from already-completed runs racing to exit.
+    std::time::Duration::from_millis(500)
 }
 
 fn shared_server_paths(root: &Path) -> ServerPaths {
@@ -1735,9 +1737,21 @@ mod tests {
 
     #[test]
     fn run_and_create_commands_include_test_labels() {
-        let _lock = env_lock().lock().expect("env lock poisoned");
-        let _guard = EnvGuard::set("NEXTEST_RUN_ID", Some("run-cmd-labels"));
-        let context = TestContext::new(PathBuf::from("/tmp/fabro"));
+        let context_root = tempfile::tempdir().expect("failed to create temp dir");
+        let context = TestContext {
+            temp_dir: context_root.path().join("temp"),
+            home_dir: context_root.path().join("home"),
+            storage_dir: context_root.path().join("storage"),
+            test_case_id: "case-123".to_string(),
+            test_run_id: "run-cmd-labels".to_string(),
+            session_root: context_root.path().join("session"),
+            fabro_bin: context_root.path().join("fabro"),
+            filters: Vec::new(),
+            active_socket_path: context_root.path().join("fabro.sock"),
+            isolated_server: None,
+            managed_storage_dirs: Vec::new(),
+            _context_root: context_root,
+        };
 
         let run_args = context
             .run_cmd()
@@ -1760,10 +1774,10 @@ mod tests {
     }
 
     #[test]
-    fn stop_test_server_timeout_exceeds_server_worker_grace() {
+    fn stop_test_server_timeout_is_short() {
         assert!(
-            test_server_stop_timeout() >= std::time::Duration::from_secs(6),
-            "test harness must give the server longer than its 5s worker shutdown grace"
+            test_server_stop_timeout() <= std::time::Duration::from_secs(1),
+            "test harness should SIGKILL quickly — no real work to preserve"
         );
     }
 
