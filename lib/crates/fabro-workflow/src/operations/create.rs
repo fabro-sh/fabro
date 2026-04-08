@@ -16,7 +16,7 @@ use crate::pipeline::{self, Persisted, TransformOptions, Validated};
 use crate::records::RunRecord;
 use crate::run_lookup::default_scratch_base;
 use crate::transforms::{Transform, expand_vars};
-use crate::workflow_bundle::{AcceptedRunDefinition, WorkflowBundle};
+use crate::workflow_bundle::{RunDefinition, WorkflowBundle};
 use fabro_sandbox::daytona::detect_repo_info;
 use fabro_util::json::normalize_json_value;
 
@@ -114,7 +114,7 @@ pub async fn create(store: &Database, request: CreateRunInput) -> Result<Created
     let current_dir = resolved.current_dir.clone();
     let file_resolver = resolved.file_resolver.clone();
     let accepted_definition = match (&workflow_path, &workflow_bundle) {
-        (Some(workflow_path), Some(workflow_bundle)) => Some(AcceptedRunDefinition::new(
+        (Some(workflow_path), Some(workflow_bundle)) => Some(RunDefinition::new(
             workflow_path.clone(),
             workflow_bundle.clone(),
         )),
@@ -169,7 +169,7 @@ async fn persist_created_run(
     workflow_source: &str,
     workflow_config: Option<String>,
     submitted_manifest_bytes: Option<&[u8]>,
-    accepted_definition: Option<&AcceptedRunDefinition>,
+    accepted_definition: Option<&RunDefinition>,
 ) -> Result<(), FabroError> {
     let record = persisted.run_record();
     let run_store = match store.create_run(&record.run_id).await {

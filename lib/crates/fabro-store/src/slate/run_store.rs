@@ -1,14 +1,12 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use chrono::Utc;
 use futures::Stream;
 use slatedb::{Db, DbRead};
 use tokio::sync::{Mutex, broadcast, mpsc};
-use tokio::time::sleep;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::keys;
@@ -17,9 +15,6 @@ use crate::{EventEnvelope, EventPayload, Result, RunProjection, RunSummary, Stor
 use fabro_types::{RunBlobId, RunId};
 
 const DEFAULT_EVENT_TAIL_LIMIT: usize = 1024;
-const BLOB_VISIBILITY_WAIT_TIMEOUT: Duration = Duration::from_secs(30);
-const BLOB_VISIBILITY_POLL_INTERVAL: Duration = Duration::from_millis(50);
-
 #[derive(Clone)]
 pub struct RunDatabase {
     inner: Arc<RunDatabaseInner>,
@@ -302,18 +297,6 @@ impl RunDatabase {
         }
         let id = RunBlobId::new(data);
         self.inner.db.put(keys::blob_key(&id), data).await?;
-        let deadline = Instant::now() + BLOB_VISIBILITY_WAIT_TIMEOUT;
-        loop {
-            if self.read_blob(&id).await?.is_some() {
-                break;
-            }
-            if Instant::now() >= deadline {
-                return Err(StoreError::Other(format!(
-                    "blob {id} remained unreadable after write"
-                )));
-            }
-            sleep(BLOB_VISIBILITY_POLL_INTERVAL).await;
-        }
         Ok(id)
     }
 

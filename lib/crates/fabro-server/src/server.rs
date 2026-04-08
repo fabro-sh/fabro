@@ -6533,7 +6533,10 @@ mod tests {
             .expect("accepted definition blob should exist");
         let accepted_definition: serde_json::Value =
             serde_json::from_slice(&accepted_definition_bytes).unwrap();
-        assert_eq!(accepted_definition["version"], 1);
+        assert!(
+            accepted_definition.get("version").is_none(),
+            "accepted run definition should not carry compatibility versioning"
+        );
         assert_eq!(accepted_definition["workflow_path"], "workflow.fabro");
         assert!(accepted_definition["workflows"]["workflow.fabro"].is_object());
 

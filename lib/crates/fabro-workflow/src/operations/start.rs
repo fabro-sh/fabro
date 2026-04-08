@@ -30,18 +30,12 @@ use crate::run_control::RunControlState;
 use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::run_status::{RunStatus, StatusReason};
 use crate::runtime_store::RunStoreHandle;
-use crate::workflow_bundle::{
-    ACCEPTED_RUN_DEFINITION_VERSION, AcceptedRunDefinition, WorkflowBundle,
-};
+use crate::workflow_bundle::{RunDefinition, WorkflowBundle};
 use fabro_config::run::PullRequestSettings;
 use fabro_retro::retro::Retro;
 use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::daytona::detect_repo_info;
 use tokio::runtime::Handle;
-use tokio::time::sleep;
-
-const ACCEPTED_DEFINITION_BLOB_WAIT_TIMEOUT: Duration = Duration::from_secs(5);
-const ACCEPTED_DEFINITION_BLOB_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 struct RunSession {
     cancel_token: Option<Arc<AtomicBool>>,
@@ -428,32 +422,17 @@ impl RunSession {
 async fn load_accepted_run_definition(
     run_store: &RunStoreHandle,
     blob_id: fabro_types::RunBlobId,
-) -> Result<AcceptedRunDefinition, FabroError> {
-    let deadline = Instant::now() + ACCEPTED_DEFINITION_BLOB_WAIT_TIMEOUT;
-    let bytes = loop {
-        let blob = run_store
-            .read_blob(&blob_id)
-            .await
-            .map_err(|err| FabroError::engine(err.to_string()))?;
-        if let Some(blob) = blob {
-            break blob;
-        }
-        if Instant::now() >= deadline {
-            return Err(FabroError::engine(format!(
-                "accepted run definition blob is missing from the run store: {blob_id}"
-            )));
-        }
-        sleep(ACCEPTED_DEFINITION_BLOB_POLL_INTERVAL).await;
-    };
-    let definition: AcceptedRunDefinition =
-        serde_json::from_slice(&bytes).map_err(|err| FabroError::Parse(err.to_string()))?;
-    if definition.version != ACCEPTED_RUN_DEFINITION_VERSION {
-        return Err(FabroError::Parse(format!(
-            "unsupported accepted run definition version: {}",
-            definition.version
-        )));
-    }
-    Ok(definition)
+) -> Result<RunDefinition, FabroError> {
+    let bytes = run_store
+        .read_blob(&blob_id)
+        .await
+        .map_err(|err| FabroError::engine(err.to_string()))?
+        .ok_or_else(|| {
+            FabroError::engine(format!(
+                "run definition blob is missing from the run store: {blob_id}"
+            ))
+        })?;
+    serde_json::from_slice(&bytes).map_err(|err| FabroError::Parse(err.to_string()))
 }
 
 fn resolve_sandbox_provider(settings: &Settings) -> Result<SandboxProvider, FabroError> {
@@ -1078,9 +1057,10 @@ mod tests {
         .unwrap();
 
         let bundle_file = created.run_dir.join("workflow_bundle.json");
-        if bundle_file.exists() {
-            std::fs::remove_file(&bundle_file).unwrap();
-        }
+        assert!(
+            !bundle_file.exists(),
+            "run scratch should not persist workflow_bundle.json"
+        );
 
         let started = start(
             &run_dir,

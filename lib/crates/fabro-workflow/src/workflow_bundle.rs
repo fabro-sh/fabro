@@ -60,20 +60,16 @@ impl WorkflowBundle {
     }
 }
 
-pub const ACCEPTED_RUN_DEFINITION_VERSION: u32 = 1;
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct AcceptedRunDefinition {
-    pub version: u32,
+pub struct RunDefinition {
     pub workflow_path: PathBuf,
     pub workflows: HashMap<PathBuf, BundledWorkflow>,
 }
 
-impl AcceptedRunDefinition {
+impl RunDefinition {
     #[must_use]
     pub fn new(workflow_path: PathBuf, bundle: WorkflowBundle) -> Self {
         Self {
-            version: ACCEPTED_RUN_DEFINITION_VERSION,
             workflow_path,
             workflows: bundle.workflows,
         }
