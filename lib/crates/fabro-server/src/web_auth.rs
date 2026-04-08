@@ -10,6 +10,7 @@ use fabro_types::Settings;
 use fabro_types::settings::{ApiAuthStrategy, GitProvider, GitSettings};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tracing::{debug, error, info, warn};
 
 use crate::server::AppState;
 
@@ -120,7 +121,7 @@ pub fn parse_cookie_header(headers: &HeaderMap) -> CookieJar {
         .and_then(|value| value.to_str().ok())
     {
         for part in raw.split(';') {
-            if let Ok(cookie) = Cookie::parse(part.trim().to_string()) {
+            if let Ok(cookie) = Cookie::parse_encoded(part.trim().to_string()) {
                 jar.add_original(cookie.into_owned());
             }
         }
@@ -161,12 +162,14 @@ async fn login_github(State(state): State<Arc<AppState>>) -> Response {
         .expect("settings lock poisoned")
         .clone();
     let Some(client_id) = settings.client_id().map(str::to_string) else {
+        warn!("OAuth login failed: client_id not configured");
         return json_response(
             StatusCode::CONFLICT,
             json!({"error": "GitHub App client_id is not configured"}),
         );
     };
     let Some(web_url) = settings.web.as_ref().map(|web| web.url.clone()) else {
+        warn!("OAuth login failed: web.url not configured");
         return json_response(
             StatusCode::CONFLICT,
             json!({"error": "web.url is not configured"}),
@@ -184,6 +187,8 @@ async fn login_github(State(state): State<Arc<AppState>>) -> Response {
         ],
     )
     .expect("GitHub authorize URL should be valid");
+
+    debug!(redirect_uri = %format!("{web_url}/auth/callback/github"), "OAuth login redirecting to GitHub");
 
     let mut jar = CookieJar::new();
     jar.add(
@@ -205,6 +210,7 @@ async fn callback_github(
     headers: HeaderMap,
 ) -> Response {
     let Some(session_key) = state.session_key().await else {
+        error!("OAuth callback failed: SESSION_SECRET not configured");
         return json_response(
             StatusCode::CONFLICT,
             json!({"error": "SESSION_SECRET is not configured"}),
@@ -218,16 +224,19 @@ async fn callback_github(
     let cookie_jar = parse_cookie_header(&headers);
     let stored_state = cookie_jar.get(OAUTH_STATE_COOKIE_NAME).map(Cookie::value);
     if stored_state != Some(params.state.as_str()) {
+        warn!("OAuth callback failed: state mismatch");
         return Redirect::to("/login").into_response();
     }
 
     let Some(client_id) = settings.client_id().map(str::to_string) else {
+        error!("OAuth callback failed: client_id not configured");
         return json_response(
             StatusCode::CONFLICT,
             json!({"error": "GitHub App client_id is not configured"}),
         );
     };
     let Some(client_secret) = state.secret_or_env("GITHUB_APP_CLIENT_SECRET") else {
+        error!("OAuth callback failed: GITHUB_APP_CLIENT_SECRET not configured");
         return json_response(
             StatusCode::CONFLICT,
             json!({"error": "GITHUB_APP_CLIENT_SECRET is not configured"}),
@@ -258,7 +267,8 @@ async fn callback_github(
         Ok(response) if response.status().is_success() => {
             match response.json::<GitHubTokenResponse>().await {
                 Ok(token) => token.access_token,
-                Err(_) => {
+                Err(err) => {
+                    error!(error = %err, "OAuth callback failed: could not parse GitHub token response");
                     return json_response(
                         StatusCode::BAD_GATEWAY,
                         json!({"error": "Failed to parse GitHub token response"}),
@@ -267,15 +277,18 @@ async fn callback_github(
             }
         }
         Ok(response) => {
+            let status = response.status();
+            error!(status = %status, "OAuth callback failed: GitHub token exchange returned error");
             return json_response(
                 StatusCode::BAD_GATEWAY,
-                json!({"error": format!("GitHub token exchange failed: {}", response.status())}),
+                json!({"error": format!("GitHub token exchange failed: {status}")}),
             );
         }
-        Err(error) => {
+        Err(err) => {
+            error!(error = %err, "OAuth callback failed: GitHub token exchange request failed");
             return json_response(
                 StatusCode::BAD_GATEWAY,
-                json!({"error": format!("GitHub token exchange failed: {error}")}),
+                json!({"error": format!("GitHub token exchange failed: {err}")}),
             );
         }
     };
@@ -291,7 +304,8 @@ async fn callback_github(
         Ok(response) if response.status().is_success() => match response.json::<GitHubUser>().await
         {
             Ok(profile) => profile,
-            Err(_) => {
+            Err(err) => {
+                error!(error = %err, "OAuth callback failed: could not parse GitHub user response");
                 return json_response(
                     StatusCode::BAD_GATEWAY,
                     json!({"error": "Failed to parse GitHub user response"}),
@@ -299,15 +313,18 @@ async fn callback_github(
             }
         },
         Ok(response) => {
+            let status = response.status();
+            error!(status = %status, "OAuth callback failed: GitHub user lookup returned error");
             return json_response(
                 StatusCode::BAD_GATEWAY,
-                json!({"error": format!("GitHub user lookup failed: {}", response.status())}),
+                json!({"error": format!("GitHub user lookup failed: {status}")}),
             );
         }
-        Err(error) => {
+        Err(err) => {
+            error!(error = %err, "OAuth callback failed: GitHub user lookup request failed");
             return json_response(
                 StatusCode::BAD_GATEWAY,
-                json!({"error": format!("GitHub user lookup failed: {error}")}),
+                json!({"error": format!("GitHub user lookup failed: {err}")}),
             );
         }
     };
@@ -333,6 +350,7 @@ async fn callback_github(
         .unwrap_or_default();
     if !allowed_usernames.is_empty() && !allowed_usernames.iter().any(|user| user == &profile.login)
     {
+        warn!(login = %profile.login, "OAuth callback denied: username not in allowlist");
         return Redirect::to("/login?error=unauthorized").into_response();
     }
 
@@ -351,6 +369,8 @@ async fn callback_github(
         github_id: profile.id,
         exp: (now + chrono::Duration::days(30)).timestamp(),
     };
+
+    info!(login = %session.login, "OAuth login succeeded");
 
     let mut jar = CookieJar::new();
     jar.private_mut(&session_key).add(
@@ -379,6 +399,7 @@ async fn callback_github(
 }
 
 async fn logout(State(state): State<Arc<AppState>>) -> Response {
+    info!("User logged out");
     let mut jar = CookieJar::new();
     if let Some(key) = state.session_key().await {
         jar.private_mut(&key).remove(
@@ -394,10 +415,19 @@ async fn logout(State(state): State<Arc<AppState>>) -> Response {
 }
 
 async fn auth_me(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    let has_cookie = headers.get(header::COOKIE).is_some();
     let Some(session_key) = state.session_key().await else {
+        warn!(
+            has_cookie,
+            "Auth check failed: SESSION_SECRET not available"
+        );
         return json_response(StatusCode::UNAUTHORIZED, json!({"error": "Unauthorized"}));
     };
     let Some(session) = read_private_session(&headers, &session_key) else {
+        warn!(
+            has_cookie,
+            "Auth check failed: session cookie missing or decryption failed"
+        );
         return json_response(StatusCode::UNAUTHORIZED, json!({"error": "Unauthorized"}));
     };
 
@@ -475,10 +505,11 @@ async fn setup_register(
         .await
     {
         Ok(response) => response,
-        Err(error) => {
+        Err(err) => {
+            error!(error = %err, "Setup register failed: GitHub manifest conversion request failed");
             return json_response(
                 StatusCode::BAD_GATEWAY,
-                json!({"error": format!("GitHub manifest conversion failed: {error}")}),
+                json!({"error": format!("GitHub manifest conversion failed: {err}")}),
             );
         }
     };
@@ -486,7 +517,7 @@ async fn setup_register(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        tracing::error!(status = %status, body = %body, "GitHub manifest conversion failed");
+        error!(status = %status, body = %body, "Setup register failed: GitHub manifest conversion returned error");
         return json_response(
             StatusCode::BAD_GATEWAY,
             json!({"error": format!("GitHub manifest conversion failed: {status}")}),
@@ -495,8 +526,8 @@ async fn setup_register(
 
     let body = match response.text().await {
         Ok(body) => body,
-        Err(error) => {
-            tracing::error!(error = %error, "Failed to read GitHub manifest conversion response body");
+        Err(err) => {
+            error!(error = %err, "Setup register failed: could not read conversion response body");
             return json_response(
                 StatusCode::BAD_GATEWAY,
                 json!({"error": "Failed to read GitHub manifest conversion response"}),
@@ -505,11 +536,11 @@ async fn setup_register(
     };
     let data = match serde_json::from_str::<GitHubManifestConversion>(&body) {
         Ok(data) => data,
-        Err(error) => {
-            tracing::error!(error = %error, body = %body, "Failed to parse GitHub manifest conversion response");
+        Err(err) => {
+            error!(error = %err, body = %body, "Setup register failed: could not parse conversion response");
             return json_response(
                 StatusCode::BAD_GATEWAY,
-                json!({"error": format!("Failed to parse GitHub manifest conversion response: {error}")}),
+                json!({"error": format!("Failed to parse GitHub manifest conversion response: {err}")}),
             );
         }
     };
@@ -541,27 +572,30 @@ async fn setup_register(
     } else {
         match toml::from_str(&existing).context("failed to parse existing settings config") {
             Ok(doc) => doc,
-            Err(error) => {
+            Err(err) => {
+                error!(error = %err, path = %settings_path.display(), "Setup register failed: could not parse settings config");
                 return json_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    json!({"error": format!("Failed to parse settings config: {error}")}),
+                    json!({"error": format!("Failed to parse settings config: {err}")}),
                 );
             }
         }
     };
-    if let Err(error) = merge_settings_keys(&mut doc, &settings, &git, origin.as_deref()) {
+    if let Err(err) = merge_settings_keys(&mut doc, &settings, &git, origin.as_deref()) {
+        error!(error = %err, "Setup register failed: could not merge settings");
         return json_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            json!({"error": format!("Failed to update settings config: {error}")}),
+            json!({"error": format!("Failed to update settings config: {err}")}),
         );
     }
-    if let Err(error) = std::fs::write(
+    if let Err(err) = std::fs::write(
         &settings_path,
         toml::to_string_pretty(&doc).unwrap_or_default(),
     ) {
+        error!(error = %err, path = %settings_path.display(), "Setup register failed: could not write settings config");
         return json_response(
             StatusCode::INTERNAL_SERVER_ERROR,
-            json!({"error": format!("Failed to write settings config: {error}")}),
+            json!({"error": format!("Failed to write settings config: {err}")}),
         );
     }
 
@@ -578,10 +612,11 @@ async fn setup_register(
     {
         let mut store = state.secret_store.write().await;
         for (name, value) in secret_updates {
-            if let Err(error) = store.set(name, &value) {
+            if let Err(err) = store.set(name, &value) {
+                error!(error = %err, secret = name, "Setup register failed: could not save secret");
                 return json_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    json!({"error": format!("Failed to save secret {name}: {error}")}),
+                    json!({"error": format!("Failed to save secret {name}: {err}")}),
                 );
             }
         }
@@ -592,6 +627,7 @@ async fn setup_register(
         *shared = settings;
     }
 
+    info!(slug = %data.slug, app_id = %data.id, "GitHub App registered successfully");
     Json(json!({"ok": true})).into_response()
 }
 

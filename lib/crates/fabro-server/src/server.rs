@@ -64,7 +64,8 @@ use tokio_stream::wrappers::{BroadcastStream, UnboundedReceiverStream};
 use tower::{ServiceExt, service_fn};
 use ulid::Ulid;
 
-use tracing::{error, info};
+use tower_http::trace::TraceLayer;
+use tracing::{debug, error, info};
 
 use crate::demo;
 use crate::diagnostics;
@@ -823,6 +824,29 @@ pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
         }
     });
 
+    let trace_layer = TraceLayer::new_for_http()
+        .make_span_with(|req: &axum_extract::Request| {
+            let method = req.method().as_str();
+            let path = req.uri().path();
+            tracing::debug_span!("http_request", method, path)
+        })
+        .on_request(|req: &axum_extract::Request, _span: &tracing::Span| {
+            debug!(method = %req.method(), path = %req.uri().path(), "HTTP request");
+        })
+        .on_response(
+            |response: &axum::response::Response,
+             latency: std::time::Duration,
+             _span: &tracing::Span| {
+                let status = response.status().as_u16();
+                let latency_ms = latency.as_millis();
+                if status >= 500 {
+                    error!(status, latency_ms, "HTTP response");
+                } else {
+                    info!(status, latency_ms, "HTTP response");
+                }
+            },
+        );
+
     Router::new()
         .route("/health", get(health))
         .layer(middleware::from_fn_with_state(
@@ -842,6 +866,7 @@ pub fn build_router(state: Arc<AppState>, auth_mode: AuthMode) -> Router {
                 }
             }
         }))
+        .layer(trace_layer)
 }
 
 fn demo_routes() -> Router<Arc<AppState>> {
