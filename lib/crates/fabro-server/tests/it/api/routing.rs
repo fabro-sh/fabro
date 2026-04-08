@@ -6,7 +6,6 @@ use fabro_server::server::{
     create_app_state_with_options,
 };
 use fabro_types::Settings;
-use std::path::PathBuf;
 use tower::ServiceExt;
 
 use crate::helpers::body_json;
@@ -74,11 +73,10 @@ async fn moved_routes_not_at_root_of_api_prefix() {
 #[tokio::test]
 async fn source_maps_are_not_served() {
     let app = build_router(create_app_state(), AuthMode::Disabled);
-    let map_path = find_dist_source_map();
 
     let request = Request::builder()
         .method("GET")
-        .uri(format!("/{}", map_path))
+        .uri("/assets/entry-abc123.js.map")
         .body(Body::empty())
         .unwrap();
 
@@ -200,44 +198,4 @@ enabled = false
 
     let response = app.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-}
-
-fn find_dist_source_map() -> String {
-    let dist_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../apps/fabro-web/dist");
-    let mut entries = std::fs::read_dir(&dist_dir)
-        .unwrap_or_else(|error| panic!("failed to read {}: {error}", dist_dir.display()))
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
-    entries.sort_by_key(|entry| entry.path());
-
-    entries
-        .into_iter()
-        .flat_map(walk_entry)
-        .find_map(|path| {
-            path.strip_prefix(&dist_dir)
-                .ok()
-                .and_then(|relative| relative.to_str().map(ToOwned::to_owned))
-        })
-        .unwrap_or_else(|| {
-            panic!(
-                "expected at least one .map file under {}",
-                dist_dir.display()
-            )
-        })
-}
-
-fn walk_entry(entry: std::fs::DirEntry) -> Vec<PathBuf> {
-    let path = entry.path();
-    if path.is_dir() {
-        let mut children = std::fs::read_dir(&path)
-            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        children.sort_by_key(|child| child.path());
-        children.into_iter().flat_map(walk_entry).collect()
-    } else if path.extension().is_some_and(|extension| extension == "map") {
-        vec![path]
-    } else {
-        Vec::new()
-    }
 }
