@@ -1,16 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
-
-type Theme = "light" | "dark";
-
-const STORAGE_KEY = "fabro-theme";
+import { STORAGE_KEY, resolveTheme } from "./theme-selection";
+import type { Theme } from "./theme-selection";
 
 function getInitialTheme(): Theme {
   if (typeof window === "undefined") return "dark";
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored === "light" || stored === "dark") return stored;
-  return window.matchMedia("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
+  return resolveTheme(localStorage.getItem(STORAGE_KEY));
 }
 
 function applyThemeClass(theme: Theme) {

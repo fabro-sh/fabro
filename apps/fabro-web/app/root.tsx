@@ -1,8 +1,9 @@
 import { isRouteErrorResponse, Outlet } from "react-router";
 import { ThemeProvider } from "./lib/theme";
+import { buildThemeBootScript } from "./lib/theme-selection";
 import "./app.css";
 
-const themeScript = `(function(){try{var t=localStorage.getItem("fabro-theme");if(t!=="light"&&t!=="dark")t=window.matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light";document.documentElement.classList.add(t)}catch(e){document.documentElement.classList.add("dark")}})()`;
+const themeScript = buildThemeBootScript();
 
 export default function Root() {
   return (
