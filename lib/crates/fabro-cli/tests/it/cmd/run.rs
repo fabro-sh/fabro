@@ -956,6 +956,43 @@ fn json_run_implies_auto_approve_for_human_gates() {
         "ts": "[TIMESTAMP]"
       },
       {
+        "event": "interview.started",
+        "id": "[EVENT_ID]",
+        "node_id": "approve",
+        "node_label": "approve",
+        "properties": {
+          "allow_freeform": false,
+          "options": [
+            {
+              "key": "A",
+              "label": "[A] Approve"
+            },
+            {
+              "key": "R",
+              "label": "[R] Revise"
+            }
+          ],
+          "question": "Approve?",
+          "question_id": "[ULID]",
+          "question_type": "multiple_choice",
+          "stage": "approve"
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
+      },
+      {
+        "event": "interview.completed",
+        "id": "[EVENT_ID]",
+        "properties": {
+          "answer": "A",
+          "duration_ms": "[DURATION_MS]",
+          "question": "Approve?",
+          "question_id": "[ULID]"
+        },
+        "run_id": "[ULID]",
+        "ts": "[TIMESTAMP]"
+      },
+      {
         "event": "stage.completed",
         "id": "[EVENT_ID]",
         "node_id": "approve",
