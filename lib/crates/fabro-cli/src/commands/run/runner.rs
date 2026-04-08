@@ -66,12 +66,13 @@ pub(crate) async fn execute(
     let artifact_uploader =
         build_artifact_uploader(run_id, client.clone_for_reuse(), artifact_upload_token);
     let interviewer = Arc::new(ControlInterviewer::new());
+    let cancel_token = Arc::new(AtomicBool::new(false));
     tokio::spawn(read_worker_control_stream(
         io::stdin(),
         Arc::clone(&interviewer),
+        Arc::clone(&cancel_token),
     ));
     let run_control = RunControlState::new();
-    let cancel_token = Arc::new(AtomicBool::new(false));
     install_signal_handlers(Arc::clone(&run_control), Arc::clone(&cancel_token))?;
     let github_app = maybe_build_github_app_credentials(&run_record.settings)?;
     let services = StartServices {
@@ -106,15 +107,18 @@ pub(crate) async fn execute(
     Ok(())
 }
 
-async fn read_worker_control_stream<R>(reader: R, interviewer: Arc<ControlInterviewer>)
-where
+async fn read_worker_control_stream<R>(
+    reader: R,
+    interviewer: Arc<ControlInterviewer>,
+    cancel_token: Arc<AtomicBool>,
+) where
     R: AsyncRead + Unpin,
 {
     let mut lines = BufReader::new(reader).lines();
     loop {
         match lines.next_line().await {
             Ok(Some(line)) => {
-                apply_worker_control_line(&interviewer, &line).await;
+                apply_worker_control_line(&interviewer, &cancel_token, &line).await;
             }
             Ok(None) | Err(_) => {
                 interviewer.abort_all().await;
@@ -124,7 +128,11 @@ where
     }
 }
 
-async fn apply_worker_control_line(interviewer: &ControlInterviewer, line: &str) {
+async fn apply_worker_control_line(
+    interviewer: &ControlInterviewer,
+    cancel_token: &AtomicBool,
+    line: &str,
+) {
     if line.trim().is_empty() {
         return;
     }
@@ -136,6 +144,10 @@ async fn apply_worker_control_line(interviewer: &ControlInterviewer, line: &str)
     match message.message {
         WorkerControlMessage::InterviewAnswer { qid, answer } => {
             let _ = interviewer.submit(&qid, answer.into()).await;
+        }
+        WorkerControlMessage::RunCancel => {
+            cancel_token.store(true, Ordering::SeqCst);
+            interviewer.abort_all().await;
         }
     }
 }
@@ -470,6 +482,7 @@ fn install_signal_handlers(
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     use httpmock::MockServer;
     use serde_json::json;
@@ -680,6 +693,7 @@ mod tests {
     #[tokio::test]
     async fn worker_control_line_routes_answer_by_question_id() {
         let interviewer = Arc::new(ControlInterviewer::new());
+        let cancel_token = Arc::new(AtomicBool::new(false));
         let mut question = Question::new("Approve?", QuestionType::YesNo);
         question.id = "q-1".to_string();
         let ask_interviewer = Arc::clone(&interviewer);
@@ -687,25 +701,56 @@ mod tests {
 
         apply_worker_control_line(
             &interviewer,
+            &cancel_token,
             r#"{"v":1,"type":"interview.answer","qid":"q-1","answer":{"kind":"yes"}}"#,
         )
         .await;
 
         let answer: fabro_interview::Answer = answer_task.await.unwrap();
         assert_eq!(answer.value, AnswerValue::Yes);
+        assert!(!cancel_token.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn worker_control_line_cancel_sets_cancel_token_and_aborts_pending_interviews() {
+        let interviewer = Arc::new(ControlInterviewer::new());
+        let cancel_token = Arc::new(AtomicBool::new(false));
+        let mut question = Question::new("Approve?", QuestionType::YesNo);
+        question.id = "q-1".to_string();
+        let ask_interviewer = Arc::clone(&interviewer);
+        let answer_task = tokio::spawn(async move { ask_interviewer.ask(question).await });
+        tokio::task::yield_now().await;
+
+        apply_worker_control_line(
+            &interviewer,
+            &cancel_token,
+            r#"{"v":1,"type":"run.cancel"}"#,
+        )
+        .await;
+
+        let answer: fabro_interview::Answer = answer_task.await.unwrap();
+        assert_eq!(answer.value, AnswerValue::Aborted);
+        assert!(cancel_token.load(Ordering::SeqCst));
     }
 
     #[tokio::test]
     async fn worker_control_stream_eof_aborts_pending_interviews() {
         let interviewer = Arc::new(ControlInterviewer::new());
+        let cancel_token = Arc::new(AtomicBool::new(false));
         let mut question = Question::new("Approve?", QuestionType::YesNo);
         question.id = "q-1".to_string();
         let ask_interviewer = Arc::clone(&interviewer);
         let answer_task = tokio::spawn(async move { ask_interviewer.ask(question).await });
 
-        read_worker_control_stream(tokio::io::empty(), Arc::clone(&interviewer)).await;
+        read_worker_control_stream(
+            tokio::io::empty(),
+            Arc::clone(&interviewer),
+            Arc::clone(&cancel_token),
+        )
+        .await;
 
         let answer: fabro_interview::Answer = answer_task.await.unwrap();
         assert_eq!(answer.value, AnswerValue::Aborted);
+        assert!(!cancel_token.load(Ordering::SeqCst));
     }
 }

@@ -342,9 +342,19 @@ impl RunAnswerTransport {
         }
     }
 
-    async fn abort_pending(&self) {
-        if let Self::InProcess { interviewer } = self {
-            interviewer.abort_all().await;
+    async fn cancel_run(&self) -> Result<(), AnswerTransportError> {
+        match self {
+            Self::Subprocess { control_tx } => {
+                let message = WorkerControlEnvelope::cancel_run();
+                timeout(WORKER_CONTROL_ENQUEUE_TIMEOUT, control_tx.send(message))
+                    .await
+                    .map_err(|_| AnswerTransportError::Timeout)?
+                    .map_err(|_| AnswerTransportError::Closed)
+            }
+            Self::InProcess { interviewer } => {
+                interviewer.abort_all().await;
+                Ok(())
+            }
         }
     }
 }
@@ -2113,7 +2123,7 @@ async fn delete_run_internal(state: &Arc<AppState>, id: RunId) -> Result<(), Res
             token.store(true, Ordering::SeqCst);
         }
         if let Some(answer_transport) = managed_run.answer_transport.clone() {
-            answer_transport.abort_pending().await;
+            let _ = answer_transport.cancel_run().await;
         }
         if let Some(cancel_tx) = managed_run.cancel_tx.take() {
             let _ = cancel_tx.send(());
@@ -5121,6 +5131,7 @@ async fn cancel_run(
         created_at,
         response_status,
         persist_cancelled_status,
+        answer_transport,
         cancel_token,
         cancel_tx,
         worker_pid,
@@ -5145,6 +5156,7 @@ async fn cancel_run(
                         managed_run.created_at,
                         response_status,
                         persist_cancelled_status,
+                        managed_run.answer_transport.clone(),
                         managed_run.cancel_token.clone(),
                         managed_run.cancel_tx.take(),
                         managed_run.worker_pid,
@@ -5172,6 +5184,9 @@ async fn cancel_run(
     }
     if let Some(cancel_tx) = cancel_tx {
         let _ = cancel_tx.send(());
+    }
+    if let Some(answer_transport) = answer_transport {
+        let _ = answer_transport.cancel_run().await;
     }
     if let Some(worker_pid) = worker_pid {
         #[cfg(unix)]
@@ -5771,6 +5786,7 @@ mod tests {
     use fabro_config::server::{
         AuthProvider, AuthSettings, GitAuthorSettings, GitProvider, GitSettings, WebSettings,
     };
+    use fabro_interview::{AnswerValue, ControlInterviewer, Interviewer, Question, QuestionType};
     use fabro_types::{InterviewQuestionRecord, InterviewQuestionType, RunBlobId, RunId, fixtures};
     #[cfg(unix)]
     use std::process::Stdio;
@@ -5807,6 +5823,37 @@ mod tests {
 
     fn api(path: &str) -> String {
         format!("/api/v1{path}")
+    }
+
+    #[tokio::test]
+    async fn subprocess_answer_transport_cancel_run_enqueues_cancel_message() {
+        let (control_tx, mut control_rx) = tokio::sync::mpsc::channel(1);
+        let transport = RunAnswerTransport::Subprocess { control_tx };
+
+        transport.cancel_run().await.unwrap();
+
+        assert_eq!(
+            control_rx.recv().await,
+            Some(WorkerControlEnvelope::cancel_run())
+        );
+    }
+
+    #[tokio::test]
+    async fn in_process_answer_transport_cancel_run_aborts_pending_interviews() {
+        let interviewer = Arc::new(ControlInterviewer::new());
+        let transport = RunAnswerTransport::InProcess {
+            interviewer: Arc::clone(&interviewer),
+        };
+        let mut question = Question::new("Approve?", QuestionType::YesNo);
+        question.id = "q-1".to_string();
+        let ask_interviewer = Arc::clone(&interviewer);
+        let answer_task = tokio::spawn(async move { ask_interviewer.ask(question).await });
+        tokio::task::yield_now().await;
+
+        transport.cancel_run().await.unwrap();
+
+        let answer = answer_task.await.unwrap();
+        assert_eq!(answer.value, AnswerValue::Aborted);
     }
 
     fn minimal_manifest_json(dot_source: &str) -> serde_json::Value {

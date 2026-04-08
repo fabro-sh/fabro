@@ -972,7 +972,10 @@ mod tests {
             .await;
 
         let client = test_client(&server.url("/api/v1"));
-        let events = client.list_run_events(&run_id, None, Some(1)).await.unwrap();
+        let events = client
+            .list_run_events(&run_id, None, Some(1))
+            .await
+            .unwrap();
 
         first_page.assert_async().await;
         assert_eq!(events.len(), 1);

@@ -449,9 +449,45 @@ mod tests {
     use super::*;
     use fabro_interview::{Answer, AnswerValue};
     use fabro_util::terminal::Styles;
+    use httpmock::MockServer;
 
     fn no_color_styles() -> &'static Styles {
         Box::leak(Box::new(Styles::new(false)))
+    }
+
+    fn terminal_run_state_response() -> serde_json::Value {
+        serde_json::json!({
+            "run": null,
+            "graph_source": null,
+            "start": null,
+            "status": {
+                "status": "failed",
+                "reason": "cancelled",
+                "updated_at": "2026-04-05T12:00:02Z"
+            },
+            "checkpoint": null,
+            "checkpoints": [],
+            "conclusion": null,
+            "retro": null,
+            "retro_prompt": null,
+            "retro_response": null,
+            "sandbox": null,
+            "final_patch": null,
+            "pull_request": null,
+            "nodes": {}
+        })
+    }
+
+    fn cancel_run_response(run_id: RunId) -> serde_json::Value {
+        serde_json::json!({
+            "id": run_id,
+            "status": "cancelled",
+            "error": null,
+            "queue_position": null,
+            "status_reason": "cancelled",
+            "pending_control": "cancel",
+            "created_at": "2026-04-05T12:00:00Z"
+        })
     }
 
     #[tokio::test]
@@ -524,5 +560,34 @@ mod tests {
     #[test]
     fn json_pending_interview_does_not_require_manual_input_when_auto_approve_is_enabled() {
         assert!(!json_pending_interview_requires_manual_input(true, true));
+    }
+
+    #[tokio::test]
+    async fn handle_detach_signal_with_kill_on_detach_cancels_active_run_via_server() {
+        let run_id = fabro_types::fixtures::RUN_1;
+        let server = MockServer::start();
+        let cancel_mock = server.mock(|when, then| {
+            when.method("POST")
+                .path(format!("/api/v1/runs/{run_id}/cancel"));
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .body(cancel_run_response(run_id).to_string());
+        });
+        let state_mock = server.mock(|when, then| {
+            when.method("GET")
+                .path(format!("/api/v1/runs/{run_id}/state"));
+            then.status(200)
+                .header("Content-Type", "application/json")
+                .body(terminal_run_state_response().to_string());
+        });
+        let client =
+            server_client::connect_server_target_direct(&format!("{}/api/v1", server.base_url()))
+                .await
+                .unwrap();
+
+        handle_detach_signal(&client, &run_id, true).await;
+
+        cancel_mock.assert();
+        state_mock.assert();
     }
 }

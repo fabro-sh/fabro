@@ -22,6 +22,14 @@ impl WorkerControlEnvelope {
             },
         }
     }
+
+    #[must_use]
+    pub fn cancel_run() -> Self {
+        Self {
+            v: WORKER_CONTROL_PROTOCOL_VERSION,
+            message: WorkerControlMessage::RunCancel,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -32,6 +40,8 @@ pub enum WorkerControlMessage {
         qid: String,
         answer: WorkerControlAnswer,
     },
+    #[serde(rename = "run.cancel")]
+    RunCancel,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,6 +103,16 @@ mod tests {
             json,
             r#"{"v":1,"type":"interview.answer","qid":"q-1","answer":{"kind":"text","text":"ship it"}}"#
         );
+
+        let parsed: WorkerControlEnvelope = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, envelope);
+    }
+
+    #[test]
+    fn cancel_run_round_trips_through_json() {
+        let envelope = WorkerControlEnvelope::cancel_run();
+        let json = serde_json::to_string(&envelope).unwrap();
+        assert_eq!(json, r#"{"v":1,"type":"run.cancel"}"#);
 
         let parsed: WorkerControlEnvelope = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, envelope);

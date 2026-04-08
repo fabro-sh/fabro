@@ -1,4 +1,5 @@
 use std::io::{BufRead, BufReader, Read};
+use std::path::Path;
 use std::process::{Output, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -8,9 +9,62 @@ use serde_json::Value;
 
 use crate::support::{example_fixture, fabro_json_snapshot, run_output_filters, unique_run_id};
 
-use super::support::{output_stdout, resolve_run, wait_for_status, write_gated_workflow};
+use super::support::{
+    output_stdout, resolve_run, server_target, wait_for_status, write_gated_workflow,
+};
 
 const SHARED_DAEMON_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn server_endpoint(storage_dir: &Path) -> (reqwest::Client, String) {
+    let target = server_target(storage_dir);
+    if target.starts_with('/') {
+        (
+            reqwest::ClientBuilder::new()
+                .unix_socket(target)
+                .no_proxy()
+                .build()
+                .expect("test Unix-socket HTTP client should build"),
+            "http://fabro".to_string(),
+        )
+    } else {
+        (
+            reqwest::ClientBuilder::new()
+                .no_proxy()
+                .build()
+                .expect("test TCP HTTP client should build"),
+            target,
+        )
+    }
+}
+
+async fn wait_for_server_question(client: &reqwest::Client, base_url: &str, run_id: &str) -> Value {
+    let deadline = std::time::Instant::now() + SHARED_DAEMON_TIMEOUT;
+    loop {
+        let response = client
+            .get(format!("{base_url}/api/v1/runs/{run_id}/questions"))
+            .query(&[("page[limit]", "100"), ("page[offset]", "0")])
+            .send()
+            .await
+            .expect("question request should succeed");
+        assert!(
+            response.status().is_success(),
+            "question request failed: {}",
+            response.status()
+        );
+        let body: Value = response
+            .json()
+            .await
+            .expect("question response should parse");
+        if let Some(question) = body["data"].as_array().and_then(|items| items.first()) {
+            return question.clone();
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for a pending question"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
 
 fn format_output_snapshot(output: &Output, filters: &[(String, String)]) -> String {
     let stdout = apply_filters(&String::from_utf8_lossy(&output.stdout), filters);
@@ -713,4 +767,26 @@ fn attach_json_errors_without_prompting_for_human_input() {
       }
     ]
     "#);
+
+    let run = resolve_run(&context, &run_id);
+    tokio::runtime::Runtime::new()
+        .expect("test runtime should build")
+        .block_on(async {
+            let (client, base_url) = server_endpoint(&context.storage_dir);
+            let question = wait_for_server_question(&client, &base_url, &run_id).await;
+            let question_id = question["id"]
+                .as_str()
+                .expect("question id should be present");
+
+            let response = client
+                .post(format!(
+                    "{base_url}/api/v1/runs/{run_id}/questions/{question_id}/answer"
+                ))
+                .json(&serde_json::json!({ "selected_option_key": "A" }))
+                .send()
+                .await
+                .expect("answer submission should succeed");
+            assert_eq!(response.status(), reqwest::StatusCode::NO_CONTENT);
+        });
+    wait_for_status(&run.run_dir, &["succeeded"]);
 }

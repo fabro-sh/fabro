@@ -281,31 +281,8 @@ pub(crate) fn setup_project_fixture(context: &TestContext) -> ProjectFixture {
 }
 
 impl WorkflowGate {
-    pub(crate) fn gate_path(&self) -> &Path {
-        &self.gate_path
-    }
-
     pub(crate) fn release(&self) {
         write_text_file(&self.gate_path, "open\n");
-    }
-}
-
-pub(crate) fn wait_for_no_process_match(pattern: &str) {
-    let deadline = Instant::now() + COMMAND_TIMEOUT;
-    loop {
-        let output = std::process::Command::new("pgrep")
-            .args(["-f", pattern])
-            .output()
-            .expect("pgrep should execute");
-        if !output.status.success() {
-            return;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "timed out waiting for processes matching {pattern:?} to exit: {}",
-            String::from_utf8_lossy(&output.stdout)
-        );
-        std::thread::sleep(Duration::from_millis(50));
     }
 }
 

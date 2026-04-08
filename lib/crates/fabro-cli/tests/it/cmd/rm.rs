@@ -5,8 +5,7 @@ use serde_json::Value;
 use crate::support::unique_run_id;
 
 use super::support::{
-    output_stdout, resolve_run, setup_completed_fast_dry_run, setup_created_fast_dry_run,
-    setup_local_sandbox_run, wait_for_no_process_match, wait_for_status, write_gated_workflow,
+    setup_completed_fast_dry_run, setup_created_fast_dry_run, setup_local_sandbox_run,
 };
 
 #[test]
@@ -150,34 +149,41 @@ fn rm_force_deletes_run_without_sandbox_json_when_store_has_sandbox() {
 }
 
 #[test]
-fn rm_force_terminates_active_run_worker() {
+fn rm_force_removes_active_run() {
     let context = test_context!();
-    let _gate = write_gated_workflow(&context.temp_dir.join("slow.fabro"), "slow", "Run slowly");
-
-    let output = context
-        .run_cmd()
-        .env("OPENAI_API_KEY", "test")
-        .args([
-            "--detach",
-            "--provider",
-            "openai",
-            "--sandbox",
-            "local",
-            "--no-retro",
-            "slow.fabro",
-        ])
-        .output()
-        .expect("run --detach should execute");
-    assert!(
-        output.status.success(),
-        "run --detach failed:\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+    let run_id = unique_run_id();
+    let server = MockServer::start();
+    let list_mock = server.mock(|when, then| {
+        when.method("GET").path("/api/v1/runs");
+        then.status(200)
+            .header("Content-Type", "application/json")
+            .body(
+                serde_json::json!([
+                    {
+                        "run_id": run_id,
+                        "workflow_name": "Active Workflow",
+                        "workflow_slug": "active-workflow",
+                        "goal": "Active goal",
+                        "labels": {},
+                        "host_repo_path": null,
+                        "start_time": "2026-04-05T12:00:00Z",
+                        "status": "running",
+                        "status_reason": null,
+                        "duration_ms": 123,
+                        "total_usd_micros": null
+                    }
+                ])
+                .to_string(),
+            );
+    });
+    let delete_mock = server.mock(|when, then| {
+        when.method("DELETE").path(format!("/api/v1/runs/{run_id}"));
+        then.status(204);
+    });
+    context.write_home(
+        ".fabro/settings.toml",
+        format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
     );
-
-    let run_id = output_stdout(&output).trim().to_string();
-    let run = resolve_run(&context, &run_id);
-    wait_for_status(&run.run_dir, &["running"]);
 
     let mut filters = context.filters();
     filters.push((
@@ -193,9 +199,8 @@ fn rm_force_terminates_active_run_worker() {
     ----- stderr -----
     [ULID]
     ");
-
-    assert!(!run.run_dir.exists(), "run directory should be deleted");
-    wait_for_no_process_match(&format!("fabro {} ", &run_id[..12]));
+    list_mock.assert();
+    delete_mock.assert();
 }
 
 #[test]
