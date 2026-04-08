@@ -74,29 +74,7 @@ impl EngineServices {
 
     /// Bridge the core executor's atomic cancel flag to sandbox command cancellation.
     pub fn sandbox_cancel_token(&self) -> Option<CancellationToken> {
-        let cancel_requested = self.cancel_requested.clone()?;
-        let token = CancellationToken::new();
-
-        if cancel_requested.load(Ordering::Relaxed) {
-            token.cancel();
-            return Some(token);
-        }
-
-        let token_clone = token.clone();
-        tokio::spawn(async move {
-            loop {
-                if token_clone.is_cancelled() {
-                    return;
-                }
-                if cancel_requested.load(Ordering::Relaxed) {
-                    token_clone.cancel();
-                    return;
-                }
-                time::sleep(Duration::from_millis(10)).await;
-            }
-        });
-
-        Some(token)
+        sandbox_cancel_token(self.cancel_requested.clone())
     }
 
     /// Run lifecycle hooks and return the merged decision.
@@ -148,6 +126,34 @@ impl EngineServices {
             workflow_bundle: None,
         }
     }
+}
+
+pub(crate) fn sandbox_cancel_token(
+    cancel_requested: Option<Arc<AtomicBool>>,
+) -> Option<CancellationToken> {
+    let cancel_requested = cancel_requested?;
+    let token = CancellationToken::new();
+
+    if cancel_requested.load(Ordering::Relaxed) {
+        token.cancel();
+        return Some(token);
+    }
+
+    let token_clone = token.clone();
+    tokio::spawn(async move {
+        loop {
+            if token_clone.is_cancelled() {
+                return;
+            }
+            if cancel_requested.load(Ordering::Relaxed) {
+                token_clone.cancel();
+                return;
+            }
+            time::sleep(Duration::from_millis(10)).await;
+        }
+    });
+
+    Some(token)
 }
 
 /// The handler interface for node execution.

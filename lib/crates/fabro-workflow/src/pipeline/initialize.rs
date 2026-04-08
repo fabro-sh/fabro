@@ -589,16 +589,24 @@ pub async fn initialize(
                 index,
             });
             let cmd_start = Instant::now();
+            let cancel_token =
+                crate::handler::sandbox_cancel_token(options.run_options.cancel_token.clone());
             let result = sandbox
                 .exec_command(
                     command,
                     options.lifecycle.setup_command_timeout_ms,
                     None,
                     None,
-                    None,
+                    cancel_token.clone(),
                 )
                 .await
                 .map_err(|e| FabroError::engine(format!("Setup command failed: {e}")))?;
+            if let Some(token) = &cancel_token {
+                if token.is_cancelled() {
+                    return Err(FabroError::Cancelled);
+                }
+                token.cancel();
+            }
             let duration_ms = crate::millis_u64(cmd_start.elapsed());
             if result.exit_code != 0 {
                 options.emitter.emit(&Event::SetupFailed {
