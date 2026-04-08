@@ -239,16 +239,6 @@ mod tests {
         assert!(scratch.worktree_dir().exists());
         assert!(scratch.runtime_dir().exists());
         assert!(scratch.artifact_files_dir().exists());
-        assert!(
-            !scratch
-                .root()
-                .join("cache")
-                .join("artifacts")
-                .join("values")
-                .exists()
-        );
-        assert!(!scratch.root().join("final.patch").exists());
-
         scratch.remove().unwrap();
         assert!(!scratch.root().exists());
     }

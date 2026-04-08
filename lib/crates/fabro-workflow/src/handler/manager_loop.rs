@@ -194,7 +194,7 @@ impl Handler for SubWorkflowHandler {
 
         // Build child RunOptions
         let visit = visit_from_context(context) as u64;
-        let child_logs = run_dir.join(format!("nodes/{}_{visit}/child", node.id));
+        let child_logs = run_dir.join(format!("stages/{}@{visit}/child", node.id));
         let _ = std::fs::create_dir_all(&child_logs);
 
         let cancel_token = Arc::new(AtomicBool::new(false));
@@ -399,7 +399,7 @@ mod tests {
                 .contains("Child completed")
         );
         assert!(
-            dir.path().join("nodes/manager_1/child").exists(),
+            dir.path().join("stages/manager@1/child").exists(),
             "child logs should default to first-visit directory naming"
         );
     }

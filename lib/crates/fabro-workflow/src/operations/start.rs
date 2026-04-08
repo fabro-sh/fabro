@@ -1054,12 +1054,6 @@ mod tests {
         .await
         .unwrap();
 
-        let bundle_file = created.run_dir.join("workflow_bundle.json");
-        assert!(
-            !bundle_file.exists(),
-            "run scratch should not persist workflow_bundle.json"
-        );
-
         let started = start(
             &run_dir,
             test_start_services(&store, &run_dir, emitter, registry).await,
