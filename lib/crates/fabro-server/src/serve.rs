@@ -24,8 +24,8 @@ use crate::github_webhooks::WebhookManager;
 use crate::jwt_auth::{AuthMode, AuthStrategy, resolve_auth_mode_with_lookup};
 use crate::secret_store::SecretStore;
 use crate::server::{
-    build_app_state_with_path, build_router, reconcile_incomplete_runs_on_startup,
-    shutdown_active_workers, spawn_scheduler,
+    build_app_state_with_path, reconcile_incomplete_runs_on_startup, shutdown_active_workers,
+    spawn_scheduler,
 };
 use crate::tls::{ClientAuth, build_rustls_config, serve_tls_with_shutdown};
 use fabro_llm::client::Client as LlmClient;
@@ -46,6 +46,14 @@ pub struct ServeArgs {
     /// Address to bind to (IP or IP:port for TCP, or path containing / for Unix socket)
     #[arg(long)]
     pub bind: Option<String>,
+
+    /// Enable the embedded web UI and browser auth routes
+    #[arg(long, conflicts_with = "no_web")]
+    pub web: bool,
+
+    /// Disable the embedded web UI, browser auth routes, and web-only helper endpoints
+    #[arg(long, conflicts_with = "web")]
+    pub no_web: bool,
 
     /// Override default LLM model
     #[arg(long)]
@@ -84,6 +92,9 @@ fn apply_serve_overrides(base: &Settings, args: &ServeArgs, dry_run_mode: bool) 
     let mut settings = base.clone();
     if dry_run_mode {
         settings.dry_run = Some(true);
+    }
+    if args.web || args.no_web {
+        settings.web.get_or_insert_default().enabled = args.web;
     }
     if let Some(ref model) = args.model {
         settings.llm.get_or_insert_default().model = Some(model.clone());
@@ -250,6 +261,13 @@ where
             .unwrap_or(5);
         (auth_mode, client_auth, max_concurrent_runs)
     };
+    let web_enabled = shared_settings
+        .read()
+        .expect("config lock poisoned")
+        .web
+        .as_ref()
+        .map(|web| web.enabled)
+        .unwrap_or(true);
 
     let store_path = storage.store_dir();
     let object_store = build_object_store(&store_path)?;
@@ -281,7 +299,11 @@ where
         );
     }
     spawn_scheduler(Arc::clone(&state));
-    let router = build_router(Arc::clone(&state), auth_mode);
+    let router = crate::server::build_router_with_options(
+        Arc::clone(&state),
+        auth_mode,
+        crate::server::RouterOptions { web_enabled },
+    );
 
     let bind_request = match args.bind {
         Some(ref s) => bind::parse_bind(s)?,
@@ -631,6 +653,8 @@ mod tests {
             provider: None,
             dry_run: false,
             sandbox: None,
+            web: false,
+            no_web: false,
             max_concurrent_runs: None,
             config: None,
         };
@@ -642,6 +666,52 @@ mod tests {
             resolved.storage_dir,
             Some(PathBuf::from("/srv/fabro-storage"))
         );
+    }
+
+    #[test]
+    fn apply_runtime_settings_enables_web_from_cli_flag() {
+        let base: Settings = toml::from_str(
+            r#"
+[web]
+enabled = false
+"#,
+        )
+        .unwrap();
+        let args = ServeArgs {
+            bind: None,
+            model: None,
+            provider: None,
+            dry_run: false,
+            sandbox: None,
+            web: true,
+            no_web: false,
+            max_concurrent_runs: None,
+            config: None,
+        };
+
+        let resolved = apply_runtime_settings(&base, &args, false, &PathBuf::from("/srv/fabro"));
+
+        assert!(resolved.web.expect("web settings should exist").enabled);
+    }
+
+    #[test]
+    fn apply_runtime_settings_disables_web_from_cli_flag() {
+        let base = Settings::default();
+        let args = ServeArgs {
+            bind: None,
+            model: None,
+            provider: None,
+            dry_run: false,
+            sandbox: None,
+            web: false,
+            no_web: true,
+            max_concurrent_runs: None,
+            config: None,
+        };
+
+        let resolved = apply_runtime_settings(&base, &args, false, &PathBuf::from("/srv/fabro"));
+
+        assert!(!resolved.web.expect("web settings should exist").enabled);
     }
 
     #[test]

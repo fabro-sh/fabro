@@ -69,6 +69,8 @@ fn ensure_server_running_with_bind(
 
     let serve_args = ServeArgs {
         bind: None,
+        web: false,
+        no_web: false,
         model: None,
         provider: None,
         dry_run: false,
@@ -206,6 +208,12 @@ fn execute_daemon(
     }
     if let Some(ref provider) = serve_args.provider {
         cmd.args(["--provider", provider]);
+    }
+    if serve_args.web {
+        cmd.arg("--web");
+    }
+    if serve_args.no_web {
+        cmd.arg("--no-web");
     }
     if serve_args.dry_run {
         cmd.arg("--dry-run");

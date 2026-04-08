@@ -97,10 +97,16 @@ pub struct GitSettings {
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct WebSettings {
+    #[serde(default = "default_web_enabled")]
+    pub enabled: bool,
     #[serde(default = "default_web_url")]
     pub url: String,
     #[serde(default)]
     pub auth: AuthSettings,
+}
+
+fn default_web_enabled() -> bool {
+    true
 }
 
 fn default_web_url() -> String {
@@ -110,6 +116,7 @@ fn default_web_url() -> String {
 impl Default for WebSettings {
     fn default() -> Self {
         Self {
+            enabled: default_web_enabled(),
             url: default_web_url(),
             auth: AuthSettings::default(),
         }

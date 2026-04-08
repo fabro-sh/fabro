@@ -1495,6 +1495,7 @@ mod settings {
             storage_dir: Some("/home/fabro/.fabro".into()),
             max_concurrent_runs: Some(10),
             web: Some(WebSettings {
+                enabled: true,
                 url: "https://fabro.example.com".into(),
                 auth: AuthSettings {
                     provider: AuthProvider::Github,
