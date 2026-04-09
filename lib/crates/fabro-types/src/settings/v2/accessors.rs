@@ -92,6 +92,40 @@ impl SettingsFile {
         self.run.as_ref().and_then(|r| r.prepare.as_ref())
     }
 
+    /// Flattened prepare-step commands: each `script` is kept as-is, and
+    /// `command` argv is joined with spaces. Env-interpolation tokens are
+    /// emitted verbatim via [`InterpString::as_source`].
+    #[must_use]
+    pub fn run_prepare_commands(&self) -> Vec<String> {
+        let Some(prepare) = self.run_prepare() else {
+            return Vec::new();
+        };
+        prepare
+            .steps
+            .iter()
+            .filter_map(|step| {
+                if let Some(script) = &step.script {
+                    Some(script.as_source())
+                } else {
+                    step.command.as_ref().map(|argv| {
+                        argv.iter()
+                            .map(InterpString::as_source)
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+                }
+            })
+            .collect()
+    }
+
+    /// Prepare-step timeout in milliseconds.
+    #[must_use]
+    pub fn run_prepare_timeout_ms(&self) -> Option<u64> {
+        self.run_prepare()
+            .and_then(|p| p.timeout)
+            .map(|d| u64::try_from(d.as_std().as_millis()).unwrap_or(u64::MAX))
+    }
+
     #[must_use]
     pub fn run_checkpoint(&self) -> Option<&RunCheckpointLayer> {
         self.run.as_ref().and_then(|r| r.checkpoint.as_ref())
@@ -130,6 +164,26 @@ impl SettingsFile {
     #[must_use]
     pub fn run_inputs(&self) -> Option<&HashMap<String, toml::Value>> {
         self.run.as_ref().and_then(|r| r.inputs.as_ref())
+    }
+
+    /// Stringified view of `run.inputs`: non-string TOML values are rendered
+    /// via their canonical TOML representation (integers, booleans, and
+    /// arrays are flattened through `Display`). Returns `None` when no
+    /// inputs are set.
+    #[must_use]
+    pub fn run_inputs_as_strings(&self) -> Option<HashMap<String, String>> {
+        self.run_inputs().map(|inputs| {
+            inputs
+                .iter()
+                .map(|(k, v)| {
+                    let stringified = match v {
+                        toml::Value::String(s) => s.clone(),
+                        other => other.to_string(),
+                    };
+                    (k.clone(), stringified)
+                })
+                .collect()
+        })
     }
 
     #[must_use]

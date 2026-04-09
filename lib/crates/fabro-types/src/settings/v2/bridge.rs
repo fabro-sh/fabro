@@ -256,7 +256,7 @@ fn bridge_run(run: &RunLayer, out: &mut Settings) {
     }
 }
 
-fn bridge_sandbox(sb: &super::run::RunSandboxLayer) -> SandboxSettings {
+pub fn bridge_sandbox(sb: &super::run::RunSandboxLayer) -> SandboxSettings {
     SandboxSettings {
         provider: sb.provider.clone(),
         preserve: sb.preserve,
@@ -312,7 +312,7 @@ fn bridge_sandbox(sb: &super::run::RunSandboxLayer) -> SandboxSettings {
     }
 }
 
-fn bridge_worktree_mode(m: V2WorktreeMode) -> OldWorktreeMode {
+pub fn bridge_worktree_mode(m: V2WorktreeMode) -> OldWorktreeMode {
     match m {
         V2WorktreeMode::Always => OldWorktreeMode::Always,
         V2WorktreeMode::Clean => OldWorktreeMode::Clean,
@@ -321,7 +321,7 @@ fn bridge_worktree_mode(m: V2WorktreeMode) -> OldWorktreeMode {
     }
 }
 
-fn bridge_merge_strategy(m: V2MergeStrategy) -> OldMergeStrategy {
+pub fn bridge_merge_strategy(m: V2MergeStrategy) -> OldMergeStrategy {
     match m {
         V2MergeStrategy::Squash => OldMergeStrategy::Squash,
         V2MergeStrategy::Merge => OldMergeStrategy::Merge,
@@ -329,13 +329,31 @@ fn bridge_merge_strategy(m: V2MergeStrategy) -> OldMergeStrategy {
     }
 }
 
-fn bridge_mcps(mcps: &HashMap<String, McpEntryLayer>) -> HashMap<String, McpServerEntry> {
+pub fn bridge_pull_request(pr: &super::run::RunPullRequestLayer) -> PullRequestSettings {
+    PullRequestSettings {
+        enabled: pr.enabled.unwrap_or(false),
+        draft: pr.draft.unwrap_or(true),
+        auto_merge: pr.auto_merge.unwrap_or(false),
+        merge_strategy: pr
+            .merge_strategy
+            .map(bridge_merge_strategy)
+            .unwrap_or_default(),
+    }
+}
+
+pub fn bridge_run_artifacts(artifacts: &super::run::RunArtifactsLayer) -> ArtifactsSettings {
+    ArtifactsSettings {
+        include: artifacts.include.clone(),
+    }
+}
+
+pub fn bridge_mcps(mcps: &HashMap<String, McpEntryLayer>) -> HashMap<String, McpServerEntry> {
     mcps.iter()
         .map(|(name, entry)| (name.clone(), bridge_mcp_entry(entry)))
         .collect()
 }
 
-fn bridge_mcp_entry(entry: &McpEntryLayer) -> McpServerEntry {
+pub fn bridge_mcp_entry(entry: &McpEntryLayer) -> McpServerEntry {
     let transport = match entry {
         McpEntryLayer::Stdio {
             script,
@@ -418,7 +436,7 @@ fn bridge_mcp_entry(entry: &McpEntryLayer) -> McpServerEntry {
     }
 }
 
-fn bridge_hook(hook: &V2HookEntry) -> HookDefinition {
+pub fn bridge_hook(hook: &V2HookEntry) -> HookDefinition {
     let hook_type = resolve_hook_type(hook);
     // If the hook is a script/command form, emit via the shorthand so the
     // old HookDefinition.command field holds the full command and
@@ -550,7 +568,7 @@ fn bridge_cli(cli: &CliLayer, out: &mut Settings) {
     }
 }
 
-fn bridge_exec(exec: &CliExecLayer) -> ExecSettings {
+pub fn bridge_exec(exec: &CliExecLayer) -> ExecSettings {
     ExecSettings {
         provider: exec
             .model
