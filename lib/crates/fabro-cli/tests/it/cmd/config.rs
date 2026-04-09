@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
+use fabro_config::ConfigLayer;
 use fabro_test::{fabro_snapshot, test_context};
-use fabro_types::Settings;
-use fabro_types::settings::v2::SettingsFile;
+use fabro_types::settings::SettingsFile;
 use httpmock::MockServer;
 use predicates::prelude::*;
 
@@ -35,45 +35,29 @@ fn parse_settings(stdout: &[u8]) -> SettingsFile {
     serde_yaml::from_slice(stdout).expect("stdout should be valid YAML SettingsFile")
 }
 
-fn server_settings_fixture() -> Settings {
-    toml::from_str(
+fn server_settings_fixture() -> SettingsFile {
+    ConfigLayer::parse(
         r#"
-storage_dir = "/srv/fabro-server"
-verbose = false
+_version = 1
 
-[llm]
-model = "server-model"
+[server.storage]
+root = "/srv/fabro-server"
+
+[run.model]
+name = "server-model"
 provider = "openai"
 
-[vars]
+[run.inputs]
 server_only = "1"
 shared = "server"
 "#,
     )
     .expect("server settings fixture should parse")
+    .into()
 }
 
-fn server_settings_body(settings: &Settings) -> String {
-    fn strip_nulls(value: &mut serde_json::Value) {
-        match value {
-            serde_json::Value::Object(map) => {
-                for child in map.values_mut() {
-                    strip_nulls(child);
-                }
-                map.retain(|_, child| !child.is_null());
-            }
-            serde_json::Value::Array(values) => {
-                for child in values {
-                    strip_nulls(child);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let mut value = serde_json::to_value(settings).expect("settings fixture should serialize");
-    strip_nulls(&mut value);
-    serde_json::to_string(&value).expect("settings payload should serialize")
+fn server_settings_body(settings: &SettingsFile) -> String {
+    serde_json::to_string(settings).expect("settings payload should serialize")
 }
 
 /// Set up home config and project config for settings command tests.

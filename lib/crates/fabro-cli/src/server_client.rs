@@ -8,8 +8,7 @@ use bytes::Bytes;
 use fabro_api::types;
 use fabro_server::bind::Bind;
 use fabro_store::{EventEnvelope, RunSummary, StageId};
-use fabro_types::Settings;
-use fabro_types::settings::v2::SettingsFile;
+use fabro_types::settings::SettingsFile;
 use fabro_types::{RunBlobId, RunEvent, RunId};
 use fabro_workflow::artifact_snapshot::CapturedArtifactInfo;
 use futures::StreamExt;
@@ -279,14 +278,16 @@ impl ServerStoreClient {
         &self.base_url
     }
 
-    pub(crate) async fn retrieve_server_settings(&self) -> Result<Settings> {
+    pub(crate) async fn retrieve_server_settings(&self) -> Result<SettingsFile> {
         let response = self
             .client
             .retrieve_server_settings()
             .send()
             .await
             .map_err(map_api_error)?;
-        convert_type(response.into_inner())
+        let raw = serde_json::Value::Object(response.into_inner().into());
+        serde_json::from_value::<SettingsFile>(raw)
+            .context("server returned a settings payload that does not match the v2 schema")
     }
 
     pub(crate) async fn create_run_from_manifest(

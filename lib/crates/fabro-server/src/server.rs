@@ -76,6 +76,7 @@ use crate::jwt_auth::{
 };
 use crate::run_manifest;
 use crate::secret_store::{SecretStore, SecretStoreError};
+use crate::settings_view;
 use crate::static_files;
 use crate::web_auth;
 use fabro_interview::{
@@ -1009,7 +1010,7 @@ fn real_routes() -> Router<Arc<AppState>> {
             get(get_stage_artifact),
         )
         .route("/runs/{id}/billing", get(get_run_billing))
-        .route("/runs/{id}/settings", get(not_implemented))
+        .route("/runs/{id}/settings", get(get_run_settings))
         .route("/runs/{id}/steer", post(not_implemented))
         .route("/runs/{id}/preview", post(generate_preview_url))
         .route("/runs/{id}/ssh", post(create_ssh_access))
@@ -1064,13 +1065,8 @@ async fn get_server_settings(
     State(state): State<Arc<AppState>>,
 ) -> Response {
     let settings = state.settings.read().unwrap().clone();
-    // Stage 6.6 TODO: replace this with an explicit allow-list DTO that
-    // reads directly from the v2 tree and redacts env-sourced values via
-    // `InterpString` provenance. For now we serialize the full v2
-    // `SettingsFile` as JSON so the web UI still has a response body --
-    // the legacy `ServerSettings` OpenAPI schema will be rewritten in
-    // 6.6 alongside the fabro-web DTO updates.
-    let mut value = match serde_json::to_value(&settings) {
+    let redacted = settings_view::redact_for_api(&settings);
+    let mut value = match serde_json::to_value(&redacted) {
         Ok(value) => value,
         Err(err) => {
             return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
@@ -4034,6 +4030,47 @@ async fn get_run_status(
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
         }
     }
+}
+
+async fn get_run_settings(
+    _auth: AuthenticatedService,
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Response {
+    let id = match parse_run_id_path(&id) {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    let run_store = match state.store.open_run_reader(&id).await {
+        Ok(store) => store,
+        Err(fabro_store::StoreError::RunNotFound(_)) => {
+            return ApiError::not_found("Run not found.").into_response();
+        }
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+    let run_state = match run_store.state().await {
+        Ok(state) => state,
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+    let Some(run_record) = run_state.run else {
+        return ApiError::not_found("Run not found.").into_response();
+    };
+    let redacted = settings_view::redact_for_api(&run_record.settings);
+    let mut value = match serde_json::to_value(&redacted) {
+        Ok(value) => value,
+        Err(err) => {
+            return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+                .into_response();
+        }
+    };
+    strip_nulls(&mut value);
+    (StatusCode::OK, Json(value)).into_response()
 }
 
 async fn get_questions(
