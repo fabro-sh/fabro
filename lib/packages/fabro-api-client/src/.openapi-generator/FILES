@@ -16,6 +16,8 @@ base.ts
 common.ts
 configuration.ts
 index.ts
+models/actor-kind.ts
+models/actor-ref.ts
 models/aggregate-billing-totals.ts
 models/aggregate-billing.ts
 models/api-question-option.ts

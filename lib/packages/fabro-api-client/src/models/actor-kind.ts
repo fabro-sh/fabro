@@ -13,14 +13,18 @@
  */
 
 
-// May contain unused imports in some cases
-// @ts-ignore
-import type { ArtifactBatchUploadEntry } from './artifact-batch-upload-entry';
 
 /**
- * Manifest for strict multipart artifact uploads.
+ * High-level category of an event actor.
  */
-export interface ArtifactBatchUploadManifest {
-    'entries': Array<ArtifactBatchUploadEntry>;
-}
+
+export const ActorKind = {
+    USER: 'user',
+    AGENT: 'agent',
+    SYSTEM: 'system'
+} as const;
+
+export type ActorKind = typeof ActorKind[keyof typeof ActorKind];
+
+
 

@@ -74,16 +74,14 @@ fn remote_run_state_response() -> serde_json::Value {
 fn run_completed_event(run_id: &str) -> serde_json::Value {
     serde_json::json!({
         "seq": 1,
-        "payload": {
-            "event": "run.completed",
-            "id": "evt-run-completed",
-            "run_id": run_id,
-            "ts": "2026-04-05T12:00:01Z",
-            "properties": {
-                "duration_ms": 12,
-                "artifact_count": 0,
-                "status": "success"
-            }
+        "event": "run.completed",
+        "id": "evt-run-completed",
+        "run_id": run_id,
+        "ts": "2026-04-05T12:00:01Z",
+        "properties": {
+            "duration_ms": 12,
+            "artifact_count": 0,
+            "status": "success"
         }
     })
 }
@@ -91,13 +89,11 @@ fn run_completed_event(run_id: &str) -> serde_json::Value {
 fn run_running_event(run_id: &str, seq: u32) -> serde_json::Value {
     serde_json::json!({
         "seq": seq,
-        "payload": {
-            "event": "run.running",
-            "id": format!("evt-run-running-{seq}"),
-            "run_id": run_id,
-            "ts": "2026-04-05T12:00:00Z",
-            "properties": {}
-        }
+        "event": "run.running",
+        "id": format!("evt-run-running-{seq}"),
+        "run_id": run_id,
+        "ts": "2026-04-05T12:00:00Z",
+        "properties": {}
     })
 }
 
@@ -956,6 +952,7 @@ fn json_run_implies_auto_approve_for_human_gates() {
           "max_attempts": 1
         },
         "run_id": "[ULID]",
+        "stage_id": "start@1",
         "ts": "[TIMESTAMP]"
       },
       {
@@ -983,6 +980,7 @@ fn json_run_implies_auto_approve_for_human_gates() {
           "status": "success"
         },
         "run_id": "[ULID]",
+        "stage_id": "start@1",
         "ts": "[TIMESTAMP]"
       },
       {
@@ -1047,6 +1045,7 @@ fn json_run_implies_auto_approve_for_human_gates() {
           "max_attempts": 1
         },
         "run_id": "[ULID]",
+        "stage_id": "approve@1",
         "ts": "[TIMESTAMP]"
       },
       {
@@ -1125,6 +1124,7 @@ fn json_run_implies_auto_approve_for_human_gates() {
           ]
         },
         "run_id": "[ULID]",
+        "stage_id": "approve@1",
         "ts": "[TIMESTAMP]"
       },
       {
@@ -1213,6 +1213,7 @@ fn json_run_implies_auto_approve_for_human_gates() {
           "max_attempts": 1
         },
         "run_id": "[ULID]",
+        "stage_id": "ship@1",
         "ts": "[TIMESTAMP]"
       },
       {
@@ -1285,6 +1286,7 @@ fn json_run_implies_auto_approve_for_human_gates() {
           "status": "success"
         },
         "run_id": "[ULID]",
+        "stage_id": "ship@1",
         "ts": "[TIMESTAMP]"
       },
       {
@@ -1383,6 +1385,7 @@ fn json_run_implies_auto_approve_for_human_gates() {
           "max_attempts": 1
         },
         "run_id": "[ULID]",
+        "stage_id": "exit@1",
         "ts": "[TIMESTAMP]"
       },
       {
@@ -1398,6 +1401,7 @@ fn json_run_implies_auto_approve_for_human_gates() {
           "status": "success"
         },
         "run_id": "[ULID]",
+        "stage_id": "exit@1",
         "ts": "[TIMESTAMP]"
       },
       {

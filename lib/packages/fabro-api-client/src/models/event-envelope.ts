@@ -15,16 +15,15 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
+import type { ActorRef } from './actor-ref';
+// May contain unused imports in some cases
+// @ts-ignore
 import type { RunEvent } from './run-event';
 
 /**
- * Stored event envelope with assigned sequence number.
+ * @type EventEnvelope
+ * Stored event envelope with assigned sequence number. On the wire the envelope is flattened: seq sits alongside the RunEvent payload fields at the top level of the JSON object. 
  */
-export interface EventEnvelope {
-    /**
-     * Assigned event sequence number.
-     */
-    'seq': number;
-    'payload': RunEvent;
-}
+export type EventEnvelope = RunEvent;
+
 

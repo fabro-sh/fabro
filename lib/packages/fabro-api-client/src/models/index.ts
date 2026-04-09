@@ -1,3 +1,5 @@
+export * from './actor-kind';
+export * from './actor-ref';
 export * from './aggregate-billing';
 export * from './aggregate-billing-totals';
 export * from './api-question';

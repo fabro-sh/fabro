@@ -13,6 +13,9 @@
  */
 
 
+// May contain unused imports in some cases
+// @ts-ignore
+import type { ActorRef } from './actor-ref';
 
 /**
  * Internal RunEvent-compatible JSON payload. The server validates this body by deserializing into the typed RunEvent struct. 
@@ -25,8 +28,25 @@ export interface RunEvent {
     'run_id': string;
     'node_id'?: string;
     'node_label'?: string;
+    /**
+     * Stage execution identity, formatted as \"{node_id}@{visit}\".
+     */
+    'stage_id'?: string;
+    /**
+     * Durable identity of one execution of a parallel node, formatted as \"{node_id}@{visit}\". 
+     */
+    'parallel_group_id'?: string;
+    /**
+     * Durable identity of one branch within a parallel execution, formatted as \"{parallel_group_id}:{index}\". 
+     */
+    'parallel_branch_id'?: string;
     'session_id'?: string;
     'parent_session_id'?: string;
+    /**
+     * Stable identifier for a tool call, present on agent.tool.* events and other durable events that directly describe the same tool call. 
+     */
+    'tool_call_id'?: string;
+    'actor'?: ActorRef;
     /**
      * Event type discriminator.
      */

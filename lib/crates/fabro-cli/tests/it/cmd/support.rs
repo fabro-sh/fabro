@@ -661,7 +661,37 @@ pub(crate) fn run_events(run_dir: &Path) -> Vec<EventEnvelope> {
         run_dir,
         &format!("/api/v1/runs/{run_id}/events"),
     ));
-    serde_json::from_value(response["data"].clone()).expect("event list should parse")
+    let items = response["data"]
+        .as_array()
+        .cloned()
+        .expect("event list response should contain a data array");
+    items
+        .into_iter()
+        .map(wire_event_envelope_value_into_store)
+        .collect::<Result<Vec<_>, _>>()
+        .expect("wire event envelope list should parse")
+}
+
+fn wire_event_envelope_value_into_store(value: serde_json::Value) -> Result<EventEnvelope, String> {
+    let mut obj = match value {
+        serde_json::Value::Object(obj) => obj,
+        _ => return Err("wire envelope is not an object".to_string()),
+    };
+    let seq = obj
+        .remove("seq")
+        .and_then(|v| v.as_u64())
+        .and_then(|v| u32::try_from(v).ok())
+        .ok_or_else(|| "wire envelope missing valid seq".to_string())?;
+    let run_id_str = obj
+        .get("run_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "wire envelope missing run_id".to_string())?;
+    let run_id: RunId = run_id_str
+        .parse()
+        .map_err(|err| format!("invalid run_id in wire envelope: {err}"))?;
+    let payload = fabro_store::EventPayload::new(serde_json::Value::Object(obj), &run_id)
+        .map_err(|err| format!("wire envelope payload failed store validation: {err}"))?;
+    Ok(EventEnvelope { seq, payload })
 }
 
 pub(crate) fn wait_for_event_names(run_dir: &Path, expected: &[&str]) {

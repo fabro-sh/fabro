@@ -111,10 +111,10 @@ pub use fabro_api::types::{
     QuestionType as ApiQuestionType, RenderWorkflowGraphDirection, RenderWorkflowGraphFormat,
     RenderWorkflowGraphRequest, RunArtifactEntry, RunArtifactListResponse, RunBilling,
     RunBillingStage, RunBillingTotals, RunControlAction as ApiRunControlAction, RunError,
-    RunEvent as ApiRunEvent, RunManifest, RunStatus, RunStatusResponse, SandboxFileEntry,
-    SandboxFileListResponse, ServerSettings, SetSecretRequest, SshAccessRequest, SshAccessResponse,
-    StartRunRequest, StatusReason as ApiStatusReason, SubmitAnswerRequest, SystemInfoResponse,
-    SystemRunCounts, WriteBlobResponse,
+    RunManifest, RunStatus, RunStatusResponse, SandboxFileEntry, SandboxFileListResponse,
+    ServerSettings, SetSecretRequest, SshAccessRequest, SshAccessResponse, StartRunRequest,
+    StatusReason as ApiStatusReason, SubmitAnswerRequest, SystemInfoResponse, SystemRunCounts,
+    WriteBlobResponse,
 };
 use fabro_graphviz::render::GraphFormat;
 
@@ -2380,21 +2380,33 @@ fn octet_stream_response(bytes: Bytes) -> Response {
 }
 
 #[allow(clippy::result_large_err)]
-fn api_run_event_from_store(payload: &EventPayload) -> Result<ApiRunEvent, Response> {
-    serde_json::from_value(payload.as_value().clone()).map_err(|err| {
+fn api_event_envelope_from_store(event: &EventEnvelope) -> Result<ApiEventEnvelope, Response> {
+    // Wire EventEnvelope is flattened: seq sits alongside the RunEvent
+    // payload fields at the top level. The progenitor-generated type
+    // reflects that shape, so we merge seq into the payload value and
+    // deserialize directly.
+    let mut value = event.payload.as_value().clone();
+    match value.as_object_mut() {
+        Some(map) => {
+            map.insert(
+                "seq".to_string(),
+                serde_json::Value::Number(i64::from(event.seq).into()),
+            );
+        }
+        None => {
+            return Err(ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "stored event payload is not a JSON object".to_string(),
+            )
+            .into_response());
+        }
+    }
+    serde_json::from_value(value).map_err(|err| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to serialize stored event: {err}"),
         )
         .into_response()
-    })
-}
-
-#[allow(clippy::result_large_err)]
-fn api_event_envelope_from_store(event: &EventEnvelope) -> Result<ApiEventEnvelope, Response> {
-    Ok(ApiEventEnvelope {
-        payload: api_run_event_from_store(&event.payload)?,
-        seq: i64::from(event.seq),
     })
 }
 

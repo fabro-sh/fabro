@@ -15,20 +15,22 @@
 
 // May contain unused imports in some cases
 // @ts-ignore
-import type { AuthSettings } from './auth-settings';
+import type { ActorKind } from './actor-kind';
 
 /**
- * Web UI configuration.
+ * Optional primary actor associated with a run event. Present on control actions and durable agent output where a stable user or agent identity matters; omitted on routine runtime lifecycle events. 
  */
-export interface WebSettings {
+export interface ActorRef {
+    'kind': ActorKind;
     /**
-     * Whether the embedded web UI and browser-oriented routes are enabled.
+     * Stable actor identifier when available.
      */
-    'enabled'?: boolean;
+    'id'?: string;
     /**
-     * Web UI URL.
+     * Display-friendly label for the actor.
      */
-    'url'?: string;
-    'auth'?: AuthSettings;
+    'display'?: string;
 }
+
+
 
