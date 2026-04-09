@@ -450,6 +450,8 @@ mod tests {
                 name: "Work".into(),
                 index: 2,
                 visit: 2,
+                parallel_group_id: None,
+                parallel_branch_id: None,
                 duration_ms: 100,
                 status: "success".into(),
                 preferred_label: None,

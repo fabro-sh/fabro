@@ -74,43 +74,16 @@ impl RunAttachEventStream {
         for payload in sse::drain_sse_payloads(&mut self.pending_bytes, finalize) {
             let value: serde_json::Value = serde_json::from_str(&payload)?;
             self.buffered_events
-                .push_back(wire_event_envelope_into_store(value)?);
+                .push_back(EventEnvelope::from_wire_value(value)?);
         }
         Ok(())
     }
 }
 
-/// Converts a flattened wire `EventEnvelope` JSON value (seq alongside the
-/// RunEvent payload fields at the top level) into the internal
-/// `fabro_store::EventEnvelope` which keeps seq and payload separate.
-fn wire_event_envelope_into_store(value: serde_json::Value) -> Result<EventEnvelope> {
-    let serde_json::Value::Object(mut obj) = value else {
-        bail!("expected wire EventEnvelope JSON object");
-    };
-    let seq_value = obj
-        .remove("seq")
-        .context("wire EventEnvelope missing seq field")?;
-    let seq: u32 = match seq_value {
-        serde_json::Value::Number(n) => n
-            .as_u64()
-            .and_then(|v| u32::try_from(v).ok())
-            .context("wire EventEnvelope seq is out of u32 range")?,
-        _ => bail!("wire EventEnvelope seq is not a number"),
-    };
-    let run_id_str = obj
-        .get("run_id")
-        .and_then(|v| v.as_str())
-        .context("wire EventEnvelope missing run_id")?;
-    let run_id: RunId = run_id_str.parse().context("invalid run_id in wire event")?;
-    let payload = fabro_store::EventPayload::new(serde_json::Value::Object(obj), &run_id)
-        .map_err(|err| anyhow!("wire EventEnvelope payload failed store validation: {err}"))?;
-    Ok(EventEnvelope { seq, payload })
-}
-
 fn wire_event_envelope_from_generated(value: types::EventEnvelope) -> Result<EventEnvelope> {
     let value =
         serde_json::to_value(value).context("failed to serialize generated EventEnvelope")?;
-    wire_event_envelope_into_store(value)
+    EventEnvelope::from_wire_value(value).map_err(Into::into)
 }
 
 pub(crate) use fabro_store::RunProjection;

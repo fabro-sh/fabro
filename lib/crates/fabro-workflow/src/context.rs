@@ -23,6 +23,8 @@ pub mod keys {
     pub const INTERNAL_THREAD_ID: &str = "internal.thread_id";
     pub const INTERNAL_NODE_VISIT_COUNT: &str = "internal.node_visit_count";
     pub const INTERNAL_PARENT_PREAMBLE: &str = "internal.parent_preamble";
+    pub const INTERNAL_PARALLEL_GROUP_ID: &str = "internal.parallel_group_id";
+    pub const INTERNAL_PARALLEL_BRANCH_ID: &str = "internal.parallel_branch_id";
 
     // --- current.* keys ---
     pub const CURRENT_PREAMBLE: &str = "current.preamble";
@@ -141,6 +143,8 @@ pub trait WorkflowContext {
     fn thread_id(&self) -> Option<String>;
     fn preamble(&self) -> String;
     fn run_id(&self) -> String;
+    fn parallel_group_id(&self) -> Option<String>;
+    fn parallel_branch_id(&self) -> Option<String>;
 }
 
 impl WorkflowContext for Context {
@@ -161,6 +165,16 @@ impl WorkflowContext for Context {
 
     fn run_id(&self) -> String {
         self.get_string(keys::INTERNAL_RUN_ID, "unknown")
+    }
+
+    fn parallel_group_id(&self) -> Option<String> {
+        self.get(keys::INTERNAL_PARALLEL_GROUP_ID)
+            .and_then(|value| value.as_str().map(String::from))
+    }
+
+    fn parallel_branch_id(&self) -> Option<String> {
+        self.get(keys::INTERNAL_PARALLEL_BRANCH_ID)
+            .and_then(|value| value.as_str().map(String::from))
     }
 }
 
@@ -307,6 +321,28 @@ mod tests {
         let ctx = Context::new();
         ctx.set(keys::INTERNAL_THREAD_ID, serde_json::json!("main"));
         assert_eq!(ctx.thread_id(), Some("main".to_string()));
+    }
+
+    #[test]
+    fn parallel_ids_default() {
+        let ctx = Context::new();
+        assert_eq!(ctx.parallel_group_id(), None);
+        assert_eq!(ctx.parallel_branch_id(), None);
+    }
+
+    #[test]
+    fn parallel_ids_set() {
+        let ctx = Context::new();
+        ctx.set(
+            keys::INTERNAL_PARALLEL_GROUP_ID,
+            serde_json::json!("fanout@2"),
+        );
+        ctx.set(
+            keys::INTERNAL_PARALLEL_BRANCH_ID,
+            serde_json::json!("fanout@2:1"),
+        );
+        assert_eq!(ctx.parallel_group_id(), Some("fanout@2".to_string()));
+        assert_eq!(ctx.parallel_branch_id(), Some("fanout@2:1".to_string()));
     }
 
     #[test]

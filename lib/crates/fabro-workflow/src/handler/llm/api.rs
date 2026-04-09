@@ -41,6 +41,21 @@ fn current_visit(context: &Context) -> u32 {
     u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX)
 }
 
+#[derive(Clone)]
+struct StageEventScope {
+    visit: u32,
+    parallel_group_id: Option<String>,
+    parallel_branch_id: Option<String>,
+}
+
+fn current_stage_event_scope(context: &Context) -> StageEventScope {
+    StageEventScope {
+        visit: current_visit(context),
+        parallel_group_id: context.parallel_group_id(),
+        parallel_branch_id: context.parallel_branch_id(),
+    }
+}
+
 /// Shared state for tracking file modifications from agent tool calls.
 struct FileTracking {
     /// Maps tool_call_id → file_path for in-flight write/edit calls.
@@ -86,7 +101,7 @@ fn track_file_event(event: &AgentEvent, state: &mut FileTracking) {
 fn spawn_event_forwarder(
     session: &Session,
     node_id: String,
-    visit: u32,
+    scope: StageEventScope,
     emitter: Arc<Emitter>,
     file_tracking: Arc<Mutex<FileTracking>>,
 ) {
@@ -105,10 +120,12 @@ fn spawn_event_forwarder(
             {
                 emitter.emit(&Event::Agent {
                     stage: node_id.clone(),
-                    visit,
+                    visit: scope.visit,
                     event: event.event.clone(),
                     session_id: Some(event.session_id.clone()),
                     parent_session_id: event.parent_session_id.clone(),
+                    parallel_group_id: scope.parallel_group_id.clone(),
+                    parallel_branch_id: scope.parallel_branch_id.clone(),
                 });
             }
         }
@@ -455,12 +472,13 @@ impl CodergenBackend for AgentApiBackend {
             touched: HashSet::new(),
             last: None,
         }));
+        let event_scope = current_stage_event_scope(context);
 
         // Subscribe to session events: forward to pipeline emitter + track files.
         spawn_event_forwarder(
             &session,
             node.id.clone(),
-            current_visit(context),
+            event_scope.clone(),
             Arc::clone(emitter),
             Arc::clone(&file_tracking),
         );
@@ -525,7 +543,7 @@ impl CodergenBackend for AgentApiBackend {
                     spawn_event_forwarder(
                         &session,
                         node.id.clone(),
-                        current_visit(context),
+                        event_scope.clone(),
                         Arc::clone(emitter),
                         Arc::clone(&file_tracking),
                     );

@@ -719,6 +719,8 @@ mod tests {
                     },
                     session_id: Some("session_123".to_string()),
                     parent_session_id: None,
+                    parallel_group_id: context.parallel_group_id(),
+                    parallel_branch_id: context.parallel_branch_id(),
                 });
                 Ok(CodergenResult::Text {
                     text: "done".to_string(),

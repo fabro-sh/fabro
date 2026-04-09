@@ -1198,6 +1198,8 @@ mod tests {
                 name: "plan".to_string(),
                 index: 0,
                 visit: 1,
+                parallel_group_id: None,
+                parallel_branch_id: None,
                 duration_ms: 1,
                 status: "success".to_string(),
                 preferred_label: None,
