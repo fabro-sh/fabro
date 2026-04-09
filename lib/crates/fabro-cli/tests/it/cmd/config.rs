@@ -314,11 +314,18 @@ fn settings_local_merges_cli_and_project_defaults() {
     assert_eq!(cfg.goal.as_deref(), None);
     assert_eq!(cfg.fabro.as_ref().map(|f| f.root.as_str()), Some("fabro"));
 
+    // v2 R22: run.inputs replaces the inherited map wholesale rather than
+    // merging by key, so the project layer wipes out the CLI layer's inputs.
     let vars = cfg.vars.as_ref().expect("vars");
-    assert_eq!(vars.get("cli_only").map(String::as_str), Some("1"));
     assert_eq!(vars.get("project_only").map(String::as_str), Some("1"));
     assert_eq!(vars.get("shared").map(String::as_str), Some("project"));
+    assert!(
+        vars.get("cli_only").is_none(),
+        "run.inputs should replace across layers, not merge by key"
+    );
 
+    // v2 R71: provider-native maps such as run.sandbox.daytona.labels remain
+    // sticky merge-by-key, so CLI labels persist under the project layer.
     let sandbox = cfg.sandbox.as_ref().expect("sandbox");
     let labels = sandbox
         .daytona

@@ -554,6 +554,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(unsafe_code, clippy::allow_attributes)]
     fn build_manifest_bundles_imports_prompts_and_children() {
         let temp = tempfile::tempdir().unwrap();
         let project = temp.path();
@@ -600,6 +601,16 @@ mod tests {
         )
         .unwrap();
 
+        // Isolate from the developer's real ~/.fabro/settings.toml which may
+        // still be in the legacy shape. Setting FABRO_CONFIG to a path inside
+        // the test tempdir forces the loader to produce an empty ConfigLayer.
+        let sandboxed_settings = temp.path().join("empty-settings.toml");
+        std::fs::write(&sandboxed_settings, "_version = 1\n").unwrap();
+        // SAFETY: single-threaded unit test body.
+        unsafe {
+            std::env::set_var("FABRO_CONFIG", &sandboxed_settings);
+        }
+
         let built = build_run_manifest(ManifestBuildInput {
             workflow: PathBuf::from("fabro/workflows/demo/workflow.toml"),
             cwd: project.to_path_buf(),
@@ -608,6 +619,11 @@ mod tests {
             run_id: None,
         })
         .unwrap();
+
+        // SAFETY: single-threaded unit test body.
+        unsafe {
+            std::env::remove_var("FABRO_CONFIG");
+        }
 
         assert_eq!(
             built.manifest.target.path,

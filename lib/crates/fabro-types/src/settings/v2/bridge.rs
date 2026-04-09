@@ -420,10 +420,25 @@ fn bridge_mcp_entry(entry: &McpEntryLayer) -> McpServerEntry {
 
 fn bridge_hook(hook: &V2HookEntry) -> HookDefinition {
     let hook_type = resolve_hook_type(hook);
+    // If the hook is a script/command form, emit via the shorthand so the
+    // old HookDefinition.command field holds the full command and
+    // HookDefinition.hook_type stays None. This avoids the duplicate
+    // `command` key that would otherwise appear under `#[serde(flatten)]`.
+    let command = if let Some(script) = &hook.script {
+        Some(interp_to_string(script))
+    } else {
+        hook.command.as_ref().map(|command| {
+            command
+                .iter()
+                .map(interp_to_string)
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+    };
     HookDefinition {
         name: hook.name.clone().or_else(|| hook.id.clone()),
         event: bridge_hook_event(hook.event),
-        command: None,
+        command,
         hook_type,
         matcher: hook.matcher.clone(),
         blocking: hook.blocking,
@@ -435,19 +450,13 @@ fn bridge_hook(hook: &V2HookEntry) -> HookDefinition {
 }
 
 fn resolve_hook_type(hook: &V2HookEntry) -> Option<OldHookType> {
-    if let Some(script) = &hook.script {
-        return Some(OldHookType::Command {
-            command: interp_to_string(script),
-        });
-    }
-    if let Some(command) = &hook.command {
-        return Some(OldHookType::Command {
-            command: command
-                .iter()
-                .map(interp_to_string)
-                .collect::<Vec<_>>()
-                .join(" "),
-        });
+    // Script/command-shorthand hooks are emitted via the top-level
+    // HookDefinition.command field in bridge_hook, not here, to avoid
+    // the `#[serde(flatten)]` duplicate-field collision between the
+    // outer HookDefinition.command shorthand and the inner
+    // HookType::Command.command in the legacy old Settings shape.
+    if hook.script.is_some() || hook.command.is_some() {
+        return None;
     }
     if let Some(url) = &hook.url {
         let headers = if hook.headers.is_empty() {
