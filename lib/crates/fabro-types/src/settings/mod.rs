@@ -10,6 +10,7 @@ pub mod run;
 pub mod sandbox;
 pub mod server;
 pub mod user;
+pub mod v2;
 
 pub use hook::{HookDefinition, HookEvent, HookSettings, HookType, TlsMode};
 pub use mcp::{
