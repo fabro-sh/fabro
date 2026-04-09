@@ -6,6 +6,7 @@
 //! Value-language helpers live alongside the tree: durations, byte sizes,
 //! model references, env interpolation, and splice-capable arrays.
 
+pub mod accessors;
 pub mod bridge;
 pub mod cli;
 pub mod duration;
