@@ -16,8 +16,5 @@ pub mod serve;
 pub mod server;
 mod settings_view;
 pub mod static_files;
-pub mod server_config {
-    pub use fabro_types::settings::server::*;
-}
 pub mod tls;
 pub mod web_auth;
