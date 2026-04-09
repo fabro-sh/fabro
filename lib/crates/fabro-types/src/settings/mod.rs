@@ -19,20 +19,16 @@
 //! owning consumer crates or replace their call sites with v2-native
 //! accessors, at which point this module goes away.
 
-pub mod hook;
 pub mod mcp;
-pub mod project;
 pub mod run;
 pub mod sandbox;
 pub mod server;
 pub mod v2;
 
-pub use hook::{HookDefinition, HookEvent, HookSettings, HookType, TlsMode};
 pub use mcp::{
     McpServerEntry, McpServerSettings, McpTransport, default_startup_timeout_secs,
     default_tool_timeout_secs,
 };
-pub use project::ProjectSettings;
 pub use run::{
     ArtifactsSettings, CheckpointSettings, GitHubSettings, LlmSettings, MergeStrategy,
     PullRequestSettings, SetupSettings,

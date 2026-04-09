@@ -12,8 +12,7 @@ use serde::Serialize;
 
 use crate::config::ConfigLayer;
 use crate::run;
-pub use fabro_types::settings::project::ProjectSettings;
-use fabro_types::settings::v2::{InterpString, SettingsFile};
+use fabro_types::settings::{InterpString, SettingsFile};
 
 const CONFIG_FILENAME: &str = "fabro.toml";
 const RUN_GRAPH_FILE: &str = "workflow.fabro";
