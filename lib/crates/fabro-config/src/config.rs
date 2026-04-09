@@ -151,6 +151,8 @@ impl ConfigLayer {
 
 #[cfg(test)]
 mod tests {
+    use fabro_types::settings::v2::InterpString;
+
     use super::*;
 
     #[test]
@@ -179,7 +181,7 @@ goal = "Do things"
                 .run
                 .as_ref()
                 .and_then(|r| r.goal.as_ref())
-                .map(fabro_types::settings::v2::InterpString::as_source)
+                .map(InterpString::as_source)
                 .as_deref(),
             Some("Do things")
         );
@@ -210,7 +212,7 @@ goal = "lower goal"
                 .run
                 .as_ref()
                 .and_then(|r| r.goal.as_ref())
-                .map(fabro_types::settings::v2::InterpString::as_source)
+                .map(InterpString::as_source)
                 .as_deref(),
             Some("higher goal")
         );

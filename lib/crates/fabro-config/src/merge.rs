@@ -479,8 +479,9 @@ fn combine_server_integrations(
 
 #[cfg(test)]
 mod tests {
+    use fabro_types::settings::v2::{InterpString, parse_settings_file};
+
     use super::*;
-    use fabro_types::settings::v2::parse_settings_file;
 
     fn parse(input: &str) -> SettingsFile {
         parse_settings_file(input).expect("fixture should parse")
@@ -505,7 +506,7 @@ a = "higher"
         let inputs = merged.run.unwrap().inputs.unwrap();
         assert_eq!(inputs.len(), 1);
         assert_eq!(inputs.get("a"), Some(&toml::Value::String("higher".into())));
-        assert!(inputs.get("b").is_none(), "lower key should be gone");
+        assert!(!inputs.contains_key("b"), "lower key should be gone");
     }
 
     #[test]
@@ -593,7 +594,11 @@ script = "higher-script"
         let hooks = merged.run.unwrap().hooks;
         assert_eq!(hooks.len(), 1);
         assert_eq!(
-            hooks[0].script.as_ref().map(|s| s.as_source()).as_deref(),
+            hooks[0]
+                .script
+                .as_ref()
+                .map(InterpString::as_source)
+                .as_deref(),
             Some("higher-script")
         );
     }
@@ -618,11 +623,19 @@ script = "higher-anon"
         let hooks = merged.run.unwrap().hooks;
         assert_eq!(hooks.len(), 2);
         assert_eq!(
-            hooks[0].script.as_ref().map(|s| s.as_source()).as_deref(),
+            hooks[0]
+                .script
+                .as_ref()
+                .map(InterpString::as_source)
+                .as_deref(),
             Some("lower-anon")
         );
         assert_eq!(
-            hooks[1].script.as_ref().map(|s| s.as_source()).as_deref(),
+            hooks[1]
+                .script
+                .as_ref()
+                .map(InterpString::as_source)
+                .as_deref(),
             Some("higher-anon")
         );
     }
@@ -643,7 +656,7 @@ events = ["...", "run.completed"]
         );
         let merged = combine_files(lower, higher);
         let run = merged.run.unwrap();
-        let events = &run.notifications.get("ops").unwrap().events;
+        let events = &run.notifications["ops"].events;
         assert_eq!(events.len(), 2);
     }
 

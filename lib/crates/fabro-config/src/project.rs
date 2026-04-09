@@ -415,12 +415,12 @@ directory = "fabro/"
     #[test]
     fn parse_with_run_execution_retros() {
         let config = parse_project_config(
-            r#"
+            "
 _version = 1
 
 [run.execution]
 retros = true
-"#,
+",
         )
         .unwrap();
         assert_eq!(
@@ -449,7 +449,7 @@ retros = true
         let err = parse_project_config("_version = 2\n").unwrap_err();
         let chain: String = err
             .chain()
-            .map(|e| e.to_string())
+            .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join("; ");
         assert!(
