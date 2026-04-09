@@ -21,13 +21,14 @@ use fabro_types::settings::SettingsFile;
 
 use crate::bind::{self, Bind, BindRequest};
 use crate::github_webhooks::WebhookManager;
-use crate::jwt_auth::{AuthMode, AuthStrategy, TlsSettings, resolve_auth_mode_with_lookup};
+use crate::jwt_auth::{AuthMode, AuthStrategy, resolve_auth_mode_with_lookup};
 use crate::secret_store::SecretStore;
 use crate::server::{
     RouterOptions, build_app_state_with_path, build_router_with_options,
     reconcile_incomplete_runs_on_startup, shutdown_active_workers, spawn_scheduler,
 };
 use crate::tls::{ClientAuth, build_rustls_config, serve_tls_with_shutdown};
+use crate::tls_config::TlsSettings;
 use fabro_llm::client::Client as LlmClient;
 use fabro_sandbox::SandboxProvider;
 

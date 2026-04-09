@@ -17,4 +17,5 @@ pub mod server;
 mod settings_view;
 pub mod static_files;
 pub mod tls;
+pub mod tls_config;
 pub mod web_auth;
