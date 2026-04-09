@@ -6,42 +6,45 @@ use axum::http::request::Parts;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use rustls_pki_types::CertificateDer;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tracing::warn;
 
 use crate::error::ApiError;
 use crate::web_auth::SessionCookie;
 use fabro_types::RunAuthMethod;
+use fabro_types::settings::SettingsFile;
+use fabro_types::settings::interp::InterpString;
+use fabro_types::settings::server::ServerListenLayer;
 
-/// Authentication strategy flag consumed by `resolve_auth_mode_with_lookup`.
-///
-/// Projected out of the v2 `server.auth.api.{jwt,mtls}` subtree by
-/// `serve::build_legacy_api_settings`. Stage 6.6g will delete this shim
-/// and walk the v2 tree directly in the auth resolver.
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ApiAuthStrategy {
-    Jwt,
-    Mtls,
-}
-
-/// mTLS material loaded from `[server.listen.tls]`. Consumed by the
-/// `tls.rs` rustls config builder.
-#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+/// Resolved TLS material used by the rustls config builder in `tls.rs`
+/// when the server is listening on TCP with `[server.listen.tls]` set.
+#[derive(Debug, Clone, PartialEq)]
 pub struct TlsSettings {
     pub cert: PathBuf,
     pub key: PathBuf,
     pub ca: PathBuf,
 }
 
-/// Shim `ApiSettings` that `serve::build_legacy_api_settings` projects out
-/// of the v2 tree so the pre-v2 [`resolve_auth_mode_with_lookup`] signature
-/// keeps working until Stage 6.6g rewrites it.
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
-pub struct ApiSettings {
-    #[serde(default)]
-    pub authentication_strategies: Vec<ApiAuthStrategy>,
-    pub tls: Option<TlsSettings>,
+impl TlsSettings {
+    /// Extract the `[server.listen.tls]` subtree out of a `SettingsFile`.
+    /// Returns `None` when the server is on Unix sockets, TLS is unset, or
+    /// any of the three fields is missing.
+    #[must_use]
+    pub fn from_settings(file: &SettingsFile) -> Option<Self> {
+        let listen = file.server.as_ref()?.listen.as_ref()?;
+        let tls = match listen {
+            ServerListenLayer::Tcp { tls, .. } => tls.as_ref()?,
+            ServerListenLayer::Unix { .. } => return None,
+        };
+        let cert = tls.cert.as_ref().map(InterpString::as_source)?;
+        let key = tls.key.as_ref().map(InterpString::as_source)?;
+        let ca = tls.ca.as_ref().map(InterpString::as_source)?;
+        Some(Self {
+            cert: cert.into(),
+            key: key.into(),
+            ca: ca.into(),
+        })
+    }
 }
 
 /// JWT claims for service-to-service authentication.
@@ -99,34 +102,74 @@ pub fn decode_pem_env(name: &str, value: &str) -> String {
         .unwrap_or_else(|e| panic!("{name} base64 decoded to invalid UTF-8: {e}"))
 }
 
-/// Resolve the authentication mode from the API config section.
+/// Resolve the authentication mode from a [`SettingsFile`].
 ///
 /// Call this once at startup before serving requests. Panics if the
-/// configuration is invalid (JWT strategy but no public key, or mTLS without TLS config).
-pub fn resolve_auth_mode(api_settings: &ApiSettings, allowed_usernames: &[String]) -> AuthMode {
-    resolve_auth_mode_with_lookup(api_settings, allowed_usernames, |name| {
-        std::env::var(name).ok()
-    })
+/// configuration is invalid (JWT strategy but no public key, or mTLS without
+/// TLS config). Walks the v2 `server.auth.api.{jwt,mtls}` subtree and
+/// `server.auth.web.allowed_usernames`.
+pub fn resolve_auth_mode(settings: &SettingsFile) -> AuthMode {
+    resolve_auth_mode_with_lookup(settings, |name| std::env::var(name).ok())
 }
 
-pub fn resolve_auth_mode_with_lookup<F>(
-    api_settings: &ApiSettings,
-    allowed_usernames: &[String],
-    lookup: F,
-) -> AuthMode
+/// Describes which API auth strategies are enabled in a `SettingsFile`.
+struct ResolvedAuthStrategies {
+    jwt_enabled: bool,
+    mtls_enabled: bool,
+    tls_present: bool,
+    allowed_usernames: Vec<String>,
+}
+
+fn resolve_auth_strategies(settings: &SettingsFile) -> ResolvedAuthStrategies {
+    let server = settings.server.as_ref();
+    let auth = server.and_then(|s| s.auth.as_ref());
+    let auth_api = auth.and_then(|a| a.api.as_ref());
+
+    // Strategies: a subtree with `enabled = false` is explicitly off.
+    // Presence of the subtree with `enabled` unset counts as on.
+    let jwt_enabled = auth_api
+        .and_then(|api| api.jwt.as_ref())
+        .is_some_and(|jwt| jwt.enabled.unwrap_or(true));
+    let mtls_enabled = auth_api
+        .and_then(|api| api.mtls.as_ref())
+        .is_some_and(|mtls| mtls.enabled.unwrap_or(true));
+
+    let tls_present = TlsSettings::from_settings(settings).is_some();
+
+    let allowed_usernames = auth
+        .and_then(|a| a.web.as_ref())
+        .map(|w| w.allowed_usernames.clone())
+        .unwrap_or_default();
+
+    ResolvedAuthStrategies {
+        jwt_enabled,
+        mtls_enabled,
+        tls_present,
+        allowed_usernames,
+    }
+}
+
+pub fn resolve_auth_mode_with_lookup<F>(settings: &SettingsFile, lookup: F) -> AuthMode
 where
     F: Fn(&str) -> Option<String>,
 {
-    if api_settings.authentication_strategies.is_empty()
-        && std::env::var("FABRO_LOCAL_NO_AUTH").ok().as_deref() == Some("1")
-    {
+    let ResolvedAuthStrategies {
+        jwt_enabled,
+        mtls_enabled,
+        tls_present,
+        allowed_usernames,
+    } = resolve_auth_strategies(settings);
+
+    let any_strategy = jwt_enabled || mtls_enabled;
+
+    if !any_strategy && std::env::var("FABRO_LOCAL_NO_AUTH").ok().as_deref() == Some("1") {
         warn!(
             "No authentication strategies configured; allowing unauthenticated local daemon access"
         );
         return AuthMode::Disabled;
     }
 
-    if api_settings.authentication_strategies.is_empty() {
+    if !any_strategy {
         warn!("No authentication strategies configured; all requests will be rejected");
     }
 
@@ -135,34 +178,30 @@ where
         strategies.push(AuthStrategy::Cookie);
     }
 
-    strategies.extend(api_settings
-        .authentication_strategies
-        .iter()
-        .map(|s| match s {
-            ApiAuthStrategy::Jwt => {
-                let raw = lookup("FABRO_JWT_PUBLIC_KEY").unwrap_or_else(|| {
-                    panic!(
-                        "FABRO_JWT_PUBLIC_KEY is not set. Provide an Ed25519 public key in PEM \
-                         format (or base64-encoded PEM) for JWT authentication."
-                    )
-                });
-                let pem = decode_pem_env("FABRO_JWT_PUBLIC_KEY", &raw);
-                let key = DecodingKey::from_ed_pem(pem.as_bytes())
-                    .expect("FABRO_JWT_PUBLIC_KEY contains an invalid Ed25519 PEM public key");
-                AuthStrategy::Jwt {
-                    key: Arc::new(key),
-                    validation: Arc::new(jwt_validation()),
-                    allowed_usernames: allowed_usernames.to_vec(),
-                }
-            }
-            ApiAuthStrategy::Mtls => {
-                assert!(
-                    api_settings.tls.is_some(),
-                    "mTLS authentication strategy requires [api.tls] configuration with cert, key, and ca"
-                );
-                AuthStrategy::Mtls
-            }
-        }));
+    if jwt_enabled {
+        let raw = lookup("FABRO_JWT_PUBLIC_KEY").unwrap_or_else(|| {
+            panic!(
+                "FABRO_JWT_PUBLIC_KEY is not set. Provide an Ed25519 public key in PEM format \
+                 (or base64-encoded PEM) for JWT authentication."
+            )
+        });
+        let pem = decode_pem_env("FABRO_JWT_PUBLIC_KEY", &raw);
+        let key = DecodingKey::from_ed_pem(pem.as_bytes())
+            .expect("FABRO_JWT_PUBLIC_KEY contains an invalid Ed25519 PEM public key");
+        strategies.push(AuthStrategy::Jwt {
+            key: Arc::new(key),
+            validation: Arc::new(jwt_validation()),
+            allowed_usernames: allowed_usernames.clone(),
+        });
+    }
+
+    if mtls_enabled {
+        assert!(
+            tls_present,
+            "mTLS authentication strategy requires [server.listen.tls] configuration with cert, key, and ca"
+        );
+        strategies.push(AuthStrategy::Mtls);
+    }
 
     AuthMode::Strategies(strategies)
 }

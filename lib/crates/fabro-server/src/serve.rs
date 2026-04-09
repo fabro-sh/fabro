@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use crate::jwt_auth::ApiSettings;
 use fabro_config::Storage;
 use fabro_config::resolve_storage_dir;
 use fabro_config::user::{active_settings_path, load_settings_config};
@@ -22,7 +21,7 @@ use fabro_types::settings::v2::SettingsFile;
 
 use crate::bind::{self, Bind, BindRequest};
 use crate::github_webhooks::WebhookManager;
-use crate::jwt_auth::{AuthMode, AuthStrategy, resolve_auth_mode_with_lookup};
+use crate::jwt_auth::{AuthMode, AuthStrategy, TlsSettings, resolve_auth_mode_with_lookup};
 use crate::secret_store::SecretStore;
 use crate::server::{
     RouterOptions, build_app_state_with_path, build_router_with_options,
@@ -83,65 +82,6 @@ pub struct ServeArgs {
 
 fn load_settings(path: Option<&Path>) -> anyhow::Result<SettingsFile> {
     Ok(load_settings_config(path)?.into())
-}
-
-/// Build the legacy `ApiSettings` shape that `resolve_auth_mode_with_lookup`
-/// and the TLS branch still expect, extracting the pieces it needs from the
-/// v2 tree. Stage 6.6 replaces this with a v2-aware auth resolver and drops
-/// the legacy `ApiSettings` type entirely.
-fn build_legacy_api_settings(file: &SettingsFile) -> ApiSettings {
-    use crate::jwt_auth::{ApiAuthStrategy, TlsSettings};
-    use fabro_types::settings::v2::interp::InterpString;
-    use fabro_types::settings::v2::server::ServerListenLayer;
-
-    let auth_api = file
-        .server
-        .as_ref()
-        .and_then(|s| s.auth.as_ref())
-        .and_then(|a| a.api.as_ref());
-
-    let mut authentication_strategies = Vec::new();
-    if auth_api
-        .and_then(|api| api.jwt.as_ref())
-        .and_then(|jwt| jwt.enabled)
-        .unwrap_or(auth_api.and_then(|api| api.jwt.as_ref()).is_some())
-    {
-        authentication_strategies.push(ApiAuthStrategy::Jwt);
-    }
-    if auth_api
-        .and_then(|api| api.mtls.as_ref())
-        .and_then(|mtls| mtls.enabled)
-        .unwrap_or(auth_api.and_then(|api| api.mtls.as_ref()).is_some())
-    {
-        authentication_strategies.push(ApiAuthStrategy::Mtls);
-    }
-
-    // TLS files now live under `server.listen.tls.{cert,key,ca}` in v2.
-    // Build a legacy TlsSettings from the listen TLS subtree so the
-    // existing rustls config path keeps working.
-    let tls = file
-        .server
-        .as_ref()
-        .and_then(|s| s.listen.as_ref())
-        .and_then(|listen| match listen {
-            ServerListenLayer::Tcp { tls, .. } => tls.as_ref(),
-            ServerListenLayer::Unix { .. } => None,
-        })
-        .and_then(|tls_layer| {
-            let cert = tls_layer.cert.as_ref().map(InterpString::as_source)?;
-            let key = tls_layer.key.as_ref().map(InterpString::as_source)?;
-            let ca = tls_layer.ca.as_ref().map(InterpString::as_source)?;
-            Some(TlsSettings {
-                cert: cert.into(),
-                key: key.into(),
-                ca: ca.into(),
-            })
-        });
-
-    ApiSettings {
-        authentication_strategies,
-        tls,
-    }
 }
 
 fn resolved_config_path(path: Option<&Path>) -> PathBuf {
@@ -347,24 +287,14 @@ where
     std::fs::create_dir_all(&data_dir)?;
     let (auth_mode, client_auth, max_concurrent_runs) = {
         let cfg_file = shared_settings.read().expect("config lock poisoned");
-        // Build the legacy ApiSettings + allowed_usernames shapes that the
-        // v1 auth resolver expects. Stage 6.6 replaces this with a direct
-        // v2-aware resolver.
-        let api = build_legacy_api_settings(&cfg_file);
-        let allowed_usernames = cfg_file
-            .server
-            .as_ref()
-            .and_then(|s| s.auth.as_ref())
-            .and_then(|a| a.web.as_ref())
-            .map(|w| w.allowed_usernames.clone())
-            .unwrap_or_default();
-        let auth_mode = resolve_auth_mode_with_lookup(&api, &allowed_usernames, |name| {
+        let auth_mode = resolve_auth_mode_with_lookup(&cfg_file, |name| {
             secret_snapshot
                 .get(name)
                 .cloned()
                 .or_else(|| std::env::var(name).ok())
         });
-        let client_auth = api.tls.as_ref().map(|_| client_auth_from_mode(&auth_mode));
+        let tls_present = TlsSettings::from_settings(&cfg_file).is_some();
+        let client_auth = tls_present.then(|| client_auth_from_mode(&auth_mode));
         let max_concurrent_runs = args
             .max_concurrent_runs
             .or_else(|| cfg_file.max_concurrent_runs())
@@ -516,7 +446,7 @@ where
     // Branch: TLS, plain TCP, or Unix socket
     let tls_settings = {
         let cfg_file = shared_settings.read().expect("config lock poisoned");
-        build_legacy_api_settings(&cfg_file).tls.clone()
+        TlsSettings::from_settings(&cfg_file)
     };
 
     let bound_listener = bind_listener(&bind_request).await?;
