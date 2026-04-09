@@ -2712,20 +2712,24 @@ components:
           additionalProperties: true
       additionalProperties: true
 
+    EventSeq:
+      description: Assigned sequence number component of a stored event envelope.
+      type: object
+      required:
+        - seq
+      properties:
+        seq:
+          type: integer
+          description: Assigned event sequence number.
+          example: 42
+
     EventEnvelope:
       description: >
         Stored event envelope with assigned sequence number. On the wire the
         envelope is flattened: seq sits alongside the RunEvent payload fields
         at the top level of the JSON object.
       allOf:
-        - type: object
-          required:
-            - seq
-          properties:
-            seq:
-              type: integer
-              description: Assigned event sequence number.
-              example: 42
+        - $ref: "#/components/schemas/EventSeq"
         - $ref: "#/components/schemas/RunEvent"
 
     PaginatedEventList:
