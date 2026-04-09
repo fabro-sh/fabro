@@ -9,13 +9,13 @@ use fabro_hooks::config::bridge_hook;
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_mcp::config::bridge_mcp_entry;
 use fabro_model::{Catalog, FallbackTarget, Provider};
+use fabro_sandbox::config::{
+    self as sandbox_config, WorktreeMode, bridge_sandbox, bridge_worktree_mode,
+};
 use fabro_sandbox::{SandboxProvider, SandboxSpec};
 use fabro_types::RunId;
-use fabro_types::settings::sandbox::{self as sandbox_config, WorktreeMode};
 use fabro_types::settings::v2::run::ModelRefOrSplice;
-use fabro_types::settings::v2::to_runtime::{
-    bridge_pull_request, bridge_sandbox, bridge_worktree_mode,
-};
+use fabro_types::settings::v2::to_runtime::bridge_pull_request;
 use fabro_types::settings::v2::{InterpString, SettingsFile};
 
 use crate::artifact_upload::ArtifactSink;

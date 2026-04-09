@@ -10,8 +10,8 @@ use fabro_llm::Provider;
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::FallbackTarget;
 use fabro_sandbox::SandboxSpec;
+use fabro_sandbox::config::WorktreeMode;
 use fabro_types::RunId;
-use fabro_types::settings::sandbox::WorktreeMode;
 use fabro_validate::Diagnostic;
 
 use crate::artifact_upload::ArtifactSink;

@@ -20,17 +20,12 @@
 //! accessors, at which point this module goes away.
 
 pub mod run;
-pub mod sandbox;
 pub mod server;
 pub mod v2;
 
 pub use run::{
     ArtifactsSettings, CheckpointSettings, GitHubSettings, LlmSettings, MergeStrategy,
     PullRequestSettings, SetupSettings,
-};
-pub use sandbox::{
-    DaytonaNetwork, DaytonaSettings, DaytonaSnapshotSettings, DockerfileSource,
-    LocalSandboxSettings, SandboxSettings, WorktreeMode,
 };
 pub use server::{
     ApiAuthStrategy, ApiSettings, ArtifactStorageBackend, ArtifactStorageSettings, AuthProvider,

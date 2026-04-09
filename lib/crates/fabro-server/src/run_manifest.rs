@@ -13,6 +13,7 @@ use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_graphviz::render::apply_direction;
 use fabro_llm::Provider;
 use fabro_model::Catalog;
+use fabro_sandbox::config::bridge_sandbox;
 use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxProvider, SandboxSpec};
 use fabro_types::RunId;
@@ -23,7 +24,6 @@ use fabro_types::settings::v2::run::{
     ApprovalMode, DaytonaDockerfileLayer, RunExecutionLayer, RunLayer, RunMode, RunModelLayer,
     RunSandboxLayer,
 };
-use fabro_types::settings::v2::to_runtime::bridge_sandbox;
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_validate::Severity;
 use fabro_workflow::error::FabroError;

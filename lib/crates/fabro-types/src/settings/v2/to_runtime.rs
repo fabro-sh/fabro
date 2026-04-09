@@ -1,92 +1,24 @@
 //! v2 → runtime-type conversion helpers.
 //!
-//! The runtime types in `fabro_types::settings::{run,sandbox}` are the
-//! shapes that downstream crates (fabro-workflow, fabro-sandbox) still
-//! consume at runtime. Each helper here reads the v2 parse tree and
-//! builds the equivalent runtime value.
+//! Everything but the pull-request / artifacts / merge-strategy conversion
+//! has moved out of this module into the consumer crate that owns the
+//! target runtime type:
 //!
-//! Hook bridging has moved to `fabro_hooks::config::bridge_hook`; MCP
-//! bridging has moved to `fabro_mcp::config::{bridge_mcps, bridge_mcp_entry}`.
-//! Consumer crates will pull the rest of these helpers into their own
-//! crates in follow-up 6.3b passes.
+//! - Hook bridging: [`fabro_hooks::config::bridge_hook`]
+//! - MCP bridging: [`fabro_mcp::config::bridge_mcp_entry`] /
+//!   [`fabro_mcp::config::bridge_mcps`]
+//! - Sandbox bridging: [`fabro_sandbox::config::bridge_sandbox`] /
+//!   [`fabro_sandbox::config::bridge_worktree_mode`]
+//!
+//! Pull-request / artifacts / merge-strategy still live here because their
+//! target runtime types (`PullRequestSettings`, `ArtifactsSettings`,
+//! `MergeStrategy`) are still in `fabro-types::settings::run`. When that
+//! module moves into `fabro-workflow` the remaining helpers will follow.
 
-use super::interp::InterpString;
-use super::run::{
-    MergeStrategy as V2MergeStrategy, RunArtifactsLayer, RunPullRequestLayer, RunSandboxLayer,
-    WorktreeMode as V2WorktreeMode,
-};
+use super::run::{MergeStrategy as V2MergeStrategy, RunArtifactsLayer, RunPullRequestLayer};
 use crate::settings::run::{
     ArtifactsSettings, MergeStrategy as OldMergeStrategy, PullRequestSettings,
 };
-use crate::settings::sandbox::{
-    DaytonaNetwork, DaytonaSettings, DaytonaSnapshotSettings, DockerfileSource,
-    LocalSandboxSettings, SandboxSettings, WorktreeMode as OldWorktreeMode,
-};
-
-pub fn bridge_sandbox(sb: &RunSandboxLayer) -> SandboxSettings {
-    SandboxSettings {
-        provider: sb.provider.clone(),
-        preserve: sb.preserve,
-        devcontainer: sb.devcontainer,
-        local: sb.local.as_ref().map(|local| LocalSandboxSettings {
-            worktree_mode: local
-                .worktree_mode
-                .map(bridge_worktree_mode)
-                .unwrap_or_default(),
-        }),
-        daytona: sb.daytona.as_ref().map(|d| DaytonaSettings {
-            auto_stop_interval: d.auto_stop_interval,
-            labels: if d.labels.is_empty() {
-                None
-            } else {
-                Some(d.labels.clone())
-            },
-            snapshot: d.snapshot.as_ref().and_then(|s| {
-                s.name.as_ref().map(|name| DaytonaSnapshotSettings {
-                    name: name.clone(),
-                    cpu: s.cpu,
-                    memory: s.memory.map(|sz| size_to_gb_i32(sz.as_bytes())),
-                    disk: s.disk.map(|sz| size_to_gb_i32(sz.as_bytes())),
-                    dockerfile: s.dockerfile.as_ref().map(|d| match d {
-                        super::run::DaytonaDockerfileLayer::Inline(text) => {
-                            DockerfileSource::Inline(text.clone())
-                        }
-                        super::run::DaytonaDockerfileLayer::Path { path } => {
-                            DockerfileSource::Path { path: path.clone() }
-                        }
-                    }),
-                })
-            }),
-            network: d.network.as_ref().map(|n| match n {
-                super::run::DaytonaNetworkLayer::Block => DaytonaNetwork::Block,
-                super::run::DaytonaNetworkLayer::AllowAll => DaytonaNetwork::AllowAll,
-                super::run::DaytonaNetworkLayer::AllowList { allow_list } => {
-                    DaytonaNetwork::AllowList(allow_list.clone())
-                }
-            }),
-            skip_clone: d.skip_clone.unwrap_or(false),
-        }),
-        env: if sb.env.is_empty() {
-            None
-        } else {
-            Some(
-                sb.env
-                    .iter()
-                    .map(|(k, v)| (k.clone(), interp_to_string(v)))
-                    .collect(),
-            )
-        },
-    }
-}
-
-pub fn bridge_worktree_mode(m: V2WorktreeMode) -> OldWorktreeMode {
-    match m {
-        V2WorktreeMode::Always => OldWorktreeMode::Always,
-        V2WorktreeMode::Clean => OldWorktreeMode::Clean,
-        V2WorktreeMode::Dirty => OldWorktreeMode::Dirty,
-        V2WorktreeMode::Never => OldWorktreeMode::Never,
-    }
-}
 
 pub fn bridge_merge_strategy(m: V2MergeStrategy) -> OldMergeStrategy {
     match m {
@@ -112,13 +44,4 @@ pub fn bridge_run_artifacts(artifacts: &RunArtifactsLayer) -> ArtifactsSettings 
     ArtifactsSettings {
         include: artifacts.include.clone(),
     }
-}
-
-fn interp_to_string(value: &InterpString) -> String {
-    value.as_source()
-}
-
-fn size_to_gb_i32(bytes: u64) -> i32 {
-    let gb = bytes / 1_000_000_000;
-    i32::try_from(gb).unwrap_or(i32::MAX)
 }
