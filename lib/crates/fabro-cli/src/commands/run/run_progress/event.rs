@@ -511,6 +511,8 @@ mod tests {
             name: "Plan".into(),
             index: 0,
             visit: 1,
+            parallel_group_id: None,
+            parallel_branch_id: None,
             duration_ms: 5000,
             status: "success".into(),
             preferred_label: None,
@@ -555,6 +557,8 @@ mod tests {
             },
             session_id: None,
             parent_session_id: None,
+            parallel_group_id: None,
+            parallel_branch_id: None,
         };
 
         let stored = to_run_event(&fixtures::RUN_1, &event);

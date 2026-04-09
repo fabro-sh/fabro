@@ -595,6 +595,7 @@ impl RunEvent {
         let obj = value.as_object().ok_or_else(|| {
             <serde_json::Error as DeError>::custom("run event must be a JSON object")
         })?;
+        let opt_str = |key: &str| obj.get(key).and_then(Value::as_str).map(str::to_string);
         let id = obj.get("id").and_then(Value::as_str).ok_or_else(|| {
             <serde_json::Error as DeError>::custom("missing or non-string field: id")
         })?;
@@ -621,38 +622,14 @@ impl RunEvent {
             id: id.to_string(),
             ts,
             run_id,
-            node_id: obj
-                .get("node_id")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-            node_label: obj
-                .get("node_label")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-            stage_id: obj
-                .get("stage_id")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-            parallel_group_id: obj
-                .get("parallel_group_id")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-            parallel_branch_id: obj
-                .get("parallel_branch_id")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-            session_id: obj
-                .get("session_id")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-            parent_session_id: obj
-                .get("parent_session_id")
-                .and_then(Value::as_str)
-                .map(str::to_string),
-            tool_call_id: obj
-                .get("tool_call_id")
-                .and_then(Value::as_str)
-                .map(str::to_string),
+            node_id: opt_str("node_id"),
+            node_label: opt_str("node_label"),
+            stage_id: opt_str("stage_id"),
+            parallel_group_id: opt_str("parallel_group_id"),
+            parallel_branch_id: opt_str("parallel_branch_id"),
+            session_id: opt_str("session_id"),
+            parent_session_id: opt_str("parent_session_id"),
+            tool_call_id: opt_str("tool_call_id"),
             actor,
             event,
             properties: &properties,

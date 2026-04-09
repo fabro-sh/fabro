@@ -600,6 +600,8 @@ mod tests {
                 name: "Code".to_string(),
                 index: 1,
                 visit: 2,
+                parallel_group_id: None,
+                parallel_branch_id: None,
                 duration_ms: 250,
                 status: "partial_success".to_string(),
                 preferred_label: None,

@@ -14,6 +14,7 @@ use fabro_config::Storage;
 use fabro_server::bind::Bind;
 use fabro_store::EventEnvelope;
 use fabro_test::TestContext;
+use fabro_types::RunId;
 use serde_json::Value;
 use shlex::try_quote;
 

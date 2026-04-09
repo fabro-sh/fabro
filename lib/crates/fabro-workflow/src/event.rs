@@ -5,8 +5,8 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use ::fabro_types::run_event as fabro_types;
 use ::fabro_types::{
-    BilledTokenCounts, RunBlobId, RunControlAction, RunEvent, RunId, StageId, StageStatus,
-    StatusReason,
+    ActorKind, ActorRef, BilledTokenCounts, RunBlobId, RunControlAction, RunEvent, RunId,
+    RunProvenance, StageId, StageStatus, StatusReason,
 };
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -55,7 +55,7 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         db_prefix: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        provenance: Option<::fabro_types::RunProvenance>,
+        provenance: Option<RunProvenance>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         manifest_blob: Option<RunBlobId>,
     },
@@ -1289,11 +1289,20 @@ struct StoredEventFields {
     parallel_group_id: Option<String>,
     parallel_branch_id: Option<String>,
     tool_call_id: Option<String>,
-    actor: Option<::fabro_types::ActorRef>,
+    actor: Option<ActorRef>,
 }
 
 fn default_node_label(node_id: Option<&String>, node_label: Option<String>) -> Option<String> {
     node_label.or_else(|| node_id.cloned())
+}
+
+fn node_stored_fields(node_id: Option<String>) -> StoredEventFields {
+    let node_label = default_node_label(node_id.as_ref(), None);
+    StoredEventFields {
+        node_id,
+        node_label,
+        ..StoredEventFields::default()
+    }
 }
 
 fn billed_token_counts_from_llm(usage: &LlmTokenCounts) -> BilledTokenCounts {
@@ -1383,15 +1392,7 @@ fn stored_event_fields(event: &Event) -> StoredEventFields {
         | Event::CommandStarted { node_id, .. }
         | Event::CommandCompleted { node_id, .. }
         | Event::AgentCliStarted { node_id, .. }
-        | Event::AgentCliCompleted { node_id, .. } => {
-            let node_id = Some(node_id.clone());
-            let node_label = default_node_label(node_id.as_ref(), None);
-            StoredEventFields {
-                node_id,
-                node_label,
-                ..StoredEventFields::default()
-            }
-        }
+        | Event::AgentCliCompleted { node_id, .. } => node_stored_fields(Some(node_id.clone())),
         Event::Agent {
             stage,
             visit,
@@ -1416,17 +1417,9 @@ fn stored_event_fields(event: &Event) -> StoredEventFields {
                 parallel_branch_id: parallel_branch_id.clone(),
                 tool_call_id,
                 actor,
-                ..StoredEventFields::default()
             }
         }
-        Event::GitCommit { node_id, .. } => {
-            let node_label = default_node_label(node_id.as_ref(), None);
-            StoredEventFields {
-                node_id: node_id.clone(),
-                node_label,
-                ..StoredEventFields::default()
-            }
-        }
+        Event::GitCommit { node_id, .. } => node_stored_fields(node_id.clone()),
         Event::ParallelBranchStarted {
             parallel_group_id,
             parallel_branch_id,
@@ -1453,35 +1446,16 @@ fn stored_event_fields(event: &Event) -> StoredEventFields {
         | Event::InterviewStarted { stage, .. }
         | Event::InterviewTimeout { stage, .. }
         | Event::InterviewInterrupted { stage, .. }
-        | Event::Failover { stage, .. } => {
-            let node_id = Some(stage.clone());
-            let node_label = default_node_label(node_id.as_ref(), None);
-            StoredEventFields {
-                node_id,
-                node_label,
-                ..StoredEventFields::default()
-            }
-        }
-        Event::StallWatchdogTimeout { node, .. } => {
-            let node_id = Some(node.clone());
-            let node_label = default_node_label(node_id.as_ref(), None);
-            StoredEventFields {
-                node_id,
-                node_label,
-                ..StoredEventFields::default()
-            }
-        }
+        | Event::Failover { stage, .. } => node_stored_fields(Some(stage.clone())),
+        Event::StallWatchdogTimeout { node, .. } => node_stored_fields(Some(node.clone())),
         _ => StoredEventFields::default(),
     }
 }
 
-fn actor_from_provenance(
-    provenance: &::fabro_types::RunProvenance,
-) -> Option<::fabro_types::ActorRef> {
-    let subject = provenance.subject.as_ref()?;
-    let login = subject.login.clone()?;
-    Some(::fabro_types::ActorRef {
-        kind: ::fabro_types::ActorKind::User,
+fn actor_from_provenance(provenance: &RunProvenance) -> Option<ActorRef> {
+    let login = provenance.subject.as_ref()?.login.clone()?;
+    Some(ActorRef {
+        kind: ActorKind::User,
         id: Some(login.clone()),
         display: Some(login),
     })
@@ -1495,13 +1469,10 @@ fn agent_tool_call_id(event: &AgentEvent) -> Option<&str> {
     }
 }
 
-fn agent_actor_for_event(
-    event: &AgentEvent,
-    session_id: Option<&str>,
-) -> Option<::fabro_types::ActorRef> {
+fn agent_actor_for_event(event: &AgentEvent, session_id: Option<&str>) -> Option<ActorRef> {
     match event {
-        AgentEvent::AssistantMessage { model, .. } => Some(::fabro_types::ActorRef {
-            kind: ::fabro_types::ActorKind::Agent,
+        AgentEvent::AssistantMessage { model, .. } => Some(ActorRef {
+            kind: ActorKind::Agent,
             id: session_id.map(str::to_string),
             display: Some(model.clone()),
         }),
@@ -3281,16 +3252,14 @@ mod tests {
             },
         );
         let actor = stored.actor.as_ref().expect("actor set");
-        assert_eq!(actor.kind, ::fabro_types::ActorKind::Agent);
+        assert_eq!(actor.kind, ActorKind::Agent);
         assert_eq!(actor.id.as_deref(), Some("ses_agent"));
         assert_eq!(actor.display.as_deref(), Some("claude-sonnet"));
     }
 
     #[test]
     fn run_created_populates_user_actor_from_provenance() {
-        use ::fabro_types::{
-            Graph, RunAuthMethod, RunProvenance, RunSubjectProvenance, Settings, fixtures,
-        };
+        use ::fabro_types::{Graph, RunAuthMethod, RunSubjectProvenance, Settings, fixtures};
 
         let provenance = RunProvenance {
             server: None,
@@ -3322,7 +3291,7 @@ mod tests {
             },
         );
         let actor = stored.actor.as_ref().expect("actor set");
-        assert_eq!(actor.kind, ::fabro_types::ActorKind::User);
+        assert_eq!(actor.kind, ActorKind::User);
         assert_eq!(actor.id.as_deref(), Some("alice"));
         assert_eq!(actor.display.as_deref(), Some("alice"));
     }

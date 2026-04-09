@@ -37,10 +37,6 @@ fn build_profile(model: &str, provider: Provider) -> Box<dyn AgentProfile> {
     }
 }
 
-fn current_visit(context: &Context) -> u32 {
-    u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX)
-}
-
 #[derive(Clone)]
 struct StageEventScope {
     visit: u32,
@@ -50,7 +46,7 @@ struct StageEventScope {
 
 fn current_stage_event_scope(context: &Context) -> StageEventScope {
     StageEventScope {
-        visit: current_visit(context),
+        visit: u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX),
         parallel_group_id: context.parallel_group_id(),
         parallel_branch_id: context.parallel_branch_id(),
     }

@@ -1480,8 +1480,8 @@ fn event_matches_run_filter(event: &EventEnvelope, run_filter: Option<&HashSet<R
 }
 
 fn sse_event_from_store(event: &EventEnvelope) -> Option<Event> {
-    let event = api_event_envelope_from_store(event).ok()?;
-    let data = serde_json::to_string(&event).ok()?;
+    let wire = event.to_wire_value().ok()?;
+    let data = serde_json::to_string(&wire).ok()?;
     let data = redact_jsonl_line(&data);
     Some(Event::default().data(data))
 }
@@ -2381,20 +2381,15 @@ fn octet_stream_response(bytes: Bytes) -> Response {
 
 #[allow(clippy::result_large_err)]
 fn api_event_envelope_from_store(event: &EventEnvelope) -> Result<ApiEventEnvelope, Response> {
-    let value = event.to_wire_value().map_err(|err| {
+    fn serialize_error(err: impl std::fmt::Display) -> Response {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to serialize stored event: {err}"),
         )
         .into_response()
-    })?;
-    serde_json::from_value(value).map_err(|err| {
-        ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to serialize stored event: {err}"),
-        )
-        .into_response()
-    })
+    }
+    let value = event.to_wire_value().map_err(serialize_error)?;
+    serde_json::from_value(value).map_err(serialize_error)
 }
 
 fn clear_live_run_state(run: &mut ManagedRun) {
