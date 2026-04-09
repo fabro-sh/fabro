@@ -1031,6 +1031,7 @@ fn json_run_implies_auto_approve_for_human_gates() {
           "status": "success"
         },
         "run_id": "[ULID]",
+        "stage_id": "start@1",
         "ts": "[TIMESTAMP]"
       },
       {
@@ -1071,11 +1072,14 @@ fn json_run_implies_auto_approve_for_human_gates() {
           "stage": "approve"
         },
         "run_id": "[ULID]",
+        "stage_id": "approve@1",
         "ts": "[TIMESTAMP]"
       },
       {
         "event": "interview.completed",
         "id": "[EVENT_ID]",
+        "node_id": "approve",
+        "node_label": "approve",
         "properties": {
           "answer": "A",
           "duration_ms": "[DURATION_MS]",
@@ -1083,6 +1087,7 @@ fn json_run_implies_auto_approve_for_human_gates() {
           "question_id": "[ULID]"
         },
         "run_id": "[ULID]",
+        "stage_id": "approve@1",
         "ts": "[TIMESTAMP]"
       },
       {
@@ -1199,6 +1204,7 @@ fn json_run_implies_auto_approve_for_human_gates() {
           "status": "success"
         },
         "run_id": "[ULID]",
+        "stage_id": "approve@1",
         "ts": "[TIMESTAMP]"
       },
       {
@@ -1227,6 +1233,7 @@ fn json_run_implies_auto_approve_for_human_gates() {
           "script": "echo shipped"
         },
         "run_id": "[ULID]",
+        "stage_id": "ship@1",
         "ts": "[TIMESTAMP]"
       },
       {
@@ -1242,6 +1249,7 @@ fn json_run_implies_auto_approve_for_human_gates() {
           "timed_out": false
         },
         "run_id": "[ULID]",
+        "stage_id": "ship@1",
         "ts": "[TIMESTAMP]"
       },
       {
@@ -1371,6 +1379,7 @@ fn json_run_implies_auto_approve_for_human_gates() {
           "status": "success"
         },
         "run_id": "[ULID]",
+        "stage_id": "ship@1",
         "ts": "[TIMESTAMP]"
       },
       {

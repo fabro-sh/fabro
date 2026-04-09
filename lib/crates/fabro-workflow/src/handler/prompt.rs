@@ -3,7 +3,7 @@ use std::path::Path;
 use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
-use crate::event::Event;
+use crate::event::{Event, StageScope};
 use crate::outcome::Outcome;
 use crate::run_dir::visit_from_context;
 use async_trait::async_trait;
@@ -91,14 +91,18 @@ impl Handler for PromptHandler {
             .map(String::from)
             .or_else(|| Some(Provider::default_from_env().as_str().to_string()));
         let prompt_model = node.model().map(String::from);
-        services.emitter.emit(&Event::Prompt {
-            stage: node.id.clone(),
-            visit: u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX),
-            text: prompt.clone(),
-            mode: Some("prompt".to_string()),
-            provider: prompt_provider.clone(),
-            model: prompt_model.clone(),
-        });
+        let stage_scope = StageScope::for_handler(context, &node.id);
+        services.emitter.emit_scoped(
+            &Event::Prompt {
+                stage: node.id.clone(),
+                visit: u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX),
+                text: prompt.clone(),
+                mode: Some("prompt".to_string()),
+                provider: prompt_provider.clone(),
+                model: prompt_model.clone(),
+            },
+            &stage_scope,
+        );
 
         // 3. Call LLM backend (one_shot)
         let (response_text, stage_usage, backend_files_touched) =
@@ -140,13 +144,16 @@ impl Handler for PromptHandler {
             .or_else(|| Some(Provider::default_from_env().as_str().to_string()))
             .unwrap_or_default();
 
-        services.emitter.emit(&Event::PromptCompleted {
-            node_id: node.id.clone(),
-            response: response_text.clone(),
-            model: response_model,
-            provider: response_provider,
-            billing: stage_usage.clone(),
-        });
+        services.emitter.emit_scoped(
+            &Event::PromptCompleted {
+                node_id: node.id.clone(),
+                response: response_text.clone(),
+                model: response_model,
+                provider: response_provider,
+                billing: stage_usage.clone(),
+            },
+            &stage_scope,
+        );
 
         // 4. Build and write status
         let mut outcome = Outcome::success();

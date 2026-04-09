@@ -479,8 +479,6 @@ mod tests {
             event,
             session_id: None,
             parent_session_id: None,
-            parallel_group_id: None,
-            parallel_branch_id: None,
         }
     }
 
@@ -489,9 +487,6 @@ mod tests {
             node_id: node_id.into(),
             name: name.into(),
             index: 0,
-            visit: 1,
-            parallel_group_id: None,
-            parallel_branch_id: None,
             handler_type: String::new(),
             attempt: 1,
             max_attempts: 1,
@@ -515,9 +510,6 @@ mod tests {
             node_id: node_id.into(),
             name: name.into(),
             index: 0,
-            visit: 1,
-            parallel_group_id: None,
-            parallel_branch_id: None,
             duration_ms: 5000,
             status: "success".into(),
             preferred_label: None,
@@ -714,9 +706,6 @@ mod tests {
                 node_id: "code".into(),
                 name: "Code".into(),
                 index: 0,
-                visit: 1,
-                parallel_group_id: None,
-                parallel_branch_id: None,
                 attempt: 2,
                 max_attempts: 3,
                 delay_ms: 1500,
@@ -961,9 +950,6 @@ mod tests {
                 node_id: "code".into(),
                 name: "Code".into(),
                 index: 0,
-                visit: 1,
-                parallel_group_id: None,
-                parallel_branch_id: None,
                 attempt: 2,
                 max_attempts: 3,
                 delay_ms: 1500,
@@ -1168,14 +1154,12 @@ mod tests {
                 node_id: "code".into(),
                 name: "Code".into(),
                 index: 0,
-                visit: 1,
-                parallel_group_id: None,
-                parallel_branch_id: None,
                 handler_type: "agent".into(),
                 attempt: 1,
                 max_attempts: 1,
             },
             started_ts,
+            None,
         ))
         .unwrap();
         let tool_started = serde_json::to_string(&to_run_event_at(
@@ -1189,6 +1173,7 @@ mod tests {
                 },
             ),
             started_ts,
+            None,
         ))
         .unwrap();
         let tool_completed = serde_json::to_string(&to_run_event_at(
@@ -1203,6 +1188,7 @@ mod tests {
                 },
             ),
             completed_ts,
+            None,
         ))
         .unwrap();
 

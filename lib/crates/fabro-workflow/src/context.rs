@@ -135,6 +135,8 @@ pub mod keys {
 
 pub use fabro_core::Context;
 
+use crate::event::StageScope;
+use crate::run_dir::visit_from_context;
 use fabro_graphviz::Fidelity;
 use fabro_types::{ParallelBranchId, StageId};
 
@@ -146,6 +148,10 @@ pub trait WorkflowContext {
     fn run_id(&self) -> String;
     fn parallel_group_id(&self) -> Option<StageId>;
     fn parallel_branch_id(&self) -> Option<ParallelBranchId>;
+    /// Build the stage-level emit scope from the currently-executing node and its
+    /// accumulated visit count. Returns `None` for run-level emissions where no
+    /// stage is active (i.e., `CURRENT_NODE` is unset).
+    fn current_stage_scope(&self) -> Option<StageScope>;
 }
 
 impl WorkflowContext for Context {
@@ -176,6 +182,19 @@ impl WorkflowContext for Context {
     fn parallel_branch_id(&self) -> Option<ParallelBranchId> {
         self.get(keys::INTERNAL_PARALLEL_BRANCH_ID)
             .and_then(|value| serde_json::from_value(value).ok())
+    }
+
+    fn current_stage_scope(&self) -> Option<StageScope> {
+        let node_id = self
+            .get(keys::CURRENT_NODE)
+            .and_then(|value| value.as_str().map(String::from))?;
+        let visit = u32::try_from(visit_from_context(self)).unwrap_or(u32::MAX);
+        Some(StageScope {
+            node_id,
+            visit,
+            parallel_group_id: self.parallel_group_id(),
+            parallel_branch_id: self.parallel_branch_id(),
+        })
     }
 }
 

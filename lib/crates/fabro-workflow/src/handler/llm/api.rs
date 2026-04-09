@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
+use crate::event::StageScope;
 use fabro_agent::{
     AgentEvent, AgentProfile, AnthropicProfile, GeminiProfile, OpenAiProfile, Sandbox, Session,
     SessionOptions, Turn,
@@ -13,7 +14,6 @@ use fabro_llm::types::{Message, Request, TokenCounts};
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::FallbackTarget;
 use fabro_model::Provider;
-use fabro_types::{ParallelBranchId, StageId};
 use tokio::sync::Mutex as TokioMutex;
 
 use super::super::agent::{CodergenBackend, CodergenResult};
@@ -22,7 +22,6 @@ use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
 use crate::event::{Emitter, Event};
 use crate::outcome::billed_model_usage_from_llm;
-use crate::run_dir::visit_from_context;
 use fabro_graphviz::graph::Node;
 
 fn build_profile(model: &str, provider: Provider) -> Box<dyn AgentProfile> {
@@ -35,21 +34,6 @@ fn build_profile(model: &str, provider: Provider) -> Box<dyn AgentProfile> {
         | Provider::OpenAiCompatible => Box::new(OpenAiProfile::new(model).with_provider(provider)),
         Provider::Gemini => Box::new(GeminiProfile::new(model)),
         Provider::Anthropic => Box::new(AnthropicProfile::new(model)),
-    }
-}
-
-#[derive(Clone)]
-struct StageEventScope {
-    visit: u32,
-    parallel_group_id: Option<StageId>,
-    parallel_branch_id: Option<ParallelBranchId>,
-}
-
-fn current_stage_event_scope(context: &Context) -> StageEventScope {
-    StageEventScope {
-        visit: u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX),
-        parallel_group_id: context.parallel_group_id(),
-        parallel_branch_id: context.parallel_branch_id(),
     }
 }
 
@@ -98,7 +82,7 @@ fn track_file_event(event: &AgentEvent, state: &mut FileTracking) {
 fn spawn_event_forwarder(
     session: &Session,
     node_id: String,
-    scope: StageEventScope,
+    scope: StageScope,
     emitter: Arc<Emitter>,
     file_tracking: Arc<Mutex<FileTracking>>,
 ) {
@@ -115,15 +99,16 @@ fn spawn_event_forwarder(
             if !event.event.is_streaming_noise()
                 && !matches!(&event.event, AgentEvent::ProcessingEnd)
             {
-                emitter.emit(&Event::Agent {
-                    stage: node_id.clone(),
-                    visit: scope.visit,
-                    event: event.event.clone(),
-                    session_id: Some(event.session_id.clone()),
-                    parent_session_id: event.parent_session_id.clone(),
-                    parallel_group_id: scope.parallel_group_id.clone(),
-                    parallel_branch_id: scope.parallel_branch_id.clone(),
-                });
+                emitter.emit_scoped(
+                    &Event::Agent {
+                        stage: node_id.clone(),
+                        visit: scope.visit,
+                        event: event.event.clone(),
+                        session_id: Some(event.session_id.clone()),
+                        parent_session_id: event.parent_session_id.clone(),
+                    },
+                    &scope,
+                );
             }
         }
     });
@@ -469,7 +454,7 @@ impl CodergenBackend for AgentApiBackend {
             touched: HashSet::new(),
             last: None,
         }));
-        let event_scope = current_stage_event_scope(context);
+        let event_scope = StageScope::for_handler(context, &node.id);
 
         // Subscribe to session events: forward to pipeline emitter + track files.
         spawn_event_forwarder(
@@ -503,14 +488,17 @@ impl CodergenBackend for AgentApiBackend {
                 let mut succeeded = false;
 
                 for target in &self.fallback_chain {
-                    emitter.emit(&Event::Failover {
-                        stage: node.id.clone(),
-                        from_provider: from_provider.clone(),
-                        from_model: from_model.clone(),
-                        to_provider: target.provider.clone(),
-                        to_model: target.model.clone(),
-                        error: error_msg.clone(),
-                    });
+                    emitter.emit_scoped(
+                        &Event::Failover {
+                            stage: node.id.clone(),
+                            from_provider: from_provider.clone(),
+                            from_model: from_model.clone(),
+                            to_provider: target.provider.clone(),
+                            to_model: target.model.clone(),
+                            error: error_msg.clone(),
+                        },
+                        &event_scope,
+                    );
 
                     let target_provider: Provider = match target.provider.parse() {
                         Ok(p) => p,

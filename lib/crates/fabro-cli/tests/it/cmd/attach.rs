@@ -726,6 +726,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
           "status": "success"
         },
         "run_id": "[ULID]",
+        "stage_id": "start@1",
         "ts": "[TIMESTAMP]"
       },
       {
@@ -766,6 +767,7 @@ fn attach_json_errors_without_prompting_for_human_input() {
           "stage": "approve"
         },
         "run_id": "[ULID]",
+        "stage_id": "approve@1",
         "ts": "[TIMESTAMP]"
       }
     ]

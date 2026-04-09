@@ -4,6 +4,7 @@ use crate::context::Context;
 use crate::context::keys;
 use crate::error::FabroError;
 use crate::event::Event;
+use crate::event::StageScope;
 use crate::outcome::{Outcome, OutcomeExt};
 use async_trait::async_trait;
 use fabro_graphviz::graph::{Graph, Node};
@@ -57,7 +58,7 @@ impl Handler for CommandHandler {
     async fn execute(
         &self,
         node: &Node,
-        _context: &Context,
+        context: &Context,
         _graph: &Graph,
         _run_dir: &Path,
         services: &EngineServices,
@@ -90,13 +91,17 @@ impl Handler for CommandHandler {
         } else {
             script.to_string()
         };
-        services.emitter.emit(&Event::CommandStarted {
-            node_id: node.id.clone(),
-            script: script.to_string(),
-            command: command.clone(),
-            language: language.to_string(),
-            timeout_ms: timeout_ms(node),
-        });
+        let stage_scope = StageScope::for_handler(context, &node.id);
+        services.emitter.emit_scoped(
+            &Event::CommandStarted {
+                node_id: node.id.clone(),
+                script: script.to_string(),
+                command: command.clone(),
+                language: language.to_string(),
+                timeout_ms: timeout_ms(node),
+            },
+            &stage_scope,
+        );
 
         let timeout_ms = node
             .timeout()
@@ -118,14 +123,17 @@ impl Handler for CommandHandler {
         let result =
             result.map_err(|e| FabroError::handler(format!("Failed to spawn script: {e}")))?;
 
-        services.emitter.emit(&Event::CommandCompleted {
-            node_id: node.id.clone(),
-            stdout: result.stdout.clone(),
-            stderr: result.stderr.clone(),
-            exit_code: (!result.timed_out).then_some(result.exit_code),
-            duration_ms: result.duration_ms,
-            timed_out: result.timed_out,
-        });
+        services.emitter.emit_scoped(
+            &Event::CommandCompleted {
+                node_id: node.id.clone(),
+                stdout: result.stdout.clone(),
+                stderr: result.stderr.clone(),
+                exit_code: (!result.timed_out).then_some(result.exit_code),
+                duration_ms: result.duration_ms,
+                timed_out: result.timed_out,
+            },
+            &stage_scope,
+        );
 
         if result.timed_out {
             return Err(FabroError::handler(format!(

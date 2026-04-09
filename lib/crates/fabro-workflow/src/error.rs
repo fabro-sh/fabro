@@ -1692,9 +1692,6 @@ mod tests {
             node_id: "code".into(),
             name: "code".into(),
             index: 0,
-            visit: 1,
-            parallel_group_id: None,
-            parallel_branch_id: None,
             failure: failure.clone(),
             will_retry: false,
         };

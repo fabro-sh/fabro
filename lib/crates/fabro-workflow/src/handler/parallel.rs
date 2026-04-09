@@ -10,7 +10,7 @@ use tokio::sync::Semaphore;
 use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
-use crate::event::Event;
+use crate::event::{Event, StageScope};
 use crate::git::sanitize_ref_component;
 use crate::hook_context::set_hook_node;
 use crate::millis_u64;
@@ -280,6 +280,8 @@ impl Handler for ParallelHandler {
             });
         }
 
+        let parent_scope = StageScope::for_handler(context, &node.id);
+
         // --- Fan out: concurrent execution ---
         let mut handles = Vec::new();
         for setup in branch_setups {
@@ -302,6 +304,7 @@ impl Handler for ParallelHandler {
                 .map(|gs| gs.git_author.clone())
                 .unwrap_or_default();
             let group_id = parallel_group_id.clone();
+            let branch_scope = parent_scope.clone();
 
             let handle = tokio::spawn(async move {
                 let _permit = sem
@@ -309,12 +312,15 @@ impl Handler for ParallelHandler {
                     .await
                     .map_err(|e| FabroError::handler(format!("semaphore error: {e}")))?;
 
-                emitter.emit(&Event::ParallelBranchStarted {
-                    parallel_group_id: group_id.clone(),
-                    parallel_branch_id: setup.parallel_branch_id.clone(),
-                    branch: setup.target_id.clone(),
-                    index: setup.branch_index,
-                });
+                emitter.emit_scoped(
+                    &Event::ParallelBranchStarted {
+                        parallel_group_id: group_id.clone(),
+                        parallel_branch_id: setup.parallel_branch_id.clone(),
+                        branch: setup.target_id.clone(),
+                        index: setup.branch_index,
+                    },
+                    &branch_scope,
+                );
                 let branch_start = Instant::now();
 
                 let Some(target_node) = graph.nodes.get(&setup.target_id) else {
@@ -322,15 +328,18 @@ impl Handler for ParallelHandler {
                         "branch target node not found: {}",
                         setup.target_id
                     ));
-                    emitter.emit(&Event::ParallelBranchCompleted {
-                        parallel_group_id: group_id.clone(),
-                        parallel_branch_id: setup.parallel_branch_id.clone(),
-                        branch: setup.target_id.clone(),
-                        index: setup.branch_index,
-                        duration_ms: millis_u64(branch_start.elapsed()),
-                        status: "fail".to_string(),
-                        head_sha: None,
-                    });
+                    emitter.emit_scoped(
+                        &Event::ParallelBranchCompleted {
+                            parallel_group_id: group_id.clone(),
+                            parallel_branch_id: setup.parallel_branch_id.clone(),
+                            branch: setup.target_id.clone(),
+                            index: setup.branch_index,
+                            duration_ms: millis_u64(branch_start.elapsed()),
+                            status: "fail".to_string(),
+                            head_sha: None,
+                        },
+                        &branch_scope,
+                    );
                     return Ok(BranchResult {
                         id: setup.target_id.clone(),
                         outcome,
@@ -408,15 +417,18 @@ impl Handler for ParallelHandler {
                     None
                 };
 
-                emitter.emit(&Event::ParallelBranchCompleted {
-                    parallel_group_id: group_id.clone(),
-                    parallel_branch_id: setup.parallel_branch_id.clone(),
-                    branch: setup.target_id.clone(),
-                    index: setup.branch_index,
-                    duration_ms: millis_u64(branch_start.elapsed()),
-                    status: outcome.status.to_string(),
-                    head_sha: head_sha.clone(),
-                });
+                emitter.emit_scoped(
+                    &Event::ParallelBranchCompleted {
+                        parallel_group_id: group_id.clone(),
+                        parallel_branch_id: setup.parallel_branch_id.clone(),
+                        branch: setup.target_id.clone(),
+                        index: setup.branch_index,
+                        duration_ms: millis_u64(branch_start.elapsed()),
+                        status: outcome.status.to_string(),
+                        head_sha: head_sha.clone(),
+                    },
+                    &branch_scope,
+                );
 
                 Ok::<BranchResult, FabroError>(BranchResult {
                     id: setup.target_id,

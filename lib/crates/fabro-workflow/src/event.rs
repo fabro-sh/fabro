@@ -19,8 +19,10 @@ use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot};
 use uuid::Uuid;
 
+use crate::context::{Context as WfContext, WorkflowContext};
 use crate::error::FabroError;
 use crate::outcome::{BilledModelUsage, FailureDetail, Outcome};
+use crate::run_dir::visit_from_context;
 use fabro_agent::{AgentEvent, SandboxEvent, WorktreeEvent, WorktreeEventCallback};
 use fabro_llm::types::TokenCounts as LlmTokenCounts;
 use fabro_util::redact::redact_json_value;
@@ -138,11 +140,6 @@ pub enum Event {
         node_id: String,
         name: String,
         index: usize,
-        visit: u32,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        parallel_group_id: Option<StageId>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        parallel_branch_id: Option<ParallelBranchId>,
         handler_type: String,
         attempt: usize,
         max_attempts: usize,
@@ -151,11 +148,6 @@ pub enum Event {
         node_id: String,
         name: String,
         index: usize,
-        visit: u32,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        parallel_group_id: Option<StageId>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        parallel_branch_id: Option<ParallelBranchId>,
         duration_ms: u64,
         status: String,
         preferred_label: Option<String>,
@@ -186,11 +178,6 @@ pub enum Event {
         node_id: String,
         name: String,
         index: usize,
-        visit: u32,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        parallel_group_id: Option<StageId>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        parallel_branch_id: Option<ParallelBranchId>,
         failure: FailureDetail,
         will_retry: bool,
     },
@@ -198,11 +185,6 @@ pub enum Event {
         node_id: String,
         name: String,
         index: usize,
-        visit: u32,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        parallel_group_id: Option<StageId>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        parallel_branch_id: Option<ParallelBranchId>,
         attempt: usize,
         max_attempts: usize,
         delay_ms: u64,
@@ -377,10 +359,6 @@ pub enum Event {
         session_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_session_id: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        parallel_group_id: Option<StageId>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        parallel_branch_id: Option<ParallelBranchId>,
     },
     SubgraphStarted {
         node_id: String,
@@ -1321,53 +1299,45 @@ fn stage_status_from_string(status: &str) -> StageStatus {
     serde_json::from_value(Value::String(status.to_string())).expect("valid stage status")
 }
 
-fn stored_event_fields(event: &Event) -> StoredEventFields {
+fn stored_event_fields(event: &Event, scope: Option<&StageScope>) -> StoredEventFields {
+    let mut fields = stored_event_fields_for_variant(event);
+    if let Some(scope) = scope {
+        if fields.node_id.is_none() {
+            fields.node_id = Some(scope.node_id.clone());
+            fields.node_label = default_node_label(Some(&scope.node_id), fields.node_label);
+        }
+        if fields.stage_id.is_none() {
+            fields.stage_id = Some(StageId::new(scope.node_id.clone(), scope.visit));
+        }
+        if fields.parallel_group_id.is_none() {
+            fields
+                .parallel_group_id
+                .clone_from(&scope.parallel_group_id);
+        }
+        if fields.parallel_branch_id.is_none() {
+            fields
+                .parallel_branch_id
+                .clone_from(&scope.parallel_branch_id);
+        }
+    }
+    fields
+}
+
+fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
     match event {
         Event::RunCreated { provenance, .. } => StoredEventFields {
             actor: provenance.as_ref().and_then(actor_from_provenance),
             ..StoredEventFields::default()
         },
-        Event::StageCompleted {
-            node_id,
-            name,
-            visit,
-            parallel_group_id,
-            parallel_branch_id,
-            ..
-        }
-        | Event::StageFailed {
-            node_id,
-            name,
-            visit,
-            parallel_group_id,
-            parallel_branch_id,
-            ..
-        }
-        | Event::StageStarted {
-            node_id,
-            name,
-            visit,
-            parallel_group_id,
-            parallel_branch_id,
-            ..
-        }
-        | Event::StageRetrying {
-            node_id,
-            name,
-            visit,
-            parallel_group_id,
-            parallel_branch_id,
-            ..
-        } => {
+        Event::StageCompleted { node_id, name, .. }
+        | Event::StageFailed { node_id, name, .. }
+        | Event::StageStarted { node_id, name, .. }
+        | Event::StageRetrying { node_id, name, .. } => {
             let node_id_str = node_id.clone();
             let node_label = default_node_label(Some(&node_id_str), Some(name.clone()));
-            let stage_id = Some(StageId::new(node_id_str.clone(), *visit));
             StoredEventFields {
                 node_id: Some(node_id_str),
                 node_label,
-                stage_id,
-                parallel_group_id: parallel_group_id.clone(),
-                parallel_branch_id: parallel_branch_id.clone(),
                 ..StoredEventFields::default()
             }
         }
@@ -1399,8 +1369,6 @@ fn stored_event_fields(event: &Event) -> StoredEventFields {
             event: agent_event,
             session_id,
             parent_session_id,
-            parallel_group_id,
-            parallel_branch_id,
         } => {
             let node_id = Some(stage.clone());
             let node_label = default_node_label(node_id.as_ref(), None);
@@ -1413,10 +1381,9 @@ fn stored_event_fields(event: &Event) -> StoredEventFields {
                 node_id,
                 node_label,
                 stage_id,
-                parallel_group_id: parallel_group_id.clone(),
-                parallel_branch_id: parallel_branch_id.clone(),
                 tool_call_id,
                 actor,
+                ..StoredEventFields::default()
             }
         }
         Event::GitCommit { node_id, .. } => node_stored_fields(node_id.clone()),
@@ -2481,12 +2448,44 @@ fn event_body_from_event(event: &Event) -> EventBody {
     }
 }
 
-pub fn to_run_event(run_id: &RunId, event: &Event) -> RunEvent {
-    to_run_event_at(run_id, event, Utc::now())
+/// Stage-level scope threaded through event emission to populate
+/// `stage_id` / `parallel_group_id` / `parallel_branch_id` on events
+/// that happen inside a concrete stage execution.
+#[derive(Clone, Debug)]
+pub struct StageScope {
+    pub node_id: String,
+    pub visit: u32,
+    pub parallel_group_id: Option<StageId>,
+    pub parallel_branch_id: Option<ParallelBranchId>,
 }
 
-pub fn to_run_event_at(run_id: &RunId, event: &Event, ts: chrono::DateTime<Utc>) -> RunEvent {
-    let fields = stored_event_fields(event);
+impl StageScope {
+    /// Build scope for a handler invocation. Prefers the current_stage_scope
+    /// set by the fidelity lifecycle before_attempt hook, but falls back to
+    /// a scope synthesized from the node id and the context's visit count
+    /// for tests and other direct-handler call sites that don't go through
+    /// the full lifecycle.
+    pub fn for_handler(context: &WfContext, node_id: impl Into<String>) -> Self {
+        context.current_stage_scope().unwrap_or_else(|| Self {
+            node_id: node_id.into(),
+            visit: u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX),
+            parallel_group_id: context.parallel_group_id(),
+            parallel_branch_id: context.parallel_branch_id(),
+        })
+    }
+}
+
+pub fn to_run_event(run_id: &RunId, event: &Event) -> RunEvent {
+    to_run_event_at(run_id, event, Utc::now(), None)
+}
+
+pub fn to_run_event_at(
+    run_id: &RunId,
+    event: &Event,
+    ts: chrono::DateTime<Utc>,
+    scope: Option<&StageScope>,
+) -> RunEvent {
+    let fields = stored_event_fields(event, scope);
     let body = event_body_from_event(event);
     RunEvent {
         id: Uuid::now_v7().to_string(),
@@ -2759,6 +2758,14 @@ impl Emitter {
     }
 
     pub fn emit(&self, event: &Event) {
+        self.emit_with_scope(event, None);
+    }
+
+    pub fn emit_scoped(&self, event: &Event, scope: &StageScope) {
+        self.emit_with_scope(event, Some(scope));
+    }
+
+    fn emit_with_scope(&self, event: &Event, scope: Option<&StageScope>) {
         self.last_event_at.store(epoch_millis(), Ordering::Relaxed);
         event.trace();
         if let Event::WorkflowRunStarted { run_id, .. } = event {
@@ -2767,7 +2774,7 @@ impl Emitter {
                 "workflow run started event must match emitter run_id"
             );
         }
-        let stored = to_run_event(&self.run_id, event);
+        let stored = to_run_event_at(&self.run_id, event, Utc::now(), scope);
         self.dispatch_run_event(&stored);
     }
 
@@ -2858,15 +2865,12 @@ mod tests {
 
     #[test]
     fn run_event_stage_completed_places_node_fields_in_header() {
-        let stored = to_run_event(
+        let stored = to_run_event_at(
             &fixtures::RUN_2,
             &Event::StageCompleted {
                 node_id: "plan".to_string(),
                 name: "Plan".to_string(),
                 index: 0,
-                visit: 1,
-                parallel_group_id: None,
-                parallel_branch_id: None,
                 duration_ms: 5000,
                 status: "success".to_string(),
                 preferred_label: None,
@@ -2885,6 +2889,13 @@ mod tests {
                 attempt: 1,
                 max_attempts: 1,
             },
+            Utc::now(),
+            Some(&StageScope {
+                node_id: "plan".to_string(),
+                visit: 1,
+                parallel_group_id: None,
+                parallel_branch_id: None,
+            }),
         );
 
         assert_eq!(stored.event_name(), "stage.completed");
@@ -2906,9 +2917,6 @@ mod tests {
                 node_id: "plan".to_string(),
                 name: "Plan".to_string(),
                 index: 0,
-                visit: 1,
-                parallel_group_id: None,
-                parallel_branch_id: None,
                 duration_ms: 5000,
                 status: "success".to_string(),
                 preferred_label: None,
@@ -2943,9 +2951,6 @@ mod tests {
                 node_id: "code".to_string(),
                 name: "Code".to_string(),
                 index: 1,
-                visit: 1,
-                parallel_group_id: None,
-                parallel_branch_id: None,
                 failure: FailureDetail::new(
                     "lint failed",
                     crate::outcome::FailureCategory::Deterministic,
@@ -2975,8 +2980,6 @@ mod tests {
                 },
                 session_id: Some("ses_child".to_string()),
                 parent_session_id: Some("ses_parent".to_string()),
-                parallel_group_id: None,
-                parallel_branch_id: None,
             },
         );
 
@@ -3151,8 +3154,6 @@ mod tests {
                 },
                 session_id: None,
                 parent_session_id: None,
-                parallel_group_id: None,
-                parallel_branch_id: None,
             }),
             "agent.sub.spawned"
         );
@@ -3160,19 +3161,23 @@ mod tests {
 
     #[test]
     fn stage_started_populates_parallel_ids_when_present() {
-        let stored = to_run_event(
+        let stored = to_run_event_at(
             &fixtures::RUN_1,
             &Event::StageStarted {
                 node_id: "review".to_string(),
                 name: "review".to_string(),
                 index: 1,
-                visit: 1,
-                parallel_group_id: Some(StageId::new("fanout", 2)),
-                parallel_branch_id: Some(ParallelBranchId::new(StageId::new("fanout", 2), 1)),
                 handler_type: "agent".to_string(),
                 attempt: 1,
                 max_attempts: 1,
             },
+            Utc::now(),
+            Some(&StageScope {
+                node_id: "review".to_string(),
+                visit: 1,
+                parallel_group_id: Some(StageId::new("fanout", 2)),
+                parallel_branch_id: Some(ParallelBranchId::new(StageId::new("fanout", 2), 1)),
+            }),
         );
         assert_eq!(stored.parallel_group_id, Some(StageId::new("fanout", 2)));
         assert_eq!(
@@ -3216,7 +3221,7 @@ mod tests {
 
     #[test]
     fn agent_tool_started_populates_tool_call_id_and_stage_id() {
-        let stored = to_run_event(
+        let stored = to_run_event_at(
             &fixtures::RUN_1,
             &Event::Agent {
                 stage: "code".to_string(),
@@ -3228,9 +3233,14 @@ mod tests {
                 },
                 session_id: Some("ses_1".to_string()),
                 parent_session_id: None,
+            },
+            Utc::now(),
+            Some(&StageScope {
+                node_id: "code".to_string(),
+                visit: 3,
                 parallel_group_id: Some(StageId::new("fanout", 2)),
                 parallel_branch_id: Some(ParallelBranchId::new(StageId::new("fanout", 2), 0)),
-            },
+            }),
         );
         assert_eq!(stored.stage_id, Some(StageId::new("code", 3)));
         assert_eq!(stored.tool_call_id.as_deref(), Some("call_abc"));
@@ -3239,6 +3249,70 @@ mod tests {
             stored.parallel_branch_id,
             Some(ParallelBranchId::new(StageId::new("fanout", 2), 0))
         );
+    }
+
+    #[test]
+    fn stage_scope_populates_stage_id_on_non_stage_events() {
+        // Events tied to a concrete stage execution but lacking scope in their
+        // own variant fields (CheckpointCompleted, CommandStarted, PromptCompleted,
+        // Prompt, InterviewStarted, Failover, GitCommit) should pick up stage_id
+        // / parallel_group_id / parallel_branch_id from the scope argument.
+        let scope = StageScope {
+            node_id: "build".to_string(),
+            visit: 2,
+            parallel_group_id: Some(StageId::new("fanout", 1)),
+            parallel_branch_id: Some(ParallelBranchId::new(StageId::new("fanout", 1), 0)),
+        };
+
+        let command_started = to_run_event_at(
+            &fixtures::RUN_1,
+            &Event::CommandStarted {
+                node_id: "build".to_string(),
+                script: "echo".to_string(),
+                command: "echo".to_string(),
+                language: "shell".to_string(),
+                timeout_ms: None,
+            },
+            Utc::now(),
+            Some(&scope),
+        );
+        assert_eq!(command_started.stage_id, Some(StageId::new("build", 2)));
+        assert_eq!(command_started.parallel_group_id, scope.parallel_group_id);
+        assert_eq!(command_started.parallel_branch_id, scope.parallel_branch_id);
+
+        let prompt = to_run_event_at(
+            &fixtures::RUN_1,
+            &Event::Prompt {
+                stage: "build".to_string(),
+                visit: 2,
+                text: "do it".to_string(),
+                mode: None,
+                provider: None,
+                model: None,
+            },
+            Utc::now(),
+            Some(&scope),
+        );
+        assert_eq!(prompt.stage_id, Some(StageId::new("build", 2)));
+
+        let git_commit = to_run_event_at(
+            &fixtures::RUN_1,
+            &Event::GitCommit {
+                node_id: Some("build".to_string()),
+                sha: "deadbeef".to_string(),
+            },
+            Utc::now(),
+            Some(&scope),
+        );
+        assert_eq!(git_commit.stage_id, Some(StageId::new("build", 2)));
+    }
+
+    #[test]
+    fn run_level_events_without_scope_leave_stage_id_absent() {
+        let stored = to_run_event(&fixtures::RUN_1, &Event::RunRunning { reason: None });
+        assert!(stored.stage_id.is_none());
+        assert!(stored.parallel_group_id.is_none());
+        assert!(stored.parallel_branch_id.is_none());
     }
 
     #[test]
@@ -3256,8 +3330,6 @@ mod tests {
                 },
                 session_id: Some("ses_agent".to_string()),
                 parent_session_id: None,
-                parallel_group_id: None,
-                parallel_branch_id: None,
             },
         );
         let actor = stored.actor.as_ref().expect("actor set");
