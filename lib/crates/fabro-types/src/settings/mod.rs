@@ -25,7 +25,6 @@ pub mod project;
 pub mod run;
 pub mod sandbox;
 pub mod server;
-pub mod user;
 pub mod v2;
 
 pub use hook::{HookDefinition, HookEvent, HookSettings, HookType, TlsMode};
@@ -47,8 +46,6 @@ pub use server::{
     AuthSettings, FeaturesSettings, GitAuthorSettings, GitProvider, GitSettings, LogSettings,
     SlackSettings, TlsSettings, WebSettings, WebhookSettings, WebhookStrategy,
 };
-pub use user::{ClientTlsSettings, ExecSettings, OutputFormat, PermissionLevel, ServerSettings};
-
 // v2 top-level re-exports. Stage 6.5 of the settings TOML redesign
 // promoted the v2 namespaced parse tree to be the primary API surface;
 // consumers can now write `fabro_types::settings::SettingsFile` /

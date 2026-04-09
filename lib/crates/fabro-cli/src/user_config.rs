@@ -1,13 +1,21 @@
 use std::path::{Path, PathBuf};
 
 pub(crate) use fabro_config::user::*;
-pub(crate) use fabro_types::settings::user::ClientTlsSettings;
 
 use anyhow::{Result, bail};
 use fabro_config::ConfigLayer;
-use fabro_types::settings::v2::SettingsFile;
+use fabro_types::settings::SettingsFile;
 use fabro_util::version::FABRO_VERSION;
+use serde::{Deserialize, Serialize};
 use tracing::debug;
+
+/// Client-side TLS material for the CLI's remote server target.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub(crate) struct ClientTlsSettings {
+    pub cert: PathBuf,
+    pub key: PathBuf,
+    pub ca: PathBuf,
+}
 
 use crate::args::ServerTargetArgs;
 
