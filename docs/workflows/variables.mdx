@@ -5,22 +5,26 @@ description: "Using variables in workflows"
 
 Fabro supports `$variable` placeholders that let you parameterize workflows without editing the Graphviz file.
 
-## Run config variables
+## Run config inputs
 
-Define variables in the `[vars]` section of a run config TOML file:
+Define inputs in the `[run.inputs]` section of a run config TOML file:
 
 ```toml title="run.toml"
-version = 1
-goal = "Run tests for $repo_name"
+_version = 1
+
+[workflow]
 graph = "check.fabro"
 
-[vars]
+[run]
+goal = "Run tests for $repo_name"
+
+[run.inputs]
 repo_name = "fabro"
 repo_url = "https://github.com/fabro-sh/fabro"
 language = "rust"
 ```
 
-These variables are expanded into the Graphviz source **before** the graph is parsed. You can use `$variable` anywhere in the Graphviz file — goals, prompts, labels, scripts, or any other attribute:
+These inputs are expanded into the Graphviz source **before** the graph is parsed. You can use `$variable` anywhere in the Graphviz file — goals, prompts, labels, scripts, or any other attribute:
 
 ```dot title="check.fabro"
 digraph Check {
@@ -40,7 +44,7 @@ When launched with `fabro run run.toml`, Fabro replaces `$repo_name`, `$repo_url
 
 ### Undefined variables
 
-If a `$variable` in the Graphviz file has no matching entry in `[vars]`, Fabro raises an error. This catches typos early — a misspelled `$langauge` fails immediately rather than passing a literal `$langauge` to the LLM.
+If a `$variable` in the Graphviz file has no matching entry in `[run.inputs]`, Fabro raises an error. This catches typos early — a misspelled `$langauge` fails immediately rather than passing a literal `$langauge` to the LLM.
 
 ### Escaping `$`
 
@@ -66,11 +70,15 @@ digraph Example {
 
 The plan node's prompt becomes `"Create a plan for: Implement the login feature"`.
 
-## Variable merging
+## Input merging
 
-When using server-level run defaults alongside a run config TOML, variables are merged. Task config vars override default vars when keys collide:
+`[run.inputs]` intentionally replaces the inherited map wholesale rather than merging by key. Whichever layer has the highest precedence and sets `[run.inputs]` wins its entire map — lower-precedence inputs do not show through.
 
 | Source | Priority |
 |---|---|
-| Run config TOML `[vars]` | Highest — wins on collision |
-| Server defaults `[vars]` | Lowest — provides fallback values |
+| CLI flags (`-V key=value`, repeated) | Highest |
+| `workflow.toml` `[run.inputs]` | |
+| `fabro.toml` `[run.inputs]` | |
+| `~/.fabro/settings.toml` `[run.inputs]` | Lowest |
+
+If you need per-key overrides on top of inherited defaults, set each input explicitly in the winning layer.

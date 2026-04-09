@@ -7,7 +7,7 @@ description: "Server-owned settings.toml sections, CLI overrides, and environmen
 
 `fabro server start` reads `~/.fabro/settings.toml` by default. This is the same file schema used by the CLI.
 
-On a same-machine setup, the CLI and server share one `settings.toml`. On a remote deployment, the server machine has its own `settings.toml`, and the client machine keeps a separate local `settings.toml` for CLI-only values such as `[server].target`.
+On a same-machine setup, the CLI and server share one `settings.toml`. On a remote deployment, the server machine has its own `settings.toml`, and the client machine keeps a separate local `settings.toml` for CLI-only values such as `[cli.target]`.
 
 <Note>
 Legacy `server.toml`, `user.toml`, and `cli.toml` are ignored with a warning. Rename them to `settings.toml`.
@@ -17,84 +17,88 @@ Legacy `server.toml`, `user.toml`, and `cli.toml` are ignored with a warning. Re
 
 | Scope | Examples |
 |---|---|
-| Server-owned | `storage_dir`, `max_concurrent_runs`, `[web]`, `[api]`, `[features]` |
-| Shared with CLI and workflow defaults | `[llm]`, `[log]`, `[git]`, `[setup]`, `[sandbox]`, `[checkpoint]`, `[vars]`, `[pull_request]` |
+| Server-owned (runtime-only from local `settings.toml`) | `[server.listen]`, `[server.api]`, `[server.web]`, `[server.auth]`, `[server.storage]`, `[server.artifacts]`, `[server.slatedb]`, `[server.scheduler]`, `[server.logging]`, `[server.integrations]`, `[features]` |
+| Shared run defaults (layered through `fabro.toml`/`workflow.toml`) | `[run.model]`, `[run.prepare]`, `[run.sandbox]`, `[run.checkpoint]`, `[run.inputs]`, `[run.pull_request]`, `[run.git]`, `[run.hooks]`, `[run.agent]` |
 
-The CLI-only `[server]` section still belongs in the client machine's `settings.toml`. It tells CLI commands where to find a server. The server process does not read `[server].target` for its own binding or routing.
+The CLI-only `[cli.*]` sections (including `[cli.target]`) belong in the client machine's `settings.toml`. They tell CLI commands how to reach a server. The server process does not read `[cli.*]` for its own binding or routing.
 
 ### Full reference
 
 ```toml title="settings.toml"
-# Maximum concurrent workflow runs (default: 5)
-max_concurrent_runs = 8
+_version = 1
 
-# Override the default data directory (default: ~/.fabro)
-data_dir = "/var/lib/fabro"
+[server.listen]
+type = "tcp"
+address = "0.0.0.0:3000"
 
-[api]
-base_url = "https://fabro.example.com/api/v1"
-
-[api.tls]
+[server.listen.tls]
 cert = "/etc/fabro/tls/cert.pem"
 key = "/etc/fabro/tls/key.pem"
 ca = "/etc/fabro/tls/ca.pem"
 
-# Authentication strategies (array of Jwt or Mtls)
-[[api.authentication_strategies]]
-type = "Jwt"
+[server.api]
+url = "https://fabro.example.com/api/v1"
 
-[web]
+[server.auth.api.jwt]
+enabled = true
+
+[server.web]
 enabled = true
 url = "https://fabro-web.example.com"
 
-[web.auth]
-provider = "Github"
+[server.auth.web]
 allowed_usernames = ["alice", "bob"]
 
-[git]
-provider = "Github"
+[server.auth.web.providers.github]
+enabled = true
+client_id = "Iv1.abc123"
+
+[server.integrations.github]
 app_id = "123456"
 client_id = "Iv1.abc123"
 
-[log]
+[server.integrations.github.webhooks]
+strategy = "tailscale_funnel"
+
+[server.storage]
+root = "/var/lib/fabro"
+
+[server.scheduler]
+max_concurrent_runs = 8
+
+[server.logging]
 level = "info"
 
-[git.author]
+# Run defaults — applied to every run unless overridden by workflow/project config
+[run.model]
+name = "claude-sonnet-4-5"
+provider = "anthropic"
+fallbacks = ["gemini", "openai"]
+
+[[run.prepare.steps]]
+script = "npm install"
+
+[run.sandbox]
+provider = "daytona"
+
+[run.sandbox.daytona]
+auto_stop_interval = 60
+
+[run.sandbox.daytona.labels]
+team = "platform"
+
+[run.checkpoint]
+exclude_globs = ["**/node_modules/**", "**/.cache/**"]
+
+[run.inputs]
+default_branch = "main"
+
+[run.git.author]
 name = "fabro-bot"
 email = "fabro-bot@company.com"
 
-[git.webhooks]
-strategy = "tailscale_funnel"
-
-# Run defaults — applied to every run unless overridden by workflow/project config
-[llm]
-model = "claude-sonnet-4-5"
-provider = "anthropic"
-
-[llm.fallbacks]
-anthropic = ["gemini", "openai"]
-
-[setup]
-commands = ["npm install"]
-timeout_ms = 120000
-
-[sandbox]
-provider = "daytona"
-
-[sandbox.daytona]
-auto_stop_interval = 60
-
-[sandbox.daytona.labels]
-team = "platform"
-
 [features]
-retros = true
-
-[checkpoint]
-exclude_globs = ["**/node_modules/**", "**/.cache/**"]
-
-[vars]
-default_branch = "main"
+session_sandboxes = true
 ```
 
 ### CLI overrides
@@ -116,36 +120,38 @@ Several `settings.toml` settings can be overridden via `fabro server start` flag
 
 CLI flags take precedence over `settings.toml` values. See [Run Configuration — Precedence](/execution/run-configuration#precedence) for the full resolution order.
 
-### `[web]` section
+### `[server.web]` section
 
 Control the embedded SPA and browser-oriented routes.
 
 | Key | Description | Default |
 |---|---|---|
 | `enabled` | Serve the embedded SPA, `/auth/*`, and the web-only helper endpoints under `/api/v1` | `true` |
-| `url` | External web UI URL used for OAuth redirects | `http://localhost:3000` |
+| `url` | External web UI URL used for OAuth redirects | none (no implicit derivation from `server.listen`) |
 
 When `enabled = false`, the server still exposes the machine API and `/health`, but `/`, `/auth/*`, SPA client routes, `/api/v1/auth/me`, `/api/v1/setup/*`, and `/api/v1/demo/toggle` all return `404`.
 
 ### Run defaults
 
-The `[llm]`, `[setup]`, `[sandbox]`, `[checkpoint]`, and `[vars]` sections in `settings.toml` act as defaults for every run.
+The `[run.*]` sections in `settings.toml` act as defaults for every run.
 
-On a same-machine setup, `settings.toml` is the shared machine-default layer under `workflow.toml` / `run.toml` and `fabro.toml`.
+On a same-machine setup, `settings.toml` is the shared machine-default layer under `workflow.toml` and `fabro.toml`.
 
-On a remote setup, the client bundles workflow, project, and user config into the run manifest. The server then layers those bundled client configs over its own local defaults for run-shaped fields. Server-owned values like `storage_dir`, `[api]`, `[web]`, `[features]`, and `max_concurrent_runs` always come from the server machine's own `settings.toml` or `fabro server start` flags.
+On a remote setup, the client bundles workflow, project, and user config into the run manifest. The server then layers those bundled client configs over its own local defaults for run-shaped fields. Server-owned values like `[server.storage]`, `[server.api]`, `[server.web]`, `[features]`, and `[server.scheduler]` always come from the server machine's own `settings.toml` or `fabro server start` flags.
 
-For `[vars]`, Daytona labels, and checkpoint exclude globs, values are **merged** and the more specific layer wins on key collisions. All other fields use "first non-empty wins" precedence.
+Merge rules follow the normative matrix: `[run.inputs]` replaces wholesale, `[run.sandbox.env]` and `[run.sandbox.daytona.labels]` merge by key, `[run.prepare.steps]` replaces whole-list, and `[[run.hooks]]` merge by optional `id`. Most other fields use "higher-precedence wins" field-wise merging.
 
-### `[log]` section
+### `[server.logging]` section
 
-Configure the default log level without environment variables. Precedence: `FABRO_LOG` env var > `--debug` flag > `[log]` level > `"info"`.
+Configure the default server log level. Precedence: `FABRO_LOG` env var > `--debug` flag > `[server.logging].level` > `"info"`.
 
 | Key | Description | Default |
 |---|---|---|
 | `level` | Log level: `error`, `warn`, `info`, `debug`, `trace` | `"info"` |
 
-### `[git.author]` section
+The CLI has its own `[cli.logging]` section.
+
+### `[run.git.author]` section
 
 Customize the git author identity used for checkpoint commits. When not set, defaults to `fabro` / `fabro@local`.
 
@@ -154,19 +160,23 @@ Customize the git author identity used for checkpoint commits. When not set, def
 | `name` | Git author name | `"fabro"` |
 | `email` | Git author email | `"fabro@local"` |
 
-On same-machine setups, the CLI and server read the same `[git.author]`. On remote setups, the server uses its local `settings.toml`.
+### `[server.integrations.github]` section
 
-### `[git.webhooks]` section
+Configure a GitHub App integration. Required fields include `app_id`, `client_id`, and `slug`. Webhook delivery is configured under `[server.integrations.github.webhooks]`:
 
-Enable automatic GitHub webhook delivery via Tailscale funnel. When configured, `fabro server start` binds a local HTTP listener, exposes it through `tailscale funnel`, and updates the GitHub App's webhook URL on startup. Incoming webhooks are verified with HMAC-SHA256.
+```toml title="settings.toml"
+[server.integrations.github]
+app_id = "123456"
+client_id = "Iv1.abc123"
+slug = "fabro-app"
 
-| Key | Description | Values |
-|---|---|---|
-| `strategy` | Webhook delivery method | `"tailscale_funnel"` |
+[server.integrations.github.webhooks]
+strategy = "tailscale_funnel"
+```
 
-Requires a configured GitHub App (`[git]` section with `app_id` and `client_id`) and the `GITHUB_APP_WEBHOOK_SECRET` environment variable.
+When `webhooks.strategy = "tailscale_funnel"` is configured, `fabro server start` binds a local HTTP listener, exposes it through `tailscale funnel`, and updates the GitHub App's webhook URL on startup. Incoming webhooks are verified with HMAC-SHA256. Requires the `GITHUB_APP_WEBHOOK_SECRET` environment variable.
 
-### `[checkpoint]` section
+### `[run.checkpoint]` section
 
 Configure checkpoint behavior for all runs.
 
@@ -174,7 +184,7 @@ Configure checkpoint behavior for all runs.
 |---|---|
 | `exclude_globs` | Glob patterns for files to exclude from checkpoint commits (for example, `["**/node_modules/**"]`) |
 
-Exclude globs from `settings.toml` and run configs are merged (union, deduplicated). See [Run Configuration — Checkpoint](/execution/run-configuration#checkpoint) for per-run configuration.
+`exclude_globs` replaces across layers — the highest-precedence layer wins wholesale. See [Run Configuration — Checkpoint](/execution/run-configuration#runcheckpoint) for per-run configuration.
 
 ### `[features]` section
 
@@ -182,7 +192,6 @@ Toggle experimental or opt-in features. All features default to `false`.
 
 | Key | Description |
 |---|---|
-| `retros` | Enable automatic [retro](/execution/retros) generation after workflow runs (experimental) |
 | `session_sandboxes` | Enable session sandboxes in the web UI |
 
 The same `[features]` section can be set in `fabro.toml` (project-level) to enable features per-project.
