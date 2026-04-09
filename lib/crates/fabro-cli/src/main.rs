@@ -230,7 +230,9 @@ async fn main_inner() -> (String, Result<()>) {
             }
             Commands::Pr(ns) => Box::pin(commands::pr::dispatch(ns, &globals)).await?,
             Commands::Secret(ns) => commands::secret::dispatch(ns, &globals).await?,
-            Commands::Settings(args) => commands::config::execute(&args, &globals).await?,
+            Commands::Settings(args) => {
+                Box::pin(commands::config::execute(&args, &globals)).await?;
+            }
             Commands::Workflow(ns) => commands::workflow::dispatch(ns, &globals)?,
             Commands::Upgrade(args) => {
                 commands::upgrade::run_upgrade(args, &globals).await?;

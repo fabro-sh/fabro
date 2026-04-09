@@ -15,6 +15,7 @@ use fabro_llm::Provider;
 use fabro_model::Catalog;
 use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxProvider, SandboxSpec};
+use fabro_types::settings::v2::SettingsFile;
 use fabro_types::settings::v2::interp::InterpString;
 use fabro_types::settings::v2::run::{
     AgentPermissions, ApprovalMode, DaytonaDockerfileLayer, RunExecutionLayer, RunLayer, RunMode,
@@ -251,7 +252,7 @@ fn manifest_args_layer(args: Option<&types::ManifestArgs>) -> ConfigLayer {
         ..RunLayer::default()
     });
 
-    let mut file = fabro_types::settings::v2::SettingsFile::default();
+    let mut file = SettingsFile::default();
     if let Some(run) = run {
         file.run = Some(run);
     }

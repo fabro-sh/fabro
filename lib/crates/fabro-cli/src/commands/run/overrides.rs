@@ -23,13 +23,13 @@ pub(crate) fn parse_labels(labels: &[String]) -> HashMap<String, String> {
         .collect()
 }
 
-fn model_from_args(model: &Option<String>, provider: &Option<String>) -> Option<RunModelLayer> {
+fn model_from_args(model: Option<&str>, provider: Option<&str>) -> Option<RunModelLayer> {
     if model.is_none() && provider.is_none() {
         return None;
     }
     Some(RunModelLayer {
-        provider: provider.as_deref().map(InterpString::parse),
-        name: model.as_deref().map(InterpString::parse),
+        provider: provider.map(InterpString::parse),
+        name: model.map(InterpString::parse),
         fallbacks: Vec::new(),
     })
 }
@@ -73,7 +73,7 @@ impl TryFrom<&RunArgs> for ConfigLayer {
     type Error = anyhow::Error;
 
     fn try_from(args: &RunArgs) -> Result<Self, Self::Error> {
-        let model = model_from_args(&args.model, &args.provider);
+        let model = model_from_args(args.model.as_deref(), args.provider.as_deref());
         let sandbox = sandbox_layer(
             args.sandbox.map(Into::into),
             sparse_flag(args.preserve_sandbox),
@@ -84,29 +84,29 @@ impl TryFrom<&RunArgs> for ConfigLayer {
             sparse_flag(args.no_retro),
         );
 
+        let mut metadata = parse_labels(&args.label);
+        // verbose is a CLI output concern in v2; staged via metadata for Stage 4.
+        if args.verbose {
+            metadata.insert("fabro.verbose".into(), "true".into());
+        }
+
         let run = RunLayer {
             goal: args.goal.as_deref().map(InterpString::parse),
-            metadata: parse_labels(&args.label),
+            metadata,
             model,
             sandbox,
             execution,
             ..RunLayer::default()
         };
 
-        let mut file = SettingsFile::default();
-        file.run = Some(run);
         // goal_file is not part of v2; fall through to Settings.goal_file via the bridge.
         // Stage 4 consumers that still consult goal_file read it from Settings.
         let _ = &args.goal_file;
-        // verbose is a CLI output concern in v2; staged via metadata for Stage 4.
-        if args.verbose {
-            file.run
-                .as_mut()
-                .unwrap()
-                .metadata
-                .insert("fabro.verbose".into(), "true".into());
-        }
-        Ok(Self::from(file))
+
+        Ok(Self::from(SettingsFile {
+            run: Some(run),
+            ..SettingsFile::default()
+        }))
     }
 }
 
@@ -114,29 +114,30 @@ impl TryFrom<&PreflightArgs> for ConfigLayer {
     type Error = anyhow::Error;
 
     fn try_from(args: &PreflightArgs) -> Result<Self, Self::Error> {
-        let model = model_from_args(&args.model, &args.provider);
+        let model = model_from_args(args.model.as_deref(), args.provider.as_deref());
         let sandbox = args.sandbox.map(|s| RunSandboxLayer {
             provider: Some(SandboxProvider::from(s).to_string()),
             ..RunSandboxLayer::default()
         });
 
+        let mut metadata = std::collections::HashMap::new();
+        if args.verbose {
+            metadata.insert("fabro.verbose".into(), "true".into());
+        }
+
         let run = RunLayer {
             goal: args.goal.as_deref().map(InterpString::parse),
+            metadata,
             model,
             sandbox,
             ..RunLayer::default()
         };
 
-        let mut file = SettingsFile::default();
-        file.run = Some(run);
         let _ = &args.goal_file; // Stage 4 preflight still reads goal_file via Settings bridge.
-        if args.verbose {
-            file.run
-                .as_mut()
-                .unwrap()
-                .metadata
-                .insert("fabro.verbose".into(), "true".into());
-        }
-        Ok(Self::from(file))
+
+        Ok(Self::from(SettingsFile {
+            run: Some(run),
+            ..SettingsFile::default()
+        }))
     }
 }

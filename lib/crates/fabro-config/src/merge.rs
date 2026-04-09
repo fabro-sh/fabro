@@ -5,6 +5,7 @@
 //! sticky merge-by-key where the requirements call for it, splice-capable
 //! string arrays, whole-list replacement for ordered prepare steps, and
 //! ordered hook merging with optional `id` replacement.
+#![allow(clippy::needless_pass_by_value)]
 
 use std::collections::HashMap;
 

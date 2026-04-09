@@ -71,7 +71,7 @@ pub fn resolve_settings(
             let mut stripped_user = user;
             strip_owner_domains(stripped_user.as_v2_mut());
 
-            let server_defaults = server_defaults_layer(server_settings)?;
+            let server_defaults = server_defaults_layer(server_settings);
 
             let mut settings = args
                 .combine(workflow)
@@ -101,13 +101,13 @@ fn strip_owner_domains(file: &mut SettingsFile) {
     file.server = None;
 }
 
-fn server_defaults_layer(settings: &Settings) -> Result<Settings> {
+fn server_defaults_layer(settings: &Settings) -> Settings {
     let mut out = settings.clone();
     // Run manifests carry their own dry-run intent. Do not let a daemon's
     // startup-time fallback mode silently force every submitted run/preflight
     // into simulation.
     out.dry_run = None;
-    Ok(out)
+    out
 }
 
 fn apply_server_defaults(settings: &mut Settings, server: &Settings) {

@@ -10,6 +10,7 @@ use fabro_config::user::active_settings_path;
 use fabro_graphviz::graph::AttrValue;
 use fabro_graphviz::parser;
 use fabro_sandbox::daytona::detect_repo_info;
+use fabro_types::settings::v2::run::DaytonaDockerfileLayer;
 use fabro_types::{RunId, Settings};
 use fabro_workflow::git::{GitSyncStatus, head_sha, sync_status};
 
@@ -327,8 +328,7 @@ fn collect_workflow_config_files(
         .and_then(|daytona| daytona.snapshot.as_ref())
         .and_then(|snapshot| snapshot.dockerfile.as_ref());
 
-    let Some(fabro_types::settings::v2::run::DaytonaDockerfileLayer::Path { path }) = dockerfile
-    else {
+    let Some(DaytonaDockerfileLayer::Path { path }) = dockerfile else {
         return Ok(());
     };
 

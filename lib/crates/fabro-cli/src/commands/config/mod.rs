@@ -80,7 +80,7 @@ async fn merged_config(args: &SettingsArgs) -> anyhow::Result<Settings> {
 }
 
 pub(crate) async fn execute(args: &SettingsArgs, globals: &GlobalArgs) -> anyhow::Result<()> {
-    let config = merged_config(args).await?;
+    let config = Box::pin(merged_config(args)).await?;
     if globals.json {
         print_json_pretty(&config)?;
         return Ok(());
