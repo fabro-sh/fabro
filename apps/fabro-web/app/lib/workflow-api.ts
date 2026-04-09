@@ -1,4 +1,12 @@
-import type { PaginationMeta, RunSettings } from "@qltysh/fabro-api-client";
+import type { PaginationMeta } from "@qltysh/fabro-api-client";
+
+/**
+ * Opaque settings payload returned by `/api/v1/runs/:id/settings`. Mirrors the
+ * v2 `SettingsFile` shape in `lib/crates/fabro-types/src/settings/tree.rs`,
+ * with secret-bearing subtrees dropped before serialization. Treated as a
+ * loose JSON object on the web side — consumers only render it.
+ */
+export type RunSettings = Record<string, unknown>;
 
 export interface WorkflowScheduleSummary {
   expression: string;

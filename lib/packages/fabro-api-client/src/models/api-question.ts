@@ -32,6 +32,10 @@ export interface ApiQuestion {
      * The question text displayed to the user.
      */
     'text': string;
+    /**
+     * Workflow stage identifier that produced the question.
+     */
+    'stage': string;
     'question_type': QuestionType;
     /**
      * Available options for selection-based questions. Empty for freeform questions.
@@ -41,6 +45,14 @@ export interface ApiQuestion {
      * Whether the user may provide freeform text in addition to selecting options.
      */
     'allow_freeform': boolean;
+    /**
+     * Timeout for the question when configured by the workflow.
+     */
+    'timeout_seconds'?: number;
+    /**
+     * Optional contextual text shown alongside the question.
+     */
+    'context_display'?: string;
 }
 
 

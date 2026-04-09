@@ -42,8 +42,6 @@ import type { RunEvent } from '../models';
 // @ts-ignore
 import type { RunProjection } from '../models';
 // @ts-ignore
-import type { RunSettings } from '../models';
-// @ts-ignore
 import type { WriteBlobResponse } from '../models';
 // @ts-ignore
 import type { WriteRunBlobRequest } from '../models';
@@ -481,7 +479,7 @@ export const RunInternalsApiAxiosParamCreator = function (configuration?: Config
             };
         },
         /**
-         * Uploads one or more artifacts for a stage. Intended for trusted internal callers.  The server accepts both: - `application/octet-stream` for single-file uploads with the `filename` query parameter - strict manifest-first `multipart/form-data` uploads documented by `ArtifactBatchUploadManifest`  The generated Rust client currently exposes the octet-stream variant because the OpenAPI code generator in this repo does not support multiple request media types on one operation.
+         * Uploads one or more artifacts for a stage. Intended for trusted internal callers.  The server accepts both: - `application/octet-stream` for single-file uploads with the `filename` query parameter - strict manifest-first `multipart/form-data` uploads documented by `ArtifactBatchUploadManifest`  The generated Rust client currently exposes the octet-stream variant because the OpenAPI code generator in this repo does not support multiple request media types on one operation. 
          * @summary Put Stage Artifact
          * @param {string} id Unique run identifier (ULID).
          * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
@@ -847,7 +845,7 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Uploads one or more artifacts for a stage. Intended for trusted internal callers.  The server accepts both: - `application/octet-stream` for single-file uploads with the `filename` query parameter - strict manifest-first `multipart/form-data` uploads documented by `ArtifactBatchUploadManifest`  The generated Rust client currently exposes the octet-stream variant because the OpenAPI code generator in this repo does not support multiple request media types on one operation.
+         * Uploads one or more artifacts for a stage. Intended for trusted internal callers.  The server accepts both: - `application/octet-stream` for single-file uploads with the `filename` query parameter - strict manifest-first `multipart/form-data` uploads documented by `ArtifactBatchUploadManifest`  The generated Rust client currently exposes the octet-stream variant because the OpenAPI code generator in this repo does not support multiple request media types on one operation. 
          * @summary Put Stage Artifact
          * @param {string} id Unique run identifier (ULID).
          * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
@@ -896,7 +894,7 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async retrieveRunSettings(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunSettings>> {
+        async retrieveRunSettings(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.retrieveRunSettings(id, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.retrieveRunSettings']?.[localVarOperationServerIndex]?.url;
@@ -1028,7 +1026,7 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
             return localVarFp.listStageTurns(id, stageId, pageLimit, pageOffset, options).then((request) => request(axios, basePath));
         },
         /**
-         * Uploads one or more artifacts for a stage. Intended for trusted internal callers.  The server accepts both: - `application/octet-stream` for single-file uploads with the `filename` query parameter - strict manifest-first `multipart/form-data` uploads documented by `ArtifactBatchUploadManifest`  The generated Rust client currently exposes the octet-stream variant because the OpenAPI code generator in this repo does not support multiple request media types on one operation.
+         * Uploads one or more artifacts for a stage. Intended for trusted internal callers.  The server accepts both: - `application/octet-stream` for single-file uploads with the `filename` query parameter - strict manifest-first `multipart/form-data` uploads documented by `ArtifactBatchUploadManifest`  The generated Rust client currently exposes the octet-stream variant because the OpenAPI code generator in this repo does not support multiple request media types on one operation. 
          * @summary Put Stage Artifact
          * @param {string} id Unique run identifier (ULID).
          * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
@@ -1068,7 +1066,7 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        retrieveRunSettings(id: string, options?: RawAxiosRequestConfig): AxiosPromise<RunSettings> {
+        retrieveRunSettings(id: string, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
             return localVarFp.retrieveRunSettings(id, options).then((request) => request(axios, basePath));
         },
         /**
@@ -1201,7 +1199,7 @@ export class RunInternalsApi extends BaseAPI {
     }
 
     /**
-     * Uploads one or more artifacts for a stage. Intended for trusted internal callers.  The server accepts both: - `application/octet-stream` for single-file uploads with the `filename` query parameter - strict manifest-first `multipart/form-data` uploads documented by `ArtifactBatchUploadManifest`  The generated Rust client currently exposes the octet-stream variant because the OpenAPI code generator in this repo does not support multiple request media types on one operation.
+     * Uploads one or more artifacts for a stage. Intended for trusted internal callers.  The server accepts both: - `application/octet-stream` for single-file uploads with the `filename` query parameter - strict manifest-first `multipart/form-data` uploads documented by `ArtifactBatchUploadManifest`  The generated Rust client currently exposes the octet-stream variant because the OpenAPI code generator in this repo does not support multiple request media types on one operation. 
      * @summary Put Stage Artifact
      * @param {string} id Unique run identifier (ULID).
      * @param {string} stageId Identifier of a stage within a run\&#39;s workflow graph, serialized as &#x60;node_id@visit&#x60;.
@@ -1260,3 +1258,4 @@ export class RunInternalsApi extends BaseAPI {
         return RunInternalsApiFp(this.configuration).writeRunBlob(id, body, options).then((request) => request(this.axios, this.basePath));
     }
 }
+
