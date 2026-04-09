@@ -179,7 +179,7 @@ fn run_events(run_dir: &Path) -> Vec<EventEnvelope> {
         .expect("event list response should contain a data array");
     items
         .into_iter()
-        .map(EventEnvelope::from_wire_value)
+        .map(serde_json::from_value)
         .collect::<Result<Vec<_>, _>>()
         .expect("wire event envelope list should parse")
 }

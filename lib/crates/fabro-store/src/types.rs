@@ -83,44 +83,8 @@ impl TryFrom<&EventPayload> for RunEvent {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EventEnvelope {
     pub seq: u32,
+    #[serde(flatten)]
     pub payload: EventPayload,
-}
-
-impl EventEnvelope {
-    pub fn from_wire_value(value: serde_json::Value) -> Result<Self> {
-        let serde_json::Value::Object(mut obj) = value else {
-            return Err(StoreError::InvalidEvent(
-                "wire EventEnvelope must be a JSON object".into(),
-            ));
-        };
-        let seq = obj
-            .remove("seq")
-            .and_then(|value| value.as_u64())
-            .and_then(|value| u32::try_from(value).ok())
-            .ok_or_else(|| {
-                StoreError::InvalidEvent("wire EventEnvelope missing valid seq".into())
-            })?;
-        let run_id = obj
-            .get("run_id")
-            .and_then(|value| value.as_str())
-            .ok_or_else(|| StoreError::InvalidEvent("wire EventEnvelope missing run_id".into()))?
-            .parse()
-            .map_err(|err| StoreError::InvalidEvent(format!("invalid wire run_id: {err}")))?;
-        let payload = EventPayload::new(serde_json::Value::Object(obj), &run_id)?;
-        Ok(Self { seq, payload })
-    }
-
-    pub fn to_wire_value(&self) -> Result<serde_json::Value> {
-        let mut value = self.payload.as_value().clone();
-        let map = value.as_object_mut().ok_or_else(|| {
-            StoreError::InvalidEvent("stored event payload must be a JSON object".into())
-        })?;
-        map.insert(
-            "seq".to_string(),
-            serde_json::Value::Number(u64::from(self.seq).into()),
-        );
-        Ok(value)
-    }
 }
 
 #[cfg(test)]
@@ -160,9 +124,13 @@ mod tests {
         let payload = EventPayload::new(event.to_value().unwrap(), &fixtures::RUN_1).unwrap();
         let envelope = EventEnvelope { seq: 7, payload };
 
-        let wire = envelope.to_wire_value().unwrap();
-        let parsed = EventEnvelope::from_wire_value(wire).unwrap();
+        let wire = serde_json::to_value(&envelope).unwrap();
+        assert_eq!(wire["seq"], 7);
+        assert_eq!(wire["id"], "evt_1");
+        assert_eq!(wire["event"], "run.completed");
+        assert!(wire.get("payload").is_none(), "wire shape must be flat");
 
+        let parsed: EventEnvelope = serde_json::from_value(wire).unwrap();
         assert_eq!(parsed, envelope);
     }
 }

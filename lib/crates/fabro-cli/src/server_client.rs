@@ -72,18 +72,11 @@ impl RunAttachEventStream {
 
     fn buffer_sse_events(&mut self, finalize: bool) -> Result<()> {
         for payload in sse::drain_sse_payloads(&mut self.pending_bytes, finalize) {
-            let value: serde_json::Value = serde_json::from_str(&payload)?;
             self.buffered_events
-                .push_back(EventEnvelope::from_wire_value(value)?);
+                .push_back(serde_json::from_str(&payload)?);
         }
         Ok(())
     }
-}
-
-fn wire_event_envelope_from_generated(value: types::EventEnvelope) -> Result<EventEnvelope> {
-    let value =
-        serde_json::to_value(value).context("failed to serialize generated EventEnvelope")?;
-    EventEnvelope::from_wire_value(value).map_err(Into::into)
 }
 
 pub(crate) use fabro_store::RunProjection;
@@ -414,7 +407,7 @@ impl ServerStoreClient {
             let page_events = parsed
                 .data
                 .into_iter()
-                .map(wire_event_envelope_from_generated)
+                .map(convert_type::<_, EventEnvelope>)
                 .collect::<Result<Vec<EventEnvelope>>>()?;
             let next_page_since_seq = page_events.last().map(|event| event.seq.saturating_add(1));
             all_events.extend(page_events);
