@@ -62,6 +62,7 @@ models/disk-usage-summary-row.ts
 models/error-response-entry.ts
 models/error-response.ts
 models/event-envelope.ts
+models/event-seq.ts
 models/execute-query-request.ts
 models/execute-query-response-rows-inner-inner.ts
 models/execute-query-response.ts
