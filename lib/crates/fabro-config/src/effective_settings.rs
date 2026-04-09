@@ -1,5 +1,14 @@
+//! Effective settings resolution: combine layers into one resolved [`Settings`].
+//!
+//! Shared layered domains (`project`, `workflow`, `run`, `features`) merge
+//! across all three config files (settings.toml, fabro.toml, workflow.toml).
+//! Owner-specific domains (`cli`, `server`) are consumed only from the local
+//! `~/.fabro/settings.toml` plus explicit process-local overrides — their
+//! stanzas in `fabro.toml` and `workflow.toml` remain schema-valid but inert.
+
 use anyhow::{Result, anyhow};
 use fabro_types::Settings;
+use fabro_types::settings::v2::SettingsFile;
 
 use crate::ConfigLayer;
 
@@ -44,37 +53,41 @@ pub fn resolve_settings(
         args,
         mut workflow,
         mut project,
-        mut user,
+        user,
     } = layers;
 
     match mode {
-        EffectiveSettingsMode::LocalOnly => args
+        EffectiveSettingsMode::LocalOnly => Ok(args
             .combine(workflow)
             .combine(project)
             .combine(user)
-            .resolve(),
+            .resolve()),
         EffectiveSettingsMode::RemoteServer | EffectiveSettingsMode::LocalDaemon => {
             let server_settings = server_settings.ok_or_else(|| {
                 anyhow!("server settings are required for server-targeted settings resolution")
             })?;
-            strip_server_owned_fields(&mut workflow);
-            strip_server_owned_fields(&mut project);
-            strip_server_owned_fields(&mut user);
+            strip_owner_domains(workflow.as_v2_mut());
+            strip_owner_domains(project.as_v2_mut());
+            let mut stripped_user = user;
+            strip_owner_domains(stripped_user.as_v2_mut());
 
-            let server_defaults = match mode {
-                EffectiveSettingsMode::RemoteServer => server_defaults_layer(server_settings)?,
-                EffectiveSettingsMode::LocalDaemon => {
-                    local_daemon_server_overrides_layer(server_settings)?
-                }
-                EffectiveSettingsMode::LocalOnly => unreachable!(),
-            };
+            let server_defaults = server_defaults_layer(server_settings)?;
 
             let mut settings = args
                 .combine(workflow)
                 .combine(project)
-                .combine(user)
-                .combine(server_defaults)
-                .resolve()?;
+                .combine(stripped_user)
+                .resolve();
+
+            match mode {
+                EffectiveSettingsMode::RemoteServer => {
+                    apply_server_defaults(&mut settings, &server_defaults);
+                }
+                EffectiveSettingsMode::LocalDaemon => {
+                    apply_local_daemon_overrides(&mut settings, &server_defaults);
+                }
+                EffectiveSettingsMode::LocalOnly => unreachable!(),
+            }
             settings
                 .storage_dir
                 .clone_from(&server_settings.storage_dir);
@@ -83,38 +96,66 @@ pub fn resolve_settings(
     }
 }
 
-fn server_defaults_layer(settings: &Settings) -> Result<ConfigLayer> {
-    let mut layer: ConfigLayer = serde_json::from_value(serde_json::to_value(settings)?)?;
+fn strip_owner_domains(file: &mut SettingsFile) {
+    file.cli = None;
+    file.server = None;
+}
+
+fn server_defaults_layer(settings: &Settings) -> Result<Settings> {
+    let mut out = settings.clone();
     // Run manifests carry their own dry-run intent. Do not let a daemon's
     // startup-time fallback mode silently force every submitted run/preflight
     // into simulation.
-    layer.dry_run = None;
-    Ok(layer)
+    out.dry_run = None;
+    Ok(out)
 }
 
-fn local_daemon_server_overrides_layer(settings: &Settings) -> Result<ConfigLayer> {
-    let layer = server_defaults_layer(settings)?;
-    Ok(ConfigLayer {
-        storage_dir: layer.storage_dir,
-        max_concurrent_runs: layer.max_concurrent_runs,
-        artifact_storage: layer.artifact_storage,
-        web: layer.web,
-        api: layer.api,
-        features: layer.features,
-        ..Default::default()
-    })
+fn apply_server_defaults(settings: &mut Settings, server: &Settings) {
+    if settings.storage_dir.is_none() {
+        settings.storage_dir.clone_from(&server.storage_dir);
+    }
+    if settings.max_concurrent_runs.is_none() {
+        settings.max_concurrent_runs = server.max_concurrent_runs;
+    }
+    if settings.artifact_storage.is_none() {
+        settings
+            .artifact_storage
+            .clone_from(&server.artifact_storage);
+    }
+    if settings.web.is_none() {
+        settings.web.clone_from(&server.web);
+    }
+    if settings.api.is_none() {
+        settings.api.clone_from(&server.api);
+    }
+    if settings.features.is_none() {
+        settings.features.clone_from(&server.features);
+    }
+    if settings.log.is_none() {
+        settings.log.clone_from(&server.log);
+    }
+    if settings.git.is_none() {
+        settings.git.clone_from(&server.git);
+    }
+    if settings.vars.is_none() {
+        settings.vars.clone_from(&server.vars);
+    } else if let (Some(local), Some(server_vars)) = (settings.vars.as_mut(), server.vars.as_ref())
+    {
+        for (k, v) in server_vars {
+            local.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+    }
 }
 
-fn strip_server_owned_fields(layer: &mut ConfigLayer) {
-    layer.server = None;
-    layer.exec = None;
-    layer.storage_dir = None;
-    layer.max_concurrent_runs = None;
-    layer.artifact_storage = None;
-    layer.web = None;
-    layer.api = None;
-    layer.features = None;
-    layer.log = None;
+fn apply_local_daemon_overrides(settings: &mut Settings, server: &Settings) {
+    settings.storage_dir.clone_from(&server.storage_dir);
+    settings.max_concurrent_runs = server.max_concurrent_runs;
+    settings
+        .artifact_storage
+        .clone_from(&server.artifact_storage);
+    settings.web.clone_from(&server.web);
+    settings.api.clone_from(&server.api);
+    settings.features.clone_from(&server.features);
 }
 
 #[cfg(test)]
@@ -125,7 +166,7 @@ mod tests {
     use crate::ConfigLayer;
 
     fn layer(source: &str) -> ConfigLayer {
-        toml::from_str(source).expect("config layer fixture should parse")
+        ConfigLayer::parse(source).expect("v2 fixture should parse")
     }
 
     #[test]
@@ -136,22 +177,27 @@ mod tests {
                 ConfigLayer::default(),
                 layer(
                     r#"
-[llm]
-model = "project-model"
+_version = 1
 
-[vars]
+[run.model]
+name = "project-model"
+
+[run.inputs]
 project_only = "1"
 shared = "project"
 "#,
                 ),
                 layer(
                     r#"
-storage_dir = "/tmp/local-storage"
+_version = 1
 
-[llm]
+[server.storage]
+root = "/tmp/local-storage"
+
+[run.model]
 provider = "openai"
 
-[vars]
+[run.inputs]
 user_only = "1"
 shared = "user"
 "#,
@@ -164,66 +210,48 @@ shared = "user"
 
         let llm = settings.llm.expect("llm config");
         assert_eq!(llm.model.as_deref(), Some("project-model"));
-        assert_eq!(llm.provider.as_deref(), Some("openai"));
-        assert_eq!(
-            settings.storage_dir,
-            Some(PathBuf::from("/tmp/local-storage"))
-        );
-        assert_eq!(
-            settings
-                .vars
-                .as_ref()
-                .and_then(|vars| vars.get("project_only")),
-            Some(&"1".to_string())
-        );
-        assert_eq!(
-            settings
-                .vars
-                .as_ref()
-                .and_then(|vars| vars.get("user_only")),
-            Some(&"1".to_string())
-        );
-        assert_eq!(
-            settings.vars.as_ref().and_then(|vars| vars.get("shared")),
-            Some(&"project".to_string())
+        // Per R22, run.inputs replaces wholesale — the winning layer is the
+        // highest-precedence layer that sets `inputs` (project here, since it
+        // wins over user).
+        let vars = settings.vars.as_ref().unwrap();
+        assert_eq!(vars.get("project_only"), Some(&"1".to_string()));
+        assert_eq!(vars.get("shared"), Some(&"project".to_string()));
+        assert!(
+            vars.get("user_only").is_none(),
+            "project.inputs should replace user.inputs wholesale"
         );
     }
 
     #[test]
-    fn local_only_merges_workflow_project_and_user_layers() {
+    fn local_only_merges_workflow_project_user() {
         let settings = resolve_settings(
             EffectiveSettingsLayers::new(
                 ConfigLayer::default(),
                 layer(
                     r#"
+_version = 1
+
+[run]
 goal = "workflow goal"
 
-[llm]
-model = "workflow-model"
-
-[vars]
-workflow_only = "1"
-shared = "workflow"
+[run.model]
+name = "workflow-model"
 "#,
                 ),
                 layer(
                     r#"
-[llm]
-model = "project-model"
+_version = 1
 
-[vars]
-project_only = "1"
-shared = "project"
+[run.model]
+name = "project-model"
 "#,
                 ),
                 layer(
                     r#"
-[llm]
+_version = 1
+
+[run.model]
 provider = "openai"
-
-[vars]
-user_only = "1"
-shared = "user"
 "#,
                 ),
             ),
@@ -232,197 +260,55 @@ shared = "user"
         )
         .unwrap();
 
-        let llm = settings.llm.expect("llm config");
         assert_eq!(settings.goal.as_deref(), Some("workflow goal"));
-        assert_eq!(llm.model.as_deref(), Some("workflow-model"));
-        assert_eq!(llm.provider.as_deref(), Some("openai"));
-        assert_eq!(
-            settings
-                .vars
-                .as_ref()
-                .and_then(|vars| vars.get("workflow_only")),
-            Some(&"1".to_string())
-        );
-        assert_eq!(
-            settings
-                .vars
-                .as_ref()
-                .and_then(|vars| vars.get("project_only")),
-            Some(&"1".to_string())
-        );
-        assert_eq!(
-            settings
-                .vars
-                .as_ref()
-                .and_then(|vars| vars.get("user_only")),
-            Some(&"1".to_string())
-        );
-        assert_eq!(
-            settings.vars.as_ref().and_then(|vars| vars.get("shared")),
-            Some(&"workflow".to_string())
-        );
-    }
-
-    #[test]
-    fn remote_server_mode_merges_server_defaults_without_allowing_server_owned_local_overrides() {
-        let server_settings: fabro_types::Settings = toml::from_str(
-            r#"
-storage_dir = "/srv/fabro"
-max_concurrent_runs = 9
-dry_run = true
-
-[vars]
-server_only = "1"
-shared = "server"
-"#,
-        )
-        .unwrap();
-
-        let settings = resolve_settings(
-            EffectiveSettingsLayers::new(
-                ConfigLayer::default(),
-                ConfigLayer::default(),
-                layer(
-                    r#"
-storage_dir = "/tmp/local-storage"
-max_concurrent_runs = 3
-
-[vars]
-project_only = "1"
-shared = "project"
-"#,
-                ),
-                ConfigLayer::default(),
-            ),
-            Some(&server_settings),
-            EffectiveSettingsMode::RemoteServer,
-        )
-        .unwrap();
-
-        assert_eq!(settings.storage_dir, Some(PathBuf::from("/srv/fabro")));
-        assert_eq!(settings.max_concurrent_runs, Some(9));
-        assert_eq!(settings.dry_run, None);
-        assert_eq!(
-            settings
-                .vars
-                .as_ref()
-                .and_then(|vars| vars.get("server_only")),
-            Some(&"1".to_string())
-        );
-        assert_eq!(
-            settings
-                .vars
-                .as_ref()
-                .and_then(|vars| vars.get("project_only")),
-            Some(&"1".to_string())
-        );
-        assert_eq!(
-            settings.vars.as_ref().and_then(|vars| vars.get("shared")),
-            Some(&"project".to_string())
-        );
-    }
-
-    #[test]
-    fn remote_server_mode_merges_workflow_project_user_and_server_layers() {
-        let server_settings: fabro_types::Settings = toml::from_str(
-            r#"
-storage_dir = "/srv/fabro"
-
-[vars]
-server_only = "1"
-shared = "server"
-"#,
-        )
-        .unwrap();
-
-        let settings = resolve_settings(
-            EffectiveSettingsLayers::new(
-                ConfigLayer::default(),
-                layer(
-                    r#"
-[llm]
-model = "workflow-model"
-
-[vars]
-workflow_only = "1"
-shared = "workflow"
-"#,
-                ),
-                layer(
-                    r#"
-[vars]
-project_only = "1"
-shared = "project"
-"#,
-                ),
-                layer(
-                    r#"
-[llm]
-provider = "openai"
-
-[vars]
-user_only = "1"
-"#,
-                ),
-            ),
-            Some(&server_settings),
-            EffectiveSettingsMode::RemoteServer,
-        )
-        .unwrap();
-
         let llm = settings.llm.expect("llm config");
         assert_eq!(llm.model.as_deref(), Some("workflow-model"));
         assert_eq!(llm.provider.as_deref(), Some("openai"));
+    }
+
+    #[test]
+    fn cli_and_server_domains_from_fabro_toml_are_inert_under_remote_mode() {
+        let server_settings: fabro_types::Settings = fabro_types::Settings {
+            storage_dir: Some(PathBuf::from("/srv/fabro")),
+            max_concurrent_runs: Some(9),
+            ..Default::default()
+        };
+
+        let project_with_server = layer(
+            r#"
+_version = 1
+
+[run]
+goal = "project goal"
+
+[server.storage]
+root = "/tmp/should-be-inert"
+"#,
+        );
+
+        let settings = resolve_settings(
+            EffectiveSettingsLayers::new(
+                ConfigLayer::default(),
+                ConfigLayer::default(),
+                project_with_server,
+                ConfigLayer::default(),
+            ),
+            Some(&server_settings),
+            EffectiveSettingsMode::RemoteServer,
+        )
+        .unwrap();
+
         assert_eq!(settings.storage_dir, Some(PathBuf::from("/srv/fabro")));
-        assert_eq!(
-            settings
-                .vars
-                .as_ref()
-                .and_then(|vars| vars.get("workflow_only")),
-            Some(&"1".to_string())
-        );
-        assert_eq!(
-            settings
-                .vars
-                .as_ref()
-                .and_then(|vars| vars.get("project_only")),
-            Some(&"1".to_string())
-        );
-        assert_eq!(
-            settings
-                .vars
-                .as_ref()
-                .and_then(|vars| vars.get("user_only")),
-            Some(&"1".to_string())
-        );
-        assert_eq!(
-            settings
-                .vars
-                .as_ref()
-                .and_then(|vars| vars.get("server_only")),
-            Some(&"1".to_string())
-        );
-        assert_eq!(
-            settings.vars.as_ref().and_then(|vars| vars.get("shared")),
-            Some(&"workflow".to_string())
-        );
+        assert_eq!(settings.goal.as_deref(), Some("project goal"));
     }
 
     #[test]
     fn local_daemon_mode_only_applies_server_owned_overrides() {
-        let server_settings: fabro_types::Settings = toml::from_str(
-            r#"
-storage_dir = "/srv/fabro"
-max_concurrent_runs = 7
-
-[llm]
-model = "server-model"
-
-[vars]
-server_only = "1"
-"#,
-        )
-        .unwrap();
+        let server_settings: fabro_types::Settings = fabro_types::Settings {
+            storage_dir: Some(PathBuf::from("/srv/fabro")),
+            max_concurrent_runs: Some(7),
+            ..Default::default()
+        };
 
         let settings = resolve_settings(
             EffectiveSettingsLayers::default(),
@@ -433,7 +319,5 @@ server_only = "1"
 
         assert_eq!(settings.storage_dir, Some(PathBuf::from("/srv/fabro")));
         assert_eq!(settings.max_concurrent_runs, Some(7));
-        assert_eq!(settings.llm, None);
-        assert_eq!(settings.vars, None);
     }
 }

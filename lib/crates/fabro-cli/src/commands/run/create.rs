@@ -36,7 +36,7 @@ pub(crate) async fn create_run(
         .clone()
         .combine(ConfigLayer::for_workflow(workflow_path, &cwd)?)
         .combine(cli_defaults)
-        .resolve()?;
+        .resolve();
     let run_id = args
         .run_id
         .as_deref()

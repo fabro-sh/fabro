@@ -270,7 +270,7 @@ pub(crate) fn setup_project_fixture(context: &TestContext) -> ProjectFixture {
     let fabro_root = project_dir.join("fabro");
     write_text_file(
         &project_dir.join("fabro.toml"),
-        "version = 1\n[fabro]\nroot = \"fabro/\"\n",
+        "_version = 1\n\n[project]\ndirectory = \"fabro/\"\n",
     );
     std::fs::create_dir_all(fabro_root.join("workflows"))
         .unwrap_or_else(|err| panic!("failed to create {}: {err}", fabro_root.display()));
@@ -306,18 +306,22 @@ pub(crate) fn setup_artifact_run(context: &TestContext) -> WorkspaceRunSetup {
     );
     write_text_file(
         &workspace_dir.join("run.toml"),
-        r#"version = 1
+        r#"_version = 1
+
+[workflow]
 graph = "artifact_run.fabro"
+
+[run]
 goal = "Exercise artifact commands"
 
-[sandbox]
+[run.sandbox]
 provider = "local"
 preserve = true
 
-[sandbox.local]
+[run.sandbox.local]
 worktree_mode = "never"
 
-[artifacts]
+[run.artifacts]
 include = ["assets/**"]
 "#,
     );
@@ -345,15 +349,19 @@ pub(crate) fn setup_local_sandbox_run(context: &TestContext) -> WorkspaceRunSetu
     );
     write_text_file(
         &workspace_dir.join("run.toml"),
-        r#"version = 1
+        r#"_version = 1
+
+[workflow]
 graph = "sandbox_run.fabro"
+
+[run]
 goal = "Exercise sandbox commands"
 
-[sandbox]
+[run.sandbox]
 provider = "local"
 preserve = true
 
-[sandbox.local]
+[run.sandbox.local]
 worktree_mode = "never"
 "#,
     );
@@ -408,7 +416,9 @@ pub(crate) fn add_project_workflow(
     write_text_file(&workflow_dir.join("workflow.fabro"), dot_source);
     write_text_file(
         &workflow_dir.join("workflow.toml"),
-        &format!("version = 1\ngoal = {goal:?}\ngraph = \"workflow.fabro\"\n"),
+        &format!(
+            "_version = 1\n\n[workflow]\ngraph = \"workflow.fabro\"\n\n[run]\ngoal = {goal:?}\n"
+        ),
     );
     workflow_dir
 }
@@ -419,7 +429,9 @@ pub(crate) fn add_user_workflow(context: &TestContext, name: &str, goal: &str) -
         .unwrap_or_else(|err| panic!("failed to create {}: {err}", workflow_dir.display()));
     write_text_file(
         &workflow_dir.join("workflow.toml"),
-        &format!("version = 1\ngoal = {goal:?}\ngraph = \"workflow.fabro\"\n"),
+        &format!(
+            "_version = 1\n\n[workflow]\ngraph = \"workflow.fabro\"\n\n[run]\ngoal = {goal:?}\n"
+        ),
     );
     write_text_file(
         &workflow_dir.join("workflow.fabro"),

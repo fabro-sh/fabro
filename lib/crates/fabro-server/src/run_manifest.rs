@@ -8,14 +8,18 @@ use fabro_config::ConfigLayer;
 use fabro_config::effective_settings;
 use fabro_config::effective_settings::{EffectiveSettingsLayers, EffectiveSettingsMode};
 use fabro_config::project::resolve_working_directory;
-use fabro_config::run::{LlmConfig, parse_run_config};
-use fabro_config::sandbox::{DockerfileSource, SandboxConfig};
+use fabro_config::run::parse_run_config;
 use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_graphviz::render::apply_direction;
 use fabro_llm::Provider;
 use fabro_model::Catalog;
 use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxProvider, SandboxSpec};
+use fabro_types::settings::v2::interp::InterpString;
+use fabro_types::settings::v2::run::{
+    AgentPermissions, ApprovalMode, DaytonaDockerfileLayer, RunExecutionLayer, RunLayer, RunMode,
+    RunModelLayer, RunSandboxLayer,
+};
 use fabro_types::{RunId, Settings};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_validate::Severity;
@@ -200,7 +204,7 @@ fn parse_manifest_config(config: &types::ManifestConfig) -> Result<ConfigLayer> 
     let Some(source) = config.source.as_deref() else {
         return Ok(ConfigLayer::default());
     };
-    toml::from_str(source).map_err(Into::into)
+    ConfigLayer::parse(source)
 }
 
 fn manifest_args_layer(args: Option<&types::ManifestArgs>) -> ConfigLayer {
@@ -208,28 +212,61 @@ fn manifest_args_layer(args: Option<&types::ManifestArgs>) -> ConfigLayer {
         return ConfigLayer::default();
     };
 
-    let llm = (args.model.is_some() || args.provider.is_some()).then(|| LlmConfig {
-        model: args.model.clone(),
-        provider: args.provider.clone(),
-        fallbacks: None,
+    let model = (args.model.is_some() || args.provider.is_some()).then(|| RunModelLayer {
+        provider: args.provider.as_deref().map(InterpString::parse),
+        name: args.model.as_deref().map(InterpString::parse),
+        fallbacks: Vec::new(),
     });
     let sandbox =
-        (args.sandbox.is_some() || args.preserve_sandbox.is_some()).then(|| SandboxConfig {
+        (args.sandbox.is_some() || args.preserve_sandbox.is_some()).then(|| RunSandboxLayer {
             provider: args.sandbox.clone(),
             preserve: args.preserve_sandbox,
-            ..Default::default()
+            ..RunSandboxLayer::default()
         });
 
-    ConfigLayer {
-        llm,
+    let execution_has_any =
+        args.dry_run.is_some() || args.auto_approve.is_some() || args.no_retro.is_some();
+    let execution = execution_has_any.then(|| RunExecutionLayer {
+        mode: args
+            .dry_run
+            .map(|d| if d { RunMode::DryRun } else { RunMode::Normal }),
+        approval: args.auto_approve.map(|a| {
+            if a {
+                ApprovalMode::Auto
+            } else {
+                ApprovalMode::Prompt
+            }
+        }),
+        retros: args.no_retro.map(|nr| !nr),
+    });
+
+    let run_has_any =
+        model.is_some() || sandbox.is_some() || execution.is_some() || !args.label.is_empty();
+
+    let run = run_has_any.then(|| RunLayer {
+        model,
         sandbox,
-        verbose: args.verbose,
-        dry_run: args.dry_run,
-        auto_approve: args.auto_approve,
-        no_retro: args.no_retro,
-        labels: parse_labels(&args.label),
-        ..Default::default()
+        execution,
+        metadata: parse_labels(&args.label),
+        ..RunLayer::default()
+    });
+
+    let mut file = fabro_types::settings::v2::SettingsFile::default();
+    if let Some(run) = run {
+        file.run = Some(run);
     }
+
+    // Verbose is a CLI output-verbosity concern in v2, but manifest args
+    // are resolved server-side as run knobs too. For now we store it as a
+    // metadata key so Stage 4 consumers can pick it up via the bridge.
+    if let Some(verbose) = args.verbose {
+        file.run
+            .get_or_insert_with(RunLayer::default)
+            .metadata
+            .insert("fabro.verbose".into(), verbose.to_string());
+    }
+    let _ = AgentPermissions::ReadOnly; // keep unused import alive until Stage 4 wires agent args
+    ConfigLayer::from(file)
 }
 
 fn parse_labels(labels: &[String]) -> HashMap<String, String> {
@@ -246,22 +283,27 @@ fn resolve_manifest_dockerfile(
     files: &HashMap<PathBuf, String>,
 ) -> Result<()> {
     let source = layer
-        .sandbox
+        .as_v2_mut()
+        .run
         .as_mut()
+        .and_then(|run| run.sandbox.as_mut())
         .and_then(|sandbox| sandbox.daytona.as_mut())
         .and_then(|daytona| daytona.snapshot.as_mut())
         .and_then(|snapshot| snapshot.dockerfile.as_mut());
-    let Some(DockerfileSource::Path { path }) = source else {
+    let Some(DaytonaDockerfileLayer::Path { path }) = source else {
         return Ok(());
     };
-    let logical_path =
-        normalize_logical_path(config_path.parent().unwrap_or_else(|| Path::new(".")), path)
-            .ok_or_else(|| anyhow!("unsupported dockerfile reference: {path}"))?;
+    let path_owned = path.clone();
+    let logical_path = normalize_logical_path(
+        config_path.parent().unwrap_or_else(|| Path::new(".")),
+        &path_owned,
+    )
+    .ok_or_else(|| anyhow!("unsupported dockerfile reference: {path_owned}"))?;
     let content = files
         .get(&logical_path)
         .cloned()
         .ok_or_else(|| anyhow!("missing bundled dockerfile: {}", logical_path.display()))?;
-    *source.unwrap() = DockerfileSource::Inline(content);
+    *source.unwrap() = DaytonaDockerfileLayer::Inline(content);
     Ok(())
 }
 

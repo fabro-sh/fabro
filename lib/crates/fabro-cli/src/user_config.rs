@@ -31,22 +31,29 @@ pub(crate) fn settings_layer_with_storage_dir(
 pub(crate) fn load_settings_with_storage_dir(
     storage_dir: Option<&Path>,
 ) -> anyhow::Result<Settings> {
-    settings_layer_with_storage_dir(storage_dir)?.resolve()
+    Ok(settings_layer_with_storage_dir(storage_dir)?.resolve())
 }
 
 pub(crate) fn load_settings_with_config_and_storage_dir(
     config_path: Option<&Path>,
     storage_dir: Option<&Path>,
 ) -> anyhow::Result<Settings> {
-    settings_layer_with_config_and_storage_dir(config_path, storage_dir)?.resolve()
+    Ok(settings_layer_with_config_and_storage_dir(config_path, storage_dir)?.resolve())
 }
 
 pub(crate) fn apply_storage_dir_override(
     mut layer: ConfigLayer,
     storage_dir: Option<&Path>,
 ) -> ConfigLayer {
+    use fabro_types::settings::v2::interp::InterpString;
+    use fabro_types::settings::v2::server::{ServerLayer, ServerStorageLayer};
     if let Some(dir) = storage_dir {
-        layer.storage_dir = Some(dir.to_path_buf());
+        let file = layer.as_v2_mut();
+        let server = file.server.get_or_insert_with(ServerLayer::default);
+        let storage = server
+            .storage
+            .get_or_insert_with(ServerStorageLayer::default);
+        storage.root = Some(InterpString::parse(&dir.display().to_string()));
     }
 
     layer

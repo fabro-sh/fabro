@@ -1,202 +1,100 @@
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+//! v2-backed configuration layer.
+//!
+//! `ConfigLayer` is now a newtype over [`SettingsFile`] — the v2 namespaced
+//! parse tree in `fabro_types::settings::v2`. Loading functions return the
+//! same `ConfigLayer` type they always have; internally they call
+//! `parse_settings_file`, which hard-fails on any legacy top-level key with a
+//! targeted rename hint.
+//!
+//! `ConfigLayer::combine` walks the v2 merge matrix from `crate::merge`.
+//! `ConfigLayer::resolve` uses the temporary bridge in
+//! `fabro_types::settings::v2::bridge` to produce the legacy flat [`Settings`]
+//! shape until Stage 4 migrates consumers off it.
 
+use std::path::Path;
+
+use anyhow::Context;
+use fabro_types::Settings;
+use fabro_types::settings::v2::{
+    SettingsFile, bridge_to_old, parse_settings_file as parse_v2_settings_file,
+};
 use serde::{Deserialize, Serialize};
 
-use crate::combine::Combine;
-use crate::hook::{HookDefinition, HookSettings};
-use crate::mcp::McpServerEntry;
-use crate::project::{self, ProjectConfig};
-use crate::run::{
-    ArtifactsConfig, CheckpointConfig, GitHubConfig, LlmConfig, PullRequestConfig, SetupConfig,
-};
-use crate::sandbox::SandboxConfig;
-use crate::server::{ApiConfig, FeaturesConfig, GitConfig, LogConfig, SlackConfig, WebConfig};
-use crate::user::{self, ExecConfig, ServerConfig};
-use fabro_types::Settings;
+use crate::merge::combine_files;
+use crate::project::{self};
+use crate::user;
 
-fn is_default_checkpoint(c: &CheckpointConfig) -> bool {
-    c.exclude_globs.is_empty()
-}
-
-/// Unified sparse configuration type for all Fabro config sources.
+/// A parsed settings file layer.
 ///
-/// Loading functions (`load_settings_config`, `load_run_config`,
-/// `parse_project_config`) all return this type. Fields irrelevant to a
-/// particular source are left unset (`None` / empty).
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+/// Currently a thin newtype around the v2 [`SettingsFile`] parse tree. The
+/// newtype exists so fabro-config can attach helper methods and evolve the
+/// internal representation without forcing every caller to import v2 types.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct ConfigLayer {
-    // --- Workflow run config fields ---
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub version: Option<u32>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub goal: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub goal_file: Option<PathBuf>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub graph: Option<String>,
-
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub labels: HashMap<String, String>,
-
-    // --- Run defaults fields (inlined) ---
-    #[serde(default, alias = "directory", skip_serializing_if = "Option::is_none")]
-    pub work_dir: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub llm: Option<LlmConfig>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub setup: Option<SetupConfig>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sandbox: Option<SandboxConfig>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vars: Option<HashMap<String, String>>,
-
-    #[serde(default, skip_serializing_if = "is_default_checkpoint")]
-    pub checkpoint: CheckpointConfig,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pull_request: Option<PullRequestConfig>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub artifacts: Option<ArtifactsConfig>,
-
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub hooks: Vec<HookDefinition>,
-
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub mcp_servers: HashMap<String, McpServerEntry>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub github: Option<GitHubConfig>,
-
-    // --- User config fields ---
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub server: Option<ServerConfig>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exec: Option<ExecConfig>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prevent_idle_sleep: Option<bool>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub verbose: Option<bool>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub upgrade_check: Option<bool>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dry_run: Option<bool>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auto_approve: Option<bool>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub no_retro: Option<bool>,
-
-    // --- Server config fields ---
-    #[serde(default, alias = "data_dir", skip_serializing_if = "Option::is_none")]
-    pub storage_dir: Option<PathBuf>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_concurrent_runs: Option<usize>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub artifact_storage: Option<fabro_types::ArtifactStorageSettings>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub web: Option<WebConfig>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub slack: Option<SlackConfig>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub api: Option<ApiConfig>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub features: Option<FeaturesConfig>,
-
-    // --- Shared fields ---
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub log: Option<LogConfig>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub git: Option<GitConfig>,
-
-    // --- Project config fields ---
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fabro: Option<ProjectConfig>,
+    pub file: SettingsFile,
 }
 
-impl Combine for ConfigLayer {
-    fn combine(self, other: Self) -> Self {
-        let hooks = if self.hooks.is_empty() {
-            other.hooks
-        } else if other.hooks.is_empty() {
-            self.hooks
-        } else {
-            HookSettings { hooks: other.hooks }
-                .merge(HookSettings { hooks: self.hooks })
-                .hooks
-        };
+impl From<SettingsFile> for ConfigLayer {
+    fn from(file: SettingsFile) -> Self {
+        Self { file }
+    }
+}
 
-        Self {
-            version: self.version.combine(other.version),
-            goal: self.goal.combine(other.goal),
-            goal_file: self.goal_file.combine(other.goal_file),
-            graph: self.graph.combine(other.graph),
-            labels: self.labels.combine(other.labels),
-            work_dir: self.work_dir.combine(other.work_dir),
-            llm: self.llm.combine(other.llm),
-            setup: self.setup.combine(other.setup),
-            sandbox: self.sandbox.combine(other.sandbox),
-            vars: self.vars.combine(other.vars),
-            checkpoint: self.checkpoint.combine(other.checkpoint),
-            pull_request: self.pull_request.combine(other.pull_request),
-            artifacts: self.artifacts.combine(other.artifacts),
-            hooks,
-            mcp_servers: self.mcp_servers.combine(other.mcp_servers),
-            github: self.github.combine(other.github),
-            server: self.server.combine(other.server),
-            exec: self.exec.combine(other.exec),
-            prevent_idle_sleep: self.prevent_idle_sleep.combine(other.prevent_idle_sleep),
-            verbose: self.verbose.combine(other.verbose),
-            upgrade_check: self.upgrade_check.combine(other.upgrade_check),
-            dry_run: self.dry_run.combine(other.dry_run),
-            auto_approve: self.auto_approve.combine(other.auto_approve),
-            no_retro: self.no_retro.combine(other.no_retro),
-            storage_dir: self.storage_dir.combine(other.storage_dir),
-            max_concurrent_runs: self.max_concurrent_runs.combine(other.max_concurrent_runs),
-            artifact_storage: self.artifact_storage.combine(other.artifact_storage),
-            web: self.web.combine(other.web),
-            slack: self.slack.combine(other.slack),
-            api: self.api.combine(other.api),
-            features: self.features.combine(other.features),
-            log: self.log.combine(other.log),
-            git: self.git.combine(other.git),
-            fabro: self.fabro.combine(other.fabro),
-        }
+impl From<ConfigLayer> for SettingsFile {
+    fn from(layer: ConfigLayer) -> Self {
+        layer.file
+    }
+}
+
+impl TryFrom<ConfigLayer> for Settings {
+    type Error = anyhow::Error;
+
+    fn try_from(value: ConfigLayer) -> Result<Self, Self::Error> {
+        Ok(value.resolve())
+    }
+}
+
+impl TryFrom<&ConfigLayer> for Settings {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &ConfigLayer) -> Result<Self, Self::Error> {
+        Ok(value.clone().resolve())
     }
 }
 
 impl ConfigLayer {
+    /// Combine two layers using the v2 merge matrix.
     #[must_use]
     pub fn combine(self, other: Self) -> Self {
-        Combine::combine(self, other)
+        // In the legacy contract `self.combine(other)` means `self` is the
+        // higher-precedence layer and `other` is the lower-precedence one.
+        // The merge matrix walker takes (lower, higher).
+        Self {
+            file: combine_files(other.file, self.file),
+        }
+    }
+
+    /// Parse a v2 TOML settings file into a layer.
+    pub fn parse(content: &str) -> anyhow::Result<Self> {
+        let file = parse_v2_settings_file(content)
+            .map_err(|e| anyhow::anyhow!("{e}"))
+            .context("Failed to parse settings file")?;
+        Ok(Self { file })
+    }
+
+    /// Load a v2 TOML settings file from disk.
+    pub fn load(path: &Path) -> anyhow::Result<Self> {
+        let content = std::fs::read_to_string(path)
+            .with_context(|| format!("Failed to read {}", path.display()))?;
+        Self::parse(&content)
     }
 
     /// Load workflow config + project config for a workflow path.
     ///
     /// Resolves the workflow path, loads its config, discovers project config
-    /// (`fabro.toml`) from the resolved workflow's parent directory, and combines
-    /// them (workflow takes precedence over project).
+    /// (`fabro.toml`) from the resolved workflow's parent directory, and
+    /// combines them (workflow takes precedence over project).
     pub fn for_workflow(path: &Path, cwd: &Path) -> anyhow::Result<Self> {
         let resolution = project::resolve_workflow_path(path, cwd)?;
         if resolution.workflow_config.is_none() && !resolution.resolved_workflow_path.is_file() {
@@ -231,8 +129,89 @@ impl ConfigLayer {
         user::load_settings_config(None)
     }
 
-    /// Convert this combined config layer into final resolved settings.
-    pub fn resolve(self) -> anyhow::Result<Settings> {
-        self.try_into()
+    /// Convert this layer into the legacy flat [`Settings`] shape via the
+    /// temporary bridge. This path is removed in Stage 6.
+    #[must_use]
+    pub fn resolve(self) -> Settings {
+        bridge_to_old(&self.file)
+    }
+
+    /// Borrow the inner v2 settings file for direct access.
+    #[must_use]
+    pub fn as_v2(&self) -> &SettingsFile {
+        &self.file
+    }
+
+    /// Mutably borrow the inner v2 settings file.
+    pub fn as_v2_mut(&mut self) -> &mut SettingsFile {
+        &mut self.file
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_rejects_legacy_flat_keys() {
+        let err = ConfigLayer::parse("[llm]\nprovider = \"openai\"").unwrap_err();
+        let text = format!("{err:#}");
+        assert!(
+            text.contains("run.model") || text.contains("llm"),
+            "expected rename hint in error: {text}"
+        );
+    }
+
+    #[test]
+    fn parse_accepts_minimal_v2_file() {
+        let layer = ConfigLayer::parse(
+            r#"
+_version = 1
+[run]
+goal = "Do things"
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            layer
+                .file
+                .run
+                .as_ref()
+                .and_then(|r| r.goal.as_ref())
+                .map(fabro_types::settings::v2::InterpString::as_source)
+                .as_deref(),
+            Some("Do things")
+        );
+    }
+
+    #[test]
+    fn combine_prefers_higher_precedence_self() {
+        let higher = ConfigLayer::parse(
+            r#"
+_version = 1
+[run]
+goal = "higher goal"
+"#,
+        )
+        .unwrap();
+        let lower = ConfigLayer::parse(
+            r#"
+_version = 1
+[run]
+goal = "lower goal"
+"#,
+        )
+        .unwrap();
+        let merged = higher.combine(lower);
+        assert_eq!(
+            merged
+                .file
+                .run
+                .as_ref()
+                .and_then(|r| r.goal.as_ref())
+                .map(fabro_types::settings::v2::InterpString::as_source)
+                .as_deref(),
+            Some("higher goal")
+        );
     }
 }

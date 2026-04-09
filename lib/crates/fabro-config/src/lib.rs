@@ -7,6 +7,7 @@ pub mod home;
 pub mod hook;
 pub mod legacy_env;
 pub mod mcp;
+pub mod merge;
 pub mod project;
 pub mod run;
 pub mod sandbox;

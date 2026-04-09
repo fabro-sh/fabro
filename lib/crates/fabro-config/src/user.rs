@@ -1,9 +1,12 @@
+//! User config loading.
+//!
+//! Stage 3 removed the parse-time `ClientTlsConfig`/`ServerConfig`/`ExecConfig`
+//! types; this module now only exposes machine-level settings loading plus
+//! path helpers and a re-export of the resolved user-facing types.
+
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
-
-use anyhow::anyhow;
-use serde::{Deserialize, Serialize};
 
 use crate::config::ConfigLayer;
 use crate::home::Home;
@@ -19,67 +22,6 @@ pub const LEGACY_SERVER_CONFIG_FILENAME: &str = "server.toml";
 pub const FABRO_CONFIG_ENV: &str = "FABRO_CONFIG";
 
 static WARNED_LEGACY_USER_CONFIGS: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
-pub struct ClientTlsConfig {
-    pub cert: Option<PathBuf>,
-    pub key: Option<PathBuf>,
-    pub ca: Option<PathBuf>,
-}
-
-impl TryFrom<ClientTlsConfig> for ClientTlsSettings {
-    type Error = anyhow::Error;
-
-    fn try_from(value: ClientTlsConfig) -> Result<Self, Self::Error> {
-        Ok(Self {
-            cert: value.cert.ok_or_else(|| {
-                anyhow!("server.tls.cert is required when server.tls is configured")
-            })?,
-            key: value.key.ok_or_else(|| {
-                anyhow!("server.tls.key is required when server.tls is configured")
-            })?,
-            ca: value.ca.ok_or_else(|| {
-                anyhow!("server.tls.ca is required when server.tls is configured")
-            })?,
-        })
-    }
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
-pub struct ServerConfig {
-    pub target: Option<String>,
-    pub tls: Option<ClientTlsConfig>,
-}
-
-impl TryFrom<ServerConfig> for ServerSettings {
-    type Error = anyhow::Error;
-
-    fn try_from(value: ServerConfig) -> Result<Self, Self::Error> {
-        Ok(Self {
-            target: value.target,
-            tls: value.tls.map(TryInto::try_into).transpose()?,
-        })
-    }
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, crate::Combine)]
-pub struct ExecConfig {
-    pub provider: Option<String>,
-    pub model: Option<String>,
-    pub permissions: Option<PermissionLevel>,
-    pub output_format: Option<OutputFormat>,
-}
-
-impl From<ExecConfig> for ExecSettings {
-    fn from(value: ExecConfig) -> Self {
-        Self {
-            provider: value.provider,
-            model: value.model,
-            permissions: value.permissions,
-            output_format: value.output_format,
-        }
-    }
-}
 
 pub fn default_settings_path() -> PathBuf {
     Home::from_env().user_config()
@@ -126,15 +68,16 @@ fn should_warn_about_legacy_user_config(path: &Path) -> bool {
         .insert(path.to_path_buf())
 }
 
-/// Load settings config from an explicit path or `~/.fabro/settings.toml`, returning defaults if the
-/// default file doesn't exist. An explicit path that doesn't exist is an error.
+/// Load settings config from an explicit path or `~/.fabro/settings.toml`,
+/// returning defaults if the default file doesn't exist. An explicit path that
+/// doesn't exist is an error.
 #[allow(clippy::print_stderr)]
 pub fn load_settings_config(path: Option<&Path>) -> anyhow::Result<ConfigLayer> {
     if let Some(explicit) = path
         .map(Path::to_path_buf)
         .or_else(|| std::env::var_os(FABRO_CONFIG_ENV).map(PathBuf::from))
     {
-        return crate::load_config_file(Some(&explicit), SETTINGS_CONFIG_FILENAME);
+        return load_v2_layer_from_path(&explicit);
     }
 
     for legacy_path in [
@@ -155,7 +98,16 @@ pub fn load_settings_config(path: Option<&Path>) -> anyhow::Result<ConfigLayer> 
         }
     }
 
-    crate::load_config_file(None, SETTINGS_CONFIG_FILENAME)
+    let default = Home::from_env().root().join(SETTINGS_CONFIG_FILENAME);
+    if default.is_file() {
+        load_v2_layer_from_path(&default)
+    } else {
+        Ok(ConfigLayer::default())
+    }
+}
+
+fn load_v2_layer_from_path(path: &Path) -> anyhow::Result<ConfigLayer> {
+    ConfigLayer::load(path)
 }
 
 #[cfg(test)]

@@ -1,9 +1,13 @@
 use std::collections::HashMap;
 
 use anyhow::Result;
-use fabro_config::run::LlmConfig;
-use fabro_config::{ConfigLayer, sandbox as sandbox_config};
+use fabro_config::ConfigLayer;
 use fabro_sandbox::SandboxProvider;
+use fabro_types::settings::v2::SettingsFile;
+use fabro_types::settings::v2::interp::InterpString;
+use fabro_types::settings::v2::run::{
+    ApprovalMode, RunExecutionLayer, RunLayer, RunMode, RunModelLayer, RunSandboxLayer,
+};
 
 use crate::args::{PreflightArgs, RunArgs};
 
@@ -19,44 +23,90 @@ pub(crate) fn parse_labels(labels: &[String]) -> HashMap<String, String> {
         .collect()
 }
 
+fn model_from_args(model: &Option<String>, provider: &Option<String>) -> Option<RunModelLayer> {
+    if model.is_none() && provider.is_none() {
+        return None;
+    }
+    Some(RunModelLayer {
+        provider: provider.as_deref().map(InterpString::parse),
+        name: model.as_deref().map(InterpString::parse),
+        fallbacks: Vec::new(),
+    })
+}
+
+fn sandbox_layer(
+    sandbox: Option<SandboxProvider>,
+    preserve: Option<bool>,
+) -> Option<RunSandboxLayer> {
+    if sandbox.is_none() && preserve.is_none() {
+        return None;
+    }
+    Some(RunSandboxLayer {
+        provider: sandbox.map(|p| p.to_string()),
+        preserve,
+        ..RunSandboxLayer::default()
+    })
+}
+
+fn execution_layer(
+    dry_run: Option<bool>,
+    auto_approve: Option<bool>,
+    no_retro: Option<bool>,
+) -> Option<RunExecutionLayer> {
+    if dry_run.is_none() && auto_approve.is_none() && no_retro.is_none() {
+        return None;
+    }
+    Some(RunExecutionLayer {
+        mode: dry_run.map(|d| if d { RunMode::DryRun } else { RunMode::Normal }),
+        approval: auto_approve.map(|a| {
+            if a {
+                ApprovalMode::Auto
+            } else {
+                ApprovalMode::Prompt
+            }
+        }),
+        retros: no_retro.map(|nr| !nr),
+    })
+}
+
 impl TryFrom<&RunArgs> for ConfigLayer {
     type Error = anyhow::Error;
 
     fn try_from(args: &RunArgs) -> Result<Self, Self::Error> {
-        let llm = if args.model.is_some() || args.provider.is_some() {
-            Some(LlmConfig {
-                model: args.model.clone(),
-                provider: args.provider.clone(),
-                fallbacks: None,
-            })
-        } else {
-            None
-        };
-        let sandbox = if args.sandbox.is_some() || args.preserve_sandbox {
-            Some(sandbox_config::SandboxConfig {
-                provider: args
-                    .sandbox
-                    .map(Into::into)
-                    .map(|provider: SandboxProvider| provider.to_string()),
-                preserve: sparse_flag(args.preserve_sandbox),
-                ..Default::default()
-            })
-        } else {
-            None
+        let model = model_from_args(&args.model, &args.provider);
+        let sandbox = sandbox_layer(
+            args.sandbox.map(Into::into),
+            sparse_flag(args.preserve_sandbox),
+        );
+        let execution = execution_layer(
+            sparse_flag(args.dry_run),
+            sparse_flag(args.auto_approve),
+            sparse_flag(args.no_retro),
+        );
+
+        let run = RunLayer {
+            goal: args.goal.as_deref().map(InterpString::parse),
+            metadata: parse_labels(&args.label),
+            model,
+            sandbox,
+            execution,
+            ..RunLayer::default()
         };
 
-        Ok(Self {
-            goal: args.goal.clone(),
-            goal_file: args.goal_file.clone(),
-            llm,
-            sandbox,
-            verbose: sparse_flag(args.verbose),
-            dry_run: sparse_flag(args.dry_run),
-            auto_approve: sparse_flag(args.auto_approve),
-            no_retro: sparse_flag(args.no_retro),
-            labels: parse_labels(&args.label),
-            ..Default::default()
-        })
+        let mut file = SettingsFile::default();
+        file.run = Some(run);
+        // goal_file is not part of v2; fall through to Settings.goal_file via the bridge.
+        // Stage 4 consumers that still consult goal_file read it from Settings.
+        let _ = &args.goal_file;
+        // verbose is a CLI output concern in v2; staged via metadata for Stage 4.
+        if args.verbose {
+            file.run
+                .as_mut()
+                .unwrap()
+                .metadata
+                .insert("fabro.verbose".into(), "true".into());
+        }
+        Ok(Self::from(file))
     }
 }
 
@@ -64,27 +114,29 @@ impl TryFrom<&PreflightArgs> for ConfigLayer {
     type Error = anyhow::Error;
 
     fn try_from(args: &PreflightArgs) -> Result<Self, Self::Error> {
-        let llm = if args.model.is_some() || args.provider.is_some() {
-            Some(LlmConfig {
-                model: args.model.clone(),
-                provider: args.provider.clone(),
-                fallbacks: None,
-            })
-        } else {
-            None
-        };
-        let sandbox = args.sandbox.map(|sandbox| sandbox_config::SandboxConfig {
-            provider: Some(SandboxProvider::from(sandbox).to_string()),
-            ..Default::default()
+        let model = model_from_args(&args.model, &args.provider);
+        let sandbox = args.sandbox.map(|s| RunSandboxLayer {
+            provider: Some(SandboxProvider::from(s).to_string()),
+            ..RunSandboxLayer::default()
         });
 
-        Ok(Self {
-            goal: args.goal.clone(),
-            goal_file: args.goal_file.clone(),
-            llm,
+        let run = RunLayer {
+            goal: args.goal.as_deref().map(InterpString::parse),
+            model,
             sandbox,
-            verbose: sparse_flag(args.verbose),
-            ..Default::default()
-        })
+            ..RunLayer::default()
+        };
+
+        let mut file = SettingsFile::default();
+        file.run = Some(run);
+        let _ = &args.goal_file; // Stage 4 preflight still reads goal_file via Settings bridge.
+        if args.verbose {
+            file.run
+                .as_mut()
+                .unwrap()
+                .metadata
+                .insert("fabro.verbose".into(), "true".into());
+        }
+        Ok(Self::from(file))
     }
 }

@@ -6,7 +6,6 @@ use fabro_api::types;
 use fabro_config::ConfigLayer;
 use fabro_config::project::{self, discover_project_config, resolve_workflow_path};
 use fabro_config::run::parse_run_config;
-use fabro_config::sandbox::DockerfileSource;
 use fabro_config::user::active_settings_path;
 use fabro_graphviz::graph::AttrValue;
 use fabro_graphviz::parser;
@@ -51,7 +50,7 @@ pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManif
         .clone()
         .combine(ConfigLayer::for_workflow(&input.workflow, &input.cwd)?)
         .combine(user_layer.clone())
-        .resolve()?;
+        .resolve();
 
     let root_resolution = resolve_workflow_path(&input.workflow, &input.cwd)?;
     let target_path = root_resolution.dot_path.clone();
@@ -320,13 +319,16 @@ fn collect_workflow_config_files(
 ) -> Result<()> {
     let config_layer = parse_run_config(&config.source)?;
     let dockerfile = config_layer
-        .sandbox
+        .as_v2()
+        .run
         .as_ref()
+        .and_then(|run| run.sandbox.as_ref())
         .and_then(|sandbox| sandbox.daytona.as_ref())
         .and_then(|daytona| daytona.snapshot.as_ref())
         .and_then(|snapshot| snapshot.dockerfile.as_ref());
 
-    let Some(DockerfileSource::Path { path }) = dockerfile else {
+    let Some(fabro_types::settings::v2::run::DaytonaDockerfileLayer::Path { path }) = dockerfile
+    else {
         return Ok(());
     };
 
@@ -390,19 +392,16 @@ fn resolve_manifest_goal(
 ) -> Result<Option<types::ManifestGoal>> {
     let working_directory = project::resolve_working_directory(settings, cwd);
 
-    if let Some(goal) = args_layer.goal.as_ref() {
+    if let Some(goal) = args_layer
+        .as_v2()
+        .run
+        .as_ref()
+        .and_then(|r| r.goal.as_ref())
+    {
         return Ok(Some(types::ManifestGoal {
             path: None,
-            text: goal.clone(),
+            text: goal.as_source(),
             type_: types::ManifestGoalType::Value,
-        }));
-    }
-    if let Some(goal_file) = args_layer.goal_file.as_ref() {
-        return Ok(Some(types::ManifestGoal {
-            path: Some(goal_file.display().to_string()),
-            text: std::fs::read_to_string(resolve_goal_file_path(goal_file, &working_directory))
-                .with_context(|| format!("Failed to read {}", goal_file.display()))?,
-            type_: types::ManifestGoalType::File,
         }));
     }
     if let Some(goal) = settings.goal.as_ref() {

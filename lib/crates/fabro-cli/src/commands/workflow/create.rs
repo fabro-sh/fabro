@@ -104,7 +104,7 @@ fn write_workflow_scaffold(
         .with_context(|| format!("failed to write {}", dot_path.display()))?;
 
     let toml_path = workflows_dir.join("workflow.toml");
-    std::fs::write(&toml_path, "version = 1\n")
+    std::fs::write(&toml_path, "_version = 1\n")
         .with_context(|| format!("failed to write {}", toml_path.display()))?;
 
     Ok(vec![dot_path, toml_path])
