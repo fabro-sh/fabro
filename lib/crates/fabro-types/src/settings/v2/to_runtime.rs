@@ -1,22 +1,20 @@
 //! v2 → runtime-type conversion helpers.
 //!
-//! The runtime types in `fabro_types::settings::{mcp,run,sandbox}` are the
-//! shapes that downstream crates (fabro-workflow, fabro-mcp, fabro-sandbox)
-//! still consume at runtime. Each helper here reads the v2 parse tree and
+//! The runtime types in `fabro_types::settings::{run,sandbox}` are the
+//! shapes that downstream crates (fabro-workflow, fabro-sandbox) still
+//! consume at runtime. Each helper here reads the v2 parse tree and
 //! builds the equivalent runtime value.
 //!
-//! Hook bridging has moved to `fabro_hooks::config::bridge_hook`, which
-//! owns its runtime shape. Consumer crates will pull the rest of these
-//! helpers into their own crates in follow-up 6.3b passes.
-
-use std::collections::HashMap;
+//! Hook bridging has moved to `fabro_hooks::config::bridge_hook`; MCP
+//! bridging has moved to `fabro_mcp::config::{bridge_mcps, bridge_mcp_entry}`.
+//! Consumer crates will pull the rest of these helpers into their own
+//! crates in follow-up 6.3b passes.
 
 use super::interp::InterpString;
 use super::run::{
-    McpEntryLayer, MergeStrategy as V2MergeStrategy, RunArtifactsLayer, RunPullRequestLayer,
-    RunSandboxLayer, WorktreeMode as V2WorktreeMode,
+    MergeStrategy as V2MergeStrategy, RunArtifactsLayer, RunPullRequestLayer, RunSandboxLayer,
+    WorktreeMode as V2WorktreeMode,
 };
-use crate::settings::mcp::{McpServerEntry, McpTransport};
 use crate::settings::run::{
     ArtifactsSettings, MergeStrategy as OldMergeStrategy, PullRequestSettings,
 };
@@ -113,95 +111,6 @@ pub fn bridge_pull_request(pr: &RunPullRequestLayer) -> PullRequestSettings {
 pub fn bridge_run_artifacts(artifacts: &RunArtifactsLayer) -> ArtifactsSettings {
     ArtifactsSettings {
         include: artifacts.include.clone(),
-    }
-}
-
-pub fn bridge_mcps(mcps: &HashMap<String, McpEntryLayer>) -> HashMap<String, McpServerEntry> {
-    mcps.iter()
-        .map(|(name, entry)| (name.clone(), bridge_mcp_entry(entry)))
-        .collect()
-}
-
-pub fn bridge_mcp_entry(entry: &McpEntryLayer) -> McpServerEntry {
-    let transport = match entry {
-        McpEntryLayer::Stdio {
-            script,
-            command,
-            env,
-            ..
-        } => {
-            let command_vec: Vec<String> = if let Some(script) = script {
-                vec!["sh".into(), "-c".into(), interp_to_string(script)]
-            } else if let Some(command) = command {
-                command.iter().map(interp_to_string).collect()
-            } else {
-                Vec::new()
-            };
-            McpTransport::Stdio {
-                command: command_vec,
-                env: env
-                    .iter()
-                    .map(|(k, v)| (k.clone(), interp_to_string(v)))
-                    .collect(),
-            }
-        }
-        McpEntryLayer::Http { url, headers, .. } => McpTransport::Http {
-            url: interp_to_string(url),
-            headers: headers
-                .iter()
-                .map(|(k, v)| (k.clone(), interp_to_string(v)))
-                .collect(),
-        },
-        McpEntryLayer::Sandbox {
-            script,
-            command,
-            port,
-            env,
-            ..
-        } => {
-            let command_vec: Vec<String> = if let Some(script) = script {
-                vec!["sh".into(), "-c".into(), interp_to_string(script)]
-            } else if let Some(command) = command {
-                command.iter().map(interp_to_string).collect()
-            } else {
-                Vec::new()
-            };
-            McpTransport::Sandbox {
-                command: command_vec,
-                port: *port,
-                env: env
-                    .iter()
-                    .map(|(k, v)| (k.clone(), interp_to_string(v)))
-                    .collect(),
-            }
-        }
-    };
-
-    let (startup_secs, tool_secs) = match entry {
-        McpEntryLayer::Http {
-            startup_timeout,
-            tool_timeout,
-            ..
-        }
-        | McpEntryLayer::Stdio {
-            startup_timeout,
-            tool_timeout,
-            ..
-        }
-        | McpEntryLayer::Sandbox {
-            startup_timeout,
-            tool_timeout,
-            ..
-        } => (
-            startup_timeout.map_or(10, |d| d.as_std().as_secs()),
-            tool_timeout.map_or(60, |d| d.as_std().as_secs()),
-        ),
-    };
-
-    McpServerEntry {
-        transport,
-        startup_timeout_secs: startup_secs,
-        tool_timeout_secs: tool_secs,
     }
 }
 

@@ -2,9 +2,8 @@ use anyhow::Result;
 use fabro_agent::cli::{OutputFormat, run_with_args, run_with_args_and_client};
 use fabro_llm::client::Client;
 use fabro_llm::providers::FabroServerAdapter;
-use fabro_mcp::config::McpServerSettings;
+use fabro_mcp::config::{McpServerSettings, bridge_mcp_entry};
 use fabro_types::settings::v2::InterpString;
-use fabro_types::settings::v2::to_runtime::bridge_mcp_entry;
 use std::collections::HashMap;
 use std::sync::Arc;
 
