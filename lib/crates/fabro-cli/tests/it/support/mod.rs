@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use assert_cmd::Command;
+use fabro_store::EventEnvelope;
 use fabro_test::TestContext;
 use fabro_types::RunId;
 macro_rules! fabro_json_snapshot {
@@ -58,6 +59,17 @@ pub(crate) fn run_output_filters(context: &TestContext) -> Vec<(String, String)>
 
 pub(crate) fn unique_run_id() -> String {
     RunId::new().to_string()
+}
+
+pub(crate) fn parse_event_envelopes(response: &serde_json::Value) -> Vec<EventEnvelope> {
+    response["data"]
+        .as_array()
+        .expect("event list response should contain a data array")
+        .iter()
+        .cloned()
+        .map(serde_json::from_value)
+        .collect::<Result<Vec<_>, _>>()
+        .expect("wire event envelope list should parse")
 }
 
 pub(crate) struct LightweightCli {

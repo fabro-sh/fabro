@@ -173,15 +173,7 @@ fn run_events(run_dir: &Path) -> Vec<EventEnvelope> {
         storage_dir,
         &format!("/api/v1/runs/{run_id}/events"),
     ));
-    let items = response["data"]
-        .as_array()
-        .cloned()
-        .expect("event list response should contain a data array");
-    items
-        .into_iter()
-        .map(serde_json::from_value)
-        .collect::<Result<Vec<_>, _>>()
-        .expect("wire event envelope list should parse")
+    crate::support::parse_event_envelopes(&response)
 }
 
 macro_rules! sandbox_tests {

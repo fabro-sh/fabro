@@ -34,7 +34,7 @@ use fabro_store::{
     ArtifactStore, Database, EventEnvelope, EventPayload, PendingInterviewRecord, StageId,
 };
 use fabro_types::{
-    ActorKind, ActorRef, EventBody, InterviewQuestionRecord, InterviewQuestionType, RunBlobId,
+    ActorRef, EventBody, InterviewQuestionRecord, InterviewQuestionType, RunBlobId,
     RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance, RunServerProvenance,
     RunSubjectProvenance, Settings,
 };
@@ -5155,12 +5155,7 @@ async fn append_control_request(
 }
 
 fn actor_from_subject(subject: &AuthenticatedSubject) -> Option<ActorRef> {
-    let login = subject.login.clone()?;
-    Some(ActorRef {
-        kind: ActorKind::User,
-        id: Some(login.clone()),
-        display: Some(login),
-    })
+    subject.login.clone().map(ActorRef::user)
 }
 
 fn schedule_worker_kill(state: Arc<AppState>, run_id: RunId, worker_pid: u32) {

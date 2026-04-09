@@ -136,7 +136,6 @@ pub mod keys {
 pub use fabro_core::Context;
 
 use crate::event::StageScope;
-use crate::run_dir::visit_from_context;
 use fabro_graphviz::Fidelity;
 use fabro_types::{ParallelBranchId, StageId};
 
@@ -188,13 +187,7 @@ impl WorkflowContext for Context {
         let node_id = self
             .get(keys::CURRENT_NODE)
             .and_then(|value| value.as_str().map(String::from))?;
-        let visit = u32::try_from(visit_from_context(self)).unwrap_or(u32::MAX);
-        Some(StageScope {
-            node_id,
-            visit,
-            parallel_group_id: self.parallel_group_id(),
-            parallel_branch_id: self.parallel_branch_id(),
-        })
+        Some(StageScope::from_context(self, node_id))
     }
 }
 

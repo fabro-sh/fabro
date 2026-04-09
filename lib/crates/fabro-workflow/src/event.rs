@@ -1435,12 +1435,12 @@ fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
 }
 
 fn actor_from_provenance(provenance: &RunProvenance) -> Option<ActorRef> {
-    let login = provenance.subject.as_ref()?.login.clone()?;
-    Some(ActorRef {
-        kind: ActorKind::User,
-        id: Some(login.clone()),
-        display: Some(login),
-    })
+    provenance
+        .subject
+        .as_ref()?
+        .login
+        .clone()
+        .map(ActorRef::user)
 }
 
 fn agent_tool_call_id(event: &AgentEvent) -> Option<&str> {
@@ -2475,18 +2475,25 @@ pub struct StageScope {
 }
 
 impl StageScope {
-    /// Build scope for a handler invocation. Prefers the current_stage_scope
-    /// set by the fidelity lifecycle before_attempt hook, but falls back to
-    /// a scope synthesized from the node id and the context's visit count
-    /// for tests and other direct-handler call sites that don't go through
-    /// the full lifecycle.
-    pub fn for_handler(context: &WfContext, node_id: impl Into<String>) -> Self {
-        context.current_stage_scope().unwrap_or_else(|| Self {
+    /// Build a scope from the given node id, sourcing visit count and parallel
+    /// ids from the current context.
+    pub fn from_context(context: &WfContext, node_id: impl Into<String>) -> Self {
+        Self {
             node_id: node_id.into(),
             visit: u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX),
             parallel_group_id: context.parallel_group_id(),
             parallel_branch_id: context.parallel_branch_id(),
-        })
+        }
+    }
+
+    /// Build scope for a handler invocation. Prefers the `current_stage_scope`
+    /// seeded by the fidelity lifecycle before_attempt hook, and falls back to
+    /// synthesizing one from `node_id` for direct-handler call sites (tests,
+    /// etc.) that don't go through the full lifecycle.
+    pub fn for_handler(context: &WfContext, node_id: impl Into<String>) -> Self {
+        context
+            .current_stage_scope()
+            .unwrap_or_else(|| Self::from_context(context, node_id))
     }
 }
 

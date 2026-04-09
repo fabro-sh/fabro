@@ -214,12 +214,11 @@ impl Handler for ParallelHandler {
             );
             branch_context.set(
                 keys::INTERNAL_PARALLEL_GROUP_ID,
-                serde_json::to_value(&parallel_group_id).expect("StageId serializes as string"),
+                serde_json::Value::String(parallel_group_id.to_string()),
             );
             branch_context.set(
                 keys::INTERNAL_PARALLEL_BRANCH_ID,
-                serde_json::to_value(&parallel_branch_id)
-                    .expect("ParallelBranchId serializes as string"),
+                serde_json::Value::String(parallel_branch_id.to_string()),
             );
 
             let (branch_sandbox, worktree_path): (Arc<dyn Sandbox>, Option<PathBuf>) = if let (
@@ -280,8 +279,6 @@ impl Handler for ParallelHandler {
             });
         }
 
-        let parent_scope = StageScope::for_handler(context, &node.id);
-
         // --- Fan out: concurrent execution ---
         let mut handles = Vec::new();
         for setup in branch_setups {
@@ -304,7 +301,12 @@ impl Handler for ParallelHandler {
                 .map(|gs| gs.git_author.clone())
                 .unwrap_or_default();
             let group_id = parallel_group_id.clone();
-            let branch_scope = parent_scope.clone();
+            let branch_scope = StageScope {
+                node_id: setup.target_id.clone(),
+                visit: 1,
+                parallel_group_id: Some(group_id.clone()),
+                parallel_branch_id: Some(setup.parallel_branch_id.clone()),
+            };
 
             let handle = tokio::spawn(async move {
                 let _permit = sem
@@ -405,10 +407,13 @@ impl Handler for ParallelHandler {
                     match sha_result {
                         Ok(r) if r.exit_code == 0 => {
                             let sha = r.stdout.trim().to_string();
-                            emitter.emit(&Event::GitCommit {
-                                node_id: Some(setup.target_id.clone()),
-                                sha: sha.clone(),
-                            });
+                            emitter.emit_scoped(
+                                &Event::GitCommit {
+                                    node_id: Some(setup.target_id.clone()),
+                                    sha: sha.clone(),
+                                },
+                                &branch_scope,
+                            );
                             Some(sha)
                         }
                         _ => None,

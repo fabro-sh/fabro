@@ -44,6 +44,17 @@ pub struct ActorRef {
     pub display: Option<String>,
 }
 
+impl ActorRef {
+    #[must_use]
+    pub fn user(login: String) -> Self {
+        Self {
+            kind: ActorKind::User,
+            id: Some(login.clone()),
+            display: Some(login),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunEvent {
     pub id: String,
@@ -677,50 +688,46 @@ impl RunEvent {
     }
 
     pub fn to_value(&self) -> serde_json::Result<Value> {
+        fn insert_opt<T: Serialize>(
+            map: &mut Map<String, Value>,
+            key: &str,
+            value: Option<&T>,
+        ) -> serde_json::Result<()> {
+            if let Some(v) = value {
+                map.insert(key.to_string(), serde_json::to_value(v)?);
+            }
+            Ok(())
+        }
+
         let mut map = Map::new();
-        map.insert("id".to_string(), serde_json::to_value(&self.id)?);
+        map.insert("id".to_string(), Value::String(self.id.clone()));
         map.insert("ts".to_string(), serde_json::to_value(self.ts)?);
         map.insert("run_id".to_string(), serde_json::to_value(self.run_id)?);
         map.insert(
             "event".to_string(),
             Value::String(self.body.event_name().to_string()),
         );
-        if let Some(value) = &self.session_id {
-            map.insert("session_id".to_string(), Value::String(value.clone()));
-        }
-        if let Some(value) = &self.parent_session_id {
-            map.insert(
-                "parent_session_id".to_string(),
-                Value::String(value.clone()),
-            );
-        }
-        if let Some(value) = &self.node_id {
-            map.insert("node_id".to_string(), Value::String(value.clone()));
-        }
-        if let Some(value) = &self.node_label {
-            map.insert("node_label".to_string(), Value::String(value.clone()));
-        }
-        if let Some(value) = &self.stage_id {
-            map.insert("stage_id".to_string(), serde_json::to_value(value)?);
-        }
-        if let Some(value) = &self.parallel_group_id {
-            map.insert(
-                "parallel_group_id".to_string(),
-                serde_json::to_value(value)?,
-            );
-        }
-        if let Some(value) = &self.parallel_branch_id {
-            map.insert(
-                "parallel_branch_id".to_string(),
-                serde_json::to_value(value)?,
-            );
-        }
-        if let Some(value) = &self.tool_call_id {
-            map.insert("tool_call_id".to_string(), Value::String(value.clone()));
-        }
-        if let Some(actor) = &self.actor {
-            map.insert("actor".to_string(), serde_json::to_value(actor)?);
-        }
+        insert_opt(&mut map, "session_id", self.session_id.as_ref())?;
+        insert_opt(
+            &mut map,
+            "parent_session_id",
+            self.parent_session_id.as_ref(),
+        )?;
+        insert_opt(&mut map, "node_id", self.node_id.as_ref())?;
+        insert_opt(&mut map, "node_label", self.node_label.as_ref())?;
+        insert_opt(&mut map, "stage_id", self.stage_id.as_ref())?;
+        insert_opt(
+            &mut map,
+            "parallel_group_id",
+            self.parallel_group_id.as_ref(),
+        )?;
+        insert_opt(
+            &mut map,
+            "parallel_branch_id",
+            self.parallel_branch_id.as_ref(),
+        )?;
+        insert_opt(&mut map, "tool_call_id", self.tool_call_id.as_ref())?;
+        insert_opt(&mut map, "actor", self.actor.as_ref())?;
         map.insert("properties".to_string(), self.body.properties_value()?);
         Ok(Value::Object(map))
     }
