@@ -76,6 +76,8 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
                             event: event.event.clone(),
                             session_id: Some(event.session_id.clone()),
                             parent_session_id: event.parent_session_id.clone(),
+                            parallel_group_id: None,
+                            parallel_branch_id: None,
                         });
                     }
                 })

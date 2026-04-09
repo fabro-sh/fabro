@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use fabro_agent::{Sandbox, WorktreeOptions, WorktreeSandbox};
-use fabro_types::RunId;
+use fabro_types::{RunId, StageId};
 use tokio::sync::Semaphore;
 
 use crate::context::keys;
@@ -152,7 +152,7 @@ impl Handler for ParallelHandler {
         );
 
         let parallel_visit = u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX);
-        let parallel_group_id = format!("{}@{}", node.id, parallel_visit);
+        let parallel_group_id = StageId::new(node.id.clone(), parallel_visit).to_string();
 
         services.emitter.emit(&Event::ParallelStarted {
             node_id: node.id.clone(),
@@ -208,6 +208,15 @@ impl Handler for ParallelHandler {
         for (branch_index, edge) in branches.iter().enumerate() {
             let target_id = edge.to.clone();
             let branch_context = context.fork();
+            let parallel_branch_id = format!("{parallel_group_id}:{branch_index}");
+            branch_context.set(
+                keys::INTERNAL_PARALLEL_GROUP_ID,
+                serde_json::json!(&parallel_group_id),
+            );
+            branch_context.set(
+                keys::INTERNAL_PARALLEL_BRANCH_ID,
+                serde_json::json!(&parallel_branch_id),
+            );
 
             let (branch_sandbox, worktree_path): (Arc<dyn Sandbox>, Option<PathBuf>) = if let (
                 Some(ref gs),
@@ -257,7 +266,6 @@ impl Handler for ParallelHandler {
                 (Arc::clone(&services.sandbox), None)
             };
 
-            let parallel_branch_id = format!("{parallel_group_id}:{branch_index}");
             branch_setups.push(BranchSetup {
                 target_id,
                 branch_index,

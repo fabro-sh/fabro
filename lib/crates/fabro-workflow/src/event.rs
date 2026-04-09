@@ -5,7 +5,8 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use ::fabro_types::run_event as fabro_types;
 use ::fabro_types::{
-    BilledTokenCounts, RunBlobId, RunControlAction, RunEvent, RunId, StageStatus, StatusReason,
+    BilledTokenCounts, RunBlobId, RunControlAction, RunEvent, RunId, StageId, StageStatus,
+    StatusReason,
 };
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -138,6 +139,10 @@ pub enum Event {
         name: String,
         index: usize,
         visit: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parallel_group_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parallel_branch_id: Option<String>,
         handler_type: String,
         attempt: usize,
         max_attempts: usize,
@@ -147,6 +152,10 @@ pub enum Event {
         name: String,
         index: usize,
         visit: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parallel_group_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parallel_branch_id: Option<String>,
         duration_ms: u64,
         status: String,
         preferred_label: Option<String>,
@@ -178,6 +187,10 @@ pub enum Event {
         name: String,
         index: usize,
         visit: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parallel_group_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parallel_branch_id: Option<String>,
         failure: FailureDetail,
         will_retry: bool,
     },
@@ -186,6 +199,10 @@ pub enum Event {
         name: String,
         index: usize,
         visit: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parallel_group_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parallel_branch_id: Option<String>,
         attempt: usize,
         max_attempts: usize,
         delay_ms: u64,
@@ -360,6 +377,10 @@ pub enum Event {
         session_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_session_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parallel_group_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parallel_branch_id: Option<String>,
     },
     SubgraphStarted {
         node_id: String,
@@ -1301,33 +1322,43 @@ fn stored_event_fields(event: &Event) -> StoredEventFields {
             node_id,
             name,
             visit,
+            parallel_group_id,
+            parallel_branch_id,
             ..
         }
         | Event::StageFailed {
             node_id,
             name,
             visit,
+            parallel_group_id,
+            parallel_branch_id,
             ..
         }
         | Event::StageStarted {
             node_id,
             name,
             visit,
+            parallel_group_id,
+            parallel_branch_id,
             ..
         }
         | Event::StageRetrying {
             node_id,
             name,
             visit,
+            parallel_group_id,
+            parallel_branch_id,
             ..
         } => {
             let node_id_str = node_id.clone();
             let node_label = default_node_label(Some(&node_id_str), Some(name.clone()));
-            let stage_id = Some(format!("{node_id_str}@{visit}"));
+            let stage_id = Some(StageId::new(node_id_str.clone(), *visit).to_string());
             StoredEventFields {
                 node_id: Some(node_id_str),
                 node_label,
                 stage_id,
+                parallel_group_id: parallel_group_id.clone(),
+                parallel_branch_id: parallel_branch_id.clone(),
                 ..StoredEventFields::default()
             }
         }
@@ -1335,7 +1366,7 @@ fn stored_event_fields(event: &Event) -> StoredEventFields {
         | Event::ParallelCompleted { node_id, visit, .. } => {
             let node_id_str = node_id.clone();
             let node_label = default_node_label(Some(&node_id_str), None);
-            let parallel_group_id = Some(format!("{node_id_str}@{visit}"));
+            let parallel_group_id = Some(StageId::new(node_id_str.clone(), *visit).to_string());
             StoredEventFields {
                 node_id: Some(node_id_str),
                 node_label,
@@ -1367,10 +1398,12 @@ fn stored_event_fields(event: &Event) -> StoredEventFields {
             event: agent_event,
             session_id,
             parent_session_id,
+            parallel_group_id,
+            parallel_branch_id,
         } => {
             let node_id = Some(stage.clone());
             let node_label = default_node_label(node_id.as_ref(), None);
-            let stage_id = Some(format!("{stage}@{visit}"));
+            let stage_id = Some(StageId::new(stage.clone(), *visit).to_string());
             let tool_call_id = agent_tool_call_id(agent_event).map(str::to_string);
             let actor = agent_actor_for_event(agent_event, session_id.as_deref());
             StoredEventFields {
@@ -1379,6 +1412,8 @@ fn stored_event_fields(event: &Event) -> StoredEventFields {
                 node_id,
                 node_label,
                 stage_id,
+                parallel_group_id: parallel_group_id.clone(),
+                parallel_branch_id: parallel_branch_id.clone(),
                 tool_call_id,
                 actor,
                 ..StoredEventFields::default()
@@ -2859,6 +2894,8 @@ mod tests {
                 name: "Plan".to_string(),
                 index: 0,
                 visit: 1,
+                parallel_group_id: None,
+                parallel_branch_id: None,
                 duration_ms: 5000,
                 status: "success".to_string(),
                 preferred_label: None,
@@ -2899,6 +2936,8 @@ mod tests {
                 name: "Plan".to_string(),
                 index: 0,
                 visit: 1,
+                parallel_group_id: None,
+                parallel_branch_id: None,
                 duration_ms: 5000,
                 status: "success".to_string(),
                 preferred_label: None,
@@ -2934,6 +2973,8 @@ mod tests {
                 name: "Code".to_string(),
                 index: 1,
                 visit: 1,
+                parallel_group_id: None,
+                parallel_branch_id: None,
                 failure: FailureDetail::new(
                     "lint failed",
                     crate::outcome::FailureCategory::Deterministic,
@@ -2963,6 +3004,8 @@ mod tests {
                 },
                 session_id: Some("ses_child".to_string()),
                 parent_session_id: Some("ses_parent".to_string()),
+                parallel_group_id: None,
+                parallel_branch_id: None,
             },
         );
 
@@ -3137,9 +3180,31 @@ mod tests {
                 },
                 session_id: None,
                 parent_session_id: None,
+                parallel_group_id: None,
+                parallel_branch_id: None,
             }),
             "agent.sub.spawned"
         );
+    }
+
+    #[test]
+    fn stage_started_populates_parallel_ids_when_present() {
+        let stored = to_run_event(
+            &fixtures::RUN_1,
+            &Event::StageStarted {
+                node_id: "review".to_string(),
+                name: "review".to_string(),
+                index: 1,
+                visit: 1,
+                parallel_group_id: Some("fanout@2".to_string()),
+                parallel_branch_id: Some("fanout@2:1".to_string()),
+                handler_type: "agent".to_string(),
+                attempt: 1,
+                max_attempts: 1,
+            },
+        );
+        assert_eq!(stored.parallel_group_id.as_deref(), Some("fanout@2"));
+        assert_eq!(stored.parallel_branch_id.as_deref(), Some("fanout@2:1"));
     }
 
     #[test]
@@ -3186,10 +3251,14 @@ mod tests {
                 },
                 session_id: Some("ses_1".to_string()),
                 parent_session_id: None,
+                parallel_group_id: Some("fanout@2".to_string()),
+                parallel_branch_id: Some("fanout@2:0".to_string()),
             },
         );
         assert_eq!(stored.stage_id.as_deref(), Some("code@3"));
         assert_eq!(stored.tool_call_id.as_deref(), Some("call_abc"));
+        assert_eq!(stored.parallel_group_id.as_deref(), Some("fanout@2"));
+        assert_eq!(stored.parallel_branch_id.as_deref(), Some("fanout@2:0"));
     }
 
     #[test]
@@ -3207,6 +3276,8 @@ mod tests {
                 },
                 session_id: Some("ses_agent".to_string()),
                 parent_session_id: None,
+                parallel_group_id: None,
+                parallel_branch_id: None,
             },
         );
         let actor = stored.actor.as_ref().expect("actor set");
