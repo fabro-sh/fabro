@@ -8,8 +8,8 @@ use fabro_server::server::{
     AppState, build_router, create_app_state, create_app_state_with_settings_and_registry_factory,
     spawn_scheduler,
 };
-use fabro_types::settings::v2::SettingsFile;
-use fabro_types::settings::v2::run::{
+use fabro_types::settings::SettingsFile;
+use fabro_types::settings::run::{
     LocalSandboxLayer, RunExecutionLayer, RunLayer, RunMode, RunSandboxLayer, WorktreeMode,
 };
 use tokio::time::sleep;

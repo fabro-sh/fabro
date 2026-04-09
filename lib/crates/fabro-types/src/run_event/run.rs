@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::settings::v2::SettingsFile;
+use crate::settings::SettingsFile;
 use crate::{Graph, RunBlobId, RunControlAction, RunProvenance, StatusReason};
 
 use super::{BilledTokenCounts, RunNoticeLevel};

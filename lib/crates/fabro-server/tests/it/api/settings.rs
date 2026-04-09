@@ -3,7 +3,7 @@ use axum::http::{Request, StatusCode};
 use fabro_config::ConfigLayer;
 use fabro_server::jwt_auth::AuthMode;
 use fabro_server::server::{build_router, create_app_state_with_options};
-use fabro_types::settings::v2::SettingsFile;
+use fabro_types::settings::SettingsFile;
 use tower::ServiceExt;
 
 use crate::helpers::body_json;

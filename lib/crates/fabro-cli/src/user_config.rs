@@ -54,8 +54,8 @@ pub(crate) fn apply_storage_dir_override(
     mut layer: ConfigLayer,
     storage_dir: Option<&Path>,
 ) -> ConfigLayer {
-    use fabro_types::settings::v2::interp::InterpString;
-    use fabro_types::settings::v2::server::{ServerLayer, ServerStorageLayer};
+    use fabro_types::settings::interp::InterpString;
+    use fabro_types::settings::server::{ServerLayer, ServerStorageLayer};
     if let Some(dir) = storage_dir {
         let file = layer.as_v2_mut();
         let server = file.server.get_or_insert_with(ServerLayer::default);
@@ -82,8 +82,8 @@ pub(crate) enum ServerTarget {
 /// http(s) URL or a unix socket path. `tls` is the CLI-side client TLS
 /// settings extracted from `[cli.target.http.tls]`.
 fn cli_target_from_v2(settings: &SettingsFile) -> Option<(String, Option<ClientTlsSettings>)> {
-    use fabro_types::settings::v2::cli::CliTargetLayer;
-    use fabro_types::settings::v2::interp::InterpString;
+    use fabro_types::settings::cli::CliTargetLayer;
+    use fabro_types::settings::interp::InterpString;
 
     let target = settings.cli.as_ref()?.target.as_ref()?;
     match target {

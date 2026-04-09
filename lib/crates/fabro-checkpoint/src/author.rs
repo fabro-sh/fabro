@@ -1,7 +1,7 @@
 use std::fmt::Write;
 
 use fabro_types::settings::InterpString;
-use fabro_types::settings::v2::run::GitAuthorLayer;
+use fabro_types::settings::run::GitAuthorLayer;
 
 /// Resolved git author identity for checkpoint commits.
 #[derive(Debug, Clone, PartialEq)]

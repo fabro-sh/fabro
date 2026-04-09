@@ -413,7 +413,7 @@ impl SettingsFile {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::v2::run::{RunLayer, RunModelLayer};
+    use crate::settings::run::{RunLayer, RunModelLayer};
 
     #[test]
     fn run_goal_str_returns_source_value() {
@@ -453,8 +453,8 @@ mod tests {
 
     #[test]
     fn all_labels_merges_project_workflow_run() {
-        use crate::settings::v2::project::ProjectLayer;
-        use crate::settings::v2::workflow::WorkflowLayer;
+        use crate::settings::project::ProjectLayer;
+        use crate::settings::workflow::WorkflowLayer;
 
         let mut project_metadata = HashMap::new();
         project_metadata.insert("env".into(), "project".into());

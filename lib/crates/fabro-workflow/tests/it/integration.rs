@@ -26,8 +26,8 @@ use fabro_interview::{
 };
 use fabro_llm::provider::Provider;
 use fabro_store::{ArtifactStore, Database};
-use fabro_types::settings::v2::SettingsFile;
-use fabro_types::settings::v2::run::{RunArtifactsLayer, RunLayer};
+use fabro_types::settings::SettingsFile;
+use fabro_types::settings::run::{RunArtifactsLayer, RunLayer};
 use fabro_types::{RunEvent, RunId, StageId};
 use fabro_validate::{Severity, validate, validate_or_raise};
 use fabro_workflow::context::Context;
@@ -6019,7 +6019,7 @@ mod real_llm {
     use async_trait::async_trait;
 
     use fabro_graphviz::graph::Node;
-    use fabro_types::settings::v2::SettingsFile;
+    use fabro_types::settings::SettingsFile;
     use fabro_workflow::context::Context;
     use fabro_workflow::error::FabroError;
     use fabro_workflow::handler::agent::{AgentHandler, CodergenBackend, CodergenResult};
@@ -8091,7 +8091,7 @@ async fn hook_config_merge_run_overrides_by_name() {
 
 // The legacy `Settings`-based TOML parsing tests were deleted in Stage
 // 6.3b. Hook TOML parsing now flows through the v2 `SettingsFile` path,
-// with coverage in `fabro-types::settings::v2::tree::tests` and the
+// with coverage in `fabro-types::settings::tree::tests` and the
 // fabro-cli integration tests under `cmd::config`.
 
 // --- Blocking vs non-blocking behavior ---
@@ -8241,7 +8241,7 @@ async fn hook_sandbox_false_runs_on_host() {
 
 // Prompt and Agent hook TOML parsing: the legacy `Settings`-based
 // variant of this test was deleted in Stage 6.3b; v2 coverage lives in
-// `fabro-types::settings::v2::tree::tests`.
+// `fabro-types::settings::tree::tests`.
 
 // --- Events emitted correctly alongside hooks ---
 

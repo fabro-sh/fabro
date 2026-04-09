@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use fabro_config::Storage;
 use fabro_store::{Database, RunSummary};
 use fabro_types::RunId;
-use fabro_types::settings::v2::SettingsFile;
+use fabro_types::settings::SettingsFile;
 use serde::Serialize;
 
 use crate::operations::make_run_dir;
@@ -397,7 +397,7 @@ mod tests {
 
     use fabro_graphviz::graph::Graph;
     use fabro_store::Database;
-    use fabro_types::settings::v2::SettingsFile;
+    use fabro_types::settings::SettingsFile;
     use fabro_types::{RunStatus, fixtures};
     use object_store::memory::InMemory;
 

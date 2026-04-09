@@ -3,8 +3,8 @@ use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, Provider};
 use fabro_sandbox::SandboxProvider;
 use fabro_store::Database;
-use fabro_types::settings::v2::run::{RunLayer, RunModelLayer};
-use fabro_types::settings::v2::{InterpString, SettingsFile};
+use fabro_types::settings::run::{RunLayer, RunModelLayer};
+use fabro_types::settings::{InterpString, SettingsFile};
 use fabro_types::{RunId, RunProvenance};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -559,7 +559,7 @@ mod tests {
             start -> work -> exit
         }"#;
         let validated = validate_dot(dot, {
-            use fabro_types::settings::v2::run::RunLayer;
+            use fabro_types::settings::run::RunLayer;
             let mut inputs = std::collections::HashMap::new();
             inputs.insert("who".to_string(), toml::Value::String("agent".to_string()));
             SettingsFile {
@@ -765,7 +765,7 @@ mod tests {
                     base_dir: None,
                 },
                 settings: {
-                    use fabro_types::settings::v2::run::{
+                    use fabro_types::settings::run::{
                         RunExecutionLayer, RunLayer, RunMode, RunModelLayer, RunPullRequestLayer,
                     };
                     let mut metadata = HashMap::new();
@@ -871,7 +871,7 @@ mod tests {
                     base_dir: None,
                 },
                 settings: {
-                    use fabro_types::settings::v2::run::{RunExecutionLayer, RunLayer, RunMode};
+                    use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
                     SettingsFile {
                         run: Some(RunLayer {
                             working_dir: Some(InterpString::parse("workspace")),
@@ -947,7 +947,7 @@ mod tests {
     }
 
     fn dry_run_only_settings() -> SettingsFile {
-        use fabro_types::settings::v2::run::{RunExecutionLayer, RunLayer, RunMode};
+        use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
         SettingsFile {
             run: Some(RunLayer {
                 execution: Some(RunExecutionLayer {
@@ -961,8 +961,8 @@ mod tests {
     }
 
     fn dry_run_with_storage(storage_dir: &Path) -> SettingsFile {
-        use fabro_types::settings::v2::run::{RunExecutionLayer, RunLayer, RunMode};
-        use fabro_types::settings::v2::server::{ServerLayer, ServerStorageLayer};
+        use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
+        use fabro_types::settings::server::{ServerLayer, ServerStorageLayer};
         SettingsFile {
             run: Some(RunLayer {
                 execution: Some(RunExecutionLayer {

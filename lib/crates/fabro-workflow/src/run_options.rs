@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use fabro_types::RunId;
-use fabro_types::settings::v2::SettingsFile;
-use fabro_types::settings::v2::run::RunPullRequestLayer;
+use fabro_types::settings::SettingsFile;
+use fabro_types::settings::run::RunPullRequestLayer;
 
 use crate::git::{GitAuthor, git_author_from_settings};
 

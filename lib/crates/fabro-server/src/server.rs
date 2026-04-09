@@ -33,7 +33,7 @@ use fabro_model::{BilledModelUsage, BilledTokenCounts};
 use fabro_store::{
     ArtifactStore, Database, EventEnvelope, EventPayload, PendingInterviewRecord, StageId,
 };
-use fabro_types::settings::v2::{InterpString, SettingsFile};
+use fabro_types::settings::{InterpString, SettingsFile};
 use fabro_types::{
     EventBody, InterviewQuestionRecord, InterviewQuestionType, RunBlobId, RunClientProvenance,
     RunControlAction, RunEvent, RunId, RunProvenance, RunServerProvenance, RunSubjectProvenance,
@@ -5911,7 +5911,7 @@ mod tests {
     }"#;
 
     fn dry_run_settings() -> SettingsFile {
-        use fabro_types::settings::v2::run::{RunExecutionLayer, RunLayer, RunMode};
+        use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
         SettingsFile {
             run: Some(RunLayer {
                 execution: Some(RunExecutionLayer {

@@ -5,7 +5,7 @@ use crate::command_context::CommandContext;
 use fabro_config::ConfigLayer;
 use fabro_config::Storage;
 use fabro_types::RunId;
-use fabro_types::settings::v2::SettingsFile;
+use fabro_types::settings::SettingsFile;
 use fabro_util::terminal::Styles;
 
 use super::output::{api_diagnostics_to_local, print_preflight_workflow_summary};

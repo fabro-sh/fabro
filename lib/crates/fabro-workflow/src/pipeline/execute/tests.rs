@@ -13,7 +13,7 @@ use fabro_hooks::HookSettings;
 use fabro_interview::AutoApproveInterviewer;
 use fabro_sandbox::SandboxSpec;
 use fabro_store::Database;
-use fabro_types::settings::v2::SettingsFile;
+use fabro_types::settings::SettingsFile;
 use fabro_types::{RunId, fixtures};
 use object_store::memory::InMemory;
 

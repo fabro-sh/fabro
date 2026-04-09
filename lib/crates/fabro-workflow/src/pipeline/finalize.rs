@@ -306,7 +306,7 @@ mod tests {
 
     use fabro_graphviz::graph::Graph;
     use fabro_store::Database;
-    use fabro_types::settings::v2::SettingsFile;
+    use fabro_types::settings::SettingsFile;
     use fabro_types::{RunId, fixtures};
     use object_store::memory::InMemory;
 

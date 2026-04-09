@@ -297,7 +297,7 @@ mod tests {
 
     use chrono::{DateTime, Utc};
     use fabro_store::{Database, EventEnvelope, EventPayload};
-    use fabro_types::settings::v2::SettingsFile;
+    use fabro_types::settings::SettingsFile;
     use fabro_types::{
         AggregateStats, AttrValue, BilledTokenCounts, Checkpoint, Conclusion, Graph,
         NodeStatusRecord, Retro, RunId, RunRecord, RunStatus, RunStatusRecord, SandboxRecord,

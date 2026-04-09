@@ -18,7 +18,7 @@ use crate::run_options::RunOptions;
 use async_trait::async_trait;
 use fabro_graphviz::graph::{AttrValue, Graph, Node};
 use fabro_store::{ArtifactStore, Database};
-use fabro_types::settings::v2::SettingsFile;
+use fabro_types::settings::SettingsFile;
 use object_store::memory::InMemory;
 use tokio::time::{sleep, timeout};
 

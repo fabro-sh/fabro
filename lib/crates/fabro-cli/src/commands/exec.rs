@@ -3,7 +3,7 @@ use fabro_agent::cli::{OutputFormat, run_with_args, run_with_args_and_client};
 use fabro_llm::client::Client;
 use fabro_llm::providers::FabroServerAdapter;
 use fabro_mcp::config::{McpServerSettings, bridge_mcp_entry};
-use fabro_types::settings::v2::InterpString;
+use fabro_types::settings::InterpString;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -12,7 +12,7 @@ use crate::user_config;
 
 pub(crate) async fn execute(mut args: ExecArgs, globals: &GlobalArgs) -> Result<()> {
     use fabro_agent::cli::PermissionLevel as AgentPermissionLevel;
-    use fabro_types::settings::v2::run::AgentPermissions;
+    use fabro_types::settings::run::AgentPermissions;
 
     let cli_settings = user_config::load_settings()?;
     #[cfg(feature = "sleep_inhibitor")]

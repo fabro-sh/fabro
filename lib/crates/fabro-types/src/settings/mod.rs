@@ -39,10 +39,3 @@ pub use splice_array::{SPLICE_MARKER, SpliceArray, SpliceArrayError};
 pub use tree::{ParseError, SettingsFile, parse_settings_file};
 pub use version::{CURRENT_VERSION, SchemaVersion, VersionError, validate_version};
 pub use workflow::WorkflowLayer;
-
-/// Transitional alias for code still using `fabro_types::settings::v2::*`
-/// paths. The whole `v2` namespace is scheduled for removal once the
-/// workspace-wide sweep (Stage 6.5b follow-up) is done.
-pub mod v2 {
-    pub use super::*;
-}

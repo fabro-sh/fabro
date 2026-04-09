@@ -330,7 +330,7 @@ fn settings_local_workflow_name_applies_run_overlay_and_deep_merges() {
         .stdout
         .clone();
 
-    use fabro_types::settings::v2::run::McpEntryLayer;
+    use fabro_types::settings::run::McpEntryLayer;
 
     let cfg = parse_settings(&output);
     assert_eq!(cfg.run_goal_str().as_deref(), Some("demo goal"));

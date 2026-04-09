@@ -1,11 +1,11 @@
 //! Workflow runtime configuration shapes.
 //!
 //! Runtime-side types consumed by the pipeline. The v2 parse tree lives in
-//! `fabro_types::settings::v2::run::{RunPullRequestLayer, MergeStrategy,
+//! `fabro_types::settings::run::{RunPullRequestLayer, MergeStrategy,
 //! RunArtifactsLayer}`. Conversion from v2 lives in [`bridge_pull_request`]
 //! / [`bridge_run_artifacts`].
 
-use fabro_types::settings::v2::run::{
+use fabro_types::settings::run::{
     MergeStrategy as V2MergeStrategy, RunArtifactsLayer, RunPullRequestLayer,
 };
 use serde::{Deserialize, Serialize};

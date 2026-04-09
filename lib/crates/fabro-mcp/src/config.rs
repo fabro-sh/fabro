@@ -1,6 +1,6 @@
 //! MCP server configuration runtime types.
 //!
-//! The v2 parse tree lives in `fabro_types::settings::v2::run::McpEntryLayer`.
+//! The v2 parse tree lives in `fabro_types::settings::run::McpEntryLayer`.
 //! This module owns the runtime shape (flattened, with timeout helpers) that
 //! the MCP client consumes at execution time. Conversion from the v2 shape
 //! lives in [`bridge_mcp_entry`] / [`bridge_mcps`].
@@ -8,8 +8,8 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use fabro_types::settings::v2::InterpString;
-use fabro_types::settings::v2::run::McpEntryLayer;
+use fabro_types::settings::InterpString;
+use fabro_types::settings::run::McpEntryLayer;
 use serde::{Deserialize, Serialize};
 
 #[must_use]

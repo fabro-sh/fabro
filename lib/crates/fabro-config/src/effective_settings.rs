@@ -7,9 +7,9 @@
 //! stanzas in `fabro.toml` and `workflow.toml` remain schema-valid but inert.
 
 use anyhow::{Result, anyhow};
-use fabro_types::settings::v2::SettingsFile;
-use fabro_types::settings::v2::run::{RunExecutionLayer, RunLayer};
-use fabro_types::settings::v2::server::ServerLayer;
+use fabro_types::settings::SettingsFile;
+use fabro_types::settings::run::{RunExecutionLayer, RunLayer};
+use fabro_types::settings::server::ServerLayer;
 
 use crate::ConfigLayer;
 use crate::merge::combine_files;
@@ -177,10 +177,8 @@ fn apply_local_daemon_overrides(mut settings: SettingsFile, server: &SettingsFil
 
 #[cfg(test)]
 mod tests {
-    use fabro_types::settings::v2::InterpString;
-    use fabro_types::settings::v2::server::{
-        ServerLayer, ServerSchedulerLayer, ServerStorageLayer,
-    };
+    use fabro_types::settings::InterpString;
+    use fabro_types::settings::server::{ServerLayer, ServerSchedulerLayer, ServerStorageLayer};
 
     use super::{EffectiveSettingsLayers, EffectiveSettingsMode, resolve_settings};
     use crate::ConfigLayer;
@@ -295,7 +293,7 @@ provider = "openai"
 
     #[test]
     fn cli_and_server_domains_from_fabro_toml_are_inert_under_remote_mode() {
-        let mut server_settings = fabro_types::settings::v2::SettingsFile::default();
+        let mut server_settings = fabro_types::settings::SettingsFile::default();
         server_settings.server = Some(ServerLayer {
             storage: Some(ServerStorageLayer {
                 root: Some(InterpString::parse("/srv/fabro")),
@@ -339,7 +337,7 @@ root = "/tmp/should-be-inert"
 
     #[test]
     fn local_daemon_mode_only_applies_server_owned_overrides() {
-        let mut server_settings = fabro_types::settings::v2::SettingsFile::default();
+        let mut server_settings = fabro_types::settings::SettingsFile::default();
         server_settings.server = Some(ServerLayer {
             storage: Some(ServerStorageLayer {
                 root: Some(InterpString::parse("/srv/fabro")),

@@ -534,7 +534,7 @@ pub async fn initialize(
             build_registry(&options.llm, Arc::clone(&options.interviewer), &env, &graph).await?
         };
     if effective_dry_run {
-        use fabro_types::settings::v2::run::{RunExecutionLayer, RunLayer, RunMode};
+        use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
 
         options.dry_run = true;
         let run = options
@@ -688,7 +688,7 @@ mod tests {
     use fabro_interview::AutoApproveInterviewer;
     use fabro_sandbox::SandboxSpec;
     use fabro_store::Database;
-    use fabro_types::settings::v2::SettingsFile;
+    use fabro_types::settings::SettingsFile;
     use fabro_types::{RunId, fixtures};
     use object_store::memory::InMemory;
 

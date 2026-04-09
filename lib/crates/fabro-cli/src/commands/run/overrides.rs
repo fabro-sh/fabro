@@ -3,10 +3,10 @@ use std::collections::HashMap;
 use anyhow::Result;
 use fabro_config::ConfigLayer;
 use fabro_sandbox::SandboxProvider;
-use fabro_types::settings::v2::SettingsFile;
-use fabro_types::settings::v2::cli::{CliLayer, CliOutputLayer, OutputVerbosity};
-use fabro_types::settings::v2::interp::InterpString;
-use fabro_types::settings::v2::run::{
+use fabro_types::settings::SettingsFile;
+use fabro_types::settings::cli::{CliLayer, CliOutputLayer, OutputVerbosity};
+use fabro_types::settings::interp::InterpString;
+use fabro_types::settings::run::{
     ApprovalMode, RunExecutionLayer, RunLayer, RunMode, RunModelLayer, RunSandboxLayer,
 };
 

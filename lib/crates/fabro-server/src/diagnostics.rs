@@ -465,7 +465,7 @@ async fn check_brave_search(state: &AppState) -> CheckResult {
 }
 
 fn check_crypto(state: &AppState) -> CheckResult {
-    use fabro_types::settings::v2::interp::InterpString;
+    use fabro_types::settings::interp::InterpString;
 
     let settings_file = state
         .settings
@@ -501,7 +501,7 @@ fn check_crypto(state: &AppState) -> CheckResult {
     let mut errors = Vec::new();
 
     if has_mtls {
-        use fabro_types::settings::v2::server::ServerListenLayer;
+        use fabro_types::settings::server::ServerListenLayer;
         let listen_tls = settings_file
             .server
             .as_ref()

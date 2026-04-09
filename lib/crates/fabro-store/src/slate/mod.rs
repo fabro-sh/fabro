@@ -233,7 +233,7 @@ mod tests {
     use super::*;
 
     use chrono::{DateTime, Utc};
-    use fabro_types::settings::v2::SettingsFile;
+    use fabro_types::settings::SettingsFile;
     use fabro_types::{AttrValue, Graph, RunControlAction, RunRecord, RunStatus, StatusReason};
     use futures::TryStreamExt;
     use object_store::memory::InMemory;

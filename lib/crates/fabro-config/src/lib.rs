@@ -17,7 +17,7 @@ pub use storage::{RunScratch, ServerState, Storage};
 
 use std::path::{Path, PathBuf};
 
-use fabro_types::settings::v2::SettingsFile;
+use fabro_types::settings::SettingsFile;
 use serde::de::DeserializeOwned;
 
 /// Resolve the storage directory: v2 `server.storage.root` > home default.

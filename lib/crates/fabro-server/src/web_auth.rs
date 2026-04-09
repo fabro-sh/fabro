@@ -6,7 +6,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::{Json, Router, routing::get, routing::post};
 use cookie::{Cookie, CookieJar, Expiration, Key, SameSite, time::Duration};
-use fabro_types::settings::v2::{InterpString, SettingsFile};
+use fabro_types::settings::{InterpString, SettingsFile};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{debug, error, info, warn};

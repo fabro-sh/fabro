@@ -6,7 +6,7 @@ use fabro_server::server::{
     RouterOptions, build_router, build_router_with_options, create_app_state,
     create_app_state_with_options,
 };
-use fabro_types::settings::v2::SettingsFile;
+use fabro_types::settings::SettingsFile;
 use tower::ServiceExt;
 
 use crate::helpers::body_json;

@@ -1,7 +1,7 @@
 //! Hook configuration runtime types.
 //!
 //! These types are the runtime shape that the hook executor consumes. The
-//! v2 parse tree under `fabro_types::settings::v2::run::HookEntry` is the
+//! v2 parse tree under `fabro_types::settings::run::HookEntry` is the
 //! *config-file* shape; this module lives in `fabro-hooks` because the
 //! behavior methods (`is_blocking`, `timeout`, `resolved_hook_type`,
 //! `runs_in_sandbox`, `effective_name`) are runtime concerns owned by the
@@ -13,8 +13,8 @@
 
 use std::borrow::Cow;
 
-use fabro_types::settings::v2::InterpString;
-use fabro_types::settings::v2::run::{
+use fabro_types::settings::InterpString;
+use fabro_types::settings::run::{
     HookAgentMarker, HookEntry, HookEvent as V2HookEvent, HookTlsMode as V2HookTlsMode,
 };
 use serde::{Deserialize, Serialize};

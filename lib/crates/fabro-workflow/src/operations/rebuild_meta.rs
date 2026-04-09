@@ -335,7 +335,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use fabro_graphviz::graph::Graph;
     use fabro_store::{Database, StageId};
-    use fabro_types::settings::v2::SettingsFile;
+    use fabro_types::settings::SettingsFile;
     use fabro_types::{RunId, RunRecord, SandboxRecord, StartRecord, fixtures};
     use object_store::memory::InMemory;
     use std::collections::HashMap;

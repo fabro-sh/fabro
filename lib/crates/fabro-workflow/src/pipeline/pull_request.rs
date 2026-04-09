@@ -595,7 +595,7 @@ mod tests {
         AggregateStats, FrictionKind, FrictionPoint, OpenItem, OpenItemKind, StageRetro,
     };
     use fabro_store::Database;
-    use fabro_types::settings::v2::SettingsFile;
+    use fabro_types::settings::SettingsFile;
     use fabro_types::{BilledTokenCounts, RunRecord, fixtures};
     use futures::stream;
     use object_store::memory::InMemory;

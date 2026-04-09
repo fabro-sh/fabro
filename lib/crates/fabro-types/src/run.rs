@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::graph::Graph;
 use crate::run_blob_id::RunBlobId;
 use crate::run_id::RunId;
-use crate::settings::v2::SettingsFile;
+use crate::settings::SettingsFile;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

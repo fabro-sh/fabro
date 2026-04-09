@@ -1,7 +1,7 @@
 //! Sandbox configuration runtime types.
 //!
 //! These types are the runtime shape that the sandbox providers consume.
-//! The v2 parse tree lives in `fabro_types::settings::v2::run::RunSandboxLayer`.
+//! The v2 parse tree lives in `fabro_types::settings::run::RunSandboxLayer`.
 //! Conversion from the v2 shape lives in [`bridge_sandbox`].
 //!
 //! The `DaytonaSettings`/`DaytonaSnapshotSettings` names are kept for
@@ -11,8 +11,8 @@
 
 use std::collections::HashMap;
 
-use fabro_types::settings::v2::InterpString;
-use fabro_types::settings::v2::run::{
+use fabro_types::settings::InterpString;
+use fabro_types::settings::run::{
     DaytonaDockerfileLayer, DaytonaNetworkLayer, RunSandboxLayer, WorktreeMode as V2WorktreeMode,
 };
 use serde::de::{self, MapAccess, Visitor};

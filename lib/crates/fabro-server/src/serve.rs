@@ -17,7 +17,7 @@ use tracing::{error, info, warn};
 
 use clap::Args;
 
-use fabro_types::settings::v2::SettingsFile;
+use fabro_types::settings::SettingsFile;
 
 use crate::bind::{self, Bind, BindRequest};
 use crate::github_webhooks::WebhookManager;
@@ -93,12 +93,12 @@ fn apply_serve_overrides(
     args: &ServeArgs,
     dry_run_mode: bool,
 ) -> SettingsFile {
-    use fabro_types::settings::v2::cli::CliLayer;
-    use fabro_types::settings::v2::interp::InterpString;
-    use fabro_types::settings::v2::run::{
+    use fabro_types::settings::cli::CliLayer;
+    use fabro_types::settings::interp::InterpString;
+    use fabro_types::settings::run::{
         RunExecutionLayer, RunLayer, RunMode, RunModelLayer, RunSandboxLayer,
     };
-    use fabro_types::settings::v2::server::{ServerLayer, ServerWebLayer};
+    use fabro_types::settings::server::{ServerLayer, ServerWebLayer};
     let mut settings = base.clone();
     if dry_run_mode {
         let run = settings.run.get_or_insert_with(RunLayer::default);
@@ -136,8 +136,8 @@ fn apply_runtime_settings(
     dry_run_mode: bool,
     data_dir: &Path,
 ) -> SettingsFile {
-    use fabro_types::settings::v2::interp::InterpString;
-    use fabro_types::settings::v2::server::{ServerLayer, ServerStorageLayer};
+    use fabro_types::settings::interp::InterpString;
+    use fabro_types::settings::server::{ServerLayer, ServerStorageLayer};
     let mut settings = apply_serve_overrides(base, args, dry_run_mode);
     let server = settings.server.get_or_insert_with(ServerLayer::default);
     let storage = server
@@ -174,8 +174,8 @@ fn build_artifact_object_store(
     settings: &SettingsFile,
     storage: &Storage,
 ) -> anyhow::Result<(Arc<dyn ObjectStore>, String)> {
-    use fabro_types::settings::v2::interp::InterpString;
-    use fabro_types::settings::v2::server::ObjectStoreProvider;
+    use fabro_types::settings::interp::InterpString;
+    use fabro_types::settings::server::ObjectStoreProvider;
 
     let artifacts = settings.server_artifacts();
     let prefix = artifacts
@@ -349,7 +349,7 @@ where
 
     // Optionally start webhook listener
     let webhook_app_id = {
-        use fabro_types::settings::v2::InterpString;
+        use fabro_types::settings::InterpString;
         let cfg_file = shared_settings.read().expect("config lock poisoned");
         cfg_file
             .server_integrations_github()
@@ -680,7 +680,7 @@ mod tests {
     };
     use crate::bind::Bind;
     use fabro_config::ConfigLayer;
-    use fabro_types::settings::v2::SettingsFile;
+    use fabro_types::settings::SettingsFile;
 
     fn parse_settings(source: &str) -> SettingsFile {
         ConfigLayer::parse(source)

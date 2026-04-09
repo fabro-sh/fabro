@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use fabro_types::settings::v2::SettingsFile;
+use fabro_types::settings::SettingsFile;
 
 use crate::error::FabroError;
 use crate::pipeline::Validated;

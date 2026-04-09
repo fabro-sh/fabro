@@ -55,9 +55,9 @@ mod tests {
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
     use fabro_store::{Database, RunDatabase};
     use fabro_types::fixtures;
-    use fabro_types::settings::v2::SettingsFile;
-    use fabro_types::settings::v2::cli::{CliLayer, CliOutputLayer, OutputVerbosity};
-    use fabro_types::settings::v2::run::{RunExecutionLayer, RunLayer, RunMode};
+    use fabro_types::settings::SettingsFile;
+    use fabro_types::settings::cli::{CliLayer, CliOutputLayer, OutputVerbosity};
+    use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
     use object_store::memory::InMemory;
     use std::sync::Arc;
     use std::time::Duration;

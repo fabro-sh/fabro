@@ -2,7 +2,7 @@ use std::path::Path;
 use std::process::Command;
 
 use fabro_checkpoint::git::Store;
-use fabro_types::settings::v2::SettingsFile;
+use fabro_types::settings::SettingsFile;
 
 use crate::error::{FabroError, Result};
 use tokio::task::{JoinError, spawn_blocking};

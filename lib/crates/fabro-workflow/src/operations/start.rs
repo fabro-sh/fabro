@@ -14,8 +14,8 @@ use fabro_sandbox::config::{
 };
 use fabro_sandbox::{SandboxProvider, SandboxSpec};
 use fabro_types::RunId;
-use fabro_types::settings::v2::run::ModelRefOrSplice;
-use fabro_types::settings::v2::{InterpString, SettingsFile};
+use fabro_types::settings::run::ModelRefOrSplice;
+use fabro_types::settings::{InterpString, SettingsFile};
 
 use crate::config::{PullRequestSettings, bridge_pull_request};
 
@@ -852,7 +852,7 @@ mod tests {
     use chrono::Utc;
     use fabro_store::Database;
     use fabro_types::fixtures;
-    use fabro_types::settings::v2::run::{RunExecutionLayer, RunLayer, RunMode};
+    use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
     use object_store::memory::InMemory;
 
     use super::*;

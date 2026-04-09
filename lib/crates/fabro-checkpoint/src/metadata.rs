@@ -178,7 +178,7 @@ mod tests {
 
     use super::*;
     use chrono::{TimeZone, Utc};
-    use fabro_types::settings::v2::SettingsFile;
+    use fabro_types::settings::SettingsFile;
     use fabro_types::{Graph, fixtures};
 
     /// Create a temporary git repo with an initial commit.

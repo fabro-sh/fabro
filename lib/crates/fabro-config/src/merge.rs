@@ -9,22 +9,22 @@
 
 use std::collections::HashMap;
 
-use fabro_types::settings::v2::cli::{
+use fabro_types::settings::cli::{
     CliExecAgentLayer, CliExecLayer, CliExecModelLayer, CliLayer, CliTargetLayer,
 };
-use fabro_types::settings::v2::project::ProjectLayer;
-use fabro_types::settings::v2::run::{
+use fabro_types::settings::project::ProjectLayer;
+use fabro_types::settings::run::{
     DaytonaSandboxLayer, GitAuthorLayer, HookEntry, InterviewsLayer, ModelRefOrSplice,
     NotificationRouteLayer, RunAgentLayer, RunCheckpointLayer, RunExecutionLayer, RunGitLayer,
     RunLayer, RunModelLayer, RunPrepareLayer, RunPullRequestLayer, RunSandboxLayer, RunScmLayer,
     StringOrSplice,
 };
-use fabro_types::settings::v2::server::{
+use fabro_types::settings::server::{
     ServerArtifactsLayer, ServerAuthLayer, ServerIntegrationsLayer, ServerLayer, ServerListenLayer,
     ServerSchedulerLayer, ServerSlateDbLayer, ServerStorageLayer, ServerWebLayer,
 };
-use fabro_types::settings::v2::tree::SettingsFile;
-use fabro_types::settings::v2::workflow::WorkflowLayer;
+use fabro_types::settings::tree::SettingsFile;
+use fabro_types::settings::workflow::WorkflowLayer;
 
 /// Combine two settings files: `higher` takes precedence over `lower` wherever
 /// the merge matrix does not dictate otherwise.
@@ -479,7 +479,7 @@ fn combine_server_integrations(
 
 #[cfg(test)]
 mod tests {
-    use fabro_types::settings::v2::{InterpString, parse_settings_file};
+    use fabro_types::settings::{InterpString, parse_settings_file};
 
     use super::*;
 

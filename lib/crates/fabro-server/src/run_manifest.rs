@@ -17,10 +17,10 @@ use fabro_sandbox::config::bridge_sandbox;
 use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxProvider, SandboxSpec};
 use fabro_types::RunId;
-use fabro_types::settings::v2::SettingsFile;
-use fabro_types::settings::v2::cli::{CliLayer, CliOutputLayer, OutputVerbosity};
-use fabro_types::settings::v2::interp::InterpString;
-use fabro_types::settings::v2::run::{
+use fabro_types::settings::SettingsFile;
+use fabro_types::settings::cli::{CliLayer, CliOutputLayer, OutputVerbosity};
+use fabro_types::settings::interp::InterpString;
+use fabro_types::settings::run::{
     ApprovalMode, DaytonaDockerfileLayer, RunExecutionLayer, RunLayer, RunMode, RunModelLayer,
     RunSandboxLayer,
 };

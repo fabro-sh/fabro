@@ -11,8 +11,8 @@ use fabro_graphviz::graph::AttrValue;
 use fabro_graphviz::parser;
 use fabro_sandbox::daytona::detect_repo_info;
 use fabro_types::RunId;
-use fabro_types::settings::v2::SettingsFile;
-use fabro_types::settings::v2::run::DaytonaDockerfileLayer;
+use fabro_types::settings::SettingsFile;
+use fabro_types::settings::run::DaytonaDockerfileLayer;
 use fabro_workflow::git::{GitSyncStatus, head_sha, sync_status};
 
 use crate::args::{PreflightArgs, RunArgs};

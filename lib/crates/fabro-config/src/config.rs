@@ -13,7 +13,7 @@
 use std::path::Path;
 
 use anyhow::Context;
-use fabro_types::settings::v2::{SettingsFile, parse_settings_file as parse_v2_settings_file};
+use fabro_types::settings::{SettingsFile, parse_settings_file as parse_v2_settings_file};
 use serde::{Deserialize, Serialize};
 
 use crate::merge::combine_files;
@@ -124,7 +124,7 @@ impl ConfigLayer {
 
 #[cfg(test)]
 mod tests {
-    use fabro_types::settings::v2::InterpString;
+    use fabro_types::settings::InterpString;
 
     use super::*;
 

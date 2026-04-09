@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use fabro_config::project as project_config;
-use fabro_types::settings::v2::{InterpString, SettingsFile};
+use fabro_types::settings::{InterpString, SettingsFile};
 use fabro_util::path::expand_tilde;
 
 use crate::file_resolver::{FileResolver, FilesystemFileResolver};
@@ -168,7 +168,7 @@ mod tests {
 
     #[test]
     fn resolve_workflow_uses_explicit_cwd_for_relative_work_dir() {
-        use fabro_types::settings::v2::run::RunLayer;
+        use fabro_types::settings::run::RunLayer;
 
         let dir = tempfile::tempdir().unwrap();
         let resolved = resolve_workflow(ResolveWorkflowInput {

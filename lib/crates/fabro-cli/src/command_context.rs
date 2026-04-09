@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail};
-use fabro_types::settings::v2::SettingsFile;
+use fabro_types::settings::SettingsFile;
 use tokio::sync::OnceCell;
 
 use crate::args::{ServerConnectionArgs, ServerTargetArgs};

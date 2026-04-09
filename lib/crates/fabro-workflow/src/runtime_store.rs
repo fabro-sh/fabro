@@ -113,7 +113,7 @@ mod tests {
     use fabro_store::Database;
     use fabro_types::fixtures;
     use fabro_types::run_event::RunSubmittedProps;
-    use fabro_types::settings::v2::SettingsFile;
+    use fabro_types::settings::SettingsFile;
     use fabro_types::{EventBody, RunEvent};
     use object_store::memory::InMemory;
 
