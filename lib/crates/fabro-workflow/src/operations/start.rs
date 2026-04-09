@@ -5,11 +5,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use fabro_config::sandbox::WorktreeMode;
-use fabro_config::{project as project_config, run as run_config, sandbox as sandbox_config};
+use fabro_config::{project as project_config, sandbox as sandbox_config};
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_model::{Catalog, FallbackTarget, Provider};
 use fabro_sandbox::{SandboxProvider, SandboxSpec};
-use fabro_types::{RunId, Settings};
+use fabro_types::RunId;
+use fabro_types::settings::v2::bridge::{bridge_mcp_entry, bridge_sandbox, bridge_worktree_mode};
+use fabro_types::settings::v2::run::ModelRefOrSplice;
+use fabro_types::settings::v2::{InterpString, SettingsFile};
 
 use crate::artifact_upload::ArtifactSink;
 use crate::context::Context;
@@ -260,7 +263,7 @@ async fn persist_terminal_engine_failure(
 impl RunSession {
     async fn new(persisted: &Persisted, services: StartServices) -> Result<Self, FabroError> {
         let record = persisted.run_record();
-        let mut settings = record.settings.clone();
+        let settings = &record.settings;
         let working_directory = record.working_directory.clone();
         let state = services
             .run_store
@@ -287,34 +290,21 @@ impl RunSession {
         let workflow_bundle =
             accepted_definition.map(|definition| Arc::new(definition.workflow_bundle()));
 
-        if let Some(env) = settings
-            .sandbox
-            .as_mut()
-            .and_then(|sandbox| sandbox.env.as_mut())
-        {
-            run_config::resolve_env_refs(env)
-                .map_err(|err| FabroError::Precondition(err.to_string()))?;
-        }
-
         let (origin_url, detected_base_branch) = detect_repo_info(&working_directory)
             .map(|(url, branch)| (Some(url), branch))
             .unwrap_or((None, None));
 
-        let sandbox_provider = resolve_sandbox_provider(&settings)?;
+        let sandbox_provider = resolve_sandbox_provider(settings)?;
         let sandbox_provider = if settings.dry_run_enabled() && !sandbox_provider.is_local() {
             SandboxProvider::Local
         } else {
             sandbox_provider
         };
         let model = settings
-            .llm
-            .as_ref()
-            .and_then(|llm| llm.model.clone())
+            .run_model_name_str()
             .unwrap_or_else(|| Catalog::builtin().default_from_env().id.clone());
         let provider = settings
-            .llm
-            .as_ref()
-            .and_then(|llm| llm.provider.clone())
+            .run_model_provider_str()
             .filter(|value| !value.is_empty());
 
         let provider_enum: Provider = provider
@@ -324,13 +314,15 @@ impl RunSession {
             .map_err(|err| FabroError::Precondition(err.clone()))?
             .unwrap_or_else(Provider::default_from_env);
 
-        let fallback_chain = resolve_fallback_chain(provider_enum, &model, &settings);
+        let fallback_chain = resolve_fallback_chain(provider_enum, &model, settings);
         let mcp_servers = settings
-            .mcp_server_entries()
-            .clone()
-            .into_iter()
-            .map(|(name, entry)| entry.into_config(name))
-            .collect();
+            .run_agent_mcps()
+            .map(|mcps| {
+                mcps.iter()
+                    .map(|(name, entry)| bridge_mcp_entry(entry).into_config(name.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
 
         let sandbox = match sandbox_provider {
             SandboxProvider::Local => SandboxSpec::Local {
@@ -343,26 +335,39 @@ impl RunSession {
                 },
             },
             SandboxProvider::Daytona => SandboxSpec::Daytona {
-                config: resolve_daytona_config(&settings).unwrap_or_default(),
+                config: resolve_daytona_config(settings).unwrap_or_default(),
                 github_app: services.github_app.clone(),
                 run_id: Some(record.run_id),
                 clone_branch: detected_base_branch.or_else(|| record.base_branch.clone()),
             },
         };
 
+        let toml_env: HashMap<String, String> = settings
+            .run_sandbox()
+            .map(|sb| {
+                sb.env
+                    .iter()
+                    .map(|(k, v)| (k.clone(), resolve_interp(v)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let github_permissions: Option<HashMap<String, String>> =
+            settings.github_permissions().map(|perms| {
+                perms
+                    .iter()
+                    .map(|(k, v)| (k.clone(), resolve_interp(v)))
+                    .collect()
+            });
         let sandbox_env = SandboxEnvSpec {
             devcontainer_env: HashMap::new(),
-            toml_env: settings
-                .sandbox_settings()
-                .and_then(|sandbox| sandbox.env.clone())
-                .unwrap_or_default(),
-            github_permissions: settings.github_permissions().cloned(),
+            toml_env,
+            github_permissions,
             origin_url: origin_url.clone(),
         };
 
         let devcontainer = settings
-            .sandbox_settings()
-            .and_then(|sandbox| sandbox.devcontainer)
+            .run_sandbox()
+            .and_then(|sb| sb.devcontainer)
             .unwrap_or(false)
             .then(|| DevcontainerSpec {
                 enabled: true,
@@ -374,6 +379,10 @@ impl RunSession {
         } else {
             services.interviewer
         };
+
+        let pr_config = settings
+            .run_pull_request()
+            .map(fabro_types::settings::v2::bridge::bridge_pull_request);
 
         Ok(Self {
             cancel_token: services.cancel_token,
@@ -391,12 +400,16 @@ impl RunSession {
             interviewer,
             on_node: services.on_node,
             lifecycle: LifecycleOptions {
-                setup_commands: settings.setup_commands().to_vec(),
-                setup_command_timeout_ms: settings.setup_timeout_ms().unwrap_or(300_000),
+                setup_commands: settings.run_prepare_commands(),
+                setup_command_timeout_ms: settings.run_prepare_timeout_ms().unwrap_or(300_000),
                 devcontainer_phases: Vec::new(),
             },
             hooks: fabro_hooks::HookSettings {
-                hooks: settings.hooks.clone(),
+                hooks: settings
+                    .run_hooks()
+                    .iter()
+                    .map(fabro_types::settings::v2::bridge::bridge_hook)
+                    .collect(),
             },
             sandbox_env,
             devcontainer,
@@ -405,11 +418,11 @@ impl RunSession {
             artifact_sink: services.artifact_sink,
             git,
             github_app: services.github_app.clone(),
-            worktree_mode: Some(resolve_worktree_mode(&settings)),
+            worktree_mode: Some(resolve_worktree_mode(settings)),
             registry_override: services.registry_override,
             retro_enabled: !settings.no_retro_enabled() && project_config::is_retro_enabled(),
-            preserve_sandbox: resolve_preserve_sandbox(&settings),
-            pr_config: settings.pull_request.clone(),
+            preserve_sandbox: resolve_preserve_sandbox(settings),
+            pr_config,
             pr_github_app: services.github_app,
             pr_origin_url: origin_url,
             pr_model: model,
@@ -417,6 +430,12 @@ impl RunSession {
             workflow_bundle,
         })
     }
+}
+
+fn resolve_interp(value: &InterpString) -> String {
+    value
+        .resolve(|name| std::env::var(name).ok())
+        .map_or_else(|_| value.as_source(), |resolved| resolved.value)
 }
 
 async fn load_accepted_run_definition(
@@ -435,45 +454,62 @@ async fn load_accepted_run_definition(
     serde_json::from_slice(&bytes).map_err(|err| FabroError::Parse(err.to_string()))
 }
 
-fn resolve_sandbox_provider(settings: &Settings) -> Result<SandboxProvider, FabroError> {
+fn resolve_sandbox_provider(settings: &SettingsFile) -> Result<SandboxProvider, FabroError> {
     settings
-        .sandbox_settings()
-        .and_then(|sandbox| sandbox.provider.as_deref())
+        .run_sandbox()
+        .and_then(|sb| sb.provider.as_deref())
         .map(str::parse::<SandboxProvider>)
         .transpose()
         .map_err(|err| FabroError::Precondition(format!("Invalid sandbox provider: {err}")))?
         .map_or_else(|| Ok(SandboxProvider::default()), Ok)
 }
 
-fn resolve_preserve_sandbox(settings: &Settings) -> bool {
+fn resolve_preserve_sandbox(settings: &SettingsFile) -> bool {
     settings.preserve_sandbox_enabled()
 }
 
-fn resolve_worktree_mode(settings: &Settings) -> sandbox_config::WorktreeMode {
+fn resolve_worktree_mode(settings: &SettingsFile) -> sandbox_config::WorktreeMode {
     settings
-        .sandbox_settings()
-        .and_then(|sandbox| sandbox.local.as_ref())
-        .map(|local| local.worktree_mode)
+        .run_sandbox()
+        .and_then(|sb| sb.local.as_ref())
+        .and_then(|local| local.worktree_mode)
+        .map(bridge_worktree_mode)
         .unwrap_or_default()
 }
 
-fn resolve_daytona_config(settings: &Settings) -> Option<DaytonaConfig> {
-    settings
-        .sandbox_settings()
-        .and_then(|sandbox| sandbox.daytona.clone())
+fn resolve_daytona_config(settings: &SettingsFile) -> Option<DaytonaConfig> {
+    let sandbox = settings.run_sandbox()?;
+    bridge_sandbox(sandbox).daytona
 }
 
 fn resolve_fallback_chain(
     provider: Provider,
     model: &str,
-    settings: &Settings,
+    settings: &SettingsFile,
 ) -> Vec<FallbackTarget> {
-    let fallbacks = settings.llm.as_ref().and_then(|llm| llm.fallbacks.as_ref());
-
-    match fallbacks {
-        Some(map) => Catalog::builtin().build_fallback_chain(provider, model, map),
-        None => Vec::new(),
+    let Some(model_layer) = settings.run_model() else {
+        return Vec::new();
+    };
+    if model_layer.fallbacks.is_empty() {
+        return Vec::new();
     }
+    // Group v2 ModelRef entries by provider name, preserving the legacy
+    // shape expected by `Catalog::build_fallback_chain`. The historical
+    // bridge grouped all fallback tokens under the empty-string key; we
+    // preserve that behavior here so `Catalog::build_fallback_chain`
+    // returns an empty chain unless a consumer has explicitly wired
+    // provider-keyed fallbacks. A proper provider-aware fallback chain
+    // is a follow-up along with the model registry work.
+    let mut by_provider: HashMap<String, Vec<String>> = HashMap::new();
+    for entry in &model_layer.fallbacks {
+        if let ModelRefOrSplice::ModelRef(model_ref) = entry {
+            by_provider
+                .entry(String::new())
+                .or_default()
+                .push(model_ref.to_string());
+        }
+    }
+    Catalog::builtin().build_fallback_chain(provider, model, &by_provider)
 }
 
 impl RunSession {

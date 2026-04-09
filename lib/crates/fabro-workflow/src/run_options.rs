@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use fabro_config::run::PullRequestSettings;
-use fabro_types::{RunId, Settings};
+use fabro_types::RunId;
+use fabro_types::settings::v2::SettingsFile;
+use fabro_types::settings::v2::run::RunPullRequestLayer;
 
 use crate::git::{GitAuthor, git_author_from_settings};
 
@@ -19,7 +20,7 @@ pub struct GitCheckpointOptions {
 /// Options for a workflow run.
 #[derive(Clone)]
 pub struct RunOptions {
-    pub settings: Settings,
+    pub settings: SettingsFile,
     pub run_dir: PathBuf,
     pub cancel_token: Option<Arc<AtomicBool>>,
     /// Unique identifier for this workflow run.
@@ -46,22 +47,23 @@ impl RunOptions {
     }
 
     pub fn checkpoint_exclude_globs(&self) -> &[String] {
-        &self.settings.checkpoint.exclude_globs
+        self.settings
+            .run_checkpoint()
+            .map_or(&[], |cp| cp.exclude_globs.as_slice())
     }
 
     pub fn git_author(&self) -> GitAuthor {
         git_author_from_settings(&self.settings)
     }
 
-    /// PR config (already normalized — disabled entries stripped at construction).
-    pub fn pull_request(&self) -> Option<&PullRequestSettings> {
-        self.settings.pull_request.as_ref()
+    /// PR config, if present in the v2 run layer.
+    pub fn pull_request(&self) -> Option<&RunPullRequestLayer> {
+        self.settings.run_pull_request()
     }
 
     pub fn artifact_globs(&self) -> &[String] {
         self.settings
-            .artifacts
-            .as_ref()
+            .run_artifacts()
             .map_or(&[], |a| a.include.as_slice())
     }
 }

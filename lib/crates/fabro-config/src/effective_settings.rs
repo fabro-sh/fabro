@@ -1,4 +1,4 @@
-//! Effective settings resolution: combine layers into one resolved [`Settings`].
+//! Effective settings resolution: combine layers into one resolved [`SettingsFile`].
 //!
 //! Shared layered domains (`project`, `workflow`, `run`, `features`) merge
 //! across all three config files (settings.toml, fabro.toml, workflow.toml).
@@ -7,10 +7,11 @@
 //! stanzas in `fabro.toml` and `workflow.toml` remain schema-valid but inert.
 
 use anyhow::{Result, anyhow};
-use fabro_types::Settings;
 use fabro_types::settings::v2::SettingsFile;
+use fabro_types::settings::v2::run::{RunExecutionLayer, RunLayer};
 
 use crate::ConfigLayer;
+use crate::merge::combine_files;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EffectiveSettingsMode {
@@ -44,11 +45,12 @@ impl EffectiveSettingsLayers {
     }
 }
 
+/// Resolve layered configuration down to a single effective [`SettingsFile`].
 pub fn resolve_settings(
     layers: EffectiveSettingsLayers,
-    server_settings: Option<&Settings>,
+    server_settings: Option<&SettingsFile>,
     mode: EffectiveSettingsMode,
-) -> Result<Settings> {
+) -> Result<SettingsFile> {
     let EffectiveSettingsLayers {
         args,
         mut workflow,
@@ -57,11 +59,9 @@ pub fn resolve_settings(
     } = layers;
 
     match mode {
-        EffectiveSettingsMode::LocalOnly => Ok(args
-            .combine(workflow)
-            .combine(project)
-            .combine(user)
-            .resolve()),
+        EffectiveSettingsMode::LocalOnly => {
+            Ok(args.combine(workflow).combine(project).combine(user).into())
+        }
         EffectiveSettingsMode::RemoteServer | EffectiveSettingsMode::LocalDaemon => {
             let server_settings = server_settings.ok_or_else(|| {
                 anyhow!("server settings are required for server-targeted settings resolution")
@@ -72,26 +72,33 @@ pub fn resolve_settings(
             strip_owner_domains(workflow.as_v2_mut());
             strip_owner_domains(project.as_v2_mut());
 
-            let server_defaults = server_defaults_layer(server_settings);
+            let server_defaults = server_defaults_file(server_settings);
 
-            let mut settings = args
-                .combine(workflow)
-                .combine(project)
-                .combine(user)
-                .resolve();
+            let combined: SettingsFile =
+                args.combine(workflow).combine(project).combine(user).into();
 
-            match mode {
+            let mut settings = match mode {
                 EffectiveSettingsMode::RemoteServer => {
-                    apply_server_defaults(&mut settings, &server_defaults);
+                    apply_server_defaults(combined, &server_defaults)
                 }
                 EffectiveSettingsMode::LocalDaemon => {
-                    apply_local_daemon_overrides(&mut settings, &server_defaults);
+                    apply_local_daemon_overrides(combined, &server_defaults)
                 }
                 EffectiveSettingsMode::LocalOnly => unreachable!(),
+            };
+            // Storage root always comes from the server's local
+            // ~/.fabro/settings.toml, never from the client.
+            if let Some(server_root) = server_settings
+                .server
+                .as_ref()
+                .and_then(|s| s.storage.as_ref())
+                .cloned()
+            {
+                let server = settings
+                    .server
+                    .get_or_insert_with(fabro_types::settings::v2::server::ServerLayer::default);
+                server.storage = Some(server_root);
             }
-            settings
-                .storage_dir
-                .clone_from(&server_settings.storage_dir);
             Ok(settings)
         }
     }
@@ -102,103 +109,81 @@ fn strip_owner_domains(file: &mut SettingsFile) {
     file.server = None;
 }
 
-fn server_defaults_layer(settings: &Settings) -> Settings {
+/// Copy of the server settings with startup-time dry-run fallback cleared.
+/// Run manifests carry their own dry-run intent; a daemon's startup-time
+/// fallback mode must not silently force every submitted run into simulation.
+fn server_defaults_file(settings: &SettingsFile) -> SettingsFile {
     let mut out = settings.clone();
-    // Run manifests carry their own dry-run intent. Do not let a daemon's
-    // startup-time fallback mode silently force every submitted run/preflight
-    // into simulation.
-    out.dry_run = None;
+    if let Some(run) = out.run.as_mut() {
+        if let Some(execution) = run.execution.as_mut() {
+            execution.mode = None;
+        }
+    }
     out
 }
 
-fn apply_server_defaults(settings: &mut Settings, server: &Settings) {
-    // Owner-specific storage and scheduling come from the server's local
-    // settings.toml. These always win over anything layered from the client.
-    if settings.storage_dir.is_none() {
-        settings.storage_dir.clone_from(&server.storage_dir);
-    }
-    if settings.max_concurrent_runs.is_none() {
-        settings.max_concurrent_runs = server.max_concurrent_runs;
-    }
-    if settings.artifact_storage.is_none() {
-        settings
-            .artifact_storage
-            .clone_from(&server.artifact_storage);
-    }
-    if settings.web.is_none() {
-        settings.web.clone_from(&server.web);
-    }
-    if settings.api.is_none() {
-        settings.api.clone_from(&server.api);
-    }
-    if settings.features.is_none() {
-        settings.features.clone_from(&server.features);
-    }
-    if settings.log.is_none() {
-        settings.log.clone_from(&server.log);
-    }
-    if settings.git.is_none() {
-        settings.git.clone_from(&server.git);
-    }
-    // Run-shaped defaults also flow from server to CLI in RemoteServer mode
-    // so the persisted run record matches the server's local configuration.
-    if settings.llm.is_none() {
-        settings.llm.clone_from(&server.llm);
-    }
-    if settings.sandbox.is_none() {
-        settings.sandbox.clone_from(&server.sandbox);
-    }
-    if settings.setup.is_none() {
-        settings.setup.clone_from(&server.setup);
-    }
-    if settings.checkpoint.exclude_globs.is_empty() {
-        settings.checkpoint = server.checkpoint.clone();
-    }
-    if settings.pull_request.is_none() {
-        settings.pull_request.clone_from(&server.pull_request);
-    }
-    if settings.artifacts.is_none() {
-        settings.artifacts.clone_from(&server.artifacts);
-    }
-    if settings.hooks.is_empty() {
-        settings.hooks.clone_from(&server.hooks);
-    }
-    if settings.mcp_servers.is_empty() {
-        settings.mcp_servers.clone_from(&server.mcp_servers);
-    }
-    if settings.github.is_none() {
-        settings.github.clone_from(&server.github);
-    }
-    if settings.slack.is_none() {
-        settings.slack.clone_from(&server.slack);
-    }
-    if settings.fabro.is_none() {
-        settings.fabro.clone_from(&server.fabro);
-    }
-    if settings.vars.is_none() {
-        settings.vars.clone_from(&server.vars);
-    } else if let (Some(local), Some(server_vars)) = (settings.vars.as_mut(), server.vars.as_ref())
-    {
-        for (k, v) in server_vars {
-            local.entry(k.clone()).or_insert_with(|| v.clone());
-        }
-    }
+/// Apply server-side defaults to a client-layered [`SettingsFile`].
+///
+/// Server-owned domains (`server`, `features`, and parts of `run`) flow from
+/// the server's local `~/.fabro/settings.toml` when the corresponding client
+/// value is absent. Run-shaped defaults (model, prepare, sandbox, checkpoint,
+/// hooks, agent mcps, etc.) also flow from server to client so the persisted
+/// run record matches the server's local configuration.
+fn apply_server_defaults(mut settings: SettingsFile, server: &SettingsFile) -> SettingsFile {
+    // Server-owned domains: server-side always wins when client left blank.
+    // Use the v2 merge matrix with the server layer in lower precedence so
+    // that client-supplied values still dominate when present.
+    settings = combine_files(server.clone(), settings);
+    settings
 }
 
-fn apply_local_daemon_overrides(settings: &mut Settings, server: &Settings) {
-    settings.storage_dir.clone_from(&server.storage_dir);
-    settings.max_concurrent_runs = server.max_concurrent_runs;
+/// Apply server-side overrides in LocalDaemon mode.
+///
+/// In LocalDaemon mode, a subset of server-owned fields unconditionally
+/// override any client-side values. Client-controlled run-level fields are
+/// left alone.
+fn apply_local_daemon_overrides(mut settings: SettingsFile, server: &SettingsFile) -> SettingsFile {
+    if let Some(server_layer) = server.server.clone() {
+        let client = settings
+            .server
+            .get_or_insert_with(fabro_types::settings::v2::server::ServerLayer::default);
+        if let Some(storage) = server_layer.storage {
+            client.storage = Some(storage);
+        }
+        if let Some(scheduler) = server_layer.scheduler {
+            client.scheduler = Some(scheduler);
+        }
+        if let Some(artifacts) = server_layer.artifacts {
+            client.artifacts = Some(artifacts);
+        }
+        if let Some(web) = server_layer.web {
+            client.web = Some(web);
+        }
+        if let Some(api) = server_layer.api {
+            client.api = Some(api);
+        }
+    }
+    if let Some(features) = server.features.clone() {
+        settings.features = Some(features);
+    }
+    // Ensure a run.execution table exists so downstream consumers that check
+    // for explicit dry-run defaults see a well-formed layer.
+    settings.run.get_or_insert_with(RunLayer::default);
     settings
-        .artifact_storage
-        .clone_from(&server.artifact_storage);
-    settings.web.clone_from(&server.web);
-    settings.api.clone_from(&server.api);
-    settings.features.clone_from(&server.features);
+        .run
+        .as_mut()
+        .unwrap()
+        .execution
+        .get_or_insert_with(RunExecutionLayer::default);
+    settings
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use fabro_types::settings::v2::InterpString;
+    use fabro_types::settings::v2::server::{
+        ServerLayer, ServerSchedulerLayer, ServerStorageLayer,
+    };
 
     use super::{EffectiveSettingsLayers, EffectiveSettingsMode, resolve_settings};
     use crate::ConfigLayer;
@@ -246,16 +231,21 @@ shared = "user"
         )
         .unwrap();
 
-        let llm = settings.llm.expect("llm config");
-        assert_eq!(llm.model.as_deref(), Some("project-model"));
+        assert_eq!(
+            settings.run_model_name_str().as_deref(),
+            Some("project-model")
+        );
         // Per R22, run.inputs replaces wholesale — the winning layer is the
         // highest-precedence layer that sets `inputs` (project here, since it
         // wins over user).
-        let vars = settings.vars.as_ref().unwrap();
-        assert_eq!(vars.get("project_only"), Some(&"1".to_string()));
-        assert_eq!(vars.get("shared"), Some(&"project".to_string()));
+        let inputs = settings.run_inputs().unwrap();
+        assert!(inputs.contains_key("project_only"));
+        assert_eq!(
+            inputs.get("shared").and_then(|v| v.as_str()),
+            Some("project")
+        );
         assert!(
-            vars.get("user_only").is_none(),
+            !inputs.contains_key("user_only"),
             "project.inputs should replace user.inputs wholesale"
         );
     }
@@ -298,19 +288,26 @@ provider = "openai"
         )
         .unwrap();
 
-        assert_eq!(settings.goal.as_deref(), Some("workflow goal"));
-        let llm = settings.llm.expect("llm config");
-        assert_eq!(llm.model.as_deref(), Some("workflow-model"));
-        assert_eq!(llm.provider.as_deref(), Some("openai"));
+        assert_eq!(settings.run_goal_str().as_deref(), Some("workflow goal"));
+        assert_eq!(
+            settings.run_model_name_str().as_deref(),
+            Some("workflow-model")
+        );
+        assert_eq!(settings.run_model_provider_str().as_deref(), Some("openai"));
     }
 
     #[test]
     fn cli_and_server_domains_from_fabro_toml_are_inert_under_remote_mode() {
-        let server_settings: fabro_types::Settings = fabro_types::Settings {
-            storage_dir: Some(PathBuf::from("/srv/fabro")),
-            max_concurrent_runs: Some(9),
-            ..Default::default()
-        };
+        let mut server_settings = fabro_types::settings::v2::SettingsFile::default();
+        server_settings.server = Some(ServerLayer {
+            storage: Some(ServerStorageLayer {
+                root: Some(InterpString::parse("/srv/fabro")),
+            }),
+            scheduler: Some(ServerSchedulerLayer {
+                max_concurrent_runs: Some(9),
+            }),
+            ..ServerLayer::default()
+        });
 
         let project_with_server = layer(
             r#"
@@ -336,17 +333,25 @@ root = "/tmp/should-be-inert"
         )
         .unwrap();
 
-        assert_eq!(settings.storage_dir, Some(PathBuf::from("/srv/fabro")));
-        assert_eq!(settings.goal.as_deref(), Some("project goal"));
+        assert_eq!(
+            settings.server_storage_root_str().as_deref(),
+            Some("/srv/fabro")
+        );
+        assert_eq!(settings.run_goal_str().as_deref(), Some("project goal"));
     }
 
     #[test]
     fn local_daemon_mode_only_applies_server_owned_overrides() {
-        let server_settings: fabro_types::Settings = fabro_types::Settings {
-            storage_dir: Some(PathBuf::from("/srv/fabro")),
-            max_concurrent_runs: Some(7),
-            ..Default::default()
-        };
+        let mut server_settings = fabro_types::settings::v2::SettingsFile::default();
+        server_settings.server = Some(ServerLayer {
+            storage: Some(ServerStorageLayer {
+                root: Some(InterpString::parse("/srv/fabro")),
+            }),
+            scheduler: Some(ServerSchedulerLayer {
+                max_concurrent_runs: Some(7),
+            }),
+            ..ServerLayer::default()
+        });
 
         let settings = resolve_settings(
             EffectiveSettingsLayers::default(),
@@ -355,7 +360,10 @@ root = "/tmp/should-be-inert"
         )
         .unwrap();
 
-        assert_eq!(settings.storage_dir, Some(PathBuf::from("/srv/fabro")));
-        assert_eq!(settings.max_concurrent_runs, Some(7));
+        assert_eq!(
+            settings.server_storage_root_str().as_deref(),
+            Some("/srv/fabro")
+        );
+        assert_eq!(settings.max_concurrent_runs(), Some(7));
     }
 }

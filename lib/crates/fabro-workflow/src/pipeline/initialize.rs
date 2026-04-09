@@ -534,8 +534,16 @@ pub async fn initialize(
             build_registry(&options.llm, Arc::clone(&options.interviewer), &env, &graph).await?
         };
     if effective_dry_run {
+        use fabro_types::settings::v2::run::{RunExecutionLayer, RunLayer, RunMode};
+
         options.dry_run = true;
-        options.run_options.settings.dry_run = Some(true);
+        let run = options
+            .run_options
+            .settings
+            .run
+            .get_or_insert_with(RunLayer::default);
+        let execution = run.execution.get_or_insert_with(RunExecutionLayer::default);
+        execution.mode = Some(RunMode::DryRun);
     }
 
     let has_run_branch = options

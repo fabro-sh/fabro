@@ -12,8 +12,8 @@ use serde::Serialize;
 
 use crate::config::ConfigLayer;
 use crate::run;
-use fabro_types::Settings;
 pub use fabro_types::settings::project::ProjectSettings;
+use fabro_types::settings::v2::{InterpString, SettingsFile};
 
 const CONFIG_FILENAME: &str = "fabro.toml";
 const RUN_GRAPH_FILE: &str = "workflow.fabro";
@@ -124,11 +124,11 @@ pub fn resolve_workflow_path(
     }
 }
 
-pub fn resolve_working_directory(settings: &Settings, caller_cwd: &Path) -> PathBuf {
-    let Some(work_dir) = settings.work_dir.as_deref() else {
+pub fn resolve_working_directory(settings: &SettingsFile, caller_cwd: &Path) -> PathBuf {
+    let Some(work_dir) = settings.run_working_dir().map(InterpString::as_source) else {
         return caller_cwd.to_path_buf();
     };
-    let path = PathBuf::from(work_dir);
+    let path = PathBuf::from(&work_dir);
     if path.is_absolute() {
         path
     } else {

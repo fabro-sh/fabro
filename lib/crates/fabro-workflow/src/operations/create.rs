@@ -3,7 +3,9 @@ use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, Provider};
 use fabro_sandbox::SandboxProvider;
 use fabro_store::Database;
-use fabro_types::{RunId, RunProvenance, Settings};
+use fabro_types::settings::v2::run::{RunLayer, RunModelLayer};
+use fabro_types::settings::v2::{InterpString, SettingsFile};
+use fabro_types::{RunId, RunProvenance};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -26,7 +28,7 @@ use crate::event::{Event, append_event, to_run_event_at};
 #[derive(Clone, Debug)]
 pub struct CreateRunInput {
     pub workflow: WorkflowInput,
-    pub settings: Settings,
+    pub settings: SettingsFile,
     pub cwd: PathBuf,
     pub workflow_slug: Option<String>,
     pub workflow_path: Option<PathBuf>,
@@ -48,7 +50,7 @@ pub struct CreatedRun {
 }
 
 struct PersistCreateOptions {
-    settings: Settings,
+    settings: SettingsFile,
     run_id: Option<RunId>,
     run_dir: Option<PathBuf>,
     workflow_slug: Option<String>,
@@ -125,7 +127,7 @@ pub async fn create(store: &Database, request: CreateRunInput) -> Result<Created
             run_id: Some(run_id),
             run_dir: Some(run_dir.clone()),
             workflow_slug: workflow_slug.or(resolved.workflow_slug.clone()),
-            labels: resolved.settings.labels.clone(),
+            labels: resolved.settings.all_labels(),
             base_branch,
             working_directory,
             host_repo_path,
@@ -246,9 +248,9 @@ fn store_error(err: impl std::fmt::Display) -> FabroError {
     FabroError::engine(err.to_string())
 }
 
-fn validate_sandbox_provider(settings: &Settings) -> Result<(), FabroError> {
+fn validate_sandbox_provider(settings: &SettingsFile) -> Result<(), FabroError> {
     if let Some(provider) = settings
-        .sandbox_settings()
+        .run_sandbox()
         .and_then(|sandbox| sandbox.provider.as_deref())
     {
         provider
@@ -289,12 +291,11 @@ pub(super) fn preprocess_and_validate(
     current_dir: Option<PathBuf>,
     file_resolver: Option<Arc<dyn FileResolver>>,
     custom_transforms: Vec<Box<dyn Transform>>,
-    settings: Option<&Settings>,
+    settings: Option<&SettingsFile>,
     goal_override: Option<&str>,
 ) -> Result<Validated, FabroError> {
-    let source = match settings.and_then(|resolved| resolved.vars.as_ref()) {
-        Some(vars) => {
-            let mut vars = vars.clone();
+    let source = match settings.and_then(SettingsFile::run_inputs_as_strings) {
+        Some(mut vars) => {
             vars.insert("goal".to_string(), "$goal".to_string());
             expand_vars(dot_source, &vars)
                 .map_err(|e| FabroError::Parse(format!("var expansion failed: {e}")))?
@@ -371,28 +372,32 @@ fn persist_validated(
     )
 }
 
-pub(crate) fn resolve_run_settings(mut settings: Settings, graph: &Graph) -> Settings {
-    let llm_settings = settings.llm.as_ref();
-    let configured_model = llm_settings.and_then(|l| l.model.as_deref());
-    let configured_provider = llm_settings.and_then(|l| l.provider.as_deref());
-    let graph_provider = graph.attrs.get("default_provider").and_then(|v| v.as_str());
-    let graph_model = graph.attrs.get("default_model").and_then(|v| v.as_str());
+pub(crate) fn resolve_run_settings(mut settings: SettingsFile, graph: &Graph) -> SettingsFile {
+    let configured_model = settings.run_model_name_str();
+    let configured_provider = settings.run_model_provider_str();
+    let graph_provider = graph
+        .attrs
+        .get("default_provider")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let graph_model = graph
+        .attrs
+        .get("default_model")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
 
-    let provider = configured_provider.or(graph_provider).map(str::to_string);
+    let provider = configured_provider.or(graph_provider);
 
-    let model = configured_model.or(graph_model).map_or_else(
-        || {
-            let catalog = Catalog::builtin();
-            provider
-                .as_deref()
-                .and_then(|value| value.parse::<Provider>().ok())
-                .and_then(|provider| catalog.default_for_provider(provider))
-                .unwrap_or_else(|| catalog.default_from_env())
-                .id
-                .clone()
-        },
-        str::to_string,
-    );
+    let model = configured_model.or(graph_model).unwrap_or_else(|| {
+        let catalog = Catalog::builtin();
+        provider
+            .as_deref()
+            .and_then(|value| value.parse::<Provider>().ok())
+            .and_then(|provider| catalog.default_for_provider(provider))
+            .unwrap_or_else(|| catalog.default_from_env())
+            .id
+            .clone()
+    });
 
     let (resolved_model, resolved_provider) = match Catalog::builtin().get(&model) {
         Some(info) => (
@@ -402,16 +407,26 @@ pub(crate) fn resolve_run_settings(mut settings: Settings, graph: &Graph) -> Set
         None => (model, provider),
     };
 
-    let llm = settings.llm.get_or_insert_default();
-    llm.model = Some(resolved_model);
-    llm.provider = resolved_provider;
+    let run = settings.run.get_or_insert_with(RunLayer::default);
+    let model_layer = run.model.get_or_insert_with(RunModelLayer::default);
+    model_layer.name = Some(InterpString::parse(&resolved_model));
+    model_layer.provider = resolved_provider.as_deref().map(InterpString::parse);
 
     let goal = graph.goal().to_string();
-    settings.goal = if goal.is_empty() { None } else { Some(goal) };
-    settings.pull_request = settings
+    run.goal = if goal.is_empty() {
+        None
+    } else {
+        Some(InterpString::parse(&goal))
+    };
+    // Strip disabled pull_request entries so downstream consumers can
+    // treat `Some(_)` as "PR creation is on".
+    if run
         .pull_request
-        .take()
-        .filter(|pull_request| pull_request.enabled);
+        .as_ref()
+        .is_some_and(|pr| !pr.enabled.unwrap_or(false))
+    {
+        run.pull_request = None;
+    }
 
     settings
 }

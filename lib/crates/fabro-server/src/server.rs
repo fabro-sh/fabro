@@ -33,6 +33,7 @@ use fabro_model::{BilledModelUsage, BilledTokenCounts};
 use fabro_store::{
     ArtifactStore, Database, EventEnvelope, EventPayload, PendingInterviewRecord, StageId,
 };
+use fabro_types::settings::v2::SettingsFile;
 use fabro_types::{
     EventBody, InterviewQuestionRecord, InterviewQuestionType, RunBlobId, RunClientProvenance,
     RunControlAction, RunEvent, RunId, RunProvenance, RunServerProvenance, RunSubjectProvenance,
@@ -520,7 +521,7 @@ pub struct AppState {
     global_event_tx: broadcast::Sender<EventEnvelope>,
 
     pub(crate) secret_store: AsyncRwLock<SecretStore>,
-    pub(crate) settings: Arc<RwLock<Settings>>,
+    pub(crate) settings: Arc<RwLock<SettingsFile>>,
     pub(crate) config_path: PathBuf,
     pub(crate) local_daemon_mode: bool,
     shutting_down: AtomicBool,
@@ -3585,7 +3586,13 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
         }
     };
     let github_app = match state
-        .github_app_credentials(persisted.run_record().settings.app_id())
+        .github_app_credentials(
+            persisted
+                .run_record()
+                .settings
+                .github_app_id_str()
+                .as_deref(),
+        )
         .await
     {
         Ok(github_app) => github_app,
