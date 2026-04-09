@@ -220,4 +220,203 @@ name = "Fabro"
         let err = parse_settings_file("_version = 99").unwrap_err();
         assert!(err.to_string().contains("Upgrade"));
     }
+
+    #[test]
+    fn representative_full_tree_parses() {
+        let input = r##"
+_version = 1
+
+[project]
+name = "Fabro"
+description = "AI workflow orchestration"
+directory = "fabro/"
+
+[project.metadata]
+owner = "platform"
+
+[workflow]
+name = "Implement Feature"
+description = "Turns a request into a code change"
+
+[run]
+goal = "Implement OAuth refresh tokens"
+working_dir = "/workspace"
+
+[run.inputs]
+repo = "fabro"
+branch = "main"
+
+[run.metadata]
+team = "auth"
+
+[run.model]
+provider = "anthropic"
+name = "sonnet"
+fallbacks = ["openai", "gpt-5.4", "gemini/gemini-flash"]
+
+[run.git.author]
+name = "fabro-bot"
+email = "bot@fabro.sh"
+
+[[run.prepare.steps]]
+script = "bun install"
+
+[[run.prepare.steps]]
+command = ["bun", "run", "typecheck"]
+
+[run.execution]
+mode = "normal"
+approval = "prompt"
+retros = true
+
+[run.checkpoint]
+exclude_globs = ["target/", "node_modules/"]
+
+[run.sandbox]
+provider = "daytona"
+preserve = false
+
+[run.sandbox.env]
+AWS_REGION = "us-west-2"
+
+[run.sandbox.daytona]
+auto_stop_interval = 60
+
+[run.sandbox.daytona.snapshot]
+name = "fabro-dev"
+cpu = 4
+memory = "8GB"
+disk = "20GB"
+
+[run.agent]
+permissions = "read-write"
+
+[run.agent.mcps.fs]
+type = "stdio"
+command = ["npx", "-y", "@modelcontextprotocol/server-filesystem"]
+
+[run.notifications.ops]
+enabled = true
+provider = "slack"
+events = ["run.failed", "run.completed"]
+
+[run.notifications.ops.slack]
+channel = "#ops"
+
+[run.interviews]
+provider = "slack"
+
+[run.interviews.slack]
+channel = "#approvals"
+
+[[run.hooks]]
+id = "pre-commit"
+name = "Run linter before each commit"
+event = "pre_tool_use"
+script = "bun run lint"
+
+[run.pull_request]
+enabled = true
+draft = true
+auto_merge = false
+merge_strategy = "squash"
+
+[run.artifacts]
+include = ["target/debug/fabro"]
+
+[cli.target]
+type = "http"
+url = "https://fabro.example.com/api/v1"
+
+[cli.auth]
+strategy = "mtls"
+
+[cli.exec]
+prevent_idle_sleep = true
+
+[cli.exec.model]
+provider = "anthropic"
+name = "claude-opus"
+
+[cli.exec.agent]
+permissions = "read-write"
+
+[cli.output]
+format = "text"
+verbosity = "normal"
+
+[cli.updates]
+check = true
+
+[cli.logging]
+level = "info"
+
+[server.listen]
+type = "tcp"
+address = "127.0.0.1:32276"
+
+[server.api]
+url = "https://fabro.example.com/api/v1"
+
+[server.web]
+enabled = true
+url = "https://fabro.example.com"
+
+[server.storage]
+root = "/var/lib/fabro"
+
+[server.artifacts]
+provider = "s3"
+prefix = "artifacts"
+
+[server.artifacts.s3]
+bucket = "fabro-artifacts"
+region = "us-west-2"
+
+[server.slatedb]
+provider = "s3"
+prefix = "runs"
+flush_interval = "1s"
+
+[server.slatedb.s3]
+bucket = "fabro-slatedb"
+region = "us-west-2"
+
+[server.scheduler]
+max_concurrent_runs = 10
+
+[server.logging]
+level = "info"
+
+[features]
+session_sandboxes = true
+"##;
+
+        let file = parse_settings_file(input).expect("full fixture should parse");
+        let project = file.project.expect("project present");
+        assert_eq!(project.name.as_deref(), Some("Fabro"));
+        assert_eq!(project.directory.as_deref(), Some("fabro/"));
+
+        let run = file.run.expect("run present");
+        let model = run.model.expect("run.model present");
+        assert_eq!(model.fallbacks.len(), 3);
+
+        let sandbox = run.sandbox.expect("run.sandbox present");
+        assert_eq!(sandbox.env.len(), 1);
+        let daytona = sandbox.daytona.expect("daytona leaf present");
+        let snap = daytona.snapshot.expect("daytona snapshot present");
+        assert_eq!(snap.memory.map(|s| s.as_bytes()), Some(8_000_000_000));
+
+        let hooks = run.hooks;
+        assert_eq!(hooks.len(), 1);
+        assert_eq!(hooks[0].id.as_deref(), Some("pre-commit"));
+
+        let cli = file.cli.expect("cli present");
+        assert!(cli.target.is_some());
+        assert!(cli.exec.is_some());
+
+        let server = file.server.expect("server present");
+        let slate = server.slatedb.expect("slatedb present");
+        assert!(slate.flush_interval.is_some());
+    }
 }

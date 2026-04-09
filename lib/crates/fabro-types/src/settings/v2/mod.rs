@@ -6,6 +6,7 @@
 //! Value-language helpers live alongside the tree: durations, byte sizes,
 //! model references, env interpolation, and splice-capable arrays.
 
+pub mod bridge;
 pub mod cli;
 pub mod duration;
 pub mod features;
@@ -19,6 +20,8 @@ pub mod splice_array;
 pub mod tree;
 pub mod version;
 pub mod workflow;
+
+pub use bridge::bridge_to_old;
 
 pub use cli::CliLayer;
 pub use duration::{Duration, ParseDurationError};
