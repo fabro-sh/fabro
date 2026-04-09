@@ -559,18 +559,20 @@ async fn setup_register(
 
     let settings_path = state.config_path.clone();
 
-    // Build a v2 settings_path edit in place. This used to bridge back to
-    // the legacy flat shape and emit v1 TOML; the v2 parser hard-rejects
-    // the v1 top-level keys, so this was already broken. Write v2 TOML
-    // using `merge_settings_keys` against the raw TOML document.
+    // Edit the settings file in place via `toml_edit::DocumentMut`, which
+    // preserves existing comments, whitespace, and key ordering. The value-
+    // tree parser (`toml::Value`) would strip all of that on round-trip.
     if let Some(parent) = settings_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
     let existing = std::fs::read_to_string(&settings_path).unwrap_or_default();
-    let mut doc: toml::Value = if existing.is_empty() {
-        toml::Value::Table(toml::Table::default())
+    let mut doc: toml_edit::DocumentMut = if existing.is_empty() {
+        toml_edit::DocumentMut::new()
     } else {
-        match toml::from_str(&existing).context("failed to parse existing settings config") {
+        match existing
+            .parse::<toml_edit::DocumentMut>()
+            .context("failed to parse existing settings config")
+        {
             Ok(doc) => doc,
             Err(err) => {
                 error!(error = %err, path = %settings_path.display(), "Setup register failed: could not parse settings config");
@@ -588,10 +590,7 @@ async fn setup_register(
             json!({"error": format!("Failed to update settings config: {err}")}),
         );
     }
-    if let Err(err) = std::fs::write(
-        &settings_path,
-        toml::to_string_pretty(&doc).unwrap_or_default(),
-    ) {
+    if let Err(err) = std::fs::write(&settings_path, doc.to_string()) {
         error!(error = %err, path = %settings_path.display(), "Setup register failed: could not write settings config");
         return json_response(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -635,52 +634,76 @@ async fn setup_register(
     Json(json!({"ok": true})).into_response()
 }
 
-fn root_table_mut(doc: &mut toml::Value) -> anyhow::Result<&mut toml::Table> {
-    doc.as_table_mut()
-        .ok_or_else(|| anyhow!("settings config root is not a table"))
+/// Walk dotted `path` into `doc`, creating missing intermediate tables,
+/// and return a mutable reference to the terminal table.
+///
+/// Uses `toml_edit`'s [`toml_edit::Entry::or_insert`] so existing tables
+/// keep their comments, ordering, and any sibling keys untouched.
+fn ensure_nested_table<'a>(
+    doc: &'a mut toml_edit::DocumentMut,
+    path: &[&str],
+) -> anyhow::Result<&'a mut toml_edit::Table> {
+    let mut current: &mut toml_edit::Table = doc.as_table_mut();
+    for segment in path {
+        let next = current
+            .entry(segment)
+            .or_insert(toml_edit::Item::Table(toml_edit::Table::new()));
+        current = next
+            .as_table_mut()
+            .ok_or_else(|| anyhow!("settings config [{segment}] is not a table"))?;
+    }
+    Ok(current)
 }
 
-fn ensure_table<'a>(table: &'a mut toml::Table, key: &str) -> anyhow::Result<&'a mut toml::Table> {
-    table
-        .entry(key.to_string())
-        .or_insert_with(|| toml::Value::Table(toml::Table::default()))
-        .as_table_mut()
-        .ok_or_else(|| anyhow!("settings config [{key}] is not a table"))
+/// Set a scalar value on `table[key]`, preserving any key-level decor
+/// (leading comments, blank lines) that was attached to the existing entry.
+///
+/// `toml_edit`'s default `Table::insert` replaces the entry wholesale and
+/// drops its prefix decoration, which would strip a top-of-file comment
+/// attached to a key we're updating. Copying the decor forward keeps the
+/// user's formatting intact.
+fn set_preserving_decor(table: &mut toml_edit::Table, key: &str, value: toml_edit::Item) {
+    let preserved_decor = table.key(key).map(|existing| existing.leaf_decor().clone());
+    table.insert(key, value);
+    if let (Some(decor), Some(mut updated)) = (preserved_decor, table.key_mut(key)) {
+        *updated.leaf_decor_mut() = decor;
+    }
 }
 
 fn merge_settings_keys(
-    doc: &mut toml::Value,
+    doc: &mut toml_edit::DocumentMut,
     data: &GitHubManifestConversion,
     origin: Option<&str>,
 ) -> anyhow::Result<()> {
     let web_url = origin.map_or_else(|| "http://localhost:3000".to_string(), str::to_string);
 
-    let root = root_table_mut(doc)?;
-    // Make sure the freshly-written file is a valid v2 file.
-    root.insert("_version".to_string(), toml::Value::Integer(1));
+    // Make sure the freshly-written file is a valid v2 file. `_version` is
+    // always `1` at the moment, so skip the write entirely if it's already
+    // there -- otherwise we'd trample any top-of-file comment attached to
+    // the key.
+    let root = doc.as_table_mut();
+    if !root.contains_key("_version") {
+        root.insert("_version", toml_edit::value(1_i64));
+    }
 
-    let server = ensure_table(root, "server")?;
-    let web = ensure_table(server, "web")?;
-    web.insert("enabled".to_string(), toml::Value::Boolean(true));
-    web.insert("url".to_string(), toml::Value::String(web_url));
+    let web = ensure_nested_table(doc, &["server", "web"])?;
+    set_preserving_decor(web, "enabled", toml_edit::value(true));
+    set_preserving_decor(web, "url", toml_edit::value(web_url));
 
-    let auth = ensure_table(server, "auth")?;
-    let auth_web = ensure_table(auth, "web")?;
-    let _ = auth_web;
-    let auth_api = ensure_table(auth, "api")?;
-    let _jwt = ensure_table(auth_api, "jwt")?;
+    // Ensure the auth subtrees exist so a freshly-registered GitHub App
+    // resolves `[server.auth.web]` / `[server.auth.api.jwt]` strategies on
+    // the next startup without a second manual edit.
+    ensure_nested_table(doc, &["server", "auth", "web"])?;
+    ensure_nested_table(doc, &["server", "auth", "api", "jwt"])?;
 
-    let integrations = ensure_table(server, "integrations")?;
-    let github = ensure_table(integrations, "github")?;
-    github.insert(
-        "app_id".to_string(),
-        toml::Value::String(data.id.to_string()),
+    let github = ensure_nested_table(doc, &["server", "integrations", "github"])?;
+    set_preserving_decor(github, "app_id", toml_edit::value(data.id.to_string()));
+    set_preserving_decor(
+        github,
+        "client_id",
+        toml_edit::value(data.client_id.clone()),
     );
-    github.insert(
-        "client_id".to_string(),
-        toml::Value::String(data.client_id.clone()),
-    );
-    github.insert("slug".to_string(), toml::Value::String(data.slug.clone()));
+    set_preserving_decor(github, "slug", toml_edit::value(data.slug.clone()));
 
     Ok(())
 }
@@ -700,38 +723,122 @@ mod tests {
         }
     }
 
+    fn parse_doc(source: &str) -> toml_edit::DocumentMut {
+        source
+            .parse::<toml_edit::DocumentMut>()
+            .expect("fixture should parse as TOML")
+    }
+
     #[test]
     fn merge_settings_keys_writes_v2_server_integrations_github() {
-        let mut doc: toml::Value =
-            toml::from_str("_version = 1\n").expect("empty v2 doc should parse");
+        let mut doc = parse_doc("_version = 1\n");
         merge_settings_keys(&mut doc, &sample_conversion(), Some("https://example.test")).unwrap();
 
-        let github = doc
-            .get("server")
-            .and_then(toml::Value::as_table)
-            .and_then(|s| s.get("integrations"))
-            .and_then(toml::Value::as_table)
-            .and_then(|i| i.get("github"))
-            .and_then(toml::Value::as_table)
+        let github = doc["server"]["integrations"]["github"]
+            .as_table()
             .expect("server.integrations.github should exist");
+        assert_eq!(github["app_id"].as_str(), Some("123"));
+        assert_eq!(github["slug"].as_str(), Some("fabro"));
+        assert_eq!(github["client_id"].as_str(), Some("abc"));
+
+        let web = doc["server"]["web"]
+            .as_table()
+            .expect("server.web should exist");
+        assert_eq!(web["url"].as_str(), Some("https://example.test"));
+        assert_eq!(web["enabled"].as_bool(), Some(true));
+
+        // Re-parse the emitted document to prove it round-trips into a
+        // valid v2 `SettingsFile`.
+        let emitted = doc.to_string();
+        let file = fabro_config::ConfigLayer::parse(&emitted)
+            .expect("merged output should parse as a v2 SettingsFile");
+        let server = file
+            .as_v2()
+            .server
+            .as_ref()
+            .expect("[server] should be present");
+        let integrations = server
+            .integrations
+            .as_ref()
+            .expect("[server.integrations] should be present");
+        let github = integrations
+            .github
+            .as_ref()
+            .expect("[server.integrations.github] should be present");
         assert_eq!(
-            github.get("app_id").and_then(toml::Value::as_str),
-            Some("123")
+            github.app_id.as_ref().map(|s| s.as_source()),
+            Some("123".to_string())
         );
-        assert_eq!(
-            github.get("slug").and_then(toml::Value::as_str),
-            Some("fabro")
+    }
+
+    #[test]
+    fn merge_settings_keys_preserves_comments_and_unrelated_keys() {
+        let existing = r##"# Top-of-file comment explaining the settings layout.
+_version = 1
+
+# Storage root comment — should survive the edit.
+[server.storage]
+root = "/srv/fabro-data"
+
+# A pre-existing integration that is NOT github.
+[server.integrations.slack]
+default_channel = "#ops"
+
+[run.model]
+provider = "anthropic"
+name = "claude-sonnet"
+"##;
+        let mut doc = parse_doc(existing);
+        merge_settings_keys(
+            &mut doc,
+            &sample_conversion(),
+            Some("https://fabro.example"),
+        )
+        .unwrap();
+
+        let emitted = doc.to_string();
+
+        // Comments must survive the round-trip.
+        assert!(
+            emitted.contains("# Top-of-file comment explaining the settings layout."),
+            "top-of-file comment was stripped:\n{emitted}"
+        );
+        assert!(
+            emitted.contains("# Storage root comment — should survive the edit."),
+            "inline table comment was stripped:\n{emitted}"
+        );
+        assert!(
+            emitted.contains("# A pre-existing integration that is NOT github."),
+            "sibling-table comment was stripped:\n{emitted}"
         );
 
-        let web = doc
-            .get("server")
-            .and_then(toml::Value::as_table)
-            .and_then(|s| s.get("web"))
-            .and_then(toml::Value::as_table)
-            .expect("server.web should exist");
-        assert_eq!(
-            web.get("url").and_then(toml::Value::as_str),
-            Some("https://example.test")
+        // Unrelated keys must still be intact.
+        assert!(
+            emitted.contains(r#"root = "/srv/fabro-data""#),
+            "server.storage.root was lost:\n{emitted}"
         );
+        assert!(
+            emitted.contains(r##"default_channel = "#ops""##),
+            "server.integrations.slack.default_channel was lost:\n{emitted}"
+        );
+        assert!(
+            emitted.contains(r#"provider = "anthropic""#),
+            "run.model.provider was lost:\n{emitted}"
+        );
+
+        // And the new keys must be present.
+        assert!(
+            emitted.contains(r#"app_id = "123""#),
+            "server.integrations.github.app_id missing:\n{emitted}"
+        );
+        assert!(
+            emitted.contains(r#"url = "https://fabro.example""#),
+            "server.web.url missing:\n{emitted}"
+        );
+
+        // Finally, the whole thing must still parse as a valid v2
+        // SettingsFile.
+        fabro_config::ConfigLayer::parse(&emitted)
+            .expect("merged output should still parse as v2 after the edit");
     }
 }
