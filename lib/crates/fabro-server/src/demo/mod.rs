@@ -1325,59 +1325,39 @@ mod runs {
     }
 
     pub(super) fn settings() -> serde_json::Value {
-        serde_json::to_value(fabro_types::Settings {
-            version: Some(1),
-            goal: Some("Add rate limiting to auth endpoints".into()),
-            graph: Some("implement.fabro".into()),
-            work_dir: Some("/workspace/api-server".into()),
-            llm: Some(fabro_types::settings::run::LlmSettings {
-                model: Some("claude-opus-4-6".into()),
-                provider: Some("anthropic".into()),
-                fallbacks: None,
-            }),
-            setup: Some(fabro_types::settings::run::SetupSettings {
-                commands: vec!["bun install".into(), "bun run typecheck".into()],
-                timeout_ms: Some(120_000),
-            }),
-            sandbox: Some(fabro_types::settings::sandbox::SandboxSettings {
-                provider: Some("daytona".into()),
-                preserve: None,
-                devcontainer: None,
-                local: None,
-                daytona: Some(fabro_sandbox::daytona::DaytonaConfig {
-                    auto_stop_interval: Some(60),
-                    labels: Some(std::collections::HashMap::from([(
-                        "project".into(),
-                        "api-server".into(),
-                    )])),
-                    snapshot: Some(fabro_sandbox::daytona::DaytonaSnapshotConfig {
-                        name: "api-server-dev".into(),
-                        cpu: Some(4),
-                        memory: Some(8),
-                        disk: Some(10),
-                        dockerfile: None,
-                    }),
-                    network: Some(fabro_sandbox::daytona::DaytonaNetwork::Block),
-                    skip_clone: false,
-                }),
-                env: None,
-            }),
-            vars: Some(std::collections::HashMap::from([
-                (
-                    "repo_url".into(),
-                    "https://github.com/org/api-server".into(),
-                ),
-                ("branch".into(), "feature/rate-limiting".into()),
-            ])),
-            hooks: vec![],
-            checkpoint: Default::default(),
-            pull_request: None,
-            artifacts: None,
-            mcp_servers: Default::default(),
-            github: None,
-            ..Default::default()
+        // v2 SettingsFile shape — matches what /api/v1/runs/:id/settings
+        // returns in production, so the demo renders identically.
+        serde_json::json!({
+            "_version": 1,
+            "run": {
+                "goal": "Add rate limiting to auth endpoints",
+                "working_dir": "/workspace/api-server",
+                "model": {
+                    "provider": "anthropic",
+                    "name": "claude-opus-4-6"
+                },
+                "prepare": {
+                    "steps": [
+                        { "command": ["bun", "install"] },
+                        { "command": ["bun", "run", "typecheck"] }
+                    ],
+                    "timeout": "120s"
+                },
+                "sandbox": {
+                    "provider": "daytona",
+                    "daytona": {
+                        "auto_stop_interval": 60,
+                        "labels": { "project": "api-server" },
+                        "snapshot": {
+                            "name": "api-server-dev",
+                            "cpu": 4,
+                            "memory": "8GB",
+                            "disk": "10GB"
+                        }
+                    }
+                }
+            }
         })
-        .unwrap()
     }
 }
 
@@ -1489,68 +1469,64 @@ mod insights {
 }
 
 mod settings {
-    use fabro_types::Settings;
-    use fabro_types::settings::server::*;
-
     pub(super) fn server_settings() -> serde_json::Value {
-        serde_json::to_value(Settings {
-            storage_dir: Some("/home/fabro/.fabro".into()),
-            max_concurrent_runs: Some(10),
-            web: Some(WebSettings {
-                enabled: true,
-                url: "https://fabro.example.com".into(),
-                auth: AuthSettings {
-                    provider: AuthProvider::Github,
-                    allowed_usernames: vec!["brynary".into(), "alice".into()],
+        // v2 SettingsFile shape — matches what /api/v1/settings returns in
+        // production, so the demo renders identically.
+        serde_json::json!({
+            "_version": 1,
+            "server": {
+                "storage": {
+                    "root": "/home/fabro/.fabro"
                 },
-            }),
-            api: Some(ApiSettings {
-                base_url: "https://api.fabro.example.com".into(),
-                authentication_strategies: vec![ApiAuthStrategy::Jwt],
-                tls: None,
-            }),
-            git: Some(GitSettings {
-                provider: GitProvider::Github,
-                app_id: Some("12345".into()),
-                client_id: Some("Iv1.abc123".into()),
-                slug: Some("fabro-dev".into()),
-                author: Default::default(),
-                webhooks: None,
-            }),
-            features: Some(FeaturesSettings {
-                session_sandboxes: false,
-                retros: false,
-            }),
-            log: Default::default(),
-            llm: Some(fabro_types::settings::run::LlmSettings {
-                model: Some("claude-sonnet".into()),
-                provider: Some("anthropic".into()),
-                fallbacks: None,
-            }),
-            setup: None,
-            sandbox: Some(fabro_types::settings::sandbox::SandboxSettings {
-                provider: Some("daytona".into()),
-                preserve: None,
-                devcontainer: None,
-                local: None,
-                daytona: Some(fabro_sandbox::daytona::DaytonaConfig {
-                    auto_stop_interval: Some(60),
-                    labels: None,
-                    snapshot: None,
-                    network: Some(fabro_sandbox::daytona::DaytonaNetwork::Block),
-                    skip_clone: false,
-                }),
-                env: None,
-            }),
-            vars: None,
-            checkpoint: Default::default(),
-            pull_request: None,
-            artifacts: None,
-            hooks: vec![],
-            mcp_servers: Default::default(),
-            github: None,
-            ..Default::default()
+                "scheduler": {
+                    "max_concurrent_runs": 10
+                },
+                "api": {
+                    "url": "https://api.fabro.example.com"
+                },
+                "web": {
+                    "enabled": true,
+                    "url": "https://fabro.example.com"
+                },
+                "auth": {
+                    "api": {
+                        "jwt": { "enabled": true }
+                    },
+                    "web": {
+                        "allowed_usernames": ["brynary", "alice"],
+                        "providers": {
+                            "github": {
+                                "enabled": true,
+                                "client_id": "Iv1.abc123"
+                            }
+                        }
+                    }
+                },
+                "integrations": {
+                    "github": {
+                        "app_id": "12345",
+                        "client_id": "Iv1.abc123",
+                        "slug": "fabro-dev"
+                    }
+                }
+            },
+            "run": {
+                "model": {
+                    "provider": "anthropic",
+                    "name": "claude-sonnet"
+                },
+                "sandbox": {
+                    "provider": "daytona",
+                    "daytona": {
+                        "auto_stop_interval": 60,
+                        "network": "block"
+                    }
+                }
+            },
+            "features": {
+                "session_sandboxes": false,
+                "retros": false
+            }
         })
-        .unwrap()
     }
 }

@@ -53,7 +53,7 @@ pub use run_event::{EventBody, RunEvent, RunNoticeLevel};
 pub use run_id::RunId;
 pub use run_id::fixtures;
 pub use sandbox_record::SandboxRecord;
-pub use settings::{ArtifactStorageBackend, ArtifactStorageSettings, Settings};
+pub use settings::{ArtifactStorageBackend, ArtifactStorageSettings};
 pub use stage_id::StageId;
 pub use start::StartRecord;
 pub use status::{
