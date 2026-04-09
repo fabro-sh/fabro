@@ -4,12 +4,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use fabro_config::sandbox::WorktreeMode;
-use fabro_config::{project as project_config, sandbox as sandbox_config};
+use fabro_config::project as project_config;
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_model::{Catalog, FallbackTarget, Provider};
 use fabro_sandbox::{SandboxProvider, SandboxSpec};
 use fabro_types::RunId;
+use fabro_types::settings::sandbox::{self as sandbox_config, WorktreeMode};
 use fabro_types::settings::v2::run::ModelRefOrSplice;
 use fabro_types::settings::v2::to_runtime::{
     bridge_hook, bridge_mcp_entry, bridge_pull_request, bridge_sandbox, bridge_worktree_mode,
@@ -36,10 +36,10 @@ use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::run_status::{RunStatus, StatusReason};
 use crate::runtime_store::RunStoreHandle;
 use crate::workflow_bundle::{RunDefinition, WorkflowBundle};
-use fabro_config::run::PullRequestSettings;
 use fabro_retro::retro::Retro;
 use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::daytona::detect_repo_info;
+use fabro_types::settings::run::PullRequestSettings;
 use tokio::runtime::Handle;
 
 struct RunSession {

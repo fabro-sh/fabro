@@ -1,41 +1,15 @@
-//! Re-export shim for run-side settings types.
+//! Workflow / run config loading helpers.
 //!
-//! Stage 3 replaced the parse-time types previously defined here with the
-//! v2 parse tree in `fabro_types::settings::v2`. This module stays alive as
-//! a pass-through for crates that still import resolved run types via the
-//! legacy `fabro_config::run` path; Stage 6 deletes it.
+//! Thin wrappers around `ConfigLayer::parse` / `ConfigLayer::load` plus
+//! path resolution for the `[workflow] graph` override. Runtime types
+//! that used to be re-exported from here live under
+//! `fabro_types::settings::run` now.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
 use crate::config::ConfigLayer;
-
-pub use fabro_types::settings::run::{
-    ArtifactsSettings, CheckpointSettings, GitHubSettings, LlmSettings, MergeStrategy,
-    PullRequestSettings, SetupSettings,
-};
-
-/// Expand `${env.NAME}` whole-value references inside a string map.
-///
-/// Leaves entries that don't match the whole-value form untouched. Missing
-/// host variables produce an error. This is the minimal resolver legacy
-/// consumers still call while they are being migrated off `Settings`; the
-/// full v2 interpolation pass lives in `fabro_types::settings::v2::interp`.
-pub fn resolve_env_refs(env: &mut HashMap<String, String>) -> anyhow::Result<()> {
-    for (key, value) in env.iter_mut() {
-        if let Some(var_name) = value
-            .strip_prefix("${env.")
-            .and_then(|s| s.strip_suffix('}'))
-        {
-            *value = std::env::var(var_name).with_context(|| {
-                format!("sandbox.env.{key}: host environment variable {var_name:?} is not set")
-            })?;
-        }
-    }
-    Ok(())
-}
 
 /// Load and parse a run config from a TOML file.
 pub fn parse_run_config(contents: &str) -> anyhow::Result<ConfigLayer> {

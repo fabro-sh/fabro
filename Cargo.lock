@@ -1487,6 +1487,7 @@ dependencies = [
  "fabro-model",
  "fabro-sandbox",
  "fabro-test",
+ "fabro-types",
  "fabro-util",
  "futures",
  "glob",

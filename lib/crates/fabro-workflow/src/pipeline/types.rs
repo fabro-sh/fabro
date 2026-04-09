@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use fabro_agent::Sandbox;
-use fabro_config::sandbox::WorktreeMode;
 use fabro_graphviz::graph::Graph;
 use fabro_hooks::HookRunner;
 use fabro_interview::Interviewer;
@@ -12,6 +11,7 @@ use fabro_mcp::config::McpServerSettings;
 use fabro_model::FallbackTarget;
 use fabro_sandbox::SandboxSpec;
 use fabro_types::RunId;
+use fabro_types::settings::sandbox::WorktreeMode;
 use fabro_validate::Diagnostic;
 
 use crate::artifact_upload::ArtifactSink;
@@ -27,9 +27,9 @@ use crate::run_options::{GitCheckpointOptions, LifecycleOptions, RunOptions};
 use crate::runtime_store::RunStoreHandle;
 use crate::transforms::Transform;
 use crate::workflow_bundle::WorkflowBundle;
-use fabro_config::run::PullRequestSettings;
 use fabro_llm::client::Client;
 use fabro_retro::retro::Retro;
+use fabro_types::settings::run::PullRequestSettings;
 use fabro_validate::Severity;
 
 /// Output of the PARSE phase.

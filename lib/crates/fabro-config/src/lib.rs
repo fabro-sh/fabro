@@ -3,14 +3,10 @@ extern crate self as fabro_config;
 pub mod config;
 pub mod effective_settings;
 pub mod home;
-pub mod hook;
 pub mod legacy_env;
-pub mod mcp;
 pub mod merge;
 pub mod project;
 pub mod run;
-pub mod sandbox;
-pub mod server;
 pub mod storage;
 pub mod user;
 
@@ -19,9 +15,16 @@ pub use fabro_util::path::expand_tilde;
 pub use home::Home;
 pub use storage::{RunScratch, ServerState, Storage};
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use fabro_types::settings::v2::SettingsFile;
 use serde::de::DeserializeOwned;
+
+/// Resolve the storage directory: v2 `server.storage.root` > home default.
+#[must_use]
+pub fn resolve_storage_dir(settings: &SettingsFile) -> PathBuf {
+    settings.storage_dir()
+}
 
 /// Load a TOML config from an explicit path or `~/.fabro/{filename}`.
 ///

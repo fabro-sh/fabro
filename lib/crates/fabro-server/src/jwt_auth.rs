@@ -10,8 +10,8 @@ use tracing::warn;
 
 use crate::error::ApiError;
 use crate::web_auth::SessionCookie;
-use fabro_config::server::ApiSettings;
 use fabro_types::RunAuthMethod;
+use fabro_types::settings::server::ApiSettings;
 
 /// JWT claims for service-to-service authentication.
 #[derive(Debug, Deserialize)]
@@ -86,7 +86,7 @@ pub fn resolve_auth_mode_with_lookup<F>(
 where
     F: Fn(&str) -> Option<String>,
 {
-    use fabro_config::server::ApiAuthStrategy;
+    use fabro_types::settings::server::ApiAuthStrategy;
 
     if api_settings.authentication_strategies.is_empty()
         && std::env::var("FABRO_LOCAL_NO_AUTH").ok().as_deref() == Some("1")

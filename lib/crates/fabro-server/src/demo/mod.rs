@@ -1330,16 +1330,16 @@ mod runs {
             goal: Some("Add rate limiting to auth endpoints".into()),
             graph: Some("implement.fabro".into()),
             work_dir: Some("/workspace/api-server".into()),
-            llm: Some(fabro_config::run::LlmSettings {
+            llm: Some(fabro_types::settings::run::LlmSettings {
                 model: Some("claude-opus-4-6".into()),
                 provider: Some("anthropic".into()),
                 fallbacks: None,
             }),
-            setup: Some(fabro_config::run::SetupSettings {
+            setup: Some(fabro_types::settings::run::SetupSettings {
                 commands: vec!["bun install".into(), "bun run typecheck".into()],
                 timeout_ms: Some(120_000),
             }),
-            sandbox: Some(fabro_config::sandbox::SandboxSettings {
+            sandbox: Some(fabro_types::settings::sandbox::SandboxSettings {
                 provider: Some("daytona".into()),
                 preserve: None,
                 devcontainer: None,
@@ -1489,8 +1489,8 @@ mod insights {
 }
 
 mod settings {
-    use fabro_config::server::*;
     use fabro_types::Settings;
+    use fabro_types::settings::server::*;
 
     pub(super) fn server_settings() -> serde_json::Value {
         serde_json::to_value(Settings {
@@ -1522,13 +1522,13 @@ mod settings {
                 retros: false,
             }),
             log: Default::default(),
-            llm: Some(fabro_config::run::LlmSettings {
+            llm: Some(fabro_types::settings::run::LlmSettings {
                 model: Some("claude-sonnet".into()),
                 provider: Some("anthropic".into()),
                 fallbacks: None,
             }),
             setup: None,
-            sandbox: Some(fabro_config::sandbox::SandboxSettings {
+            sandbox: Some(fabro_types::settings::sandbox::SandboxSettings {
                 provider: Some("daytona".into()),
                 preserve: None,
                 devcontainer: None,

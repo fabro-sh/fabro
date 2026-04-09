@@ -1,6 +1,6 @@
-use fabro_config::run::MergeStrategy;
 use fabro_store::RunProjection;
 use fabro_types::PullRequestRecord;
+use fabro_types::settings::run::MergeStrategy;
 use tracing::{debug, info};
 
 use fabro_github::{self as github_app, GitHubAppCredentials, ssh_url_to_https};

@@ -1,8 +1,8 @@
 //! User config loading.
 //!
-//! Stage 3 removed the parse-time `ClientTlsConfig`/`ServerConfig`/`ExecConfig`
-//! types; this module now only exposes machine-level settings loading plus
-//! path helpers and a re-export of the resolved user-facing types.
+//! Exposes machine-level settings loading plus path helpers for the
+//! `~/.fabro/settings.toml` file. Runtime types that used to be
+//! re-exported from here live in `fabro_types::settings::user` now.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -10,10 +10,6 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::config::ConfigLayer;
 use crate::home::Home;
-
-pub use fabro_types::settings::user::{
-    ClientTlsSettings, ExecSettings, OutputFormat, PermissionLevel, ServerSettings,
-};
 
 pub const SETTINGS_CONFIG_FILENAME: &str = "settings.toml";
 pub const LEGACY_USER_CONFIG_FILENAME: &str = "cli.toml";

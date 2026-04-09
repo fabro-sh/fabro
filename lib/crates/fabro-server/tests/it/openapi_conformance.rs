@@ -12,13 +12,13 @@ use std::collections::BTreeSet;
 
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
-use fabro_config::run::*;
-use fabro_config::sandbox::SandboxSettings;
 use fabro_hooks::*;
 use fabro_sandbox::daytona::*;
 use fabro_server::jwt_auth::AuthMode;
 use fabro_server::server::build_router;
 use fabro_server::server_config::*;
+use fabro_types::settings::run::*;
+use fabro_types::settings::sandbox::SandboxSettings;
 use fabro_types::settings::{
     ClientTlsSettings, ExecSettings, OutputFormat, PermissionLevel, ProjectSettings,
     ServerSettings as UserServerSettings,
@@ -398,13 +398,13 @@ fn fully_populated_server_config() -> Settings {
         ],
         mcp_servers: std::collections::HashMap::from([(
             "test".into(),
-            fabro_config::mcp::McpServerEntry {
-                transport: fabro_config::mcp::McpTransport::Stdio {
+            fabro_types::settings::mcp::McpServerEntry {
+                transport: fabro_types::settings::mcp::McpTransport::Stdio {
                     command: vec!["echo".into()],
                     env: Default::default(),
                 },
-                startup_timeout_secs: fabro_config::mcp::default_startup_timeout_secs(),
-                tool_timeout_secs: fabro_config::mcp::default_tool_timeout_secs(),
+                startup_timeout_secs: fabro_types::settings::mcp::default_startup_timeout_secs(),
+                tool_timeout_secs: fabro_types::settings::mcp::default_tool_timeout_secs(),
             },
         )]),
         github: Some(GitHubSettings {

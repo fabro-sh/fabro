@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 pub(crate) use fabro_config::user::*;
+pub(crate) use fabro_types::settings::user::ClientTlsSettings;
 
 use anyhow::{Result, bail};
 use fabro_config::ConfigLayer;

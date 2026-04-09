@@ -68,7 +68,7 @@ struct Cli {
     args: AgentArgs,
 }
 
-pub use fabro_config::user::{OutputFormat, PermissionLevel};
+pub use fabro_types::settings::user::{OutputFormat, PermissionLevel};
 
 impl AgentArgs {
     /// Fill `None` fields from settings.toml values, then hardcoded defaults.

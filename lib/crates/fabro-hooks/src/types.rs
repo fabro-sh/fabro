@@ -1,4 +1,4 @@
-pub use fabro_config::hook::HookEvent;
+pub use fabro_types::settings::hook::HookEvent;
 
 use fabro_types::RunId;
 use serde::{Deserialize, Serialize};
