@@ -510,6 +510,7 @@ mod tests {
             node_id: "plan".into(),
             name: "Plan".into(),
             index: 0,
+            visit: 1,
             duration_ms: 5000,
             status: "success".into(),
             preferred_label: None,

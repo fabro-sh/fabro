@@ -1197,6 +1197,7 @@ mod tests {
                 node_id: "plan".to_string(),
                 name: "plan".to_string(),
                 index: 0,
+                visit: 1,
                 duration_ms: 1,
                 status: "success".to_string(),
                 preferred_label: None,

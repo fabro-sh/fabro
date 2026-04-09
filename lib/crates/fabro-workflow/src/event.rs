@@ -137,6 +137,7 @@ pub enum Event {
         node_id: String,
         name: String,
         index: usize,
+        visit: u32,
         handler_type: String,
         attempt: usize,
         max_attempts: usize,
@@ -145,6 +146,7 @@ pub enum Event {
         node_id: String,
         name: String,
         index: usize,
+        visit: u32,
         duration_ms: u64,
         status: String,
         preferred_label: Option<String>,
@@ -175,6 +177,7 @@ pub enum Event {
         node_id: String,
         name: String,
         index: usize,
+        visit: u32,
         failure: FailureDetail,
         will_retry: bool,
     },
@@ -182,6 +185,7 @@ pub enum Event {
         node_id: String,
         name: String,
         index: usize,
+        visit: u32,
         attempt: usize,
         max_attempts: usize,
         delay_ms: u64,
@@ -193,10 +197,14 @@ pub enum Event {
         join_policy: String,
     },
     ParallelBranchStarted {
+        parallel_group_id: String,
+        parallel_branch_id: String,
         branch: String,
         index: usize,
     },
     ParallelBranchCompleted {
+        parallel_group_id: String,
+        parallel_branch_id: String,
         branch: String,
         index: usize,
         duration_ms: u64,
@@ -676,6 +684,7 @@ impl Event {
                 index,
                 failure,
                 will_retry,
+                ..
             } => {
                 let error_msg = &failure.message;
                 if *will_retry {
@@ -705,6 +714,7 @@ impl Event {
                 attempt,
                 max_attempts,
                 delay_ms,
+                ..
             } => {
                 warn!(
                     node_id,
@@ -723,7 +733,7 @@ impl Event {
             } => {
                 debug!(branch_count, join_policy, "Parallel execution started");
             }
-            Self::ParallelBranchStarted { branch, index } => {
+            Self::ParallelBranchStarted { branch, index, .. } => {
                 debug!(branch, index, "Parallel branch started");
             }
             Self::ParallelBranchCompleted {
@@ -2759,6 +2769,7 @@ mod tests {
                 node_id: "plan".to_string(),
                 name: "Plan".to_string(),
                 index: 0,
+                visit: 1,
                 duration_ms: 5000,
                 status: "success".to_string(),
                 preferred_label: None,
@@ -2797,6 +2808,7 @@ mod tests {
                 node_id: "plan".to_string(),
                 name: "Plan".to_string(),
                 index: 0,
+                visit: 1,
                 duration_ms: 5000,
                 status: "success".to_string(),
                 preferred_label: None,
@@ -2831,6 +2843,7 @@ mod tests {
                 node_id: "code".to_string(),
                 name: "Code".to_string(),
                 index: 1,
+                visit: 1,
                 failure: FailureDetail::new(
                     "lint failed",
                     crate::outcome::FailureCategory::Deterministic,
@@ -3016,6 +3029,8 @@ mod tests {
         );
         assert_eq!(
             event_name(&Event::ParallelBranchStarted {
+                parallel_group_id: "plan@1".to_string(),
+                parallel_branch_id: "plan@1:0".to_string(),
                 branch: "fork".to_string(),
                 index: 0,
             }),

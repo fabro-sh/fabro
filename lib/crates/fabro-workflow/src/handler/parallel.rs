@@ -132,6 +132,7 @@ impl Handler for ParallelHandler {
         struct BranchSetup {
             target_id: String,
             branch_index: usize,
+            parallel_branch_id: String,
             branch_context: Context,
             sandbox: Arc<dyn Sandbox>,
             worktree_path: Option<PathBuf>,
@@ -150,9 +151,12 @@ impl Handler for ParallelHandler {
                 .unwrap_or("wait_all"),
         );
 
+        let parallel_visit = u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX);
+        let parallel_group_id = format!("{}@{}", node.id, parallel_visit);
+
         services.emitter.emit(&Event::ParallelStarted {
             node_id: node.id.clone(),
-            visit: u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX),
+            visit: parallel_visit,
             branch_count: branches.len(),
             join_policy: join_policy.to_string(),
         });
@@ -253,9 +257,11 @@ impl Handler for ParallelHandler {
                 (Arc::clone(&services.sandbox), None)
             };
 
+            let parallel_branch_id = format!("{parallel_group_id}:{branch_index}");
             branch_setups.push(BranchSetup {
                 target_id,
                 branch_index,
+                parallel_branch_id,
                 branch_context,
                 sandbox: branch_sandbox,
                 worktree_path,
@@ -283,6 +289,7 @@ impl Handler for ParallelHandler {
                 .as_ref()
                 .map(|gs| gs.git_author.clone())
                 .unwrap_or_default();
+            let group_id = parallel_group_id.clone();
 
             let handle = tokio::spawn(async move {
                 let _permit = sem
@@ -291,6 +298,8 @@ impl Handler for ParallelHandler {
                     .map_err(|e| FabroError::handler(format!("semaphore error: {e}")))?;
 
                 emitter.emit(&Event::ParallelBranchStarted {
+                    parallel_group_id: group_id.clone(),
+                    parallel_branch_id: setup.parallel_branch_id.clone(),
                     branch: setup.target_id.clone(),
                     index: setup.branch_index,
                 });
@@ -302,6 +311,8 @@ impl Handler for ParallelHandler {
                         setup.target_id
                     ));
                     emitter.emit(&Event::ParallelBranchCompleted {
+                        parallel_group_id: group_id.clone(),
+                        parallel_branch_id: setup.parallel_branch_id.clone(),
                         branch: setup.target_id.clone(),
                         index: setup.branch_index,
                         duration_ms: millis_u64(branch_start.elapsed()),
@@ -386,6 +397,8 @@ impl Handler for ParallelHandler {
                 };
 
                 emitter.emit(&Event::ParallelBranchCompleted {
+                    parallel_group_id: group_id.clone(),
+                    parallel_branch_id: setup.parallel_branch_id.clone(),
                     branch: setup.target_id.clone(),
                     index: setup.branch_index,
                     duration_ms: millis_u64(branch_start.elapsed()),
