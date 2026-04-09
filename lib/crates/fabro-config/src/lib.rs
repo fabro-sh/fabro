@@ -1,6 +1,5 @@
 extern crate self as fabro_config;
 
-pub mod combine;
 pub mod config;
 pub mod effective_settings;
 pub mod home;
@@ -12,7 +11,6 @@ pub mod project;
 pub mod run;
 pub mod sandbox;
 pub mod server;
-pub mod settings;
 pub mod storage;
 pub mod user;
 

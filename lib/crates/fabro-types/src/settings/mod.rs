@@ -1,3 +1,22 @@
+//! Legacy flat `Settings` shape plus the v2 namespaced schema.
+//!
+//! The authoritative config schema lives in [`v2`] — it is the namespaced
+//! parse tree that `_version = 1` TOML files decode into. Value-language
+//! helpers, the merge matrix, and strict unknown-key validation all live
+//! there.
+//!
+//! The flat [`Settings`] type and its submodules (`hook`, `mcp`, `project`,
+//! `run`, `sandbox`, `server`, `user`) are the **resolved** shape that
+//! current consumers still read. `fabro_config::ConfigLayer::resolve` walks
+//! the v2 tree through [`v2::bridge::bridge_to_old`] to produce this flat
+//! shape, so every consumer that touches `settings.llm`, `settings.vars`,
+//! `settings.sandbox`, etc. keeps working.
+//!
+//! Full deletion of the flat shape (including the bridge) is scheduled for
+//! a follow-up PR that migrates every consumer call site to read from
+//! [`v2::SettingsFile`] directly. This module deliberately stays as a
+//! transitional seam until then.
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 
