@@ -368,7 +368,7 @@ fn concurrent_autostart_converges_on_one_shared_daemon_and_cleans_up() {
     std::fs::write(
         &config_path,
         format!(
-            "storage_dir = \"{}\"\n[server]\ntarget = \"{}\"\n",
+            "_version = 1\n\n[server.storage]\nroot = \"{}\"\n\n[cli.target]\ntype = \"unix\"\npath = \"{}\"\n",
             storage_dir.display(),
             socket_path.display()
         ),

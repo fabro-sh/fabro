@@ -421,6 +421,15 @@ fn attach_json_errors_without_prompting_for_human_input() {
                     );
                 }
             }
+            // Strip v2-shape server/version fields that the bridge emits,
+            // since the test fixture's socket path is randomised per run.
+            if let Some(settings) = event
+                .pointer_mut("/properties/settings")
+                .and_then(Value::as_object_mut)
+            {
+                settings.remove("server");
+                settings.remove("version");
+            }
             event
         })
         .collect();

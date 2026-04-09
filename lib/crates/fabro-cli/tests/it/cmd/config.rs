@@ -429,13 +429,11 @@ fn settings_local_explicit_workflow_path_uses_workflow_project_layers() {
 
     let cfg = parse_settings(&output);
     assert_eq!(cfg.auto_approve, Some(true));
+    // v2 R30: run.prepare.steps replaces the whole ordered list across layers.
+    // The highest-precedence layer (workflow) wins.
     assert_eq!(
         cfg.setup.as_ref().expect("setup config").commands,
-        vec![
-            "workflow-setup".to_string(),
-            "project-setup".to_string(),
-            "cli-setup".to_string(),
-        ]
+        vec!["workflow-setup".to_string()]
     );
     assert_eq!(
         cfg.sandbox.as_ref().expect("sandbox config").preserve,
@@ -502,9 +500,10 @@ fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
         run_record["settings"]["llm"]["model"].as_str(),
         Some("gpt-5.2")
     );
+    // v2 R30: run.prepare.steps replaces the whole ordered list across layers.
     assert_eq!(
         run_record["settings"]["setup"]["commands"],
-        serde_json::json!(["workflow-setup", "project-setup", "cli-setup"])
+        serde_json::json!(["workflow-setup"])
     );
 }
 

@@ -354,8 +354,13 @@ fn strip_managed_storage_settings(contents: &str) -> &str {
 
 fn settings_storage_dir(settings_path: &Path) -> Option<PathBuf> {
     let content = std::fs::read_to_string(settings_path).ok()?;
-    let stripped = strip_managed_storage_settings(&content);
-    let value = toml::from_str::<toml::Value>(stripped).ok()?;
+    // Settings files that fabro-test injected with its managed marker are
+    // not treated as user-explicit storage overrides — the override tracks
+    // ONLY what the test itself asked for.
+    if content.starts_with(MANAGED_STORAGE_MARKER) {
+        return None;
+    }
+    let value = toml::from_str::<toml::Value>(&content).ok()?;
     value
         .get("server")
         .and_then(toml::Value::as_table)

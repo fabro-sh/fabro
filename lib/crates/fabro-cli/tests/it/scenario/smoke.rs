@@ -307,7 +307,7 @@ fn attach_smoke_covers_arg_validation_and_remote_server_behaviors() {
     context.write_home(
         ".fabro/settings.toml",
         format!(
-            "[server]\ntarget = \"{}/api/v1\"\n",
+            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
             success_server.base_url()
         ),
     );
@@ -406,7 +406,10 @@ fn attach_smoke_covers_arg_validation_and_remote_server_behaviors() {
     });
     context.write_home(
         ".fabro/settings.toml",
-        format!("[server]\ntarget = \"{}/api/v1\"\n", eof_server.base_url()),
+        format!(
+            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
+            eof_server.base_url()
+        ),
     );
 
     let eof_output = context

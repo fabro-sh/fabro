@@ -4,6 +4,7 @@ use anyhow::Result;
 use fabro_config::ConfigLayer;
 use fabro_sandbox::SandboxProvider;
 use fabro_types::settings::v2::SettingsFile;
+use fabro_types::settings::v2::cli::{CliLayer, CliOutputLayer, OutputVerbosity};
 use fabro_types::settings::v2::interp::InterpString;
 use fabro_types::settings::v2::run::{
     ApprovalMode, RunExecutionLayer, RunLayer, RunMode, RunModelLayer, RunSandboxLayer,
@@ -69,6 +70,16 @@ fn execution_layer(
     })
 }
 
+fn cli_layer_for_verbose(verbose: bool) -> Option<CliLayer> {
+    verbose.then(|| CliLayer {
+        output: Some(CliOutputLayer {
+            verbosity: Some(OutputVerbosity::Verbose),
+            ..CliOutputLayer::default()
+        }),
+        ..CliLayer::default()
+    })
+}
+
 impl TryFrom<&RunArgs> for ConfigLayer {
     type Error = anyhow::Error;
 
@@ -84,15 +95,9 @@ impl TryFrom<&RunArgs> for ConfigLayer {
             sparse_flag(args.no_retro),
         );
 
-        let mut metadata = parse_labels(&args.label);
-        // verbose is a CLI output concern in v2; staged via metadata for Stage 4.
-        if args.verbose {
-            metadata.insert("fabro.verbose".into(), "true".into());
-        }
-
         let run = RunLayer {
             goal: args.goal.as_deref().map(InterpString::parse),
-            metadata,
+            metadata: parse_labels(&args.label),
             model,
             sandbox,
             execution,
@@ -105,6 +110,7 @@ impl TryFrom<&RunArgs> for ConfigLayer {
 
         Ok(Self::from(SettingsFile {
             run: Some(run),
+            cli: cli_layer_for_verbose(args.verbose),
             ..SettingsFile::default()
         }))
     }
@@ -120,14 +126,8 @@ impl TryFrom<&PreflightArgs> for ConfigLayer {
             ..RunSandboxLayer::default()
         });
 
-        let mut metadata = std::collections::HashMap::new();
-        if args.verbose {
-            metadata.insert("fabro.verbose".into(), "true".into());
-        }
-
         let run = RunLayer {
             goal: args.goal.as_deref().map(InterpString::parse),
-            metadata,
             model,
             sandbox,
             ..RunLayer::default()
@@ -137,6 +137,7 @@ impl TryFrom<&PreflightArgs> for ConfigLayer {
 
         Ok(Self::from(SettingsFile {
             run: Some(run),
+            cli: cli_layer_for_verbose(args.verbose),
             ..SettingsFile::default()
         }))
     }

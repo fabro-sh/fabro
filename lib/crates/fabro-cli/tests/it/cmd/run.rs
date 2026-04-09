@@ -724,6 +724,14 @@ fn json_run_implies_auto_approve_for_human_gates() {
                 );
             }
         }
+        // Strip v2-shape server/version fields that the bridge now emits.
+        if let Some(settings) = event
+            .pointer_mut("/properties/settings")
+            .and_then(Value::as_object_mut)
+        {
+            settings.remove("server");
+            settings.remove("version");
+        }
         let Some(llm) = event.pointer_mut("/properties/settings/llm") else {
             continue;
         };

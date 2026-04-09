@@ -16,10 +16,11 @@ use fabro_model::Catalog;
 use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxProvider, SandboxSpec};
 use fabro_types::settings::v2::SettingsFile;
+use fabro_types::settings::v2::cli::{CliLayer, CliOutputLayer, OutputVerbosity};
 use fabro_types::settings::v2::interp::InterpString;
 use fabro_types::settings::v2::run::{
-    AgentPermissions, ApprovalMode, DaytonaDockerfileLayer, RunExecutionLayer, RunLayer, RunMode,
-    RunModelLayer, RunSandboxLayer,
+    ApprovalMode, DaytonaDockerfileLayer, RunExecutionLayer, RunLayer, RunMode, RunModelLayer,
+    RunSandboxLayer,
 };
 use fabro_types::{RunId, Settings};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
@@ -252,22 +253,22 @@ fn manifest_args_layer(args: Option<&types::ManifestArgs>) -> ConfigLayer {
         ..RunLayer::default()
     });
 
-    let mut file = SettingsFile::default();
-    if let Some(run) = run {
-        file.run = Some(run);
-    }
+    // Verbose is a CLI output concern in v2; route it through cli.output.verbosity.
+    let cli = args.verbose.and_then(|verbose| {
+        verbose.then(|| CliLayer {
+            output: Some(CliOutputLayer {
+                verbosity: Some(OutputVerbosity::Verbose),
+                ..CliOutputLayer::default()
+            }),
+            ..CliLayer::default()
+        })
+    });
 
-    // Verbose is a CLI output-verbosity concern in v2, but manifest args
-    // are resolved server-side as run knobs too. For now we store it as a
-    // metadata key so Stage 4 consumers can pick it up via the bridge.
-    if let Some(verbose) = args.verbose {
-        file.run
-            .get_or_insert_with(RunLayer::default)
-            .metadata
-            .insert("fabro.verbose".into(), verbose.to_string());
-    }
-    let _ = AgentPermissions::ReadOnly; // keep unused import alive until Stage 4 wires agent args
-    ConfigLayer::from(file)
+    ConfigLayer::from(SettingsFile {
+        run,
+        cli,
+        ..SettingsFile::default()
+    })
 }
 
 fn parse_labels(labels: &[String]) -> HashMap<String, String> {

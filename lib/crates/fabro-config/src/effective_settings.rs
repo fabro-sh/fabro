@@ -112,6 +112,8 @@ fn server_defaults_layer(settings: &Settings) -> Settings {
 }
 
 fn apply_server_defaults(settings: &mut Settings, server: &Settings) {
+    // Owner-specific storage and scheduling come from the server's local
+    // settings.toml. These always win over anything layered from the client.
     if settings.storage_dir.is_none() {
         settings.storage_dir.clone_from(&server.storage_dir);
     }
@@ -137,6 +139,41 @@ fn apply_server_defaults(settings: &mut Settings, server: &Settings) {
     }
     if settings.git.is_none() {
         settings.git.clone_from(&server.git);
+    }
+    // Run-shaped defaults also flow from server to CLI in RemoteServer mode
+    // so the persisted run record matches the server's local configuration.
+    if settings.llm.is_none() {
+        settings.llm.clone_from(&server.llm);
+    }
+    if settings.sandbox.is_none() {
+        settings.sandbox.clone_from(&server.sandbox);
+    }
+    if settings.setup.is_none() {
+        settings.setup.clone_from(&server.setup);
+    }
+    if settings.checkpoint.exclude_globs.is_empty() {
+        settings.checkpoint = server.checkpoint.clone();
+    }
+    if settings.pull_request.is_none() {
+        settings.pull_request.clone_from(&server.pull_request);
+    }
+    if settings.artifacts.is_none() {
+        settings.artifacts.clone_from(&server.artifacts);
+    }
+    if settings.hooks.is_empty() {
+        settings.hooks.clone_from(&server.hooks);
+    }
+    if settings.mcp_servers.is_empty() {
+        settings.mcp_servers.clone_from(&server.mcp_servers);
+    }
+    if settings.github.is_none() {
+        settings.github.clone_from(&server.github);
+    }
+    if settings.slack.is_none() {
+        settings.slack.clone_from(&server.slack);
+    }
+    if settings.fabro.is_none() {
+        settings.fabro.clone_from(&server.fabro);
     }
     if settings.vars.is_none() {
         settings.vars.clone_from(&server.vars);
