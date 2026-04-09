@@ -34,9 +34,9 @@ use fabro_store::{
     ArtifactStore, Database, EventEnvelope, EventPayload, PendingInterviewRecord, StageId,
 };
 use fabro_types::{
-    EventBody, InterviewQuestionRecord, InterviewQuestionType, RunBlobId, RunClientProvenance,
-    RunControlAction, RunEvent, RunId, RunProvenance, RunServerProvenance, RunSubjectProvenance,
-    Settings,
+    ActorKind, ActorRef, EventBody, InterviewQuestionRecord, InterviewQuestionType, RunBlobId,
+    RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance, RunServerProvenance,
+    RunSubjectProvenance, Settings,
 };
 use fabro_util::redact::redact_jsonl_line;
 use fabro_util::version::FABRO_VERSION;
@@ -5143,14 +5143,24 @@ async fn append_control_request(
     state: &AppState,
     run_id: RunId,
     action: RunControlAction,
+    actor: Option<ActorRef>,
 ) -> anyhow::Result<()> {
     let run_store = state.store.open_run(&run_id).await?;
     let event = match action {
-        RunControlAction::Cancel => workflow_event::Event::RunCancelRequested,
-        RunControlAction::Pause => workflow_event::Event::RunPauseRequested,
-        RunControlAction::Unpause => workflow_event::Event::RunUnpauseRequested,
+        RunControlAction::Cancel => workflow_event::Event::RunCancelRequested { actor },
+        RunControlAction::Pause => workflow_event::Event::RunPauseRequested { actor },
+        RunControlAction::Unpause => workflow_event::Event::RunUnpauseRequested { actor },
     };
     workflow_event::append_event(&run_store, &run_id, &event).await
+}
+
+fn actor_from_subject(subject: &AuthenticatedSubject) -> Option<ActorRef> {
+    let login = subject.login.clone()?;
+    Some(ActorRef {
+        kind: ActorKind::User,
+        id: Some(login.clone()),
+        display: Some(login),
+    })
 }
 
 fn schedule_worker_kill(state: Arc<AppState>, run_id: RunId, worker_pid: u32) {
@@ -5168,7 +5178,7 @@ fn schedule_worker_kill(state: Arc<AppState>, run_id: RunId, worker_pid: u32) {
 }
 
 async fn cancel_run(
-    _auth: AuthenticatedService,
+    subject: AuthenticatedSubject,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -5234,7 +5244,13 @@ async fn cancel_run(
     };
 
     if pending_control != Some(RunControlAction::Cancel) {
-        if let Err(err) = append_control_request(state.as_ref(), id, RunControlAction::Cancel).await
+        if let Err(err) = append_control_request(
+            state.as_ref(),
+            id,
+            RunControlAction::Cancel,
+            actor_from_subject(&subject),
+        )
+        .await
         {
             return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
                 .into_response();
@@ -5286,7 +5302,7 @@ async fn cancel_run(
 }
 
 async fn pause_run(
-    _auth: AuthenticatedService,
+    subject: AuthenticatedSubject,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -5324,7 +5340,14 @@ async fn pause_run(
     let Some(worker_pid) = worker_pid else {
         return ApiError::new(StatusCode::CONFLICT, "Run worker is not available.").into_response();
     };
-    if let Err(err) = append_control_request(state.as_ref(), id, RunControlAction::Pause).await {
+    if let Err(err) = append_control_request(
+        state.as_ref(),
+        id,
+        RunControlAction::Pause,
+        actor_from_subject(&subject),
+    )
+    .await
+    {
         return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
     #[cfg(unix)]
@@ -5347,7 +5370,7 @@ async fn pause_run(
 }
 
 async fn unpause_run(
-    _auth: AuthenticatedService,
+    subject: AuthenticatedSubject,
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Response {
@@ -5385,7 +5408,14 @@ async fn unpause_run(
     let Some(worker_pid) = worker_pid else {
         return ApiError::new(StatusCode::CONFLICT, "Run worker is not available.").into_response();
     };
-    if let Err(err) = append_control_request(state.as_ref(), id, RunControlAction::Unpause).await {
+    if let Err(err) = append_control_request(
+        state.as_ref(),
+        id,
+        RunControlAction::Unpause,
+        actor_from_subject(&subject),
+    )
+    .await
+    {
         return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response();
     }
     #[cfg(unix)]
@@ -7448,7 +7478,7 @@ mod tests {
             managed_run.status = RunStatus::Running;
             managed_run.worker_pid = Some(u32::MAX);
         }
-        append_control_request(state.as_ref(), run_id, RunControlAction::Pause)
+        append_control_request(state.as_ref(), run_id, RunControlAction::Pause, None)
             .await
             .unwrap();
 
@@ -7479,7 +7509,7 @@ mod tests {
             managed_run.status = RunStatus::Running;
             managed_run.worker_pid = Some(u32::MAX);
         }
-        append_control_request(state.as_ref(), run_id, RunControlAction::Cancel)
+        append_control_request(state.as_ref(), run_id, RunControlAction::Cancel, None)
             .await
             .unwrap();
 
@@ -7613,7 +7643,7 @@ mod tests {
                 workflow_event::Event::RunStarting { reason: None },
                 workflow_event::Event::RunRunning { reason: None },
                 workflow_event::Event::RunPaused,
-                workflow_event::Event::RunCancelRequested,
+                workflow_event::Event::RunCancelRequested { actor: None },
             ],
         )
         .await;

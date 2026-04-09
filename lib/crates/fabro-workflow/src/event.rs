@@ -93,9 +93,18 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<StatusReason>,
     },
-    RunCancelRequested,
-    RunPauseRequested,
-    RunUnpauseRequested,
+    RunCancelRequested {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor: Option<ActorRef>,
+    },
+    RunPauseRequested {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor: Option<ActorRef>,
+    },
+    RunUnpauseRequested {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor: Option<ActorRef>,
+    },
     RunPaused,
     RunUnpaused,
     RunRewound {
@@ -575,13 +584,13 @@ impl Event {
             Self::RunRemoving { reason } => {
                 info!(?reason, "Run removing");
             }
-            Self::RunCancelRequested => {
+            Self::RunCancelRequested { .. } => {
                 info!("Run cancel requested");
             }
-            Self::RunPauseRequested => {
+            Self::RunPauseRequested { .. } => {
                 info!("Run pause requested");
             }
-            Self::RunUnpauseRequested => {
+            Self::RunUnpauseRequested { .. } => {
                 info!("Run unpause requested");
             }
             Self::RunPaused => {
@@ -1140,9 +1149,9 @@ pub fn event_name(event: &Event) -> &'static str {
         Event::RunStarting { .. } => "run.starting",
         Event::RunRunning { .. } => "run.running",
         Event::RunRemoving { .. } => "run.removing",
-        Event::RunCancelRequested => "run.cancel.requested",
-        Event::RunPauseRequested => "run.pause.requested",
-        Event::RunUnpauseRequested => "run.unpause.requested",
+        Event::RunCancelRequested { .. } => "run.cancel.requested",
+        Event::RunPauseRequested { .. } => "run.pause.requested",
+        Event::RunUnpauseRequested { .. } => "run.unpause.requested",
         Event::RunPaused => "run.paused",
         Event::RunUnpaused => "run.unpaused",
         Event::RunRewound { .. } => "run.rewound",
@@ -1329,6 +1338,12 @@ fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
             actor: provenance.as_ref().and_then(actor_from_provenance),
             ..StoredEventFields::default()
         },
+        Event::RunCancelRequested { actor }
+        | Event::RunPauseRequested { actor }
+        | Event::RunUnpauseRequested { actor } => StoredEventFields {
+            actor: actor.clone(),
+            ..StoredEventFields::default()
+        },
         Event::StageCompleted { node_id, name, .. }
         | Event::StageFailed { node_id, name, .. }
         | Event::StageStarted { node_id, name, .. }
@@ -1513,17 +1528,17 @@ fn event_body_from_event(event: &Event) -> EventBody {
         Event::RunRemoving { reason } => {
             EventBody::RunRemoving(fabro_types::RunStatusTransitionProps { reason: *reason })
         }
-        Event::RunCancelRequested => {
+        Event::RunCancelRequested { .. } => {
             EventBody::RunCancelRequested(fabro_types::RunControlRequestedProps {
                 action: RunControlAction::Cancel,
             })
         }
-        Event::RunPauseRequested => {
+        Event::RunPauseRequested { .. } => {
             EventBody::RunPauseRequested(fabro_types::RunControlRequestedProps {
                 action: RunControlAction::Pause,
             })
         }
-        Event::RunUnpauseRequested => {
+        Event::RunUnpauseRequested { .. } => {
             EventBody::RunUnpauseRequested(fabro_types::RunControlRequestedProps {
                 action: RunControlAction::Unpause,
             })
@@ -3071,7 +3086,7 @@ mod tests {
 
         let (writer, reader) = tokio::io::duplex(4096);
         let sink = RunEventSink::json_lines(writer);
-        let event = to_run_event(&fixtures::RUN_7, &Event::RunPauseRequested);
+        let event = to_run_event(&fixtures::RUN_7, &Event::RunPauseRequested { actor: None });
 
         sink.write_run_event(&event).await.unwrap();
 
@@ -3313,6 +3328,38 @@ mod tests {
         assert!(stored.stage_id.is_none());
         assert!(stored.parallel_group_id.is_none());
         assert!(stored.parallel_branch_id.is_none());
+    }
+
+    #[test]
+    fn control_action_events_carry_actor_in_envelope() {
+        let actor = ActorRef {
+            kind: ActorKind::User,
+            id: Some("alice".to_string()),
+            display: Some("alice".to_string()),
+        };
+
+        let cancel = to_run_event(
+            &fixtures::RUN_1,
+            &Event::RunCancelRequested {
+                actor: Some(actor.clone()),
+            },
+        );
+        assert_eq!(cancel.event_name(), "run.cancel.requested");
+        assert_eq!(cancel.actor.as_ref().expect("actor set"), &actor);
+
+        let pause = to_run_event(
+            &fixtures::RUN_1,
+            &Event::RunPauseRequested {
+                actor: Some(actor.clone()),
+            },
+        );
+        assert_eq!(pause.actor.as_ref().expect("actor set"), &actor);
+
+        let unpause = to_run_event(
+            &fixtures::RUN_1,
+            &Event::RunUnpauseRequested { actor: None },
+        );
+        assert!(unpause.actor.is_none());
     }
 
     #[test]
