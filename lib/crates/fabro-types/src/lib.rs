@@ -49,7 +49,7 @@ pub use run::{
     RunSubjectProvenance,
 };
 pub use run_blob_id::RunBlobId;
-pub use run_event::{EventBody, RunEvent, RunNoticeLevel};
+pub use run_event::{ActorKind, ActorRef, EventBody, RunEvent, RunNoticeLevel};
 pub use run_id::RunId;
 pub use run_id::fixtures;
 pub use sandbox_record::SandboxRecord;
