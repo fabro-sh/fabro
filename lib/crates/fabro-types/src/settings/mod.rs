@@ -53,6 +53,22 @@ pub use server::{
 };
 pub use user::{ClientTlsSettings, ExecSettings, OutputFormat, PermissionLevel, ServerSettings};
 
+// v2 top-level re-exports. Stage 6.5 of the settings TOML redesign
+// promoted the v2 namespaced parse tree to be the primary API surface;
+// consumers can now write `fabro_types::settings::SettingsFile` /
+// `fabro_types::settings::InterpString` / `fabro_types::settings::Duration`
+// without the `::v2::` prefix. The `v2` module itself stays until the
+// remaining legacy files under `settings/{project,run,server,...}.rs`
+// are deleted in Stage 6.3, because the v2 submodules and the legacy
+// submodules share those file names.
+pub use v2::{
+    CURRENT_VERSION, CliLayer, Duration, FeaturesLayer, InterpString, ModelRef, ParseDurationError,
+    ParseError, ParseModelRefError, ParseSizeError, ProjectLayer, Provenance, ResolveEnvError,
+    Resolved, ResolvedModelRef, RunLayer, SchemaVersion, ServerLayer, SettingsFile, Size,
+    SpliceArray, SpliceArrayError, VersionError, WorkflowLayer, parse_settings_file,
+    validate_version,
+};
+
 fn is_default_checkpoint(c: &CheckpointSettings) -> bool {
     c.exclude_globs.is_empty()
 }
