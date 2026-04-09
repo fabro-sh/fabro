@@ -599,6 +599,7 @@ mod tests {
                 node_id: "code".to_string(),
                 name: "Code".to_string(),
                 index: 1,
+                visit: 2,
                 duration_ms: 250,
                 status: "partial_success".to_string(),
                 preferred_label: None,

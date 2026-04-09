@@ -487,6 +487,7 @@ mod tests {
             node_id: node_id.into(),
             name: name.into(),
             index: 0,
+            visit: 1,
             handler_type: String::new(),
             attempt: 1,
             max_attempts: 1,
@@ -510,6 +511,7 @@ mod tests {
             node_id: node_id.into(),
             name: name.into(),
             index: 0,
+            visit: 1,
             duration_ms: 5000,
             status: "success".into(),
             preferred_label: None,
@@ -561,6 +563,8 @@ mod tests {
         emit(
             &mut ui,
             Event::ParallelBranchStarted {
+                parallel_group_id: "fork1@1".into(),
+                parallel_branch_id: "fork1@1:0".into(),
                 branch: "security".into(),
                 index: 0,
             },
@@ -576,6 +580,8 @@ mod tests {
         emit(
             &mut ui,
             Event::ParallelBranchCompleted {
+                parallel_group_id: "fork1@1".into(),
+                parallel_branch_id: "fork1@1:0".into(),
                 branch: "security".into(),
                 index: 0,
                 duration_ms: 2000,
@@ -607,6 +613,8 @@ mod tests {
         emit(
             &mut ui,
             Event::ParallelBranchStarted {
+                parallel_group_id: "fork1@1".into(),
+                parallel_branch_id: "fork1@1:0".into(),
                 branch: "security".into(),
                 index: 0,
             },
@@ -700,6 +708,7 @@ mod tests {
                 node_id: "code".into(),
                 name: "Code".into(),
                 index: 0,
+                visit: 1,
                 attempt: 2,
                 max_attempts: 3,
                 delay_ms: 1500,
@@ -944,6 +953,7 @@ mod tests {
                 node_id: "code".into(),
                 name: "Code".into(),
                 index: 0,
+                visit: 1,
                 attempt: 2,
                 max_attempts: 3,
                 delay_ms: 1500,
@@ -1108,6 +1118,8 @@ mod tests {
         emit(
             &mut ui,
             Event::ParallelBranchStarted {
+                parallel_group_id: "fork1@1".into(),
+                parallel_branch_id: "fork1@1:0".into(),
                 branch: "security".into(),
                 index: 0,
             },
@@ -1115,6 +1127,8 @@ mod tests {
         emit(
             &mut ui,
             Event::ParallelBranchCompleted {
+                parallel_group_id: "fork1@1".into(),
+                parallel_branch_id: "fork1@1:0".into(),
                 branch: "security".into(),
                 index: 0,
                 duration_ms: 500,
@@ -1144,6 +1158,7 @@ mod tests {
                 node_id: "code".into(),
                 name: "Code".into(),
                 index: 0,
+                visit: 1,
                 handler_type: "agent".into(),
                 attempt: 1,
                 max_attempts: 1,

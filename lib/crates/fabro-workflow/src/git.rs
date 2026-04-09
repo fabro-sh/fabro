@@ -449,6 +449,7 @@ mod tests {
                 node_id: "work".into(),
                 name: "Work".into(),
                 index: 2,
+                visit: 2,
                 duration_ms: 100,
                 status: "success".into(),
                 preferred_label: None,

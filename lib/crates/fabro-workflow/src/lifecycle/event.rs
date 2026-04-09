@@ -79,6 +79,11 @@ fn response_from_outcome(node_id: &str, outcome: &Outcome) -> Option<String> {
         .and_then(|value| value.as_str().map(ToOwned::to_owned))
 }
 
+fn stage_visit(state: &WfRunState, node_id: &str) -> u32 {
+    let visits = state.node_visits.get(node_id).copied().unwrap_or(1);
+    u32::try_from(visits.max(1)).unwrap_or(u32::MAX)
+}
+
 #[async_trait]
 impl RunLifecycle<WorkflowGraph> for EventLifecycle {
     async fn on_run_start(&self, _graph: &WorkflowGraph, _state: &WfRunState) -> CoreResult<()> {
@@ -120,12 +125,14 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         }
         let gv = node.inner();
         let stage_index = state.stage_index;
+        let visit = stage_visit(state, &gv.id);
         let (loop_failure_signatures, restart_failure_signatures) =
             snapshot_failure_signatures(&self.circuit_breaker);
         self.emitter.emit(&Event::StageStarted {
             node_id: gv.id.clone(),
             name: gv.label().to_string(),
             index: stage_index,
+            visit,
             handler_type: gv.handler_type().unwrap_or_default().to_string(),
             attempt: 1,
             max_attempts: 1,
@@ -134,6 +141,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             node_id: gv.id.clone(),
             name: gv.label().to_string(),
             index: stage_index,
+            visit,
             duration_ms: 0,
             status: StageStatus::Success.to_string(),
             preferred_label: None,
@@ -167,6 +175,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             node_id: gv.id.clone(),
             name: gv.label().to_string(),
             index: state.stage_index,
+            visit: stage_visit(state, &gv.id),
             handler_type: gv.handler_type().unwrap_or_default().to_string(),
             attempt: ctx.attempt as usize,
             max_attempts: ctx.max_attempts as usize,
@@ -183,11 +192,13 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             let gv = ctx.node.inner();
             let outcome = &ctx.result.outcome;
             let stage_index = state.stage_index;
+            let visit = stage_visit(state, &gv.id);
 
             self.emitter.emit(&Event::StageFailed {
                 node_id: gv.id.clone(),
                 name: gv.label().to_string(),
                 index: stage_index,
+                visit,
                 failure: outcome.failure.clone().unwrap_or_else(|| {
                     FailureDetail::new("handler failed", FailureCategory::TransientInfra)
                 }),
@@ -198,6 +209,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                 node_id: gv.id.clone(),
                 name: gv.label().to_string(),
                 index: stage_index,
+                visit,
                 attempt: ctx.attempt as usize,
                 max_attempts: ctx.result.max_attempts as usize,
                 delay_ms: ctx
@@ -221,6 +233,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         }
         let gv = node.inner();
         let stage_index = state.stage_index;
+        let visit = stage_visit(state, &gv.id);
         let duration_ms = u64::try_from(result.duration.as_millis()).unwrap();
         let (loop_failure_signatures, restart_failure_signatures) =
             snapshot_failure_signatures(&self.circuit_breaker);
@@ -230,6 +243,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                 node_id: gv.id.clone(),
                 name: gv.label().to_string(),
                 index: stage_index,
+                visit,
                 failure: outcome.failure.clone().unwrap_or_else(|| {
                     FailureDetail::new("handler failed", FailureCategory::Deterministic)
                 }),
@@ -240,6 +254,7 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
                 node_id: gv.id.clone(),
                 name: gv.label().to_string(),
                 index: stage_index,
+                visit,
                 duration_ms,
                 status: outcome.status.to_string(),
                 preferred_label: outcome.preferred_label.clone(),

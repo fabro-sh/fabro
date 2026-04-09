@@ -1692,6 +1692,7 @@ mod tests {
             node_id: "code".into(),
             name: "code".into(),
             index: 0,
+            visit: 1,
             failure: failure.clone(),
             will_retry: false,
         };
