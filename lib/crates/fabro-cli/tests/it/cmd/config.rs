@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use fabro_config::mcp::McpTransport;
 use fabro_test::{fabro_snapshot, test_context};
 use fabro_types::Settings;
+use fabro_types::settings::v2::SettingsFile;
 use httpmock::MockServer;
 use predicates::prelude::*;
 
@@ -32,7 +33,13 @@ fn old_config_show_command_is_rejected() {
 // ---------------------------------------------------------------------------
 
 fn parse_settings(stdout: &[u8]) -> Settings {
-    serde_yaml::from_slice(stdout).expect("stdout should be valid YAML Settings")
+    // The `settings` command now emits a v2 SettingsFile as YAML. Bridge
+    // it down to the legacy flat shape so the existing test assertions
+    // (which use flat fields like `cfg.llm`, `cfg.sandbox`, etc.) keep
+    // working. Stage 6.6 will rewrite these tests against the v2 tree.
+    let file: SettingsFile =
+        serde_yaml::from_slice(stdout).expect("stdout should be valid YAML SettingsFile");
+    fabro_types::settings::v2::bridge::bridge_to_old(&file)
 }
 
 fn server_settings_fixture() -> Settings {
@@ -487,23 +494,26 @@ fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
     let state = run_state(&run_dir);
     let run_record =
         serde_json::to_value(state.run.as_ref().expect("run record should exist")).unwrap();
-    assert_eq!(run_record["settings"]["auto_approve"].as_bool(), Some(true));
     assert_eq!(
-        run_record["settings"]["storage_dir"].as_str(),
+        run_record["settings"]["run"]["execution"]["approval"].as_str(),
+        Some("auto")
+    );
+    assert_eq!(
+        run_record["settings"]["server"]["storage"]["root"].as_str(),
         Some(storage_dir.to_str().unwrap())
     );
     assert_eq!(
-        run_record["settings"]["sandbox"]["preserve"].as_bool(),
+        run_record["settings"]["run"]["sandbox"]["preserve"].as_bool(),
         Some(true)
     );
     assert_eq!(
-        run_record["settings"]["llm"]["model"].as_str(),
+        run_record["settings"]["run"]["model"]["name"].as_str(),
         Some("gpt-5.2")
     );
     // v2 R30: run.prepare.steps replaces the whole ordered list across layers.
     assert_eq!(
-        run_record["settings"]["setup"]["commands"],
-        serde_json::json!(["workflow-setup"])
+        run_record["settings"]["run"]["prepare"]["steps"],
+        serde_json::json!([{"script": "workflow-setup"}])
     );
 }
 
@@ -659,8 +669,11 @@ name = "from-fabro-home"
     );
 
     let cfg: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(cfg["verbose"].as_bool(), Some(true));
-    assert_eq!(cfg["llm"]["model"].as_str(), Some("from-fabro-home"));
+    assert_eq!(cfg["cli"]["output"]["verbosity"].as_str(), Some("verbose"));
+    assert_eq!(
+        cfg["run"]["model"]["name"].as_str(),
+        Some("from-fabro-home")
+    );
 }
 
 #[test]
@@ -756,10 +769,16 @@ shared = "cli"
     assert_eq!(cfg.storage_dir, Some(PathBuf::from("/srv/fabro-server")));
     assert_eq!(cfg.verbose, Some(true));
 
+    // R22: run.inputs replaces wholesale across layers. Project is the
+    // highest-precedence layer that sets inputs, so project's vars win
+    // and server-side vars are discarded rather than merged.
     let vars = cfg.vars.as_ref().expect("vars");
-    assert_eq!(vars.get("server_only").map(String::as_str), Some("1"));
     assert_eq!(vars.get("project_only").map(String::as_str), Some("1"));
     assert_eq!(vars.get("shared").map(String::as_str), Some("project"));
+    assert!(
+        !vars.contains_key("server_only"),
+        "v2 merge matrix replaces run.inputs wholesale; server_only should be dropped"
+    );
 }
 
 #[test]

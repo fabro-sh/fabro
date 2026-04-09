@@ -592,9 +592,9 @@ fn dry_run_persists_event_history_in_store() {
     assert_eq!(
         progress
             .first()
-            .and_then(|event| event.pointer("/properties/settings/auto_approve"))
-            .and_then(Value::as_bool),
-        Some(true)
+            .and_then(|event| event.pointer("/properties/settings/run/execution/approval"))
+            .and_then(Value::as_str),
+        Some("auto")
     );
     assert!(
         progress
@@ -724,25 +724,35 @@ fn json_run_implies_auto_approve_for_human_gates() {
                 );
             }
         }
-        // Strip v2-shape server/version fields that the bridge now emits.
+        // Strip fields that vary between runs (version, server stanzas that
+        // carry machine-specific values, cli.target sockets).
         if let Some(settings) = event
             .pointer_mut("/properties/settings")
             .and_then(Value::as_object_mut)
         {
+            settings.remove("_version");
             settings.remove("server");
             settings.remove("version");
         }
-        let Some(llm) = event.pointer_mut("/properties/settings/llm") else {
+        if let Some(target) = event
+            .pointer_mut("/properties/settings/cli/target")
+            .and_then(Value::as_object_mut)
+        {
+            if target.contains_key("path") {
+                target.insert(
+                    "path".to_string(),
+                    Value::String("[CLI_SOCKET]".to_string()),
+                );
+            }
+        }
+        let Some(model) = event.pointer_mut("/properties/settings/run/model") else {
             continue;
         };
-        let Some(llm) = llm.as_object_mut() else {
+        let Some(model) = model.as_object_mut() else {
             continue;
         };
-        llm.insert(
-            "model".to_string(),
-            Value::String("[LLM_MODEL]".to_string()),
-        );
-        llm.insert(
+        model.insert("name".to_string(), Value::String("[LLM_MODEL]".to_string()));
+        model.insert(
             "provider".to_string(),
             Value::String("[LLM_PROVIDER]".to_string()),
         );
@@ -870,23 +880,26 @@ fn json_run_implies_auto_approve_for_human_gates() {
           },
           "run_dir": "[RUN_DIR]",
           "settings": {
-            "auto_approve": true,
-            "goal": "Route through the default approval path",
-            "llm": {
-              "fallbacks": null,
-              "model": "[LLM_MODEL]",
-              "provider": "[LLM_PROVIDER]"
+            "run": {
+              "execution": {
+                "approval": "auto",
+                "retros": false
+              },
+              "goal": "Route through the default approval path",
+              "model": {
+                "name": "[LLM_MODEL]",
+                "provider": "[LLM_PROVIDER]"
+              },
+              "sandbox": {
+                "provider": "local"
+              }
             },
-            "no_retro": true,
-            "sandbox": {
-              "daytona": null,
-              "devcontainer": null,
-              "env": null,
-              "local": null,
-              "preserve": null,
-              "provider": "local"
-            },
-            "storage_dir": "[STORAGE_DIR]"
+            "cli": {
+              "target": {
+                "path": "[CLI_SOCKET]",
+                "type": "unix"
+              }
+            }
           },
           "workflow_slug": "human-gate",
           "workflow_source": "digraph HumanGate {/n  graph [goal=\"Route through the default approval path\"]/n  start [shape=Mdiamond, label=\"Start\"]/n  exit  [shape=Msquare, label=\"Exit\"]/n  approve [shape=hexagon, label=\"Approve?\"]/n  ship   [shape=parallelogram, script=\"echo shipped\"]/n  revise [shape=parallelogram, script=\"echo revised\"]/n  start -> approve/n  approve -> ship   [label=\"[A] Approve\"]/n  approve -> revise [label=\"[R] Revise\"]/n  ship -> exit/n  revise -> exit/n}/n",
@@ -1431,8 +1444,8 @@ fn json_run_implies_auto_approve_for_human_gates() {
     "#);
 
     assert_eq!(
-        progress[0].pointer("/properties/settings/auto_approve"),
-        Some(&serde_json::json!(true))
+        progress[0].pointer("/properties/settings/run/execution/approval"),
+        Some(&serde_json::json!("auto"))
     );
 }
 

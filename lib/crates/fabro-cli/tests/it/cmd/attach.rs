@@ -427,8 +427,20 @@ fn attach_json_errors_without_prompting_for_human_input() {
                 .pointer_mut("/properties/settings")
                 .and_then(Value::as_object_mut)
             {
+                settings.remove("_version");
                 settings.remove("server");
                 settings.remove("version");
+            }
+            if let Some(target) = event
+                .pointer_mut("/properties/settings/cli/target")
+                .and_then(Value::as_object_mut)
+            {
+                if target.contains_key("path") {
+                    target.insert(
+                        "path".to_string(),
+                        Value::String("[CLI_SOCKET]".to_string()),
+                    );
+                }
             }
             event
         })
@@ -556,22 +568,25 @@ fn attach_json_errors_without_prompting_for_human_input() {
           },
           "run_dir": "[RUN_DIR]",
           "settings": {
-            "goal": "Wait for approval",
-            "llm": {
-              "fallbacks": null,
-              "model": "gpt-5.4",
-              "provider": "openai"
+            "run": {
+              "execution": {
+                "retros": false
+              },
+              "goal": "Wait for approval",
+              "model": {
+                "name": "gpt-5.4",
+                "provider": "openai"
+              },
+              "sandbox": {
+                "provider": "local"
+              }
             },
-            "no_retro": true,
-            "sandbox": {
-              "daytona": null,
-              "devcontainer": null,
-              "env": null,
-              "local": null,
-              "preserve": null,
-              "provider": "local"
-            },
-            "storage_dir": "[STORAGE_DIR]"
+            "cli": {
+              "target": {
+                "path": "[CLI_SOCKET]",
+                "type": "unix"
+              }
+            }
           },
           "workflow_slug": "human-gate",
           "workflow_source": "digraph HumanGate {/n  graph [goal=\"Wait for approval\"]/n  start [shape=Mdiamond, label=\"Start\"]/n  exit  [shape=Msquare, label=\"Exit\"]/n  approve [shape=hexagon, label=\"Approve?\"]/n  ship   [shape=parallelogram, script=\"echo shipped\"]/n  revise [shape=parallelogram, script=\"echo revised\"]/n  start -> approve/n  approve -> ship   [label=\"[A] Approve\"]/n  approve -> revise [label=\"[R] Revise\"]/n  ship -> exit/n  revise -> exit/n}/n",

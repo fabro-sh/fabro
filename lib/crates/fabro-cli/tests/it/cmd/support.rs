@@ -803,15 +803,19 @@ pub(crate) fn compact_inspect(output: &Output) -> Value {
                 let checkpoint = item["checkpoint"].clone();
                 let conclusion = item["conclusion"].clone();
                 let sandbox = item["sandbox"].clone();
+                let dry_run = run_record
+                    .pointer("/settings/run/execution/mode")
+                    .and_then(Value::as_str)
+                    .map(|mode| Value::Bool(mode == "dry_run"));
                 serde_json::json!({
                     "run_id": "[ULID]",
                     "status": item["status"],
                     "run_record": {
-                        "goal": run_record.pointer("/settings/goal"),
+                        "goal": run_record.pointer("/settings/run/goal"),
                         "workflow_name": run_record.pointer("/graph/name"),
                         "workflow_slug": run_record.pointer("/workflow_slug"),
-                        "sandbox_provider": run_record.pointer("/settings/sandbox/provider"),
-                        "dry_run": run_record.pointer("/settings/dry_run"),
+                        "sandbox_provider": run_record.pointer("/settings/run/sandbox/provider"),
+                        "dry_run": dry_run,
                         "provenance": run_record.pointer("/provenance").as_ref().map(|_| {
                             serde_json::json!({
                                 "server_version": "[VERSION]",
@@ -866,11 +870,11 @@ pub(crate) fn compact_git_inspect(output: &Output) -> Value {
                     "run_id": "[ULID]",
                     "status": item["status"],
                     "run_record": {
-                        "goal": run_record.pointer("/settings/goal"),
+                        "goal": run_record.pointer("/settings/run/goal"),
                         "workflow_name": run_record.pointer("/graph/name"),
                         "workflow_slug": run_record.pointer("/workflow_slug"),
-                        "llm_provider": run_record.pointer("/settings/llm/provider"),
-                        "sandbox_provider": run_record.pointer("/settings/sandbox/provider"),
+                        "llm_provider": run_record.pointer("/settings/run/model/provider"),
+                        "sandbox_provider": run_record.pointer("/settings/run/sandbox/provider"),
                         "provenance": run_record.pointer("/provenance").as_ref().map(|_| {
                             serde_json::json!({
                                 "server_version": "[VERSION]",
