@@ -1,15 +1,16 @@
 //! v2-backed configuration layer.
 //!
-//! `ConfigLayer` is now a newtype over [`SettingsFile`] — the v2 namespaced
-//! parse tree in `fabro_types::settings::v2`. Loading functions return the
-//! same `ConfigLayer` type they always have; internally they call
-//! `parse_settings_file`, which hard-fails on any legacy top-level key with a
-//! targeted rename hint.
+//! `ConfigLayer` is a newtype over [`SettingsFile`] — the v2 namespaced
+//! parse tree in `fabro_types::settings::v2`. Loading functions (`parse`,
+//! `load`, `for_workflow`, `project`, `settings`) all hard-fail on legacy
+//! top-level keys with targeted rename hints. `ConfigLayer::combine` walks
+//! the v2 merge matrix from [`crate::merge`].
 //!
-//! `ConfigLayer::combine` walks the v2 merge matrix from `crate::merge`.
-//! `ConfigLayer::resolve` uses the temporary bridge in
-//! `fabro_types::settings::v2::bridge` to produce the legacy flat [`Settings`]
-//! shape until Stage 4 migrates consumers off it.
+//! [`ConfigLayer::resolve`] uses the transitional bridge in
+//! [`fabro_types::settings::v2::bridge`] to produce the legacy flat
+//! [`Settings`] shape that most consumers still read. New code should prefer
+//! [`ConfigLayer::as_v2`] to read v2 fields directly; the bridge and the old
+//! flat shape are scheduled for removal once every consumer is migrated.
 
 use std::path::Path;
 
