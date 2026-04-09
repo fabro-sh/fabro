@@ -1,13 +1,15 @@
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use fabro_config::ConfigLayer;
 use fabro_sandbox::SandboxProvider;
 use fabro_types::settings::SettingsFile;
 use fabro_types::settings::cli::{CliLayer, CliOutputLayer, OutputVerbosity};
 use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::run::{
-    ApprovalMode, RunExecutionLayer, RunLayer, RunMode, RunModelLayer, RunSandboxLayer,
+    ApprovalMode, RunExecutionLayer, RunGoalLayer, RunLayer, RunMode, RunModelLayer,
+    RunSandboxLayer,
 };
 
 use crate::args::{PreflightArgs, RunArgs};
@@ -80,6 +82,41 @@ fn cli_layer_for_verbose(verbose: bool) -> Option<CliLayer> {
     })
 }
 
+/// Build the `run.goal` override from the `--goal` / `--goal-file` args.
+///
+/// The two are mutually exclusive at the clap level; this helper assumes
+/// at most one is set and returns an error if that invariant is violated.
+///
+/// CLI-supplied file paths are anchored at `cwd` (where the user invoked
+/// the command), matching standard Unix CLI-flag conventions.
+fn goal_layer_from_args(
+    goal: Option<&str>,
+    goal_file: Option<&Path>,
+    cwd: &Path,
+) -> Result<Option<RunGoalLayer>> {
+    match (goal, goal_file) {
+        (Some(_), Some(_)) => Err(anyhow!(
+            "--goal and --goal-file are mutually exclusive; use exactly one"
+        )),
+        (Some(text), None) => Ok(Some(RunGoalLayer::Inline(InterpString::parse(text)))),
+        (None, Some(path)) => {
+            let absolute = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                cwd.join(path)
+            };
+            Ok(Some(RunGoalLayer::File {
+                file: InterpString::parse(&absolute.to_string_lossy()),
+            }))
+        }
+        (None, None) => Ok(None),
+    }
+}
+
+fn current_dir_or_dot() -> PathBuf {
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
 impl TryFrom<&RunArgs> for ConfigLayer {
     type Error = anyhow::Error;
 
@@ -95,18 +132,17 @@ impl TryFrom<&RunArgs> for ConfigLayer {
             sparse_flag(args.no_retro),
         );
 
+        let cwd = current_dir_or_dot();
+        let goal = goal_layer_from_args(args.goal.as_deref(), args.goal_file.as_deref(), &cwd)?;
+
         let run = RunLayer {
-            goal: args.goal.as_deref().map(InterpString::parse),
+            goal,
             metadata: parse_labels(&args.label),
             model,
             sandbox,
             execution,
             ..RunLayer::default()
         };
-
-        // goal_file is not part of v2; fall through to Settings.goal_file via the bridge.
-        // Stage 4 consumers that still consult goal_file read it from Settings.
-        let _ = &args.goal_file;
 
         Ok(Self::from(SettingsFile {
             run: Some(run),
@@ -126,19 +162,76 @@ impl TryFrom<&PreflightArgs> for ConfigLayer {
             ..RunSandboxLayer::default()
         });
 
+        let cwd = current_dir_or_dot();
+        let goal = goal_layer_from_args(args.goal.as_deref(), args.goal_file.as_deref(), &cwd)?;
+
         let run = RunLayer {
-            goal: args.goal.as_deref().map(InterpString::parse),
+            goal,
             model,
             sandbox,
             ..RunLayer::default()
         };
-
-        let _ = &args.goal_file; // Stage 4 preflight still reads goal_file via Settings bridge.
 
         Ok(Self::from(SettingsFile {
             run: Some(run),
             cli: cli_layer_for_verbose(args.verbose),
             ..SettingsFile::default()
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn goal_and_goal_file_together_is_rejected() {
+        let err = goal_layer_from_args(
+            Some("inline text"),
+            Some(Path::new("goal.md")),
+            Path::new("/tmp"),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("mutually exclusive"));
+    }
+
+    #[test]
+    fn goal_file_is_anchored_at_cwd_when_relative() {
+        let layer =
+            goal_layer_from_args(None, Some(Path::new("prompts/goal.md")), Path::new("/cwd"))
+                .unwrap()
+                .expect("should build a goal layer");
+        let RunGoalLayer::File { file } = layer else {
+            panic!("expected file variant");
+        };
+        assert_eq!(file.as_source(), "/cwd/prompts/goal.md");
+    }
+
+    #[test]
+    fn absolute_goal_file_is_preserved() {
+        let layer = goal_layer_from_args(None, Some(Path::new("/abs/goal.md")), Path::new("/cwd"))
+            .unwrap()
+            .expect("should build a goal layer");
+        let RunGoalLayer::File { file } = layer else {
+            panic!("expected file variant");
+        };
+        assert_eq!(file.as_source(), "/abs/goal.md");
+    }
+
+    #[test]
+    fn inline_goal_builds_inline_variant() {
+        let layer = goal_layer_from_args(Some("inline goal"), None, Path::new("/cwd"))
+            .unwrap()
+            .expect("should build a goal layer");
+        assert!(matches!(layer, RunGoalLayer::Inline(_)));
+    }
+
+    #[test]
+    fn empty_args_produce_no_goal_layer() {
+        assert!(
+            goal_layer_from_args(None, None, Path::new("/cwd"))
+                .unwrap()
+                .is_none()
+        );
     }
 }

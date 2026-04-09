@@ -3,7 +3,7 @@ use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, Provider};
 use fabro_sandbox::SandboxProvider;
 use fabro_store::Database;
-use fabro_types::settings::run::{RunLayer, RunModelLayer};
+use fabro_types::settings::run::{RunGoalLayer, RunLayer, RunModelLayer};
 use fabro_types::settings::{InterpString, SettingsFile};
 use fabro_types::{RunId, RunProvenance};
 use std::collections::BTreeMap;
@@ -416,7 +416,7 @@ pub(crate) fn resolve_run_settings(mut settings: SettingsFile, graph: &Graph) ->
     run.goal = if goal.is_empty() {
         None
     } else {
-        Some(InterpString::parse(&goal))
+        Some(RunGoalLayer::Inline(InterpString::parse(&goal)))
     };
     // Strip disabled pull_request entries so downstream consumers can
     // treat `Some(_)` as "PR creation is on".
@@ -559,12 +559,12 @@ mod tests {
             start -> work -> exit
         }"#;
         let validated = validate_dot(dot, {
-            use fabro_types::settings::run::RunLayer;
+            use fabro_types::settings::run::{RunGoalLayer, RunLayer};
             let mut inputs = std::collections::HashMap::new();
             inputs.insert("who".to_string(), toml::Value::String("agent".to_string()));
             SettingsFile {
                 run: Some(RunLayer {
-                    goal: Some(InterpString::parse("override")),
+                    goal: Some(RunGoalLayer::Inline(InterpString::parse("override"))),
                     inputs: Some(inputs),
                     ..RunLayer::default()
                 }),
@@ -766,13 +766,14 @@ mod tests {
                 },
                 settings: {
                     use fabro_types::settings::run::{
-                        RunExecutionLayer, RunLayer, RunMode, RunModelLayer, RunPullRequestLayer,
+                        RunExecutionLayer, RunGoalLayer, RunLayer, RunMode, RunModelLayer,
+                        RunPullRequestLayer,
                     };
                     let mut metadata = HashMap::new();
                     metadata.insert("env".to_string(), "test".to_string());
                     SettingsFile {
                         run: Some(RunLayer {
-                            goal: Some(InterpString::parse("override goal")),
+                            goal: Some(RunGoalLayer::Inline(InterpString::parse("override goal"))),
                             metadata,
                             model: Some(RunModelLayer {
                                 name: Some(InterpString::parse("sonnet")),
@@ -831,7 +832,7 @@ mod tests {
                 .persisted
                 .run_record()
                 .settings
-                .run_goal_str()
+                .run_goal_inline_str()
                 .as_deref(),
             Some("override goal")
         );

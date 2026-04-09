@@ -7420,7 +7420,7 @@ level = "debug"
         // Server-side `dry_run` default must not override the manifest's intent.
         // Verify a sampling of the persisted v2 settings.
         assert_eq!(
-            run_record.settings.run_goal_str().as_deref(),
+            run_record.settings.run_goal_inline_str().as_deref(),
             Some("Test"),
             "goal should be persisted from the manifest"
         );

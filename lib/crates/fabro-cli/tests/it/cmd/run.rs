@@ -543,6 +543,62 @@ fn dry_run_simple() {
 }
 
 #[test]
+fn dry_run_with_goal_file_reads_contents_into_goal() {
+    // Regression test for the `--goal-file` flag that was previously
+    // being silently ignored in the v2 path. The file content must end
+    // up in the effective goal displayed in the preflight summary.
+    let context = test_context!();
+
+    let goal_dir = tempfile::tempdir().unwrap();
+    let goal_path = goal_dir.path().join("goal.md");
+    std::fs::write(&goal_path, "Ship the rate-limiting feature end to end.\n").unwrap();
+
+    let mut cmd = context.run_cmd();
+    cmd.args(["--dry-run", "--auto-approve", "--goal-file"]);
+    cmd.arg(&goal_path);
+    cmd.arg(example_fixture("simple.fabro"));
+
+    let output = cmd.output().expect("run command should execute");
+    assert!(
+        output.status.success(),
+        "run should succeed:\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Ship the rate-limiting feature end to end."),
+        "goal file content should appear in preflight summary, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn dry_run_rejects_goal_and_goal_file_together() {
+    // clap `conflicts_with` must fire when both flags are supplied.
+    let context = test_context!();
+
+    let goal_dir = tempfile::tempdir().unwrap();
+    let goal_path = goal_dir.path().join("goal.md");
+    std::fs::write(&goal_path, "never read").unwrap();
+
+    let mut cmd = context.run_cmd();
+    cmd.args(["--dry-run", "--goal", "inline override", "--goal-file"]);
+    cmd.arg(&goal_path);
+    cmd.arg(example_fixture("simple.fabro"));
+    let output = cmd.output().expect("run command should execute");
+    assert!(
+        !output.status.success(),
+        "run should fail when --goal and --goal-file are both set"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("cannot be used with")
+            || stderr.contains("conflict")
+            || stderr.to_lowercase().contains("mutually exclusive"),
+        "expected conflicts_with error, got:\n{stderr}"
+    );
+}
+
+#[test]
 fn dry_run_persists_event_history_in_store() {
     let context = test_context!();
     let run_id = unique_run_id();

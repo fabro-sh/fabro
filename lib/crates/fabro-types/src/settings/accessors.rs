@@ -6,15 +6,15 @@
 //! walks the real v2 structure — there is no transitional state here.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::cli::{CliExecLayer, CliLayer, CliOutputLayer};
 use super::interp::InterpString;
 use super::project::ProjectLayer;
 use super::run::{
-    ApprovalMode, GitAuthorLayer, HookEntry, McpEntryLayer, RunAgentLayer, RunArtifactsLayer,
-    RunCheckpointLayer, RunExecutionLayer, RunLayer, RunMode, RunModelLayer, RunPrepareLayer,
-    RunPullRequestLayer, RunSandboxLayer,
+    ApprovalMode, GitAuthorLayer, HookEntry, McpEntryLayer, ResolvedGoalSource, ResolvedRunGoal,
+    RunAgentLayer, RunArtifactsLayer, RunCheckpointLayer, RunExecutionLayer, RunGoalLayer,
+    RunLayer, RunMode, RunModelLayer, RunPrepareLayer, RunPullRequestLayer, RunSandboxLayer,
 };
 use super::server::{
     GithubIntegrationLayer, ServerApiLayer, ServerArtifactsLayer, ServerIntegrationsLayer,
@@ -43,14 +43,67 @@ impl SettingsFile {
         self.run.as_ref()
     }
 
+    /// Raw access to the `run.goal` variant (inline or file).
     #[must_use]
-    pub fn run_goal(&self) -> Option<&InterpString> {
+    pub fn run_goal_layer(&self) -> Option<&RunGoalLayer> {
         self.run.as_ref().and_then(|r| r.goal.as_ref())
     }
 
+    /// Inline goal text only. Returns `None` when `run.goal` is unset **or**
+    /// when it's a file-sourced goal — callers that need the file contents
+    /// should use [`SettingsFile::resolve_run_goal`].
     #[must_use]
-    pub fn run_goal_str(&self) -> Option<String> {
-        self.run_goal().map(InterpString::as_source)
+    pub fn run_goal_inline_str(&self) -> Option<String> {
+        match self.run_goal_layer()? {
+            RunGoalLayer::Inline(s) => Some(s.as_source()),
+            RunGoalLayer::File { .. } => None,
+        }
+    }
+
+    /// Resolve the `run.goal` layer to its final text, reading a file from
+    /// disk if necessary.
+    ///
+    /// Path resolution:
+    ///
+    /// - Absolute paths in the `file` variant are used as-is.
+    /// - Literal relative paths should already have been rewritten to
+    ///   absolute at config-load time by
+    ///   `fabro_config::resolve_goal_file_paths`. If one reaches this point
+    ///   it will be resolved against `base_dir` as a fallback.
+    /// - `${env.NAME}` interpolation is resolved via `std::env::var` at
+    ///   call time. Relative paths that survive interpolation are also
+    ///   resolved against `base_dir`.
+    ///
+    /// Returns `Ok(None)` when `run.goal` is unset. Returns `Err` when the
+    /// file variant points at a path that can't be read or has an
+    /// unresolved env token.
+    pub fn resolve_run_goal(
+        &self,
+        base_dir: &Path,
+    ) -> Result<Option<ResolvedRunGoal>, ResolveGoalError> {
+        let Some(layer) = self.run_goal_layer() else {
+            return Ok(None);
+        };
+        match layer {
+            RunGoalLayer::Inline(s) => Ok(Some(ResolvedRunGoal {
+                text: s.as_source(),
+                source: ResolvedGoalSource::Inline,
+            })),
+            RunGoalLayer::File { file } => {
+                let resolved = file
+                    .resolve(|name| std::env::var(name).ok())
+                    .map_err(|err| ResolveGoalError::EnvLookup { var: err.name })?;
+                let path = resolve_goal_file_path(&resolved.value, base_dir);
+                let text = std::fs::read_to_string(&path).map_err(|err| ResolveGoalError::Io {
+                    path: path.clone(),
+                    source: err,
+                })?;
+                Ok(Some(ResolvedRunGoal {
+                    text,
+                    source: ResolvedGoalSource::File { path },
+                }))
+            }
+        }
     }
 
     #[must_use]
@@ -410,21 +463,135 @@ impl SettingsFile {
     }
 }
 
+/// Resolve a goal-file path string against `base_dir`. Absolute paths are
+/// used as-is; relative paths are joined onto `base_dir`.
+fn resolve_goal_file_path(path_str: &str, base_dir: &Path) -> PathBuf {
+    let path = Path::new(path_str);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        base_dir.join(path)
+    }
+}
+
+/// Error returned by [`SettingsFile::resolve_run_goal`].
+#[derive(Debug)]
+pub enum ResolveGoalError {
+    /// The `run.goal.file` InterpString referenced an env var that wasn't
+    /// set at consume time.
+    EnvLookup { var: String },
+    /// The goal file exists in config but could not be read.
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+}
+
+impl std::fmt::Display for ResolveGoalError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EnvLookup { var } => write!(
+                f,
+                "failed to resolve run.goal.file: env var {var:?} referenced by ${{env.{var}}} is not set"
+            ),
+            Self::Io { path, source } => write!(
+                f,
+                "failed to read run.goal.file at {}: {source}",
+                path.display()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ResolveGoalError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::EnvLookup { .. } => None,
+            Self::Io { source, .. } => Some(source),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::settings::run::{RunLayer, RunModelLayer};
 
     #[test]
-    fn run_goal_str_returns_source_value() {
+    fn run_goal_inline_str_returns_source_value() {
         let file = SettingsFile {
             run: Some(RunLayer {
-                goal: Some(InterpString::parse("Implement OAuth")),
+                goal: Some(RunGoalLayer::Inline(InterpString::parse("Implement OAuth"))),
                 ..RunLayer::default()
             }),
             ..SettingsFile::default()
         };
-        assert_eq!(file.run_goal_str().as_deref(), Some("Implement OAuth"));
+        assert_eq!(
+            file.run_goal_inline_str().as_deref(),
+            Some("Implement OAuth")
+        );
+    }
+
+    #[test]
+    fn run_goal_inline_str_is_none_for_file_variant() {
+        let file = SettingsFile {
+            run: Some(RunLayer {
+                goal: Some(RunGoalLayer::File {
+                    file: InterpString::parse("/abs/goal.md"),
+                }),
+                ..RunLayer::default()
+            }),
+            ..SettingsFile::default()
+        };
+        assert_eq!(file.run_goal_inline_str(), None);
+        assert!(matches!(
+            file.run_goal_layer(),
+            Some(RunGoalLayer::File { .. })
+        ));
+    }
+
+    #[test]
+    fn resolve_run_goal_reads_file_variant_from_disk() {
+        let tmp = tempfile::tempdir().unwrap();
+        let goal_path = tmp.path().join("goal.md");
+        std::fs::write(&goal_path, "ship the thing").unwrap();
+
+        let file = SettingsFile {
+            run: Some(RunLayer {
+                goal: Some(RunGoalLayer::File {
+                    file: InterpString::parse(goal_path.to_str().unwrap()),
+                }),
+                ..RunLayer::default()
+            }),
+            ..SettingsFile::default()
+        };
+
+        let resolved = file
+            .resolve_run_goal(tmp.path())
+            .expect("goal file should resolve")
+            .expect("goal should be set");
+        assert_eq!(resolved.text, "ship the thing");
+        assert!(matches!(
+            resolved.source,
+            ResolvedGoalSource::File { ref path } if path == &goal_path
+        ));
+    }
+
+    #[test]
+    fn resolve_run_goal_inline_passes_text_through() {
+        let file = SettingsFile {
+            run: Some(RunLayer {
+                goal: Some(RunGoalLayer::Inline(InterpString::parse("literal goal"))),
+                ..RunLayer::default()
+            }),
+            ..SettingsFile::default()
+        };
+        let resolved = file
+            .resolve_run_goal(std::path::Path::new("/"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(resolved.text, "literal goal");
+        assert_eq!(resolved.source, ResolvedGoalSource::Inline);
     }
 
     #[test]

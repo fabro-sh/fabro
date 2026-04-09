@@ -12,7 +12,7 @@ use fabro_graphviz::parser;
 use fabro_sandbox::daytona::detect_repo_info;
 use fabro_types::RunId;
 use fabro_types::settings::SettingsFile;
-use fabro_types::settings::run::DaytonaDockerfileLayer;
+use fabro_types::settings::run::{DaytonaDockerfileLayer, ResolvedGoalSource, ResolvedRunGoal};
 use fabro_workflow::git::{GitSyncStatus, head_sha, sync_status};
 
 use crate::args::{PreflightArgs, RunArgs};
@@ -391,30 +391,30 @@ fn resolve_manifest_goal(
     root_dot_path: &Path,
     cwd: &Path,
 ) -> Result<Option<types::ManifestGoal>> {
-    let _working_directory = project::resolve_working_directory(settings, cwd);
+    let working_directory = project::resolve_working_directory(settings, cwd);
 
-    if let Some(goal) = args_layer
+    // Precedence 1: CLI args (`--goal` / `--goal-file`). These are already
+    // resolved to absolute paths by `overrides::goal_layer_from_args`.
+    if let Some(resolved) = args_layer
         .as_v2()
-        .run
-        .as_ref()
-        .and_then(|r| r.goal.as_ref())
+        .resolve_run_goal(&working_directory)
+        .context("failed to resolve --goal-file contents")?
     {
-        return Ok(Some(types::ManifestGoal {
-            path: None,
-            text: goal.as_source(),
-            type_: types::ManifestGoalType::Value,
-        }));
+        return Ok(Some(resolved_goal_to_manifest(resolved)));
     }
-    if let Some(goal) = settings.run_goal_str() {
-        return Ok(Some(types::ManifestGoal {
-            path: None,
-            text: goal,
-            type_: types::ManifestGoalType::Value,
-        }));
-    }
-    // V2 does not carry a distinct `goal_file` field; file-based goals now
-    // come through workflow manifest layers sourced on the server side.
 
+    // Precedence 2: merged config `run.goal`. Config-sourced `goal.file`
+    // paths were rewritten to absolute by `ConfigLayer::load` at the
+    // directory of the config file that declared them.
+    if let Some(resolved) = settings
+        .resolve_run_goal(&working_directory)
+        .context("failed to resolve run.goal.file contents")?
+    {
+        return Ok(Some(resolved_goal_to_manifest(resolved)));
+    }
+
+    // Precedence 3: graph-level `goal` attribute in the DOT, with `@file`
+    // sugar for workflow-colocated goal files.
     let graph = parser::parse(root_source)
         .map_err(|err| anyhow!("Failed to parse {}: {err}", root_dot_path.display()))?;
     let Some(goal) = graph.attrs.get("goal").and_then(AttrValue::as_str) else {
@@ -439,6 +439,24 @@ fn resolve_manifest_goal(
         text: goal.to_string(),
         type_: types::ManifestGoalType::Graph,
     }))
+}
+
+/// Translate a [`ResolvedRunGoal`] into the wire-level `ManifestGoal`
+/// shape. Inline goals get `type = Value`; file-sourced goals keep their
+/// absolute path as the `path` field and use `type = File`.
+fn resolved_goal_to_manifest(resolved: ResolvedRunGoal) -> types::ManifestGoal {
+    match resolved.source {
+        ResolvedGoalSource::Inline => types::ManifestGoal {
+            path: None,
+            text: resolved.text,
+            type_: types::ManifestGoalType::Value,
+        },
+        ResolvedGoalSource::File { path } => types::ManifestGoal {
+            path: Some(path.to_string_lossy().into_owned()),
+            text: resolved.text,
+            type_: types::ManifestGoalType::File,
+        },
+    }
 }
 
 fn build_manifest_git(cwd: &Path) -> Option<types::ManifestGit> {

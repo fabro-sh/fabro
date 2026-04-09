@@ -19,7 +19,7 @@ use super::model_ref::ModelRef;
 #[serde(deny_unknown_fields)]
 pub struct RunLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub goal: Option<InterpString>,
+    pub goal: Option<RunGoalLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub working_dir: Option<InterpString>,
     /// Flat string-to-string map. Replaces wholesale across layers.
@@ -54,6 +54,55 @@ pub struct RunLayer {
     pub pull_request: Option<RunPullRequestLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifacts: Option<RunArtifactsLayer>,
+}
+
+/// The source of a run's goal, either inline literal text or a reference to
+/// a file on disk.
+///
+/// TOML surface:
+///
+/// ```toml
+/// # Inline form
+/// [run]
+/// goal = "Diagnose and fix CI build failures"
+///
+/// # File form
+/// [run.goal]
+/// file = "prompts/fix_build.md"
+/// ```
+///
+/// Relative paths inside the `file` variant are resolved against the
+/// directory of the config file that declared them at load time (see
+/// `fabro_config::resolve_goal_file_paths`). `${env.NAME}` interpolation is
+/// supported inside the `file` path; env-tokenized relative paths stay
+/// unresolved until consume time and are then resolved against the run's
+/// effective working directory.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum RunGoalLayer {
+    Inline(InterpString),
+    File { file: InterpString },
+}
+
+/// Outcome of resolving a [`RunGoalLayer`] to its final goal text.
+///
+/// Carries provenance alongside the text so downstream consumers (e.g. the
+/// run manifest builder) can distinguish inline goals from file-sourced
+/// goals without having to re-walk the layer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedRunGoal {
+    pub text: String,
+    pub source: ResolvedGoalSource,
+}
+
+/// Provenance of a [`ResolvedRunGoal`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolvedGoalSource {
+    /// Goal text came from a literal `run.goal = "..."` value.
+    Inline,
+    /// Goal text was read from a file on disk. The absolute path of that
+    /// file is carried for provenance / error reporting.
+    File { path: std::path::PathBuf },
 }
 
 /// `[run.model]` — provider-neutral default model selection.

@@ -13,12 +13,42 @@
 use std::path::Path;
 
 use anyhow::Context;
+use fabro_types::settings::interp::InterpString;
+use fabro_types::settings::run::RunGoalLayer;
 use fabro_types::settings::{SettingsFile, parse_settings_file as parse_v2_settings_file};
 use serde::{Deserialize, Serialize};
 
 use crate::merge::combine_files;
 use crate::project::{self};
 use crate::user;
+
+/// Rewrite any relative `run.goal = { file = "..." }` path in `file` to an
+/// absolute path anchored at `base_dir`.
+///
+/// Called from `ConfigLayer::load` so that layers coming from different
+/// config files can be merged without losing the "relative to my source
+/// file" context. Paths that contain `${env.NAME}` interpolation are left
+/// alone (they get resolved against the run's working directory at consume
+/// time via [`SettingsFile::resolve_run_goal`]).
+fn resolve_goal_file_paths(file: &mut SettingsFile, base_dir: &Path) {
+    let Some(run) = file.run.as_mut() else {
+        return;
+    };
+    let Some(RunGoalLayer::File { file: goal_file }) = run.goal.as_mut() else {
+        return;
+    };
+    if !goal_file.is_literal() {
+        // Env-tokenized paths stay unresolved until consume time.
+        return;
+    }
+    let literal = goal_file.as_source();
+    let path = Path::new(&literal);
+    if path.is_absolute() {
+        return;
+    }
+    let absolute = base_dir.join(path);
+    *goal_file = InterpString::parse(&absolute.to_string_lossy());
+}
 
 /// A parsed settings file layer.
 ///
@@ -65,10 +95,17 @@ impl ConfigLayer {
     }
 
     /// Load a v2 TOML settings file from disk.
+    ///
+    /// Relative `run.goal = { file = "..." }` paths are resolved against
+    /// the directory of `path` at load time. Subsequent merging with other
+    /// layers can then safely treat the path as self-contained.
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
-        Self::parse(&content)
+        let mut layer = Self::parse(&content)?;
+        let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
+        resolve_goal_file_paths(&mut layer.file, base_dir);
+        Ok(layer)
     }
 
     /// Load workflow config + project config for a workflow path.
@@ -124,7 +161,7 @@ impl ConfigLayer {
 
 #[cfg(test)]
 mod tests {
-    use fabro_types::settings::InterpString;
+    use fabro_types::settings::run::RunGoalLayer;
 
     use super::*;
 
@@ -139,7 +176,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_accepts_minimal_v2_file() {
+    fn parse_accepts_inline_goal() {
         let layer = ConfigLayer::parse(
             r#"
 _version = 1
@@ -149,15 +186,42 @@ goal = "Do things"
         )
         .unwrap();
         assert_eq!(
-            layer
-                .file
-                .run
-                .as_ref()
-                .and_then(|r| r.goal.as_ref())
-                .map(InterpString::as_source)
-                .as_deref(),
+            layer.file.run_goal_inline_str().as_deref(),
             Some("Do things")
         );
+    }
+
+    #[test]
+    fn parse_accepts_file_variant() {
+        let layer = ConfigLayer::parse(
+            r#"
+_version = 1
+[run.goal]
+file = "prompts/goal.md"
+"#,
+        )
+        .unwrap();
+        let Some(RunGoalLayer::File { file }) = layer.file.run_goal_layer() else {
+            panic!("expected run.goal.file variant");
+        };
+        assert_eq!(file.as_source(), "prompts/goal.md");
+    }
+
+    #[test]
+    fn parse_rejects_goal_with_unknown_sibling_fields() {
+        // The untagged enum should reject any `{ file = ..., extra = ... }`
+        // shape because neither the inline nor the file variant matches.
+        let err = ConfigLayer::parse(
+            r#"
+_version = 1
+[run.goal]
+file = "prompts/goal.md"
+extra = "boom"
+"#,
+        )
+        .unwrap_err();
+        let text = format!("{err:#}");
+        assert!(text.to_lowercase().contains("run.goal") || text.contains("extra"));
     }
 
     #[test]
@@ -180,14 +244,133 @@ goal = "lower goal"
         .unwrap();
         let merged = higher.combine(lower);
         assert_eq!(
-            merged
-                .file
-                .run
-                .as_ref()
-                .and_then(|r| r.goal.as_ref())
-                .map(InterpString::as_source)
-                .as_deref(),
+            merged.file.run_goal_inline_str().as_deref(),
             Some("higher goal")
         );
+    }
+
+    #[test]
+    fn combine_replaces_file_goal_with_inline_from_higher_layer() {
+        // A higher-precedence `run.goal = "inline"` must fully override a
+        // lower layer's `run.goal = { file = "..." }` — the scalar merge
+        // treats `goal` as one field regardless of which variant each
+        // layer picked.
+        let higher = ConfigLayer::parse(
+            r#"
+_version = 1
+[run]
+goal = "inline override"
+"#,
+        )
+        .unwrap();
+        let lower = ConfigLayer::parse(
+            r#"
+_version = 1
+[run.goal]
+file = "/tmp/goal.md"
+"#,
+        )
+        .unwrap();
+        let merged = higher.combine(lower);
+        assert_eq!(
+            merged.file.run_goal_inline_str().as_deref(),
+            Some("inline override")
+        );
+    }
+
+    #[test]
+    fn combine_replaces_inline_goal_with_file_from_higher_layer() {
+        let higher = ConfigLayer::parse(
+            r#"
+_version = 1
+[run.goal]
+file = "/tmp/goal.md"
+"#,
+        )
+        .unwrap();
+        let lower = ConfigLayer::parse(
+            r#"
+_version = 1
+[run]
+goal = "inline loser"
+"#,
+        )
+        .unwrap();
+        let merged = higher.combine(lower);
+        assert!(matches!(
+            merged.file.run_goal_layer(),
+            Some(RunGoalLayer::File { .. })
+        ));
+    }
+
+    #[test]
+    fn load_rewrites_relative_goal_file_to_absolute() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_path = tmp.path().join("fabro.toml");
+        std::fs::write(
+            &config_path,
+            r#"
+_version = 1
+[run.goal]
+file = "prompts/goal.md"
+"#,
+        )
+        .unwrap();
+
+        let layer = ConfigLayer::load(&config_path).unwrap();
+        let Some(RunGoalLayer::File { file }) = layer.file.run_goal_layer() else {
+            panic!("expected file variant");
+        };
+        let resolved = file.as_source();
+        let expected = tmp.path().join("prompts").join("goal.md");
+        assert_eq!(resolved, expected.to_string_lossy());
+    }
+
+    #[test]
+    fn load_leaves_absolute_goal_file_untouched() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_path = tmp.path().join("fabro.toml");
+        let abs_goal = "/etc/fabro/goal.md";
+        std::fs::write(
+            &config_path,
+            format!(
+                r#"
+_version = 1
+[run.goal]
+file = "{abs_goal}"
+"#
+            ),
+        )
+        .unwrap();
+
+        let layer = ConfigLayer::load(&config_path).unwrap();
+        let Some(RunGoalLayer::File { file }) = layer.file.run_goal_layer() else {
+            panic!("expected file variant");
+        };
+        assert_eq!(file.as_source(), abs_goal);
+    }
+
+    #[test]
+    fn load_leaves_env_interpolated_goal_file_untouched() {
+        // InterpString paths aren't resolved at load time because env
+        // lookups happen at consume time. The loader should leave them
+        // alone.
+        let tmp = tempfile::tempdir().unwrap();
+        let config_path = tmp.path().join("fabro.toml");
+        std::fs::write(
+            &config_path,
+            r#"
+_version = 1
+[run.goal]
+file = "${env.GOALS_DIR}/goal.md"
+"#,
+        )
+        .unwrap();
+
+        let layer = ConfigLayer::load(&config_path).unwrap();
+        let Some(RunGoalLayer::File { file }) = layer.file.run_goal_layer() else {
+            panic!("expected file variant");
+        };
+        assert_eq!(file.as_source(), "${env.GOALS_DIR}/goal.md");
     }
 }

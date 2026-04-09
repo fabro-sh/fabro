@@ -294,7 +294,7 @@ fn settings_local_merges_cli_and_project_defaults() {
     let cfg = parse_settings(&output);
     assert_eq!(cfg.run_model_name_str().as_deref(), Some("project-model"));
     assert_eq!(cfg.run_model_provider_str().as_deref(), Some("openai"));
-    assert_eq!(cfg.run_goal_str().as_deref(), None);
+    assert_eq!(cfg.run_goal_inline_str().as_deref(), None);
     assert_eq!(cfg.project_directory(), Some("fabro"));
 
     // v2 R22: run.inputs replaces the inherited map wholesale rather than
@@ -333,7 +333,7 @@ fn settings_local_workflow_name_applies_run_overlay_and_deep_merges() {
     use fabro_types::settings::run::McpEntryLayer;
 
     let cfg = parse_settings(&output);
-    assert_eq!(cfg.run_goal_str().as_deref(), Some("demo goal"));
+    assert_eq!(cfg.run_goal_inline_str().as_deref(), Some("demo goal"));
     assert_eq!(cfg.run_model_name_str().as_deref(), Some("run-model"));
     assert_eq!(cfg.run_model_provider_str().as_deref(), Some("anthropic"));
 

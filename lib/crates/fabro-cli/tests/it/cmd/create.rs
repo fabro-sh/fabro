@@ -356,7 +356,7 @@ fn create_persists_requested_overrides_into_store() {
     let compact = json!({
         "workflow_slug": run_record.workflow_slug,
         "settings": {
-            "goal": settings.run_goal_str(),
+            "goal": settings.run_goal_inline_str(),
             "dry_run": settings.dry_run_enabled(),
             "auto_approve": settings.auto_approve_enabled(),
             "no_retro": settings.no_retro_enabled(),

@@ -21,8 +21,8 @@ use fabro_types::settings::SettingsFile;
 use fabro_types::settings::cli::{CliLayer, CliOutputLayer, OutputVerbosity};
 use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::run::{
-    ApprovalMode, DaytonaDockerfileLayer, RunExecutionLayer, RunLayer, RunMode, RunModelLayer,
-    RunSandboxLayer,
+    ApprovalMode, DaytonaDockerfileLayer, RunExecutionLayer, RunGoalLayer, RunLayer, RunMode,
+    RunModelLayer, RunSandboxLayer,
 };
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_validate::Severity;
@@ -91,7 +91,10 @@ pub(crate) fn prepare_manifest_with_mode(
     )?;
     if let Some(goal) = manifest.goal.as_ref() {
         let run = settings.run.get_or_insert_with(RunLayer::default);
-        run.goal = Some(InterpString::parse(&goal.text));
+        // The CLI has already resolved any goal-file reads into
+        // `manifest.goal.text`, so the server side always stores the
+        // final text inline.
+        run.goal = Some(RunGoalLayer::Inline(InterpString::parse(&goal.text)));
     }
 
     Ok(PreparedManifest {

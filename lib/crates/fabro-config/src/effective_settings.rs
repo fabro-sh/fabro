@@ -283,7 +283,10 @@ provider = "openai"
         )
         .unwrap();
 
-        assert_eq!(settings.run_goal_str().as_deref(), Some("workflow goal"));
+        assert_eq!(
+            settings.run_goal_inline_str().as_deref(),
+            Some("workflow goal")
+        );
         assert_eq!(
             settings.run_model_name_str().as_deref(),
             Some("workflow-model")
@@ -332,7 +335,10 @@ root = "/tmp/should-be-inert"
             settings.server_storage_root_str().as_deref(),
             Some("/srv/fabro")
         );
-        assert_eq!(settings.run_goal_str().as_deref(), Some("project goal"));
+        assert_eq!(
+            settings.run_goal_inline_str().as_deref(),
+            Some("project goal")
+        );
     }
 
     #[test]
