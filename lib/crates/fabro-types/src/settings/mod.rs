@@ -22,11 +22,7 @@
 pub mod server;
 pub mod v2;
 
-pub use server::{
-    ApiAuthStrategy, ApiSettings, ArtifactStorageBackend, ArtifactStorageSettings, AuthProvider,
-    AuthSettings, FeaturesSettings, GitAuthorSettings, GitProvider, GitSettings, LogSettings,
-    SlackSettings, TlsSettings, WebSettings, WebhookSettings, WebhookStrategy,
-};
+pub use server::{ApiAuthStrategy, ApiSettings, TlsSettings};
 // v2 top-level re-exports. Stage 6.5 of the settings TOML redesign
 // promoted the v2 namespaced parse tree to be the primary API surface;
 // consumers can now write `fabro_types::settings::SettingsFile` /

@@ -116,14 +116,6 @@ fn build_legacy_api_settings(file: &SettingsFile) -> ApiSettings {
         authentication_strategies.push(ApiAuthStrategy::Mtls);
     }
 
-    let base_url = file
-        .server_api()
-        .and_then(|api| api.url.as_ref())
-        .map_or_else(
-            || "http://localhost:3000/api/v1".to_string(),
-            InterpString::as_source,
-        );
-
     // TLS files now live under `server.listen.tls.{cert,key,ca}` in v2.
     // Build a legacy TlsSettings from the listen TLS subtree so the
     // existing rustls config path keeps working.
@@ -147,7 +139,6 @@ fn build_legacy_api_settings(file: &SettingsFile) -> ApiSettings {
         });
 
     ApiSettings {
-        base_url,
         authentication_strategies,
         tls,
     }
