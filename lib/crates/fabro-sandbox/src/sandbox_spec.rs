@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use fabro_types::{RunId, settings::WorktreeMode};
+use crate::config::WorktreeMode;
+use fabro_types::RunId;
 
 #[cfg(any(feature = "docker", feature = "daytona"))]
 use anyhow::anyhow;
