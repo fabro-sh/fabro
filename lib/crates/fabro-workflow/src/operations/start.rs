@@ -7,13 +7,14 @@ use std::time::{Duration, Instant};
 use fabro_config::project as project_config;
 use fabro_hooks::config::bridge_hook;
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
+use fabro_mcp::config::bridge_mcp_entry;
 use fabro_model::{Catalog, FallbackTarget, Provider};
 use fabro_sandbox::{SandboxProvider, SandboxSpec};
 use fabro_types::RunId;
 use fabro_types::settings::sandbox::{self as sandbox_config, WorktreeMode};
 use fabro_types::settings::v2::run::ModelRefOrSplice;
 use fabro_types::settings::v2::to_runtime::{
-    bridge_mcp_entry, bridge_pull_request, bridge_sandbox, bridge_worktree_mode,
+    bridge_pull_request, bridge_sandbox, bridge_worktree_mode,
 };
 use fabro_types::settings::v2::{InterpString, SettingsFile};
 
