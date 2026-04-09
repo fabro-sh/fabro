@@ -116,6 +116,7 @@ pub mod artifact;
 pub mod artifact_snapshot;
 pub mod artifact_upload;
 pub(crate) mod condition;
+pub mod config;
 pub mod context;
 pub mod devcontainer_bridge;
 pub mod error;

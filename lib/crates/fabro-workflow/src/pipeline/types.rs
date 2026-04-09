@@ -15,6 +15,7 @@ use fabro_types::RunId;
 use fabro_validate::Diagnostic;
 
 use crate::artifact_upload::ArtifactSink;
+use crate::config::PullRequestSettings;
 use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::Emitter;
@@ -29,7 +30,6 @@ use crate::transforms::Transform;
 use crate::workflow_bundle::WorkflowBundle;
 use fabro_llm::client::Client;
 use fabro_retro::retro::Retro;
-use fabro_types::settings::run::PullRequestSettings;
 use fabro_validate::Severity;
 
 /// Output of the PARSE phase.

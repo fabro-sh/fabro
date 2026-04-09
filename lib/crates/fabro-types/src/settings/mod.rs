@@ -19,14 +19,9 @@
 //! owning consumer crates or replace their call sites with v2-native
 //! accessors, at which point this module goes away.
 
-pub mod run;
 pub mod server;
 pub mod v2;
 
-pub use run::{
-    ArtifactsSettings, CheckpointSettings, GitHubSettings, LlmSettings, MergeStrategy,
-    PullRequestSettings, SetupSettings,
-};
 pub use server::{
     ApiAuthStrategy, ApiSettings, ArtifactStorageBackend, ArtifactStorageSettings, AuthProvider,
     AuthSettings, FeaturesSettings, GitAuthorSettings, GitProvider, GitSettings, LogSettings,

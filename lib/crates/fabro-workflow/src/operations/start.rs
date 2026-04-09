@@ -15,8 +15,9 @@ use fabro_sandbox::config::{
 use fabro_sandbox::{SandboxProvider, SandboxSpec};
 use fabro_types::RunId;
 use fabro_types::settings::v2::run::ModelRefOrSplice;
-use fabro_types::settings::v2::to_runtime::bridge_pull_request;
 use fabro_types::settings::v2::{InterpString, SettingsFile};
+
+use crate::config::{PullRequestSettings, bridge_pull_request};
 
 use crate::artifact_upload::ArtifactSink;
 use crate::context::Context;
@@ -41,7 +42,6 @@ use crate::workflow_bundle::{RunDefinition, WorkflowBundle};
 use fabro_retro::retro::Retro;
 use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::daytona::detect_repo_info;
-use fabro_types::settings::run::PullRequestSettings;
 use tokio::runtime::Handle;
 
 struct RunSession {
