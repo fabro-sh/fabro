@@ -293,7 +293,7 @@ where
                 .get(name)
                 .cloned()
                 .or_else(|| std::env::var(name).ok())
-        });
+        })?;
         let tls_present = TlsSettings::from_settings(&cfg_file).is_some();
         let client_auth = tls_present.then(|| client_auth_from_mode(&auth_mode));
         let max_concurrent_runs = args

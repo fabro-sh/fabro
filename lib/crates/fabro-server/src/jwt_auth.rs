@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use anyhow::{Result, anyhow};
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
@@ -14,6 +15,15 @@ use crate::web_auth::SessionCookie;
 use fabro_types::RunAuthMethod;
 use fabro_types::settings::SettingsFile;
 
+/// Env var that explicitly opts the server into unauthenticated startup.
+///
+/// When set to `"1"`, [`resolve_auth_mode_with_lookup`] returns
+/// [`AuthMode::Disabled`] regardless of what `server.auth` says. This is the
+/// only escape hatch for running the server without configured
+/// authentication; it is off by default, so accidental misconfigurations
+/// fail closed.
+pub const FABRO_LOCAL_NO_AUTH_ENV: &str = "FABRO_LOCAL_NO_AUTH";
+
 /// JWT claims for service-to-service authentication.
 #[derive(Debug, Deserialize)]
 struct Claims {
@@ -27,7 +37,7 @@ struct Claims {
 }
 
 /// A single authentication strategy resolved at startup.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum AuthStrategy {
     Jwt {
         key: Arc<DecodingKey>,
@@ -46,7 +56,7 @@ pub fn jwt_validation() -> Validation {
 }
 
 /// Authentication mode resolved at startup.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum AuthMode {
     /// One or more strategies to try in order.
     Strategies(Vec<AuthStrategy>),
@@ -71,11 +81,19 @@ pub fn decode_pem_env(name: &str, value: &str) -> String {
 
 /// Resolve the authentication mode from a [`SettingsFile`].
 ///
-/// Call this once at startup before serving requests. Panics if the
-/// configuration is invalid (JWT strategy but no public key, or mTLS without
-/// TLS config). Walks the v2 `server.auth.api.{jwt,mtls}` subtree and
+/// Call this once at startup before serving requests. Returns
+/// [`AuthMode::Disabled`] when [`FABRO_LOCAL_NO_AUTH_ENV`] is set to `"1"`
+/// (explicit insecure-startup opt-in). Returns `AuthMode::Strategies(...)`
+/// when `server.auth` resolves to at least one enabled strategy.
+///
+/// Fails closed when `server.auth` is absent or resolves to zero enabled
+/// strategies: startup refuses rather than silently accepting every
+/// request. Panics if a configured strategy is missing its required
+/// material (JWT public key, mTLS TLS config).
+///
+/// Walks the v2 `server.auth.api.{jwt,mtls}` subtree and
 /// `server.auth.web.allowed_usernames`.
-pub fn resolve_auth_mode(settings: &SettingsFile) -> AuthMode {
+pub fn resolve_auth_mode(settings: &SettingsFile) -> Result<AuthMode> {
     resolve_auth_mode_with_lookup(settings, |name| std::env::var(name).ok())
 }
 
@@ -116,29 +134,24 @@ fn resolve_auth_strategies(settings: &SettingsFile) -> ResolvedAuthStrategies {
     }
 }
 
-pub fn resolve_auth_mode_with_lookup<F>(settings: &SettingsFile, lookup: F) -> AuthMode
+pub fn resolve_auth_mode_with_lookup<F>(settings: &SettingsFile, lookup: F) -> Result<AuthMode>
 where
     F: Fn(&str) -> Option<String>,
 {
+    if lookup(FABRO_LOCAL_NO_AUTH_ENV).as_deref() == Some("1") {
+        warn!(
+            "{FABRO_LOCAL_NO_AUTH_ENV}=1 set; allowing unauthenticated local daemon access. \
+             Do not use this flag outside local development or demo environments."
+        );
+        return Ok(AuthMode::Disabled);
+    }
+
     let ResolvedAuthStrategies {
         jwt_enabled,
         mtls_enabled,
         tls_present,
         allowed_usernames,
     } = resolve_auth_strategies(settings);
-
-    let any_strategy = jwt_enabled || mtls_enabled;
-
-    if !any_strategy && std::env::var("FABRO_LOCAL_NO_AUTH").ok().as_deref() == Some("1") {
-        warn!(
-            "No authentication strategies configured; allowing unauthenticated local daemon access"
-        );
-        return AuthMode::Disabled;
-    }
-
-    if !any_strategy {
-        warn!("No authentication strategies configured; all requests will be rejected");
-    }
 
     let mut strategies = Vec::new();
     if lookup("SESSION_SECRET").is_some() {
@@ -170,7 +183,21 @@ where
         strategies.push(AuthStrategy::Mtls);
     }
 
-    AuthMode::Strategies(strategies)
+    if strategies.is_empty() {
+        return Err(anyhow!(
+            "Fabro server refuses to start: no authentication strategies are configured.\n\
+             \n\
+             Configure at least one of the following in `[server.auth]`:\n\
+               - `[server.auth.api.jwt]` (requires `FABRO_JWT_PUBLIC_KEY` env)\n\
+               - `[server.auth.api.mtls]` (requires `[server.listen.tls]` cert/key/ca)\n\
+               - `SESSION_SECRET` env (enables cookie-based web auth)\n\
+             \n\
+             Or set `{FABRO_LOCAL_NO_AUTH_ENV}=1` to explicitly opt in to \
+             unauthenticated local daemon access."
+        ));
+    }
+
+    Ok(AuthMode::Strategies(strategies))
 }
 
 /// Extract the login from JWT claims.
@@ -417,9 +444,111 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use axum::response::IntoResponse;
     use axum::routing::get;
+    use fabro_config::ConfigLayer;
     use tower::ServiceExt;
 
     use crate::web_auth::SessionCookie;
+
+    // --- Fail-closed resolver tests (R52/R53) -----------------------------------
+
+    fn settings(source: &str) -> SettingsFile {
+        ConfigLayer::parse(source)
+            .expect("fixture should parse")
+            .into()
+    }
+
+    /// Lookup closure that returns nothing — every env var is absent.
+    fn empty_lookup(_name: &str) -> Option<String> {
+        None
+    }
+
+    #[test]
+    fn fail_closed_when_server_auth_absent() {
+        let file = settings("_version = 1\n");
+        let err =
+            resolve_auth_mode_with_lookup(&file, empty_lookup).expect_err("should refuse startup");
+        assert!(err.to_string().contains("refuses to start"));
+        assert!(err.to_string().contains("FABRO_LOCAL_NO_AUTH"));
+    }
+
+    #[test]
+    fn fail_closed_when_all_strategies_disabled() {
+        let file = settings(
+            r#"
+_version = 1
+
+[server.auth.api.jwt]
+enabled = false
+
+[server.auth.api.mtls]
+enabled = false
+"#,
+        );
+        let err =
+            resolve_auth_mode_with_lookup(&file, empty_lookup).expect_err("should refuse startup");
+        assert!(err.to_string().contains("no authentication strategies"));
+    }
+
+    #[test]
+    fn opt_in_insecure_startup_via_env() {
+        let file = settings("_version = 1\n");
+        let mode = resolve_auth_mode_with_lookup(&file, |name| {
+            (name == FABRO_LOCAL_NO_AUTH_ENV).then(|| "1".to_string())
+        })
+        .expect("FABRO_LOCAL_NO_AUTH=1 should allow startup");
+        assert!(matches!(mode, AuthMode::Disabled));
+    }
+
+    #[test]
+    fn insecure_startup_flag_any_other_value_still_fails_closed() {
+        let file = settings("_version = 1\n");
+        let err = resolve_auth_mode_with_lookup(&file, |name| {
+            (name == FABRO_LOCAL_NO_AUTH_ENV).then(|| "true".to_string())
+        })
+        .expect_err("only the literal string \"1\" opts in");
+        assert!(err.to_string().contains("refuses to start"));
+    }
+
+    #[test]
+    fn cookie_strategy_alone_unlocks_startup() {
+        let file = settings("_version = 1\n");
+        let mode = resolve_auth_mode_with_lookup(&file, |name| {
+            (name == "SESSION_SECRET").then(|| "deadbeef".to_string())
+        })
+        .expect("SESSION_SECRET alone should unlock startup");
+        let AuthMode::Strategies(strategies) = mode else {
+            panic!("expected Strategies, got Disabled");
+        };
+        assert_eq!(strategies.len(), 1);
+        assert!(matches!(strategies[0], AuthStrategy::Cookie));
+    }
+
+    #[test]
+    fn mtls_strategy_resolves_when_enabled_with_listen_tls() {
+        let file = settings(
+            r#"
+_version = 1
+
+[server.auth.api.mtls]
+enabled = true
+
+[server.listen]
+type = "tcp"
+address = "127.0.0.1:3000"
+
+[server.listen.tls]
+cert = "/etc/fabro/tls/cert.pem"
+key = "/etc/fabro/tls/key.pem"
+ca = "/etc/fabro/tls/ca.pem"
+"#,
+        );
+        let mode =
+            resolve_auth_mode_with_lookup(&file, empty_lookup).expect("mTLS config should resolve");
+        let AuthMode::Strategies(strategies) = mode else {
+            panic!("expected Strategies, got Disabled");
+        };
+        assert!(strategies.iter().any(|s| matches!(s, AuthStrategy::Mtls)));
+    }
 
     async fn protected_handler(_auth: AuthenticatedService) -> impl IntoResponse {
         "ok"
