@@ -6,19 +6,14 @@
 //! top-level keys with targeted rename hints. `ConfigLayer::combine` walks
 //! the v2 merge matrix from [`crate::merge`].
 //!
-//! [`ConfigLayer::resolve`] uses the transitional bridge in
-//! [`fabro_types::settings::v2::bridge`] to produce the legacy flat
-//! [`Settings`] shape that most consumers still read. New code should prefer
-//! [`ConfigLayer::as_v2`] to read v2 fields directly; the bridge and the old
-//! flat shape are scheduled for removal once every consumer is migrated.
+//! Consumers that need the inner tree call [`ConfigLayer::as_v2`] (borrow)
+//! or `.into()` to move out an owned `SettingsFile`. The legacy flat
+//! `Settings` shape is no longer reachable from this layer.
 
 use std::path::Path;
 
 use anyhow::Context;
-use fabro_types::Settings;
-use fabro_types::settings::v2::{
-    SettingsFile, bridge_to_old, parse_settings_file as parse_v2_settings_file,
-};
+use fabro_types::settings::v2::{SettingsFile, parse_settings_file as parse_v2_settings_file};
 use serde::{Deserialize, Serialize};
 
 use crate::merge::combine_files;
@@ -27,9 +22,10 @@ use crate::user;
 
 /// A parsed settings file layer.
 ///
-/// Currently a thin newtype around the v2 [`SettingsFile`] parse tree. The
-/// newtype exists so fabro-config can attach helper methods and evolve the
-/// internal representation without forcing every caller to import v2 types.
+/// Thin newtype around the v2 [`SettingsFile`] parse tree. The newtype
+/// exists so fabro-config can attach helper methods and evolve the
+/// internal representation without forcing every caller to import v2
+/// types.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ConfigLayer {
@@ -45,22 +41,6 @@ impl From<SettingsFile> for ConfigLayer {
 impl From<ConfigLayer> for SettingsFile {
     fn from(layer: ConfigLayer) -> Self {
         layer.file
-    }
-}
-
-impl TryFrom<ConfigLayer> for Settings {
-    type Error = anyhow::Error;
-
-    fn try_from(value: ConfigLayer) -> Result<Self, Self::Error> {
-        Ok(value.resolve())
-    }
-}
-
-impl TryFrom<&ConfigLayer> for Settings {
-    type Error = anyhow::Error;
-
-    fn try_from(value: &ConfigLayer) -> Result<Self, Self::Error> {
-        Ok(value.clone().resolve())
     }
 }
 
@@ -128,13 +108,6 @@ impl ConfigLayer {
     /// Load machine-level defaults from `~/.fabro/settings.toml`.
     pub fn settings() -> anyhow::Result<Self> {
         user::load_settings_config(None)
-    }
-
-    /// Convert this layer into the legacy flat [`Settings`] shape via the
-    /// temporary bridge. This path is removed in Stage 6.
-    #[must_use]
-    pub fn resolve(self) -> Settings {
-        bridge_to_old(&self.file)
     }
 
     /// Borrow the inner v2 settings file for direct access.

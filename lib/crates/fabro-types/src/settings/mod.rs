@@ -6,16 +6,17 @@
 //! there.
 //!
 //! The flat [`Settings`] type and its submodules (`hook`, `mcp`, `project`,
-//! `run`, `sandbox`, `server`, `user`) are the **resolved** shape that
-//! current consumers still read. `fabro_config::ConfigLayer::resolve` walks
-//! the v2 tree through [`v2::bridge::bridge_to_old`] to produce this flat
-//! shape, so every consumer that touches `settings.llm`, `settings.vars`,
-//! `settings.sandbox`, etc. keeps working.
+//! `run`, `sandbox`, `server`, `user`) are the **runtime shapes** that
+//! downstream crates (fabro-workflow, fabro-sandbox, fabro-mcp,
+//! fabro-hooks) still consume at execution time. Stage 6.1 deleted the
+//! `Settings` parse path; Stage 6.2 deleted the `bridge_to_old`
+//! catch-all converter. Narrow v2→runtime helpers live in
+//! [`v2::to_runtime`] and build these runtime shapes from specific v2
+//! subtrees on demand.
 //!
-//! Full deletion of the flat shape (including the bridge) is scheduled for
-//! a follow-up PR that migrates every consumer call site to read from
-//! [`v2::SettingsFile`] directly. This module deliberately stays as a
-//! transitional seam until then.
+//! Stage 6.3 deletes these runtime types entirely in favor of v2-native
+//! replacements, at which point this module and the helper modules
+//! around it go away too.
 
 use std::collections::HashMap;
 use std::path::PathBuf;

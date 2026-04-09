@@ -10,10 +10,10 @@ use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_model::{Catalog, FallbackTarget, Provider};
 use fabro_sandbox::{SandboxProvider, SandboxSpec};
 use fabro_types::RunId;
-use fabro_types::settings::v2::bridge::{
+use fabro_types::settings::v2::run::ModelRefOrSplice;
+use fabro_types::settings::v2::to_runtime::{
     bridge_hook, bridge_mcp_entry, bridge_pull_request, bridge_sandbox, bridge_worktree_mode,
 };
-use fabro_types::settings::v2::run::ModelRefOrSplice;
 use fabro_types::settings::v2::{InterpString, SettingsFile};
 
 use crate::artifact_upload::ArtifactSink;

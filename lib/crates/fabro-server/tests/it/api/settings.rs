@@ -43,8 +43,10 @@ server_only = "1"
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response.into_body()).await;
-    assert_eq!(body["storage_dir"], "/srv/fabro");
-    assert_eq!(body["max_concurrent_runs"], 9);
-    assert_eq!(body["verbose"], true);
-    assert_eq!(body["vars"]["server_only"], "1");
+    // `/api/v1/settings` emits the v2 SettingsFile shape directly now.
+    // Stage 6.6 will replace this with an explicit allow-list DTO.
+    assert_eq!(body["server"]["storage"]["root"], "/srv/fabro");
+    assert_eq!(body["server"]["scheduler"]["max_concurrent_runs"], 9);
+    assert_eq!(body["cli"]["output"]["verbosity"], "verbose");
+    assert_eq!(body["run"]["inputs"]["server_only"], "1");
 }

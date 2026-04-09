@@ -6,10 +6,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::{Json, Router, routing::get, routing::post};
 use cookie::{Cookie, CookieJar, Expiration, Key, SameSite, time::Duration};
-use fabro_types::Settings;
-use fabro_types::settings::v2::SettingsFile;
-use fabro_types::settings::v2::bridge::bridge_to_old;
-use fabro_types::settings::{ApiAuthStrategy, GitProvider, GitSettings};
+use fabro_types::settings::v2::{InterpString, SettingsFile};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{debug, error, info, warn};
@@ -149,42 +146,43 @@ fn json_response(status: StatusCode, body: serde_json::Value) -> Response {
     (status, Json(body)).into_response()
 }
 
-fn features_json(settings: &Settings) -> serde_json::Value {
-    let features = settings.features.clone().unwrap_or_default();
+fn features_json(settings: &SettingsFile) -> serde_json::Value {
+    let features = settings.features.as_ref();
+    let session_sandboxes = features.and_then(|f| f.session_sandboxes).unwrap_or(false);
+    // Retros in v2 live under `run.execution.retros` (positive form) rather
+    // than the top-level features stanza.
+    let retros = settings
+        .run_execution()
+        .and_then(|e| e.retros)
+        .unwrap_or(false);
     json!({
-        "session_sandboxes": features.session_sandboxes,
-        "retros": features.retros,
+        "session_sandboxes": session_sandboxes,
+        "retros": retros,
     })
 }
 
-/// Temporary helper used during the v2 consumer migration. Bridges a
-/// `SettingsFile` down to the legacy flat `Settings` shape so web_auth's
-/// oauth/git flows can keep reading flat fields until they're migrated
-/// directly (Stage 6.6 alongside the `/api/v1/settings` DTO rewrite).
-fn bridged(settings_file: &SettingsFile) -> Settings {
-    bridge_to_old(settings_file)
-}
-
 async fn login_github(State(state): State<Arc<AppState>>) -> Response {
-    let settings = bridged(
-        &state
-            .settings
-            .read()
-            .expect("settings lock poisoned")
-            .clone(),
-    );
-    let Some(client_id) = settings.client_id().map(str::to_string) else {
+    let settings = state
+        .settings
+        .read()
+        .expect("settings lock poisoned")
+        .clone();
+    let Some(client_id) = settings.github_client_id_str() else {
         warn!("OAuth login failed: client_id not configured");
         return json_response(
             StatusCode::CONFLICT,
             json!({"error": "GitHub App client_id is not configured"}),
         );
     };
-    let Some(web_url) = settings.web.as_ref().map(|web| web.url.clone()) else {
-        warn!("OAuth login failed: web.url not configured");
+    let Some(web_url) = settings
+        .server_web()
+        .and_then(|w| w.url.as_ref())
+        .map(InterpString::as_source)
+    else {
+        warn!("OAuth login failed: server.web.url not configured");
         return json_response(
             StatusCode::CONFLICT,
-            json!({"error": "web.url is not configured"}),
+            json!({"error": "server.web.url is not configured"}),
         );
     };
 
@@ -228,13 +226,11 @@ async fn callback_github(
             json!({"error": "SESSION_SECRET is not configured"}),
         );
     };
-    let settings = bridged(
-        &state
-            .settings
-            .read()
-            .expect("settings lock poisoned")
-            .clone(),
-    );
+    let settings = state
+        .settings
+        .read()
+        .expect("settings lock poisoned")
+        .clone();
     let cookie_jar = parse_cookie_header(&headers);
     let stored_state = cookie_jar.get(OAUTH_STATE_COOKIE_NAME).map(Cookie::value);
     if stored_state != Some(params.state.as_str()) {
@@ -242,7 +238,7 @@ async fn callback_github(
         return Redirect::to("/login").into_response();
     }
 
-    let Some(client_id) = settings.client_id().map(str::to_string) else {
+    let Some(client_id) = settings.github_client_id_str() else {
         error!("OAuth callback failed: client_id not configured");
         return json_response(
             StatusCode::CONFLICT,
@@ -256,10 +252,13 @@ async fn callback_github(
             json!({"error": "GITHUB_APP_CLIENT_SECRET is not configured"}),
         );
     };
-    let web_url = settings.web.as_ref().map_or_else(
-        || "http://localhost:3000".to_string(),
-        |web| web.url.clone(),
-    );
+    let web_url = settings
+        .server_web()
+        .and_then(|w| w.url.as_ref())
+        .map_or_else(
+            || "http://localhost:3000".to_string(),
+            InterpString::as_source,
+        );
 
     let http = reqwest::Client::new();
     let token = match http
@@ -358,9 +357,11 @@ async fn callback_github(
     };
 
     let allowed_usernames = settings
-        .web
+        .server
         .as_ref()
-        .map(|web| web.auth.allowed_usernames.clone())
+        .and_then(|s| s.auth.as_ref())
+        .and_then(|a| a.web.as_ref())
+        .map(|w| w.allowed_usernames.clone())
         .unwrap_or_default();
     if !allowed_usernames.is_empty() && !allowed_usernames.iter().any(|user| user == &profile.login)
     {
@@ -445,13 +446,11 @@ async fn auth_me(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Resp
         return json_response(StatusCode::UNAUTHORIZED, json!({"error": "Unauthorized"}));
     };
 
-    let settings = bridged(
-        &state
-            .settings
-            .read()
-            .expect("settings lock poisoned")
-            .clone(),
-    );
+    let settings = state
+        .settings
+        .read()
+        .expect("settings lock poisoned")
+        .clone();
     let demo_mode = parse_cookie_header(&headers)
         .get("fabro-demo")
         .is_some_and(|cookie| cookie.value() == "1");
@@ -471,17 +470,12 @@ async fn auth_me(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Resp
 }
 
 async fn setup_status(State(state): State<Arc<AppState>>) -> Response {
-    let settings = bridged(
-        &state
-            .settings
-            .read()
-            .expect("settings lock poisoned")
-            .clone(),
-    );
-    let configured = settings
-        .git
-        .as_ref()
-        .is_some_and(|git| git.client_id.is_some());
+    let settings = state
+        .settings
+        .read()
+        .expect("settings lock poisoned")
+        .clone();
+    let configured = settings.github_client_id_str().is_some();
     Json(SetupStatusResponse { configured }).into_response()
 }
 
@@ -565,26 +559,10 @@ async fn setup_register(
 
     let settings_path = state.config_path.clone();
 
-    // Bridge the v2 in-memory state down to the legacy flat shape so the
-    // existing register flow can continue to mutate it and write legacy
-    // TOML. Stage 6.6 rewrites this to produce v2 TOML directly.
-    let settings_file = state
-        .settings
-        .read()
-        .expect("settings lock poisoned")
-        .clone();
-    let mut settings = bridged(&settings_file);
-    let mut git = settings.git.clone().unwrap_or_default();
-    git.provider = GitProvider::Github;
-    git.app_id = Some(data.id.to_string());
-    git.client_id = Some(data.client_id.clone());
-    git.slug = Some(data.slug.clone());
-    settings.git = Some(git.clone());
-    if let Some(ref origin) = origin {
-        let web = settings.web.get_or_insert_default();
-        web.url.clone_from(origin);
-    }
-
+    // Build a v2 settings_path edit in place. This used to bridge back to
+    // the legacy flat shape and emit v1 TOML; the v2 parser hard-rejects
+    // the v1 top-level keys, so this was already broken. Write v2 TOML
+    // using `merge_settings_keys` against the raw TOML document.
     if let Some(parent) = settings_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -603,7 +581,7 @@ async fn setup_register(
             }
         }
     };
-    if let Err(err) = merge_settings_keys(&mut doc, &settings, &git, origin.as_deref()) {
+    if let Err(err) = merge_settings_keys(&mut doc, &data, origin.as_deref()) {
         error!(error = %err, "Setup register failed: could not merge settings");
         return json_response(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -644,13 +622,14 @@ async fn setup_register(
         }
     }
 
-    // Stage 6.6 TODO: re-parse the freshly-written `settings_path` via
-    // `ConfigLayer::load` and swap it into `state.settings`. For now, leave
-    // the in-memory state unchanged -- subsequent server restarts will
-    // re-read the file. The `settings` binding above mutates a bridged
-    // copy that only feeds the TOML merge output; dropping it here is
-    // intentional.
-    drop(settings);
+    // Re-parse the freshly-written settings file and swap it into the
+    // in-memory state. Stage 6.6 may split this differently when the web
+    // setup flow is reworked, but for now a round-trip through
+    // `ConfigLayer::load` keeps the live state consistent with disk.
+    if let Ok(reloaded) = fabro_config::ConfigLayer::load(&settings_path) {
+        let mut shared = state.settings.write().expect("settings lock poisoned");
+        *shared = reloaded.into();
+    }
 
     info!(slug = %data.slug, app_id = %data.id, "GitHub App registered successfully");
     Json(json!({"ok": true})).into_response()
@@ -671,152 +650,88 @@ fn ensure_table<'a>(table: &'a mut toml::Table, key: &str) -> anyhow::Result<&'a
 
 fn merge_settings_keys(
     doc: &mut toml::Value,
-    settings: &Settings,
-    git: &GitSettings,
+    data: &GitHubManifestConversion,
     origin: Option<&str>,
 ) -> anyhow::Result<()> {
-    let web_url = origin
-        .map(str::to_string)
-        .or_else(|| settings.web.as_ref().map(|web| web.url.clone()))
-        .unwrap_or_else(|| "http://localhost:3000".to_string());
-    let allowed = settings
-        .web
-        .as_ref()
-        .map(|web| web.auth.allowed_usernames.clone())
-        .unwrap_or_default();
-    let api = settings.api.clone().unwrap_or_default();
+    let web_url = origin.map_or_else(|| "http://localhost:3000".to_string(), str::to_string);
 
     let root = root_table_mut(doc)?;
-    let web = ensure_table(root, "web")?;
-    web.insert("url".to_string(), toml::Value::String(web_url.clone()));
-    let auth = ensure_table(web, "auth")?;
-    auth.insert(
-        "provider".to_string(),
-        toml::Value::String("github".to_string()),
-    );
-    auth.insert(
-        "allowed_usernames".to_string(),
-        toml::Value::Array(allowed.into_iter().map(toml::Value::String).collect()),
-    );
+    // Make sure the freshly-written file is a valid v2 file.
+    root.insert("_version".to_string(), toml::Value::Integer(1));
 
-    let base_url = format!("{web_url}/api/v1");
-    let api_table = ensure_table(root, "api")?;
-    api_table.insert("base_url".to_string(), toml::Value::String(base_url));
-    api_table.insert(
-        "authentication_strategies".to_string(),
-        toml::Value::Array(
-            api.authentication_strategies
-                .iter()
-                .map(|strategy| match strategy {
-                    ApiAuthStrategy::Jwt => "jwt",
-                    ApiAuthStrategy::Mtls => "mtls",
-                })
-                .map(|value| toml::Value::String(value.to_string()))
-                .collect(),
-        ),
-    );
+    let server = ensure_table(root, "server")?;
+    let web = ensure_table(server, "web")?;
+    web.insert("enabled".to_string(), toml::Value::Boolean(true));
+    web.insert("url".to_string(), toml::Value::String(web_url));
 
-    let git_table = ensure_table(root, "git")?;
-    git_table.insert(
-        "provider".to_string(),
-        toml::Value::String("github".to_string()),
-    );
-    git_table.insert(
+    let auth = ensure_table(server, "auth")?;
+    let auth_web = ensure_table(auth, "web")?;
+    let _ = auth_web;
+    let auth_api = ensure_table(auth, "api")?;
+    let _jwt = ensure_table(auth_api, "jwt")?;
+
+    let integrations = ensure_table(server, "integrations")?;
+    let github = ensure_table(integrations, "github")?;
+    github.insert(
         "app_id".to_string(),
-        toml::Value::String(git.app_id.clone().unwrap_or_default()),
+        toml::Value::String(data.id.to_string()),
     );
-    git_table.insert(
+    github.insert(
         "client_id".to_string(),
-        toml::Value::String(git.client_id.clone().unwrap_or_default()),
+        toml::Value::String(data.client_id.clone()),
     );
-    git_table.insert(
-        "slug".to_string(),
-        toml::Value::String(git.slug.clone().unwrap_or_default()),
-    );
+    github.insert("slug".to_string(), toml::Value::String(data.slug.clone()));
 
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::merge_settings_keys;
-    use fabro_types::Settings;
+    use super::{GitHubManifestConversion, merge_settings_keys};
 
-    #[test]
-    fn merge_settings_keys_preserves_unrelated_git_nested_keys() {
-        let mut doc: toml::Value = toml::from_str(
-            r#"
-[git]
-provider = "github"
-
-[git.author]
-name = "fabro"
-email = "fabro@example.com"
-
-[git.webhooks]
-strategy = "tailscale_funnel"
-"#,
-        )
-        .unwrap();
-
-        let mut settings = Settings::default();
-        settings.web.get_or_insert_default().auth.allowed_usernames = vec!["alice".to_string()];
-        settings.git.get_or_insert_default().provider = fabro_config::server::GitProvider::Github;
-        settings.git.get_or_insert_default().app_id = Some("123".to_string());
-        settings.git.get_or_insert_default().client_id = Some("abc".to_string());
-        settings.git.get_or_insert_default().slug = Some("fabro".to_string());
-
-        merge_settings_keys(&mut doc, &settings, settings.git.as_ref().unwrap(), None).unwrap();
-
-        let git = doc.get("git").and_then(toml::Value::as_table).unwrap();
-        assert_eq!(git.get("app_id").and_then(toml::Value::as_str), Some("123"));
-        let author = git.get("author").and_then(toml::Value::as_table).unwrap();
-        assert_eq!(
-            author.get("name").and_then(toml::Value::as_str),
-            Some("fabro")
-        );
-        let webhooks = git.get("webhooks").and_then(toml::Value::as_table).unwrap();
-        assert_eq!(
-            webhooks.get("strategy").and_then(toml::Value::as_str),
-            Some("tailscale_funnel")
-        );
+    fn sample_conversion() -> GitHubManifestConversion {
+        GitHubManifestConversion {
+            id: 123,
+            slug: "fabro".to_string(),
+            client_id: "abc".to_string(),
+            client_secret: "shh".to_string(),
+            pem: String::new(),
+            webhook_secret: None,
+        }
     }
 
     #[test]
-    fn merge_settings_keys_preserves_unrelated_top_level_sections() {
-        let mut doc: toml::Value = toml::from_str(
-            r#"
-[exec]
-provider = "anthropic"
+    fn merge_settings_keys_writes_v2_server_integrations_github() {
+        let mut doc: toml::Value =
+            toml::from_str("_version = 1\n").expect("empty v2 doc should parse");
+        merge_settings_keys(&mut doc, &sample_conversion(), Some("https://example.test")).unwrap();
 
-[server]
-target = "https://fabro.example.com/api/v1"
-"#,
-        )
-        .unwrap();
-
-        let mut settings = Settings::default();
-        settings.web.get_or_insert_default().auth.allowed_usernames = vec!["alice".to_string()];
-        settings.git.get_or_insert_default().provider = fabro_config::server::GitProvider::Github;
-        settings.git.get_or_insert_default().app_id = Some("123".to_string());
-        settings.git.get_or_insert_default().client_id = Some("abc".to_string());
-        settings.git.get_or_insert_default().slug = Some("fabro".to_string());
-
-        merge_settings_keys(&mut doc, &settings, settings.git.as_ref().unwrap(), None).unwrap();
-
+        let github = doc
+            .get("server")
+            .and_then(toml::Value::as_table)
+            .and_then(|s| s.get("integrations"))
+            .and_then(toml::Value::as_table)
+            .and_then(|i| i.get("github"))
+            .and_then(toml::Value::as_table)
+            .expect("server.integrations.github should exist");
         assert_eq!(
-            doc.get("exec")
-                .and_then(toml::Value::as_table)
-                .and_then(|exec| exec.get("provider"))
-                .and_then(toml::Value::as_str),
-            Some("anthropic")
+            github.get("app_id").and_then(toml::Value::as_str),
+            Some("123")
         );
         assert_eq!(
-            doc.get("server")
-                .and_then(toml::Value::as_table)
-                .and_then(|server| server.get("target"))
-                .and_then(toml::Value::as_str),
-            Some("https://fabro.example.com/api/v1")
+            github.get("slug").and_then(toml::Value::as_str),
+            Some("fabro")
+        );
+
+        let web = doc
+            .get("server")
+            .and_then(toml::Value::as_table)
+            .and_then(|s| s.get("web"))
+            .and_then(toml::Value::as_table)
+            .expect("server.web should exist");
+        assert_eq!(
+            web.get("url").and_then(toml::Value::as_str),
+            Some("https://example.test")
         );
     }
 }

@@ -1,15 +1,13 @@
-use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::LazyLock;
 use std::time::Duration;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use fabro_config::server::ApiAuthStrategy;
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::types::{Message, Request};
 use fabro_model::{Catalog, Provider};
-use fabro_types::settings::v2::bridge::bridge_to_old;
 use fabro_util::check_report::{CheckDetail, CheckResult, CheckSection, CheckStatus};
 use fabro_util::version::FABRO_VERSION;
 use regex::Regex;
@@ -467,20 +465,24 @@ async fn check_brave_search(state: &AppState) -> CheckResult {
 }
 
 fn check_crypto(state: &AppState) -> CheckResult {
+    use fabro_types::settings::v2::interp::InterpString;
+
     let settings_file = state
         .settings
         .read()
         .expect("settings lock poisoned")
         .clone();
-    // Temporary bridge while diagnostics is migrated to v2 shapes directly.
-    let settings = bridge_to_old(&settings_file);
-    let api = settings.api.clone().unwrap_or_default();
-    let has_jwt = api
-        .authentication_strategies
-        .contains(&ApiAuthStrategy::Jwt);
-    let has_mtls = api
-        .authentication_strategies
-        .contains(&ApiAuthStrategy::Mtls);
+    let auth_api = settings_file
+        .server
+        .as_ref()
+        .and_then(|s| s.auth.as_ref())
+        .and_then(|a| a.api.as_ref());
+    let has_jwt = auth_api
+        .and_then(|api| api.jwt.as_ref())
+        .is_some_and(|jwt| jwt.enabled.unwrap_or(true));
+    let has_mtls = auth_api
+        .and_then(|api| api.mtls.as_ref())
+        .is_some_and(|mtls| mtls.enabled.unwrap_or(true));
 
     if !has_jwt && !has_mtls {
         return CheckResult {
@@ -488,7 +490,10 @@ fn check_crypto(state: &AppState) -> CheckResult {
             status: CheckStatus::Warning,
             summary: "no authentication configured".to_string(),
             details: Vec::new(),
-            remediation: Some("Configure authentication_strategies in [api]".to_string()),
+            remediation: Some(
+                "Configure strategies under [server.auth.api.jwt] or [server.auth.api.mtls]"
+                    .to_string(),
+            ),
         };
     }
 
@@ -496,13 +501,32 @@ fn check_crypto(state: &AppState) -> CheckResult {
     let mut errors = Vec::new();
 
     if has_mtls {
-        if let Some(tls) = api.tls {
-            let read = |path: &Path| -> Result<String, String> {
-                let expanded = fabro_config::expand_tilde(path);
+        use fabro_types::settings::v2::server::ServerListenLayer;
+        let listen_tls = settings_file
+            .server
+            .as_ref()
+            .and_then(|s| s.listen.as_ref())
+            .and_then(|listen| match listen {
+                ServerListenLayer::Tcp { tls, .. } => tls.as_ref(),
+                ServerListenLayer::Unix { .. } => None,
+            });
+        if let Some(listen_tls) = listen_tls {
+            let read = |raw: Option<String>, label: &str| -> Result<String, String> {
+                let Some(path_str) = raw else {
+                    return Err(format!("server.listen.tls.{label} is not configured"));
+                };
+                let path = PathBuf::from(&path_str);
+                let expanded = fabro_config::expand_tilde(&path);
                 std::fs::read_to_string(&expanded)
                     .map_err(|e| format!("{}: {e}", expanded.display()))
             };
-            match (read(&tls.cert), read(&tls.key), read(&tls.ca)) {
+            let cert = read(
+                listen_tls.cert.as_ref().map(InterpString::as_source),
+                "cert",
+            );
+            let key = read(listen_tls.key.as_ref().map(InterpString::as_source), "key");
+            let ca = read(listen_tls.ca.as_ref().map(InterpString::as_source), "ca");
+            match (cert, key, ca) {
                 (Ok(cert_pem), Ok(key_pem), Ok(ca_pem)) => {
                     if let Err(err) = validate_tls_cert(&cert_pem, chrono::Utc::now().timestamp()) {
                         errors.push(err);
@@ -517,7 +541,7 @@ fn check_crypto(state: &AppState) -> CheckResult {
                 _ => errors.push("failed to read mTLS files".to_string()),
             }
         } else {
-            errors.push("mTLS configured but [api.tls] is missing".to_string());
+            errors.push("mTLS configured but [server.listen.tls] is missing".to_string());
         }
     }
 

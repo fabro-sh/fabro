@@ -5,6 +5,7 @@ use crate::command_context::CommandContext;
 use fabro_config::ConfigLayer;
 use fabro_config::Storage;
 use fabro_types::RunId;
+use fabro_types::settings::v2::SettingsFile;
 use fabro_util::terminal::Styles;
 
 use super::output::{api_diagnostics_to_local, print_preflight_workflow_summary};
@@ -32,11 +33,11 @@ pub(crate) async fn create_run(
         .ok_or_else(|| anyhow::anyhow!("--workflow is required"))?;
     let cli_args_config = ConfigLayer::try_from(args)?;
     let cwd = ctx.cwd().to_path_buf();
-    let _settings = cli_args_config
+    let _settings: SettingsFile = cli_args_config
         .clone()
         .combine(ConfigLayer::for_workflow(workflow_path, &cwd)?)
         .combine(cli_defaults)
-        .resolve();
+        .into();
     let run_id = args
         .run_id
         .as_deref()

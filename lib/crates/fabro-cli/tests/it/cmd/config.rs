@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use fabro_config::mcp::McpTransport;
 use fabro_test::{fabro_snapshot, test_context};
 use fabro_types::Settings;
 use fabro_types::settings::v2::SettingsFile;
@@ -32,14 +31,8 @@ fn old_config_show_command_is_rejected() {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn parse_settings(stdout: &[u8]) -> Settings {
-    // The `settings` command now emits a v2 SettingsFile as YAML. Bridge
-    // it down to the legacy flat shape so the existing test assertions
-    // (which use flat fields like `cfg.llm`, `cfg.sandbox`, etc.) keep
-    // working. Stage 6.6 will rewrite these tests against the v2 tree.
-    let file: SettingsFile =
-        serde_yaml::from_slice(stdout).expect("stdout should be valid YAML SettingsFile");
-    fabro_types::settings::v2::bridge::bridge_to_old(&file)
+fn parse_settings(stdout: &[u8]) -> SettingsFile {
+    serde_yaml::from_slice(stdout).expect("stdout should be valid YAML SettingsFile")
 }
 
 fn server_settings_fixture() -> Settings {
@@ -315,30 +308,25 @@ fn settings_local_merges_cli_and_project_defaults() {
         .clone();
 
     let cfg = parse_settings(&output);
-    let llm = cfg.llm.as_ref().expect("llm config");
-    assert_eq!(llm.model.as_deref(), Some("project-model"));
-    assert_eq!(llm.provider.as_deref(), Some("openai"));
-    assert_eq!(cfg.goal.as_deref(), None);
-    assert_eq!(cfg.fabro.as_ref().map(|f| f.root.as_str()), Some("fabro"));
+    assert_eq!(cfg.run_model_name_str().as_deref(), Some("project-model"));
+    assert_eq!(cfg.run_model_provider_str().as_deref(), Some("openai"));
+    assert_eq!(cfg.run_goal_str().as_deref(), None);
+    assert_eq!(cfg.project_directory(), Some("fabro"));
 
     // v2 R22: run.inputs replaces the inherited map wholesale rather than
     // merging by key, so the project layer wipes out the CLI layer's inputs.
-    let vars = cfg.vars.as_ref().expect("vars");
-    assert_eq!(vars.get("project_only").map(String::as_str), Some("1"));
-    assert_eq!(vars.get("shared").map(String::as_str), Some("project"));
+    let vars = cfg.run_inputs().expect("run.inputs");
+    assert_eq!(vars.get("project_only").and_then(|v| v.as_str()), Some("1"));
+    assert_eq!(vars.get("shared").and_then(|v| v.as_str()), Some("project"));
     assert!(
-        vars.get("cli_only").is_none(),
+        !vars.contains_key("cli_only"),
         "run.inputs should replace across layers, not merge by key"
     );
 
     // v2 R71: provider-native maps such as run.sandbox.daytona.labels remain
     // sticky merge-by-key, so CLI labels persist under the project layer.
-    let sandbox = cfg.sandbox.as_ref().expect("sandbox");
-    let labels = sandbox
-        .daytona
-        .as_ref()
-        .and_then(|d| d.labels.as_ref())
-        .expect("daytona labels");
+    let sandbox = cfg.run_sandbox().expect("run.sandbox");
+    let labels = &sandbox.daytona.as_ref().expect("daytona").labels;
     assert_eq!(labels.get("cli_only").map(String::as_str), Some("1"));
     assert_eq!(labels.get("shared").map(String::as_str), Some("cli"));
 }
@@ -358,61 +346,80 @@ fn settings_local_workflow_name_applies_run_overlay_and_deep_merges() {
         .stdout
         .clone();
 
+    use fabro_types::settings::v2::run::McpEntryLayer;
+
     let cfg = parse_settings(&output);
-    let llm = cfg.llm.as_ref().expect("llm config");
-    assert_eq!(cfg.goal.as_deref(), Some("demo goal"));
-    assert_eq!(llm.model.as_deref(), Some("run-model"));
-    assert_eq!(llm.provider.as_deref(), Some("anthropic"));
+    assert_eq!(cfg.run_goal_str().as_deref(), Some("demo goal"));
+    assert_eq!(cfg.run_model_name_str().as_deref(), Some("run-model"));
+    assert_eq!(cfg.run_model_provider_str().as_deref(), Some("anthropic"));
 
     // v2 R22: run.inputs replaces wholesale, so the workflow layer wins
     // over project and cli.
-    let vars = cfg.vars.as_ref().expect("vars");
-    assert_eq!(vars.get("run_only").map(String::as_str), Some("1"));
-    assert_eq!(vars.get("shared").map(String::as_str), Some("run"));
+    let vars = cfg.run_inputs().expect("run.inputs");
+    assert_eq!(vars.get("run_only").and_then(|v| v.as_str()), Some("1"));
+    assert_eq!(vars.get("shared").and_then(|v| v.as_str()), Some("run"));
 
     // checkpoint.exclude_globs is a security/policy list: replace by default.
+    let checkpoint = cfg.run_checkpoint().expect("run.checkpoint");
     assert_eq!(
-        cfg.checkpoint.exclude_globs,
+        checkpoint.exclude_globs,
         vec!["run-only".to_string(), "shared".to_string()]
     );
 
     // Hooks: id-based replacement. The "shared" hook appears in both cli and
     // workflow layers and resolves to the workflow entry; project and run-only
     // contribute the other two ids.
-    assert!(cfg.hooks.len() >= 2);
-    let shared_hook = cfg
-        .hooks
+    let hooks = cfg.run_hooks();
+    assert!(hooks.len() >= 2);
+    let shared_hook = hooks
         .iter()
         .find(|hook| hook.name.as_deref() == Some("shared"))
         .expect("shared hook");
-    assert_eq!(shared_hook.command.as_deref(), Some("echo run"));
+    assert_eq!(
+        shared_hook
+            .script
+            .as_ref()
+            .map(|s| s.as_source())
+            .as_deref(),
+        Some("echo run")
+    );
     assert!(
-        cfg.hooks
+        hooks
             .iter()
             .any(|hook| hook.name.as_deref() == Some("run-only"))
     );
 
-    match &cfg.mcp_servers["shared"].transport {
-        McpTransport::Stdio { command, .. } => assert_eq!(command, &vec!["echo", "run"]),
+    let mcps = cfg.run_agent_mcps().expect("run.agent.mcps");
+    match mcps.get("shared").expect("shared mcp") {
+        McpEntryLayer::Stdio { command, .. } => {
+            let command = command.as_ref().expect("command");
+            let parts: Vec<String> = command.iter().map(|c| c.as_source()).collect();
+            assert_eq!(parts, vec!["echo".to_string(), "run".to_string()]);
+        }
         other => panic!("unexpected MCP transport: {other:?}"),
     }
-    assert!(cfg.mcp_servers.contains_key("run_only"));
+    assert!(mcps.contains_key("run_only"));
 
     // run.sandbox.daytona.labels stays sticky merge-by-key per R71.
-    let sandbox = cfg.sandbox.as_ref().expect("sandbox");
-    let labels = sandbox
-        .daytona
-        .as_ref()
-        .and_then(|d| d.labels.as_ref())
-        .expect("daytona labels");
+    let sandbox = cfg.run_sandbox().expect("run.sandbox");
+    let labels = &sandbox.daytona.as_ref().expect("daytona").labels;
     assert_eq!(labels.get("run_only").map(String::as_str), Some("1"));
     assert_eq!(labels.get("shared").map(String::as_str), Some("run"));
 
     // run.sandbox.env stays sticky merge-by-key per R71.
-    let env = sandbox.env.as_ref().expect("sandbox env");
-    assert_eq!(env.get("CLI_ONLY").map(String::as_str), Some("1"));
-    assert_eq!(env.get("RUN_ONLY").map(String::as_str), Some("1"));
-    assert_eq!(env.get("SHARED").map(String::as_str), Some("run"));
+    let env = &sandbox.env;
+    assert_eq!(
+        env.get("CLI_ONLY").map(|v| v.as_source()).as_deref(),
+        Some("1")
+    );
+    assert_eq!(
+        env.get("RUN_ONLY").map(|v| v.as_source()).as_deref(),
+        Some("1")
+    );
+    assert_eq!(
+        env.get("SHARED").map(|v| v.as_source()).as_deref(),
+        Some("run")
+    );
 }
 
 #[test]
@@ -435,17 +442,14 @@ fn settings_local_explicit_workflow_path_uses_workflow_project_layers() {
         .clone();
 
     let cfg = parse_settings(&output);
-    assert_eq!(cfg.auto_approve, Some(true));
+    assert!(cfg.auto_approve_enabled());
     // v2 R30: run.prepare.steps replaces the whole ordered list across layers.
     // The highest-precedence layer (workflow) wins.
     assert_eq!(
-        cfg.setup.as_ref().expect("setup config").commands,
+        cfg.run_prepare_commands(),
         vec!["workflow-setup".to_string()]
     );
-    assert_eq!(
-        cfg.sandbox.as_ref().expect("sandbox config").preserve,
-        Some(true)
-    );
+    assert_eq!(cfg.run_sandbox().and_then(|sb| sb.preserve), Some(true));
 }
 
 #[test]
@@ -594,8 +598,8 @@ name = "legacy-model"
         .stderr(predicate::str::contains("Rename it to"));
 
     let cfg = parse_settings(&assert.get_output().stdout);
-    assert_eq!(cfg.verbose, None);
-    assert_eq!(cfg.llm, None);
+    assert!(!cfg.verbose_enabled());
+    assert!(cfg.run_model().is_none());
 }
 
 #[test]
@@ -624,12 +628,11 @@ shared = "legacy"
         .stderr(predicate::str::contains("ignoring legacy config file"));
 
     let cfg = parse_settings(&assert.get_output().stdout);
-    let llm = cfg.llm.as_ref().expect("llm config");
-    assert_eq!(llm.model.as_deref(), Some("project-model"));
+    assert_eq!(cfg.run_model_name_str().as_deref(), Some("project-model"));
     assert_eq!(
-        cfg.vars
-            .as_ref()
-            .and_then(|vars| vars.get("shared").map(String::as_str)),
+        cfg.run_inputs()
+            .and_then(|vars| vars.get("shared"))
+            .and_then(|v| v.as_str()),
         Some("project")
     );
 }
@@ -763,18 +766,20 @@ shared = "cli"
 
     mock.assert();
     let cfg = parse_settings(&output);
-    let llm = cfg.llm.as_ref().expect("llm config");
-    assert_eq!(llm.model.as_deref(), Some("project-model"));
-    assert_eq!(llm.provider.as_deref(), Some("openai"));
-    assert_eq!(cfg.storage_dir, Some(PathBuf::from("/srv/fabro-server")));
-    assert_eq!(cfg.verbose, Some(true));
+    assert_eq!(cfg.run_model_name_str().as_deref(), Some("project-model"));
+    assert_eq!(cfg.run_model_provider_str().as_deref(), Some("openai"));
+    assert_eq!(
+        cfg.server_storage_root_str().as_deref(),
+        Some("/srv/fabro-server")
+    );
+    assert!(cfg.verbose_enabled());
 
     // R22: run.inputs replaces wholesale across layers. Project is the
     // highest-precedence layer that sets inputs, so project's vars win
     // and server-side vars are discarded rather than merged.
-    let vars = cfg.vars.as_ref().expect("vars");
-    assert_eq!(vars.get("project_only").map(String::as_str), Some("1"));
-    assert_eq!(vars.get("shared").map(String::as_str), Some("project"));
+    let vars = cfg.run_inputs().expect("run.inputs");
+    assert_eq!(vars.get("project_only").and_then(|v| v.as_str()), Some("1"));
+    assert_eq!(vars.get("shared").and_then(|v| v.as_str()), Some("project"));
     assert!(
         !vars.contains_key("server_only"),
         "v2 merge matrix replaces run.inputs wholesale; server_only should be dropped"
@@ -829,7 +834,10 @@ verbosity = "verbose"
     cli_mock.assert();
     configured_mock.assert_calls(0);
     let cfg = parse_settings(&output);
-    assert_eq!(cfg.storage_dir, Some(PathBuf::from("/srv/fabro-server")));
+    assert_eq!(
+        cfg.server_storage_root_str().as_deref(),
+        Some("/srv/fabro-server")
+    );
 }
 
 #[test]

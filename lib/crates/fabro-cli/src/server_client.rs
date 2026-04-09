@@ -8,7 +8,9 @@ use bytes::Bytes;
 use fabro_api::types;
 use fabro_server::bind::Bind;
 use fabro_store::{EventEnvelope, RunSummary, StageId};
-use fabro_types::{RunBlobId, RunEvent, RunId, Settings};
+use fabro_types::Settings;
+use fabro_types::settings::v2::SettingsFile;
+use fabro_types::{RunBlobId, RunEvent, RunId};
 use fabro_workflow::artifact_snapshot::CapturedArtifactInfo;
 use futures::StreamExt;
 use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE};
@@ -99,7 +101,7 @@ pub(crate) async fn connect_server_target_direct(target: &str) -> Result<ServerS
 
 pub(crate) async fn connect_server_with_settings(
     args: &ServerTargetArgs,
-    settings: &Settings,
+    settings: &SettingsFile,
     base_config_path: &Path,
 ) -> Result<ServerStoreClient> {
     let target = user_config::resolve_server_target(args, settings)?;

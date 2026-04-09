@@ -33,7 +33,6 @@ use fabro_model::{BilledModelUsage, BilledTokenCounts};
 use fabro_store::{
     ArtifactStore, Database, EventEnvelope, EventPayload, PendingInterviewRecord, StageId,
 };
-use fabro_types::settings::v2::bridge::bridge_to_old;
 use fabro_types::settings::v2::{InterpString, SettingsFile};
 use fabro_types::{
     EventBody, InterviewQuestionRecord, InterviewQuestionType, RunBlobId, RunClientProvenance,
@@ -1065,24 +1064,21 @@ async fn get_server_settings(
     State(state): State<Arc<AppState>>,
 ) -> Response {
     let settings = state.settings.read().unwrap().clone();
-    let response = match api_server_settings(&settings) {
-        Ok(response) => response,
+    // Stage 6.6 TODO: replace this with an explicit allow-list DTO that
+    // reads directly from the v2 tree and redacts env-sourced values via
+    // `InterpString` provenance. For now we serialize the full v2
+    // `SettingsFile` as JSON so the web UI still has a response body --
+    // the legacy `ServerSettings` OpenAPI schema will be rewritten in
+    // 6.6 alongside the fabro-web DTO updates.
+    let mut value = match serde_json::to_value(&settings) {
+        Ok(value) => value,
         Err(err) => {
             return ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
                 .into_response();
         }
     };
-    (StatusCode::OK, Json(response)).into_response()
-}
-
-fn api_server_settings(settings: &SettingsFile) -> anyhow::Result<ServerSettings> {
-    // Temporary shim: reuse the legacy flat Settings shape via the v2 bridge
-    // so the existing `/api/v1/settings` DTO keeps working. Stage 6.6 replaces
-    // this with an explicit allow-list DTO built directly from the v2 tree.
-    let legacy = bridge_to_old(settings);
-    let mut value = serde_json::to_value(&legacy)?;
     strip_nulls(&mut value);
-    serde_json::from_value(value).map_err(Into::into)
+    (StatusCode::OK, Json(value)).into_response()
 }
 
 fn strip_nulls(value: &mut serde_json::Value) {

@@ -1,9 +1,10 @@
 use anyhow::Result;
 use fabro_agent::cli::{OutputFormat, run_with_args, run_with_args_and_client};
-use fabro_config::mcp::McpServerEntry;
 use fabro_llm::client::Client;
 use fabro_llm::providers::FabroServerAdapter;
 use fabro_mcp::config::McpServerSettings;
+use fabro_types::settings::v2::InterpString;
+use fabro_types::settings::v2::to_runtime::bridge_mcp_entry;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -11,25 +12,52 @@ use crate::args::{ExecArgs, GlobalArgs};
 use crate::user_config;
 
 pub(crate) async fn execute(mut args: ExecArgs, globals: &GlobalArgs) -> Result<()> {
+    use fabro_agent::cli::PermissionLevel as AgentPermissionLevel;
+    use fabro_types::settings::v2::run::AgentPermissions;
+
     let cli_settings = user_config::load_settings()?;
     #[cfg(feature = "sleep_inhibitor")]
     let _sleep_guard = crate::sleep_inhibitor::guard(cli_settings.prevent_idle_sleep_enabled());
-    let exec_defaults = cli_settings.exec.as_ref();
+    let exec_defaults = cli_settings.cli_exec();
+    let exec_model = exec_defaults.and_then(|e| e.model.as_ref());
+    let exec_agent = exec_defaults.and_then(|e| e.agent.as_ref());
+    let provider_str = exec_model
+        .and_then(|m| m.provider.as_ref())
+        .map(InterpString::as_source);
+    let model_str = exec_model
+        .and_then(|m| m.name.as_ref())
+        .map(InterpString::as_source);
+    let permissions = exec_agent
+        .and_then(|agent| agent.permissions)
+        .map(|p| match p {
+            AgentPermissions::ReadOnly => AgentPermissionLevel::ReadOnly,
+            AgentPermissions::ReadWrite => AgentPermissionLevel::ReadWrite,
+            AgentPermissions::Full => AgentPermissionLevel::Full,
+        });
     args.agent.apply_cli_defaults(
-        exec_defaults.and_then(|a| a.provider.as_deref()),
-        exec_defaults.and_then(|a| a.model.as_deref()),
-        exec_defaults.and_then(|a| a.permissions),
-        exec_defaults.and_then(|a| a.output_format),
+        provider_str.as_deref(),
+        model_str.as_deref(),
+        permissions,
+        None,
     );
     if globals.json {
         args.agent.output_format = Some(OutputFormat::Json);
     }
     let server_target = user_config::exec_server_target(&args.server, &cli_settings)?;
-    let mcp_servers: Vec<McpServerSettings> = cli_settings
-        .mcp_servers
-        .into_iter()
-        .map(|(name, entry): (String, McpServerEntry)| entry.into_config(name))
-        .collect();
+    // v2 MCPs live under `cli.exec.agent.mcps` (owner-specific) or
+    // `run.agent.mcps`. For `fabro exec` we use the cli.exec path, falling
+    // back to run.agent.mcps if unset.
+    let mcps_iter = exec_agent
+        .map(|a| &a.mcps)
+        .filter(|m| !m.is_empty())
+        .or_else(|| cli_settings.run_agent_mcps());
+    let mcp_servers: Vec<McpServerSettings> = mcps_iter
+        .map(|mcps| {
+            mcps.iter()
+                .map(|(name, entry)| bridge_mcp_entry(entry).into_config(name.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
     if let Some(target) = server_target {
         tracing::info!(transport = "server", "Agent session starting");
         let provider_name = args

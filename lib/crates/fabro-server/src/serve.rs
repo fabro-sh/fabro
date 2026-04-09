@@ -3,7 +3,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use fabro_config::Storage;
-use fabro_config::server::{ArtifactStorageBackend, resolve_storage_dir};
+use fabro_config::server::{ApiSettings, resolve_storage_dir};
 use fabro_config::user::{active_settings_path, load_settings_config};
 use fabro_util::terminal::Styles;
 use object_store::ObjectStore;
@@ -17,9 +17,7 @@ use tracing::{error, info, warn};
 
 use clap::Args;
 
-use fabro_types::Settings;
 use fabro_types::settings::v2::SettingsFile;
-use fabro_types::settings::v2::bridge::bridge_to_old;
 
 use crate::bind::{self, Bind, BindRequest};
 use crate::github_webhooks::WebhookManager;
@@ -86,11 +84,72 @@ fn load_settings(path: Option<&Path>) -> anyhow::Result<SettingsFile> {
     Ok(load_settings_config(path)?.into())
 }
 
-/// Bridged helper for legacy call sites inside serve.rs that still read flat
-/// Settings fields. Callers pass a v2 SettingsFile; this returns the legacy
-/// shape via the transitional bridge.
-fn bridged(settings: &SettingsFile) -> Settings {
-    bridge_to_old(settings)
+/// Build the legacy `ApiSettings` shape that `resolve_auth_mode_with_lookup`
+/// and the TLS branch still expect, extracting the pieces it needs from the
+/// v2 tree. Stage 6.6 replaces this with a v2-aware auth resolver and drops
+/// the legacy `ApiSettings` type entirely.
+fn build_legacy_api_settings(file: &SettingsFile) -> ApiSettings {
+    use fabro_config::server::{ApiAuthStrategy, TlsSettings};
+    use fabro_types::settings::v2::interp::InterpString;
+    use fabro_types::settings::v2::server::ServerListenLayer;
+
+    let auth_api = file
+        .server
+        .as_ref()
+        .and_then(|s| s.auth.as_ref())
+        .and_then(|a| a.api.as_ref());
+
+    let mut authentication_strategies = Vec::new();
+    if auth_api
+        .and_then(|api| api.jwt.as_ref())
+        .and_then(|jwt| jwt.enabled)
+        .unwrap_or(auth_api.and_then(|api| api.jwt.as_ref()).is_some())
+    {
+        authentication_strategies.push(ApiAuthStrategy::Jwt);
+    }
+    if auth_api
+        .and_then(|api| api.mtls.as_ref())
+        .and_then(|mtls| mtls.enabled)
+        .unwrap_or(auth_api.and_then(|api| api.mtls.as_ref()).is_some())
+    {
+        authentication_strategies.push(ApiAuthStrategy::Mtls);
+    }
+
+    let base_url = file
+        .server_api()
+        .and_then(|api| api.url.as_ref())
+        .map_or_else(
+            || "http://localhost:3000/api/v1".to_string(),
+            InterpString::as_source,
+        );
+
+    // TLS files now live under `server.listen.tls.{cert,key,ca}` in v2.
+    // Build a legacy TlsSettings from the listen TLS subtree so the
+    // existing rustls config path keeps working.
+    let tls = file
+        .server
+        .as_ref()
+        .and_then(|s| s.listen.as_ref())
+        .and_then(|listen| match listen {
+            ServerListenLayer::Tcp { tls, .. } => tls.as_ref(),
+            ServerListenLayer::Unix { .. } => None,
+        })
+        .and_then(|tls_layer| {
+            let cert = tls_layer.cert.as_ref().map(InterpString::as_source)?;
+            let key = tls_layer.key.as_ref().map(InterpString::as_source)?;
+            let ca = tls_layer.ca.as_ref().map(InterpString::as_source)?;
+            Some(TlsSettings {
+                cert: cert.into(),
+                key: key.into(),
+                ca: ca.into(),
+            })
+        });
+
+    ApiSettings {
+        base_url,
+        authentication_strategies,
+        tls,
+    }
 }
 
 fn resolved_config_path(path: Option<&Path>) -> PathBuf {
@@ -183,39 +242,52 @@ fn build_artifact_object_store(
     settings: &SettingsFile,
     storage: &Storage,
 ) -> anyhow::Result<(Arc<dyn ObjectStore>, String)> {
-    let bridged_settings = bridged(settings);
-    let artifact_settings = bridged_settings
-        .artifact_storage
-        .clone()
-        .unwrap_or_default();
+    use fabro_types::settings::v2::interp::InterpString;
+    use fabro_types::settings::v2::server::ObjectStoreProvider;
+
+    let artifacts = settings.server_artifacts();
+    let prefix = artifacts
+        .and_then(|a| a.prefix.as_ref())
+        .map_or_else(|| "artifacts".to_string(), InterpString::as_source);
 
     if use_in_memory_store() {
-        return Ok((Arc::new(InMemory::new()), artifact_settings.prefix));
+        return Ok((Arc::new(InMemory::new()), prefix));
     }
 
-    match artifact_settings.backend {
-        ArtifactStorageBackend::Local => {
+    let provider = artifacts
+        .and_then(|a| a.provider)
+        .unwrap_or(ObjectStoreProvider::Local);
+
+    let s3_cfg = artifacts.and_then(|a| a.s3.as_ref());
+    match provider {
+        ObjectStoreProvider::Local => {
             std::fs::create_dir_all(storage.artifact_store_dir())?;
             let object_store = Arc::new(LocalFileSystem::new_with_prefix(storage.root())?);
-            Ok((object_store, artifact_settings.prefix))
+            Ok((object_store, prefix))
         }
-        ArtifactStorageBackend::S3 => {
-            let bucket = artifact_settings
+        ObjectStoreProvider::S3 => {
+            let s3 = s3_cfg.ok_or_else(|| {
+                anyhow::anyhow!("server.artifacts.s3 is required for provider = 's3'")
+            })?;
+            let bucket = s3
                 .bucket
-                .ok_or_else(|| anyhow::anyhow!("artifact_storage.bucket is required for s3"))?;
-            let region = artifact_settings
+                .as_ref()
+                .map(InterpString::as_source)
+                .ok_or_else(|| anyhow::anyhow!("server.artifacts.s3.bucket is required"))?;
+            let region = s3
                 .region
-                .ok_or_else(|| anyhow::anyhow!("artifact_storage.region is required for s3"))?;
-
+                .as_ref()
+                .map(InterpString::as_source)
+                .ok_or_else(|| anyhow::anyhow!("server.artifacts.s3.region is required"))?;
             let mut builder = AmazonS3Builder::from_env()
                 .with_bucket_name(bucket)
                 .with_region(region)
-                .with_virtual_hosted_style_request(!artifact_settings.path_style.unwrap_or(false));
-            if let Some(endpoint) = artifact_settings.endpoint {
+                .with_virtual_hosted_style_request(!s3.path_style.unwrap_or(false));
+            if let Some(endpoint) = s3.endpoint.as_ref().map(InterpString::as_source) {
                 builder = builder.with_endpoint(endpoint);
             }
             let object_store = Arc::new(builder.build()?);
-            Ok((object_store, artifact_settings.prefix))
+            Ok((object_store, prefix))
         }
     }
 }
@@ -241,8 +313,7 @@ where
     let config_path = args.config.clone();
     let disk_settings = load_settings(config_path.as_deref())?;
     let active_config_path = resolved_config_path(config_path.as_deref());
-    let data_dir =
-        storage_dir_override.unwrap_or_else(|| resolve_storage_dir(&bridged(&disk_settings)));
+    let data_dir = storage_dir_override.unwrap_or_else(|| resolve_storage_dir(&disk_settings));
     let storage = Storage::new(&data_dir);
     let secret_store_path = storage.secrets_path();
     let secret_store = SecretStore::load(secret_store_path.clone())?;
@@ -284,12 +355,16 @@ where
     std::fs::create_dir_all(&data_dir)?;
     let (auth_mode, client_auth, max_concurrent_runs) = {
         let cfg_file = shared_settings.read().expect("config lock poisoned");
-        let cfg = bridged(&cfg_file);
-        let api = cfg.api.clone().unwrap_or_default();
-        let allowed_usernames = cfg
-            .web
+        // Build the legacy ApiSettings + allowed_usernames shapes that the
+        // v1 auth resolver expects. Stage 6.6 replaces this with a direct
+        // v2-aware resolver.
+        let api = build_legacy_api_settings(&cfg_file);
+        let allowed_usernames = cfg_file
+            .server
             .as_ref()
-            .map(|w| w.auth.allowed_usernames.clone())
+            .and_then(|s| s.auth.as_ref())
+            .and_then(|a| a.web.as_ref())
+            .map(|w| w.allowed_usernames.clone())
             .unwrap_or_default();
         let auth_mode = resolve_auth_mode_with_lookup(&api, &allowed_usernames, |name| {
             secret_snapshot
@@ -300,7 +375,7 @@ where
         let client_auth = api.tls.as_ref().map(|_| client_auth_from_mode(&auth_mode));
         let max_concurrent_runs = args
             .max_concurrent_runs
-            .or(cfg.max_concurrent_runs)
+            .or_else(|| cfg_file.max_concurrent_runs())
             .unwrap_or(5);
         (auth_mode, client_auth, max_concurrent_runs)
     };
@@ -352,12 +427,13 @@ where
 
     // Optionally start webhook listener
     let webhook_app_id = {
+        use fabro_types::settings::v2::InterpString;
         let cfg_file = shared_settings.read().expect("config lock poisoned");
-        let cfg = bridged(&cfg_file);
-        cfg.git
-            .as_ref()
-            .and_then(|g| g.webhooks.as_ref().and(g.app_id.as_ref()))
-            .cloned()
+        cfg_file
+            .server_integrations_github()
+            .filter(|github| github.webhooks.is_some())
+            .and_then(|github| github.app_id.as_ref())
+            .map(InterpString::as_source)
     };
     let webhook_manager = match webhook_app_id {
         Some(app_id) => {
@@ -448,8 +524,7 @@ where
     // Branch: TLS, plain TCP, or Unix socket
     let tls_settings = {
         let cfg_file = shared_settings.read().expect("config lock poisoned");
-        let cfg = bridged(&cfg_file);
-        cfg.api.as_ref().and_then(|a| a.tls.clone())
+        build_legacy_api_settings(&cfg_file).tls.clone()
     };
 
     let bound_listener = bind_listener(&bind_request).await?;

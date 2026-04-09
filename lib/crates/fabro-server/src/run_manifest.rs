@@ -17,13 +17,13 @@ use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxProvider, SandboxSpec};
 use fabro_types::RunId;
 use fabro_types::settings::v2::SettingsFile;
-use fabro_types::settings::v2::bridge::bridge_sandbox;
 use fabro_types::settings::v2::cli::{CliLayer, CliOutputLayer, OutputVerbosity};
 use fabro_types::settings::v2::interp::InterpString;
 use fabro_types::settings::v2::run::{
     ApprovalMode, DaytonaDockerfileLayer, RunExecutionLayer, RunLayer, RunMode, RunModelLayer,
     RunSandboxLayer,
 };
+use fabro_types::settings::v2::to_runtime::bridge_sandbox;
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_validate::Severity;
 use fabro_workflow::error::FabroError;
