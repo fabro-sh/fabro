@@ -28,7 +28,7 @@ use fabro_llm::provider::Provider;
 use fabro_store::{ArtifactStore, Database};
 use fabro_types::settings::v2::SettingsFile;
 use fabro_types::settings::v2::run::{RunArtifactsLayer, RunLayer};
-use fabro_types::{RunEvent, RunId, Settings, StageId};
+use fabro_types::{RunEvent, RunId, StageId};
 use fabro_validate::{Severity, validate, validate_or_raise};
 use fabro_workflow::context::Context;
 use fabro_workflow::error::{FabroError, FailureSignatureExt};
@@ -8089,41 +8089,10 @@ async fn hook_config_merge_run_overrides_by_name() {
     assert_eq!(outcome.status, StageStatus::Success);
 }
 
-// --- TOML config parsing integration ---
-
-#[test]
-fn hook_toml_run_config_parsing() {
-    let toml = r#"
-version = 1
-goal = "Test hooks in run config"
-graph = "test.fabro"
-
-[[hooks]]
-event = "stage_start"
-command = "./scripts/pre-check.sh"
-matcher = "agent_loop"
-blocking = true
-timeout_ms = 30000
-sandbox = false
-
-[[hooks]]
-event = "run_complete"
-command = "echo done"
-"#;
-
-    let cfg: Settings = toml::from_str(toml).unwrap();
-    assert_eq!(cfg.hooks.len(), 2);
-    assert_eq!(cfg.hooks[0].event, fabro_hooks::HookEvent::StageStart);
-    assert_eq!(cfg.hooks[0].matcher.as_deref(), Some("agent_loop"));
-    assert!(cfg.hooks[0].is_blocking());
-    assert!(!cfg.hooks[0].runs_in_sandbox());
-    assert_eq!(
-        cfg.hooks[0].timeout(),
-        std::time::Duration::from_millis(30000)
-    );
-    assert_eq!(cfg.hooks[1].event, fabro_hooks::HookEvent::RunComplete);
-    assert!(!cfg.hooks[1].is_blocking()); // RunComplete non-blocking by default
-}
+// The legacy `Settings`-based TOML parsing tests were deleted in Stage
+// 6.3b. Hook TOML parsing now flows through the v2 `SettingsFile` path,
+// with coverage in `fabro-types::settings::v2::tree::tests` and the
+// fabro-cli integration tests under `cmd::config`.
 
 // --- Blocking vs non-blocking behavior ---
 
@@ -8270,59 +8239,9 @@ async fn hook_sandbox_false_runs_on_host() {
     assert_eq!(std::fs::read_to_string(&marker).unwrap().trim(), "host");
 }
 
-// --- Prompt and Agent hook TOML parsing ---
-
-#[test]
-fn hook_toml_prompt_and_agent_parsing() {
-    let toml = r#"
-version = 1
-goal = "Test prompt/agent hooks"
-graph = "test.fabro"
-
-[[hooks]]
-event = "stage_start"
-type = "prompt"
-prompt = "Should this stage proceed?"
-model = "haiku"
-
-[[hooks]]
-event = "run_complete"
-type = "agent"
-prompt = "Verify all tests pass."
-model = "sonnet"
-max_tool_rounds = 10
-timeout_ms = 120000
-"#;
-
-    let cfg: Settings = toml::from_str(toml).unwrap();
-    assert_eq!(cfg.hooks.len(), 2);
-
-    // Prompt hook
-    assert_eq!(cfg.hooks[0].event, fabro_hooks::HookEvent::StageStart);
-    assert!(matches!(
-        cfg.hooks[0].resolved_hook_type().as_deref(),
-        Some(fabro_hooks::HookType::Prompt { prompt, model })
-            if prompt == "Should this stage proceed?" && *model == Some("haiku".into())
-    ));
-    assert_eq!(
-        cfg.hooks[0].timeout(),
-        std::time::Duration::from_millis(30000)
-    );
-
-    // Agent hook
-    assert_eq!(cfg.hooks[1].event, fabro_hooks::HookEvent::RunComplete);
-    assert!(matches!(
-        cfg.hooks[1].resolved_hook_type().as_deref(),
-        Some(fabro_hooks::HookType::Agent { prompt, model, max_tool_rounds })
-            if prompt == "Verify all tests pass."
-            && *model == Some("sonnet".into())
-            && *max_tool_rounds == Some(10)
-    ));
-    assert_eq!(
-        cfg.hooks[1].timeout(),
-        std::time::Duration::from_millis(120000)
-    );
-}
+// Prompt and Agent hook TOML parsing: the legacy `Settings`-based
+// variant of this test was deleted in Stage 6.3b; v2 coverage lives in
+// `fabro-types::settings::v2::tree::tests`.
 
 // --- Events emitted correctly alongside hooks ---
 

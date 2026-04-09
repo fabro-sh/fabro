@@ -1,27 +1,23 @@
-//! Legacy flat `Settings` shape plus the v2 namespaced schema.
+//! v2 namespaced config schema plus transitional runtime shapes.
 //!
 //! The authoritative config schema lives in [`v2`] — it is the namespaced
 //! parse tree that `_version = 1` TOML files decode into. Value-language
 //! helpers, the merge matrix, and strict unknown-key validation all live
 //! there.
 //!
-//! The flat [`Settings`] type and its submodules (`hook`, `mcp`, `project`,
-//! `run`, `sandbox`, `server`, `user`) are the **runtime shapes** that
-//! downstream crates (fabro-workflow, fabro-sandbox, fabro-mcp,
-//! fabro-hooks) still consume at execution time. Stage 6.1 deleted the
-//! `Settings` parse path; Stage 6.2 deleted the `bridge_to_old`
-//! catch-all converter. Narrow v2→runtime helpers live in
-//! [`v2::to_runtime`] and build these runtime shapes from specific v2
-//! subtrees on demand.
+//! The submodules `hook`, `mcp`, `project`, `run`, `sandbox`, `server`,
+//! and `user` still hold **runtime shapes** that downstream crates
+//! (fabro-workflow, fabro-sandbox, fabro-mcp, fabro-hooks) consume at
+//! execution time. Stage 6.1 deleted the flat `Settings` parse path;
+//! Stage 6.2 deleted the `bridge_to_old` catch-all converter; Stage 6.3b
+//! deleted the legacy flat `Settings` struct itself, its inherent
+//! helpers, and its `Combine`-driven layering. Narrow v2→runtime helpers
+//! live in [`v2::to_runtime`] and build these runtime shapes from
+//! specific v2 subtrees on demand.
 //!
-//! Stage 6.3 deletes these runtime types entirely in favor of v2-native
-//! replacements, at which point this module and the helper modules
-//! around it go away too.
-
-use std::collections::HashMap;
-use std::path::PathBuf;
-
-use serde::{Deserialize, Serialize};
+//! A follow-up pass will either promote these runtime shapes into their
+//! owning consumer crates or replace their call sites with v2-native
+//! accessors, at which point this module goes away.
 
 pub mod hook;
 pub mod mcp;
@@ -59,8 +55,8 @@ pub use user::{ClientTlsSettings, ExecSettings, OutputFormat, PermissionLevel, S
 // `fabro_types::settings::InterpString` / `fabro_types::settings::Duration`
 // without the `::v2::` prefix. The `v2` module itself stays until the
 // remaining legacy files under `settings/{project,run,server,...}.rs`
-// are deleted in Stage 6.3, because the v2 submodules and the legacy
-// submodules share those file names.
+// are deleted in a follow-up pass, because the v2 submodules and the
+// legacy submodules share those file names.
 pub use v2::{
     CURRENT_VERSION, CliLayer, Duration, FeaturesLayer, InterpString, ModelRef, ParseDurationError,
     ParseError, ParseModelRefError, ParseSizeError, ProjectLayer, Provenance, ResolveEnvError,
@@ -68,86 +64,3 @@ pub use v2::{
     SpliceArray, SpliceArrayError, VersionError, WorkflowLayer, parse_settings_file,
     validate_version,
 };
-
-fn is_default_checkpoint(c: &CheckpointSettings) -> bool {
-    c.exclude_globs.is_empty()
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-pub struct Settings {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub version: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub goal: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub goal_file: Option<PathBuf>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub graph: Option<String>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub labels: HashMap<String, String>,
-    #[serde(default, alias = "directory", skip_serializing_if = "Option::is_none")]
-    pub work_dir: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub llm: Option<LlmSettings>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub setup: Option<SetupSettings>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sandbox: Option<SandboxSettings>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vars: Option<HashMap<String, String>>,
-    #[serde(default, skip_serializing_if = "is_default_checkpoint")]
-    pub checkpoint: CheckpointSettings,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pull_request: Option<PullRequestSettings>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub artifacts: Option<ArtifactsSettings>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub hooks: Vec<HookDefinition>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub mcp_servers: HashMap<String, McpServerEntry>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub github: Option<GitHubSettings>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub server: Option<ServerSettings>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exec: Option<ExecSettings>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prevent_idle_sleep: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub verbose: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub upgrade_check: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dry_run: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auto_approve: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub no_retro: Option<bool>,
-    #[serde(default, alias = "data_dir", skip_serializing_if = "Option::is_none")]
-    pub storage_dir: Option<PathBuf>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_concurrent_runs: Option<usize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub artifact_storage: Option<ArtifactStorageSettings>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub web: Option<WebSettings>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub slack: Option<SlackSettings>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub api: Option<ApiSettings>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub features: Option<FeaturesSettings>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub log: Option<LogSettings>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub git: Option<GitSettings>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fabro: Option<ProjectSettings>,
-}
-
-// All inherent helpers on `Settings` are gone -- the v2 `SettingsFile`
-// accessors in `settings::v2::accessors` are the single source of truth
-// for reading merged configuration. The flat `Settings` struct itself
-// lingers for the OpenAPI legacy `ServerSettings` response shape and a
-// handful of demo-route payloads; Stage 6.6 finishes the deletion once
-// the OpenAPI spec is rewritten to return v2 DTOs.
