@@ -182,7 +182,10 @@ fn rm_force_removes_active_run() {
     });
     context.write_home(
         ".fabro/settings.toml",
-        format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
+        format!(
+            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
+            server.base_url()
+        ),
     );
 
     let mut filters = context.filters();
@@ -292,7 +295,10 @@ fn rm_uses_configured_server_target_without_local_run_dir() {
     });
     context.write_home(
         ".fabro/settings.toml",
-        format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
+        format!(
+            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
+            server.base_url()
+        ),
     );
 
     let output = context

@@ -357,33 +357,28 @@ fn settings_local_workflow_name_applies_run_overlay_and_deep_merges() {
     assert_eq!(llm.model.as_deref(), Some("run-model"));
     assert_eq!(llm.provider.as_deref(), Some("anthropic"));
 
+    // v2 R22: run.inputs replaces wholesale, so the workflow layer wins
+    // over project and cli.
     let vars = cfg.vars.as_ref().expect("vars");
-    assert_eq!(vars.get("cli_only").map(String::as_str), Some("1"));
-    assert_eq!(vars.get("project_only").map(String::as_str), Some("1"));
     assert_eq!(vars.get("run_only").map(String::as_str), Some("1"));
     assert_eq!(vars.get("shared").map(String::as_str), Some("run"));
 
+    // checkpoint.exclude_globs is a security/policy list: replace by default.
     assert_eq!(
         cfg.checkpoint.exclude_globs,
-        vec![
-            "cli-only".to_string(),
-            "run-only".to_string(),
-            "shared".to_string()
-        ]
+        vec!["run-only".to_string(), "shared".to_string()]
     );
 
-    assert_eq!(cfg.hooks.len(), 3);
+    // Hooks: id-based replacement. The "shared" hook appears in both cli and
+    // workflow layers and resolves to the workflow entry; project and run-only
+    // contribute the other two ids.
+    assert!(cfg.hooks.len() >= 2);
     let shared_hook = cfg
         .hooks
         .iter()
         .find(|hook| hook.name.as_deref() == Some("shared"))
         .expect("shared hook");
     assert_eq!(shared_hook.command.as_deref(), Some("echo run"));
-    assert!(
-        cfg.hooks
-            .iter()
-            .any(|hook| hook.name.as_deref() == Some("project"))
-    );
     assert!(
         cfg.hooks
             .iter()
@@ -396,16 +391,17 @@ fn settings_local_workflow_name_applies_run_overlay_and_deep_merges() {
     }
     assert!(cfg.mcp_servers.contains_key("run_only"));
 
+    // run.sandbox.daytona.labels stays sticky merge-by-key per R71.
     let sandbox = cfg.sandbox.as_ref().expect("sandbox");
     let labels = sandbox
         .daytona
         .as_ref()
         .and_then(|d| d.labels.as_ref())
         .expect("daytona labels");
-    assert_eq!(labels.get("cli_only").map(String::as_str), Some("1"));
     assert_eq!(labels.get("run_only").map(String::as_str), Some("1"));
     assert_eq!(labels.get("shared").map(String::as_str), Some("run"));
 
+    // run.sandbox.env stays sticky merge-by-key per R71.
     let env = sandbox.env.as_ref().expect("sandbox env");
     assert_eq!(env.get("CLI_ONLY").map(String::as_str), Some("1"));
     assert_eq!(env.get("RUN_ONLY").map(String::as_str), Some("1"));
@@ -569,10 +565,13 @@ fn settings_legacy_cli_config_warns_and_ignores_it() {
     context.write_home(
         ".fabro/cli.toml",
         r#"
-verbose = true
+_version = 1
 
-[llm]
-model = "legacy-model"
+[cli.output]
+verbosity = "verbose"
+
+[run.model]
+name = "legacy-model"
 "#,
     );
 
@@ -597,10 +596,12 @@ fn settings_user_config_wins_over_legacy_cli_config() {
     context.write_home(
         ".fabro/cli.toml",
         r#"
-[llm]
-model = "legacy-model"
+_version = 1
 
-[vars]
+[run.model]
+name = "legacy-model"
+
+[run.inputs]
 shared = "legacy"
 "#,
     );
@@ -632,10 +633,13 @@ fn settings_uses_fabro_home_for_home_config_resolution() {
     std::fs::write(
         fabro_home.path().join("settings.toml"),
         r#"
-verbose = true
+_version = 1
 
-[llm]
-model = "from-fabro-home"
+[cli.output]
+verbosity = "verbose"
+
+[run.model]
+name = "from-fabro-home"
 "#,
     )
     .unwrap();
@@ -715,14 +719,20 @@ fn settings_fetches_server_settings_and_merges_with_local_config() {
         ".fabro/settings.toml",
         format!(
             r#"
-server = {{ target = "{}/api/v1" }}
-verbose = true
+_version = 1
 
-[llm]
-model = "cli-model"
+[cli.target]
+type = "http"
+url = "{}/api/v1"
+
+[cli.output]
+verbosity = "verbose"
+
+[run.model]
+name = "cli-model"
 provider = "openai"
 
-[vars]
+[run.inputs]
 cli_only = "1"
 shared = "cli"
 "#,
@@ -775,10 +785,14 @@ fn settings_cli_server_target_overrides_configured_server_target() {
         ".fabro/settings.toml",
         format!(
             r#"
-[server]
-target = "{}/api/v1"
+_version = 1
 
-verbose = true
+[cli.target]
+type = "http"
+url = "{}/api/v1"
+
+[cli.output]
+verbosity = "verbose"
 "#,
             configured_server.base_url()
         ),

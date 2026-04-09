@@ -101,7 +101,10 @@ fn create_uses_configured_server_target_without_server_flag() {
     });
     context.write_home(
         ".fabro/settings.toml",
-        format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
+        format!(
+            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
+            server.base_url()
+        ),
     );
 
     let output = context
@@ -162,7 +165,7 @@ fn create_cli_server_target_overrides_configured_server_target() {
     context.write_home(
         ".fabro/settings.toml",
         format!(
-            "[server]\ntarget = \"{}/api/v1\"\n",
+            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
             config_server.base_url()
         ),
     );

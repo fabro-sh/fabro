@@ -218,7 +218,10 @@ fn list_uses_configured_server_target_without_server_flag() {
     });
     context.write_home(
         ".fabro/settings.toml",
-        format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
+        format!(
+            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
+            server.base_url()
+        ),
     );
 
     let mut cmd = context.model();
@@ -277,7 +280,10 @@ fn list_uses_fabro_config_for_machine_settings() {
     let config_path = config_dir.path().join("custom-settings.toml");
     std::fs::write(
         &config_path,
-        format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
+        format!(
+            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
+            server.base_url()
+        ),
     )
     .unwrap();
 
