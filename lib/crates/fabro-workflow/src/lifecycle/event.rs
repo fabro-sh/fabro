@@ -23,7 +23,7 @@ use crate::event::{Emitter, Event};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::{BilledModelUsage, FailureCategory, FailureDetail, Outcome, StageStatus};
-use fabro_types::{BilledTokenCounts, RunId, StatusReason};
+use fabro_types::{BilledTokenCounts, ParallelBranchId, RunId, StageId, StatusReason};
 
 type WfRunState = ExecutionState<Option<BilledModelUsage>>;
 type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
@@ -85,7 +85,7 @@ fn stage_visit(state: &WfRunState, node_id: &str) -> u32 {
     u32::try_from(visits.max(1)).unwrap_or(u32::MAX)
 }
 
-fn stage_parallel_ids(state: &WfRunState) -> (Option<String>, Option<String>) {
+fn stage_parallel_ids(state: &WfRunState) -> (Option<StageId>, Option<ParallelBranchId>) {
     (
         state.context.parallel_group_id(),
         state.context.parallel_branch_id(),

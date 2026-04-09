@@ -13,6 +13,7 @@ use fabro_llm::types::{Message, Request, TokenCounts};
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::FallbackTarget;
 use fabro_model::Provider;
+use fabro_types::{ParallelBranchId, StageId};
 use tokio::sync::Mutex as TokioMutex;
 
 use super::super::agent::{CodergenBackend, CodergenResult};
@@ -40,8 +41,8 @@ fn build_profile(model: &str, provider: Provider) -> Box<dyn AgentProfile> {
 #[derive(Clone)]
 struct StageEventScope {
     visit: u32,
-    parallel_group_id: Option<String>,
-    parallel_branch_id: Option<String>,
+    parallel_group_id: Option<StageId>,
+    parallel_branch_id: Option<ParallelBranchId>,
 }
 
 fn current_stage_event_scope(context: &Context) -> StageEventScope {

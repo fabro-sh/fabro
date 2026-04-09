@@ -136,6 +136,7 @@ pub mod keys {
 pub use fabro_core::Context;
 
 use fabro_graphviz::Fidelity;
+use fabro_types::{ParallelBranchId, StageId};
 
 /// Domain-specific typed accessors for workflow context values.
 pub trait WorkflowContext {
@@ -143,8 +144,8 @@ pub trait WorkflowContext {
     fn thread_id(&self) -> Option<String>;
     fn preamble(&self) -> String;
     fn run_id(&self) -> String;
-    fn parallel_group_id(&self) -> Option<String>;
-    fn parallel_branch_id(&self) -> Option<String>;
+    fn parallel_group_id(&self) -> Option<StageId>;
+    fn parallel_branch_id(&self) -> Option<ParallelBranchId>;
 }
 
 impl WorkflowContext for Context {
@@ -167,14 +168,14 @@ impl WorkflowContext for Context {
         self.get_string(keys::INTERNAL_RUN_ID, "unknown")
     }
 
-    fn parallel_group_id(&self) -> Option<String> {
+    fn parallel_group_id(&self) -> Option<StageId> {
         self.get(keys::INTERNAL_PARALLEL_GROUP_ID)
-            .and_then(|value| value.as_str().map(String::from))
+            .and_then(|value| serde_json::from_value(value).ok())
     }
 
-    fn parallel_branch_id(&self) -> Option<String> {
+    fn parallel_branch_id(&self) -> Option<ParallelBranchId> {
         self.get(keys::INTERNAL_PARALLEL_BRANCH_ID)
-            .and_then(|value| value.as_str().map(String::from))
+            .and_then(|value| serde_json::from_value(value).ok())
     }
 }
 
@@ -341,8 +342,11 @@ mod tests {
             keys::INTERNAL_PARALLEL_BRANCH_ID,
             serde_json::json!("fanout@2:1"),
         );
-        assert_eq!(ctx.parallel_group_id(), Some("fanout@2".to_string()));
-        assert_eq!(ctx.parallel_branch_id(), Some("fanout@2:1".to_string()));
+        assert_eq!(ctx.parallel_group_id(), Some(StageId::new("fanout", 2)));
+        assert_eq!(
+            ctx.parallel_branch_id(),
+            Some(ParallelBranchId::new(StageId::new("fanout", 2), 1))
+        );
     }
 
     #[test]

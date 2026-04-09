@@ -5,8 +5,8 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use ::fabro_types::run_event as fabro_types;
 use ::fabro_types::{
-    ActorKind, ActorRef, BilledTokenCounts, RunBlobId, RunControlAction, RunEvent, RunId,
-    RunProvenance, StageId, StageStatus, StatusReason,
+    ActorKind, ActorRef, BilledTokenCounts, ParallelBranchId, RunBlobId, RunControlAction,
+    RunEvent, RunId, RunProvenance, StageId, StageStatus, StatusReason,
 };
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -140,9 +140,9 @@ pub enum Event {
         index: usize,
         visit: u32,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        parallel_group_id: Option<String>,
+        parallel_group_id: Option<StageId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        parallel_branch_id: Option<String>,
+        parallel_branch_id: Option<ParallelBranchId>,
         handler_type: String,
         attempt: usize,
         max_attempts: usize,
@@ -153,9 +153,9 @@ pub enum Event {
         index: usize,
         visit: u32,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        parallel_group_id: Option<String>,
+        parallel_group_id: Option<StageId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        parallel_branch_id: Option<String>,
+        parallel_branch_id: Option<ParallelBranchId>,
         duration_ms: u64,
         status: String,
         preferred_label: Option<String>,
@@ -188,9 +188,9 @@ pub enum Event {
         index: usize,
         visit: u32,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        parallel_group_id: Option<String>,
+        parallel_group_id: Option<StageId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        parallel_branch_id: Option<String>,
+        parallel_branch_id: Option<ParallelBranchId>,
         failure: FailureDetail,
         will_retry: bool,
     },
@@ -200,9 +200,9 @@ pub enum Event {
         index: usize,
         visit: u32,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        parallel_group_id: Option<String>,
+        parallel_group_id: Option<StageId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        parallel_branch_id: Option<String>,
+        parallel_branch_id: Option<ParallelBranchId>,
         attempt: usize,
         max_attempts: usize,
         delay_ms: u64,
@@ -214,14 +214,14 @@ pub enum Event {
         join_policy: String,
     },
     ParallelBranchStarted {
-        parallel_group_id: String,
-        parallel_branch_id: String,
+        parallel_group_id: StageId,
+        parallel_branch_id: ParallelBranchId,
         branch: String,
         index: usize,
     },
     ParallelBranchCompleted {
-        parallel_group_id: String,
-        parallel_branch_id: String,
+        parallel_group_id: StageId,
+        parallel_branch_id: ParallelBranchId,
         branch: String,
         index: usize,
         duration_ms: u64,
@@ -378,9 +378,9 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         parent_session_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        parallel_group_id: Option<String>,
+        parallel_group_id: Option<StageId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        parallel_branch_id: Option<String>,
+        parallel_branch_id: Option<ParallelBranchId>,
     },
     SubgraphStarted {
         node_id: String,
@@ -1285,9 +1285,9 @@ struct StoredEventFields {
     parent_session_id: Option<String>,
     node_id: Option<String>,
     node_label: Option<String>,
-    stage_id: Option<String>,
-    parallel_group_id: Option<String>,
-    parallel_branch_id: Option<String>,
+    stage_id: Option<StageId>,
+    parallel_group_id: Option<StageId>,
+    parallel_branch_id: Option<ParallelBranchId>,
     tool_call_id: Option<String>,
     actor: Option<ActorRef>,
 }
@@ -1361,7 +1361,7 @@ fn stored_event_fields(event: &Event) -> StoredEventFields {
         } => {
             let node_id_str = node_id.clone();
             let node_label = default_node_label(Some(&node_id_str), Some(name.clone()));
-            let stage_id = Some(StageId::new(node_id_str.clone(), *visit).to_string());
+            let stage_id = Some(StageId::new(node_id_str.clone(), *visit));
             StoredEventFields {
                 node_id: Some(node_id_str),
                 node_label,
@@ -1375,7 +1375,7 @@ fn stored_event_fields(event: &Event) -> StoredEventFields {
         | Event::ParallelCompleted { node_id, visit, .. } => {
             let node_id_str = node_id.clone();
             let node_label = default_node_label(Some(&node_id_str), None);
-            let parallel_group_id = Some(StageId::new(node_id_str.clone(), *visit).to_string());
+            let parallel_group_id = Some(StageId::new(node_id_str.clone(), *visit));
             StoredEventFields {
                 node_id: Some(node_id_str),
                 node_label,
@@ -1404,7 +1404,7 @@ fn stored_event_fields(event: &Event) -> StoredEventFields {
         } => {
             let node_id = Some(stage.clone());
             let node_label = default_node_label(node_id.as_ref(), None);
-            let stage_id = Some(StageId::new(stage.clone(), *visit).to_string());
+            let stage_id = Some(StageId::new(stage.clone(), *visit));
             let tool_call_id = agent_tool_call_id(agent_event).map(str::to_string);
             let actor = agent_actor_for_event(agent_event, session_id.as_deref());
             StoredEventFields {
@@ -2891,7 +2891,7 @@ mod tests {
         assert_eq!(stored.run_id, fixtures::RUN_2);
         assert_eq!(stored.node_id.as_deref(), Some("plan"));
         assert_eq!(stored.node_label.as_deref(), Some("Plan"));
-        assert_eq!(stored.stage_id.as_deref(), Some("plan@1"));
+        assert_eq!(stored.stage_id, Some(StageId::new("plan", 1)));
         let properties = stored.properties().unwrap();
         assert_eq!(properties["duration_ms"], 5000);
         assert_eq!(properties["status"], "success");
@@ -3133,8 +3133,8 @@ mod tests {
         );
         assert_eq!(
             event_name(&Event::ParallelBranchStarted {
-                parallel_group_id: "plan@1".to_string(),
-                parallel_branch_id: "plan@1:0".to_string(),
+                parallel_group_id: StageId::new("plan", 1),
+                parallel_branch_id: ParallelBranchId::new(StageId::new("plan", 1), 0),
                 branch: "fork".to_string(),
                 index: 0,
             }),
@@ -3167,15 +3167,18 @@ mod tests {
                 name: "review".to_string(),
                 index: 1,
                 visit: 1,
-                parallel_group_id: Some("fanout@2".to_string()),
-                parallel_branch_id: Some("fanout@2:1".to_string()),
+                parallel_group_id: Some(StageId::new("fanout", 2)),
+                parallel_branch_id: Some(ParallelBranchId::new(StageId::new("fanout", 2), 1)),
                 handler_type: "agent".to_string(),
                 attempt: 1,
                 max_attempts: 1,
             },
         );
-        assert_eq!(stored.parallel_group_id.as_deref(), Some("fanout@2"));
-        assert_eq!(stored.parallel_branch_id.as_deref(), Some("fanout@2:1"));
+        assert_eq!(stored.parallel_group_id, Some(StageId::new("fanout", 2)));
+        assert_eq!(
+            stored.parallel_branch_id,
+            Some(ParallelBranchId::new(StageId::new("fanout", 2), 1))
+        );
     }
 
     #[test]
@@ -3189,7 +3192,7 @@ mod tests {
                 join_policy: "wait_all".to_string(),
             },
         );
-        assert_eq!(stored.parallel_group_id.as_deref(), Some("fanout@2"));
+        assert_eq!(stored.parallel_group_id, Some(StageId::new("fanout", 2)));
         assert!(stored.parallel_branch_id.is_none());
     }
 
@@ -3198,14 +3201,17 @@ mod tests {
         let stored = to_run_event(
             &fixtures::RUN_1,
             &Event::ParallelBranchStarted {
-                parallel_group_id: "fanout@2".to_string(),
-                parallel_branch_id: "fanout@2:1".to_string(),
+                parallel_group_id: StageId::new("fanout", 2),
+                parallel_branch_id: ParallelBranchId::new(StageId::new("fanout", 2), 1),
                 branch: "review".to_string(),
                 index: 1,
             },
         );
-        assert_eq!(stored.parallel_group_id.as_deref(), Some("fanout@2"));
-        assert_eq!(stored.parallel_branch_id.as_deref(), Some("fanout@2:1"));
+        assert_eq!(stored.parallel_group_id, Some(StageId::new("fanout", 2)));
+        assert_eq!(
+            stored.parallel_branch_id,
+            Some(ParallelBranchId::new(StageId::new("fanout", 2), 1))
+        );
     }
 
     #[test]
@@ -3222,14 +3228,17 @@ mod tests {
                 },
                 session_id: Some("ses_1".to_string()),
                 parent_session_id: None,
-                parallel_group_id: Some("fanout@2".to_string()),
-                parallel_branch_id: Some("fanout@2:0".to_string()),
+                parallel_group_id: Some(StageId::new("fanout", 2)),
+                parallel_branch_id: Some(ParallelBranchId::new(StageId::new("fanout", 2), 0)),
             },
         );
-        assert_eq!(stored.stage_id.as_deref(), Some("code@3"));
+        assert_eq!(stored.stage_id, Some(StageId::new("code", 3)));
         assert_eq!(stored.tool_call_id.as_deref(), Some("call_abc"));
-        assert_eq!(stored.parallel_group_id.as_deref(), Some("fanout@2"));
-        assert_eq!(stored.parallel_branch_id.as_deref(), Some("fanout@2:0"));
+        assert_eq!(stored.parallel_group_id, Some(StageId::new("fanout", 2)));
+        assert_eq!(
+            stored.parallel_branch_id,
+            Some(ParallelBranchId::new(StageId::new("fanout", 2), 0))
+        );
     }
 
     #[test]

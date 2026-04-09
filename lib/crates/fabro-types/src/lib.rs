@@ -54,7 +54,7 @@ pub use run_id::RunId;
 pub use run_id::fixtures;
 pub use sandbox_record::SandboxRecord;
 pub use settings::{ArtifactStorageBackend, ArtifactStorageSettings, Settings};
-pub use stage_id::StageId;
+pub use stage_id::{ParallelBranchId, StageId};
 pub use start::StartRecord;
 pub use status::{
     InvalidTransition, ParseRunStatusError, RunControlAction, RunStatus, RunStatusRecord,

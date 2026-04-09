@@ -91,7 +91,7 @@ pub struct EventEnvelope {
 mod tests {
     use chrono::{TimeZone, Utc};
 
-    use fabro_types::{EventBody, RunEvent, fixtures, run_event::RunCompletedProps};
+    use fabro_types::{EventBody, RunEvent, StageId, fixtures, run_event::RunCompletedProps};
 
     use super::{EventEnvelope, EventPayload};
 
@@ -103,7 +103,7 @@ mod tests {
             run_id: fixtures::RUN_1,
             node_id: Some("code".to_string()),
             node_label: Some("Code".to_string()),
-            stage_id: Some("code@1".to_string()),
+            stage_id: Some(StageId::new("code", 1)),
             parallel_group_id: None,
             parallel_branch_id: None,
             session_id: None,

@@ -11,7 +11,7 @@ use serde::ser::Error as SerError;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value, json};
 
-use crate::RunId;
+use crate::{ParallelBranchId, RunId, StageId};
 
 pub use agent::*;
 pub use infra::*;
@@ -51,9 +51,9 @@ pub struct RunEvent {
     pub run_id: RunId,
     pub node_id: Option<String>,
     pub node_label: Option<String>,
-    pub stage_id: Option<String>,
-    pub parallel_group_id: Option<String>,
-    pub parallel_branch_id: Option<String>,
+    pub stage_id: Option<StageId>,
+    pub parallel_group_id: Option<StageId>,
+    pub parallel_branch_id: Option<ParallelBranchId>,
     pub session_id: Option<String>,
     pub parent_session_id: Option<String>,
     pub tool_call_id: Option<String>,
@@ -293,11 +293,11 @@ struct RunEventRaw {
     #[serde(default)]
     node_label: Option<String>,
     #[serde(default)]
-    stage_id: Option<String>,
+    stage_id: Option<StageId>,
     #[serde(default)]
-    parallel_group_id: Option<String>,
+    parallel_group_id: Option<StageId>,
     #[serde(default)]
-    parallel_branch_id: Option<String>,
+    parallel_branch_id: Option<ParallelBranchId>,
     #[serde(default)]
     session_id: Option<String>,
     #[serde(default)]
@@ -321,9 +321,9 @@ struct RunEventParts<'a> {
     run_id: RunId,
     node_id: Option<String>,
     node_label: Option<String>,
-    stage_id: Option<String>,
-    parallel_group_id: Option<String>,
-    parallel_branch_id: Option<String>,
+    stage_id: Option<StageId>,
+    parallel_group_id: Option<StageId>,
+    parallel_branch_id: Option<ParallelBranchId>,
     session_id: Option<String>,
     parent_session_id: Option<String>,
     tool_call_id: Option<String>,
@@ -592,6 +592,16 @@ impl RunEvent {
     }
 
     pub fn from_ref(value: &Value) -> serde_json::Result<Self> {
+        fn opt_field<T: for<'a> Deserialize<'a>>(
+            obj: &Map<String, Value>,
+            key: &str,
+        ) -> serde_json::Result<Option<T>> {
+            match obj.get(key) {
+                Some(value) if !value.is_null() => Ok(Some(T::deserialize(value)?)),
+                _ => Ok(None),
+            }
+        }
+
         let obj = value.as_object().ok_or_else(|| {
             <serde_json::Error as DeError>::custom("run event must be a JSON object")
         })?;
@@ -614,23 +624,19 @@ impl RunEvent {
             .get("properties")
             .cloned()
             .unwrap_or_else(default_properties);
-        let actor = match obj.get("actor") {
-            Some(value) if !value.is_null() => Some(ActorRef::deserialize(value)?),
-            _ => None,
-        };
         Self::from_parts(RunEventParts {
             id: id.to_string(),
             ts,
             run_id,
             node_id: opt_str("node_id"),
             node_label: opt_str("node_label"),
-            stage_id: opt_str("stage_id"),
-            parallel_group_id: opt_str("parallel_group_id"),
-            parallel_branch_id: opt_str("parallel_branch_id"),
+            stage_id: opt_field(obj, "stage_id")?,
+            parallel_group_id: opt_field(obj, "parallel_group_id")?,
+            parallel_branch_id: opt_field(obj, "parallel_branch_id")?,
             session_id: opt_str("session_id"),
             parent_session_id: opt_str("parent_session_id"),
             tool_call_id: opt_str("tool_call_id"),
-            actor,
+            actor: opt_field(obj, "actor")?,
             event,
             properties: &properties,
         })
@@ -695,18 +701,18 @@ impl RunEvent {
             map.insert("node_label".to_string(), Value::String(value.clone()));
         }
         if let Some(value) = &self.stage_id {
-            map.insert("stage_id".to_string(), Value::String(value.clone()));
+            map.insert("stage_id".to_string(), serde_json::to_value(value)?);
         }
         if let Some(value) = &self.parallel_group_id {
             map.insert(
                 "parallel_group_id".to_string(),
-                Value::String(value.clone()),
+                serde_json::to_value(value)?,
             );
         }
         if let Some(value) = &self.parallel_branch_id {
             map.insert(
                 "parallel_branch_id".to_string(),
-                Value::String(value.clone()),
+                serde_json::to_value(value)?,
             );
         }
         if let Some(value) = &self.tool_call_id {
@@ -981,9 +987,12 @@ mod tests {
         });
 
         let parsed = RunEvent::from_value(value.clone()).unwrap();
-        assert_eq!(parsed.stage_id.as_deref(), Some("code@1"));
-        assert_eq!(parsed.parallel_group_id.as_deref(), Some("code@1"));
-        assert_eq!(parsed.parallel_branch_id.as_deref(), Some("code@1:0"));
+        assert_eq!(parsed.stage_id, Some(StageId::new("code", 1)));
+        assert_eq!(parsed.parallel_group_id, Some(StageId::new("code", 1)));
+        assert_eq!(
+            parsed.parallel_branch_id,
+            Some(ParallelBranchId::new(StageId::new("code", 1), 0))
+        );
         assert_eq!(parsed.tool_call_id.as_deref(), Some("call_1"));
         let actor = parsed.actor.as_ref().expect("actor present");
         assert_eq!(actor.kind, ActorKind::Agent);
