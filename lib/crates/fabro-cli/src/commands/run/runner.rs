@@ -7,7 +7,8 @@ use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use fabro_interview::{ControlInterviewer, WorkerControlEnvelope, WorkerControlMessage};
 use fabro_store::{EventEnvelope, EventPayload, RunProjection};
-use fabro_types::{EventBody, RunBlobId, RunEvent, RunId, Settings, StatusReason};
+use fabro_types::settings::v2::SettingsFile;
+use fabro_types::{EventBody, RunBlobId, RunEvent, RunId, StatusReason};
 use fabro_workflow::artifact_snapshot::CapturedArtifactInfo;
 use fabro_workflow::artifact_upload::{ArtifactSink, StageArtifactUploader};
 use fabro_workflow::event::{Emitter, RunEventSink};
@@ -418,20 +419,19 @@ fn update_worker_title_from_event(event: &RunEvent) {
 }
 
 fn maybe_build_github_app_credentials(
-    settings: &Settings,
+    settings: &SettingsFile,
 ) -> Result<Option<fabro_github::GitHubAppCredentials>> {
     let needs_github_app = settings
-        .sandbox_settings()
+        .run_sandbox()
         .and_then(|sandbox| sandbox.provider.as_deref())
         .is_some_and(|provider| provider == "daytona")
         || settings
-            .pull_request
-            .as_ref()
-            .is_some_and(|pull_request| pull_request.enabled)
+            .run_pull_request()
+            .is_some_and(|pr| pr.enabled.unwrap_or(false))
         || settings.github_permissions().is_some();
 
     if needs_github_app {
-        build_github_app_credentials(settings.app_id())
+        build_github_app_credentials(settings.github_app_id_str().as_deref())
     } else {
         Ok(None)
     }

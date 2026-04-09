@@ -17,6 +17,7 @@ use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxProvider, SandboxSpec};
 use fabro_types::RunId;
 use fabro_types::settings::v2::SettingsFile;
+use fabro_types::settings::v2::bridge::bridge_sandbox;
 use fabro_types::settings::v2::cli::{CliLayer, CliOutputLayer, OutputVerbosity};
 use fabro_types::settings::v2::interp::InterpString;
 use fabro_types::settings::v2::run::{
@@ -417,7 +418,7 @@ fn resolve_sandbox_provider(settings: &SettingsFile) -> Result<SandboxProvider> 
 
 fn resolve_daytona_config(settings: &SettingsFile) -> Option<DaytonaConfig> {
     let sandbox = settings.run_sandbox()?;
-    fabro_types::settings::v2::bridge::bridge_sandbox(sandbox).daytona
+    bridge_sandbox(sandbox).daytona
 }
 
 async fn run_sandbox_check(

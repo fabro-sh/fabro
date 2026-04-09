@@ -10,8 +10,9 @@ use fabro_config::user::active_settings_path;
 use fabro_graphviz::graph::AttrValue;
 use fabro_graphviz::parser;
 use fabro_sandbox::daytona::detect_repo_info;
+use fabro_types::RunId;
+use fabro_types::settings::v2::SettingsFile;
 use fabro_types::settings::v2::run::DaytonaDockerfileLayer;
-use fabro_types::{RunId, Settings};
 use fabro_workflow::git::{GitSyncStatus, head_sha, sync_status};
 
 use crate::args::{PreflightArgs, RunArgs};
@@ -46,12 +47,12 @@ struct WorkflowScanInput {
 
 pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManifest> {
     let user_layer = ConfigLayer::settings()?;
-    let merged_settings = input
+    let merged_settings: SettingsFile = input
         .args_layer
         .clone()
         .combine(ConfigLayer::for_workflow(&input.workflow, &input.cwd)?)
         .combine(user_layer.clone())
-        .resolve();
+        .into();
 
     let root_resolution = resolve_workflow_path(&input.workflow, &input.cwd)?;
     let target_path = root_resolution.dot_path.clone();
@@ -385,12 +386,12 @@ fn collect_bundled_file(
 
 fn resolve_manifest_goal(
     args_layer: &ConfigLayer,
-    settings: &Settings,
+    settings: &SettingsFile,
     root_source: &str,
     root_dot_path: &Path,
     cwd: &Path,
 ) -> Result<Option<types::ManifestGoal>> {
-    let working_directory = project::resolve_working_directory(settings, cwd);
+    let _working_directory = project::resolve_working_directory(settings, cwd);
 
     if let Some(goal) = args_layer
         .as_v2()
@@ -404,21 +405,15 @@ fn resolve_manifest_goal(
             type_: types::ManifestGoalType::Value,
         }));
     }
-    if let Some(goal) = settings.goal.as_ref() {
+    if let Some(goal) = settings.run_goal_str() {
         return Ok(Some(types::ManifestGoal {
             path: None,
-            text: goal.clone(),
+            text: goal,
             type_: types::ManifestGoalType::Value,
         }));
     }
-    if let Some(goal_file) = settings.goal_file.as_ref() {
-        return Ok(Some(types::ManifestGoal {
-            path: Some(goal_file.display().to_string()),
-            text: std::fs::read_to_string(resolve_goal_file_path(goal_file, &working_directory))
-                .with_context(|| format!("Failed to read {}", goal_file.display()))?,
-            type_: types::ManifestGoalType::File,
-        }));
-    }
+    // V2 does not carry a distinct `goal_file` field; file-based goals now
+    // come through workflow manifest layers sourced on the server side.
 
     let graph = parser::parse(root_source)
         .map_err(|err| anyhow!("Failed to parse {}: {err}", root_dot_path.display()))?;
@@ -444,14 +439,6 @@ fn resolve_manifest_goal(
         text: goal.to_string(),
         type_: types::ManifestGoalType::Graph,
     }))
-}
-
-fn resolve_goal_file_path(goal_file: &Path, working_directory: &Path) -> PathBuf {
-    if goal_file.is_absolute() {
-        goal_file.to_path_buf()
-    } else {
-        working_directory.join(goal_file)
-    }
 }
 
 fn build_manifest_git(cwd: &Path) -> Option<types::ManifestGit> {

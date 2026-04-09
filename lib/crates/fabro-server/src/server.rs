@@ -33,11 +33,11 @@ use fabro_model::{BilledModelUsage, BilledTokenCounts};
 use fabro_store::{
     ArtifactStore, Database, EventEnvelope, EventPayload, PendingInterviewRecord, StageId,
 };
-use fabro_types::settings::v2::SettingsFile;
+use fabro_types::settings::v2::bridge::bridge_to_old;
+use fabro_types::settings::v2::{InterpString, SettingsFile};
 use fabro_types::{
     EventBody, InterviewQuestionRecord, InterviewQuestionType, RunBlobId, RunClientProvenance,
     RunControlAction, RunEvent, RunId, RunProvenance, RunServerProvenance, RunSubjectProvenance,
-    Settings,
 };
 use fabro_util::redact::redact_jsonl_line;
 use fabro_util::version::FABRO_VERSION;
@@ -1075,8 +1075,12 @@ async fn get_server_settings(
     (StatusCode::OK, Json(response)).into_response()
 }
 
-fn api_server_settings(settings: &Settings) -> anyhow::Result<ServerSettings> {
-    let mut value = serde_json::to_value(settings)?;
+fn api_server_settings(settings: &SettingsFile) -> anyhow::Result<ServerSettings> {
+    // Temporary shim: reuse the legacy flat Settings shape via the v2 bridge
+    // so the existing `/api/v1/settings` DTO keeps working. Stage 6.6 replaces
+    // this with an explicit allow-list DTO built directly from the v2 tree.
+    let legacy = bridge_to_old(settings);
+    let mut value = serde_json::to_value(&legacy)?;
     strip_nulls(&mut value);
     serde_json::from_value(value).map_err(Into::into)
 }
@@ -1417,10 +1421,10 @@ fn build_prune_plan(
     })
 }
 
-fn system_sandbox_provider(settings: &Settings) -> String {
+fn system_sandbox_provider(settings: &SettingsFile) -> String {
     settings
-        .sandbox_settings()
-        .and_then(|sandbox| sandbox.provider.clone())
+        .run_sandbox()
+        .and_then(|sb| sb.provider.clone())
         .unwrap_or_else(|| SandboxProvider::default().to_string())
 }
 
@@ -1615,15 +1619,12 @@ async fn get_github_repo(
         .read()
         .expect("settings lock poisoned")
         .clone();
-    let app_id = match settings.app_id() {
-        Some(app_id) => app_id.to_string(),
-        None => {
-            return ApiError::new(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "git.app_id is not configured",
-            )
-            .into_response();
-        }
+    let Some(app_id) = settings.github_app_id_str() else {
+        return ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "server.integrations.github.app_id is not configured",
+        )
+        .into_response();
     };
 
     let creds = match state.github_app_credentials(Some(&app_id)).await {
@@ -1649,7 +1650,7 @@ async fn get_github_repo(
 
     let base_url = fabro_github::github_api_base_url();
     let client = reqwest::Client::new();
-    let install_url = settings.slug().map_or_else(
+    let install_url = settings.github_slug_str().map_or_else(
         || format!("https://github.com/organizations/{owner}/settings/installations"),
         |slug| format!("https://github.com/apps/{slug}/installations/new"),
     );
@@ -1932,7 +1933,7 @@ async fn get_run_billing(
 
 /// Create an `AppState` with default settings.
 pub fn create_app_state() -> Arc<AppState> {
-    create_app_state_with_options(Settings::default(), 5)
+    create_app_state_with_options(SettingsFile::default(), 5)
 }
 
 #[doc(hidden)]
@@ -1940,14 +1941,14 @@ pub fn create_app_state_with_registry_factory(
     registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
     create_app_state_with_settings_and_registry_factory(
-        Settings::default(),
+        SettingsFile::default(),
         registry_factory_override,
     )
 }
 
 #[doc(hidden)]
 pub fn create_app_state_with_settings_and_registry_factory(
-    settings: Settings,
+    settings: SettingsFile,
     registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
     let (store, artifact_store) = test_store_bundle();
@@ -1966,7 +1967,7 @@ pub fn create_app_state_with_settings_and_registry_factory(
 
 /// Create an `AppState` with the given settings and concurrency limit.
 pub fn create_app_state_with_options(
-    settings: Settings,
+    settings: SettingsFile,
     max_concurrent_runs: usize,
 ) -> Arc<AppState> {
     let (store, artifact_store) = test_store_bundle();
@@ -1990,7 +1991,7 @@ fn test_store_bundle() -> (Arc<Database>, ArtifactStore) {
 }
 
 pub fn create_app_state_with_store(
-    settings: Arc<RwLock<Settings>>,
+    settings: Arc<RwLock<SettingsFile>>,
     max_concurrent_runs: usize,
     store: Arc<Database>,
     artifact_store: ArtifactStore,
@@ -2009,7 +2010,7 @@ pub fn create_app_state_with_store(
 }
 
 pub(crate) fn build_app_state_with_path(
-    settings: Arc<RwLock<Settings>>,
+    settings: Arc<RwLock<SettingsFile>>,
     registry_factory_override: Option<Box<RegistryFactoryOverride>>,
     max_concurrent_runs: usize,
     store: Arc<Database>,
@@ -2023,8 +2024,8 @@ pub(crate) fn build_app_state_with_path(
     let slack_service = {
         let settings = settings.read().expect("settings lock poisoned");
         settings
-            .slack_settings()
-            .and_then(|slack| slack.default_channel.clone())
+            .server_integrations_slack()
+            .and_then(|slack| slack.default_channel.as_ref().map(InterpString::as_source))
             .and_then(|default_channel| {
                 resolve_slack_credentials().map(|credentials| {
                     Arc::new(SlackService::new(
@@ -5863,9 +5864,6 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::Request;
-    use fabro_config::server::{
-        AuthProvider, AuthSettings, GitAuthorSettings, GitProvider, GitSettings, WebSettings,
-    };
     use fabro_interview::{AnswerValue, ControlInterviewer, Interviewer, Question, QuestionType};
     use fabro_types::{InterviewQuestionRecord, InterviewQuestionType, RunBlobId, RunId, fixtures};
     #[cfg(unix)]
@@ -5879,10 +5877,17 @@ mod tests {
         start -> exit
     }"#;
 
-    fn dry_run_settings() -> Settings {
-        Settings {
-            dry_run: Some(true),
-            ..Default::default()
+    fn dry_run_settings() -> SettingsFile {
+        use fabro_types::settings::v2::run::{RunExecutionLayer, RunLayer, RunMode};
+        SettingsFile {
+            run: Some(RunLayer {
+                execution: Some(RunExecutionLayer {
+                    mode: Some(RunMode::DryRun),
+                    ..RunExecutionLayer::default()
+                }),
+                ..RunLayer::default()
+            }),
+            ..SettingsFile::default()
         }
     }
 
@@ -6164,25 +6169,23 @@ mod tests {
     }
 
     #[tokio::test]
-    #[allow(clippy::field_reassign_with_default)]
     async fn auth_login_github_redirects_to_github() {
-        let mut settings = Settings::default();
-        settings.web = Some(WebSettings {
-            enabled: true,
-            url: "http://localhost:3000".to_string(),
-            auth: AuthSettings {
-                provider: AuthProvider::Github,
-                allowed_usernames: vec!["brynary".to_string()],
-            },
-        });
-        settings.git = Some(GitSettings {
-            provider: GitProvider::Github,
-            app_id: Some("123".to_string()),
-            client_id: Some("Iv1.testclient".to_string()),
-            slug: Some("fabro".to_string()),
-            author: GitAuthorSettings::default(),
-            webhooks: None,
-        });
+        let settings: SettingsFile = fabro_config::ConfigLayer::parse(
+            r#"
+_version = 1
+
+[server.web]
+enabled = true
+url = "http://localhost:3000"
+
+[server.integrations.github]
+app_id = "123"
+client_id = "Iv1.testclient"
+slug = "fabro"
+"#,
+        )
+        .expect("fixture should parse")
+        .into();
         let app = build_router(
             create_app_state_with_options(settings, 5),
             AuthMode::Disabled,
@@ -7308,49 +7311,48 @@ mod tests {
 
     #[tokio::test]
     async fn start_run_persists_full_settings_snapshot() {
-        let settings = Settings {
-            dry_run: Some(true),
-            llm: Some(fabro_config::run::LlmSettings {
-                model: Some("claude-sonnet-4-5".to_string()),
-                provider: Some("anthropic".to_string()),
-                fallbacks: None,
-            }),
-            sandbox: Some(fabro_config::sandbox::SandboxSettings {
-                provider: Some("local".to_string()),
-                ..Default::default()
-            }),
-            hooks: vec![fabro_hooks::HookDefinition {
-                name: Some("snapshot-hook".to_string()),
-                event: fabro_hooks::HookEvent::RunStart,
-                command: Some("echo snapshot".to_string()),
-                hook_type: None,
-                matcher: None,
-                blocking: Some(false),
-                timeout_ms: Some(1_000),
-                sandbox: Some(false),
-            }],
-            git: Some(fabro_config::server::GitSettings {
-                app_id: Some("12345".to_string()),
-                author: fabro_config::server::GitAuthorSettings {
-                    name: Some("Snapshot Bot".to_string()),
-                    email: Some("snapshot@example.com".to_string()),
-                },
-                ..Default::default()
-            }),
-            web: Some(fabro_config::server::WebSettings {
-                url: "http://example.test".to_string(),
-                ..Default::default()
-            }),
-            api: Some(fabro_config::server::ApiSettings {
-                base_url: "http://api.example.test".to_string(),
-                ..Default::default()
-            }),
-            log: Some(fabro_config::server::LogSettings {
-                level: Some("debug".to_string()),
-            }),
-            ..Default::default()
-        };
-        let state = create_app_state_with_options(settings.clone(), 5);
+        let settings: SettingsFile = fabro_config::ConfigLayer::parse(
+            r#"
+_version = 1
+
+[run.execution]
+mode = "dry_run"
+
+[run.model]
+provider = "anthropic"
+name = "claude-sonnet-4-5"
+
+[run.sandbox]
+provider = "local"
+
+[[run.hooks]]
+name = "snapshot-hook"
+event = "run_start"
+command = ["echo", "snapshot"]
+blocking = false
+timeout = "1s"
+sandbox = false
+
+[run.git.author]
+name = "Snapshot Bot"
+email = "snapshot@example.com"
+
+[server.integrations.github]
+app_id = "12345"
+
+[server.web]
+url = "http://example.test"
+
+[server.api]
+url = "http://api.example.test"
+
+[server.logging]
+level = "debug"
+"#,
+        )
+        .expect("fixture should parse")
+        .into();
+        let state = create_app_state_with_options(settings, 5);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
         let req = Request::builder()
@@ -7381,11 +7383,26 @@ mod tests {
             .unwrap()
             .run
             .expect("run record should exist");
-        let mut expected_settings = settings;
-        expected_settings.goal = Some("Test".to_string());
-        expected_settings.dry_run = None;
 
-        assert_eq!(run_record.settings, expected_settings);
+        // Server-side `dry_run` default must not override the manifest's intent.
+        // Verify a sampling of the persisted v2 settings.
+        assert_eq!(
+            run_record.settings.run_goal_str().as_deref(),
+            Some("Test"),
+            "goal should be persisted from the manifest"
+        );
+        assert!(
+            !run_record.settings.dry_run_enabled(),
+            "server-local dry_run fallback must not override manifest intent"
+        );
+        assert_eq!(
+            run_record.settings.run_model_name_str().as_deref(),
+            Some("claude-sonnet-4-5"),
+        );
+        assert_eq!(
+            run_record.settings.github_app_id_str().as_deref(),
+            Some("12345"),
+        );
     }
 
     #[tokio::test]
@@ -7748,13 +7765,19 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cancel_during_startup_persists_cancelled_reason() {
-        let settings = Settings {
-            setup: Some(fabro_config::run::SetupSettings {
-                commands: vec!["sleep 5".to_string()],
-                timeout_ms: Some(30_000),
-            }),
-            ..Default::default()
-        };
+        let settings: SettingsFile = fabro_config::ConfigLayer::parse(
+            r#"
+_version = 1
+
+[[run.prepare.steps]]
+script = "sleep 5"
+
+[run.prepare]
+timeout = "30s"
+"#,
+        )
+        .expect("fixture should parse")
+        .into();
         let state = create_app_state_with_settings_and_registry_factory(settings, |interviewer| {
             fabro_workflow::handler::default_registry(interviewer, || None)
         });
@@ -7857,7 +7880,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrency_limit_respected() {
-        let state = create_app_state_with_options(Settings::default(), 1);
+        let state = create_app_state_with_options(SettingsFile::default(), 1);
         let app = test_app_with_scheduler(Arc::clone(&state));
 
         // Create and start two runs with max_concurrent_runs=1

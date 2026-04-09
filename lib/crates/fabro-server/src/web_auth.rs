@@ -7,6 +7,8 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::{Json, Router, routing::get, routing::post};
 use cookie::{Cookie, CookieJar, Expiration, Key, SameSite, time::Duration};
 use fabro_types::Settings;
+use fabro_types::settings::v2::SettingsFile;
+use fabro_types::settings::v2::bridge::bridge_to_old;
 use fabro_types::settings::{ApiAuthStrategy, GitProvider, GitSettings};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -155,12 +157,22 @@ fn features_json(settings: &Settings) -> serde_json::Value {
     })
 }
 
+/// Temporary helper used during the v2 consumer migration. Bridges a
+/// `SettingsFile` down to the legacy flat `Settings` shape so web_auth's
+/// oauth/git flows can keep reading flat fields until they're migrated
+/// directly (Stage 6.6 alongside the `/api/v1/settings` DTO rewrite).
+fn bridged(settings_file: &SettingsFile) -> Settings {
+    bridge_to_old(settings_file)
+}
+
 async fn login_github(State(state): State<Arc<AppState>>) -> Response {
-    let settings = state
-        .settings
-        .read()
-        .expect("settings lock poisoned")
-        .clone();
+    let settings = bridged(
+        &state
+            .settings
+            .read()
+            .expect("settings lock poisoned")
+            .clone(),
+    );
     let Some(client_id) = settings.client_id().map(str::to_string) else {
         warn!("OAuth login failed: client_id not configured");
         return json_response(
@@ -216,11 +228,13 @@ async fn callback_github(
             json!({"error": "SESSION_SECRET is not configured"}),
         );
     };
-    let settings = state
-        .settings
-        .read()
-        .expect("settings lock poisoned")
-        .clone();
+    let settings = bridged(
+        &state
+            .settings
+            .read()
+            .expect("settings lock poisoned")
+            .clone(),
+    );
     let cookie_jar = parse_cookie_header(&headers);
     let stored_state = cookie_jar.get(OAUTH_STATE_COOKIE_NAME).map(Cookie::value);
     if stored_state != Some(params.state.as_str()) {
@@ -431,11 +445,13 @@ async fn auth_me(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Resp
         return json_response(StatusCode::UNAUTHORIZED, json!({"error": "Unauthorized"}));
     };
 
-    let settings = state
-        .settings
-        .read()
-        .expect("settings lock poisoned")
-        .clone();
+    let settings = bridged(
+        &state
+            .settings
+            .read()
+            .expect("settings lock poisoned")
+            .clone(),
+    );
     let demo_mode = parse_cookie_header(&headers)
         .get("fabro-demo")
         .is_some_and(|cookie| cookie.value() == "1");
@@ -455,11 +471,13 @@ async fn auth_me(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Resp
 }
 
 async fn setup_status(State(state): State<Arc<AppState>>) -> Response {
-    let settings = state
-        .settings
-        .read()
-        .expect("settings lock poisoned")
-        .clone();
+    let settings = bridged(
+        &state
+            .settings
+            .read()
+            .expect("settings lock poisoned")
+            .clone(),
+    );
     let configured = settings
         .git
         .as_ref()
@@ -547,11 +565,15 @@ async fn setup_register(
 
     let settings_path = state.config_path.clone();
 
-    let mut settings = state
+    // Bridge the v2 in-memory state down to the legacy flat shape so the
+    // existing register flow can continue to mutate it and write legacy
+    // TOML. Stage 6.6 rewrites this to produce v2 TOML directly.
+    let settings_file = state
         .settings
         .read()
         .expect("settings lock poisoned")
         .clone();
+    let mut settings = bridged(&settings_file);
     let mut git = settings.git.clone().unwrap_or_default();
     git.provider = GitProvider::Github;
     git.app_id = Some(data.id.to_string());
@@ -622,10 +644,13 @@ async fn setup_register(
         }
     }
 
-    {
-        let mut shared = state.settings.write().expect("settings lock poisoned");
-        *shared = settings;
-    }
+    // Stage 6.6 TODO: re-parse the freshly-written `settings_path` via
+    // `ConfigLayer::load` and swap it into `state.settings`. For now, leave
+    // the in-memory state unchanged -- subsequent server restarts will
+    // re-read the file. The `settings` binding above mutates a bridged
+    // copy that only feeds the TOML merge output; dropping it here is
+    // intentional.
+    drop(settings);
 
     info!(slug = %data.slug, app_id = %data.id, "GitHub App registered successfully");
     Json(json!({"ok": true})).into_response()

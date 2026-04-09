@@ -8,8 +8,10 @@ use fabro_server::server::{
     AppState, build_router, create_app_state, create_app_state_with_settings_and_registry_factory,
     spawn_scheduler,
 };
-use fabro_types::Settings;
-use fabro_types::settings::{LocalSandboxSettings, SandboxSettings, WorktreeMode};
+use fabro_types::settings::v2::SettingsFile;
+use fabro_types::settings::v2::run::{
+    LocalSandboxLayer, RunExecutionLayer, RunLayer, RunMode, RunSandboxLayer, WorktreeMode,
+};
 use tokio::time::sleep;
 use tower::ServiceExt;
 
@@ -28,7 +30,7 @@ pub(crate) fn test_app_state() -> Arc<AppState> {
 }
 
 pub(crate) fn test_app_state_with_options(
-    settings: Settings,
+    settings: SettingsFile,
     max_concurrent_runs: usize,
 ) -> Arc<AppState> {
     let _ = max_concurrent_runs;
@@ -37,23 +39,27 @@ pub(crate) fn test_app_state_with_options(
     })
 }
 
-pub(crate) fn test_settings() -> Settings {
-    Settings {
-        sandbox: Some(SandboxSettings {
-            local: Some(LocalSandboxSettings {
-                worktree_mode: WorktreeMode::Never,
+pub(crate) fn test_settings() -> SettingsFile {
+    SettingsFile {
+        run: Some(RunLayer {
+            sandbox: Some(RunSandboxLayer {
+                local: Some(LocalSandboxLayer {
+                    worktree_mode: Some(WorktreeMode::Never),
+                }),
+                ..RunSandboxLayer::default()
             }),
-            ..Default::default()
+            ..RunLayer::default()
         }),
-        ..Default::default()
+        ..SettingsFile::default()
     }
 }
 
-pub(crate) fn dry_run_settings() -> Settings {
-    Settings {
-        dry_run: Some(true),
-        ..test_settings()
-    }
+pub(crate) fn dry_run_settings() -> SettingsFile {
+    let mut settings = test_settings();
+    let run = settings.run.get_or_insert_with(RunLayer::default);
+    let execution = run.execution.get_or_insert_with(RunExecutionLayer::default);
+    execution.mode = Some(RunMode::DryRun);
+    settings
 }
 
 pub(crate) fn dry_run_app() -> axum::Router {

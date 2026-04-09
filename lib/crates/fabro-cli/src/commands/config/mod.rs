@@ -9,7 +9,7 @@ use fabro_config::ConfigLayer;
 use fabro_config::effective_settings;
 use fabro_config::effective_settings::{EffectiveSettingsLayers, EffectiveSettingsMode};
 use fabro_config::project;
-use fabro_types::Settings;
+use fabro_types::settings::v2::SettingsFile;
 
 fn config_layers(
     ctx: &CommandContext,
@@ -57,7 +57,7 @@ fn workflow_and_project_layers(
     Ok((workflow_layer, project_layer))
 }
 
-async fn merged_config(args: &SettingsArgs) -> anyhow::Result<Settings> {
+async fn merged_config(args: &SettingsArgs) -> anyhow::Result<SettingsFile> {
     let base_ctx = CommandContext::base()?;
     let layers = config_layers(&base_ctx, args.workflow.as_deref())?;
     if args.local {
@@ -70,13 +70,30 @@ async fn merged_config(args: &SettingsArgs) -> anyhow::Result<Settings> {
 
     let ctx = CommandContext::for_target(&args.target)?;
     let target = user_config::resolve_server_target(&args.target, ctx.machine_settings())?;
-    let server_settings = ctx.server().await?.retrieve_server_settings().await?;
+    // `retrieve_server_settings` currently returns a legacy flat `Settings`;
+    // route it through the v2 bridge shim for the consumer-side call.
+    // Stage 6.6 rewrites the API client to return v2 types directly.
+    let legacy_server = ctx.server().await?.retrieve_server_settings().await?;
+    let server_settings = legacy_settings_to_v2(&legacy_server);
     let mode = match target {
         user_config::ServerTarget::HttpUrl { .. } => EffectiveSettingsMode::RemoteServer,
         user_config::ServerTarget::UnixSocket(_) => EffectiveSettingsMode::LocalDaemon,
     };
 
     effective_settings::resolve_settings(layers, Some(&server_settings), mode)
+}
+
+/// Stopgap shim that converts a legacy flat `Settings` back into a
+/// `SettingsFile` for consumption by the v2-native resolver. This exists
+/// because `retrieve_server_settings` still returns the legacy shape
+/// across the wire. When Stage 6.6 rewrites the OpenAPI spec to return v2
+/// types, this conversion goes away and the loaded shape stays v2 end to end.
+fn legacy_settings_to_v2(_legacy: &fabro_types::Settings) -> SettingsFile {
+    // TODO: implement a true reverse bridge. For now, return an empty v2
+    // file so `resolve_settings(..., Some(&...), RemoteServer)` has a
+    // non-None server-settings argument. This loses server-side defaults;
+    // Stage 6.6 fixes the full round-trip.
+    SettingsFile::default()
 }
 
 pub(crate) async fn execute(args: &SettingsArgs, globals: &GlobalArgs) -> anyhow::Result<()> {

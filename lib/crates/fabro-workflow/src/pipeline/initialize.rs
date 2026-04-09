@@ -688,7 +688,8 @@ mod tests {
     use fabro_interview::AutoApproveInterviewer;
     use fabro_sandbox::SandboxSpec;
     use fabro_store::Database;
-    use fabro_types::{RunId, Settings, fixtures};
+    use fabro_types::settings::v2::SettingsFile;
+    use fabro_types::{RunId, fixtures};
     use object_store::memory::InMemory;
 
     use super::*;
@@ -735,7 +736,7 @@ mod tests {
 
     fn test_settings(run_dir: &std::path::Path) -> RunOptions {
         RunOptions {
-            settings: Settings::default(),
+            settings: SettingsFile::default(),
             run_dir: run_dir.to_path_buf(),
             cancel_token: None,
             run_id: test_run_id(),
@@ -757,7 +758,7 @@ mod tests {
             run_dir.to_path_buf(),
             RunRecord {
                 run_id: test_run_id(),
-                settings: Settings::default(),
+                settings: SettingsFile::default(),
                 graph,
                 workflow_slug: Some("test".to_string()),
                 working_directory: std::env::current_dir().unwrap(),

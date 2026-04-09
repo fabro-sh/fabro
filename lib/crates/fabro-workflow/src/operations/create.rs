@@ -463,7 +463,7 @@ mod tests {
         ))
     }
 
-    fn validate_dot(dot_source: &str, settings: Settings) -> Validated {
+    fn validate_dot(dot_source: &str, settings: SettingsFile) -> Validated {
         validate(ValidateInput {
             workflow: WorkflowInput::DotSource {
                 source: dot_source.to_string(),
@@ -485,7 +485,7 @@ mod tests {
 
     #[test]
     fn validate_minimal() {
-        let validated = validate_dot(MINIMAL_DOT, Settings::default());
+        let validated = validate_dot(MINIMAL_DOT, SettingsFile::default());
         validated.raise_on_errors().unwrap();
 
         assert_eq!(validated.graph().name, "Test");
@@ -502,7 +502,7 @@ mod tests {
             exit  [shape=Msquare]
             start -> work -> exit
         }"#;
-        let validated = validate_dot(dot, Settings::default());
+        let validated = validate_dot(dot, SettingsFile::default());
         validated.raise_on_errors().unwrap();
 
         let prompt = validated.graph().nodes["work"]
@@ -540,7 +540,7 @@ mod tests {
             exit  [shape=Msquare]
             start -> work -> exit
         }"#;
-        let validated = validate_dot(dot, Settings::default());
+        let validated = validate_dot(dot, SettingsFile::default());
         validated.raise_on_errors().unwrap();
 
         assert_eq!(
@@ -558,14 +558,19 @@ mod tests {
             exit [shape=Msquare]
             start -> work -> exit
         }"#;
-        let validated = validate_dot(
-            dot,
-            Settings {
-                vars: Some(HashMap::from([("who".to_string(), "agent".to_string())])),
-                goal: Some("override".to_string()),
-                ..Default::default()
-            },
-        );
+        let validated = validate_dot(dot, {
+            use fabro_types::settings::v2::run::RunLayer;
+            let mut inputs = std::collections::HashMap::new();
+            inputs.insert("who".to_string(), toml::Value::String("agent".to_string()));
+            SettingsFile {
+                run: Some(RunLayer {
+                    goal: Some(InterpString::parse("override")),
+                    inputs: Some(inputs),
+                    ..RunLayer::default()
+                }),
+                ..SettingsFile::default()
+            }
+        });
         validated.raise_on_errors().unwrap();
 
         assert_eq!(validated.graph().goal(), "override");
@@ -584,7 +589,7 @@ mod tests {
                 source: "not a graph".to_string(),
                 base_dir: None,
             },
-            settings: Settings::default(),
+            settings: SettingsFile::default(),
             cwd: PathBuf::from("."),
             custom_transforms: Vec::new(),
         });
@@ -597,7 +602,7 @@ mod tests {
             graph [goal="Test"]
             work [label="Work"]
         }"#;
-        let validated = validate_dot(dot, Settings::default());
+        let validated = validate_dot(dot, SettingsFile::default());
 
         assert!(validated.has_errors());
         assert!(validated.raise_on_errors().is_err());
@@ -624,7 +629,7 @@ mod tests {
                 source: MINIMAL_DOT.to_string(),
                 base_dir: None,
             },
-            settings: Settings::default(),
+            settings: SettingsFile::default(),
             cwd: PathBuf::from("."),
             custom_transforms: vec![Box::new(TagTransform)],
         })
@@ -657,7 +662,7 @@ mod tests {
 
         let validated = validate(ValidateInput {
             workflow: WorkflowInput::Path(dot_path),
-            settings: Settings::default(),
+            settings: SettingsFile::default(),
             cwd: dir.path().to_path_buf(),
             custom_transforms: Vec::new(),
         })
@@ -693,7 +698,7 @@ mod tests {
                     (PathBuf::from("prompts/lint.md"), "Lint $goal".to_string()),
                 ]),
             }),
-            settings: Settings::default(),
+            settings: SettingsFile::default(),
             cwd: PathBuf::from("."),
             custom_transforms: Vec::new(),
         })
@@ -724,7 +729,7 @@ mod tests {
                     source: dot.to_string(),
                     base_dir: None,
                 },
-                settings: Settings::default(),
+                settings: SettingsFile::default(),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: None,
                 workflow_path: None,
@@ -759,20 +764,32 @@ mod tests {
                     source: MINIMAL_DOT.to_string(),
                     base_dir: None,
                 },
-                settings: Settings {
-                    llm: Some(fabro_config::run::LlmSettings {
-                        model: Some("sonnet".to_string()),
-                        provider: None,
-                        fallbacks: None,
-                    }),
-                    pull_request: Some(fabro_config::run::PullRequestSettings {
-                        enabled: false,
-                        ..Default::default()
-                    }),
-                    goal: Some("override goal".to_string()),
-                    dry_run: Some(true),
-                    labels: HashMap::from([("env".to_string(), "test".to_string())]),
-                    ..Default::default()
+                settings: {
+                    use fabro_types::settings::v2::run::{
+                        RunExecutionLayer, RunLayer, RunMode, RunModelLayer, RunPullRequestLayer,
+                    };
+                    let mut metadata = HashMap::new();
+                    metadata.insert("env".to_string(), "test".to_string());
+                    SettingsFile {
+                        run: Some(RunLayer {
+                            goal: Some(InterpString::parse("override goal")),
+                            metadata,
+                            model: Some(RunModelLayer {
+                                name: Some(InterpString::parse("sonnet")),
+                                ..RunModelLayer::default()
+                            }),
+                            pull_request: Some(RunPullRequestLayer {
+                                enabled: Some(false),
+                                ..RunPullRequestLayer::default()
+                            }),
+                            execution: Some(RunExecutionLayer {
+                                mode: Some(RunMode::DryRun),
+                                ..RunExecutionLayer::default()
+                            }),
+                            ..RunLayer::default()
+                        }),
+                        ..SettingsFile::default()
+                    }
                 },
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: Some("slug".to_string()),
@@ -796,9 +813,8 @@ mod tests {
                 .persisted
                 .run_record()
                 .settings
-                .llm
-                .as_ref()
-                .and_then(|llm| llm.model.as_deref()),
+                .run_model_name_str()
+                .as_deref(),
             Some("claude-sonnet-4-6")
         );
         assert_eq!(
@@ -806,13 +822,17 @@ mod tests {
                 .persisted
                 .run_record()
                 .settings
-                .llm
-                .as_ref()
-                .and_then(|llm| llm.provider.as_deref()),
+                .run_model_provider_str()
+                .as_deref(),
             Some("anthropic")
         );
         assert_eq!(
-            created.persisted.run_record().settings.goal.as_deref(),
+            created
+                .persisted
+                .run_record()
+                .settings
+                .run_goal_str()
+                .as_deref(),
             Some("override goal")
         );
         assert!(
@@ -820,7 +840,7 @@ mod tests {
                 .persisted
                 .run_record()
                 .settings
-                .pull_request
+                .run_pull_request()
                 .is_none()
         );
         assert_eq!(
@@ -850,10 +870,19 @@ mod tests {
                     source: MINIMAL_DOT.to_string(),
                     base_dir: None,
                 },
-                settings: Settings {
-                    work_dir: Some("workspace".to_string()),
-                    dry_run: Some(true),
-                    ..Default::default()
+                settings: {
+                    use fabro_types::settings::v2::run::{RunExecutionLayer, RunLayer, RunMode};
+                    SettingsFile {
+                        run: Some(RunLayer {
+                            working_dir: Some(InterpString::parse("workspace")),
+                            execution: Some(RunExecutionLayer {
+                                mode: Some(RunMode::DryRun),
+                                ..RunExecutionLayer::default()
+                            }),
+                            ..RunLayer::default()
+                        }),
+                        ..SettingsFile::default()
+                    }
                 },
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: None,
@@ -895,10 +924,7 @@ mod tests {
                     source: MINIMAL_DOT.to_string(),
                     base_dir: None,
                 },
-                settings: Settings {
-                    dry_run: Some(true),
-                    ..Default::default()
-                },
+                settings: dry_run_only_settings(),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: None,
                 workflow_path: None,
@@ -920,6 +946,41 @@ mod tests {
         );
     }
 
+    fn dry_run_only_settings() -> SettingsFile {
+        use fabro_types::settings::v2::run::{RunExecutionLayer, RunLayer, RunMode};
+        SettingsFile {
+            run: Some(RunLayer {
+                execution: Some(RunExecutionLayer {
+                    mode: Some(RunMode::DryRun),
+                    ..RunExecutionLayer::default()
+                }),
+                ..RunLayer::default()
+            }),
+            ..SettingsFile::default()
+        }
+    }
+
+    fn dry_run_with_storage(storage_dir: &Path) -> SettingsFile {
+        use fabro_types::settings::v2::run::{RunExecutionLayer, RunLayer, RunMode};
+        use fabro_types::settings::v2::server::{ServerLayer, ServerStorageLayer};
+        SettingsFile {
+            run: Some(RunLayer {
+                execution: Some(RunExecutionLayer {
+                    mode: Some(RunMode::DryRun),
+                    ..RunExecutionLayer::default()
+                }),
+                ..RunLayer::default()
+            }),
+            server: Some(ServerLayer {
+                storage: Some(ServerStorageLayer {
+                    root: Some(InterpString::parse(&storage_dir.to_string_lossy())),
+                }),
+                ..ServerLayer::default()
+            }),
+            ..SettingsFile::default()
+        }
+    }
+
     #[tokio::test]
     async fn create_hydrates_run_created_event_into_store() {
         let dir = tempfile::tempdir().unwrap();
@@ -935,11 +996,7 @@ mod tests {
                     source: MINIMAL_DOT.to_string(),
                     base_dir: None,
                 },
-                settings: Settings {
-                    storage_dir: Some(storage_dir.clone()),
-                    dry_run: Some(true),
-                    ..Default::default()
-                },
+                settings: dry_run_with_storage(&storage_dir),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: Some("slug".to_string()),
                 workflow_path: None,
@@ -978,11 +1035,7 @@ mod tests {
                     source: MINIMAL_DOT.to_string(),
                     base_dir: None,
                 },
-                settings: Settings {
-                    storage_dir: Some(storage_dir.clone()),
-                    dry_run: Some(true),
-                    ..Default::default()
-                },
+                settings: dry_run_with_storage(&storage_dir),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: Some("slug".to_string()),
                 workflow_path: None,

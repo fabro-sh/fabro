@@ -10,7 +10,9 @@ use fabro_interview::{AutoApproveInterviewer, Interviewer};
 use fabro_model::{Catalog, FallbackTarget, Provider};
 use fabro_sandbox::{SandboxProvider, SandboxSpec};
 use fabro_types::RunId;
-use fabro_types::settings::v2::bridge::{bridge_mcp_entry, bridge_sandbox, bridge_worktree_mode};
+use fabro_types::settings::v2::bridge::{
+    bridge_hook, bridge_mcp_entry, bridge_pull_request, bridge_sandbox, bridge_worktree_mode,
+};
 use fabro_types::settings::v2::run::ModelRefOrSplice;
 use fabro_types::settings::v2::{InterpString, SettingsFile};
 
@@ -380,9 +382,7 @@ impl RunSession {
             services.interviewer
         };
 
-        let pr_config = settings
-            .run_pull_request()
-            .map(fabro_types::settings::v2::bridge::bridge_pull_request);
+        let pr_config = settings.run_pull_request().map(bridge_pull_request);
 
         Ok(Self {
             cancel_token: services.cancel_token,
@@ -405,11 +405,7 @@ impl RunSession {
                 devcontainer_phases: Vec::new(),
             },
             hooks: fabro_hooks::HookSettings {
-                hooks: settings
-                    .run_hooks()
-                    .iter()
-                    .map(fabro_types::settings::v2::bridge::bridge_hook)
-                    .collect(),
+                hooks: settings.run_hooks().iter().map(bridge_hook).collect(),
             },
             sandbox_env,
             devcontainer,
@@ -590,7 +586,7 @@ impl RunSession {
             checkpoint,
             seed_context: self.seed_context,
         };
-        let mut initialized = pipeline::initialize(persisted, init_options).await?;
+        let mut initialized = Box::pin(pipeline::initialize(persisted, init_options)).await?;
         initialized.on_node = on_node;
 
         let sandbox_for_cleanup = Arc::clone(&initialized.sandbox);
@@ -652,8 +648,8 @@ impl RunSession {
         };
 
         let retro = retroed.retro.clone();
-        let concluded = pipeline::finalize(retroed, &finalize_opts).await?;
-        let finalized = pipeline::pull_request(concluded, &pr_opts).await;
+        let concluded = Box::pin(pipeline::finalize(retroed, &finalize_opts)).await?;
+        let finalized = Box::pin(pipeline::pull_request(concluded, &pr_opts)).await;
         store_progress_logger.flush().await;
 
         scopeguard::ScopeGuard::into_inner(cleanup_guard);
@@ -853,7 +849,8 @@ mod tests {
 
     use chrono::Utc;
     use fabro_store::Database;
-    use fabro_types::{Settings, fixtures};
+    use fabro_types::fixtures;
+    use fabro_types::settings::v2::run::{RunExecutionLayer, RunLayer, RunMode};
     use object_store::memory::InMemory;
 
     use super::*;
@@ -891,9 +888,15 @@ mod tests {
                     source: dot.to_string(),
                     base_dir: None,
                 },
-                settings: Settings {
-                    dry_run: Some(true),
-                    ..Default::default()
+                settings: SettingsFile {
+                    run: Some(RunLayer {
+                        execution: Some(RunExecutionLayer {
+                            mode: Some(RunMode::DryRun),
+                            ..RunExecutionLayer::default()
+                        }),
+                        ..RunLayer::default()
+                    }),
+                    ..SettingsFile::default()
                 },
                 cwd: run_dir
                     .parent()
@@ -1071,9 +1074,15 @@ mod tests {
                         .unwrap()
                         .clone(),
                 ),
-                settings: Settings {
-                    dry_run: Some(true),
-                    ..Default::default()
+                settings: SettingsFile {
+                    run: Some(RunLayer {
+                        execution: Some(RunExecutionLayer {
+                            mode: Some(RunMode::DryRun),
+                            ..RunExecutionLayer::default()
+                        }),
+                        ..RunLayer::default()
+                    }),
+                    ..SettingsFile::default()
                 },
                 cwd: temp.path().to_path_buf(),
                 workflow_slug: Some("bundle-child".to_string()),

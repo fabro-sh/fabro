@@ -9,6 +9,7 @@ use fabro_config::server::ApiAuthStrategy;
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::types::{Message, Request};
 use fabro_model::{Catalog, Provider};
+use fabro_types::settings::v2::bridge::bridge_to_old;
 use fabro_util::check_report::{CheckDetail, CheckResult, CheckSection, CheckStatus};
 use fabro_util::version::FABRO_VERSION;
 use regex::Regex;
@@ -294,10 +295,10 @@ async fn check_github_app(state: &AppState) -> CheckResult {
         .read()
         .expect("settings lock poisoned")
         .clone();
-    let app_id = settings.app_id().map(str::to_owned);
-    let slug = settings.slug().map(str::to_owned);
+    let app_id = settings.github_app_id_str();
+    let slug = settings.github_slug_str();
     let private_key_raw = state.secret_or_env("GITHUB_APP_PRIVATE_KEY");
-    let client_id = settings.client_id().is_some();
+    let client_id = settings.github_client_id_str().is_some();
     let client_secret = state.secret_or_env("GITHUB_APP_CLIENT_SECRET").is_some();
     let webhook_secret = state.secret_or_env("GITHUB_APP_WEBHOOK_SECRET").is_some();
 
@@ -466,11 +467,13 @@ async fn check_brave_search(state: &AppState) -> CheckResult {
 }
 
 fn check_crypto(state: &AppState) -> CheckResult {
-    let settings = state
+    let settings_file = state
         .settings
         .read()
         .expect("settings lock poisoned")
         .clone();
+    // Temporary bridge while diagnostics is migrated to v2 shapes directly.
+    let settings = bridge_to_old(&settings_file);
     let api = settings.api.clone().unwrap_or_default();
     let has_jwt = api
         .authentication_strategies

@@ -18,6 +18,8 @@ use tracing::{error, info, warn};
 use clap::Args;
 
 use fabro_types::Settings;
+use fabro_types::settings::v2::SettingsFile;
+use fabro_types::settings::v2::bridge::bridge_to_old;
 
 use crate::bind::{self, Bind, BindRequest};
 use crate::github_webhooks::WebhookManager;
@@ -80,42 +82,77 @@ pub struct ServeArgs {
     pub config: Option<PathBuf>,
 }
 
-fn load_settings(path: Option<&Path>) -> anyhow::Result<Settings> {
-    load_settings_config(path)?.try_into()
+fn load_settings(path: Option<&Path>) -> anyhow::Result<SettingsFile> {
+    Ok(load_settings_config(path)?.into())
+}
+
+/// Bridged helper for legacy call sites inside serve.rs that still read flat
+/// Settings fields. Callers pass a v2 SettingsFile; this returns the legacy
+/// shape via the transitional bridge.
+fn bridged(settings: &SettingsFile) -> Settings {
+    bridge_to_old(settings)
 }
 
 fn resolved_config_path(path: Option<&Path>) -> PathBuf {
     active_settings_path(path)
 }
 
-fn apply_serve_overrides(base: &Settings, args: &ServeArgs, dry_run_mode: bool) -> Settings {
+fn apply_serve_overrides(
+    base: &SettingsFile,
+    args: &ServeArgs,
+    dry_run_mode: bool,
+) -> SettingsFile {
+    use fabro_types::settings::v2::cli::CliLayer;
+    use fabro_types::settings::v2::interp::InterpString;
+    use fabro_types::settings::v2::run::{
+        RunExecutionLayer, RunLayer, RunMode, RunModelLayer, RunSandboxLayer,
+    };
+    use fabro_types::settings::v2::server::{ServerLayer, ServerWebLayer};
     let mut settings = base.clone();
     if dry_run_mode {
-        settings.dry_run = Some(true);
+        let run = settings.run.get_or_insert_with(RunLayer::default);
+        let execution = run.execution.get_or_insert_with(RunExecutionLayer::default);
+        execution.mode = Some(RunMode::DryRun);
     }
     if args.web || args.no_web {
-        settings.web.get_or_insert_default().enabled = args.web;
+        let server = settings.server.get_or_insert_with(ServerLayer::default);
+        let web = server.web.get_or_insert_with(ServerWebLayer::default);
+        web.enabled = Some(args.web);
     }
     if let Some(ref model) = args.model {
-        settings.llm.get_or_insert_default().model = Some(model.clone());
+        let run = settings.run.get_or_insert_with(RunLayer::default);
+        let model_layer = run.model.get_or_insert_with(RunModelLayer::default);
+        model_layer.name = Some(InterpString::parse(model));
     }
     if let Some(ref provider) = args.provider {
-        settings.llm.get_or_insert_default().provider = Some(provider.clone());
+        let run = settings.run.get_or_insert_with(RunLayer::default);
+        let model_layer = run.model.get_or_insert_with(RunModelLayer::default);
+        model_layer.provider = Some(InterpString::parse(provider));
     }
     if let Some(sandbox) = args.sandbox {
-        settings.sandbox.get_or_insert_default().provider = Some(sandbox.to_string());
+        let run = settings.run.get_or_insert_with(RunLayer::default);
+        let sandbox_layer = run.sandbox.get_or_insert_with(RunSandboxLayer::default);
+        sandbox_layer.provider = Some(sandbox.to_string());
     }
+    // CliLayer is namespaced; nothing to populate from flag overrides today.
+    let _ = CliLayer::default();
     settings
 }
 
 fn apply_runtime_settings(
-    base: &Settings,
+    base: &SettingsFile,
     args: &ServeArgs,
     dry_run_mode: bool,
     data_dir: &Path,
-) -> Settings {
+) -> SettingsFile {
+    use fabro_types::settings::v2::interp::InterpString;
+    use fabro_types::settings::v2::server::{ServerLayer, ServerStorageLayer};
     let mut settings = apply_serve_overrides(base, args, dry_run_mode);
-    settings.storage_dir = Some(data_dir.to_path_buf());
+    let server = settings.server.get_or_insert_with(ServerLayer::default);
+    let storage = server
+        .storage
+        .get_or_insert_with(ServerStorageLayer::default);
+    storage.root = Some(InterpString::parse(&data_dir.to_string_lossy()));
     settings
 }
 
@@ -143,10 +180,14 @@ fn build_object_store(store_path: &Path) -> anyhow::Result<Arc<dyn ObjectStore>>
 }
 
 fn build_artifact_object_store(
-    settings: &Settings,
+    settings: &SettingsFile,
     storage: &Storage,
 ) -> anyhow::Result<(Arc<dyn ObjectStore>, String)> {
-    let artifact_settings = settings.artifact_storage.clone().unwrap_or_default();
+    let bridged_settings = bridged(settings);
+    let artifact_settings = bridged_settings
+        .artifact_storage
+        .clone()
+        .unwrap_or_default();
 
     if use_in_memory_store() {
         return Ok((Arc::new(InMemory::new()), artifact_settings.prefix));
@@ -200,7 +241,8 @@ where
     let config_path = args.config.clone();
     let disk_settings = load_settings(config_path.as_deref())?;
     let active_config_path = resolved_config_path(config_path.as_deref());
-    let data_dir = storage_dir_override.unwrap_or_else(|| resolve_storage_dir(&disk_settings));
+    let data_dir =
+        storage_dir_override.unwrap_or_else(|| resolve_storage_dir(&bridged(&disk_settings)));
     let storage = Storage::new(&data_dir);
     let secret_store_path = storage.secrets_path();
     let secret_store = SecretStore::load(secret_store_path.clone())?;
@@ -241,7 +283,8 @@ where
     let shared_settings = Arc::new(RwLock::new(effective_settings));
     std::fs::create_dir_all(&data_dir)?;
     let (auth_mode, client_auth, max_concurrent_runs) = {
-        let cfg = shared_settings.read().expect("config lock poisoned");
+        let cfg_file = shared_settings.read().expect("config lock poisoned");
+        let cfg = bridged(&cfg_file);
         let api = cfg.api.clone().unwrap_or_default();
         let allowed_usernames = cfg
             .web
@@ -261,12 +304,13 @@ where
             .unwrap_or(5);
         (auth_mode, client_auth, max_concurrent_runs)
     };
-    let web_enabled = shared_settings
-        .read()
-        .expect("config lock poisoned")
-        .web
-        .as_ref()
-        .is_none_or(|web| web.enabled);
+    let web_enabled = {
+        let cfg_file = shared_settings.read().expect("config lock poisoned");
+        cfg_file
+            .server_web()
+            .and_then(|w| w.enabled)
+            .unwrap_or(true)
+    };
 
     let store_path = storage.store_dir();
     let object_store = build_object_store(&store_path)?;
@@ -308,7 +352,8 @@ where
 
     // Optionally start webhook listener
     let webhook_app_id = {
-        let cfg = shared_settings.read().expect("config lock poisoned");
+        let cfg_file = shared_settings.read().expect("config lock poisoned");
+        let cfg = bridged(&cfg_file);
         cfg.git
             .as_ref()
             .and_then(|g| g.webhooks.as_ref().and(g.app_id.as_ref()))
@@ -401,12 +446,11 @@ where
     });
 
     // Branch: TLS, plain TCP, or Unix socket
-    let tls_settings = shared_settings
-        .read()
-        .expect("config lock poisoned")
-        .api
-        .as_ref()
-        .and_then(|a| a.tls.clone());
+    let tls_settings = {
+        let cfg_file = shared_settings.read().expect("config lock poisoned");
+        let cfg = bridged(&cfg_file);
+        cfg.api.as_ref().and_then(|a| a.tls.clone())
+    };
 
     let bound_listener = bind_listener(&bind_request).await?;
     let bind_addr = bound_listener.bind.clone();
@@ -638,11 +682,18 @@ mod tests {
         build_object_store_with_preference, server_bind_title, server_title,
     };
     use crate::bind::Bind;
-    use fabro_types::Settings;
+    use fabro_config::ConfigLayer;
+    use fabro_types::settings::v2::SettingsFile;
+
+    fn parse_settings(source: &str) -> SettingsFile {
+        ConfigLayer::parse(source)
+            .expect("v2 fixture should parse")
+            .into()
+    }
 
     #[test]
     fn apply_runtime_settings_preserves_storage_dir() {
-        let base = Settings::default();
+        let base = SettingsFile::default();
         let args = ServeArgs {
             bind: None,
             model: None,
@@ -659,20 +710,21 @@ mod tests {
             apply_runtime_settings(&base, &args, false, &PathBuf::from("/srv/fabro-storage"));
 
         assert_eq!(
-            resolved.storage_dir,
-            Some(PathBuf::from("/srv/fabro-storage"))
+            resolved.server_storage_root_str().as_deref(),
+            Some("/srv/fabro-storage")
         );
     }
 
     #[test]
     fn apply_runtime_settings_enables_web_from_cli_flag() {
-        let base: Settings = toml::from_str(
+        let base = parse_settings(
             r#"
-[web]
+_version = 1
+
+[server.web]
 enabled = false
 "#,
-        )
-        .unwrap();
+        );
         let args = ServeArgs {
             bind: None,
             model: None,
@@ -687,12 +739,12 @@ enabled = false
 
         let resolved = apply_runtime_settings(&base, &args, false, &PathBuf::from("/srv/fabro"));
 
-        assert!(resolved.web.expect("web settings should exist").enabled);
+        assert_eq!(resolved.server_web().and_then(|w| w.enabled), Some(true));
     }
 
     #[test]
     fn apply_runtime_settings_disables_web_from_cli_flag() {
-        let base = Settings::default();
+        let base = SettingsFile::default();
         let args = ServeArgs {
             bind: None,
             model: None,
@@ -707,7 +759,7 @@ enabled = false
 
         let resolved = apply_runtime_settings(&base, &args, false, &PathBuf::from("/srv/fabro"));
 
-        assert!(!resolved.web.expect("web settings should exist").enabled);
+        assert_eq!(resolved.server_web().and_then(|w| w.enabled), Some(false));
     }
 
     #[test]

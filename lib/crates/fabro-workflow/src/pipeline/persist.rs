@@ -54,7 +54,10 @@ mod tests {
 
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
     use fabro_store::{Database, RunDatabase};
-    use fabro_types::{Settings, fixtures};
+    use fabro_types::fixtures;
+    use fabro_types::settings::v2::SettingsFile;
+    use fabro_types::settings::v2::cli::{CliLayer, CliOutputLayer, OutputVerbosity};
+    use fabro_types::settings::v2::run::{RunExecutionLayer, RunLayer, RunMode};
     use object_store::memory::InMemory;
     use std::sync::Arc;
     use std::time::Duration;
@@ -118,10 +121,22 @@ mod tests {
     fn sample_record(graph: Graph) -> RunRecord {
         RunRecord {
             run_id: fixtures::RUN_1,
-            settings: Settings {
-                dry_run: Some(true),
-                verbose: Some(true),
-                ..Default::default()
+            settings: SettingsFile {
+                run: Some(RunLayer {
+                    execution: Some(RunExecutionLayer {
+                        mode: Some(RunMode::DryRun),
+                        ..RunExecutionLayer::default()
+                    }),
+                    ..RunLayer::default()
+                }),
+                cli: Some(CliLayer {
+                    output: Some(CliOutputLayer {
+                        verbosity: Some(OutputVerbosity::Verbose),
+                        ..CliOutputLayer::default()
+                    }),
+                    ..CliLayer::default()
+                }),
+                ..SettingsFile::default()
             },
             graph,
             workflow_slug: Some("ship".to_string()),

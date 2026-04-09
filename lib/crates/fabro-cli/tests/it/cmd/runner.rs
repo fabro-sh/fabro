@@ -213,7 +213,7 @@ digraph GitHubApp {
     fabro_json_snapshot!(
         context,
         serde_json::json!({
-            "app_id": run.settings.git.clone().and_then(|git| git.app_id),
+            "app_id": run.settings.github_app_id_str(),
         }),
         @r#"
         {

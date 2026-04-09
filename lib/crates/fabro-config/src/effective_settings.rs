@@ -9,6 +9,7 @@
 use anyhow::{Result, anyhow};
 use fabro_types::settings::v2::SettingsFile;
 use fabro_types::settings::v2::run::{RunExecutionLayer, RunLayer};
+use fabro_types::settings::v2::server::ServerLayer;
 
 use crate::ConfigLayer;
 use crate::merge::combine_files;
@@ -94,9 +95,7 @@ pub fn resolve_settings(
                 .and_then(|s| s.storage.as_ref())
                 .cloned()
             {
-                let server = settings
-                    .server
-                    .get_or_insert_with(fabro_types::settings::v2::server::ServerLayer::default);
+                let server = settings.server.get_or_insert_with(ServerLayer::default);
                 server.storage = Some(server_root);
             }
             Ok(settings)
@@ -144,9 +143,7 @@ fn apply_server_defaults(mut settings: SettingsFile, server: &SettingsFile) -> S
 /// left alone.
 fn apply_local_daemon_overrides(mut settings: SettingsFile, server: &SettingsFile) -> SettingsFile {
     if let Some(server_layer) = server.server.clone() {
-        let client = settings
-            .server
-            .get_or_insert_with(fabro_types::settings::v2::server::ServerLayer::default);
+        let client = settings.server.get_or_insert_with(ServerLayer::default);
         if let Some(storage) = server_layer.storage {
             client.storage = Some(storage);
         }

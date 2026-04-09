@@ -184,7 +184,8 @@ mod tests {
 
     use fabro_graphviz::graph::Graph;
     use fabro_store::Database;
-    use fabro_types::{RunId, Settings, fixtures};
+    use fabro_types::settings::v2::SettingsFile;
+    use fabro_types::{RunId, fixtures};
     use object_store::memory::InMemory;
 
     use super::*;
@@ -233,7 +234,7 @@ mod tests {
         let run_store = inner;
         let run_record = RunRecord {
             run_id: test_run_id(),
-            settings: Settings::default(),
+            settings: SettingsFile::default(),
             graph: Graph::new("test"),
             workflow_slug: None,
             working_directory: run_dir.to_path_buf(),
@@ -304,7 +305,7 @@ mod tests {
 
     fn test_run_options(run_dir: &std::path::Path) -> RunOptions {
         RunOptions {
-            settings: Settings::default(),
+            settings: SettingsFile::default(),
             run_dir: run_dir.to_path_buf(),
             cancel_token: None,
             run_id: test_run_id(),
