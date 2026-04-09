@@ -1248,12 +1248,17 @@ pub fn event_name(event: &Event) -> &'static str {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct StoredEventFields {
     session_id: Option<String>,
     parent_session_id: Option<String>,
     node_id: Option<String>,
     node_label: Option<String>,
+    stage_id: Option<String>,
+    parallel_group_id: Option<String>,
+    parallel_branch_id: Option<String>,
+    tool_call_id: Option<String>,
+    actor: Option<fabro_types::ActorRef>,
 }
 
 fn default_node_label(node_id: Option<&String>, node_label: Option<String>) -> Option<String> {
@@ -1285,10 +1290,9 @@ fn stored_event_fields(event: &Event) -> StoredEventFields {
             let node_id = Some(node_id.clone());
             let node_label = default_node_label(node_id.as_ref(), Some(name.clone()));
             StoredEventFields {
-                session_id: None,
-                parent_session_id: None,
                 node_id,
                 node_label,
+                ..StoredEventFields::default()
             }
         }
         Event::CheckpointCompleted { node_id, .. }
@@ -1306,10 +1310,9 @@ fn stored_event_fields(event: &Event) -> StoredEventFields {
             let node_id = Some(node_id.clone());
             let node_label = default_node_label(node_id.as_ref(), None);
             StoredEventFields {
-                session_id: None,
-                parent_session_id: None,
                 node_id,
                 node_label,
+                ..StoredEventFields::default()
             }
         }
         Event::Agent {
@@ -1325,15 +1328,15 @@ fn stored_event_fields(event: &Event) -> StoredEventFields {
                 parent_session_id: parent_session_id.clone(),
                 node_id,
                 node_label,
+                ..StoredEventFields::default()
             }
         }
         Event::GitCommit { node_id, .. } => {
             let node_label = default_node_label(node_id.as_ref(), None);
             StoredEventFields {
-                session_id: None,
-                parent_session_id: None,
                 node_id: node_id.clone(),
                 node_label,
+                ..StoredEventFields::default()
             }
         }
         Event::ParallelBranchStarted { branch, .. }
@@ -1341,10 +1344,9 @@ fn stored_event_fields(event: &Event) -> StoredEventFields {
             let node_id = Some(branch.clone());
             let node_label = default_node_label(node_id.as_ref(), None);
             StoredEventFields {
-                session_id: None,
-                parent_session_id: None,
                 node_id,
                 node_label,
+                ..StoredEventFields::default()
             }
         }
         Event::Prompt { stage, .. }
@@ -1355,28 +1357,21 @@ fn stored_event_fields(event: &Event) -> StoredEventFields {
             let node_id = Some(stage.clone());
             let node_label = default_node_label(node_id.as_ref(), None);
             StoredEventFields {
-                session_id: None,
-                parent_session_id: None,
                 node_id,
                 node_label,
+                ..StoredEventFields::default()
             }
         }
         Event::StallWatchdogTimeout { node, .. } => {
             let node_id = Some(node.clone());
             let node_label = default_node_label(node_id.as_ref(), None);
             StoredEventFields {
-                session_id: None,
-                parent_session_id: None,
                 node_id,
                 node_label,
+                ..StoredEventFields::default()
             }
         }
-        _ => StoredEventFields {
-            session_id: None,
-            parent_session_id: None,
-            node_id: None,
-            node_label: None,
-        },
+        _ => StoredEventFields::default(),
     }
 }
 
@@ -2394,8 +2389,13 @@ pub fn to_run_event_at(run_id: &RunId, event: &Event, ts: chrono::DateTime<Utc>)
         run_id: *run_id,
         node_id: fields.node_id,
         node_label: fields.node_label,
+        stage_id: fields.stage_id,
+        parallel_group_id: fields.parallel_group_id,
+        parallel_branch_id: fields.parallel_branch_id,
         session_id: fields.session_id,
         parent_session_id: fields.parent_session_id,
+        tool_call_id: fields.tool_call_id,
+        actor: fields.actor,
         body,
     }
 }

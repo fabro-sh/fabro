@@ -611,8 +611,13 @@ mod tests {
             run_id: fixtures::RUN_1,
             node_id: node_id.map(ToOwned::to_owned),
             node_label: None,
+            stage_id: None,
+            parallel_group_id: None,
+            parallel_branch_id: None,
             session_id: None,
             parent_session_id: None,
+            tool_call_id: None,
+            actor: None,
             body,
         };
 
