@@ -66,17 +66,18 @@ pub fn resolve_settings(
             let server_settings = server_settings.ok_or_else(|| {
                 anyhow!("server settings are required for server-targeted settings resolution")
             })?;
+            // Owner-specific domains (cli, server) may only come from the
+            // local ~/.fabro/settings.toml, never from fabro.toml or
+            // workflow.toml. The user layer keeps its cli/server fields.
             strip_owner_domains(workflow.as_v2_mut());
             strip_owner_domains(project.as_v2_mut());
-            let mut stripped_user = user;
-            strip_owner_domains(stripped_user.as_v2_mut());
 
             let server_defaults = server_defaults_layer(server_settings);
 
             let mut settings = args
                 .combine(workflow)
                 .combine(project)
-                .combine(stripped_user)
+                .combine(user)
                 .resolve();
 
             match mode {
