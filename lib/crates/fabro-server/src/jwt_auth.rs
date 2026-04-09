@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::FromRequestParts;
@@ -5,13 +6,43 @@ use axum::http::request::Parts;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use rustls_pki_types::CertificateDer;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tracing::warn;
 
 use crate::error::ApiError;
 use crate::web_auth::SessionCookie;
 use fabro_types::RunAuthMethod;
-use fabro_types::settings::server::ApiSettings;
+
+/// Authentication strategy flag consumed by `resolve_auth_mode_with_lookup`.
+///
+/// Projected out of the v2 `server.auth.api.{jwt,mtls}` subtree by
+/// `serve::build_legacy_api_settings`. Stage 6.6g will delete this shim
+/// and walk the v2 tree directly in the auth resolver.
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApiAuthStrategy {
+    Jwt,
+    Mtls,
+}
+
+/// mTLS material loaded from `[server.listen.tls]`. Consumed by the
+/// `tls.rs` rustls config builder.
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct TlsSettings {
+    pub cert: PathBuf,
+    pub key: PathBuf,
+    pub ca: PathBuf,
+}
+
+/// Shim `ApiSettings` that `serve::build_legacy_api_settings` projects out
+/// of the v2 tree so the pre-v2 [`resolve_auth_mode_with_lookup`] signature
+/// keeps working until Stage 6.6g rewrites it.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Serialize)]
+pub struct ApiSettings {
+    #[serde(default)]
+    pub authentication_strategies: Vec<ApiAuthStrategy>,
+    pub tls: Option<TlsSettings>,
+}
 
 /// JWT claims for service-to-service authentication.
 #[derive(Debug, Deserialize)]
@@ -86,8 +117,6 @@ pub fn resolve_auth_mode_with_lookup<F>(
 where
     F: Fn(&str) -> Option<String>,
 {
-    use fabro_types::settings::server::ApiAuthStrategy;
-
     if api_settings.authentication_strategies.is_empty()
         && std::env::var("FABRO_LOCAL_NO_AUTH").ok().as_deref() == Some("1")
     {

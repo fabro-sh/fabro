@@ -8,9 +8,7 @@ use rustls_pki_types::{CertificateDer, PrivateKeyDer};
 use tokio::net::TcpListener;
 use tracing::error;
 
-use fabro_types::settings::server::TlsSettings;
-
-use crate::jwt_auth::PeerCertificates;
+use crate::jwt_auth::{PeerCertificates, TlsSettings};
 
 /// How client certificates should be verified.
 #[derive(Clone, Copy)]

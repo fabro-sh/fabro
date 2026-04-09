@@ -1,40 +1,48 @@
-//! v2 namespaced config schema plus transitional runtime shapes.
+//! Namespaced settings schema.
 //!
-//! The authoritative config schema lives in [`v2`] — it is the namespaced
-//! parse tree that `_version = 1` TOML files decode into. Value-language
-//! helpers, the merge matrix, and strict unknown-key validation all live
-//! there.
+//! Top-level schema is strictly namespaced with `_version`, `[project]`,
+//! `[workflow]`, `[run]`, `[cli]`, `[server]`, and `[features]`.
+//! Value-language helpers live alongside the tree: durations, byte sizes,
+//! model references, env interpolation, and splice-capable arrays.
 //!
-//! The submodules `hook`, `mcp`, `project`, `run`, `sandbox`, `server`,
-//! and `user` still hold **runtime shapes** that downstream crates
-//! (fabro-workflow, fabro-sandbox, fabro-mcp, fabro-hooks) consume at
-//! execution time. Stage 6.1 deleted the flat `Settings` parse path;
-//! Stage 6.2 deleted the `bridge_to_old` catch-all converter; Stage 6.3b
-//! deleted the legacy flat `Settings` struct itself, its inherent
-//! helpers, and its `Combine`-driven layering. Narrow v2→runtime helpers
-//! live in [`v2::to_runtime`] and build these runtime shapes from
-//! specific v2 subtrees on demand.
-//!
-//! A follow-up pass will either promote these runtime shapes into their
-//! owning consumer crates or replace their call sites with v2-native
-//! accessors, at which point this module goes away.
+//! Stage 6.5b promoted these modules up out of the transitional
+//! `settings/v2/` subdirectory, so the `::v2::` path prefix no longer
+//! exists.
 
+pub mod accessors;
+pub mod cli;
+pub mod duration;
+pub mod features;
+pub mod interp;
+pub mod model_ref;
+pub mod project;
+pub mod run;
 pub mod server;
-pub mod v2;
+pub mod size;
+pub mod splice_array;
+pub mod tree;
+pub mod version;
+pub mod workflow;
 
-pub use server::{ApiAuthStrategy, ApiSettings, TlsSettings};
-// v2 top-level re-exports. Stage 6.5 of the settings TOML redesign
-// promoted the v2 namespaced parse tree to be the primary API surface;
-// consumers can now write `fabro_types::settings::SettingsFile` /
-// `fabro_types::settings::InterpString` / `fabro_types::settings::Duration`
-// without the `::v2::` prefix. The `v2` module itself stays until the
-// remaining legacy files under `settings/{project,run,server,...}.rs`
-// are deleted in a follow-up pass, because the v2 submodules and the
-// legacy submodules share those file names.
-pub use v2::{
-    CURRENT_VERSION, CliLayer, Duration, FeaturesLayer, InterpString, ModelRef, ParseDurationError,
-    ParseError, ParseModelRefError, ParseSizeError, ProjectLayer, Provenance, ResolveEnvError,
-    Resolved, ResolvedModelRef, RunLayer, SchemaVersion, ServerLayer, SettingsFile, Size,
-    SpliceArray, SpliceArrayError, VersionError, WorkflowLayer, parse_settings_file,
-    validate_version,
+pub use cli::CliLayer;
+pub use duration::{Duration, ParseDurationError};
+pub use features::FeaturesLayer;
+pub use interp::{InterpString, Provenance, ResolveEnvError, Resolved};
+pub use model_ref::{
+    AmbiguousModelRef, ModelRef, ModelRegistry, ParseModelRefError, ResolvedModelRef,
 };
+pub use project::ProjectLayer;
+pub use run::RunLayer;
+pub use server::ServerLayer;
+pub use size::{ParseSizeError, Size};
+pub use splice_array::{SPLICE_MARKER, SpliceArray, SpliceArrayError};
+pub use tree::{ParseError, SettingsFile, parse_settings_file};
+pub use version::{CURRENT_VERSION, SchemaVersion, VersionError, validate_version};
+pub use workflow::WorkflowLayer;
+
+/// Transitional alias for code still using `fabro_types::settings::v2::*`
+/// paths. The whole `v2` namespace is scheduled for removal once the
+/// workspace-wide sweep (Stage 6.5b follow-up) is done.
+pub mod v2 {
+    pub use super::*;
+}

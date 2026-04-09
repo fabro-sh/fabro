@@ -2,10 +2,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
+use crate::jwt_auth::ApiSettings;
 use fabro_config::Storage;
 use fabro_config::resolve_storage_dir;
 use fabro_config::user::{active_settings_path, load_settings_config};
-use fabro_types::settings::server::ApiSettings;
 use fabro_util::terminal::Styles;
 use object_store::ObjectStore;
 use object_store::aws::AmazonS3Builder;
@@ -90,7 +90,7 @@ fn load_settings(path: Option<&Path>) -> anyhow::Result<SettingsFile> {
 /// v2 tree. Stage 6.6 replaces this with a v2-aware auth resolver and drops
 /// the legacy `ApiSettings` type entirely.
 fn build_legacy_api_settings(file: &SettingsFile) -> ApiSettings {
-    use fabro_types::settings::server::{ApiAuthStrategy, TlsSettings};
+    use crate::jwt_auth::{ApiAuthStrategy, TlsSettings};
     use fabro_types::settings::v2::interp::InterpString;
     use fabro_types::settings::v2::server::ServerListenLayer;
 
