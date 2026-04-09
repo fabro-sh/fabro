@@ -562,10 +562,10 @@ mod tests {
         std::fs::create_dir_all(workflow_dir.join("prompts")).unwrap();
         std::fs::create_dir_all(workflow_dir.join("imports")).unwrap();
         std::fs::create_dir_all(&child_dir).unwrap();
-        std::fs::write(project.join("fabro.toml"), "version = 1\n").unwrap();
+        std::fs::write(project.join("fabro.toml"), "_version = 1\n").unwrap();
         std::fs::write(
             workflow_dir.join("workflow.toml"),
-            "version = 1\ngraph = \"workflow.fabro\"\n",
+            "_version = 1\n\n[workflow]\ngraph = \"workflow.fabro\"\n",
         )
         .unwrap();
         std::fs::write(

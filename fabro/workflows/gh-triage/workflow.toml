@@ -1,4 +1,7 @@
-version = 1
+_version = 1
 
-[github]
-permissions = { pull_requests = "read", issues = "read" }
+[server.integrations.github]
+
+[server.integrations.github.permissions]
+pull_requests = "read"
+issues = "read"

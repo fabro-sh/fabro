@@ -1,29 +1,26 @@
-version = 1
+_version = 1
 
-[fabro]
-root = "fabro/"
+[project]
+directory = "fabro/"
 
-[features]
-retros = false
-
-[pull_request]
+[run.pull_request]
 enabled = true
 draft = false
 
-[sandbox]
+[run.sandbox]
 provider = "daytona"
 
-[sandbox.daytona]
+[run.sandbox.daytona]
 auto_stop_interval = 30
 
-[sandbox.daytona.labels]
+[run.sandbox.daytona.labels]
 repo = "fabro-sh/fabro"
 
-[sandbox.daytona.snapshot]
+[run.sandbox.daytona.snapshot]
 name = "fabro-v6"
 cpu = 4
-memory = 8
-disk = 20
+memory = "8GB"
+disk = "20GB"
 dockerfile = """
 FROM ubuntu:24.04
 
@@ -52,9 +49,10 @@ ENV PATH="/root/.bun/bin:${PATH}"
 WORKDIR /root
 """
 
-[[hooks]]
+[[run.hooks]]
+id = "cargo-fmt"
 name = "cargo-fmt"
 event = "post_tool_use"
 matcher = "write_file|edit_file|apply_patch"
-command = "cargo fmt"
+script = "cargo fmt"
 blocking = true

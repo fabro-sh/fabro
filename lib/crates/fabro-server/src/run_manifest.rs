@@ -871,10 +871,10 @@ app_id = "snapshotted-app-id"
             Some(types::ManifestWorkflowConfig {
                 path: "workflow.toml".to_string(),
                 source: r#"
-version = 1
+_version = 1
 
-[setup]
-commands = ["workflow-setup"]
+[[run.prepare.steps]]
+script = "workflow-setup"
 "#
                 .to_string(),
             });
@@ -882,10 +882,12 @@ commands = ["workflow-setup"]
             path: Some("/tmp/home/.fabro/settings.toml".to_string()),
             source: Some(
                 r#"
-[setup]
-commands = ["cli-setup"]
+_version = 1
 
-[git]
+[[run.prepare.steps]]
+script = "cli-setup"
+
+[server.integrations.github]
 app_id = "snapshotted-app-id"
 "#
                 .to_string(),
@@ -895,13 +897,15 @@ app_id = "snapshotted-app-id"
 
         let prepared = prepare_manifest_with_mode(&server_settings, &manifest, true).unwrap();
 
+        // v2 merge matrix: run.prepare.steps replaces the whole list across
+        // layers, so the higher-precedence workflow layer wins over cli.
         assert_eq!(
             prepared
                 .settings
                 .setup
                 .as_ref()
                 .map(|setup| setup.commands.clone()),
-            Some(vec!["workflow-setup".to_string(), "cli-setup".to_string(),])
+            Some(vec!["workflow-setup".to_string()])
         );
         assert_eq!(prepared.settings.app_id(), Some("snapshotted-app-id"));
         assert_eq!(

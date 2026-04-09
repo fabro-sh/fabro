@@ -82,37 +82,44 @@ fn setup_settings_fixture(context: &fabro_test::TestContext) -> tempfile::TempDi
     context.write_home(
         ".fabro/settings.toml",
         r#"
-verbose = true
+_version = 1
 
-[llm]
-model = "cli-model"
+[cli.output]
+verbosity = "verbose"
+
+[run.model]
+name = "cli-model"
 provider = "openai"
 
-[vars]
+[run.inputs]
 cli_only = "1"
 shared = "cli"
 
-[checkpoint]
+[run.checkpoint]
 exclude_globs = ["cli-only", "shared"]
 
-[[hooks]]
+[[run.hooks]]
+id = "shared"
 name = "shared"
 event = "run_start"
-command = "echo cli"
+script = "echo cli"
 
-[mcp_servers.shared]
+[run.agent.mcps.shared]
 type = "stdio"
 command = ["echo", "cli"]
 
-[sandbox]
+[run.sandbox]
 provider = "daytona"
 
-[sandbox.daytona]
-labels = { cli_only = "1", shared = "cli" }
-
-[sandbox.env]
+[run.sandbox.env]
 CLI_ONLY = "1"
 SHARED = "cli"
+
+[run.sandbox.daytona]
+
+[run.sandbox.daytona.labels]
+cli_only = "1"
+shared = "cli"
 "#,
     );
 
@@ -120,22 +127,23 @@ SHARED = "cli"
     std::fs::write(
         project.path().join("fabro.toml"),
         r#"
-version = 1
+_version = 1
 
-[fabro]
-root = "fabro"
+[project]
+directory = "fabro"
 
-[llm]
-model = "project-model"
+[run.model]
+name = "project-model"
 
-[vars]
+[run.inputs]
 project_only = "1"
 shared = "project"
 
-[[hooks]]
+[[run.hooks]]
+id = "project"
 name = "project"
 event = "run_complete"
-command = "echo project"
+script = "echo project"
 "#,
     )
     .unwrap();
@@ -145,44 +153,51 @@ command = "echo project"
     std::fs::write(
         workflow_dir.join("workflow.toml"),
         r#"
-version = 1
+_version = 1
+
+[run]
 goal = "demo goal"
 
-[llm]
-model = "run-model"
+[run.model]
+name = "run-model"
 provider = "anthropic"
 
-[vars]
+[run.inputs]
 run_only = "1"
 shared = "run"
 
-[checkpoint]
+[run.checkpoint]
 exclude_globs = ["run-only", "shared"]
 
-[[hooks]]
+[[run.hooks]]
+id = "shared"
 name = "shared"
 event = "run_start"
-command = "echo run"
+script = "echo run"
 
-[[hooks]]
+[[run.hooks]]
+id = "run-only"
 name = "run-only"
 event = "run_complete"
-command = "echo run-only"
+script = "echo run-only"
 
-[mcp_servers.shared]
+[run.agent.mcps.shared]
 type = "stdio"
 command = ["echo", "run"]
 
-[mcp_servers.run_only]
+[run.agent.mcps.run_only]
 type = "stdio"
 command = ["echo", "run-only"]
 
-[sandbox.daytona]
-labels = { run_only = "1", shared = "run" }
-
-[sandbox.env]
+[run.sandbox.env]
 RUN_ONLY = "1"
 SHARED = "run"
+
+[run.sandbox.daytona]
+
+[run.sandbox.daytona.labels]
+run_only = "1"
+shared = "run"
 "#,
     )
     .unwrap();
@@ -208,11 +223,16 @@ fn setup_external_workflow_fixture(
         ".fabro/settings.toml",
         format!(
             r#"
-storage_dir = "{}"
-auto_approve = true
+_version = 1
 
-[setup]
-commands = ["cli-setup"]
+[server.storage]
+root = "{}"
+
+[run.execution]
+approval = "auto"
+
+[[run.prepare.steps]]
+script = "cli-setup"
 "#,
             storage_dir.display()
         ),
@@ -222,12 +242,12 @@ commands = ["cli-setup"]
     std::fs::write(
         project.path().join("fabro.toml"),
         r#"
-version = 1
+_version = 1
 
-[setup]
-commands = ["project-setup"]
+[[run.prepare.steps]]
+script = "project-setup"
 
-[sandbox]
+[run.sandbox]
 preserve = true
 "#,
     )
@@ -248,15 +268,19 @@ digraph Test {
     std::fs::write(
         project.path().join("workflow.toml"),
         r#"
-version = 1
-goal = "Ship it"
+_version = 1
+
+[workflow]
 graph = "workflow.fabro"
 
-[llm]
-model = "claude-sonnet-4-6"
+[run]
+goal = "Ship it"
 
-[setup]
-commands = ["workflow-setup"]
+[run.model]
+name = "claude-sonnet-4-6"
+
+[[run.prepare.steps]]
+script = "workflow-setup"
 "#,
     )
     .unwrap();

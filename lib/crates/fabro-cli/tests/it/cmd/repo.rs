@@ -2,9 +2,9 @@ use fabro_test::{fabro_snapshot, test_context};
 
 fn init_fabro_project(context: &fabro_test::TestContext) {
     context
-        .write_temp("fabro.toml", "version = 1\n")
+        .write_temp("fabro.toml", "_version = 1\n")
         .write_temp("fabro/workflows/hello/workflow.fabro", "digraph {}")
-        .write_temp("fabro/workflows/hello/workflow.toml", "version = 1\n");
+        .write_temp("fabro/workflows/hello/workflow.toml", "_version = 1\n");
 }
 
 #[test]

@@ -454,18 +454,22 @@ fn local_foreground_run_prints_artifact_paths_from_server_artifact_list() {
     );
     context.write_temp(
         "artifact-summary/run.toml",
-        r#"version = 1
+        r#"_version = 1
+
+[workflow]
 graph = "workflow.fabro"
+
+[run]
 goal = "Show stored artifacts"
 
-[sandbox]
+[run.sandbox]
 provider = "local"
 preserve = true
 
-[sandbox.local]
+[run.sandbox.local]
 worktree_mode = "never"
 
-[artifacts]
+[run.artifacts]
 include = ["assets/**"]
 "#,
     );
