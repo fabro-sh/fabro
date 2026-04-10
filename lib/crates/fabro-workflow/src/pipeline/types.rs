@@ -12,10 +12,10 @@ use fabro_model::FallbackTarget;
 use fabro_sandbox::SandboxSpec;
 use fabro_sandbox::config::WorktreeMode;
 use fabro_types::RunId;
+use fabro_types::settings::run::PullRequestSettings;
 use fabro_validate::Diagnostic;
 
 use crate::artifact_upload::ArtifactSink;
-use crate::config::PullRequestSettings;
 use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::Emitter;

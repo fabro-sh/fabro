@@ -5,7 +5,6 @@ use std::sync::atomic::AtomicBool;
 
 use fabro_types::RunId;
 use fabro_types::settings::SettingsFile;
-use fabro_types::settings::run::RunPullRequestLayer;
 
 use crate::git::{GitAuthor, git_author_from_settings};
 
@@ -43,28 +42,25 @@ pub struct RunOptions {
 
 impl RunOptions {
     pub fn dry_run_enabled(&self) -> bool {
-        self.settings.dry_run_enabled()
+        fabro_config::resolve_run_from_file(&self.settings)
+            .map(|settings| settings.execution.mode == fabro_types::settings::run::RunMode::DryRun)
+            .unwrap_or(false)
     }
 
-    pub fn checkpoint_exclude_globs(&self) -> &[String] {
-        self.settings
-            .run_checkpoint()
-            .map_or(&[], |cp| cp.exclude_globs.as_slice())
+    pub fn checkpoint_exclude_globs(&self) -> Vec<String> {
+        fabro_config::resolve_run_from_file(&self.settings)
+            .map(|settings| settings.checkpoint.exclude_globs)
+            .unwrap_or_default()
     }
 
     pub fn git_author(&self) -> GitAuthor {
         git_author_from_settings(&self.settings)
     }
 
-    /// PR config, if present in the v2 run layer.
-    pub fn pull_request(&self) -> Option<&RunPullRequestLayer> {
-        self.settings.run_pull_request()
-    }
-
-    pub fn artifact_globs(&self) -> &[String] {
-        self.settings
-            .run_artifacts()
-            .map_or(&[], |a| a.include.as_slice())
+    pub fn artifact_globs(&self) -> Vec<String> {
+        fabro_config::resolve_run_from_file(&self.settings)
+            .map(|settings| settings.artifacts.include)
+            .unwrap_or_default()
     }
 }
 

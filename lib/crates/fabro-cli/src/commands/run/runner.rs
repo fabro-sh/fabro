@@ -421,13 +421,13 @@ fn update_worker_title_from_event(event: &RunEvent) {
 fn maybe_build_github_app_credentials(
     settings: &SettingsFile,
 ) -> Result<Option<fabro_github::GitHubAppCredentials>> {
-    let needs_github_app = settings
-        .run_sandbox()
-        .and_then(|sandbox| sandbox.provider.as_deref())
-        .is_some_and(|provider| provider == "daytona")
-        || settings
-            .run_pull_request()
-            .is_some_and(|pr| pr.enabled.unwrap_or(false))
+    let resolved_run = fabro_config::resolve_run_from_file(settings).ok();
+    let needs_github_app = resolved_run
+        .as_ref()
+        .is_some_and(|settings| settings.sandbox.provider == "daytona")
+        || resolved_run
+            .as_ref()
+            .is_some_and(|settings| settings.pull_request.is_some())
         || settings.github_permissions().is_some();
 
     if needs_github_app {

@@ -5,19 +5,19 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use fabro_config::project as project_config;
-use fabro_hooks::config::bridge_hook;
 use fabro_interview::{AutoApproveInterviewer, Interviewer};
-use fabro_mcp::config::bridge_mcp_entry;
 use fabro_model::{Catalog, FallbackTarget, Provider};
-use fabro_sandbox::config::{
-    self as sandbox_config, WorktreeMode, bridge_sandbox, bridge_worktree_mode,
-};
+use fabro_sandbox::config::{self as sandbox_config, WorktreeMode, bridge_worktree_mode};
 use fabro_sandbox::{SandboxProvider, SandboxSpec};
 use fabro_types::RunId;
-use fabro_types::settings::run::ModelRefOrSplice;
-use fabro_types::settings::{InterpString, SettingsFile};
-
-use crate::config::{PullRequestSettings, bridge_pull_request};
+use fabro_types::settings::InterpString;
+use fabro_types::settings::run::{
+    DockerfileSource as ResolvedDockerfileSource, HookDefinition as ResolvedHookDefinition,
+    HookEvent as ResolvedHookEvent, HookType as ResolvedHookType,
+    McpServerSettings as ResolvedMcpServerSettings, McpTransport as ResolvedMcpTransport,
+    PullRequestSettings, RunModelSettings as ResolvedRunModelSettings,
+    RunSettings as ResolvedRunSettings, TlsMode as ResolvedTlsMode,
+};
 
 use crate::artifact_upload::ArtifactSink;
 use crate::context::Context;
@@ -298,17 +298,29 @@ impl RunSession {
             .map(|(url, branch)| (Some(url), branch))
             .unwrap_or((None, None));
 
-        let sandbox_provider = resolve_sandbox_provider(settings)?;
-        let sandbox_provider = if settings.dry_run_enabled() && !sandbox_provider.is_local() {
+        let resolved = fabro_config::resolve_run_from_file(settings)
+            .map_err(|errors| FabroError::Precondition(render_resolve_errors(&errors)))?;
+
+        let sandbox_provider = resolve_sandbox_provider(&resolved)?;
+        let sandbox_provider = if resolved.execution.mode
+            == fabro_types::settings::run::RunMode::DryRun
+            && !sandbox_provider.is_local()
+        {
             SandboxProvider::Local
         } else {
             sandbox_provider
         };
-        let model = settings
-            .run_model_name_str()
+        let model = resolved
+            .model
+            .name
+            .as_ref()
+            .map(InterpString::as_source)
             .unwrap_or_else(|| Catalog::builtin().default_from_env().id.clone());
-        let provider = settings
-            .run_model_provider_str()
+        let provider = resolved
+            .model
+            .provider
+            .as_ref()
+            .map(InterpString::as_source)
             .filter(|value| !value.is_empty());
 
         let provider_enum: Provider = provider
@@ -318,15 +330,13 @@ impl RunSession {
             .map_err(|err| FabroError::Precondition(err.clone()))?
             .unwrap_or_else(Provider::default_from_env);
 
-        let fallback_chain = resolve_fallback_chain(provider_enum, &model, settings);
-        let mcp_servers = settings
-            .run_agent_mcps()
-            .map(|mcps| {
-                mcps.iter()
-                    .map(|(name, entry)| bridge_mcp_entry(entry).into_config(name.clone()))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let fallback_chain = resolve_fallback_chain(provider_enum, &model, &resolved.model);
+        let mcp_servers = resolved
+            .agent
+            .mcps
+            .values()
+            .map(runtime_mcp_server)
+            .collect();
 
         let sandbox = match sandbox_provider {
             SandboxProvider::Local => SandboxSpec::Local {
@@ -339,22 +349,19 @@ impl RunSession {
                 },
             },
             SandboxProvider::Daytona => SandboxSpec::Daytona {
-                config: resolve_daytona_config(settings).unwrap_or_default(),
+                config: resolve_daytona_config(&resolved).unwrap_or_default(),
                 github_app: services.github_app.clone(),
                 run_id: Some(record.run_id),
                 clone_branch: detected_base_branch.or_else(|| record.base_branch.clone()),
             },
         };
 
-        let toml_env: HashMap<String, String> = settings
-            .run_sandbox()
-            .map(|sb| {
-                sb.env
-                    .iter()
-                    .map(|(k, v)| (k.clone(), resolve_interp(v)))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let toml_env: HashMap<String, String> = resolved
+            .sandbox
+            .env
+            .iter()
+            .map(|(k, v)| (k.clone(), resolve_interp(v)))
+            .collect();
         let github_permissions: Option<HashMap<String, String>> =
             settings.github_permissions().map(|perms| {
                 perms
@@ -369,22 +376,19 @@ impl RunSession {
             origin_url: origin_url.clone(),
         };
 
-        let devcontainer = settings
-            .run_sandbox()
-            .and_then(|sb| sb.devcontainer)
-            .unwrap_or(false)
-            .then(|| DevcontainerSpec {
-                enabled: true,
-                resolve_dir: working_directory.clone(),
-            });
+        let devcontainer = resolved.sandbox.devcontainer.then(|| DevcontainerSpec {
+            enabled: true,
+            resolve_dir: working_directory.clone(),
+        });
 
-        let interviewer: Arc<dyn Interviewer> = if settings.auto_approve_enabled() {
-            Arc::new(AutoApproveInterviewer)
-        } else {
-            services.interviewer
-        };
+        let interviewer: Arc<dyn Interviewer> =
+            if resolved.execution.approval == fabro_types::settings::run::ApprovalMode::Auto {
+                Arc::new(AutoApproveInterviewer)
+            } else {
+                services.interviewer
+            };
 
-        let pr_config = settings.run_pull_request().map(bridge_pull_request);
+        let pr_config = resolved.pull_request.clone();
 
         Ok(Self {
             cancel_token: services.cancel_token,
@@ -397,17 +401,17 @@ impl RunSession {
                 provider: provider_enum,
                 fallback_chain,
                 mcp_servers,
-                dry_run: settings.dry_run_enabled(),
+                dry_run: resolved.execution.mode == fabro_types::settings::run::RunMode::DryRun,
             },
             interviewer,
             on_node: services.on_node,
             lifecycle: LifecycleOptions {
-                setup_commands: settings.run_prepare_commands(),
-                setup_command_timeout_ms: settings.run_prepare_timeout_ms().unwrap_or(300_000),
+                setup_commands: resolved.prepare.commands.clone(),
+                setup_command_timeout_ms: resolved.prepare.timeout_ms,
                 devcontainer_phases: Vec::new(),
             },
             hooks: fabro_hooks::HookSettings {
-                hooks: settings.run_hooks().iter().map(bridge_hook).collect(),
+                hooks: resolved.hooks.iter().map(runtime_hook_definition).collect(),
             },
             sandbox_env,
             devcontainer,
@@ -416,10 +420,10 @@ impl RunSession {
             artifact_sink: services.artifact_sink,
             git,
             github_app: services.github_app.clone(),
-            worktree_mode: Some(resolve_worktree_mode(settings)),
+            worktree_mode: Some(resolve_worktree_mode(&resolved)),
             registry_override: services.registry_override,
-            retro_enabled: !settings.no_retro_enabled() && project_config::is_retro_enabled(),
-            preserve_sandbox: resolve_preserve_sandbox(settings),
+            retro_enabled: resolved.execution.retros && project_config::is_retro_enabled(),
+            preserve_sandbox: resolved.sandbox.preserve,
             pr_config,
             pr_github_app: services.github_app,
             pr_origin_url: origin_url,
@@ -452,43 +456,32 @@ async fn load_accepted_run_definition(
     serde_json::from_slice(&bytes).map_err(|err| FabroError::Parse(err.to_string()))
 }
 
-fn resolve_sandbox_provider(settings: &SettingsFile) -> Result<SandboxProvider, FabroError> {
-    settings
-        .run_sandbox()
-        .and_then(|sb| sb.provider.as_deref())
+fn resolve_sandbox_provider(settings: &ResolvedRunSettings) -> Result<SandboxProvider, FabroError> {
+    Some(settings.sandbox.provider.as_str())
         .map(str::parse::<SandboxProvider>)
         .transpose()
         .map_err(|err| FabroError::Precondition(format!("Invalid sandbox provider: {err}")))?
         .map_or_else(|| Ok(SandboxProvider::default()), Ok)
 }
 
-fn resolve_preserve_sandbox(settings: &SettingsFile) -> bool {
-    settings.preserve_sandbox_enabled()
+fn resolve_worktree_mode(settings: &ResolvedRunSettings) -> sandbox_config::WorktreeMode {
+    bridge_worktree_mode(settings.sandbox.local.worktree_mode)
 }
 
-fn resolve_worktree_mode(settings: &SettingsFile) -> sandbox_config::WorktreeMode {
+fn resolve_daytona_config(settings: &ResolvedRunSettings) -> Option<DaytonaConfig> {
     settings
-        .run_sandbox()
-        .and_then(|sb| sb.local.as_ref())
-        .and_then(|local| local.worktree_mode)
-        .map(bridge_worktree_mode)
-        .unwrap_or_default()
-}
-
-fn resolve_daytona_config(settings: &SettingsFile) -> Option<DaytonaConfig> {
-    let sandbox = settings.run_sandbox()?;
-    bridge_sandbox(sandbox).daytona
+        .sandbox
+        .daytona
+        .as_ref()
+        .map(runtime_daytona_config)
 }
 
 fn resolve_fallback_chain(
     provider: Provider,
     model: &str,
-    settings: &SettingsFile,
+    settings: &ResolvedRunModelSettings,
 ) -> Vec<FallbackTarget> {
-    let Some(model_layer) = settings.run_model() else {
-        return Vec::new();
-    };
-    if model_layer.fallbacks.is_empty() {
+    if settings.fallbacks.is_empty() {
         return Vec::new();
     }
     // Group v2 ModelRef entries by provider name, preserving the legacy
@@ -499,15 +492,154 @@ fn resolve_fallback_chain(
     // provider-keyed fallbacks. A proper provider-aware fallback chain
     // is a follow-up along with the model registry work.
     let mut by_provider: HashMap<String, Vec<String>> = HashMap::new();
-    for entry in &model_layer.fallbacks {
-        if let ModelRefOrSplice::ModelRef(model_ref) = entry {
-            by_provider
-                .entry(String::new())
-                .or_default()
-                .push(model_ref.to_string());
-        }
+    for model_ref in &settings.fallbacks {
+        by_provider
+            .entry(String::new())
+            .or_default()
+            .push(model_ref.to_string());
     }
     Catalog::builtin().build_fallback_chain(provider, model, &by_provider)
+}
+
+fn render_resolve_errors(errors: &[fabro_config::ResolveError]) -> String {
+    errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn runtime_mcp_server(
+    settings: &ResolvedMcpServerSettings,
+) -> fabro_mcp::config::McpServerSettings {
+    fabro_mcp::config::McpServerSettings {
+        name: settings.name.clone(),
+        transport: match &settings.transport {
+            ResolvedMcpTransport::Stdio { command, env } => {
+                fabro_mcp::config::McpTransport::Stdio {
+                    command: command.clone(),
+                    env: env.clone(),
+                }
+            }
+            ResolvedMcpTransport::Http { url, headers } => fabro_mcp::config::McpTransport::Http {
+                url: url.clone(),
+                headers: headers.clone(),
+            },
+            ResolvedMcpTransport::Sandbox { command, port, env } => {
+                fabro_mcp::config::McpTransport::Sandbox {
+                    command: command.clone(),
+                    port: *port,
+                    env: env.clone(),
+                }
+            }
+        },
+        startup_timeout_secs: settings.startup_timeout_secs,
+        tool_timeout_secs: settings.tool_timeout_secs,
+    }
+}
+
+fn runtime_daytona_config(settings: &fabro_types::settings::run::DaytonaSettings) -> DaytonaConfig {
+    DaytonaConfig {
+        auto_stop_interval: settings.auto_stop_interval,
+        labels: (!settings.labels.is_empty()).then_some(settings.labels.clone()),
+        snapshot: settings.snapshot.as_ref().map(|snapshot| {
+            fabro_sandbox::config::DaytonaSnapshotSettings {
+                name: snapshot.name.clone(),
+                cpu: snapshot.cpu,
+                memory: snapshot.memory_gb,
+                disk: snapshot.disk_gb,
+                dockerfile: snapshot
+                    .dockerfile
+                    .as_ref()
+                    .map(|dockerfile| match dockerfile {
+                        ResolvedDockerfileSource::Inline(text) => {
+                            fabro_sandbox::config::DockerfileSource::Inline(text.clone())
+                        }
+                        ResolvedDockerfileSource::Path { path } => {
+                            fabro_sandbox::config::DockerfileSource::Path { path: path.clone() }
+                        }
+                    }),
+            }
+        }),
+        network: settings.network.as_ref().map(|network| match network {
+            fabro_types::settings::run::DaytonaNetworkLayer::Block => {
+                fabro_sandbox::config::DaytonaNetwork::Block
+            }
+            fabro_types::settings::run::DaytonaNetworkLayer::AllowAll => {
+                fabro_sandbox::config::DaytonaNetwork::AllowAll
+            }
+            fabro_types::settings::run::DaytonaNetworkLayer::AllowList { allow_list } => {
+                fabro_sandbox::config::DaytonaNetwork::AllowList(allow_list.clone())
+            }
+        }),
+        skip_clone: settings.skip_clone,
+    }
+}
+
+fn runtime_hook_definition(definition: &ResolvedHookDefinition) -> fabro_hooks::HookDefinition {
+    fabro_hooks::HookDefinition {
+        name: definition.name.clone(),
+        event: match definition.event {
+            ResolvedHookEvent::RunStart => fabro_hooks::HookEvent::RunStart,
+            ResolvedHookEvent::RunComplete => fabro_hooks::HookEvent::RunComplete,
+            ResolvedHookEvent::RunFailed => fabro_hooks::HookEvent::RunFailed,
+            ResolvedHookEvent::StageStart => fabro_hooks::HookEvent::StageStart,
+            ResolvedHookEvent::StageComplete => fabro_hooks::HookEvent::StageComplete,
+            ResolvedHookEvent::StageFailed => fabro_hooks::HookEvent::StageFailed,
+            ResolvedHookEvent::StageRetrying => fabro_hooks::HookEvent::StageRetrying,
+            ResolvedHookEvent::EdgeSelected => fabro_hooks::HookEvent::EdgeSelected,
+            ResolvedHookEvent::ParallelStart => fabro_hooks::HookEvent::ParallelStart,
+            ResolvedHookEvent::ParallelComplete => fabro_hooks::HookEvent::ParallelComplete,
+            ResolvedHookEvent::SandboxReady => fabro_hooks::HookEvent::SandboxReady,
+            ResolvedHookEvent::SandboxCleanup => fabro_hooks::HookEvent::SandboxCleanup,
+            ResolvedHookEvent::CheckpointSaved => fabro_hooks::HookEvent::CheckpointSaved,
+            ResolvedHookEvent::PreToolUse => fabro_hooks::HookEvent::PreToolUse,
+            ResolvedHookEvent::PostToolUse => fabro_hooks::HookEvent::PostToolUse,
+            ResolvedHookEvent::PostToolUseFailure => fabro_hooks::HookEvent::PostToolUseFailure,
+        },
+        command: definition.command.clone(),
+        hook_type: definition.hook_type.as_ref().map(runtime_hook_type),
+        matcher: definition.matcher.clone(),
+        blocking: definition.blocking,
+        timeout_ms: definition.timeout_ms,
+        sandbox: definition.sandbox,
+    }
+}
+
+fn runtime_hook_type(hook_type: &ResolvedHookType) -> fabro_hooks::HookType {
+    match hook_type {
+        ResolvedHookType::Command { command } => fabro_hooks::HookType::Command {
+            command: command.clone(),
+        },
+        ResolvedHookType::Http {
+            url,
+            headers,
+            allowed_env_vars,
+            tls,
+        } => fabro_hooks::HookType::Http {
+            url: url.clone(),
+            headers: headers.clone(),
+            allowed_env_vars: allowed_env_vars.clone(),
+            tls: match tls {
+                ResolvedTlsMode::Verify => fabro_hooks::TlsMode::Verify,
+                ResolvedTlsMode::NoVerify => fabro_hooks::TlsMode::NoVerify,
+                ResolvedTlsMode::Off => fabro_hooks::TlsMode::Off,
+            },
+        },
+        ResolvedHookType::Prompt { prompt, model } => fabro_hooks::HookType::Prompt {
+            prompt: prompt.clone(),
+            model: model.clone(),
+        },
+        ResolvedHookType::Agent {
+            prompt,
+            model,
+            max_tool_rounds,
+        } => fabro_hooks::HookType::Agent {
+            prompt: prompt.clone(),
+            model: model.clone(),
+            max_tool_rounds: *max_tool_rounds,
+        },
+    }
 }
 
 impl RunSession {
@@ -852,6 +984,7 @@ mod tests {
     use chrono::Utc;
     use fabro_store::Database;
     use fabro_types::fixtures;
+    use fabro_types::settings::SettingsFile;
     use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
     use object_store::memory::InMemory;
 

@@ -32,7 +32,14 @@ pub use model_ref::{
     AmbiguousModelRef, ModelRef, ModelRegistry, ParseModelRefError, ResolvedModelRef,
 };
 pub use project::ProjectLayer;
-pub use run::RunLayer;
+pub use run::{
+    ArtifactsSettings, DaytonaSettings, DaytonaSnapshotSettings, DockerfileSource,
+    GitAuthorSettings, HookDefinition, HookType, InterviewProviderSettings, McpServerSettings,
+    McpTransport, NotificationProviderSettings, NotificationRouteSettings, PullRequestSettings,
+    RunAgentSettings, RunCheckpointSettings, RunExecutionSettings, RunGitSettings, RunGoal,
+    RunInterviewsSettings, RunLayer, RunModelSettings, RunPrepareSettings, RunSandboxSettings,
+    RunScmSettings, RunSettings, ScmGitHubSettings, TlsMode,
+};
 pub use server::{
     DiscordIntegrationSettings, GithubIntegrationSettings, GithubOauthSettings,
     IntegrationWebhooksSettings, ObjectStoreSettings, ServerApiSettings, ServerArtifactsSettings,

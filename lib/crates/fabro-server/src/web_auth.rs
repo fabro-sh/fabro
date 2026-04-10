@@ -149,11 +149,8 @@ fn json_response(status: StatusCode, body: serde_json::Value) -> Response {
 fn features_json(settings: &SettingsFile) -> serde_json::Value {
     let features = settings.features.as_ref();
     let session_sandboxes = features.and_then(|f| f.session_sandboxes).unwrap_or(false);
-    // Retros in v2 live under `run.execution.retros` (positive form) rather
-    // than the top-level features stanza.
-    let retros = settings
-        .run_execution()
-        .and_then(|e| e.retros)
+    let retros = fabro_config::resolve_run_from_file(settings)
+        .map(|settings| settings.execution.retros)
         .unwrap_or(false);
     json!({
         "session_sandboxes": session_sandboxes,

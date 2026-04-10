@@ -74,7 +74,7 @@ pub async fn execute(init: Initialized) -> Executed {
             base_sha,
             run_branch: git.run_branch.clone(),
             meta_branch: git.meta_branch.clone(),
-            checkpoint_exclude_globs: run_options.checkpoint_exclude_globs().to_vec(),
+            checkpoint_exclude_globs: run_options.checkpoint_exclude_globs(),
             git_author: run_options.git_author(),
         }))
     });

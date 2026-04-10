@@ -13,7 +13,6 @@ use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_graphviz::render::apply_direction;
 use fabro_llm::Provider;
 use fabro_model::Catalog;
-use fabro_sandbox::config::bridge_sandbox;
 use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxProvider, SandboxSpec};
 use fabro_types::RunId;
@@ -29,6 +28,7 @@ use fabro_validate::Severity;
 use fabro_workflow::error::FabroError;
 use fabro_workflow::operations::{CreateRunInput, ValidateInput, WorkflowInput, validate};
 use fabro_workflow::pipeline::Validated;
+use fabro_workflow::run_materialization::materialize_run;
 use fabro_workflow::workflow_bundle::{BundledWorkflow, WorkflowBundle};
 
 use crate::server::AppState;
@@ -340,14 +340,17 @@ async fn build_preflight_report(
 ) -> Result<(CheckReport, bool)> {
     let graph = validated.graph();
     let settings = &prepared.settings;
-    let sandbox_provider = resolve_sandbox_provider(settings)?;
+    let materialized = materialize_run(settings.clone(), graph, &Catalog::builtin());
+    let resolved_run = fabro_config::resolve_run_from_file(&materialized)
+        .map_err(|errors| anyhow!(render_resolve_errors(&errors)))?;
+    let sandbox_provider = resolve_sandbox_provider(&resolved_run)?;
     let github_app = state
         .github_app_credentials(settings.github_app_id_str().as_deref())
         .await
         .map_err(|err| anyhow!(err))?;
     let mut checks = Vec::new();
 
-    let setup_command_count = settings.run_prepare_commands().len();
+    let setup_command_count = resolved_run.prepare.commands.len();
     let repo_summary = prepared.git.as_ref().map_or_else(
         || "unknown".to_string(),
         |git| {
@@ -390,9 +393,15 @@ async fn build_preflight_report(
         remediation: None,
     });
 
-    let sandbox_ok =
-        run_sandbox_check(&mut checks, sandbox_provider, prepared, github_app.clone()).await;
-    let llm_ok = run_llm_check(state, &mut checks, graph, settings).await;
+    let sandbox_ok = run_sandbox_check(
+        &mut checks,
+        sandbox_provider,
+        prepared,
+        &resolved_run,
+        github_app.clone(),
+    )
+    .await;
+    let llm_ok = run_llm_check(state, &mut checks, graph, &resolved_run).await;
     run_github_token_check(&mut checks, prepared, settings, github_app).await;
 
     let checks_ok = sandbox_ok && llm_ok;
@@ -409,28 +418,34 @@ async fn build_preflight_report(
     ))
 }
 
-fn resolve_sandbox_provider(settings: &SettingsFile) -> Result<SandboxProvider> {
-    Ok(settings
-        .run_sandbox()
-        .and_then(|sb| sb.provider.as_deref())
+fn resolve_sandbox_provider(
+    settings: &fabro_types::settings::run::RunSettings,
+) -> Result<SandboxProvider> {
+    Ok(Some(settings.sandbox.provider.as_str())
         .map(str::parse::<SandboxProvider>)
         .transpose()
         .map_err(|err| anyhow!("Invalid sandbox provider: {err}"))?
         .unwrap_or_default())
 }
 
-fn resolve_daytona_config(settings: &SettingsFile) -> Option<DaytonaConfig> {
-    let sandbox = settings.run_sandbox()?;
-    bridge_sandbox(sandbox).daytona
+fn resolve_daytona_config(
+    settings: &fabro_types::settings::run::RunSettings,
+) -> Option<DaytonaConfig> {
+    settings
+        .sandbox
+        .daytona
+        .as_ref()
+        .map(runtime_daytona_config)
 }
 
 async fn run_sandbox_check(
     checks: &mut Vec<CheckResult>,
     sandbox_provider: SandboxProvider,
     prepared: &PreparedManifest,
+    resolved_run: &fabro_types::settings::run::RunSettings,
     github_app: Option<fabro_github::GitHubAppCredentials>,
 ) -> bool {
-    let daytona_config = resolve_daytona_config(&prepared.settings);
+    let daytona_config = resolve_daytona_config(resolved_run);
     let sandbox_result: Result<Arc<dyn Sandbox>, String> = match sandbox_provider {
         SandboxProvider::Local => SandboxSpec::Local {
             working_directory: prepared.working_directory.clone(),
@@ -500,7 +515,7 @@ async fn run_llm_check(
     state: &AppState,
     checks: &mut Vec<CheckResult>,
     graph: &Graph,
-    settings: &SettingsFile,
+    settings: &fabro_types::settings::run::RunSettings,
 ) -> bool {
     let (model, provider) = resolve_model_provider(settings, graph);
     let default_provider = provider.as_deref().unwrap_or("anthropic");
@@ -591,34 +606,21 @@ async fn run_llm_check(
     }
 }
 
-fn resolve_model_provider(settings: &SettingsFile, graph: &Graph) -> (String, Option<String>) {
-    let configured_model = settings.run_model_name_str();
-    let configured_provider = settings.run_model_provider_str();
-
-    let provider = configured_provider.or_else(|| {
-        graph
-            .attrs
-            .get("default_provider")
-            .and_then(|value| value.as_str())
-            .map(String::from)
-    });
-    let model = configured_model
-        .or_else(|| {
-            graph
-                .attrs
-                .get("default_model")
-                .and_then(|value| value.as_str())
-                .map(String::from)
-        })
-        .unwrap_or_else(|| {
-            let catalog = Catalog::builtin();
-            let info = provider
-                .as_deref()
-                .and_then(|value| value.parse::<Provider>().ok())
-                .and_then(|provider| catalog.default_for_provider(provider))
-                .unwrap_or_else(|| catalog.default_from_env());
-            info.id.clone()
-        });
+fn resolve_model_provider(
+    settings: &fabro_types::settings::run::RunSettings,
+    _graph: &Graph,
+) -> (String, Option<String>) {
+    let provider = settings
+        .model
+        .provider
+        .as_ref()
+        .map(InterpString::as_source);
+    let model = settings
+        .model
+        .name
+        .as_ref()
+        .map(InterpString::as_source)
+        .unwrap_or_else(|| Catalog::builtin().default_from_env().id.clone());
 
     match Catalog::builtin().get(&model) {
         Some(info) => (
@@ -626,6 +628,52 @@ fn resolve_model_provider(settings: &SettingsFile, graph: &Graph) -> (String, Op
             provider.or(Some(info.provider.to_string())),
         ),
         None => (model, provider),
+    }
+}
+
+fn render_resolve_errors(errors: &[fabro_config::ResolveError]) -> String {
+    errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn runtime_daytona_config(settings: &fabro_types::settings::run::DaytonaSettings) -> DaytonaConfig {
+    DaytonaConfig {
+        auto_stop_interval: settings.auto_stop_interval,
+        labels: (!settings.labels.is_empty()).then_some(settings.labels.clone()),
+        snapshot: settings.snapshot.as_ref().map(|snapshot| {
+            fabro_sandbox::config::DaytonaSnapshotSettings {
+                name: snapshot.name.clone(),
+                cpu: snapshot.cpu,
+                memory: snapshot.memory_gb,
+                disk: snapshot.disk_gb,
+                dockerfile: snapshot
+                    .dockerfile
+                    .as_ref()
+                    .map(|dockerfile| match dockerfile {
+                        fabro_types::settings::run::DockerfileSource::Inline(text) => {
+                            fabro_sandbox::config::DockerfileSource::Inline(text.clone())
+                        }
+                        fabro_types::settings::run::DockerfileSource::Path { path } => {
+                            fabro_sandbox::config::DockerfileSource::Path { path: path.clone() }
+                        }
+                    }),
+            }
+        }),
+        network: settings.network.as_ref().map(|network| match network {
+            fabro_types::settings::run::DaytonaNetworkLayer::Block => {
+                fabro_sandbox::config::DaytonaNetwork::Block
+            }
+            fabro_types::settings::run::DaytonaNetworkLayer::AllowAll => {
+                fabro_sandbox::config::DaytonaNetwork::AllowAll
+            }
+            fabro_types::settings::run::DaytonaNetworkLayer::AllowList { allow_list } => {
+                fabro_sandbox::config::DaytonaNetwork::AllowList(allow_list.clone())
+            }
+        }),
+        skip_clone: settings.skip_clone,
     }
 }
 

@@ -7,12 +7,405 @@
 //! behavior, and artifact collection.
 
 use std::collections::HashMap;
+use std::time::Duration as StdDuration;
 
 use serde::{Deserialize, Serialize};
 
 use super::duration::Duration;
 use super::interp::InterpString;
 use super::model_ref::ModelRef;
+
+/// A structurally resolved `[run]` view for consumers.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunSettings {
+    pub goal: Option<RunGoal>,
+    pub working_dir: Option<InterpString>,
+    pub metadata: HashMap<String, String>,
+    pub inputs: HashMap<String, toml::Value>,
+    pub model: RunModelSettings,
+    pub git: RunGitSettings,
+    pub prepare: RunPrepareSettings,
+    pub execution: RunExecutionSettings,
+    pub checkpoint: RunCheckpointSettings,
+    pub sandbox: RunSandboxSettings,
+    pub notifications: HashMap<String, NotificationRouteSettings>,
+    pub interviews: RunInterviewsSettings,
+    pub agent: RunAgentSettings,
+    pub hooks: Vec<HookDefinition>,
+    pub scm: RunScmSettings,
+    pub pull_request: Option<PullRequestSettings>,
+    pub artifacts: ArtifactsSettings,
+}
+
+impl Default for RunSettings {
+    fn default() -> Self {
+        Self {
+            goal: None,
+            working_dir: None,
+            metadata: HashMap::new(),
+            inputs: HashMap::new(),
+            model: RunModelSettings::default(),
+            git: RunGitSettings::default(),
+            prepare: RunPrepareSettings::default(),
+            execution: RunExecutionSettings::default(),
+            checkpoint: RunCheckpointSettings::default(),
+            sandbox: RunSandboxSettings::default(),
+            notifications: HashMap::new(),
+            interviews: RunInterviewsSettings::default(),
+            agent: RunAgentSettings::default(),
+            hooks: Vec::new(),
+            scm: RunScmSettings::default(),
+            pull_request: None,
+            artifacts: ArtifactsSettings::default(),
+        }
+    }
+}
+
+/// The resolved source of a run goal.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RunGoal {
+    Inline(InterpString),
+    File(InterpString),
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RunModelSettings {
+    pub provider: Option<InterpString>,
+    pub name: Option<InterpString>,
+    pub fallbacks: Vec<ModelRef>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RunGitSettings {
+    pub author: Option<GitAuthorSettings>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct GitAuthorSettings {
+    pub name: Option<InterpString>,
+    pub email: Option<InterpString>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunPrepareSettings {
+    pub commands: Vec<String>,
+    pub timeout_ms: u64,
+}
+
+impl Default for RunPrepareSettings {
+    fn default() -> Self {
+        Self {
+            commands: Vec::new(),
+            timeout_ms: 300_000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunExecutionSettings {
+    pub mode: RunMode,
+    pub approval: ApprovalMode,
+    pub retros: bool,
+}
+
+impl Default for RunExecutionSettings {
+    fn default() -> Self {
+        Self {
+            mode: RunMode::Normal,
+            approval: ApprovalMode::Prompt,
+            retros: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RunCheckpointSettings {
+    pub exclude_globs: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunSandboxSettings {
+    pub provider: String,
+    pub preserve: bool,
+    pub devcontainer: bool,
+    pub env: HashMap<String, InterpString>,
+    pub local: LocalSandboxSettings,
+    pub daytona: Option<DaytonaSettings>,
+}
+
+impl Default for RunSandboxSettings {
+    fn default() -> Self {
+        Self {
+            provider: "local".to_string(),
+            preserve: false,
+            devcontainer: false,
+            env: HashMap::new(),
+            local: LocalSandboxSettings::default(),
+            daytona: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LocalSandboxSettings {
+    pub worktree_mode: WorktreeMode,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DaytonaSettings {
+    pub auto_stop_interval: Option<i32>,
+    pub labels: HashMap<String, String>,
+    pub snapshot: Option<DaytonaSnapshotSettings>,
+    pub network: Option<DaytonaNetworkLayer>,
+    pub skip_clone: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum DockerfileSource {
+    Inline(String),
+    Path { path: String },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DaytonaSnapshotSettings {
+    pub name: String,
+    pub cpu: Option<i32>,
+    pub memory_gb: Option<i32>,
+    pub disk_gb: Option<i32>,
+    pub dockerfile: Option<DockerfileSource>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct NotificationRouteSettings {
+    pub enabled: bool,
+    pub provider: Option<String>,
+    pub events: Vec<String>,
+    pub slack: Option<NotificationProviderSettings>,
+    pub discord: Option<NotificationProviderSettings>,
+    pub teams: Option<NotificationProviderSettings>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct NotificationProviderSettings {
+    pub channel: Option<InterpString>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RunInterviewsSettings {
+    pub provider: Option<String>,
+    pub slack: Option<InterviewProviderSettings>,
+    pub discord: Option<InterviewProviderSettings>,
+    pub teams: Option<InterviewProviderSettings>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct InterviewProviderSettings {
+    pub channel: Option<InterpString>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RunAgentSettings {
+    pub permissions: Option<AgentPermissions>,
+    pub mcps: HashMap<String, McpServerSettings>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct McpServerSettings {
+    pub name: String,
+    pub transport: McpTransport,
+    pub startup_timeout_secs: u64,
+    pub tool_timeout_secs: u64,
+}
+
+impl Default for McpServerSettings {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            transport: McpTransport::Stdio {
+                command: Vec::new(),
+                env: HashMap::new(),
+            },
+            startup_timeout_secs: 10,
+            tool_timeout_secs: 60,
+        }
+    }
+}
+
+impl McpServerSettings {
+    #[must_use]
+    pub fn startup_timeout(&self) -> StdDuration {
+        StdDuration::from_secs(self.startup_timeout_secs)
+    }
+
+    #[must_use]
+    pub fn tool_timeout(&self) -> StdDuration {
+        StdDuration::from_secs(self.tool_timeout_secs)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum McpTransport {
+    Stdio {
+        command: Vec<String>,
+        env: HashMap<String, String>,
+    },
+    Http {
+        url: String,
+        headers: HashMap<String, String>,
+    },
+    Sandbox {
+        command: Vec<String>,
+        port: u16,
+        env: HashMap<String, String>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TlsMode {
+    #[default]
+    Verify,
+    NoVerify,
+    Off,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum HookType {
+    Command {
+        command: String,
+    },
+    Http {
+        url: String,
+        headers: Option<HashMap<String, String>>,
+        #[serde(default)]
+        allowed_env_vars: Vec<String>,
+        #[serde(default)]
+        tls: TlsMode,
+    },
+    Prompt {
+        prompt: String,
+        model: Option<String>,
+    },
+    Agent {
+        prompt: String,
+        model: Option<String>,
+        max_tool_rounds: Option<u32>,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
+pub struct HookDefinition {
+    pub name: Option<String>,
+    pub event: HookEvent,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(flatten)]
+    pub hook_type: Option<HookType>,
+    pub matcher: Option<String>,
+    pub blocking: Option<bool>,
+    pub timeout_ms: Option<u64>,
+    pub sandbox: Option<bool>,
+}
+
+impl HookDefinition {
+    pub fn resolved_hook_type(&self) -> Option<std::borrow::Cow<'_, HookType>> {
+        if let Some(ref hook_type) = self.hook_type {
+            return Some(std::borrow::Cow::Borrowed(hook_type));
+        }
+        self.command.as_ref().map(|command| {
+            std::borrow::Cow::Owned(HookType::Command {
+                command: command.clone(),
+            })
+        })
+    }
+
+    #[must_use]
+    pub fn is_blocking(&self) -> bool {
+        self.blocking.unwrap_or_else(|| {
+            matches!(
+                self.event,
+                HookEvent::RunStart
+                    | HookEvent::StageStart
+                    | HookEvent::EdgeSelected
+                    | HookEvent::PreToolUse
+                    | HookEvent::SandboxReady
+            )
+        })
+    }
+
+    #[must_use]
+    pub fn timeout(&self) -> StdDuration {
+        if let Some(ms) = self.timeout_ms {
+            return StdDuration::from_millis(ms);
+        }
+        let default_ms = match self.resolved_hook_type().as_deref() {
+            Some(HookType::Prompt { .. }) => 30_000,
+            _ => 60_000,
+        };
+        StdDuration::from_millis(default_ms)
+    }
+
+    #[must_use]
+    pub fn runs_in_sandbox(&self) -> bool {
+        self.sandbox.unwrap_or(true)
+    }
+
+    #[must_use]
+    pub fn effective_name(&self) -> String {
+        if let Some(ref name) = self.name {
+            return name.clone();
+        }
+        let event = format!("{:?}", self.event).to_lowercase();
+        match self.resolved_hook_type().as_deref() {
+            Some(HookType::Command { command }) => {
+                let short = &command[..command.floor_char_boundary(20)];
+                format!("{event}:{short}")
+            }
+            Some(HookType::Http { url, .. }) => format!("{event}:{url}"),
+            Some(HookType::Prompt { prompt, .. } | HookType::Agent { prompt, .. }) => {
+                let short = &prompt[..prompt.floor_char_boundary(20)];
+                format!("{event}:{short}")
+            }
+            None => event,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RunScmSettings {
+    pub provider: Option<String>,
+    pub owner: Option<InterpString>,
+    pub repository: Option<InterpString>,
+    pub github: Option<ScmGitHubSettings>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ScmGitHubSettings;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PullRequestSettings {
+    pub enabled: bool,
+    pub draft: bool,
+    pub auto_merge: bool,
+    pub merge_strategy: MergeStrategy,
+}
+
+impl Default for PullRequestSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            draft: true,
+            auto_merge: false,
+            merge_strategy: MergeStrategy::Squash,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ArtifactsSettings {
+    pub include: Vec<String>,
+}
 
 /// A sparse `[run]` layer as it appears in a single settings file.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

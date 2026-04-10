@@ -2,13 +2,97 @@ use anyhow::Result;
 use fabro_agent::cli::{OutputFormat, run_with_args, run_with_args_and_client};
 use fabro_llm::client::Client;
 use fabro_llm::providers::FabroServerAdapter;
-use fabro_mcp::config::{McpServerSettings, bridge_mcp_entry};
 use fabro_types::settings::InterpString;
+use fabro_types::settings::run::McpEntryLayer;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::args::{ExecArgs, GlobalArgs};
 use crate::user_config;
+
+fn runtime_mcp_server(name: &str, entry: &McpEntryLayer) -> fabro_mcp::config::McpServerSettings {
+    let transport = match entry {
+        McpEntryLayer::Stdio {
+            script,
+            command,
+            env,
+            ..
+        } => {
+            let command = if let Some(script) = script {
+                vec!["sh".to_string(), "-c".to_string(), script.as_source()]
+            } else {
+                command
+                    .as_ref()
+                    .map(|command| command.iter().map(InterpString::as_source).collect())
+                    .unwrap_or_default()
+            };
+            fabro_mcp::config::McpTransport::Stdio {
+                command,
+                env: env
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.as_source()))
+                    .collect(),
+            }
+        }
+        McpEntryLayer::Http { url, headers, .. } => fabro_mcp::config::McpTransport::Http {
+            url: url.as_source(),
+            headers: headers
+                .iter()
+                .map(|(key, value)| (key.clone(), value.as_source()))
+                .collect(),
+        },
+        McpEntryLayer::Sandbox {
+            script,
+            command,
+            port,
+            env,
+            ..
+        } => {
+            let command = if let Some(script) = script {
+                vec!["sh".to_string(), "-c".to_string(), script.as_source()]
+            } else {
+                command
+                    .as_ref()
+                    .map(|command| command.iter().map(InterpString::as_source).collect())
+                    .unwrap_or_default()
+            };
+            fabro_mcp::config::McpTransport::Sandbox {
+                command,
+                port: *port,
+                env: env
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.as_source()))
+                    .collect(),
+            }
+        }
+    };
+    let (startup_timeout_secs, tool_timeout_secs) = match entry {
+        McpEntryLayer::Http {
+            startup_timeout,
+            tool_timeout,
+            ..
+        }
+        | McpEntryLayer::Stdio {
+            startup_timeout,
+            tool_timeout,
+            ..
+        }
+        | McpEntryLayer::Sandbox {
+            startup_timeout,
+            tool_timeout,
+            ..
+        } => (
+            startup_timeout.map_or(10, |duration| duration.as_std().as_secs()),
+            tool_timeout.map_or(60, |duration| duration.as_std().as_secs()),
+        ),
+    };
+    fabro_mcp::config::McpServerSettings {
+        name: name.to_string(),
+        transport,
+        startup_timeout_secs,
+        tool_timeout_secs,
+    }
+}
 
 pub(crate) async fn execute(mut args: ExecArgs, globals: &GlobalArgs) -> Result<()> {
     use fabro_agent::cli::PermissionLevel as AgentPermissionLevel;
@@ -46,17 +130,52 @@ pub(crate) async fn execute(mut args: ExecArgs, globals: &GlobalArgs) -> Result<
     // v2 MCPs live under `cli.exec.agent.mcps` (owner-specific) or
     // `run.agent.mcps`. For `fabro exec` we use the cli.exec path, falling
     // back to run.agent.mcps if unset.
-    let mcps_iter = exec_agent
-        .map(|a| &a.mcps)
-        .filter(|m| !m.is_empty())
-        .or_else(|| cli_settings.run_agent_mcps());
-    let mcp_servers: Vec<McpServerSettings> = mcps_iter
-        .map(|mcps| {
-            mcps.iter()
-                .map(|(name, entry)| bridge_mcp_entry(entry).into_config(name.clone()))
-                .collect()
-        })
-        .unwrap_or_default();
+    let mcp_servers: Vec<fabro_mcp::config::McpServerSettings> = if let Some(mcps) = exec_agent
+        .map(|agent| &agent.mcps)
+        .filter(|mcps| !mcps.is_empty())
+    {
+        mcps.iter()
+            .map(|(name, entry)| runtime_mcp_server(name, entry))
+            .collect()
+    } else {
+        fabro_config::resolve_run_from_file(&cli_settings)
+            .map(|settings| {
+                settings
+                    .agent
+                    .mcps
+                    .values()
+                    .map(|server| fabro_mcp::config::McpServerSettings {
+                        name: server.name.clone(),
+                        transport: match &server.transport {
+                            fabro_types::settings::run::McpTransport::Stdio { command, env } => {
+                                fabro_mcp::config::McpTransport::Stdio {
+                                    command: command.clone(),
+                                    env: env.clone(),
+                                }
+                            }
+                            fabro_types::settings::run::McpTransport::Http { url, headers } => {
+                                fabro_mcp::config::McpTransport::Http {
+                                    url: url.clone(),
+                                    headers: headers.clone(),
+                                }
+                            }
+                            fabro_types::settings::run::McpTransport::Sandbox {
+                                command,
+                                port,
+                                env,
+                            } => fabro_mcp::config::McpTransport::Sandbox {
+                                command: command.clone(),
+                                port: *port,
+                                env: env.clone(),
+                            },
+                        },
+                        startup_timeout_secs: server.startup_timeout_secs,
+                        tool_timeout_secs: server.tool_timeout_secs,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
     if let Some(target) = server_target {
         tracing::info!(transport = "server", "Agent session starting");
         let provider_name = args

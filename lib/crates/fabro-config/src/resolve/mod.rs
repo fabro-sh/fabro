@@ -1,15 +1,28 @@
 mod error;
+mod run;
 mod server;
 
-use fabro_types::settings::{ServerSettings, SettingsFile};
+use fabro_types::settings::{RunSettings, ServerSettings, SettingsFile};
 
 pub use error::ResolveError;
+pub use run::resolve_run;
 pub use server::resolve_server;
 
 pub fn resolve_server_from_file(file: &SettingsFile) -> Result<ServerSettings, Vec<ResolveError>> {
     let mut errors = Vec::new();
     let layer = file.server.as_ref().cloned().unwrap_or_default();
     let resolved = resolve_server(&layer, &mut errors);
+    if errors.is_empty() {
+        Ok(resolved)
+    } else {
+        Err(errors)
+    }
+}
+
+pub fn resolve_run_from_file(file: &SettingsFile) -> Result<RunSettings, Vec<ResolveError>> {
+    let mut errors = Vec::new();
+    let layer = file.run.as_ref().cloned().unwrap_or_default();
+    let resolved = resolve_run(&layer, &mut errors);
     if errors.is_empty() {
         Ok(resolved)
     } else {
