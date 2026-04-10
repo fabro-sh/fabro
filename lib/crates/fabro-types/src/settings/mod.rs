@@ -35,7 +35,7 @@ pub use interp::{InterpString, Provenance, ResolveEnvError, Resolved};
 pub use model_ref::{
     AmbiguousModelRef, ModelRef, ModelRegistry, ParseModelRefError, ResolvedModelRef,
 };
-pub use project::ProjectLayer;
+pub use project::{ProjectLayer, ProjectSettings};
 pub use run::{
     ArtifactsSettings, DaytonaSettings, DaytonaSnapshotSettings, DockerfileSource,
     GitAuthorSettings, HookDefinition, HookType, InterviewProviderSettings, McpServerSettings,

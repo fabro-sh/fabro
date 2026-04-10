@@ -7,6 +7,15 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+/// A structurally resolved `[project]` view for consumers.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ProjectSettings {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub directory: String,
+    pub metadata: HashMap<String, String>,
+}
+
 /// A sparse `[project]` layer as it appears in a single settings file.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

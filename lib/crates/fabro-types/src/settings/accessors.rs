@@ -9,7 +9,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use super::interp::InterpString;
-use super::project::ProjectLayer;
 use super::run::{
     ApprovalMode, GitAuthorLayer, HookEntry, McpEntryLayer, ResolvedGoalSource, ResolvedRunGoal,
     RunAgentLayer, RunArtifactsLayer, RunCheckpointLayer, RunExecutionLayer, RunGoalLayer,
@@ -23,18 +22,6 @@ use super::server::{
 use super::tree::SettingsFile;
 
 impl SettingsFile {
-    // ---------- project-scope ----------
-
-    #[must_use]
-    pub fn project_layer(&self) -> Option<&ProjectLayer> {
-        self.project.as_ref()
-    }
-
-    #[must_use]
-    pub fn project_directory(&self) -> Option<&str> {
-        self.project.as_ref().and_then(|p| p.directory.as_deref())
-    }
-
     // ---------- run-scope ----------
 
     #[must_use]

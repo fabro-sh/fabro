@@ -39,6 +39,10 @@ fn resolve_cli(settings: &SettingsFile) -> fabro_types::settings::CliSettings {
     fabro_config::resolve_cli_from_file(settings).expect("cli settings should resolve")
 }
 
+fn resolve_project(settings: &SettingsFile) -> fabro_types::settings::ProjectSettings {
+    fabro_config::resolve_project_from_file(settings).expect("project settings should resolve")
+}
+
 fn server_settings_fixture() -> SettingsFile {
     ConfigLayer::parse(
         r#"
@@ -299,7 +303,7 @@ fn settings_local_merges_cli_and_project_defaults() {
     assert_eq!(cfg.run_model_name_str().as_deref(), Some("project-model"));
     assert_eq!(cfg.run_model_provider_str().as_deref(), Some("openai"));
     assert_eq!(cfg.run_goal_inline_str().as_deref(), None);
-    assert_eq!(cfg.project_directory(), Some("fabro"));
+    assert_eq!(resolve_project(&cfg).directory, "fabro");
 
     // v2 R22: run.inputs replaces the inherited map wholesale rather than
     // merging by key, so the project layer wipes out the CLI layer's inputs.

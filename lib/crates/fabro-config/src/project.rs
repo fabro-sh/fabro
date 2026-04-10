@@ -12,12 +12,11 @@ use serde::Serialize;
 
 use crate::config::ConfigLayer;
 use crate::run;
-use fabro_types::settings::{InterpString, SettingsFile};
+use crate::{resolve_project_from_file, resolve_run_from_file};
+use fabro_types::settings::SettingsFile;
 
 const CONFIG_FILENAME: &str = "fabro.toml";
 const RUN_GRAPH_FILE: &str = "workflow.fabro";
-const DEFAULT_FABRO_DIRECTORY: &str = "fabro/";
-
 #[derive(Clone, Debug)]
 pub struct WorkflowPathResolution {
     pub resolved_workflow_path: PathBuf,
@@ -38,12 +37,9 @@ pub fn parse_project_config(content: &str) -> anyhow::Result<ConfigLayer> {
 /// paths are anchored at the directory of `path` at load time.
 pub fn load_project_config(path: &Path) -> anyhow::Result<ConfigLayer> {
     let config = ConfigLayer::load(path).context("Failed to parse project config")?;
-    let root = config
-        .as_v2()
-        .project
-        .as_ref()
-        .and_then(|p| p.directory.as_deref())
-        .unwrap_or(DEFAULT_FABRO_DIRECTORY);
+    let root = resolve_project_from_file(config.as_v2())
+        .map_err(|errors| anyhow::anyhow!("Failed to resolve project settings: {errors:?}"))?
+        .directory;
     tracing::debug!(path = %path.display(), root = %root, "Loaded project config");
     Ok(config)
 }
@@ -125,11 +121,10 @@ pub fn resolve_workflow_path(
 }
 
 pub fn resolve_working_directory(settings: &SettingsFile, caller_cwd: &Path) -> PathBuf {
-    let Some(work_dir) = settings
-        .run
-        .as_ref()
-        .and_then(|run| run.working_dir.as_ref())
-        .map(InterpString::as_source)
+    let Some(work_dir) = resolve_run_from_file(settings)
+        .ok()
+        .and_then(|settings| settings.working_dir)
+        .map(|value| value.as_source())
     else {
         return caller_cwd.to_path_buf();
     };
@@ -374,12 +369,9 @@ pub fn resolve_fabro_root(config_path: &Path, config: &ConfigLayer) -> PathBuf {
     let project_dir = config_path
         .parent()
         .expect("config_path should have a parent directory");
-    let root = config
-        .as_v2()
-        .project
-        .as_ref()
-        .and_then(|p| p.directory.as_deref())
-        .unwrap_or(DEFAULT_FABRO_DIRECTORY);
+    let root = resolve_project_from_file(config.as_v2())
+        .expect("project settings should resolve")
+        .directory;
     project_dir.join(root)
 }
 
@@ -408,12 +400,8 @@ directory = "fabro/"
         )
         .unwrap();
         assert_eq!(
-            config
-                .as_v2()
-                .project
-                .as_ref()
-                .and_then(|p| p.directory.as_deref()),
-            Some("fabro/")
+            resolve_project_from_file(config.as_v2()).unwrap().directory,
+            "fabro/"
         );
     }
 
