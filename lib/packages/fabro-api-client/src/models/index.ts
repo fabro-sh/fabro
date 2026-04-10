@@ -1,3 +1,5 @@
+export * from './actor-kind';
+export * from './actor-ref';
 export * from './aggregate-billing';
 export * from './aggregate-billing-totals';
 export * from './api-question';
@@ -34,6 +36,7 @@ export * from './disk-usage-summary-row';
 export * from './error-response';
 export * from './error-response-entry';
 export * from './event-envelope';
+export * from './event-seq';
 export * from './execute-query-request';
 export * from './execute-query-response';
 export * from './execute-query-response-rows-inner-inner';

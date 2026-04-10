@@ -420,7 +420,7 @@ mod tests {
     use fabro_agent::{AgentEvent, SandboxEvent};
     use fabro_llm::types::TokenCounts;
     use fabro_model::Provider;
-    use fabro_types::fixtures;
+    use fabro_types::{ParallelBranchId, StageId, fixtures};
     use fabro_workflow::event::{Event, RunNoticeLevel, to_run_event, to_run_event_at};
     use fabro_workflow::outcome::billed_model_usage_from_llm;
 
@@ -561,6 +561,8 @@ mod tests {
         emit(
             &mut ui,
             Event::ParallelBranchStarted {
+                parallel_group_id: StageId::new("fork1", 1),
+                parallel_branch_id: ParallelBranchId::new(StageId::new("fork1", 1), 0),
                 branch: "security".into(),
                 index: 0,
             },
@@ -576,6 +578,8 @@ mod tests {
         emit(
             &mut ui,
             Event::ParallelBranchCompleted {
+                parallel_group_id: StageId::new("fork1", 1),
+                parallel_branch_id: ParallelBranchId::new(StageId::new("fork1", 1), 0),
                 branch: "security".into(),
                 index: 0,
                 duration_ms: 2000,
@@ -607,6 +611,8 @@ mod tests {
         emit(
             &mut ui,
             Event::ParallelBranchStarted {
+                parallel_group_id: StageId::new("fork1", 1),
+                parallel_branch_id: ParallelBranchId::new(StageId::new("fork1", 1), 0),
                 branch: "security".into(),
                 index: 0,
             },
@@ -1108,6 +1114,8 @@ mod tests {
         emit(
             &mut ui,
             Event::ParallelBranchStarted {
+                parallel_group_id: StageId::new("fork1", 1),
+                parallel_branch_id: ParallelBranchId::new(StageId::new("fork1", 1), 0),
                 branch: "security".into(),
                 index: 0,
             },
@@ -1115,6 +1123,8 @@ mod tests {
         emit(
             &mut ui,
             Event::ParallelBranchCompleted {
+                parallel_group_id: StageId::new("fork1", 1),
+                parallel_branch_id: ParallelBranchId::new(StageId::new("fork1", 1), 0),
                 branch: "security".into(),
                 index: 0,
                 duration_ms: 500,
@@ -1149,6 +1159,7 @@ mod tests {
                 max_attempts: 1,
             },
             started_ts,
+            None,
         ))
         .unwrap();
         let tool_started = serde_json::to_string(&to_run_event_at(
@@ -1162,6 +1173,7 @@ mod tests {
                 },
             ),
             started_ts,
+            None,
         ))
         .unwrap();
         let tool_completed = serde_json::to_string(&to_run_event_at(
@@ -1176,6 +1188,7 @@ mod tests {
                 },
             ),
             completed_ts,
+            None,
         ))
         .unwrap();
 

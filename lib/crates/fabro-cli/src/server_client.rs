@@ -73,8 +73,8 @@ impl RunAttachEventStream {
 
     fn buffer_sse_events(&mut self, finalize: bool) -> Result<()> {
         for payload in sse::drain_sse_payloads(&mut self.pending_bytes, finalize) {
-            let event: types::EventEnvelope = serde_json::from_str(&payload)?;
-            self.buffered_events.push_back(convert_type(event)?);
+            self.buffered_events
+                .push_back(serde_json::from_str(&payload)?);
         }
         Ok(())
     }
@@ -410,7 +410,7 @@ impl ServerStoreClient {
             let page_events = parsed
                 .data
                 .into_iter()
-                .map(convert_type)
+                .map(convert_type::<_, EventEnvelope>)
                 .collect::<Result<Vec<EventEnvelope>>>()?;
             let next_page_since_seq = page_events.last().map(|event| event.seq.saturating_add(1));
             all_events.extend(page_events);

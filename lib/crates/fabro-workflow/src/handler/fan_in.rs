@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::context::Context;
 use crate::context::keys;
 use crate::error::FabroError;
-use crate::event::{Emitter, Event};
+use crate::event::{Emitter, Event, StageScope};
 use crate::outcome::{Outcome, OutcomeExt};
 use crate::run_dir::visit_from_context;
 use crate::sandbox_git::git_merge_ff_only;
@@ -232,15 +232,19 @@ async fn llm_evaluate(
     );
 
     let visit_u32 = u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX);
+    let stage_scope = StageScope::for_handler(context, node_id);
 
-    emitter.emit(&Event::Prompt {
-        stage: node_id.to_string(),
-        visit: visit_u32,
-        text: full_prompt.clone(),
-        mode: Some("fan_in".to_string()),
-        provider: None,
-        model: None,
-    });
+    emitter.emit_scoped(
+        &Event::Prompt {
+            stage: node_id.to_string(),
+            visit: visit_u32,
+            text: full_prompt.clone(),
+            mode: Some("fan_in".to_string()),
+            provider: None,
+            model: None,
+        },
+        &stage_scope,
+    );
 
     // Build a synthetic node for the backend call
     let eval_node = Node::new("fan_in_eval");
@@ -269,13 +273,16 @@ async fn llm_evaluate(
                 .unwrap_or_else(|| "unknown".to_string());
             let response_text =
                 serde_json::to_string_pretty(&outcome).unwrap_or_else(|_| "{}".to_string());
-            emitter.emit(&Event::PromptCompleted {
-                node_id: node_id.to_string(),
-                response: response_text.clone(),
-                model: String::new(),
-                provider: String::new(),
-                billing: None,
-            });
+            emitter.emit_scoped(
+                &Event::PromptCompleted {
+                    node_id: node_id.to_string(),
+                    response: response_text.clone(),
+                    model: String::new(),
+                    provider: String::new(),
+                    billing: None,
+                },
+                &stage_scope,
+            );
             Ok(Candidate {
                 id: best_id,
                 status: outcome.status.to_string(),
@@ -283,13 +290,16 @@ async fn llm_evaluate(
             })
         }
         Ok(CodergenResult::Text { text, .. }) => {
-            emitter.emit(&Event::PromptCompleted {
-                node_id: node_id.to_string(),
-                response: text.clone(),
-                model: String::new(),
-                provider: String::new(),
-                billing: None,
-            });
+            emitter.emit_scoped(
+                &Event::PromptCompleted {
+                    node_id: node_id.to_string(),
+                    response: text.clone(),
+                    model: String::new(),
+                    provider: String::new(),
+                    billing: None,
+                },
+                &stage_scope,
+            );
 
             // The LLM responded with text; try to find a matching candidate ID
             let text = text.trim().to_string();

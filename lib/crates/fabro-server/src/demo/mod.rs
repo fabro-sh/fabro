@@ -240,16 +240,14 @@ pub(crate) async fn run_events_stub(
         Event::default().data(
             json!({
                 "seq": 2,
-                "payload": {
-                    "id": "evt_demo_attach_completed",
-                    "ts": "2026-04-06T15:00:02Z",
-                    "run_id": "01JQ0000000000000000000001",
-                    "event": "run.completed",
-                    "properties": {
-                        "duration_ms": 42,
-                        "artifact_count": 0,
-                        "status": "success"
-                    }
+                "id": "evt_demo_attach_completed",
+                "ts": "2026-04-06T15:00:02Z",
+                "run_id": "01JQ0000000000000000000001",
+                "event": "run.completed",
+                "properties": {
+                    "duration_ms": 42,
+                    "artifact_count": 0,
+                    "status": "success"
                 }
             })
             .to_string(),
@@ -507,12 +505,10 @@ pub(crate) async fn attach_events_stub(
             Event::default().data(
                 json!({
                     "seq": 1,
-                    "payload": {
-                        "id": "evt_demo_1",
-                        "ts": "2026-04-06T15:00:00Z",
-                        "run_id": "01JQ0000000000000000000001",
-                        "event": "run.started"
-                    }
+                    "id": "evt_demo_1",
+                    "ts": "2026-04-06T15:00:00Z",
+                    "run_id": "01JQ0000000000000000000001",
+                    "event": "run.started"
                 })
                 .to_string(),
             ),
@@ -521,12 +517,10 @@ pub(crate) async fn attach_events_stub(
             Event::default().data(
                 json!({
                     "seq": 2,
-                    "payload": {
-                        "id": "evt_demo_2",
-                        "ts": "2026-04-06T15:00:01Z",
-                        "run_id": "01JQ0000000000000000000001",
-                        "event": "stage.started"
-                    }
+                    "id": "evt_demo_2",
+                    "ts": "2026-04-06T15:00:01Z",
+                    "run_id": "01JQ0000000000000000000001",
+                    "event": "stage.started"
                 })
                 .to_string(),
             ),

@@ -15,6 +15,7 @@ use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::git::MetadataStore;
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
+use crate::lifecycle::event::stage_scope_for;
 use crate::outcome::{BilledModelUsage, Outcome, StageStatus};
 use crate::run_dump::RunDump;
 use crate::run_options::RunOptions;
@@ -283,10 +284,14 @@ impl RunLifecycle<WorkflowGraph> for GitLifecycle {
             }
             Err(e) => {
                 // Emit CheckpointFailed and return error
-                self.emitter.emit(&Event::CheckpointFailed {
-                    node_id: node_id.to_string(),
-                    error: e.clone(),
-                });
+                let scope = stage_scope_for(state, node_id);
+                self.emitter.emit_scoped(
+                    &Event::CheckpointFailed {
+                        node_id: node_id.to_string(),
+                        error: e.clone(),
+                    },
+                    &scope,
+                );
                 return Err(CoreError::Other(format!(
                     "git checkpoint commit failed for node '{node_id}': {e}"
                 )));

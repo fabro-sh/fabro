@@ -173,7 +173,7 @@ fn run_events(run_dir: &Path) -> Vec<EventEnvelope> {
         storage_dir,
         &format!("/api/v1/runs/{run_id}/events"),
     ));
-    serde_json::from_value(response["data"].clone()).expect("event list should parse")
+    crate::support::parse_event_envelopes(&response)
 }
 
 macro_rules! sandbox_tests {

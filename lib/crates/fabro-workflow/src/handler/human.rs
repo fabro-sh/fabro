@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use crate::context::Context;
 use crate::context::keys;
 use crate::error::FabroError;
-use crate::event::{Emitter, Event};
+use crate::event::{Emitter, Event, StageScope};
 use crate::millis_u64;
 use crate::outcome::{Outcome, OutcomeExt};
 use fabro_graphviz::graph::{Graph, Node};
@@ -88,10 +88,10 @@ impl HumanHandler {
         self
     }
 
-    fn emit(&self, default_emitter: &Arc<Emitter>, event: &Event) {
+    fn emit(&self, default_emitter: &Arc<Emitter>, event: &Event, scope: &StageScope) {
         match &self.emitter {
-            Some(emitter) => emitter.emit(event),
-            None => default_emitter.emit(event),
+            Some(emitter) => emitter.emit_scoped(event, scope),
+            None => default_emitter.emit_scoped(event, scope),
         }
     }
 }
@@ -209,6 +209,7 @@ impl Handler for HumanHandler {
         // 3. Present to interviewer
         let question_text = node.label().to_string();
         let question_id = question.id.clone();
+        let stage_scope = StageScope::for_handler(context, &node.id);
         self.emit(
             &services.emitter,
             &Event::InterviewStarted {
@@ -228,6 +229,7 @@ impl Handler for HumanHandler {
                 timeout_seconds: question.timeout_seconds,
                 context_display: question.context_display.clone(),
             },
+            &stage_scope,
         );
         let interview_start = Instant::now();
         let answer = self.interviewer.ask(question).await;
@@ -242,6 +244,7 @@ impl Handler for HumanHandler {
                     stage: node.id.clone(),
                     duration_ms: millis_u64(interview_start.elapsed()),
                 },
+                &stage_scope,
             );
             let default_choice = node
                 .attrs
@@ -279,6 +282,7 @@ impl Handler for HumanHandler {
                     reason: "interrupted".to_string(),
                     duration_ms: millis_u64(interview_start.elapsed()),
                 },
+                &stage_scope,
             );
             return Ok(unanswered_human_gate(
                 "human interaction interrupted before an answer was provided",
@@ -293,6 +297,7 @@ impl Handler for HumanHandler {
                     answer: answer_text(&answer),
                     duration_ms: millis_u64(interview_start.elapsed()),
                 },
+                &stage_scope,
             );
             return Ok(unanswered_human_gate("human skipped interaction"));
         }
@@ -306,6 +311,7 @@ impl Handler for HumanHandler {
                 answer: answer_text(&answer),
                 duration_ms: millis_u64(interview_start.elapsed()),
             },
+            &stage_scope,
         );
 
         // 6. Try fixed-choice match

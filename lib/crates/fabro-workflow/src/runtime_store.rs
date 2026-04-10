@@ -194,8 +194,13 @@ mod tests {
             run_id: fixtures::RUN_1,
             node_id: None,
             node_label: None,
+            stage_id: None,
+            parallel_group_id: None,
+            parallel_branch_id: None,
             session_id: None,
             parent_session_id: None,
+            tool_call_id: None,
+            actor: None,
             body: EventBody::RunSubmitted(RunSubmittedProps {
                 reason: None,
                 definition_blob: None,

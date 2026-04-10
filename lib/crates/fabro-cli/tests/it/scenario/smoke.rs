@@ -29,16 +29,14 @@ fn live_run_state_response() -> serde_json::Value {
 fn run_sse_body(run_id: &str) -> String {
     let completed = serde_json::json!({
         "seq": 2,
-        "payload": {
-            "event": "run.completed",
-            "id": "evt-run-completed",
-            "run_id": run_id,
-            "ts": "2026-04-05T12:00:01Z",
-            "properties": {
-                "duration_ms": 12,
-                "artifact_count": 0,
-                "status": "success"
-            }
+        "event": "run.completed",
+        "id": "evt-run-completed",
+        "run_id": run_id,
+        "ts": "2026-04-05T12:00:01Z",
+        "properties": {
+            "duration_ms": 12,
+            "artifact_count": 0,
+            "status": "success"
         }
     });
 
@@ -267,13 +265,11 @@ fn attach_smoke_covers_arg_validation_and_remote_server_behaviors() {
                 serde_json::json!({
                     "data": [{
                         "seq": 1,
-                        "payload": {
-                            "event": "run.running",
-                            "id": "evt-run-running",
-                            "run_id": success_run_id,
-                            "ts": "2026-04-05T12:00:00Z",
-                            "properties": {}
-                        }
+                        "event": "run.running",
+                        "id": "evt-run-running",
+                        "run_id": success_run_id,
+                        "ts": "2026-04-05T12:00:00Z",
+                        "properties": {}
                     }],
                     "meta": { "has_more": false }
                 })
@@ -367,13 +363,11 @@ fn attach_smoke_covers_arg_validation_and_remote_server_behaviors() {
                 serde_json::json!({
                     "data": [{
                         "seq": 1,
-                        "payload": {
-                            "event": "run.running",
-                            "id": "evt-run-running",
-                            "run_id": eof_run_id,
-                            "ts": "2026-04-05T12:00:00Z",
-                            "properties": {}
-                        }
+                        "event": "run.running",
+                        "id": "evt-run-running",
+                        "run_id": eof_run_id,
+                        "ts": "2026-04-05T12:00:00Z",
+                        "properties": {}
                     }],
                     "meta": { "has_more": false }
                 })

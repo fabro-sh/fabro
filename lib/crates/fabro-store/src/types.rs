@@ -83,5 +83,54 @@ impl TryFrom<&EventPayload> for RunEvent {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EventEnvelope {
     pub seq: u32,
+    #[serde(flatten)]
     pub payload: EventPayload,
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{TimeZone, Utc};
+
+    use fabro_types::{EventBody, RunEvent, StageId, fixtures, run_event::RunCompletedProps};
+
+    use super::{EventEnvelope, EventPayload};
+
+    #[test]
+    fn wire_event_envelope_round_trips() {
+        let event = RunEvent {
+            id: "evt_1".to_string(),
+            ts: Utc.with_ymd_and_hms(2026, 4, 9, 12, 0, 0).unwrap(),
+            run_id: fixtures::RUN_1,
+            node_id: Some("code".to_string()),
+            node_label: Some("Code".to_string()),
+            stage_id: Some(StageId::new("code", 1)),
+            parallel_group_id: None,
+            parallel_branch_id: None,
+            session_id: None,
+            parent_session_id: None,
+            tool_call_id: None,
+            actor: None,
+            body: EventBody::RunCompleted(RunCompletedProps {
+                duration_ms: 42,
+                artifact_count: 0,
+                status: "success".to_string(),
+                reason: None,
+                total_usd_micros: None,
+                final_git_commit_sha: None,
+                final_patch: None,
+                billing: None,
+            }),
+        };
+        let payload = EventPayload::new(event.to_value().unwrap(), &fixtures::RUN_1).unwrap();
+        let envelope = EventEnvelope { seq: 7, payload };
+
+        let wire = serde_json::to_value(&envelope).unwrap();
+        assert_eq!(wire["seq"], 7);
+        assert_eq!(wire["id"], "evt_1");
+        assert_eq!(wire["event"], "run.completed");
+        assert!(wire.get("payload").is_none(), "wire shape must be flat");
+
+        let parsed: EventEnvelope = serde_json::from_value(wire).unwrap();
+        assert_eq!(parsed, envelope);
+    }
 }

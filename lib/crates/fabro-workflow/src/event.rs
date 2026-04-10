@@ -5,7 +5,8 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use ::fabro_types::run_event as fabro_types;
 use ::fabro_types::{
-    BilledTokenCounts, RunBlobId, RunControlAction, RunEvent, RunId, StageStatus, StatusReason,
+    ActorKind, ActorRef, BilledTokenCounts, ParallelBranchId, RunBlobId, RunControlAction,
+    RunEvent, RunId, RunProvenance, StageId, StageStatus, StatusReason,
 };
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -18,8 +19,10 @@ use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot};
 use uuid::Uuid;
 
+use crate::context::{Context as WfContext, WorkflowContext};
 use crate::error::FabroError;
 use crate::outcome::{BilledModelUsage, FailureDetail, Outcome};
+use crate::run_dir::visit_from_context;
 use fabro_agent::{AgentEvent, SandboxEvent, WorktreeEvent, WorktreeEventCallback};
 use fabro_llm::types::TokenCounts as LlmTokenCounts;
 use fabro_util::redact::redact_json_value;
@@ -54,7 +57,7 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         db_prefix: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        provenance: Option<::fabro_types::RunProvenance>,
+        provenance: Option<RunProvenance>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         manifest_blob: Option<RunBlobId>,
     },
@@ -90,9 +93,18 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<StatusReason>,
     },
-    RunCancelRequested,
-    RunPauseRequested,
-    RunUnpauseRequested,
+    RunCancelRequested {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor: Option<ActorRef>,
+    },
+    RunPauseRequested {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor: Option<ActorRef>,
+    },
+    RunUnpauseRequested {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        actor: Option<ActorRef>,
+    },
     RunPaused,
     RunUnpaused,
     RunRewound {
@@ -193,10 +205,14 @@ pub enum Event {
         join_policy: String,
     },
     ParallelBranchStarted {
+        parallel_group_id: StageId,
+        parallel_branch_id: ParallelBranchId,
         branch: String,
         index: usize,
     },
     ParallelBranchCompleted {
+        parallel_group_id: StageId,
+        parallel_branch_id: ParallelBranchId,
         branch: String,
         index: usize,
         duration_ms: u64,
@@ -568,13 +584,13 @@ impl Event {
             Self::RunRemoving { reason } => {
                 info!(?reason, "Run removing");
             }
-            Self::RunCancelRequested => {
+            Self::RunCancelRequested { .. } => {
                 info!("Run cancel requested");
             }
-            Self::RunPauseRequested => {
+            Self::RunPauseRequested { .. } => {
                 info!("Run pause requested");
             }
-            Self::RunUnpauseRequested => {
+            Self::RunUnpauseRequested { .. } => {
                 info!("Run unpause requested");
             }
             Self::RunPaused => {
@@ -676,6 +692,7 @@ impl Event {
                 index,
                 failure,
                 will_retry,
+                ..
             } => {
                 let error_msg = &failure.message;
                 if *will_retry {
@@ -705,6 +722,7 @@ impl Event {
                 attempt,
                 max_attempts,
                 delay_ms,
+                ..
             } => {
                 warn!(
                     node_id,
@@ -723,7 +741,7 @@ impl Event {
             } => {
                 debug!(branch_count, join_policy, "Parallel execution started");
             }
-            Self::ParallelBranchStarted { branch, index } => {
+            Self::ParallelBranchStarted { branch, index, .. } => {
                 debug!(branch, index, "Parallel branch started");
             }
             Self::ParallelBranchCompleted {
@@ -1131,9 +1149,9 @@ pub fn event_name(event: &Event) -> &'static str {
         Event::RunStarting { .. } => "run.starting",
         Event::RunRunning { .. } => "run.running",
         Event::RunRemoving { .. } => "run.removing",
-        Event::RunCancelRequested => "run.cancel.requested",
-        Event::RunPauseRequested => "run.pause.requested",
-        Event::RunUnpauseRequested => "run.unpause.requested",
+        Event::RunCancelRequested { .. } => "run.cancel.requested",
+        Event::RunPauseRequested { .. } => "run.pause.requested",
+        Event::RunUnpauseRequested { .. } => "run.unpause.requested",
         Event::RunPaused => "run.paused",
         Event::RunUnpaused => "run.unpaused",
         Event::RunRewound { .. } => "run.rewound",
@@ -1248,16 +1266,30 @@ pub fn event_name(event: &Event) -> &'static str {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct StoredEventFields {
     session_id: Option<String>,
     parent_session_id: Option<String>,
     node_id: Option<String>,
     node_label: Option<String>,
+    stage_id: Option<StageId>,
+    parallel_group_id: Option<StageId>,
+    parallel_branch_id: Option<ParallelBranchId>,
+    tool_call_id: Option<String>,
+    actor: Option<ActorRef>,
 }
 
 fn default_node_label(node_id: Option<&String>, node_label: Option<String>) -> Option<String> {
     node_label.or_else(|| node_id.cloned())
+}
+
+fn node_stored_fields(node_id: Option<String>) -> StoredEventFields {
+    let node_label = default_node_label(node_id.as_ref(), None);
+    StoredEventFields {
+        node_id,
+        node_label,
+        ..StoredEventFields::default()
+    }
 }
 
 fn billed_token_counts_from_llm(usage: &LlmTokenCounts) -> BilledTokenCounts {
@@ -1276,19 +1308,64 @@ fn stage_status_from_string(status: &str) -> StageStatus {
     serde_json::from_value(Value::String(status.to_string())).expect("valid stage status")
 }
 
-fn stored_event_fields(event: &Event) -> StoredEventFields {
+fn stored_event_fields(event: &Event, scope: Option<&StageScope>) -> StoredEventFields {
+    let mut fields = stored_event_fields_for_variant(event);
+    if let Some(scope) = scope {
+        if fields.node_id.is_none() {
+            fields.node_id = Some(scope.node_id.clone());
+            fields.node_label = default_node_label(Some(&scope.node_id), fields.node_label);
+        }
+        if fields.stage_id.is_none() {
+            fields.stage_id = Some(StageId::new(scope.node_id.clone(), scope.visit));
+        }
+        if fields.parallel_group_id.is_none() {
+            fields
+                .parallel_group_id
+                .clone_from(&scope.parallel_group_id);
+        }
+        if fields.parallel_branch_id.is_none() {
+            fields
+                .parallel_branch_id
+                .clone_from(&scope.parallel_branch_id);
+        }
+    }
+    fields
+}
+
+fn stored_event_fields_for_variant(event: &Event) -> StoredEventFields {
     match event {
+        Event::RunCreated { provenance, .. } => StoredEventFields {
+            actor: provenance.as_ref().and_then(actor_from_provenance),
+            ..StoredEventFields::default()
+        },
+        Event::RunCancelRequested { actor }
+        | Event::RunPauseRequested { actor }
+        | Event::RunUnpauseRequested { actor } => StoredEventFields {
+            actor: actor.clone(),
+            ..StoredEventFields::default()
+        },
         Event::StageCompleted { node_id, name, .. }
         | Event::StageFailed { node_id, name, .. }
         | Event::StageStarted { node_id, name, .. }
         | Event::StageRetrying { node_id, name, .. } => {
-            let node_id = Some(node_id.clone());
-            let node_label = default_node_label(node_id.as_ref(), Some(name.clone()));
+            let node_id_str = node_id.clone();
+            let node_label = default_node_label(Some(&node_id_str), Some(name.clone()));
             StoredEventFields {
-                session_id: None,
-                parent_session_id: None,
-                node_id,
+                node_id: Some(node_id_str),
                 node_label,
+                ..StoredEventFields::default()
+            }
+        }
+        Event::ParallelStarted { node_id, visit, .. }
+        | Event::ParallelCompleted { node_id, visit, .. } => {
+            let node_id_str = node_id.clone();
+            let node_label = default_node_label(Some(&node_id_str), None);
+            let parallel_group_id = Some(StageId::new(node_id_str.clone(), *visit));
+            StoredEventFields {
+                node_id: Some(node_id_str),
+                node_label,
+                parallel_group_id,
+                ..StoredEventFields::default()
             }
         }
         Event::CheckpointCompleted { node_id, .. }
@@ -1297,86 +1374,91 @@ fn stored_event_fields(event: &Event) -> StoredEventFields {
         | Event::SubgraphCompleted { node_id, .. }
         | Event::ArtifactCaptured { node_id, .. }
         | Event::PromptCompleted { node_id, .. }
-        | Event::ParallelStarted { node_id, .. }
-        | Event::ParallelCompleted { node_id, .. }
         | Event::CommandStarted { node_id, .. }
         | Event::CommandCompleted { node_id, .. }
         | Event::AgentCliStarted { node_id, .. }
-        | Event::AgentCliCompleted { node_id, .. } => {
-            let node_id = Some(node_id.clone());
-            let node_label = default_node_label(node_id.as_ref(), None);
-            StoredEventFields {
-                session_id: None,
-                parent_session_id: None,
-                node_id,
-                node_label,
-            }
-        }
+        | Event::AgentCliCompleted { node_id, .. } => node_stored_fields(Some(node_id.clone())),
         Event::Agent {
             stage,
+            visit,
+            event: agent_event,
             session_id,
             parent_session_id,
-            ..
         } => {
             let node_id = Some(stage.clone());
             let node_label = default_node_label(node_id.as_ref(), None);
+            let stage_id = Some(StageId::new(stage.clone(), *visit));
+            let tool_call_id = agent_tool_call_id(agent_event).map(str::to_string);
+            let actor = agent_actor_for_event(agent_event, session_id.as_deref());
             StoredEventFields {
                 session_id: session_id.clone(),
                 parent_session_id: parent_session_id.clone(),
                 node_id,
                 node_label,
+                stage_id,
+                tool_call_id,
+                actor,
+                ..StoredEventFields::default()
             }
         }
-        Event::GitCommit { node_id, .. } => {
-            let node_label = default_node_label(node_id.as_ref(), None);
-            StoredEventFields {
-                session_id: None,
-                parent_session_id: None,
-                node_id: node_id.clone(),
-                node_label,
-            }
+        Event::GitCommit { node_id, .. } => node_stored_fields(node_id.clone()),
+        Event::ParallelBranchStarted {
+            parallel_group_id,
+            parallel_branch_id,
+            branch,
+            ..
         }
-        Event::ParallelBranchStarted { branch, .. }
-        | Event::ParallelBranchCompleted { branch, .. } => {
+        | Event::ParallelBranchCompleted {
+            parallel_group_id,
+            parallel_branch_id,
+            branch,
+            ..
+        } => {
             let node_id = Some(branch.clone());
             let node_label = default_node_label(node_id.as_ref(), None);
             StoredEventFields {
-                session_id: None,
-                parent_session_id: None,
                 node_id,
                 node_label,
+                parallel_group_id: Some(parallel_group_id.clone()),
+                parallel_branch_id: Some(parallel_branch_id.clone()),
+                ..StoredEventFields::default()
             }
         }
         Event::Prompt { stage, .. }
         | Event::InterviewStarted { stage, .. }
         | Event::InterviewTimeout { stage, .. }
         | Event::InterviewInterrupted { stage, .. }
-        | Event::Failover { stage, .. } => {
-            let node_id = Some(stage.clone());
-            let node_label = default_node_label(node_id.as_ref(), None);
-            StoredEventFields {
-                session_id: None,
-                parent_session_id: None,
-                node_id,
-                node_label,
-            }
-        }
-        Event::StallWatchdogTimeout { node, .. } => {
-            let node_id = Some(node.clone());
-            let node_label = default_node_label(node_id.as_ref(), None);
-            StoredEventFields {
-                session_id: None,
-                parent_session_id: None,
-                node_id,
-                node_label,
-            }
-        }
-        _ => StoredEventFields {
-            session_id: None,
-            parent_session_id: None,
-            node_id: None,
-            node_label: None,
-        },
+        | Event::Failover { stage, .. } => node_stored_fields(Some(stage.clone())),
+        Event::StallWatchdogTimeout { node, .. } => node_stored_fields(Some(node.clone())),
+        _ => StoredEventFields::default(),
+    }
+}
+
+fn actor_from_provenance(provenance: &RunProvenance) -> Option<ActorRef> {
+    provenance
+        .subject
+        .as_ref()?
+        .login
+        .clone()
+        .map(ActorRef::user)
+}
+
+fn agent_tool_call_id(event: &AgentEvent) -> Option<&str> {
+    match event {
+        AgentEvent::ToolCallStarted { tool_call_id, .. }
+        | AgentEvent::ToolCallCompleted { tool_call_id, .. } => Some(tool_call_id.as_str()),
+        _ => None,
+    }
+}
+
+fn agent_actor_for_event(event: &AgentEvent, session_id: Option<&str>) -> Option<ActorRef> {
+    match event {
+        AgentEvent::AssistantMessage { model, .. } => Some(ActorRef {
+            kind: ActorKind::Agent,
+            id: session_id.map(str::to_string),
+            display: Some(model.clone()),
+        }),
+        _ => None,
     }
 }
 
@@ -1446,17 +1528,17 @@ fn event_body_from_event(event: &Event) -> EventBody {
         Event::RunRemoving { reason } => {
             EventBody::RunRemoving(fabro_types::RunStatusTransitionProps { reason: *reason })
         }
-        Event::RunCancelRequested => {
+        Event::RunCancelRequested { .. } => {
             EventBody::RunCancelRequested(fabro_types::RunControlRequestedProps {
                 action: RunControlAction::Cancel,
             })
         }
-        Event::RunPauseRequested => {
+        Event::RunPauseRequested { .. } => {
             EventBody::RunPauseRequested(fabro_types::RunControlRequestedProps {
                 action: RunControlAction::Pause,
             })
         }
-        Event::RunUnpauseRequested => {
+        Event::RunUnpauseRequested { .. } => {
             EventBody::RunUnpauseRequested(fabro_types::RunControlRequestedProps {
                 action: RunControlAction::Unpause,
             })
@@ -2381,12 +2463,51 @@ fn event_body_from_event(event: &Event) -> EventBody {
     }
 }
 
-pub fn to_run_event(run_id: &RunId, event: &Event) -> RunEvent {
-    to_run_event_at(run_id, event, Utc::now())
+/// Stage-level scope threaded through event emission to populate
+/// `stage_id` / `parallel_group_id` / `parallel_branch_id` on events
+/// that happen inside a concrete stage execution.
+#[derive(Clone, Debug)]
+pub struct StageScope {
+    pub node_id: String,
+    pub visit: u32,
+    pub parallel_group_id: Option<StageId>,
+    pub parallel_branch_id: Option<ParallelBranchId>,
 }
 
-pub fn to_run_event_at(run_id: &RunId, event: &Event, ts: chrono::DateTime<Utc>) -> RunEvent {
-    let fields = stored_event_fields(event);
+impl StageScope {
+    /// Build a scope from the given node id, sourcing visit count and parallel
+    /// ids from the current context.
+    pub fn from_context(context: &WfContext, node_id: impl Into<String>) -> Self {
+        Self {
+            node_id: node_id.into(),
+            visit: u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX),
+            parallel_group_id: context.parallel_group_id(),
+            parallel_branch_id: context.parallel_branch_id(),
+        }
+    }
+
+    /// Build scope for a handler invocation. Prefers the `current_stage_scope`
+    /// seeded by the fidelity lifecycle before_attempt hook, and falls back to
+    /// synthesizing one from `node_id` for direct-handler call sites (tests,
+    /// etc.) that don't go through the full lifecycle.
+    pub fn for_handler(context: &WfContext, node_id: impl Into<String>) -> Self {
+        context
+            .current_stage_scope()
+            .unwrap_or_else(|| Self::from_context(context, node_id))
+    }
+}
+
+pub fn to_run_event(run_id: &RunId, event: &Event) -> RunEvent {
+    to_run_event_at(run_id, event, Utc::now(), None)
+}
+
+pub fn to_run_event_at(
+    run_id: &RunId,
+    event: &Event,
+    ts: chrono::DateTime<Utc>,
+    scope: Option<&StageScope>,
+) -> RunEvent {
+    let fields = stored_event_fields(event, scope);
     let body = event_body_from_event(event);
     RunEvent {
         id: Uuid::now_v7().to_string(),
@@ -2394,8 +2515,13 @@ pub fn to_run_event_at(run_id: &RunId, event: &Event, ts: chrono::DateTime<Utc>)
         run_id: *run_id,
         node_id: fields.node_id,
         node_label: fields.node_label,
+        stage_id: fields.stage_id,
+        parallel_group_id: fields.parallel_group_id,
+        parallel_branch_id: fields.parallel_branch_id,
         session_id: fields.session_id,
         parent_session_id: fields.parent_session_id,
+        tool_call_id: fields.tool_call_id,
+        actor: fields.actor,
         body,
     }
 }
@@ -2654,6 +2780,14 @@ impl Emitter {
     }
 
     pub fn emit(&self, event: &Event) {
+        self.emit_with_scope(event, None);
+    }
+
+    pub fn emit_scoped(&self, event: &Event, scope: &StageScope) {
+        self.emit_with_scope(event, Some(scope));
+    }
+
+    fn emit_with_scope(&self, event: &Event, scope: Option<&StageScope>) {
         self.last_event_at.store(epoch_millis(), Ordering::Relaxed);
         event.trace();
         if let Event::WorkflowRunStarted { run_id, .. } = event {
@@ -2662,7 +2796,7 @@ impl Emitter {
                 "workflow run started event must match emitter run_id"
             );
         }
-        let stored = to_run_event(&self.run_id, event);
+        let stored = to_run_event_at(&self.run_id, event, Utc::now(), scope);
         self.dispatch_run_event(&stored);
     }
 
@@ -2753,7 +2887,7 @@ mod tests {
 
     #[test]
     fn run_event_stage_completed_places_node_fields_in_header() {
-        let stored = to_run_event(
+        let stored = to_run_event_at(
             &fixtures::RUN_2,
             &Event::StageCompleted {
                 node_id: "plan".to_string(),
@@ -2777,12 +2911,20 @@ mod tests {
                 attempt: 1,
                 max_attempts: 1,
             },
+            Utc::now(),
+            Some(&StageScope {
+                node_id: "plan".to_string(),
+                visit: 1,
+                parallel_group_id: None,
+                parallel_branch_id: None,
+            }),
         );
 
         assert_eq!(stored.event_name(), "stage.completed");
         assert_eq!(stored.run_id, fixtures::RUN_2);
         assert_eq!(stored.node_id.as_deref(), Some("plan"));
         assert_eq!(stored.node_label.as_deref(), Some("Plan"));
+        assert_eq!(stored.stage_id, Some(StageId::new("plan", 1)));
         let properties = stored.properties().unwrap();
         assert_eq!(properties["duration_ms"], 5000);
         assert_eq!(properties["status"], "success");
@@ -2951,7 +3093,7 @@ mod tests {
 
         let (writer, reader) = tokio::io::duplex(4096);
         let sink = RunEventSink::json_lines(writer);
-        let event = to_run_event(&fixtures::RUN_7, &Event::RunPauseRequested);
+        let event = to_run_event(&fixtures::RUN_7, &Event::RunPauseRequested { actor: None });
 
         sink.write_run_event(&event).await.unwrap();
 
@@ -3016,6 +3158,8 @@ mod tests {
         );
         assert_eq!(
             event_name(&Event::ParallelBranchStarted {
+                parallel_group_id: StageId::new("plan", 1),
+                parallel_branch_id: ParallelBranchId::new(StageId::new("plan", 1), 0),
                 branch: "fork".to_string(),
                 index: 0,
             }),
@@ -3035,5 +3179,256 @@ mod tests {
             }),
             "agent.sub.spawned"
         );
+    }
+
+    #[test]
+    fn stage_started_populates_parallel_ids_when_present() {
+        let stored = to_run_event_at(
+            &fixtures::RUN_1,
+            &Event::StageStarted {
+                node_id: "review".to_string(),
+                name: "review".to_string(),
+                index: 1,
+                handler_type: "agent".to_string(),
+                attempt: 1,
+                max_attempts: 1,
+            },
+            Utc::now(),
+            Some(&StageScope {
+                node_id: "review".to_string(),
+                visit: 1,
+                parallel_group_id: Some(StageId::new("fanout", 2)),
+                parallel_branch_id: Some(ParallelBranchId::new(StageId::new("fanout", 2), 1)),
+            }),
+        );
+        assert_eq!(stored.parallel_group_id, Some(StageId::new("fanout", 2)));
+        assert_eq!(
+            stored.parallel_branch_id,
+            Some(ParallelBranchId::new(StageId::new("fanout", 2), 1))
+        );
+    }
+
+    #[test]
+    fn parallel_started_populates_parallel_group_id() {
+        let stored = to_run_event(
+            &fixtures::RUN_1,
+            &Event::ParallelStarted {
+                node_id: "fanout".to_string(),
+                visit: 2,
+                branch_count: 3,
+                join_policy: "wait_all".to_string(),
+            },
+        );
+        assert_eq!(stored.parallel_group_id, Some(StageId::new("fanout", 2)));
+        assert!(stored.parallel_branch_id.is_none());
+    }
+
+    #[test]
+    fn parallel_branch_started_populates_group_and_branch_ids() {
+        let stored = to_run_event(
+            &fixtures::RUN_1,
+            &Event::ParallelBranchStarted {
+                parallel_group_id: StageId::new("fanout", 2),
+                parallel_branch_id: ParallelBranchId::new(StageId::new("fanout", 2), 1),
+                branch: "review".to_string(),
+                index: 1,
+            },
+        );
+        assert_eq!(stored.parallel_group_id, Some(StageId::new("fanout", 2)));
+        assert_eq!(
+            stored.parallel_branch_id,
+            Some(ParallelBranchId::new(StageId::new("fanout", 2), 1))
+        );
+    }
+
+    #[test]
+    fn agent_tool_started_populates_tool_call_id_and_stage_id() {
+        let stored = to_run_event_at(
+            &fixtures::RUN_1,
+            &Event::Agent {
+                stage: "code".to_string(),
+                visit: 3,
+                event: AgentEvent::ToolCallStarted {
+                    tool_name: "read_file".to_string(),
+                    tool_call_id: "call_abc".to_string(),
+                    arguments: serde_json::json!({"path": "src/main.rs"}),
+                },
+                session_id: Some("ses_1".to_string()),
+                parent_session_id: None,
+            },
+            Utc::now(),
+            Some(&StageScope {
+                node_id: "code".to_string(),
+                visit: 3,
+                parallel_group_id: Some(StageId::new("fanout", 2)),
+                parallel_branch_id: Some(ParallelBranchId::new(StageId::new("fanout", 2), 0)),
+            }),
+        );
+        assert_eq!(stored.stage_id, Some(StageId::new("code", 3)));
+        assert_eq!(stored.tool_call_id.as_deref(), Some("call_abc"));
+        assert_eq!(stored.parallel_group_id, Some(StageId::new("fanout", 2)));
+        assert_eq!(
+            stored.parallel_branch_id,
+            Some(ParallelBranchId::new(StageId::new("fanout", 2), 0))
+        );
+    }
+
+    #[test]
+    fn stage_scope_populates_stage_id_on_non_stage_events() {
+        // Events tied to a concrete stage execution but lacking scope in their
+        // own variant fields (CheckpointCompleted, CommandStarted, PromptCompleted,
+        // Prompt, InterviewStarted, Failover, GitCommit) should pick up stage_id
+        // / parallel_group_id / parallel_branch_id from the scope argument.
+        let scope = StageScope {
+            node_id: "build".to_string(),
+            visit: 2,
+            parallel_group_id: Some(StageId::new("fanout", 1)),
+            parallel_branch_id: Some(ParallelBranchId::new(StageId::new("fanout", 1), 0)),
+        };
+
+        let command_started = to_run_event_at(
+            &fixtures::RUN_1,
+            &Event::CommandStarted {
+                node_id: "build".to_string(),
+                script: "echo".to_string(),
+                command: "echo".to_string(),
+                language: "shell".to_string(),
+                timeout_ms: None,
+            },
+            Utc::now(),
+            Some(&scope),
+        );
+        assert_eq!(command_started.stage_id, Some(StageId::new("build", 2)));
+        assert_eq!(command_started.parallel_group_id, scope.parallel_group_id);
+        assert_eq!(command_started.parallel_branch_id, scope.parallel_branch_id);
+
+        let prompt = to_run_event_at(
+            &fixtures::RUN_1,
+            &Event::Prompt {
+                stage: "build".to_string(),
+                visit: 2,
+                text: "do it".to_string(),
+                mode: None,
+                provider: None,
+                model: None,
+            },
+            Utc::now(),
+            Some(&scope),
+        );
+        assert_eq!(prompt.stage_id, Some(StageId::new("build", 2)));
+
+        let git_commit = to_run_event_at(
+            &fixtures::RUN_1,
+            &Event::GitCommit {
+                node_id: Some("build".to_string()),
+                sha: "deadbeef".to_string(),
+            },
+            Utc::now(),
+            Some(&scope),
+        );
+        assert_eq!(git_commit.stage_id, Some(StageId::new("build", 2)));
+    }
+
+    #[test]
+    fn run_level_events_without_scope_leave_stage_id_absent() {
+        let stored = to_run_event(&fixtures::RUN_1, &Event::RunRunning { reason: None });
+        assert!(stored.stage_id.is_none());
+        assert!(stored.parallel_group_id.is_none());
+        assert!(stored.parallel_branch_id.is_none());
+    }
+
+    #[test]
+    fn control_action_events_carry_actor_in_envelope() {
+        let actor = ActorRef {
+            kind: ActorKind::User,
+            id: Some("alice".to_string()),
+            display: Some("alice".to_string()),
+        };
+
+        let cancel = to_run_event(
+            &fixtures::RUN_1,
+            &Event::RunCancelRequested {
+                actor: Some(actor.clone()),
+            },
+        );
+        assert_eq!(cancel.event_name(), "run.cancel.requested");
+        assert_eq!(cancel.actor.as_ref().expect("actor set"), &actor);
+
+        let pause = to_run_event(
+            &fixtures::RUN_1,
+            &Event::RunPauseRequested {
+                actor: Some(actor.clone()),
+            },
+        );
+        assert_eq!(pause.actor.as_ref().expect("actor set"), &actor);
+
+        let unpause = to_run_event(
+            &fixtures::RUN_1,
+            &Event::RunUnpauseRequested { actor: None },
+        );
+        assert!(unpause.actor.is_none());
+    }
+
+    #[test]
+    fn agent_assistant_message_populates_agent_actor() {
+        let stored = to_run_event(
+            &fixtures::RUN_1,
+            &Event::Agent {
+                stage: "code".to_string(),
+                visit: 1,
+                event: AgentEvent::AssistantMessage {
+                    text: "ok".to_string(),
+                    model: "claude-sonnet".to_string(),
+                    usage: LlmTokenCounts::default(),
+                    tool_call_count: 0,
+                },
+                session_id: Some("ses_agent".to_string()),
+                parent_session_id: None,
+            },
+        );
+        let actor = stored.actor.as_ref().expect("actor set");
+        assert_eq!(actor.kind, ActorKind::Agent);
+        assert_eq!(actor.id.as_deref(), Some("ses_agent"));
+        assert_eq!(actor.display.as_deref(), Some("claude-sonnet"));
+    }
+
+    #[test]
+    fn run_created_populates_user_actor_from_provenance() {
+        use ::fabro_types::settings::SettingsFile;
+        use ::fabro_types::{Graph, RunAuthMethod, RunSubjectProvenance, fixtures};
+
+        let provenance = RunProvenance {
+            server: None,
+            client: None,
+            subject: Some(RunSubjectProvenance {
+                login: Some("alice".to_string()),
+                auth_method: RunAuthMethod::Cookie,
+            }),
+        };
+
+        let stored = to_run_event(
+            &fixtures::RUN_1,
+            &Event::RunCreated {
+                run_id: fixtures::RUN_1,
+                settings: serde_json::to_value(SettingsFile::default()).unwrap(),
+                graph: serde_json::to_value(Graph::new("test")).unwrap(),
+                workflow_source: None,
+                workflow_config: None,
+                labels: Default::default(),
+                run_dir: "/tmp/run".to_string(),
+                working_directory: "/tmp/run".to_string(),
+                host_repo_path: None,
+                repo_origin_url: None,
+                base_branch: None,
+                workflow_slug: None,
+                db_prefix: None,
+                provenance: Some(provenance),
+                manifest_blob: None,
+            },
+        );
+        let actor = stored.actor.as_ref().expect("actor set");
+        assert_eq!(actor.kind, ActorKind::User);
+        assert_eq!(actor.id.as_deref(), Some("alice"));
+        assert_eq!(actor.display.as_deref(), Some("alice"));
     }
 }
