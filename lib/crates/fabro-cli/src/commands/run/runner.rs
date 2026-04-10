@@ -7,6 +7,7 @@ use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use fabro_interview::{ControlInterviewer, WorkerControlEnvelope, WorkerControlMessage};
 use fabro_store::{EventEnvelope, EventPayload, RunProjection};
+use fabro_types::settings::InterpString;
 use fabro_types::settings::SettingsFile;
 use fabro_types::{EventBody, RunBlobId, RunEvent, RunId, StatusReason};
 use fabro_workflow::artifact_snapshot::CapturedArtifactInfo;
@@ -422,16 +423,25 @@ fn maybe_build_github_app_credentials(
     settings: &SettingsFile,
 ) -> Result<Option<fabro_github::GitHubAppCredentials>> {
     let resolved_run = fabro_config::resolve_run_from_file(settings).ok();
+    let resolved_server = fabro_config::resolve_server_from_file(settings).ok();
     let needs_github_app = resolved_run
         .as_ref()
         .is_some_and(|settings| settings.sandbox.provider == "daytona")
         || resolved_run
             .as_ref()
             .is_some_and(|settings| settings.pull_request.is_some())
-        || settings.github_permissions().is_some();
+        || resolved_server
+            .as_ref()
+            .is_some_and(|settings| !settings.integrations.github.permissions.is_empty());
 
     if needs_github_app {
-        build_github_app_credentials(settings.github_app_id_str().as_deref())
+        build_github_app_credentials(
+            resolved_server
+                .as_ref()
+                .and_then(|settings| settings.integrations.github.app_id.as_ref())
+                .map(InterpString::as_source)
+                .as_deref(),
+        )
     } else {
         Ok(None)
     }

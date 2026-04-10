@@ -1,5 +1,5 @@
 use fabro_config::resolve_project_from_file;
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::{SettingsFile, parse_settings_file};
 
 #[test]
 fn resolves_project_defaults_from_empty_settings() {
@@ -15,7 +15,7 @@ fn resolves_project_defaults_from_empty_settings() {
 
 #[test]
 fn resolves_project_directory_and_metadata() {
-    let settings: SettingsFile = fabro_config::ConfigLayer::parse(
+    let settings: SettingsFile = parse_settings_file(
         r#"
 _version = 1
 
@@ -28,8 +28,7 @@ directory = ".fabro"
 team = "platform"
 "#,
     )
-    .expect("fixture should parse")
-    .into();
+    .expect("fixture should parse");
 
     let project = resolve_project_from_file(&settings).expect("project settings should resolve");
 

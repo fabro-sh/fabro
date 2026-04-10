@@ -1,11 +1,8 @@
-use fabro_config::ConfigLayer;
 use fabro_types::settings::run::{ApprovalMode, RunGoal, RunMode, WorktreeMode};
-use fabro_types::settings::{InterpString, SettingsFile};
+use fabro_types::settings::{InterpString, SettingsFile, parse_settings_file};
 
 fn parse(source: &str) -> SettingsFile {
-    ConfigLayer::parse(source)
-        .expect("fixture should parse")
-        .into()
+    parse_settings_file(source).expect("fixture should parse")
 }
 
 #[test]

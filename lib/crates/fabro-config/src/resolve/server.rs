@@ -3,14 +3,16 @@ use std::time::Duration;
 use fabro_types::settings::InterpString;
 use fabro_types::settings::server::{
     DiscordIntegrationSettings, GithubIntegrationSettings, GithubOauthSettings,
-    IntegrationWebhooksSettings, ObjectStoreProvider, ObjectStoreSettings, ServerApiLayer,
-    ServerApiSettings, ServerArtifactsLayer, ServerArtifactsSettings, ServerAuthApiJwtSettings,
-    ServerAuthApiMtlsSettings, ServerAuthApiSettings, ServerAuthLayer, ServerAuthSettings,
-    ServerAuthWebGithubLayer, ServerAuthWebProvidersSettings, ServerAuthWebSettings,
-    ServerIntegrationsLayer, ServerIntegrationsSettings, ServerLayer, ServerListenLayer,
-    ServerListenSettings, ServerListenTlsLayer, ServerLoggingSettings, ServerSchedulerSettings,
-    ServerSettings, ServerSlateDbLayer, ServerSlateDbSettings, ServerStorageSettings,
-    ServerWebSettings, SlackIntegrationSettings, TeamsIntegrationSettings, TlsConfig,
+    IntegrationWebhooksSettings, ObjectStoreLocalLayer, ObjectStoreProvider, ObjectStoreS3Layer,
+    ObjectStoreSettings, ServerApiLayer, ServerApiSettings, ServerArtifactsLayer,
+    ServerArtifactsSettings, ServerAuthApiJwtSettings, ServerAuthApiMtlsSettings,
+    ServerAuthApiSettings, ServerAuthLayer, ServerAuthSettings, ServerAuthWebGithubLayer,
+    ServerAuthWebProvidersSettings, ServerAuthWebSettings, ServerIntegrationsLayer,
+    ServerIntegrationsSettings, ServerLayer, ServerListenLayer, ServerListenSettings,
+    ServerListenTlsLayer, ServerLoggingSettings, ServerSchedulerSettings, ServerSettings,
+    ServerSlateDbLayer, ServerSlateDbSettings, ServerStorageLayer, ServerStorageSettings,
+    ServerWebLayer, ServerWebSettings, SlackIntegrationSettings, TeamsIntegrationSettings,
+    TlsConfig,
 };
 use fabro_util::Home;
 
@@ -49,9 +51,7 @@ pub fn resolve_server(layer: &ServerLayer, errors: &mut Vec<ResolveError>) -> Se
     }
 }
 
-fn resolve_storage(
-    layer: Option<&fabro_types::settings::server::ServerStorageLayer>,
-) -> ServerStorageSettings {
+fn resolve_storage(layer: Option<&ServerStorageLayer>) -> ServerStorageSettings {
     ServerStorageSettings {
         root: layer
             .and_then(|storage| storage.root.clone())
@@ -106,10 +106,7 @@ fn resolve_tls(
     (Some(TlsConfig { cert, key, ca }), valid)
 }
 
-fn resolve_web(
-    _api: Option<&ServerApiLayer>,
-    layer: Option<&fabro_types::settings::server::ServerWebLayer>,
-) -> ServerWebSettings {
+fn resolve_web(_api: Option<&ServerApiLayer>, layer: Option<&ServerWebLayer>) -> ServerWebSettings {
     ServerWebSettings {
         enabled: layer.and_then(|web| web.enabled).unwrap_or(true),
         url: layer
@@ -217,15 +214,14 @@ fn resolve_slatedb(
         ),
         flush_interval: layer
             .and_then(|slatedb| slatedb.flush_interval)
-            .map(|duration| duration.as_std())
-            .unwrap_or_else(|| Duration::from_millis(1)),
+            .map_or_else(|| Duration::from_millis(1), |duration| duration.as_std()),
     }
 }
 
 fn resolve_object_store(
     provider: ObjectStoreProvider,
-    local: Option<&fabro_types::settings::server::ObjectStoreLocalLayer>,
-    s3: Option<&fabro_types::settings::server::ObjectStoreS3Layer>,
+    local: Option<&ObjectStoreLocalLayer>,
+    s3: Option<&ObjectStoreS3Layer>,
     storage_root: &InterpString,
     path_prefix: &str,
     errors: &mut Vec<ResolveError>,

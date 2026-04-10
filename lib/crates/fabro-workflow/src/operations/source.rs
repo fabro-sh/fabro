@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use fabro_config::project as project_config;
+use fabro_config::run::resolve_run_goal;
 use fabro_types::settings::SettingsFile;
 
 use crate::file_resolver::{FileResolver, FilesystemFileResolver};
@@ -137,8 +138,7 @@ fn resolve_goal_override(
     settings: &SettingsFile,
     working_directory: &Path,
 ) -> anyhow::Result<Option<String>> {
-    settings
-        .resolve_run_goal(working_directory)
+    resolve_run_goal(settings, working_directory)
         .map(|opt| opt.map(|resolved| resolved.text))
         .map_err(anyhow::Error::from)
 }

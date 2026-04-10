@@ -15,7 +15,7 @@ use super::duration::Duration as DurationLayer;
 use super::interp::InterpString;
 
 /// A structurally resolved `[server]` view for consumers.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ServerSettings {
     pub listen: ServerListenSettings,
     pub api: ServerApiSettings,
@@ -27,23 +27,6 @@ pub struct ServerSettings {
     pub scheduler: ServerSchedulerSettings,
     pub logging: ServerLoggingSettings,
     pub integrations: ServerIntegrationsSettings,
-}
-
-impl Default for ServerSettings {
-    fn default() -> Self {
-        Self {
-            listen: ServerListenSettings::default(),
-            api: ServerApiSettings::default(),
-            web: ServerWebSettings::default(),
-            auth: ServerAuthSettings::default(),
-            storage: ServerStorageSettings::default(),
-            artifacts: ServerArtifactsSettings::default(),
-            slatedb: ServerSlateDbSettings::default(),
-            scheduler: ServerSchedulerSettings::default(),
-            logging: ServerLoggingSettings::default(),
-            integrations: ServerIntegrationsSettings::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -85,7 +85,7 @@ pub struct ServeArgs {
 }
 
 fn load_settings(path: Option<&Path>) -> anyhow::Result<SettingsFile> {
-    Ok(load_settings_config(path)?.into())
+    load_settings_config(path)
 }
 
 fn resolved_config_path(path: Option<&Path>) -> PathBuf {
@@ -363,7 +363,7 @@ where
         .github
         .webhooks
         .as_ref()
-        .and_then(|_| resolved_server_settings.integrations.github.app_id.as_ref())
+        .and(resolved_server_settings.integrations.github.app_id.as_ref())
         .map(resolve_interp)
         .transpose()?;
     let webhook_manager = match webhook_app_id {
@@ -695,13 +695,10 @@ mod tests {
         build_object_store_with_preference, server_bind_title, server_title,
     };
     use crate::bind::Bind;
-    use fabro_config::ConfigLayer;
-    use fabro_types::settings::SettingsFile;
+    use fabro_types::settings::{SettingsFile, parse_settings_file};
 
     fn parse_settings(source: &str) -> SettingsFile {
-        ConfigLayer::parse(source)
-            .expect("v2 fixture should parse")
-            .into()
+        parse_settings_file(source).expect("v2 fixture should parse")
     }
 
     #[test]
@@ -722,10 +719,13 @@ mod tests {
         let resolved =
             apply_runtime_settings(&base, &args, false, &PathBuf::from("/srv/fabro-storage"));
 
-        assert_eq!(
-            resolved.server_storage_root_str().as_deref(),
-            Some("/srv/fabro-storage")
-        );
+        let storage_root = resolved
+            .server
+            .as_ref()
+            .and_then(|server| server.storage.as_ref())
+            .and_then(|storage| storage.root.as_ref())
+            .map(|value| value.as_source());
+        assert_eq!(storage_root.as_deref(), Some("/srv/fabro-storage"));
     }
 
     #[test]
@@ -752,7 +752,14 @@ enabled = false
 
         let resolved = apply_runtime_settings(&base, &args, false, &PathBuf::from("/srv/fabro"));
 
-        assert_eq!(resolved.server_web().and_then(|w| w.enabled), Some(true));
+        assert_eq!(
+            resolved
+                .server
+                .as_ref()
+                .and_then(|server| server.web.as_ref())
+                .and_then(|web| web.enabled),
+            Some(true)
+        );
     }
 
     #[test]
@@ -772,7 +779,14 @@ enabled = false
 
         let resolved = apply_runtime_settings(&base, &args, false, &PathBuf::from("/srv/fabro"));
 
-        assert_eq!(resolved.server_web().and_then(|w| w.enabled), Some(false));
+        assert_eq!(
+            resolved
+                .server
+                .as_ref()
+                .and_then(|server| server.web.as_ref())
+                .and_then(|web| web.enabled),
+            Some(false)
+        );
     }
 
     #[test]

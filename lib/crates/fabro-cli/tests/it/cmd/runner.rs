@@ -210,10 +210,11 @@ digraph GitHubApp {
     let run_dir = context.find_run_dir(&run_id);
     let state = run_state(&run_dir);
     let run = state.run.as_ref().expect("run record should exist");
+    let resolved_server = fabro_config::resolve_server_from_file(&run.settings).unwrap();
     fabro_json_snapshot!(
         context,
         serde_json::json!({
-            "app_id": run.settings.github_app_id_str(),
+            "app_id": resolved_server.integrations.github.app_id.map(|value| value.as_source()),
         }),
         @r#"
         {

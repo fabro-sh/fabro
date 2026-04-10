@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
-use fabro_config::ConfigLayer;
 use fabro_sandbox::SandboxProvider;
 use fabro_types::settings::SettingsFile;
 use fabro_types::settings::cli::{CliLayer, CliOutputLayer, OutputVerbosity};
@@ -117,67 +116,59 @@ fn current_dir_or_dot() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
-impl TryFrom<&RunArgs> for ConfigLayer {
-    type Error = anyhow::Error;
+pub(crate) fn run_args_layer(args: &RunArgs) -> Result<SettingsFile> {
+    let model = model_from_args(args.model.as_deref(), args.provider.as_deref());
+    let sandbox = sandbox_layer(
+        args.sandbox.map(Into::into),
+        sparse_flag(args.preserve_sandbox),
+    );
+    let execution = execution_layer(
+        sparse_flag(args.dry_run),
+        sparse_flag(args.auto_approve),
+        sparse_flag(args.no_retro),
+    );
 
-    fn try_from(args: &RunArgs) -> Result<Self, Self::Error> {
-        let model = model_from_args(args.model.as_deref(), args.provider.as_deref());
-        let sandbox = sandbox_layer(
-            args.sandbox.map(Into::into),
-            sparse_flag(args.preserve_sandbox),
-        );
-        let execution = execution_layer(
-            sparse_flag(args.dry_run),
-            sparse_flag(args.auto_approve),
-            sparse_flag(args.no_retro),
-        );
+    let cwd = current_dir_or_dot();
+    let goal = goal_layer_from_args(args.goal.as_deref(), args.goal_file.as_deref(), &cwd)?;
 
-        let cwd = current_dir_or_dot();
-        let goal = goal_layer_from_args(args.goal.as_deref(), args.goal_file.as_deref(), &cwd)?;
+    let run = RunLayer {
+        goal,
+        metadata: parse_labels(&args.label),
+        model,
+        sandbox,
+        execution,
+        ..RunLayer::default()
+    };
 
-        let run = RunLayer {
-            goal,
-            metadata: parse_labels(&args.label),
-            model,
-            sandbox,
-            execution,
-            ..RunLayer::default()
-        };
-
-        Ok(Self::from(SettingsFile {
-            run: Some(run),
-            cli: cli_layer_for_verbose(args.verbose),
-            ..SettingsFile::default()
-        }))
-    }
+    Ok(SettingsFile {
+        run: Some(run),
+        cli: cli_layer_for_verbose(args.verbose),
+        ..SettingsFile::default()
+    })
 }
 
-impl TryFrom<&PreflightArgs> for ConfigLayer {
-    type Error = anyhow::Error;
+pub(crate) fn preflight_args_layer(args: &PreflightArgs) -> Result<SettingsFile> {
+    let model = model_from_args(args.model.as_deref(), args.provider.as_deref());
+    let sandbox = args.sandbox.map(|s| RunSandboxLayer {
+        provider: Some(SandboxProvider::from(s).to_string()),
+        ..RunSandboxLayer::default()
+    });
 
-    fn try_from(args: &PreflightArgs) -> Result<Self, Self::Error> {
-        let model = model_from_args(args.model.as_deref(), args.provider.as_deref());
-        let sandbox = args.sandbox.map(|s| RunSandboxLayer {
-            provider: Some(SandboxProvider::from(s).to_string()),
-            ..RunSandboxLayer::default()
-        });
+    let cwd = current_dir_or_dot();
+    let goal = goal_layer_from_args(args.goal.as_deref(), args.goal_file.as_deref(), &cwd)?;
 
-        let cwd = current_dir_or_dot();
-        let goal = goal_layer_from_args(args.goal.as_deref(), args.goal_file.as_deref(), &cwd)?;
+    let run = RunLayer {
+        goal,
+        model,
+        sandbox,
+        ..RunLayer::default()
+    };
 
-        let run = RunLayer {
-            goal,
-            model,
-            sandbox,
-            ..RunLayer::default()
-        };
-
-        Ok(Self::from(SettingsFile {
-            run: Some(run),
-            cli: cli_layer_for_verbose(args.verbose),
-            ..SettingsFile::default()
-        }))
-    }
+    Ok(SettingsFile {
+        run: Some(run),
+        cli: cli_layer_for_verbose(args.verbose),
+        ..SettingsFile::default()
+    })
 }
 
 #[cfg(test)]

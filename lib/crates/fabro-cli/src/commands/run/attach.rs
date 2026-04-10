@@ -13,6 +13,7 @@ use fabro_api::types;
 use fabro_interview::{AnswerValue, ConsoleInterviewer, Question, QuestionOption, QuestionType};
 use fabro_store::EventEnvelope;
 use fabro_types::settings::cli::OutputVerbosity;
+use fabro_types::settings::run::ApprovalMode;
 use fabro_util::json::normalize_json_value;
 use fabro_util::terminal::Styles;
 use fabro_workflow::outcome::StageStatus;
@@ -65,9 +66,7 @@ pub(crate) async fn attach_run_with_client(
     let state = client.get_run_state(run_id).await?;
     let auto_approve = state.run.as_ref().is_some_and(|record| {
         fabro_config::resolve_run_from_file(&record.settings)
-            .map(|settings| {
-                settings.execution.approval == fabro_types::settings::run::ApprovalMode::Auto
-            })
+            .map(|settings| settings.execution.approval == ApprovalMode::Auto)
             .unwrap_or(false)
     });
     let verbose = state.run.as_ref().is_some_and(|record| {

@@ -106,7 +106,7 @@ pub(crate) async fn connect_server_with_settings(
     let target = user_config::resolve_server_target(args, settings)?;
     let runtime = LocalServerRuntime {
         active_config_path: base_config_path.to_path_buf(),
-        storage_dir: settings.storage_dir(),
+        storage_dir: user_config::storage_dir(settings)?,
     };
     connect_target_api_client_bundle(&target, &runtime).await
 }

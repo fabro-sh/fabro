@@ -11,7 +11,6 @@ use fabro_types::settings::SettingsFile;
 use fabro_types::settings::run::{RunExecutionLayer, RunLayer};
 use fabro_types::settings::server::ServerLayer;
 
-use crate::ConfigLayer;
 use crate::merge::combine_files;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -23,19 +22,19 @@ pub enum EffectiveSettingsMode {
 
 #[derive(Clone, Debug, Default)]
 pub struct EffectiveSettingsLayers {
-    pub args: ConfigLayer,
-    pub workflow: ConfigLayer,
-    pub project: ConfigLayer,
-    pub user: ConfigLayer,
+    pub args: SettingsFile,
+    pub workflow: SettingsFile,
+    pub project: SettingsFile,
+    pub user: SettingsFile,
 }
 
 impl EffectiveSettingsLayers {
     #[must_use]
     pub fn new(
-        args: ConfigLayer,
-        workflow: ConfigLayer,
-        project: ConfigLayer,
-        user: ConfigLayer,
+        args: SettingsFile,
+        workflow: SettingsFile,
+        project: SettingsFile,
+        user: SettingsFile,
     ) -> Self {
         Self {
             args,
@@ -60,9 +59,10 @@ pub fn resolve_settings(
     } = layers;
 
     match mode {
-        EffectiveSettingsMode::LocalOnly => {
-            Ok(args.combine(workflow).combine(project).combine(user).into())
-        }
+        EffectiveSettingsMode::LocalOnly => Ok(combine_files(
+            combine_files(combine_files(user, project), workflow),
+            args,
+        )),
         EffectiveSettingsMode::RemoteServer | EffectiveSettingsMode::LocalDaemon => {
             let server_settings = server_settings.ok_or_else(|| {
                 anyhow!("server settings are required for server-targeted settings resolution")
@@ -70,13 +70,13 @@ pub fn resolve_settings(
             // Owner-specific domains (cli, server) may only come from the
             // local ~/.fabro/settings.toml, never from fabro.toml or
             // workflow.toml. The user layer keeps its cli/server fields.
-            strip_owner_domains(workflow.as_v2_mut());
-            strip_owner_domains(project.as_v2_mut());
+            strip_owner_domains(&mut workflow);
+            strip_owner_domains(&mut project);
 
             let server_defaults = server_defaults_file(server_settings);
 
-            let combined: SettingsFile =
-                args.combine(workflow).combine(project).combine(user).into();
+            let combined =
+                combine_files(combine_files(combine_files(user, project), workflow), args);
 
             let mut settings = match mode {
                 EffectiveSettingsMode::RemoteServer => {
@@ -179,20 +179,20 @@ fn apply_local_daemon_overrides(mut settings: SettingsFile, server: &SettingsFil
 mod tests {
     use fabro_types::settings::InterpString;
     use fabro_types::settings::server::{ServerLayer, ServerSchedulerLayer, ServerStorageLayer};
+    use fabro_types::settings::{SettingsFile, parse_settings_file};
 
     use super::{EffectiveSettingsLayers, EffectiveSettingsMode, resolve_settings};
-    use crate::ConfigLayer;
 
-    fn layer(source: &str) -> ConfigLayer {
-        ConfigLayer::parse(source).expect("v2 fixture should parse")
+    fn layer(source: &str) -> SettingsFile {
+        parse_settings_file(source).expect("v2 fixture should parse")
     }
 
     #[test]
     fn local_only_merges_project_and_user_layers() {
         let settings = resolve_settings(
             EffectiveSettingsLayers::new(
-                ConfigLayer::default(),
-                ConfigLayer::default(),
+                SettingsFile::default(),
+                SettingsFile::default(),
                 layer(
                     r#"
 _version = 1
@@ -227,13 +227,23 @@ shared = "user"
         .unwrap();
 
         assert_eq!(
-            settings.run_model_name_str().as_deref(),
+            settings
+                .run
+                .as_ref()
+                .and_then(|run| run.model.as_ref())
+                .and_then(|model| model.name.as_ref())
+                .map(|value| value.as_source())
+                .as_deref(),
             Some("project-model")
         );
         // Per R22, run.inputs replaces wholesale — the winning layer is the
         // highest-precedence layer that sets `inputs` (project here, since it
         // wins over user).
-        let inputs = settings.run_inputs().unwrap();
+        let inputs = settings
+            .run
+            .as_ref()
+            .and_then(|run| run.inputs.as_ref())
+            .unwrap();
         assert!(inputs.contains_key("project_only"));
         assert_eq!(
             inputs.get("shared").and_then(|v| v.as_str()),
@@ -249,7 +259,7 @@ shared = "user"
     fn local_only_merges_workflow_project_user() {
         let settings = resolve_settings(
             EffectiveSettingsLayers::new(
-                ConfigLayer::default(),
+                SettingsFile::default(),
                 layer(
                     r#"
 _version = 1
@@ -284,14 +294,35 @@ provider = "openai"
         .unwrap();
 
         assert_eq!(
-            settings.run_goal_inline_str().as_deref(),
+            match settings.run.as_ref().and_then(|run| run.goal.as_ref()) {
+                Some(fabro_types::settings::run::RunGoalLayer::Inline(value)) => {
+                    Some(value.as_source())
+                }
+                _ => None,
+            }
+            .as_deref(),
             Some("workflow goal")
         );
         assert_eq!(
-            settings.run_model_name_str().as_deref(),
+            settings
+                .run
+                .as_ref()
+                .and_then(|run| run.model.as_ref())
+                .and_then(|model| model.name.as_ref())
+                .map(|value| value.as_source())
+                .as_deref(),
             Some("workflow-model")
         );
-        assert_eq!(settings.run_model_provider_str().as_deref(), Some("openai"));
+        assert_eq!(
+            settings
+                .run
+                .as_ref()
+                .and_then(|run| run.model.as_ref())
+                .and_then(|model| model.provider.as_ref())
+                .map(|value| value.as_source())
+                .as_deref(),
+            Some("openai")
+        );
     }
 
     #[test]
@@ -321,10 +352,10 @@ root = "/tmp/should-be-inert"
 
         let settings = resolve_settings(
             EffectiveSettingsLayers::new(
-                ConfigLayer::default(),
-                ConfigLayer::default(),
+                SettingsFile::default(),
+                SettingsFile::default(),
                 project_with_server,
-                ConfigLayer::default(),
+                SettingsFile::default(),
             ),
             Some(&server_settings),
             EffectiveSettingsMode::RemoteServer,
@@ -332,11 +363,23 @@ root = "/tmp/should-be-inert"
         .unwrap();
 
         assert_eq!(
-            settings.server_storage_root_str().as_deref(),
+            settings
+                .server
+                .as_ref()
+                .and_then(|server| server.storage.as_ref())
+                .and_then(|storage| storage.root.as_ref())
+                .map(|value| value.as_source())
+                .as_deref(),
             Some("/srv/fabro")
         );
         assert_eq!(
-            settings.run_goal_inline_str().as_deref(),
+            match settings.run.as_ref().and_then(|run| run.goal.as_ref()) {
+                Some(fabro_types::settings::run::RunGoalLayer::Inline(value)) => {
+                    Some(value.as_source())
+                }
+                _ => None,
+            }
+            .as_deref(),
             Some("project goal")
         );
     }
@@ -362,9 +405,22 @@ root = "/tmp/should-be-inert"
         .unwrap();
 
         assert_eq!(
-            settings.server_storage_root_str().as_deref(),
+            settings
+                .server
+                .as_ref()
+                .and_then(|server| server.storage.as_ref())
+                .and_then(|storage| storage.root.as_ref())
+                .map(|value| value.as_source())
+                .as_deref(),
             Some("/srv/fabro")
         );
-        assert_eq!(settings.max_concurrent_runs(), Some(7));
+        assert_eq!(
+            settings
+                .server
+                .as_ref()
+                .and_then(|server| server.scheduler.as_ref())
+                .and_then(|scheduler| scheduler.max_concurrent_runs),
+            Some(7)
+        );
     }
 }

@@ -40,8 +40,10 @@ pub(crate) async fn run_uninstall(args: &UninstallArgs, globals: &GlobalArgs) ->
         return Ok(());
     }
 
-    let storage_dir =
-        user_config::load_settings().map_or_else(|_| home.storage_dir(), |s| s.storage_dir());
+    let storage_dir = user_config::load_settings().map_or_else(
+        |_| home.storage_dir(),
+        |settings| user_config::storage_dir(&settings).unwrap_or_else(|_| home.storage_dir()),
+    );
 
     let inventory = build_inventory(&home_root, &storage_dir);
 

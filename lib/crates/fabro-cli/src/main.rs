@@ -133,12 +133,13 @@ async fn main_inner() -> (String, Result<()>) {
         {
             match load_settings_config(args.config.as_deref()) {
                 Ok(layer) => {
-                    use fabro_types::settings::SettingsFile;
-                    let server_settings: SettingsFile = layer.into();
+                    let server_settings = layer;
                     (
                         server_settings
-                            .server_logging()
-                            .and_then(|l| l.level.clone()),
+                            .server
+                            .as_ref()
+                            .and_then(|server| server.logging.as_ref())
+                            .and_then(|logging| logging.level.clone()),
                         false,
                     )
                 }

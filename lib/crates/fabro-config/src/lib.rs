@@ -1,9 +1,9 @@
 extern crate self as fabro_config;
 
-pub mod config;
 pub mod effective_settings;
 pub mod home;
 pub mod legacy_env;
+pub mod load;
 pub mod merge;
 pub mod project;
 pub mod resolve;
@@ -11,25 +11,40 @@ pub mod run;
 pub mod storage;
 pub mod user;
 
-pub use config::ConfigLayer;
 pub use fabro_util::path::expand_tilde;
 pub use home::Home;
+pub use load::{
+    load_settings_for_workflow, load_settings_path, load_settings_project, load_settings_user,
+};
 pub use resolve::{
-    ResolveError, resolve_cli, resolve_cli_from_file, resolve_features, resolve_features_from_file,
-    resolve_project, resolve_project_from_file, resolve_run, resolve_run_from_file, resolve_server,
-    resolve_server_from_file, resolve_workflow, resolve_workflow_from_file,
+    ResolveError, resolve, resolve_cli, resolve_cli_from_file, resolve_features,
+    resolve_features_from_file, resolve_project, resolve_project_from_file, resolve_run,
+    resolve_run_from_file, resolve_server, resolve_server_from_file, resolve_workflow,
+    resolve_workflow_from_file,
 };
 pub use storage::{RunScratch, ServerState, Storage};
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::{Settings, SettingsFile};
 use serde::de::DeserializeOwned;
 
-/// Resolve the storage directory: v2 `server.storage.root` > home default.
-#[must_use]
-pub fn resolve_storage_dir(settings: &SettingsFile) -> PathBuf {
-    settings.storage_dir()
+pub fn load_and_resolve(
+    layers: effective_settings::EffectiveSettingsLayers,
+    server_settings: Option<&SettingsFile>,
+    mode: effective_settings::EffectiveSettingsMode,
+) -> anyhow::Result<Settings> {
+    let layer = effective_settings::resolve_settings(layers, server_settings, mode)?;
+    resolve(&layer).map_err(|errors| {
+        anyhow::anyhow!(
+            "failed to resolve settings:\n{}",
+            errors
+                .into_iter()
+                .map(|error| error.to_string())
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    })
 }
 
 /// Load a TOML config from an explicit path or `~/.fabro/{filename}`.

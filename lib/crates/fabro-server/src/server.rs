@@ -34,6 +34,7 @@ use fabro_model::{BilledModelUsage, BilledTokenCounts};
 use fabro_store::{
     ArtifactStore, Database, EventEnvelope, EventPayload, PendingInterviewRecord, StageId,
 };
+use fabro_types::settings::run::RunMode;
 use fabro_types::settings::{InterpString, ServerSettings as ResolvedServerSettings, SettingsFile};
 use fabro_types::{
     ActorRef, EventBody, InterviewQuestionRecord, InterviewQuestionType, RunBlobId,
@@ -595,7 +596,7 @@ impl AppState {
 
     pub(crate) fn dry_run(&self) -> bool {
         fabro_config::resolve_run_from_file(&self.settings.read().unwrap())
-            .map(|settings| settings.execution.mode == fabro_types::settings::run::RunMode::DryRun)
+            .map(|settings| settings.execution.mode == RunMode::DryRun)
             .unwrap_or(false)
     }
 
@@ -710,7 +711,7 @@ impl AppState {
     }
 
     pub(crate) fn reload_settings_from_disk(&self) -> anyhow::Result<()> {
-        let reloaded: SettingsFile = fabro_config::ConfigLayer::load(&self.config_path)?.into();
+        let reloaded = fabro_config::load_settings_path(&self.config_path)?;
         self.replace_settings(reloaded)
     }
 }
@@ -1467,9 +1468,45 @@ fn build_prune_plan(
 }
 
 fn system_sandbox_provider(settings: &SettingsFile) -> String {
-    fabro_config::resolve_run_from_file(settings)
-        .map(|settings| settings.sandbox.provider)
-        .unwrap_or_else(|_| SandboxProvider::default().to_string())
+    fabro_config::resolve_run_from_file(settings).map_or_else(
+        |_| SandboxProvider::default().to_string(),
+        |settings| settings.sandbox.provider,
+    )
+}
+
+fn render_resolve_errors(errors: &[fabro_config::ResolveError]) -> String {
+    errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn resolved_storage_dir(settings: &SettingsFile) -> Result<PathBuf, String> {
+    let resolved =
+        resolve_server_from_file(settings).map_err(|errors| render_resolve_errors(&errors))?;
+    resolved
+        .storage
+        .root
+        .resolve(|name| std::env::var(name).ok())
+        .map(|value| PathBuf::from(value.value))
+        .map_err(|err| {
+            format!(
+                "failed to resolve {}: {err}",
+                resolved.storage.root.as_source()
+            )
+        })
+}
+
+fn resolved_github_app_id(settings: &SettingsFile) -> Result<Option<String>, String> {
+    let resolved =
+        resolve_server_from_file(settings).map_err(|errors| render_resolve_errors(&errors))?;
+    Ok(resolved
+        .integrations
+        .github
+        .app_id
+        .as_ref()
+        .map(InterpString::as_source))
 }
 
 fn parse_system_duration(raw: &str) -> anyhow::Result<chrono::Duration> {
@@ -3488,10 +3525,19 @@ async fn start_run(
         )
         .into_response();
     };
-    let run_dir = Storage::new(run_record.settings.storage_dir())
-        .run_scratch(&id)
-        .root()
-        .to_path_buf();
+    let run_dir = match resolved_storage_dir(&run_record.settings) {
+        Ok(storage_dir) => Storage::new(storage_dir)
+            .run_scratch(&id)
+            .root()
+            .to_path_buf(),
+        Err(err) => {
+            return ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("invalid persisted server storage settings: {err}"),
+            )
+            .into_response();
+        }
+    };
     let dot_source = run_state.graph_source.unwrap_or_default();
 
     {
@@ -3649,16 +3695,21 @@ async fn execute_run_in_process(state: Arc<AppState>, run_id: RunId) {
             return;
         }
     };
-    let github_app = match state
-        .github_app_credentials(
-            persisted
-                .run_record()
-                .settings
-                .github_app_id_str()
-                .as_deref(),
-        )
-        .await
-    {
+    let github_app_id = match resolved_github_app_id(&persisted.run_record().settings) {
+        Ok(app_id) => app_id,
+        Err(err) => {
+            tracing::error!(run_id = %run_id, error = %err, "Invalid GitHub App config");
+            let mut runs = state.runs.lock().expect("runs lock poisoned");
+            if let Some(managed_run) = runs.get_mut(&run_id) {
+                managed_run.status = RunStatus::Failed;
+                managed_run.error = Some(format!("Invalid GitHub App config: {err}"));
+                clear_live_run_state(managed_run);
+            }
+            state.scheduler_notify.notify_one();
+            return;
+        }
+    };
+    let github_app = match state.github_app_credentials(github_app_id.as_deref()).await {
         Ok(github_app) => github_app,
         Err(e) => {
             tracing::error!(run_id = %run_id, error = %e, "Invalid GitHub App credentials");
@@ -6299,7 +6350,7 @@ mod tests {
 
     #[tokio::test]
     async fn auth_login_github_redirects_to_github() {
-        let settings: SettingsFile = fabro_config::ConfigLayer::parse(
+        let settings: SettingsFile = fabro_types::settings::parse_settings_file(
             r#"
 _version = 1
 
@@ -6313,8 +6364,7 @@ client_id = "Iv1.testclient"
 slug = "fabro"
 "#,
         )
-        .expect("fixture should parse")
-        .into();
+        .expect("fixture should parse");
         let app = build_router(
             create_app_state_with_options(settings, 5),
             AuthMode::Disabled,
@@ -7440,7 +7490,7 @@ slug = "fabro"
 
     #[tokio::test]
     async fn start_run_persists_full_settings_snapshot() {
-        let settings: SettingsFile = fabro_config::ConfigLayer::parse(
+        let settings: SettingsFile = fabro_types::settings::parse_settings_file(
             r#"
 _version = 1
 
@@ -7479,8 +7529,7 @@ url = "http://api.example.test"
 level = "debug"
 "#,
         )
-        .expect("fixture should parse")
-        .into();
+        .expect("fixture should parse");
         let state = create_app_state_with_options(settings, 5);
         let app = build_router(Arc::clone(&state), AuthMode::Disabled);
 
@@ -7512,24 +7561,41 @@ level = "debug"
             .unwrap()
             .run
             .expect("run record should exist");
+        let resolved_run = fabro_config::resolve_run_from_file(&run_record.settings).unwrap();
+        let resolved_server = fabro_config::resolve_server_from_file(&run_record.settings).unwrap();
 
         // Server-side `dry_run` default must not override the manifest's intent.
         // Verify a sampling of the persisted v2 settings.
         assert_eq!(
-            run_record.settings.run_goal_inline_str().as_deref(),
+            match resolved_run.goal {
+                Some(fabro_types::settings::run::RunGoal::Inline(value)) => Some(value.as_source()),
+                _ => None,
+            }
+            .as_deref(),
             Some("Test"),
             "goal should be persisted from the manifest"
         );
         assert!(
-            !run_record.settings.dry_run_enabled(),
+            resolved_run.execution.mode != fabro_types::settings::run::RunMode::DryRun,
             "server-local dry_run fallback must not override manifest intent"
         );
         assert_eq!(
-            run_record.settings.run_model_name_str().as_deref(),
+            resolved_run
+                .model
+                .name
+                .as_ref()
+                .map(|value| value.as_source())
+                .as_deref(),
             Some("claude-sonnet-4-5"),
         );
         assert_eq!(
-            run_record.settings.github_app_id_str().as_deref(),
+            resolved_server
+                .integrations
+                .github
+                .app_id
+                .as_ref()
+                .map(|value| value.as_source())
+                .as_deref(),
             Some("12345"),
         );
     }
@@ -7894,7 +7960,7 @@ level = "debug"
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cancel_during_startup_persists_cancelled_reason() {
-        let settings: SettingsFile = fabro_config::ConfigLayer::parse(
+        let settings: SettingsFile = fabro_types::settings::parse_settings_file(
             r#"
 _version = 1
 
@@ -7905,8 +7971,7 @@ script = "sleep 5"
 timeout = "30s"
 "#,
         )
-        .expect("fixture should parse")
-        .into();
+        .expect("fixture should parse");
         let state = create_app_state_with_settings_and_registry_factory(settings, |interviewer| {
             fabro_workflow::handler::default_registry(interviewer, || None)
         });

@@ -1,12 +1,9 @@
-use fabro_config::ConfigLayer;
 use fabro_types::settings::server::{ObjectStoreSettings, ServerListenSettings};
-use fabro_types::settings::{InterpString, SettingsFile};
+use fabro_types::settings::{InterpString, SettingsFile, parse_settings_file};
 use fabro_util::Home;
 
 fn parse(source: &str) -> SettingsFile {
-    ConfigLayer::parse(source)
-        .expect("fixture should parse")
-        .into()
+    parse_settings_file(source).expect("fixture should parse")
 }
 
 #[test]

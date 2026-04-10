@@ -8,6 +8,12 @@ use crate::support::{fabro_json_snapshot, unique_run_id};
 
 use super::support::{fixture, output_stdout, resolve_run, run_count_for_test_case, run_state};
 
+fn resolved_run(
+    settings: &fabro_types::settings::SettingsFile,
+) -> fabro_types::settings::RunSettings {
+    fabro_config::resolve_run_from_file(settings).expect("run settings should resolve")
+}
+
 fn run_status_response(run_id: &str, status: &str) -> serde_json::Value {
     serde_json::json!({
         "id": run_id,
@@ -353,22 +359,26 @@ fn create_persists_requested_overrides_into_store() {
         "team": run_record.labels.get("team"),
     });
     let settings = &run_record.settings;
+    let resolved_run = resolved_run(settings);
     let cli_settings = fabro_config::resolve_cli_from_file(settings).expect("cli settings");
     let compact = json!({
         "workflow_slug": run_record.workflow_slug,
         "settings": {
-            "goal": settings.run_goal_inline_str(),
-            "dry_run": settings.dry_run_enabled(),
-            "auto_approve": settings.auto_approve_enabled(),
-            "no_retro": settings.no_retro_enabled(),
+            "goal": match resolved_run.goal.as_ref() {
+                Some(fabro_types::settings::run::RunGoal::Inline(value)) => Some(value.as_source()),
+                _ => None,
+            },
+            "dry_run": resolved_run.execution.mode == fabro_types::settings::run::RunMode::DryRun,
+            "auto_approve": resolved_run.execution.approval == fabro_types::settings::run::ApprovalMode::Auto,
+            "no_retro": !resolved_run.execution.retros,
             "verbose": cli_settings.output.verbosity == fabro_types::settings::cli::OutputVerbosity::Verbose,
             "llm": {
-                "model": settings.run_model_name_str(),
-                "provider": settings.run_model_provider_str(),
+                "model": resolved_run.model.name.as_ref().map(|value| value.as_source()),
+                "provider": resolved_run.model.provider.as_ref().map(|value| value.as_source()),
             },
             "sandbox": {
-                "provider": settings.run_sandbox().and_then(|sb| sb.provider.clone()),
-                "preserve": settings.preserve_sandbox_enabled(),
+                "provider": resolved_run.sandbox.provider,
+                "preserve": resolved_run.sandbox.preserve,
             },
         },
         "labels": labels,
@@ -425,12 +435,16 @@ fn create_json_implies_auto_approve() {
     let run = resolve_run(&context, run_id);
 
     assert!(
-        run_state(&run.run_dir)
-            .run
-            .as_ref()
-            .expect("run record should exist")
-            .settings
-            .auto_approve_enabled()
+        resolved_run(
+            &run_state(&run.run_dir)
+                .run
+                .as_ref()
+                .expect("run record should exist")
+                .settings,
+        )
+        .execution
+        .approval
+            == fabro_types::settings::run::ApprovalMode::Auto
     );
 }
 

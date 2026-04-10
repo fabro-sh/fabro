@@ -28,26 +28,33 @@ pub(crate) async fn dispatch(command: ServerCommand, _globals: &GlobalArgs) -> R
                 serve_args.config.as_deref(),
                 storage_dir.as_deref(),
             )?;
-            let storage_dir = settings.storage_dir();
+            let storage_dir = user_config::storage_dir(&settings)?;
             let bind_addr = match serve_args.bind.as_deref() {
                 Some(s) => bind::parse_bind(s)?,
                 None => BindRequest::Unix(user_config::default_socket_path()),
             };
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-            start::execute(bind_addr, foreground, serve_args, storage_dir, styles).await
+            Box::pin(start::execute(
+                bind_addr,
+                foreground,
+                serve_args,
+                storage_dir,
+                styles,
+            ))
+            .await
         }
         ServerCommand::Stop(ServerStopArgs {
             storage_dir,
             timeout,
         }) => {
             let settings = user_config::load_settings_with_storage_dir(storage_dir.as_deref())?;
-            let storage_dir = settings.storage_dir();
+            let storage_dir = user_config::storage_dir(&settings)?;
             stop::execute(&storage_dir, Duration::from_secs(timeout));
             Ok(())
         }
         ServerCommand::Status(ServerStatusArgs { storage_dir, json }) => {
             let settings = user_config::load_settings_with_storage_dir(storage_dir.as_deref())?;
-            let storage_dir = settings.storage_dir();
+            let storage_dir = user_config::storage_dir(&settings)?;
             status::execute(&storage_dir, json)
         }
         ServerCommand::Serve(ServerServeArgs {
@@ -69,7 +76,7 @@ pub(crate) async fn dispatch(command: ServerCommand, _globals: &GlobalArgs) -> R
                 BindRequest::Unix(user_config::default_socket_path())
             };
             let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-            foreground::execute(
+            Box::pin(foreground::execute(
                 record_path,
                 ServeArgs {
                     config: active_config_path,
@@ -78,7 +85,7 @@ pub(crate) async fn dispatch(command: ServerCommand, _globals: &GlobalArgs) -> R
                 bind_addr,
                 storage_dir.clone_path(),
                 styles,
-            )
+            ))
             .await
         }
     }

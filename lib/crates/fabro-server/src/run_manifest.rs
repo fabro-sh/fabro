@@ -4,25 +4,30 @@ use std::sync::Arc;
 
 use anyhow::{Result, anyhow, bail};
 use fabro_api::types;
-use fabro_config::ConfigLayer;
 use fabro_config::effective_settings;
 use fabro_config::effective_settings::{EffectiveSettingsLayers, EffectiveSettingsMode};
+use fabro_config::merge::combine_files;
 use fabro_config::project::resolve_working_directory;
 use fabro_config::run::parse_run_config;
 use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_graphviz::render::apply_direction;
 use fabro_llm::Provider;
 use fabro_model::Catalog;
+use fabro_sandbox::config::{
+    DaytonaNetwork, DaytonaSnapshotSettings, DockerfileSource as SandboxDockerfileSource,
+};
 use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxProvider, SandboxSpec};
 use fabro_types::RunId;
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::ServerSettings;
 use fabro_types::settings::cli::{CliLayer, CliOutputLayer, OutputVerbosity};
 use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::run::{
-    ApprovalMode, DaytonaDockerfileLayer, RunExecutionLayer, RunGoalLayer, RunLayer, RunMode,
-    RunModelLayer, RunSandboxLayer,
+    ApprovalMode, DaytonaDockerfileLayer, DaytonaNetworkLayer, DaytonaSettings, DockerfileSource,
+    RunExecutionLayer, RunGoalLayer, RunLayer, RunMode, RunModelLayer, RunSandboxLayer,
+    RunSettings,
 };
+use fabro_types::settings::{SettingsFile, parse_settings_file};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_validate::Severity;
 use fabro_workflow::error::FabroError;
@@ -70,15 +75,15 @@ pub(crate) fn prepare_manifest_with_mode(
         .configs
         .iter()
         .filter(|config| config.type_ == types::ManifestConfigType::Project)
-        .try_fold(ConfigLayer::default(), |layer, config| {
-            Ok::<_, anyhow::Error>(parse_manifest_config(config)?.combine(layer))
+        .try_fold(SettingsFile::default(), |layer, config| {
+            Ok::<_, anyhow::Error>(combine_files(layer, parse_manifest_config(config)?))
         })?;
     let user_layer = manifest
         .configs
         .iter()
         .filter(|config| config.type_ == types::ManifestConfigType::User)
-        .try_fold(ConfigLayer::default(), |layer, config| {
-            Ok::<_, anyhow::Error>(parse_manifest_config(config)?.combine(layer))
+        .try_fold(SettingsFile::default(), |layer, config| {
+            Ok::<_, anyhow::Error>(combine_files(layer, parse_manifest_config(config)?))
         })?;
     let mut settings = effective_settings::resolve_settings(
         EffectiveSettingsLayers::new(args_layer, workflow_layer, project_layer, user_layer),
@@ -193,12 +198,12 @@ fn workflow_bundle_from_manifest(
 fn root_workflow_config_layer(
     manifest: &types::RunManifest,
     workflow: &BundledWorkflow,
-) -> Result<ConfigLayer> {
+) -> Result<SettingsFile> {
     let Some(root) = manifest.workflows.get(&manifest.target.path) else {
         bail!("manifest target path is missing from workflows map");
     };
     let Some(config) = root.config.as_ref() else {
-        return Ok(ConfigLayer::default());
+        return Ok(SettingsFile::default());
     };
 
     let mut layer = parse_run_config(&config.source)?;
@@ -206,16 +211,16 @@ fn root_workflow_config_layer(
     Ok(layer)
 }
 
-fn parse_manifest_config(config: &types::ManifestConfig) -> Result<ConfigLayer> {
+fn parse_manifest_config(config: &types::ManifestConfig) -> Result<SettingsFile> {
     let Some(source) = config.source.as_deref() else {
-        return Ok(ConfigLayer::default());
+        return Ok(SettingsFile::default());
     };
-    ConfigLayer::parse(source)
+    parse_settings_file(source).map_err(|err| anyhow!("Failed to parse settings file: {err}"))
 }
 
-fn manifest_args_layer(args: Option<&types::ManifestArgs>) -> ConfigLayer {
+fn manifest_args_layer(args: Option<&types::ManifestArgs>) -> SettingsFile {
     let Some(args) = args else {
-        return ConfigLayer::default();
+        return SettingsFile::default();
     };
 
     let model = (args.model.is_some() || args.provider.is_some()).then(|| RunModelLayer {
@@ -268,11 +273,11 @@ fn manifest_args_layer(args: Option<&types::ManifestArgs>) -> ConfigLayer {
         })
     });
 
-    ConfigLayer::from(SettingsFile {
+    SettingsFile {
         run,
         cli,
         ..SettingsFile::default()
-    })
+    }
 }
 
 fn parse_labels(labels: &[String]) -> HashMap<String, String> {
@@ -284,12 +289,11 @@ fn parse_labels(labels: &[String]) -> HashMap<String, String> {
 }
 
 fn resolve_manifest_dockerfile(
-    layer: &mut ConfigLayer,
+    layer: &mut SettingsFile,
     config_path: &Path,
     files: &HashMap<PathBuf, String>,
 ) -> Result<()> {
     let source = layer
-        .as_v2_mut()
         .run
         .as_mut()
         .and_then(|run| run.sandbox.as_mut())
@@ -340,12 +344,22 @@ async fn build_preflight_report(
 ) -> Result<(CheckReport, bool)> {
     let graph = validated.graph();
     let settings = &prepared.settings;
-    let materialized = materialize_run(settings.clone(), graph, &Catalog::builtin());
+    let materialized = materialize_run(settings.clone(), graph, Catalog::builtin());
     let resolved_run = fabro_config::resolve_run_from_file(&materialized)
+        .map_err(|errors| anyhow!(render_resolve_errors(&errors)))?;
+    let resolved_server = fabro_config::resolve_server_from_file(settings)
         .map_err(|errors| anyhow!(render_resolve_errors(&errors)))?;
     let sandbox_provider = resolve_sandbox_provider(&resolved_run)?;
     let github_app = state
-        .github_app_credentials(settings.github_app_id_str().as_deref())
+        .github_app_credentials(
+            resolved_server
+                .integrations
+                .github
+                .app_id
+                .as_ref()
+                .map(InterpString::as_source)
+                .as_deref(),
+        )
         .await
         .map_err(|err| anyhow!(err))?;
     let mut checks = Vec::new();
@@ -402,7 +416,7 @@ async fn build_preflight_report(
     )
     .await;
     let llm_ok = run_llm_check(state, &mut checks, graph, &resolved_run).await;
-    run_github_token_check(&mut checks, prepared, settings, github_app).await;
+    run_github_token_check(&mut checks, prepared, &resolved_server, github_app).await;
 
     let checks_ok = sandbox_ok && llm_ok;
 
@@ -418,19 +432,16 @@ async fn build_preflight_report(
     ))
 }
 
-fn resolve_sandbox_provider(
-    settings: &fabro_types::settings::run::RunSettings,
-) -> Result<SandboxProvider> {
-    Ok(Some(settings.sandbox.provider.as_str())
-        .map(str::parse::<SandboxProvider>)
-        .transpose()
-        .map_err(|err| anyhow!("Invalid sandbox provider: {err}"))?
-        .unwrap_or_default())
+fn resolve_sandbox_provider(settings: &RunSettings) -> Result<SandboxProvider> {
+    Ok(Some(str::parse::<SandboxProvider>(
+        settings.sandbox.provider.as_str(),
+    ))
+    .transpose()
+    .map_err(|err| anyhow!("Invalid sandbox provider: {err}"))?
+    .unwrap_or_default())
 }
 
-fn resolve_daytona_config(
-    settings: &fabro_types::settings::run::RunSettings,
-) -> Option<DaytonaConfig> {
+fn resolve_daytona_config(settings: &RunSettings) -> Option<DaytonaConfig> {
     settings
         .sandbox
         .daytona
@@ -442,7 +453,7 @@ async fn run_sandbox_check(
     checks: &mut Vec<CheckResult>,
     sandbox_provider: SandboxProvider,
     prepared: &PreparedManifest,
-    resolved_run: &fabro_types::settings::run::RunSettings,
+    resolved_run: &RunSettings,
     github_app: Option<fabro_github::GitHubAppCredentials>,
 ) -> bool {
     let daytona_config = resolve_daytona_config(resolved_run);
@@ -515,7 +526,7 @@ async fn run_llm_check(
     state: &AppState,
     checks: &mut Vec<CheckResult>,
     graph: &Graph,
-    settings: &fabro_types::settings::run::RunSettings,
+    settings: &RunSettings,
 ) -> bool {
     let (model, provider) = resolve_model_provider(settings, graph);
     let default_provider = provider.as_deref().unwrap_or("anthropic");
@@ -606,21 +617,16 @@ async fn run_llm_check(
     }
 }
 
-fn resolve_model_provider(
-    settings: &fabro_types::settings::run::RunSettings,
-    _graph: &Graph,
-) -> (String, Option<String>) {
+fn resolve_model_provider(settings: &RunSettings, _graph: &Graph) -> (String, Option<String>) {
     let provider = settings
         .model
         .provider
         .as_ref()
         .map(InterpString::as_source);
-    let model = settings
-        .model
-        .name
-        .as_ref()
-        .map(InterpString::as_source)
-        .unwrap_or_else(|| Catalog::builtin().default_from_env().id.clone());
+    let model = settings.model.name.as_ref().map_or_else(
+        || Catalog::builtin().default_from_env().id.clone(),
+        InterpString::as_source,
+    );
 
     match Catalog::builtin().get(&model) {
         Some(info) => (
@@ -639,12 +645,14 @@ fn render_resolve_errors(errors: &[fabro_config::ResolveError]) -> String {
         .join("; ")
 }
 
-fn runtime_daytona_config(settings: &fabro_types::settings::run::DaytonaSettings) -> DaytonaConfig {
+fn runtime_daytona_config(settings: &DaytonaSettings) -> DaytonaConfig {
     DaytonaConfig {
         auto_stop_interval: settings.auto_stop_interval,
         labels: (!settings.labels.is_empty()).then_some(settings.labels.clone()),
-        snapshot: settings.snapshot.as_ref().map(|snapshot| {
-            fabro_sandbox::config::DaytonaSnapshotSettings {
+        snapshot: settings
+            .snapshot
+            .as_ref()
+            .map(|snapshot| DaytonaSnapshotSettings {
                 name: snapshot.name.clone(),
                 cpu: snapshot.cpu,
                 memory: snapshot.memory_gb,
@@ -653,24 +661,19 @@ fn runtime_daytona_config(settings: &fabro_types::settings::run::DaytonaSettings
                     .dockerfile
                     .as_ref()
                     .map(|dockerfile| match dockerfile {
-                        fabro_types::settings::run::DockerfileSource::Inline(text) => {
-                            fabro_sandbox::config::DockerfileSource::Inline(text.clone())
+                        DockerfileSource::Inline(text) => {
+                            SandboxDockerfileSource::Inline(text.clone())
                         }
-                        fabro_types::settings::run::DockerfileSource::Path { path } => {
-                            fabro_sandbox::config::DockerfileSource::Path { path: path.clone() }
+                        DockerfileSource::Path { path } => {
+                            SandboxDockerfileSource::Path { path: path.clone() }
                         }
                     }),
-            }
-        }),
+            }),
         network: settings.network.as_ref().map(|network| match network {
-            fabro_types::settings::run::DaytonaNetworkLayer::Block => {
-                fabro_sandbox::config::DaytonaNetwork::Block
-            }
-            fabro_types::settings::run::DaytonaNetworkLayer::AllowAll => {
-                fabro_sandbox::config::DaytonaNetwork::AllowAll
-            }
-            fabro_types::settings::run::DaytonaNetworkLayer::AllowList { allow_list } => {
-                fabro_sandbox::config::DaytonaNetwork::AllowList(allow_list.clone())
+            DaytonaNetworkLayer::Block => DaytonaNetwork::Block,
+            DaytonaNetworkLayer::AllowAll => DaytonaNetwork::AllowAll,
+            DaytonaNetworkLayer::AllowList { allow_list } => {
+                DaytonaNetwork::AllowList(allow_list.clone())
             }
         }),
         skip_clone: settings.skip_clone,
@@ -680,19 +683,19 @@ fn runtime_daytona_config(settings: &fabro_types::settings::run::DaytonaSettings
 async fn run_github_token_check(
     checks: &mut Vec<CheckResult>,
     prepared: &PreparedManifest,
-    settings: &SettingsFile,
+    settings: &ServerSettings,
     github_app: Option<fabro_github::GitHubAppCredentials>,
 ) {
-    let Some(v2_permissions) = settings.github_permissions() else {
-        return;
-    };
-    if v2_permissions.is_empty() {
+    if settings.integrations.github.permissions.is_empty() {
         return;
     }
 
     // Resolve InterpString permission values eagerly for token minting and
     // for display in the preflight report.
-    let github_permissions: HashMap<String, String> = v2_permissions
+    let github_permissions: HashMap<String, String> = settings
+        .integrations
+        .github
+        .permissions
         .iter()
         .map(|(k, v)| (k.clone(), v.as_source()))
         .collect();
@@ -863,9 +866,7 @@ mod tests {
     }
 
     fn server_settings_fixture(source: &str) -> SettingsFile {
-        fabro_config::ConfigLayer::parse(source)
-            .expect("v2 fixture should parse")
-            .into()
+        fabro_types::settings::parse_settings_file(source).expect("v2 fixture should parse")
     }
 
     #[test]
@@ -885,11 +886,10 @@ root = "/srv/fabro"
         let prepared =
             prepare_manifest_with_mode(&server_settings, &minimal_manifest(), false).unwrap();
 
-        assert!(!prepared.settings.dry_run_enabled());
-        assert_eq!(
-            prepared.settings.server_storage_root_str().as_deref(),
-            Some("/srv/fabro"),
-        );
+        let resolved_run = fabro_config::resolve_run_from_file(&prepared.settings).unwrap();
+        let resolved_server = fabro_config::resolve_server_from_file(&prepared.settings).unwrap();
+        assert!(resolved_run.execution.mode != fabro_types::settings::run::RunMode::DryRun);
+        assert_eq!(resolved_server.storage.root.as_source(), "/srv/fabro");
     }
 
     #[test]
@@ -920,7 +920,13 @@ root = "/srv/fabro"
 
         let prepared = prepare_manifest_with_mode(&server_settings, &manifest, false).unwrap();
 
-        assert!(prepared.settings.dry_run_enabled());
+        assert_eq!(
+            fabro_config::resolve_run_from_file(&prepared.settings)
+                .unwrap()
+                .execution
+                .mode,
+            fabro_types::settings::run::RunMode::DryRun
+        );
     }
 
     #[test]
@@ -970,20 +976,25 @@ app_id = "snapshotted-app-id"
         });
 
         let prepared = prepare_manifest_with_mode(&server_settings, &manifest, true).unwrap();
+        let resolved_run = fabro_config::resolve_run_from_file(&prepared.settings).unwrap();
+        let resolved_server = fabro_config::resolve_server_from_file(&prepared.settings).unwrap();
 
         // v2 merge matrix: run.prepare.steps replaces the whole list across
         // layers, so the higher-precedence workflow layer wins over cli.
         assert_eq!(
-            prepared.settings.run_prepare_commands(),
+            resolved_run.prepare.commands,
             vec!["workflow-setup".to_string()]
         );
         assert_eq!(
-            prepared.settings.github_app_id_str().as_deref(),
+            resolved_server
+                .integrations
+                .github
+                .app_id
+                .as_ref()
+                .map(|value| value.as_source())
+                .as_deref(),
             Some("snapshotted-app-id")
         );
-        assert_eq!(
-            prepared.settings.server_storage_root_str().as_deref(),
-            Some("/srv/fabro"),
-        );
+        assert_eq!(resolved_server.storage.root.as_source(), "/srv/fabro");
     }
 }

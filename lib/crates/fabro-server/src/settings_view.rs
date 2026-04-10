@@ -73,12 +73,10 @@ pub(crate) fn redact_for_api(settings: &SettingsFile) -> SettingsFile {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fabro_config::ConfigLayer;
+    use fabro_types::settings::parse_settings_file;
 
     fn parse(source: &str) -> SettingsFile {
-        ConfigLayer::parse(source)
-            .expect("fixture should parse")
-            .into()
+        parse_settings_file(source).expect("fixture should parse")
     }
 
     #[test]

@@ -1,16 +1,15 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use fabro_config::ConfigLayer;
 use fabro_server::jwt_auth::AuthMode;
 use fabro_server::server::{build_router, create_app_state_with_options};
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::{SettingsFile, parse_settings_file};
 use tower::ServiceExt;
 
 use crate::helpers::body_json;
 
 #[tokio::test]
 async fn retrieve_server_settings_returns_runtime_settings() {
-    let settings: SettingsFile = ConfigLayer::parse(
+    let settings: SettingsFile = parse_settings_file(
         r#"
 _version = 1
 
@@ -27,8 +26,7 @@ verbosity = "verbose"
 server_only = "1"
 "#,
     )
-    .expect("settings fixture should parse")
-    .into();
+    .expect("settings fixture should parse");
     let app = build_router(
         create_app_state_with_options(settings, 5),
         AuthMode::Disabled,

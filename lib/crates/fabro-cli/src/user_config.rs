@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 pub(crate) use fabro_config::user::*;
 
 use anyhow::{Result, bail};
-use fabro_config::ConfigLayer;
 use fabro_types::settings::cli::CliTargetSettings;
 use fabro_types::settings::{CliSettings, SettingsFile};
 use fabro_util::version::FABRO_VERSION;
@@ -27,28 +26,28 @@ pub(crate) fn load_settings() -> anyhow::Result<SettingsFile> {
 pub(crate) fn settings_layer_with_config_and_storage_dir(
     config_path: Option<&Path>,
     storage_dir: Option<&Path>,
-) -> anyhow::Result<ConfigLayer> {
+) -> anyhow::Result<SettingsFile> {
     let layer = load_settings_config(config_path)?;
     Ok(apply_storage_dir_override(layer, storage_dir))
 }
 
 pub(crate) fn settings_layer_with_storage_dir(
     storage_dir: Option<&Path>,
-) -> anyhow::Result<ConfigLayer> {
+) -> anyhow::Result<SettingsFile> {
     settings_layer_with_config_and_storage_dir(None, storage_dir)
 }
 
 pub(crate) fn load_settings_with_storage_dir(
     storage_dir: Option<&Path>,
 ) -> anyhow::Result<SettingsFile> {
-    Ok(settings_layer_with_storage_dir(storage_dir)?.into())
+    settings_layer_with_storage_dir(storage_dir)
 }
 
 pub(crate) fn load_settings_with_config_and_storage_dir(
     config_path: Option<&Path>,
     storage_dir: Option<&Path>,
 ) -> anyhow::Result<SettingsFile> {
-    Ok(settings_layer_with_config_and_storage_dir(config_path, storage_dir)?.into())
+    settings_layer_with_config_and_storage_dir(config_path, storage_dir)
 }
 
 fn render_resolve_errors(errors: Vec<fabro_config::ResolveError>) -> anyhow::Error {
@@ -67,14 +66,13 @@ pub(crate) fn resolve_cli_settings(file: &SettingsFile) -> anyhow::Result<CliSet
 }
 
 pub(crate) fn apply_storage_dir_override(
-    mut layer: ConfigLayer,
+    mut layer: SettingsFile,
     storage_dir: Option<&Path>,
-) -> ConfigLayer {
+) -> SettingsFile {
     use fabro_types::settings::interp::InterpString;
     use fabro_types::settings::server::{ServerLayer, ServerStorageLayer};
     if let Some(dir) = storage_dir {
-        let file = layer.as_v2_mut();
-        let server = file.server.get_or_insert_with(ServerLayer::default);
+        let server = layer.server.get_or_insert_with(ServerLayer::default);
         let storage = server
             .storage
             .get_or_insert_with(ServerStorageLayer::default);
@@ -100,12 +98,10 @@ fn cli_target_from_settings(settings: &CliSettings) -> Option<(String, Option<Cl
     let target = settings.target.as_ref()?;
     match target {
         CliTargetSettings::Http { url, tls } => {
-            let tls_settings = tls.as_ref().and_then(|tls| {
-                Some(ClientTlsSettings {
-                    cert: PathBuf::from(tls.cert.as_source()),
-                    key: PathBuf::from(tls.key.as_source()),
-                    ca: PathBuf::from(tls.ca.as_source()),
-                })
+            let tls_settings = tls.as_ref().map(|tls| ClientTlsSettings {
+                cert: PathBuf::from(tls.cert.as_source()),
+                key: PathBuf::from(tls.key.as_source()),
+                ca: PathBuf::from(tls.ca.as_source()),
             });
             Some((url.as_source(), tls_settings))
         }
@@ -123,6 +119,30 @@ fn configured_server_target(settings: &SettingsFile) -> Result<Option<ServerTarg
 
 pub(crate) fn default_server_target() -> ServerTarget {
     ServerTarget::UnixSocket(default_socket_path())
+}
+
+pub(crate) fn storage_dir(settings: &SettingsFile) -> anyhow::Result<PathBuf> {
+    let resolved = fabro_config::resolve_server_from_file(settings).map_err(|errors| {
+        anyhow::anyhow!(
+            "failed to resolve server settings:\n{}",
+            errors
+                .into_iter()
+                .map(|error| error.to_string())
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    })?;
+    let resolved_root = resolved
+        .storage
+        .root
+        .resolve(|name| std::env::var(name).ok())
+        .map_err(|err| {
+            anyhow::anyhow!(
+                "failed to resolve {}: {err}",
+                resolved.storage.root.as_source()
+            )
+        })?;
+    Ok(PathBuf::from(resolved_root.value))
 }
 
 fn parse_server_target(value: &str, tls: Option<ClientTlsSettings>) -> Result<ServerTarget> {
@@ -213,6 +233,7 @@ pub(crate) fn build_server_client(
 mod tests {
     use super::*;
     use crate::args::ServerTargetArgs;
+    use fabro_types::settings::parse_settings_file;
 
     fn server_target_args(value: Option<&str>) -> ServerTargetArgs {
         ServerTargetArgs {
@@ -221,9 +242,7 @@ mod tests {
     }
 
     fn parse_v2(source: &str) -> SettingsFile {
-        fabro_config::ConfigLayer::parse(source)
-            .expect("fixture should parse")
-            .into()
+        parse_settings_file(source).expect("fixture should parse")
     }
 
     #[test]

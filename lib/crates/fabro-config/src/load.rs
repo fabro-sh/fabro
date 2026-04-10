@@ -1,0 +1,79 @@
+use std::path::{Path, PathBuf};
+
+use anyhow::Context;
+use fabro_types::settings::run::RunGoalLayer;
+use fabro_types::settings::{InterpString, SettingsFile, parse_settings_file};
+
+use crate::merge::combine_files;
+use crate::project;
+use crate::user;
+
+pub fn load_settings_path(path: &Path) -> anyhow::Result<SettingsFile> {
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read {}", path.display()))?;
+    let mut layer = parse_settings_file(&content)
+        .map_err(|err| anyhow::anyhow!("{err}"))
+        .context("Failed to parse settings file")?;
+    let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    resolve_goal_file_paths(&mut layer, base_dir);
+    Ok(layer)
+}
+
+pub fn load_settings_for_workflow(path: &Path, cwd: &Path) -> anyhow::Result<SettingsFile> {
+    let resolution = project::resolve_workflow_path(path, cwd)?;
+    if resolution.workflow_config.is_none() && !resolution.resolved_workflow_path.is_file() {
+        anyhow::bail!(
+            "Workflow not found: {}",
+            resolution.resolved_workflow_path.display()
+        );
+    }
+
+    let workflow_config = resolution.workflow_config.unwrap_or_default();
+    let project_config = project::discover_project_config(
+        resolution
+            .resolved_workflow_path
+            .parent()
+            .unwrap_or_else(|| Path::new(".")),
+    )?
+    .map(|(_, config)| config)
+    .unwrap_or_default();
+
+    Ok(combine_files(project_config, workflow_config))
+}
+
+pub fn load_settings_project(start: &Path) -> anyhow::Result<SettingsFile> {
+    Ok(project::discover_project_config(start)?
+        .map(|(_, config)| config)
+        .unwrap_or_default())
+}
+
+pub fn load_settings_user() -> anyhow::Result<SettingsFile> {
+    user::load_settings_config(None)
+}
+
+pub(crate) fn resolve_goal_file_paths(file: &mut SettingsFile, base_dir: &Path) {
+    let Some(run) = file.run.as_mut() else {
+        return;
+    };
+    let Some(RunGoalLayer::File { file: goal_file }) = run.goal.as_mut() else {
+        return;
+    };
+    if !goal_file.is_literal() {
+        return;
+    }
+    let literal = goal_file.as_source();
+    if Path::new(&literal).is_absolute() {
+        return;
+    }
+    let absolute = resolve_goal_file_path(&literal, base_dir);
+    *goal_file = InterpString::parse(&absolute.to_string_lossy());
+}
+
+pub(crate) fn resolve_goal_file_path(path_str: &str, base_dir: &Path) -> PathBuf {
+    let path = Path::new(path_str);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        base_dir.join(path)
+    }
+}

@@ -6,7 +6,6 @@ use chrono::{DateTime, Utc};
 use fabro_config::Storage;
 use fabro_store::{Database, RunSummary};
 use fabro_types::RunId;
-use fabro_types::settings::SettingsFile;
 use serde::Serialize;
 
 use crate::operations::make_run_dir;
@@ -142,7 +141,7 @@ pub fn scratch_base(storage_dir: &Path) -> PathBuf {
 }
 
 pub fn default_scratch_base() -> PathBuf {
-    scratch_base(&SettingsFile::default().storage_dir())
+    scratch_base(&fabro_util::Home::from_env().storage_dir())
 }
 
 fn scan_orphan_runs(base: &Path) -> Result<Vec<RunInfo>> {

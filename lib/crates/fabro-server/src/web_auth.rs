@@ -781,13 +781,9 @@ mod tests {
         // Re-parse the emitted document to prove it round-trips into a
         // valid v2 `SettingsFile`.
         let emitted = doc.to_string();
-        let file = fabro_config::ConfigLayer::parse(&emitted)
+        let file = fabro_types::settings::parse_settings_file(&emitted)
             .expect("merged output should parse as a v2 SettingsFile");
-        let server = file
-            .as_v2()
-            .server
-            .as_ref()
-            .expect("[server] should be present");
+        let server = file.server.as_ref().expect("[server] should be present");
         let integrations = server
             .integrations
             .as_ref()
@@ -869,7 +865,7 @@ name = "claude-sonnet"
 
         // Finally, the whole thing must still parse as a valid v2
         // SettingsFile.
-        fabro_config::ConfigLayer::parse(&emitted)
+        fabro_types::settings::parse_settings_file(&emitted)
             .expect("merged output should still parse as v2 after the edit");
     }
 }

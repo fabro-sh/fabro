@@ -16,7 +16,7 @@ use super::interp::InterpString;
 use super::model_ref::ModelRef;
 
 /// A structurally resolved `[run]` view for consumers.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct RunSettings {
     pub goal: Option<RunGoal>,
     pub working_dir: Option<InterpString>,
@@ -35,30 +35,6 @@ pub struct RunSettings {
     pub scm: RunScmSettings,
     pub pull_request: Option<PullRequestSettings>,
     pub artifacts: ArtifactsSettings,
-}
-
-impl Default for RunSettings {
-    fn default() -> Self {
-        Self {
-            goal: None,
-            working_dir: None,
-            metadata: HashMap::new(),
-            inputs: HashMap::new(),
-            model: RunModelSettings::default(),
-            git: RunGitSettings::default(),
-            prepare: RunPrepareSettings::default(),
-            execution: RunExecutionSettings::default(),
-            checkpoint: RunCheckpointSettings::default(),
-            sandbox: RunSandboxSettings::default(),
-            notifications: HashMap::new(),
-            interviews: RunInterviewsSettings::default(),
-            agent: RunAgentSettings::default(),
-            hooks: Vec::new(),
-            scm: RunScmSettings::default(),
-            pull_request: None,
-            artifacts: ArtifactsSettings::default(),
-        }
-    }
 }
 
 /// The resolved source of a run goal.
@@ -322,7 +298,7 @@ impl HookDefinition {
 
     #[must_use]
     pub fn is_blocking(&self) -> bool {
-        self.blocking.unwrap_or_else(|| {
+        self.blocking.unwrap_or({
             matches!(
                 self.event,
                 HookEvent::RunStart

@@ -24,7 +24,7 @@ pub(crate) async fn execute(
     serve_args.bind = Some(bind.to_string());
 
     if foreground {
-        execute_foreground(bind, serve_args, storage_dir, styles).await
+        Box::pin(execute_foreground(bind, serve_args, storage_dir, styles)).await
     } else {
         execute_daemon(&bind, &serve_args, &storage_dir, true)
     }
@@ -143,7 +143,7 @@ async fn execute_foreground(
         None
     };
 
-    serve::serve_command(
+    Box::pin(serve::serve_command(
         serve_args,
         styles,
         Some(storage_dir),
@@ -158,7 +158,7 @@ async fn execute_foreground(
                 },
             )
         },
-    )
+    ))
     .await
 }
 

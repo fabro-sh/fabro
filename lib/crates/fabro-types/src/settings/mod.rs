@@ -9,13 +9,13 @@
 //! `settings/v2/` subdirectory, so the `::v2::` path prefix no longer
 //! exists.
 
-pub mod accessors;
 pub mod cli;
 pub mod duration;
 pub mod features;
 pub mod interp;
 pub mod model_ref;
 pub mod project;
+pub mod resolved;
 pub mod run;
 pub mod server;
 pub mod size;
@@ -36,6 +36,7 @@ pub use model_ref::{
     AmbiguousModelRef, ModelRef, ModelRegistry, ParseModelRefError, ResolvedModelRef,
 };
 pub use project::{ProjectLayer, ProjectSettings};
+pub use resolved::Settings;
 pub use run::{
     ArtifactsSettings, DaytonaSettings, DaytonaSnapshotSettings, DockerfileSource,
     GitAuthorSettings, HookDefinition, HookType, InterviewProviderSettings, McpServerSettings,

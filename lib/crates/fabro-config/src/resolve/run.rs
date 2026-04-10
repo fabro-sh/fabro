@@ -1,15 +1,16 @@
 use fabro_types::settings::InterpString;
 use fabro_types::settings::run::{
-    ApprovalMode, ArtifactsSettings, DaytonaDockerfileLayer, DaytonaSettings,
+    ApprovalMode, ArtifactsSettings, DaytonaDockerfileLayer, DaytonaSandboxLayer, DaytonaSettings,
     DaytonaSnapshotSettings, DockerfileSource, GitAuthorSettings, HookAgentMarker, HookDefinition,
-    HookTlsMode, HookType, InterviewProviderSettings, McpEntryLayer, McpServerSettings,
-    McpTransport, MergeStrategy, ModelRefOrSplice, NotificationProviderSettings,
+    HookEntry, HookTlsMode, HookType, InterviewProviderLayer, InterviewProviderSettings,
+    InterviewsLayer, LocalSandboxSettings, McpEntryLayer, McpServerSettings, McpTransport,
+    MergeStrategy, ModelRefOrSplice, NotificationProviderLayer, NotificationProviderSettings,
     NotificationRouteLayer, NotificationRouteSettings, PullRequestSettings, RunAgentLayer,
     RunAgentSettings, RunArtifactsLayer, RunCheckpointLayer, RunCheckpointSettings,
     RunExecutionLayer, RunExecutionSettings, RunGitLayer, RunGitSettings, RunGoal, RunGoalLayer,
     RunInterviewsSettings, RunLayer, RunMode, RunModelLayer, RunModelSettings, RunPrepareLayer,
-    RunPrepareSettings, RunSandboxLayer, RunSandboxSettings, RunScmLayer, RunScmSettings,
-    RunSettings, ScmGitHubSettings, StringOrSplice, TlsMode,
+    RunPrepareSettings, RunPullRequestLayer, RunSandboxLayer, RunSandboxSettings, RunScmLayer,
+    RunScmSettings, RunSettings, ScmGitHubSettings, StringOrSplice, TlsMode,
 };
 
 use super::ResolveError;
@@ -165,10 +166,8 @@ fn resolve_sandbox(
     }
 }
 
-fn resolve_local_sandbox(
-    sandbox: &RunSandboxLayer,
-) -> fabro_types::settings::run::LocalSandboxSettings {
-    fabro_types::settings::run::LocalSandboxSettings {
+fn resolve_local_sandbox(sandbox: &RunSandboxLayer) -> LocalSandboxSettings {
+    LocalSandboxSettings {
         worktree_mode: sandbox
             .local
             .as_ref()
@@ -177,7 +176,7 @@ fn resolve_local_sandbox(
     }
 }
 
-fn resolve_daytona(daytona: &fabro_types::settings::run::DaytonaSandboxLayer) -> DaytonaSettings {
+fn resolve_daytona(daytona: &DaytonaSandboxLayer) -> DaytonaSettings {
     DaytonaSettings {
         auto_stop_interval: daytona.auto_stop_interval,
         labels: daytona.labels.clone(),
@@ -224,16 +223,14 @@ fn resolve_notification_route(route: &NotificationRouteLayer) -> NotificationRou
 }
 
 fn resolve_notification_provider(
-    provider: &fabro_types::settings::run::NotificationProviderLayer,
+    provider: &NotificationProviderLayer,
 ) -> NotificationProviderSettings {
     NotificationProviderSettings {
         channel: provider.channel.clone(),
     }
 }
 
-fn resolve_interviews(
-    interviews: Option<&fabro_types::settings::run::InterviewsLayer>,
-) -> RunInterviewsSettings {
+fn resolve_interviews(interviews: Option<&InterviewsLayer>) -> RunInterviewsSettings {
     let Some(interviews) = interviews else {
         return RunInterviewsSettings::default();
     };
@@ -246,9 +243,7 @@ fn resolve_interviews(
     }
 }
 
-fn resolve_interview_provider(
-    provider: &fabro_types::settings::run::InterviewProviderLayer,
-) -> InterviewProviderSettings {
+fn resolve_interview_provider(provider: &InterviewProviderLayer) -> InterviewProviderSettings {
     InterviewProviderSettings {
         channel: provider.channel.clone(),
     }
@@ -347,11 +342,7 @@ fn resolve_mcp_command(
         .unwrap_or_default()
 }
 
-fn resolve_hook(
-    hook: &fabro_types::settings::run::HookEntry,
-    index: usize,
-    errors: &mut Vec<ResolveError>,
-) -> HookDefinition {
+fn resolve_hook(hook: &HookEntry, index: usize, errors: &mut Vec<ResolveError>) -> HookDefinition {
     let variants = [
         hook.script.is_some() || hook.command.is_some(),
         hook.url.is_some(),
@@ -396,7 +387,7 @@ fn resolve_hook(
     }
 }
 
-fn resolve_hook_type(hook: &fabro_types::settings::run::HookEntry) -> Option<HookType> {
+fn resolve_hook_type(hook: &HookEntry) -> Option<HookType> {
     if hook.script.is_some() || hook.command.is_some() {
         return None;
     }
@@ -457,9 +448,7 @@ fn resolve_scm(scm: Option<&RunScmLayer>) -> RunScmSettings {
     }
 }
 
-fn resolve_pull_request(
-    pull_request: Option<&fabro_types::settings::run::RunPullRequestLayer>,
-) -> Option<PullRequestSettings> {
+fn resolve_pull_request(pull_request: Option<&RunPullRequestLayer>) -> Option<PullRequestSettings> {
     let pull_request = pull_request?;
     if !pull_request.enabled.unwrap_or(false) {
         return None;

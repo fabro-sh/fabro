@@ -3,7 +3,8 @@ use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::Catalog;
 use fabro_sandbox::SandboxProvider;
 use fabro_store::Database;
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::run::RunMode;
+use fabro_types::settings::{Settings, SettingsFile};
 use fabro_types::{RunId, RunProvenance};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -72,7 +73,7 @@ pub async fn create(store: &Database, request: CreateRunInput) -> Result<Created
     .map_err(|err| FabroError::Parse(err.to_string()))?;
 
     if fabro_config::resolve_run_from_file(&resolved.settings)
-        .map(|settings| settings.execution.mode != fabro_types::settings::run::RunMode::DryRun)
+        .map(|settings| settings.execution.mode != RunMode::DryRun)
         .unwrap_or(true)
     {
         validate_sandbox_provider(&resolved.settings)?;
@@ -94,8 +95,20 @@ pub async fn create(store: &Database, request: CreateRunInput) -> Result<Created
     } = request;
 
     let settings = resolved.settings.clone();
+    let resolved_settings = resolve_settings_tree(&settings)?;
     let run_id = run_id.unwrap_or_else(RunId::new);
-    let storage = Storage::new(settings.storage_dir());
+    let storage_root = resolved_settings
+        .server
+        .storage
+        .root
+        .resolve(|name| std::env::var(name).ok())
+        .map_err(|err| {
+            FabroError::Precondition(format!(
+                "failed to resolve {}: {err}",
+                resolved_settings.server.storage.root.as_source()
+            ))
+        })?;
+    let storage = Storage::new(storage_root.value);
     let run_dir = storage.run_scratch(&run_id).root().to_path_buf();
     let working_directory = resolved.working_directory.clone();
     let host_repo_path =
@@ -130,7 +143,7 @@ pub async fn create(store: &Database, request: CreateRunInput) -> Result<Created
             run_id: Some(run_id),
             run_dir: Some(run_dir.clone()),
             workflow_slug: workflow_slug.or(resolved.workflow_slug.clone()),
-            labels: resolved.settings.all_labels(),
+            labels: combined_labels(&resolved_settings),
             base_branch,
             working_directory,
             host_repo_path,
@@ -252,16 +265,29 @@ fn store_error(err: impl std::fmt::Display) -> FabroError {
     FabroError::engine(err.to_string())
 }
 
+fn render_resolve_errors(errors: &[fabro_config::ResolveError]) -> String {
+    errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn resolve_settings_tree(settings: &SettingsFile) -> Result<Settings, FabroError> {
+    fabro_config::resolve(settings)
+        .map_err(|errors| FabroError::Precondition(render_resolve_errors(&errors)))
+}
+
+fn combined_labels(settings: &Settings) -> HashMap<String, String> {
+    let mut labels = settings.project.metadata.clone();
+    labels.extend(settings.workflow.metadata.clone());
+    labels.extend(settings.run.metadata.clone());
+    labels
+}
+
 fn validate_sandbox_provider(settings: &SettingsFile) -> Result<(), FabroError> {
-    let resolved = fabro_config::resolve_run_from_file(settings).map_err(|errors| {
-        FabroError::Precondition(
-            errors
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join("; "),
-        )
-    })?;
+    let resolved = fabro_config::resolve_run_from_file(settings)
+        .map_err(|errors| FabroError::Precondition(render_resolve_errors(&errors)))?;
     resolved
         .sandbox
         .provider
@@ -304,7 +330,7 @@ pub(super) fn preprocess_and_validate(
     settings: Option<&SettingsFile>,
     goal_override: Option<&str>,
 ) -> Result<Validated, FabroError> {
-    let source = match settings.and_then(SettingsFile::run_inputs_as_strings) {
+    let source = match run_inputs_as_strings(settings) {
         Some(mut vars) => {
             vars.insert("goal".to_string(), "$goal".to_string());
             expand_vars(dot_source, &vars)
@@ -325,6 +351,23 @@ pub(super) fn preprocess_and_validate(
         },
     );
     Ok(pipeline::validate(transformed, &[]))
+}
+
+fn run_inputs_as_strings(settings: Option<&SettingsFile>) -> Option<HashMap<String, String>> {
+    settings
+        .and_then(|settings| settings.run.as_ref())
+        .and_then(|run| run.inputs.as_ref())
+        .map(|inputs| {
+            inputs
+                .iter()
+                .map(|(key, value)| {
+                    let stringified = value
+                        .as_str()
+                        .map_or_else(|| value.to_string(), ToString::to_string);
+                    (key.clone(), stringified)
+                })
+                .collect()
+        })
 }
 
 fn apply_goal_override(graph: &mut Graph, goal_override: Option<&str>) {
@@ -353,7 +396,7 @@ fn persist_validated(
         provenance,
     } = options;
 
-    let settings = materialize_run(settings, validated.graph(), &Catalog::builtin());
+    let settings = materialize_run(settings, validated.graph(), Catalog::builtin());
 
     let run_id = run_id.unwrap_or_else(RunId::new);
     let run_dir = run_dir.unwrap_or_else(|| default_run_dir(&run_id));
@@ -762,38 +805,42 @@ mod tests {
         assert_eq!(created.run_id, fixtures::RUN_1);
         assert_eq!(created.persisted.run_record().graph.goal(), "override goal");
         assert_eq!(
-            created
-                .persisted
-                .run_record()
-                .settings
-                .run_model_name_str()
+            fabro_config::resolve_run_from_file(&created.persisted.run_record().settings)
+                .unwrap()
+                .model
+                .name
+                .as_ref()
+                .map(|value| value.as_source())
                 .as_deref(),
             Some("claude-sonnet-4-6")
         );
         assert_eq!(
-            created
-                .persisted
-                .run_record()
-                .settings
-                .run_model_provider_str()
+            fabro_config::resolve_run_from_file(&created.persisted.run_record().settings)
+                .unwrap()
+                .model
+                .provider
+                .as_ref()
+                .map(|value| value.as_source())
                 .as_deref(),
             Some("anthropic")
         );
         assert_eq!(
-            created
-                .persisted
-                .run_record()
-                .settings
-                .run_goal_inline_str()
-                .as_deref(),
+            match fabro_config::resolve_run_from_file(&created.persisted.run_record().settings)
+                .unwrap()
+                .goal
+            {
+                Some(fabro_types::settings::run::RunGoal::Inline(value)) => {
+                    Some(value.as_source())
+                }
+                _ => None,
+            }
+            .as_deref(),
             Some("override goal")
         );
         assert!(
-            created
-                .persisted
-                .run_record()
-                .settings
-                .run_pull_request()
+            fabro_config::resolve_run_from_file(&created.persisted.run_record().settings)
+                .unwrap()
+                .pull_request
                 .is_none()
         );
         assert_eq!(

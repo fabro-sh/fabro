@@ -1,5 +1,4 @@
 use anyhow::bail;
-use fabro_config::ConfigLayer;
 use fabro_types::settings::cli::OutputVerbosity;
 use fabro_util::terminal::Styles;
 
@@ -8,6 +7,7 @@ use crate::command_context::CommandContext;
 use crate::commands::run::output::{
     api_check_report_to_local, api_diagnostics_to_local, print_preflight_workflow_summary,
 };
+use crate::commands::run::overrides::preflight_args_layer;
 use crate::manifest_builder::{ManifestBuildInput, build_run_manifest, preflight_manifest_args};
 use crate::shared::print_json_pretty;
 
@@ -19,7 +19,7 @@ pub(crate) async fn execute(mut args: PreflightArgs, globals: &GlobalArgs) -> an
     let manifest = build_run_manifest(ManifestBuildInput {
         workflow: args.workflow.clone(),
         cwd: ctx.cwd().to_path_buf(),
-        args_layer: ConfigLayer::try_from(&args)?,
+        args_layer: preflight_args_layer(&args)?,
         args: preflight_manifest_args(&args),
         run_id: None,
     })?;

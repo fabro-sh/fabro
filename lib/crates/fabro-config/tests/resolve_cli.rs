@@ -1,7 +1,7 @@
 use fabro_config::resolve_cli_from_file;
-use fabro_types::settings::SettingsFile;
 use fabro_types::settings::cli::{CliTargetSettings, OutputFormat, OutputVerbosity};
 use fabro_types::settings::run::AgentPermissions;
+use fabro_types::settings::{SettingsFile, parse_settings_file};
 
 #[test]
 fn resolves_cli_defaults_from_empty_settings() {
@@ -19,7 +19,7 @@ fn resolves_cli_defaults_from_empty_settings() {
 
 #[test]
 fn resolves_cli_target_exec_and_output_settings() {
-    let settings: SettingsFile = fabro_config::ConfigLayer::parse(
+    let settings: SettingsFile = parse_settings_file(
         r#"
 _version = 1
 
@@ -57,8 +57,7 @@ check = false
 level = "debug"
 "#,
     )
-    .expect("fixture should parse")
-    .into();
+    .expect("fixture should parse");
 
     let cli = resolve_cli_from_file(&settings).expect("cli settings should resolve");
 

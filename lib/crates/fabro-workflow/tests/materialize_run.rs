@@ -33,18 +33,29 @@ fn materialize_run_applies_graph_and_catalog_defaults() {
     };
 
     let materialized = materialize_run(settings, &graph(source), &Catalog::builtin());
+    let resolved = fabro_config::resolve_run_from_file(&materialized).unwrap();
 
     assert_eq!(
-        materialized.run_model_name_str().as_deref(),
+        resolved
+            .model
+            .name
+            .as_ref()
+            .map(|value| value.as_source())
+            .as_deref(),
         Some("claude-sonnet-4-6")
     );
     assert_eq!(
-        materialized.run_model_provider_str().as_deref(),
+        resolved
+            .model
+            .provider
+            .as_ref()
+            .map(|value| value.as_source())
+            .as_deref(),
         Some("anthropic")
     );
     assert_eq!(
-        materialized.run_goal_layer(),
+        materialized.run.as_ref().and_then(|run| run.goal.as_ref()),
         Some(&RunGoalLayer::Inline(InterpString::parse("Build feature")))
     );
-    assert!(materialized.run_pull_request().is_none());
+    assert!(resolved.pull_request.is_none());
 }

@@ -1,5 +1,5 @@
 use fabro_config::resolve_features_from_file;
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::{SettingsFile, parse_settings_file};
 
 #[test]
 fn resolves_features_defaults_from_empty_settings() {
@@ -12,7 +12,7 @@ fn resolves_features_defaults_from_empty_settings() {
 
 #[test]
 fn resolves_session_sandboxes_flag() {
-    let settings: SettingsFile = fabro_config::ConfigLayer::parse(
+    let settings: SettingsFile = parse_settings_file(
         r#"
 _version = 1
 
@@ -20,8 +20,7 @@ _version = 1
 session_sandboxes = true
 "#,
     )
-    .expect("fixture should parse")
-    .into();
+    .expect("fixture should parse");
 
     let features = resolve_features_from_file(&settings).expect("features should resolve");
 

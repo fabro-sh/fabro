@@ -2,7 +2,7 @@ use std::io::Write;
 
 use anyhow::bail;
 use fabro_api::types;
-use fabro_config::ConfigLayer;
+use fabro_types::settings::SettingsFile;
 use fabro_util::terminal::Styles;
 use tracing::debug;
 
@@ -25,7 +25,7 @@ pub(crate) async fn run(
     let built = build_run_manifest(ManifestBuildInput {
         workflow: args.workflow.clone(),
         cwd: ctx.cwd().to_path_buf(),
-        args_layer: ConfigLayer::default(),
+        args_layer: SettingsFile::default(),
         args: None,
         run_id: None,
     })?;

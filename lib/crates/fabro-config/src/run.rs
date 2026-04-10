@@ -1,6 +1,6 @@
 //! Workflow / run config loading helpers.
 //!
-//! Thin wrappers around `ConfigLayer::parse` / `ConfigLayer::load` plus
+//! Thin wrappers around `parse_settings_file` / `load_settings_path` plus
 //! path resolution for the `[workflow] graph` override. Runtime types
 //! that used to be re-exported from here live under
 //! `fabro_types::settings::run` now.
@@ -9,19 +9,23 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 
-use crate::config::ConfigLayer;
+use crate::load::{load_settings_path, resolve_goal_file_path};
+use fabro_types::settings::run::{ResolvedGoalSource, ResolvedRunGoal, RunGoalLayer};
+use fabro_types::settings::{SettingsFile, parse_settings_file};
 
 /// Load and parse a run config from a TOML file.
-pub fn parse_run_config(contents: &str) -> anyhow::Result<ConfigLayer> {
-    ConfigLayer::parse(contents).context("Failed to parse run config TOML")
+pub fn parse_run_config(contents: &str) -> anyhow::Result<SettingsFile> {
+    parse_settings_file(contents)
+        .map_err(|err| anyhow::anyhow!("{err}"))
+        .context("Failed to parse run config TOML")
 }
 
 /// Load and parse a run config from a TOML file.
 ///
-/// Goes through [`ConfigLayer::load`] so that relative `run.goal.file`
+/// Goes through [`load_settings_path`] so that relative `run.goal.file`
 /// paths are anchored at the directory of `path` at load time.
-pub fn load_run_config(path: &Path) -> anyhow::Result<ConfigLayer> {
-    ConfigLayer::load(path)
+pub fn load_run_config(path: &Path) -> anyhow::Result<SettingsFile> {
+    load_settings_path(path)
         .with_context(|| format!("Failed to parse workflow config at {}", path.display()))
 }
 
@@ -32,6 +36,71 @@ pub fn resolve_graph_path(workflow_toml: &Path, graph_relative: &str) -> PathBuf
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join(graph_relative)
+}
+
+#[derive(Debug)]
+pub enum ResolveRunGoalError {
+    EnvLookup {
+        var: String,
+    },
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+}
+
+impl std::fmt::Display for ResolveRunGoalError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EnvLookup { var } => write!(
+                f,
+                "run.goal.file references env var `{var}` which is not set"
+            ),
+            Self::Io { path, source } => {
+                write!(f, "failed to read goal file {}: {source}", path.display())
+            }
+        }
+    }
+}
+
+impl std::error::Error for ResolveRunGoalError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::EnvLookup { .. } => None,
+            Self::Io { source, .. } => Some(source),
+        }
+    }
+}
+
+pub fn resolve_run_goal(
+    settings: &SettingsFile,
+    base_dir: &Path,
+) -> Result<Option<ResolvedRunGoal>, ResolveRunGoalError> {
+    let Some(goal) = settings.run.as_ref().and_then(|run| run.goal.as_ref()) else {
+        return Ok(None);
+    };
+
+    match goal {
+        RunGoalLayer::Inline(text) => Ok(Some(ResolvedRunGoal {
+            text: text.as_source(),
+            source: ResolvedGoalSource::Inline,
+        })),
+        RunGoalLayer::File { file } => {
+            let resolved = file
+                .resolve(|name| std::env::var(name).ok())
+                .map_err(|err| ResolveRunGoalError::EnvLookup { var: err.name })?;
+            let path = resolve_goal_file_path(&resolved.value, base_dir);
+            let text =
+                std::fs::read_to_string(&path).map_err(|source| ResolveRunGoalError::Io {
+                    path: path.clone(),
+                    source,
+                })?;
+            Ok(Some(ResolvedRunGoal {
+                text,
+                source: ResolvedGoalSource::File { path },
+            }))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -56,7 +125,9 @@ file = "prompts/goal.md"
         .unwrap();
 
         let config = load_run_config(&workflow_toml).unwrap();
-        let Some(RunGoalLayer::File { file }) = config.as_v2().run_goal_layer() else {
+        let Some(RunGoalLayer::File { file }) =
+            config.run.as_ref().and_then(|run| run.goal.as_ref())
+        else {
             panic!("expected file variant");
         };
         let expected = workflow_dir.join("prompts").join("goal.md");
@@ -78,7 +149,9 @@ file = "/etc/fabro/goal.md"
         .unwrap();
 
         let config = load_run_config(&workflow_toml).unwrap();
-        let Some(RunGoalLayer::File { file }) = config.as_v2().run_goal_layer() else {
+        let Some(RunGoalLayer::File { file }) =
+            config.run.as_ref().and_then(|run| run.goal.as_ref())
+        else {
             panic!("expected file variant");
         };
         assert_eq!(file.as_source(), "/etc/fabro/goal.md");

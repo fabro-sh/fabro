@@ -7,6 +7,7 @@ mod view;
 use anyhow::{Context, Result};
 
 use fabro_types::PullRequestRecord;
+use fabro_types::settings::InterpString;
 
 use crate::args::{GlobalArgs, PrCommand, PrNamespace, ServerTargetArgs};
 use crate::command_context::CommandContext;
@@ -15,8 +16,26 @@ use crate::shared::github::build_github_app_credentials;
 
 pub(crate) async fn dispatch(ns: PrNamespace, globals: &GlobalArgs) -> Result<()> {
     let ctx = CommandContext::base()?;
-    let github_app =
-        build_github_app_credentials(ctx.machine_settings().github_app_id_str().as_deref())?;
+    let server_settings =
+        fabro_config::resolve_server_from_file(ctx.machine_settings()).map_err(|errors| {
+            anyhow::anyhow!(
+                "failed to resolve server settings:\n{}",
+                errors
+                    .into_iter()
+                    .map(|error| error.to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )
+        })?;
+    let github_app = build_github_app_credentials(
+        server_settings
+            .integrations
+            .github
+            .app_id
+            .as_ref()
+            .map(InterpString::as_source)
+            .as_deref(),
+    )?;
     match ns.command {
         PrCommand::Create(args) => {
             Box::pin(create::create_command(args, github_app, globals)).await

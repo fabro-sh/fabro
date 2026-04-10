@@ -452,8 +452,8 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use axum::response::IntoResponse;
     use axum::routing::get;
-    use fabro_config::ConfigLayer;
     use fabro_config::resolve_server_from_file;
+    use fabro_types::settings::parse_settings_file;
     use tower::ServiceExt;
 
     use crate::web_auth::SessionCookie;
@@ -461,9 +461,7 @@ mod tests {
     // --- Fail-closed resolver tests (R52/R53) -----------------------------------
 
     fn settings(source: &str) -> ResolvedServerSettings {
-        let file = ConfigLayer::parse(source)
-            .expect("fixture should parse")
-            .into();
+        let file = parse_settings_file(source).expect("fixture should parse");
         resolve_server_from_file(&file).expect("fixture should resolve")
     }
 

@@ -574,7 +574,7 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
     let s = Styles::detect_stderr();
     let emoji = console::Emoji("⚒️  ", "");
     let cli_settings = user_config::load_settings_with_storage_dir(args.storage_dir.as_deref())?;
-    let storage_dir = cli_settings.storage_dir();
+    let storage_dir = user_config::storage_dir(&cli_settings)?;
     let server_was_running = record::active_server_record(&storage_dir).is_some();
 
     eprintln!();
@@ -1026,9 +1026,8 @@ mod tests {
     fn config_toml_roundtrips() {
         use fabro_types::settings::SettingsFile;
         let toml_str = format_config_toml("brynary");
-        let cfg: SettingsFile = fabro_config::ConfigLayer::parse(&toml_str)
-            .expect("generated config should parse as v2")
-            .into();
+        let cfg: SettingsFile = fabro_types::settings::parse_settings_file(&toml_str)
+            .expect("generated config should parse as v2");
         let allowed = cfg
             .server
             .as_ref()
@@ -1043,7 +1042,7 @@ mod tests {
     fn config_toml_has_auth_strategies() {
         use fabro_types::settings::SettingsFile;
         let toml_str = format_config_toml("alice");
-        let cfg: SettingsFile = fabro_config::ConfigLayer::parse(&toml_str).unwrap().into();
+        let cfg: SettingsFile = fabro_types::settings::parse_settings_file(&toml_str).unwrap();
         let auth_api = cfg
             .server
             .as_ref()
@@ -1069,7 +1068,7 @@ mod tests {
         use fabro_types::settings::SettingsFile;
         use fabro_types::settings::server::ServerListenLayer;
         let toml_str = format_config_toml("bob");
-        let cfg: SettingsFile = fabro_config::ConfigLayer::parse(&toml_str).unwrap().into();
+        let cfg: SettingsFile = fabro_types::settings::parse_settings_file(&toml_str).unwrap();
         let listen = cfg
             .server
             .as_ref()

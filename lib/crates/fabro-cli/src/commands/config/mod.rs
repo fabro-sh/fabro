@@ -5,9 +5,9 @@ use crate::args::{GlobalArgs, SettingsArgs};
 use crate::command_context::CommandContext;
 use crate::shared::print_json_pretty;
 use crate::user_config;
-use fabro_config::ConfigLayer;
 use fabro_config::effective_settings;
 use fabro_config::effective_settings::{EffectiveSettingsLayers, EffectiveSettingsMode};
+use fabro_config::load_settings_project;
 use fabro_config::project;
 use fabro_types::settings::SettingsFile;
 
@@ -18,14 +18,14 @@ fn config_layers(
     let cwd = ctx.cwd();
     let (workflow_layer, project_layer) = match workflow {
         Some(path) => workflow_and_project_layers(path, cwd)?,
-        None => (ConfigLayer::default(), ConfigLayer::project(cwd)?),
+        None => (SettingsFile::default(), load_settings_project(cwd)?),
     };
     let user_layer = user_config::settings_layer_with_config_and_storage_dir(
         Some(ctx.base_config_path()),
         None,
     )?;
     Ok(EffectiveSettingsLayers::new(
-        ConfigLayer::default(),
+        SettingsFile::default(),
         workflow_layer,
         project_layer,
         user_layer,
@@ -35,7 +35,7 @@ fn config_layers(
 fn workflow_and_project_layers(
     path: &Path,
     cwd: &Path,
-) -> anyhow::Result<(ConfigLayer, ConfigLayer)> {
+) -> anyhow::Result<(SettingsFile, SettingsFile)> {
     let resolution = project::resolve_workflow_path(path, cwd)?;
     if resolution.workflow_config.is_none() && !resolution.resolved_workflow_path.is_file() {
         anyhow::bail!(

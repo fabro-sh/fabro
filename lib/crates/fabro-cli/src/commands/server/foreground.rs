@@ -43,16 +43,21 @@ pub(crate) async fn execute(
     );
     let pid = std::process::id();
 
-    serve::serve_command(serve_args, styles, storage_dir, move |resolved_bind| {
-        record::write_server_record(
-            &record_path,
-            &record::ServerRecord {
-                pid,
-                bind: resolved_bind.clone(),
-                log_path: log_path.clone(),
-                started_at: Utc::now(),
-            },
-        )
-    })
+    Box::pin(serve::serve_command(
+        serve_args,
+        styles,
+        storage_dir,
+        move |resolved_bind| {
+            record::write_server_record(
+                &record_path,
+                &record::ServerRecord {
+                    pid,
+                    bind: resolved_bind.clone(),
+                    log_path: log_path.clone(),
+                    started_at: Utc::now(),
+                },
+            )
+        },
+    ))
     .await
 }

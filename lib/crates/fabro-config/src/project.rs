@@ -10,33 +10,35 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, bail};
 use serde::Serialize;
 
-use crate::config::ConfigLayer;
+use crate::load::load_settings_path;
 use crate::run;
 use crate::{resolve_project_from_file, resolve_run_from_file, resolve_workflow_from_file};
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::{SettingsFile, parse_settings_file};
 
 const CONFIG_FILENAME: &str = "fabro.toml";
 #[derive(Clone, Debug)]
 pub struct WorkflowPathResolution {
     pub resolved_workflow_path: PathBuf,
     pub dot_path: PathBuf,
-    pub workflow_config: Option<ConfigLayer>,
+    pub workflow_config: Option<SettingsFile>,
     pub workflow_toml_path: Option<PathBuf>,
     pub workflow_slug: Option<String>,
 }
 
 /// Parse a project config from a TOML string.
-pub fn parse_project_config(content: &str) -> anyhow::Result<ConfigLayer> {
-    ConfigLayer::parse(content).context("Failed to parse project config")
+pub fn parse_project_config(content: &str) -> anyhow::Result<SettingsFile> {
+    parse_settings_file(content)
+        .map_err(|err| anyhow::anyhow!("{err}"))
+        .context("Failed to parse project config")
 }
 
 /// Load a project config from a file path.
 ///
-/// Goes through [`ConfigLayer::load`] so that relative `run.goal.file`
+/// Goes through [`load_settings_path`] so that relative `run.goal.file`
 /// paths are anchored at the directory of `path` at load time.
-pub fn load_project_config(path: &Path) -> anyhow::Result<ConfigLayer> {
-    let config = ConfigLayer::load(path).context("Failed to parse project config")?;
-    let root = resolve_project_from_file(config.as_v2())
+pub fn load_project_config(path: &Path) -> anyhow::Result<SettingsFile> {
+    let config = load_settings_path(path).context("Failed to parse project config")?;
+    let root = resolve_project_from_file(&config)
         .map_err(|errors| anyhow::anyhow!("Failed to resolve project settings: {errors:?}"))?
         .directory;
     tracing::debug!(path = %path.display(), root = %root, "Loaded project config");
@@ -45,7 +47,7 @@ pub fn load_project_config(path: &Path) -> anyhow::Result<ConfigLayer> {
 
 /// Walk ancestor directories from `start` looking for `fabro.toml`.
 /// Returns the config file path and parsed config, or `None` if not found.
-pub fn discover_project_config(start: &Path) -> anyhow::Result<Option<(PathBuf, ConfigLayer)>> {
+pub fn discover_project_config(start: &Path) -> anyhow::Result<Option<(PathBuf, SettingsFile)>> {
     for ancestor in start.ancestors() {
         let candidate = ancestor.join(CONFIG_FILENAME);
         if candidate.is_file() {
@@ -90,7 +92,7 @@ pub fn resolve_workflow_path(
     if path.extension().is_some_and(|ext| ext == "toml") {
         match run::load_run_config(&path) {
             Ok(cfg) => {
-                let workflow = resolve_workflow_from_file(cfg.as_v2()).map_err(|errors| {
+                let workflow = resolve_workflow_from_file(&cfg).map_err(|errors| {
                     anyhow::anyhow!("Failed to resolve workflow settings: {errors:?}")
                 })?;
                 let dot_path = run::resolve_graph_path(&path, &workflow.graph);
@@ -336,7 +338,7 @@ fn find_closest_match(input: &str, candidates: &[String]) -> Option<String> {
 }
 
 /// Resolve a workflow argument to a DOT path and optional run config.
-pub fn resolve_workflow(arg: &Path) -> anyhow::Result<(PathBuf, Option<ConfigLayer>)> {
+pub fn resolve_workflow(arg: &Path) -> anyhow::Result<(PathBuf, Option<SettingsFile>)> {
     let start = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let resolution = resolve_workflow_path(arg, &start)?;
     Ok((resolution.dot_path, resolution.workflow_config))
@@ -348,7 +350,6 @@ pub fn is_retro_enabled() -> bool {
     let start = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     match discover_project_config(&start) {
         Ok(Some((_path, config))) => config
-            .as_v2()
             .run
             .as_ref()
             .and_then(|r| r.execution.as_ref())
@@ -361,11 +362,11 @@ pub fn is_retro_enabled() -> bool {
 /// Resolve the fabro root directory from a config file path and its config.
 /// The returned path is the directory containing `fabro.toml` joined with the
 /// `project.directory` value (default: `fabro/`).
-pub fn resolve_fabro_root(config_path: &Path, config: &ConfigLayer) -> PathBuf {
+pub fn resolve_fabro_root(config_path: &Path, config: &SettingsFile) -> PathBuf {
     let project_dir = config_path
         .parent()
         .expect("config_path should have a parent directory");
-    let root = resolve_project_from_file(config.as_v2())
+    let root = resolve_project_from_file(config)
         .expect("project settings should resolve")
         .directory;
     project_dir.join(root)
@@ -380,8 +381,8 @@ mod tests {
     #[test]
     fn parse_minimal_config() {
         let config = parse_project_config("_version = 1\n").unwrap();
-        assert_eq!(config.as_v2().version, Some(1));
-        assert!(config.as_v2().project.is_none());
+        assert_eq!(config.version, Some(1));
+        assert!(config.project.is_none());
     }
 
     #[test]
@@ -396,7 +397,7 @@ directory = "fabro/"
         )
         .unwrap();
         assert_eq!(
-            resolve_project_from_file(config.as_v2()).unwrap().directory,
+            resolve_project_from_file(&config).unwrap().directory,
             "fabro/"
         );
     }
@@ -414,7 +415,6 @@ retros = true
         .unwrap();
         assert_eq!(
             config
-                .as_v2()
                 .run
                 .as_ref()
                 .and_then(|r| r.execution.as_ref())
@@ -453,7 +453,7 @@ retros = true
         let path = tmp.path().join("fabro.toml");
         fs::write(&path, "_version = 1\n").unwrap();
         let config = load_project_config(&path).unwrap();
-        assert_eq!(config.as_v2().version, Some(1));
+        assert_eq!(config.version, Some(1));
     }
 
     #[test]
@@ -465,7 +465,7 @@ retros = true
 
         let (found_path, config) = discover_project_config(&sub).unwrap().unwrap();
         assert_eq!(found_path, tmp.path().join("fabro.toml"));
-        assert_eq!(config.as_v2().version, Some(1));
+        assert_eq!(config.version, Some(1));
     }
 
     #[test]
@@ -485,7 +485,9 @@ file = "prompts/goal.md"
         .unwrap();
 
         let config = load_project_config(&path).unwrap();
-        let Some(RunGoalLayer::File { file }) = config.as_v2().run_goal_layer() else {
+        let Some(RunGoalLayer::File { file }) =
+            config.run.as_ref().and_then(|run| run.goal.as_ref())
+        else {
             panic!("expected file variant");
         };
         let expected = tmp.path().join("prompts").join("goal.md");
