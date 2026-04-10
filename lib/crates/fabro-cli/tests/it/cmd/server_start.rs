@@ -1,3 +1,4 @@
+use fabro_server::jwt_auth::FABRO_LOCAL_NO_AUTH_ENV;
 use fabro_test::{fabro_snapshot, test_context};
 use std::process::Stdio;
 use std::sync::{Arc, Barrier};
@@ -148,7 +149,7 @@ fn start_with_tcp_host_only_bind_resolves_to_host_and_port() {
     // startup explicitly.
     let mut cmd = context.command();
     cmd.env("FABRO_STORAGE_DIR", &storage_dir);
-    cmd.env("FABRO_LOCAL_NO_AUTH", "1");
+    cmd.env(FABRO_LOCAL_NO_AUTH_ENV, "1");
     cmd.args(["server", "start", "--dry-run", "--bind", "127.0.0.1"]);
     let output = cmd.output().expect("server start command should run");
     assert!(
@@ -211,7 +212,7 @@ fn start_with_tcp_host_only_bind_warns_and_falls_back_when_default_port_is_unava
     // startup explicitly.
     let mut cmd = context.command();
     cmd.env("FABRO_STORAGE_DIR", &storage_dir);
-    cmd.env("FABRO_LOCAL_NO_AUTH", "1");
+    cmd.env(FABRO_LOCAL_NO_AUTH_ENV, "1");
     cmd.args(["server", "start", "--dry-run", "--bind", "127.0.0.1"]);
     fabro_snapshot!(filters, cmd, @"
     success: true

@@ -13,6 +13,7 @@
 use std::path::Path;
 
 use anyhow::Context;
+use fabro_types::settings::accessors::resolve_goal_file_path;
 use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::run::RunGoalLayer;
 use fabro_types::settings::{SettingsFile, parse_settings_file as parse_v2_settings_file};
@@ -42,11 +43,10 @@ fn resolve_goal_file_paths(file: &mut SettingsFile, base_dir: &Path) {
         return;
     }
     let literal = goal_file.as_source();
-    let path = Path::new(&literal);
-    if path.is_absolute() {
+    if Path::new(&literal).is_absolute() {
         return;
     }
-    let absolute = base_dir.join(path);
+    let absolute = resolve_goal_file_path(&literal, base_dir);
     *goal_file = InterpString::parse(&absolute.to_string_lossy());
 }
 

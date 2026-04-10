@@ -140,7 +140,7 @@ fn resolve_goal_override(
     settings
         .resolve_run_goal(working_directory)
         .map(|opt| opt.map(|resolved| resolved.text))
-        .map_err(|err| anyhow::anyhow!(err))
+        .map_err(anyhow::Error::from)
 }
 
 #[cfg(test)]

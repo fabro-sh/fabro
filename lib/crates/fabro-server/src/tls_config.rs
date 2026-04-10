@@ -1,11 +1,8 @@
 //! Resolved TLS material extracted from `[server.listen.tls]`.
 //!
-//! This module owns the `(cert, key, ca)` triple that the rustls config
-//! builder in [`crate::tls`] consumes when the server is listening on TCP
-//! with mTLS enabled. It lives outside `jwt_auth.rs` because TLS material
-//! is a listen-side concern, not an authentication strategy — the auth
-//! resolver only cares about *whether* TLS is present (for mTLS support),
-//! not about its contents.
+//! Owns the `(cert, key, ca)` triple that the rustls config builder in
+//! [`crate::tls`] consumes when the server is listening on TCP with mTLS
+//! enabled.
 
 use std::path::PathBuf;
 

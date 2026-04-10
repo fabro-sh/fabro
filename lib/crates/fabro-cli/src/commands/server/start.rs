@@ -7,6 +7,7 @@ use chrono::Utc;
 use fabro_config::Storage;
 use fabro_config::user::default_socket_path;
 use fabro_server::bind::{Bind, BindRequest};
+use fabro_server::jwt_auth::FABRO_LOCAL_NO_AUTH_ENV;
 use fabro_server::serve;
 use fabro_server::serve::{DEFAULT_TCP_PORT, ServeArgs};
 use fabro_util::terminal::Styles;
@@ -230,7 +231,7 @@ fn execute_daemon(
 
     cmd.arg("--storage-dir").arg(storage_dir);
     if matches!(bind, BindRequest::Unix(_)) {
-        cmd.env("FABRO_LOCAL_NO_AUTH", "1");
+        cmd.env(FABRO_LOCAL_NO_AUTH_ENV, "1");
     }
 
     cmd.env_remove("FABRO_JSON");

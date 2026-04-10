@@ -465,7 +465,8 @@ impl SettingsFile {
 
 /// Resolve a goal-file path string against `base_dir`. Absolute paths are
 /// used as-is; relative paths are joined onto `base_dir`.
-fn resolve_goal_file_path(path_str: &str, base_dir: &Path) -> PathBuf {
+#[must_use]
+pub fn resolve_goal_file_path(path_str: &str, base_dir: &Path) -> PathBuf {
     let path = Path::new(path_str);
     if path.is_absolute() {
         path.to_path_buf()
@@ -494,11 +495,9 @@ impl std::fmt::Display for ResolveGoalError {
                 f,
                 "failed to resolve run.goal.file: env var {var:?} referenced by ${{env.{var}}} is not set"
             ),
-            Self::Io { path, source } => write!(
-                f,
-                "failed to read run.goal.file at {}: {source}",
-                path.display()
-            ),
+            Self::Io { path, .. } => {
+                write!(f, "failed to read run.goal.file at {}", path.display())
+            }
         }
     }
 }

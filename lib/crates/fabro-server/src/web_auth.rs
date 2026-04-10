@@ -563,7 +563,13 @@ async fn setup_register(
     // preserves existing comments, whitespace, and key ordering. The value-
     // tree parser (`toml::Value`) would strip all of that on round-trip.
     if let Some(parent) = settings_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        if let Err(err) = std::fs::create_dir_all(parent) {
+            error!(error = %err, path = %parent.display(), "Setup register failed: could not create settings parent directory");
+            return json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({"error": format!("Failed to create settings directory: {err}")}),
+            );
+        }
     }
     let existing = std::fs::read_to_string(&settings_path).unwrap_or_default();
     let mut doc: toml_edit::DocumentMut = if existing.is_empty() {
@@ -622,12 +628,20 @@ async fn setup_register(
     }
 
     // Re-parse the freshly-written settings file and swap it into the
-    // in-memory state. Stage 6.6 may split this differently when the web
-    // setup flow is reworked, but for now a round-trip through
-    // `ConfigLayer::load` keeps the live state consistent with disk.
-    if let Ok(reloaded) = fabro_config::ConfigLayer::load(&settings_path) {
-        let mut shared = state.settings.write().expect("settings lock poisoned");
-        *shared = reloaded.into();
+    // in-memory state so subsequent OAuth requests see the new GitHub
+    // App credentials without a server restart.
+    match fabro_config::ConfigLayer::load(&settings_path) {
+        Ok(reloaded) => {
+            let mut shared = state.settings.write().expect("settings lock poisoned");
+            *shared = reloaded.into();
+        }
+        Err(err) => {
+            error!(error = %err, path = %settings_path.display(), "Setup register failed: could not reload written settings config");
+            return json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({"error": format!("Failed to reload settings config after write: {err}")}),
+            );
+        }
     }
 
     info!(slug = %data.slug, app_id = %data.id, "GitHub App registered successfully");
