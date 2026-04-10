@@ -1633,6 +1633,7 @@ dependencies = [
  "serde_json",
  "strsim 0.11.1",
  "tempfile",
+ "thiserror 2.0.18",
  "toml 0.8.23",
  "tracing",
 ]

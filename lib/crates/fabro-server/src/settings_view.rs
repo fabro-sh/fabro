@@ -234,4 +234,39 @@ slug = "fabro-app"
         assert!(github.client_id.is_some());
         assert!(github.slug.is_some());
     }
+
+    #[test]
+    fn preserves_env_templates_for_non_redacted_fields() {
+        let settings = parse(
+            r#"
+_version = 1
+
+[server.storage]
+root = "${env.FABRO_STORAGE_ROOT}"
+
+[server.integrations.slack]
+default_channel = "${env.SLACK_CHANNEL}"
+"#,
+        );
+
+        let redacted = redact_for_api(&settings);
+        let server = redacted
+            .server
+            .expect("server config should remain present");
+        assert_eq!(
+            server
+                .storage
+                .and_then(|storage| storage.root)
+                .map(|value| value.as_source()),
+            Some("${env.FABRO_STORAGE_ROOT}".to_string())
+        );
+        assert_eq!(
+            server
+                .integrations
+                .and_then(|integrations| integrations.slack)
+                .and_then(|slack| slack.default_channel)
+                .map(|value| value.as_source()),
+            Some("${env.SLACK_CHANNEL}".to_string())
+        );
+    }
 }

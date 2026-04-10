@@ -10,10 +10,9 @@ use serde::Deserialize;
 use tracing::warn;
 
 use crate::error::ApiError;
-use crate::tls_config::TlsSettings;
 use crate::web_auth::SessionCookie;
 use fabro_types::RunAuthMethod;
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::{ServerListenSettings, ServerSettings as ResolvedServerSettings};
 
 /// Env var that explicitly opts the server into unauthenticated startup.
 ///
@@ -78,7 +77,7 @@ pub fn decode_pem_env(name: &str, value: &str) -> Result<String> {
     String::from_utf8(bytes).map_err(|e| anyhow!("{name} base64 decoded to invalid UTF-8: {e}"))
 }
 
-/// Resolve the authentication mode from a [`SettingsFile`].
+/// Resolve the authentication mode from resolved server settings.
 ///
 /// Call this once at startup before serving requests. Returns
 /// [`AuthMode::Disabled`] when [`FABRO_LOCAL_NO_AUTH_ENV`] is set to `"1"`
@@ -92,11 +91,11 @@ pub fn decode_pem_env(name: &str, value: &str) -> Result<String> {
 ///
 /// Walks the v2 `server.auth.api.{jwt,mtls}` subtree and
 /// `server.auth.web.allowed_usernames`.
-pub fn resolve_auth_mode(settings: &SettingsFile) -> Result<AuthMode> {
+pub fn resolve_auth_mode(settings: &ResolvedServerSettings) -> Result<AuthMode> {
     resolve_auth_mode_with_lookup(settings, |name| std::env::var(name).ok())
 }
 
-/// Describes which API auth strategies are enabled in a `SettingsFile`.
+/// Describes which API auth strategies are enabled in resolved server settings.
 struct ResolvedAuthStrategies {
     jwt_enabled: bool,
     mtls_enabled: bool,
@@ -104,26 +103,26 @@ struct ResolvedAuthStrategies {
     allowed_usernames: Vec<String>,
 }
 
-fn resolve_auth_strategies(settings: &SettingsFile) -> ResolvedAuthStrategies {
-    let server = settings.server.as_ref();
-    let auth = server.and_then(|s| s.auth.as_ref());
-    let auth_api = auth.and_then(|a| a.api.as_ref());
+fn resolve_auth_strategies(settings: &ResolvedServerSettings) -> ResolvedAuthStrategies {
+    let jwt_enabled = settings
+        .auth
+        .api
+        .jwt
+        .as_ref()
+        .is_some_and(|jwt| jwt.enabled);
+    let mtls_enabled = settings
+        .auth
+        .api
+        .mtls
+        .as_ref()
+        .is_some_and(|mtls| mtls.enabled);
 
-    // Strategies: a subtree with `enabled = false` is explicitly off.
-    // Presence of the subtree with `enabled` unset counts as on.
-    let jwt_enabled = auth_api
-        .and_then(|api| api.jwt.as_ref())
-        .is_some_and(|jwt| jwt.enabled.unwrap_or(true));
-    let mtls_enabled = auth_api
-        .and_then(|api| api.mtls.as_ref())
-        .is_some_and(|mtls| mtls.enabled.unwrap_or(true));
+    let tls_present = matches!(
+        settings.listen,
+        ServerListenSettings::Tcp { ref tls, .. } if tls.is_some()
+    );
 
-    let tls_present = TlsSettings::from_settings(settings).is_some();
-
-    let allowed_usernames = auth
-        .and_then(|a| a.web.as_ref())
-        .map(|w| w.allowed_usernames.clone())
-        .unwrap_or_default();
+    let allowed_usernames = settings.auth.web.allowed_usernames.clone();
 
     ResolvedAuthStrategies {
         jwt_enabled,
@@ -133,7 +132,10 @@ fn resolve_auth_strategies(settings: &SettingsFile) -> ResolvedAuthStrategies {
     }
 }
 
-pub fn resolve_auth_mode_with_lookup<F>(settings: &SettingsFile, lookup: F) -> Result<AuthMode>
+pub fn resolve_auth_mode_with_lookup<F>(
+    settings: &ResolvedServerSettings,
+    lookup: F,
+) -> Result<AuthMode>
 where
     F: Fn(&str) -> Option<String>,
 {
@@ -451,16 +453,18 @@ mod tests {
     use axum::response::IntoResponse;
     use axum::routing::get;
     use fabro_config::ConfigLayer;
+    use fabro_config::resolve_server_from_file;
     use tower::ServiceExt;
 
     use crate::web_auth::SessionCookie;
 
     // --- Fail-closed resolver tests (R52/R53) -----------------------------------
 
-    fn settings(source: &str) -> SettingsFile {
-        ConfigLayer::parse(source)
+    fn settings(source: &str) -> ResolvedServerSettings {
+        let file = ConfigLayer::parse(source)
             .expect("fixture should parse")
-            .into()
+            .into();
+        resolve_server_from_file(&file).expect("fixture should resolve")
     }
 
     /// Lookup closure that returns nothing — every env var is absent.
@@ -588,21 +592,6 @@ enabled = true
         })
         .expect_err("invalid PEM should refuse startup");
         assert!(err.to_string().contains("invalid"));
-    }
-
-    #[test]
-    fn fail_closed_when_mtls_enabled_without_listen_tls() {
-        let file = settings(
-            r"
-_version = 1
-
-[server.auth.api.mtls]
-enabled = true
-",
-        );
-        let err = resolve_auth_mode_with_lookup(&file, empty_lookup)
-            .expect_err("mTLS without [server.listen.tls] should refuse startup");
-        assert!(err.to_string().contains("server.listen.tls"));
     }
 
     async fn protected_handler(_auth: AuthenticatedService) -> impl IntoResponse {

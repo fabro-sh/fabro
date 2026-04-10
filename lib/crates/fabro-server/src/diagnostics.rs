@@ -8,6 +8,7 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::types::{Message, Request};
 use fabro_model::{Catalog, Provider};
+use fabro_types::settings::InterpString;
 use fabro_util::check_report::{CheckDetail, CheckResult, CheckSection, CheckStatus};
 use fabro_util::version::FABRO_VERSION;
 use regex::Regex;
@@ -288,15 +289,21 @@ async fn probe_llm_provider(client: &LlmClient, provider: Provider) -> Result<()
 }
 
 async fn check_github_app(state: &AppState) -> CheckResult {
-    let settings = state
-        .settings
-        .read()
-        .expect("settings lock poisoned")
-        .clone();
-    let app_id = settings.github_app_id_str();
-    let slug = settings.github_slug_str();
+    let settings = state.server_settings();
+    let app_id = settings
+        .integrations
+        .github
+        .app_id
+        .as_ref()
+        .map(InterpString::as_source);
+    let slug = settings
+        .integrations
+        .github
+        .slug
+        .as_ref()
+        .map(InterpString::as_source);
     let private_key_raw = state.secret_or_env("GITHUB_APP_PRIVATE_KEY");
-    let client_id = settings.github_client_id_str().is_some();
+    let client_id = settings.integrations.github.client_id.is_some();
     let client_secret = state.secret_or_env("GITHUB_APP_CLIENT_SECRET").is_some();
     let webhook_secret = state.secret_or_env("GITHUB_APP_WEBHOOK_SECRET").is_some();
 

@@ -161,30 +161,49 @@ fn features_json(settings: &SettingsFile) -> serde_json::Value {
     })
 }
 
+fn resolve_interp(value: &InterpString) -> anyhow::Result<String> {
+    value
+        .resolve(|name| std::env::var(name).ok())
+        .map(|resolved| resolved.value)
+        .map_err(anyhow::Error::from)
+}
+
 async fn login_github(State(state): State<Arc<AppState>>) -> Response {
-    let settings = state
-        .settings
-        .read()
-        .expect("settings lock poisoned")
-        .clone();
-    let Some(client_id) = settings.github_client_id_str() else {
+    let settings = state.server_settings();
+    let Some(client_id) = settings.integrations.github.client_id.as_ref() else {
         warn!("OAuth login failed: client_id not configured");
         return json_response(
             StatusCode::CONFLICT,
             json!({"error": "GitHub App client_id is not configured"}),
         );
     };
-    let Some(web_url) = settings
-        .server_web()
-        .and_then(|w| w.url.as_ref())
-        .map(InterpString::as_source)
-    else {
+    let client_id = match resolve_interp(client_id) {
+        Ok(client_id) => client_id,
+        Err(err) => {
+            warn!(error = %err, "OAuth login failed: client_id could not be resolved");
+            return json_response(
+                StatusCode::CONFLICT,
+                json!({"error": format!("GitHub App client_id could not be resolved: {err}")}),
+            );
+        }
+    };
+    let web_url = match resolve_interp(&settings.web.url) {
+        Ok(web_url) => web_url,
+        Err(err) => {
+            warn!(error = %err, "OAuth login failed: server.web.url could not be resolved");
+            return json_response(
+                StatusCode::CONFLICT,
+                json!({"error": format!("server.web.url could not be resolved: {err}")}),
+            );
+        }
+    };
+    if web_url.is_empty() {
         warn!("OAuth login failed: server.web.url not configured");
         return json_response(
             StatusCode::CONFLICT,
             json!({"error": "server.web.url is not configured"}),
         );
-    };
+    }
 
     let state_token = format!("fabro-{}", ulid::Ulid::new());
     let authorize_url = reqwest::Url::parse_with_params(
@@ -226,11 +245,7 @@ async fn callback_github(
             json!({"error": "SESSION_SECRET is not configured"}),
         );
     };
-    let settings = state
-        .settings
-        .read()
-        .expect("settings lock poisoned")
-        .clone();
+    let settings = state.server_settings();
     let cookie_jar = parse_cookie_header(&headers);
     let stored_state = cookie_jar.get(OAUTH_STATE_COOKIE_NAME).map(Cookie::value);
     if stored_state != Some(params.state.as_str()) {
@@ -238,12 +253,22 @@ async fn callback_github(
         return Redirect::to("/login").into_response();
     }
 
-    let Some(client_id) = settings.github_client_id_str() else {
+    let Some(client_id) = settings.integrations.github.client_id.as_ref() else {
         error!("OAuth callback failed: client_id not configured");
         return json_response(
             StatusCode::CONFLICT,
             json!({"error": "GitHub App client_id is not configured"}),
         );
+    };
+    let client_id = match resolve_interp(client_id) {
+        Ok(client_id) => client_id,
+        Err(err) => {
+            error!(error = %err, "OAuth callback failed: client_id could not be resolved");
+            return json_response(
+                StatusCode::CONFLICT,
+                json!({"error": format!("GitHub App client_id could not be resolved: {err}")}),
+            );
+        }
     };
     let Some(client_secret) = state.secret_or_env("GITHUB_APP_CLIENT_SECRET") else {
         error!("OAuth callback failed: GITHUB_APP_CLIENT_SECRET not configured");
@@ -252,13 +277,16 @@ async fn callback_github(
             json!({"error": "GITHUB_APP_CLIENT_SECRET is not configured"}),
         );
     };
-    let web_url = settings
-        .server_web()
-        .and_then(|w| w.url.as_ref())
-        .map_or_else(
-            || "http://localhost:3000".to_string(),
-            InterpString::as_source,
-        );
+    let web_url = match resolve_interp(&settings.web.url) {
+        Ok(web_url) => web_url,
+        Err(err) => {
+            error!(error = %err, "OAuth callback failed: server.web.url could not be resolved");
+            return json_response(
+                StatusCode::CONFLICT,
+                json!({"error": format!("server.web.url could not be resolved: {err}")}),
+            );
+        }
+    };
 
     let http = reqwest::Client::new();
     let token = match http
@@ -356,13 +384,7 @@ async fn callback_github(
         _ => Vec::new(),
     };
 
-    let allowed_usernames = settings
-        .server
-        .as_ref()
-        .and_then(|s| s.auth.as_ref())
-        .and_then(|a| a.web.as_ref())
-        .map(|w| w.allowed_usernames.clone())
-        .unwrap_or_default();
+    let allowed_usernames = settings.auth.web.allowed_usernames.clone();
     if !allowed_usernames.is_empty() && !allowed_usernames.iter().any(|user| user == &profile.login)
     {
         warn!(login = %profile.login, "OAuth callback denied: username not in allowlist");
@@ -470,12 +492,12 @@ async fn auth_me(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Resp
 }
 
 async fn setup_status(State(state): State<Arc<AppState>>) -> Response {
-    let settings = state
-        .settings
-        .read()
-        .expect("settings lock poisoned")
-        .clone();
-    let configured = settings.github_client_id_str().is_some();
+    let configured = state
+        .server_settings()
+        .integrations
+        .github
+        .client_id
+        .is_some();
     Json(SetupStatusResponse { configured }).into_response()
 }
 
@@ -630,11 +652,8 @@ async fn setup_register(
     // Re-parse the freshly-written settings file and swap it into the
     // in-memory state so subsequent OAuth requests see the new GitHub
     // App credentials without a server restart.
-    match fabro_config::ConfigLayer::load(&settings_path) {
-        Ok(reloaded) => {
-            let mut shared = state.settings.write().expect("settings lock poisoned");
-            *shared = reloaded.into();
-        }
+    match state.reload_settings_from_disk() {
+        Ok(()) => {}
         Err(err) => {
             error!(error = %err, path = %settings_path.display(), "Setup register failed: could not reload written settings config");
             return json_response(

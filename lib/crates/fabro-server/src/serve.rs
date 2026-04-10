@@ -2,8 +2,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
+use anyhow::Context;
 use fabro_config::Storage;
-use fabro_config::resolve_storage_dir;
+use fabro_config::resolve_server_from_file;
 use fabro_config::user::{active_settings_path, load_settings_config};
 use fabro_util::terminal::Styles;
 use object_store::ObjectStore;
@@ -17,7 +18,10 @@ use tracing::{error, info, warn};
 
 use clap::Args;
 
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::{
+    InterpString, ObjectStoreSettings, ServerListenSettings,
+    ServerSettings as ResolvedServerSettings, SettingsFile,
+};
 
 use crate::bind::{self, Bind, BindRequest};
 use crate::github_webhooks::WebhookManager;
@@ -28,7 +32,6 @@ use crate::server::{
     reconcile_incomplete_runs_on_startup, shutdown_active_workers, spawn_scheduler,
 };
 use crate::tls::{ClientAuth, build_rustls_config, serve_tls_with_shutdown};
-use crate::tls_config::TlsSettings;
 use fabro_llm::client::Client as LlmClient;
 use fabro_sandbox::SandboxProvider;
 
@@ -171,53 +174,58 @@ fn build_object_store(store_path: &Path) -> anyhow::Result<Arc<dyn ObjectStore>>
     build_object_store_with_preference(store_path, use_in_memory_store())
 }
 
-fn build_artifact_object_store(
-    settings: &SettingsFile,
-    storage: &Storage,
-) -> anyhow::Result<(Arc<dyn ObjectStore>, String)> {
-    use fabro_types::settings::interp::InterpString;
-    use fabro_types::settings::server::ObjectStoreProvider;
+fn resolve_server_settings(file: &SettingsFile) -> anyhow::Result<ResolvedServerSettings> {
+    resolve_server_from_file(file).map_err(|errors| {
+        anyhow::anyhow!(
+            "failed to resolve server settings:\n{}",
+            errors
+                .into_iter()
+                .map(|error| error.to_string())
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    })
+}
 
-    let artifacts = settings.server_artifacts();
-    let prefix = artifacts
-        .and_then(|a| a.prefix.as_ref())
-        .map_or_else(|| "artifacts".to_string(), InterpString::as_source);
+fn resolve_interp(value: &InterpString) -> anyhow::Result<String> {
+    value
+        .resolve(|name| std::env::var(name).ok())
+        .map(|resolved| resolved.value)
+        .with_context(|| format!("failed to resolve {}", value.as_source()))
+}
+
+fn resolve_interp_path(value: &InterpString) -> anyhow::Result<PathBuf> {
+    Ok(PathBuf::from(resolve_interp(value)?))
+}
+
+fn build_artifact_object_store(
+    settings: &ResolvedServerSettings,
+) -> anyhow::Result<(Arc<dyn ObjectStore>, String)> {
+    let prefix = resolve_interp(&settings.artifacts.prefix)?;
 
     if use_in_memory_store() {
         return Ok((Arc::new(InMemory::new()), prefix));
     }
 
-    let provider = artifacts
-        .and_then(|a| a.provider)
-        .unwrap_or(ObjectStoreProvider::Local);
-
-    let s3_cfg = artifacts.and_then(|a| a.s3.as_ref());
-    match provider {
-        ObjectStoreProvider::Local => {
-            std::fs::create_dir_all(storage.artifact_store_dir())?;
-            let object_store = Arc::new(LocalFileSystem::new_with_prefix(storage.root())?);
+    match &settings.artifacts.store {
+        ObjectStoreSettings::Local { root } => {
+            let root = resolve_interp_path(root)?;
+            std::fs::create_dir_all(&root)?;
+            let object_store = Arc::new(LocalFileSystem::new_with_prefix(&root)?);
             Ok((object_store, prefix))
         }
-        ObjectStoreProvider::S3 => {
-            let s3 = s3_cfg.ok_or_else(|| {
-                anyhow::anyhow!("server.artifacts.s3 is required for provider = 's3'")
-            })?;
-            let bucket = s3
-                .bucket
-                .as_ref()
-                .map(InterpString::as_source)
-                .ok_or_else(|| anyhow::anyhow!("server.artifacts.s3.bucket is required"))?;
-            let region = s3
-                .region
-                .as_ref()
-                .map(InterpString::as_source)
-                .ok_or_else(|| anyhow::anyhow!("server.artifacts.s3.region is required"))?;
+        ObjectStoreSettings::S3 {
+            bucket,
+            region,
+            endpoint,
+            path_style,
+        } => {
             let mut builder = AmazonS3Builder::from_env()
-                .with_bucket_name(bucket)
-                .with_region(region)
-                .with_virtual_hosted_style_request(!s3.path_style.unwrap_or(false));
-            if let Some(endpoint) = s3.endpoint.as_ref().map(InterpString::as_source) {
-                builder = builder.with_endpoint(endpoint);
+                .with_bucket_name(resolve_interp(bucket)?)
+                .with_region(resolve_interp(region)?)
+                .with_virtual_hosted_style_request(!*path_style);
+            if let Some(endpoint) = endpoint.as_ref() {
+                builder = builder.with_endpoint(resolve_interp(endpoint)?);
             }
             let object_store = Arc::new(builder.build()?);
             Ok((object_store, prefix))
@@ -245,8 +253,12 @@ where
 
     let config_path = args.config.clone();
     let disk_settings = load_settings(config_path.as_deref())?;
+    let disk_server_settings = resolve_server_settings(&disk_settings)?;
     let active_config_path = resolved_config_path(config_path.as_deref());
-    let data_dir = storage_dir_override.unwrap_or_else(|| resolve_storage_dir(&disk_settings));
+    let data_dir = match storage_dir_override {
+        Some(path) => path,
+        None => resolve_interp_path(&disk_server_settings.storage.root)?,
+    };
     let storage = Storage::new(&data_dir);
     let secret_store_path = storage.secrets_path();
     let secret_store = SecretStore::load(secret_store_path.clone())?;
@@ -284,31 +296,27 @@ where
 
     // Shared config for live reloading
     let effective_settings = apply_runtime_settings(&disk_settings, &args, dry_run_mode, &data_dir);
+    let resolved_server_settings = resolve_server_settings(&effective_settings)?;
     let shared_settings = Arc::new(RwLock::new(effective_settings));
     std::fs::create_dir_all(&data_dir)?;
     let (auth_mode, client_auth, max_concurrent_runs) = {
-        let cfg_file = shared_settings.read().expect("config lock poisoned");
-        let auth_mode = resolve_auth_mode_with_lookup(&cfg_file, |name| {
+        let auth_mode = resolve_auth_mode_with_lookup(&resolved_server_settings, |name| {
             secret_snapshot
                 .get(name)
                 .cloned()
                 .or_else(|| std::env::var(name).ok())
         })?;
-        let tls_present = TlsSettings::from_settings(&cfg_file).is_some();
+        let tls_present = matches!(
+            resolved_server_settings.listen,
+            ServerListenSettings::Tcp { ref tls, .. } if tls.is_some()
+        );
         let client_auth = tls_present.then(|| client_auth_from_mode(&auth_mode));
         let max_concurrent_runs = args
             .max_concurrent_runs
-            .or_else(|| cfg_file.max_concurrent_runs())
-            .unwrap_or(5);
+            .unwrap_or(resolved_server_settings.scheduler.max_concurrent_runs);
         (auth_mode, client_auth, max_concurrent_runs)
     };
-    let web_enabled = {
-        let cfg_file = shared_settings.read().expect("config lock poisoned");
-        cfg_file
-            .server_web()
-            .and_then(|w| w.enabled)
-            .unwrap_or(true)
-    };
+    let web_enabled = resolved_server_settings.web.enabled;
 
     let store_path = storage.store_dir();
     let object_store = build_object_store(&store_path)?;
@@ -317,10 +325,8 @@ where
         "",
         Duration::from_millis(1),
     ));
-    let (artifact_object_store, artifact_prefix) = build_artifact_object_store(
-        &shared_settings.read().expect("config lock poisoned"),
-        &storage,
-    )?;
+    let (artifact_object_store, artifact_prefix) =
+        build_artifact_object_store(&resolved_server_settings)?;
     let artifact_store = fabro_store::ArtifactStore::new(artifact_object_store, artifact_prefix);
     let state = build_app_state_with_path(
         Arc::clone(&shared_settings),
@@ -345,19 +351,21 @@ where
 
     let bind_request = match args.bind {
         Some(ref s) => bind::parse_bind(s)?,
-        None => BindRequest::Tcp("127.0.0.1:3000".parse().unwrap()),
+        None => match &resolved_server_settings.listen {
+            ServerListenSettings::Unix { path } => BindRequest::Unix(resolve_interp_path(path)?),
+            ServerListenSettings::Tcp { address, .. } => BindRequest::Tcp(*address),
+        },
     };
 
     // Optionally start webhook listener
-    let webhook_app_id = {
-        use fabro_types::settings::InterpString;
-        let cfg_file = shared_settings.read().expect("config lock poisoned");
-        cfg_file
-            .server_integrations_github()
-            .filter(|github| github.webhooks.is_some())
-            .and_then(|github| github.app_id.as_ref())
-            .map(InterpString::as_source)
-    };
+    let webhook_app_id = resolved_server_settings
+        .integrations
+        .github
+        .webhooks
+        .as_ref()
+        .and_then(|_| resolved_server_settings.integrations.github.app_id.as_ref())
+        .map(resolve_interp)
+        .transpose()?;
     let webhook_manager = match webhook_app_id {
         Some(app_id) => {
             let secret = secret_snapshot
@@ -410,7 +418,7 @@ where
     });
 
     // Spawn config polling task
-    let settings_for_poll = Arc::clone(&shared_settings);
+    let state_for_poll = Arc::clone(&state);
     let config_path_for_poll = config_path.clone();
     let args_for_poll = args.clone();
     let data_dir_for_poll = data_dir.clone();
@@ -428,13 +436,20 @@ where
                         &data_dir_for_poll,
                     );
                     let changed = {
-                        let cfg = settings_for_poll.read().expect("config lock poisoned");
+                        let cfg = state_for_poll
+                            .settings
+                            .read()
+                            .expect("config lock poisoned");
                         *cfg != effective
                     };
                     if changed {
-                        let mut cfg = settings_for_poll.write().expect("config lock poisoned");
-                        *cfg = effective;
-                        info!("Server config reloaded");
+                        match state_for_poll.replace_settings(effective) {
+                            Ok(()) => info!("Server config reloaded"),
+                            Err(error) => warn!(
+                                error = %error,
+                                "Failed to resolve reloaded server config, keeping previous"
+                            ),
+                        }
                     }
                 }
                 Err(e) => {
@@ -445,9 +460,9 @@ where
     });
 
     // Branch: TLS, plain TCP, or Unix socket
-    let tls_settings = {
-        let cfg_file = shared_settings.read().expect("config lock poisoned");
-        TlsSettings::from_settings(&cfg_file)
+    let tls_settings = match &resolved_server_settings.listen {
+        ServerListenSettings::Tcp { tls, .. } => tls.clone(),
+        ServerListenSettings::Unix { .. } => None,
     };
 
     let bound_listener = bind_listener(&bind_request).await?;
@@ -483,7 +498,7 @@ where
         BoundListener::Tcp(listener) => {
             if let Some(ref tls_settings) = tls_settings {
                 let client_auth = client_auth.unwrap();
-                let rustls_config = build_rustls_config(tls_settings, client_auth);
+                let rustls_config = build_rustls_config(tls_settings, client_auth)?;
                 let tls_acceptor = tokio_rustls::TlsAcceptor::from(rustls_config);
 
                 info!("TLS enabled");

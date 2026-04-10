@@ -6,11 +6,259 @@
 //! use the same schema.
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::time::Duration as StdDuration;
 
 use serde::{Deserialize, Serialize};
 
-use super::duration::Duration;
+use super::duration::Duration as DurationLayer;
 use super::interp::InterpString;
+
+/// A structurally resolved `[server]` view for consumers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerSettings {
+    pub listen: ServerListenSettings,
+    pub api: ServerApiSettings,
+    pub web: ServerWebSettings,
+    pub auth: ServerAuthSettings,
+    pub storage: ServerStorageSettings,
+    pub artifacts: ServerArtifactsSettings,
+    pub slatedb: ServerSlateDbSettings,
+    pub scheduler: ServerSchedulerSettings,
+    pub logging: ServerLoggingSettings,
+    pub integrations: ServerIntegrationsSettings,
+}
+
+impl Default for ServerSettings {
+    fn default() -> Self {
+        Self {
+            listen: ServerListenSettings::default(),
+            api: ServerApiSettings::default(),
+            web: ServerWebSettings::default(),
+            auth: ServerAuthSettings::default(),
+            storage: ServerStorageSettings::default(),
+            artifacts: ServerArtifactsSettings::default(),
+            slatedb: ServerSlateDbSettings::default(),
+            scheduler: ServerSchedulerSettings::default(),
+            logging: ServerLoggingSettings::default(),
+            integrations: ServerIntegrationsSettings::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerListenSettings {
+    Tcp {
+        address: SocketAddr,
+        tls: Option<TlsConfig>,
+    },
+    Unix {
+        path: InterpString,
+    },
+}
+
+impl Default for ServerListenSettings {
+    fn default() -> Self {
+        Self::Unix {
+            path: InterpString::parse(""),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TlsConfig {
+    pub cert: InterpString,
+    pub key: InterpString,
+    pub ca: InterpString,
+}
+
+impl Default for TlsConfig {
+    fn default() -> Self {
+        Self {
+            cert: InterpString::parse(""),
+            key: InterpString::parse(""),
+            ca: InterpString::parse(""),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServerApiSettings {
+    pub url: Option<InterpString>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerWebSettings {
+    pub enabled: bool,
+    pub url: InterpString,
+}
+
+impl Default for ServerWebSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            url: InterpString::parse(""),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServerAuthSettings {
+    pub api: ServerAuthApiSettings,
+    pub web: ServerAuthWebSettings,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServerAuthApiSettings {
+    pub jwt: Option<ServerAuthApiJwtSettings>,
+    pub mtls: Option<ServerAuthApiMtlsSettings>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServerAuthApiJwtSettings {
+    pub enabled: bool,
+    pub issuer: Option<InterpString>,
+    pub audience: Option<InterpString>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServerAuthApiMtlsSettings {
+    pub enabled: bool,
+    pub ca: Option<InterpString>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServerAuthWebSettings {
+    pub allowed_usernames: Vec<String>,
+    pub providers: ServerAuthWebProvidersSettings,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServerAuthWebProvidersSettings {
+    pub github: Option<GithubOauthSettings>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GithubOauthSettings {
+    pub enabled: bool,
+    pub client_id: Option<InterpString>,
+    pub client_secret: Option<InterpString>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerStorageSettings {
+    pub root: InterpString,
+}
+
+impl Default for ServerStorageSettings {
+    fn default() -> Self {
+        Self {
+            root: InterpString::parse(""),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerArtifactsSettings {
+    pub prefix: InterpString,
+    pub store: ObjectStoreSettings,
+}
+
+impl Default for ServerArtifactsSettings {
+    fn default() -> Self {
+        Self {
+            prefix: InterpString::parse(""),
+            store: ObjectStoreSettings::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerSlateDbSettings {
+    pub prefix: InterpString,
+    pub store: ObjectStoreSettings,
+    pub flush_interval: StdDuration,
+}
+
+impl Default for ServerSlateDbSettings {
+    fn default() -> Self {
+        Self {
+            prefix: InterpString::parse(""),
+            store: ObjectStoreSettings::default(),
+            flush_interval: StdDuration::ZERO,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ObjectStoreSettings {
+    Local {
+        root: InterpString,
+    },
+    S3 {
+        bucket: InterpString,
+        region: InterpString,
+        endpoint: Option<InterpString>,
+        path_style: bool,
+    },
+}
+
+impl Default for ObjectStoreSettings {
+    fn default() -> Self {
+        Self::Local {
+            root: InterpString::parse(""),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServerSchedulerSettings {
+    pub max_concurrent_runs: usize,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServerLoggingSettings {
+    pub level: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServerIntegrationsSettings {
+    pub github: GithubIntegrationSettings,
+    pub slack: SlackIntegrationSettings,
+    pub discord: DiscordIntegrationSettings,
+    pub teams: TeamsIntegrationSettings,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GithubIntegrationSettings {
+    pub enabled: bool,
+    pub app_id: Option<InterpString>,
+    pub client_id: Option<InterpString>,
+    pub slug: Option<InterpString>,
+    pub permissions: HashMap<String, InterpString>,
+    pub webhooks: Option<IntegrationWebhooksSettings>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SlackIntegrationSettings {
+    pub enabled: bool,
+    pub default_channel: Option<InterpString>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DiscordIntegrationSettings {
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TeamsIntegrationSettings {
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct IntegrationWebhooksSettings {
+    pub strategy: Option<WebhookStrategy>,
+}
 
 /// A sparse `[server]` layer as it appears in a single settings file.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -194,7 +442,7 @@ pub struct ServerSlateDbLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prefix: Option<InterpString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub flush_interval: Option<Duration>,
+    pub flush_interval: Option<DurationLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local: Option<ObjectStoreLocalLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -6,6 +6,7 @@ pub mod home;
 pub mod legacy_env;
 pub mod merge;
 pub mod project;
+pub mod resolve;
 pub mod run;
 pub mod storage;
 pub mod user;
@@ -13,6 +14,7 @@ pub mod user;
 pub use config::ConfigLayer;
 pub use fabro_util::path::expand_tilde;
 pub use home::Home;
+pub use resolve::{ResolveError, resolve_server, resolve_server_from_file};
 pub use storage::{RunScratch, ServerState, Storage};
 
 use std::path::{Path, PathBuf};

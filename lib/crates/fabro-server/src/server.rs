@@ -22,6 +22,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use bytes::Bytes;
 use fabro_config::Storage;
+use fabro_config::resolve_server_from_file;
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate_object};
 use fabro_llm::model_test::{ModelTestMode, run_model_test_with_client};
@@ -33,7 +34,7 @@ use fabro_model::{BilledModelUsage, BilledTokenCounts};
 use fabro_store::{
     ArtifactStore, Database, EventEnvelope, EventPayload, PendingInterviewRecord, StageId,
 };
-use fabro_types::settings::{InterpString, SettingsFile};
+use fabro_types::settings::{InterpString, ServerSettings as ResolvedServerSettings, SettingsFile};
 use fabro_types::{
     ActorRef, EventBody, InterviewQuestionRecord, InterviewQuestionType, RunBlobId,
     RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance, RunServerProvenance,
@@ -523,6 +524,7 @@ pub struct AppState {
 
     pub(crate) secret_store: AsyncRwLock<SecretStore>,
     pub(crate) settings: Arc<RwLock<SettingsFile>>,
+    pub(crate) server_settings: RwLock<Arc<ResolvedServerSettings>>,
     pub(crate) config_path: PathBuf,
     pub(crate) local_daemon_mode: bool,
     shutting_down: AtomicBool,
@@ -575,6 +577,22 @@ fn accumulate_model_billing(entry: &mut ModelBillingTotals, usage: &BilledModelU
 }
 
 impl AppState {
+    pub(crate) fn server_settings(&self) -> Arc<ResolvedServerSettings> {
+        Arc::clone(
+            &self
+                .server_settings
+                .read()
+                .expect("server settings lock poisoned"),
+        )
+    }
+
+    pub(crate) fn server_storage_dir(&self) -> PathBuf {
+        PathBuf::from(
+            resolve_interp_string(&self.server_settings().storage.root)
+                .expect("server storage root should be resolved at startup"),
+        )
+    }
+
     pub(crate) fn dry_run(&self) -> bool {
         self.settings.read().unwrap().dry_run_enabled()
     }
@@ -668,6 +686,31 @@ impl AppState {
     fn is_shutting_down(&self) -> bool {
         self.shutting_down.load(Ordering::Relaxed)
     }
+
+    pub(crate) fn replace_settings(&self, settings: SettingsFile) -> anyhow::Result<()> {
+        let resolved = Arc::new(resolve_server_from_file(&settings).map_err(|errors| {
+            anyhow::anyhow!(
+                "failed to resolve server settings:\n{}",
+                errors
+                    .into_iter()
+                    .map(|error| error.to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )
+        })?);
+
+        *self.settings.write().expect("settings lock poisoned") = settings;
+        *self
+            .server_settings
+            .write()
+            .expect("server settings lock poisoned") = resolved;
+        Ok(())
+    }
+
+    pub(crate) fn reload_settings_from_disk(&self) -> anyhow::Result<()> {
+        let reloaded: SettingsFile = fabro_config::ConfigLayer::load(&self.config_path)?.into();
+        self.replace_settings(reloaded)
+    }
 }
 
 fn artifact_upload_token_keys() -> ArtifactUploadTokenKeys {
@@ -738,6 +781,13 @@ fn decode_secret_pem(name: &str, raw: &str) -> Result<String, String> {
         .map_err(|err| format!("{name} is not valid PEM or base64: {err}"))?;
     String::from_utf8(pem_bytes)
         .map_err(|err| format!("{name} base64 decoded to invalid UTF-8: {err}"))
+}
+
+fn resolve_interp_string(value: &InterpString) -> anyhow::Result<String> {
+    value
+        .resolve(|name| std::env::var(name).ok())
+        .map(|resolved| resolved.value)
+        .map_err(anyhow::Error::from)
 }
 
 fn start_optional_slack_service(state: &Arc<AppState>) {
@@ -1124,7 +1174,7 @@ async fn get_system_info(
         os: Some(std::env::consts::OS.to_string()),
         arch: Some(std::env::consts::ARCH.to_string()),
         storage_engine: Some("slatedb".to_string()),
-        storage_dir: Some(settings.storage_dir().display().to_string()),
+        storage_dir: Some(state.server_storage_dir().display().to_string()),
         uptime_secs: Some(to_i64(state.started_at.elapsed().as_secs())),
         runs: Some(SystemRunCounts {
             total: Some(to_i64(total_runs)),
@@ -1140,7 +1190,7 @@ async fn get_system_df(
     State(state): State<Arc<AppState>>,
     Query(params): Query<DfParams>,
 ) -> Response {
-    let storage_dir = state.settings.read().unwrap().storage_dir();
+    let storage_dir = state.server_storage_dir();
     let summaries = match state
         .store
         .list_runs(&fabro_store::ListRunsQuery::default())
@@ -1177,7 +1227,7 @@ async fn prune_runs(
     State(state): State<Arc<AppState>>,
     Json(body): Json<PruneRunsRequest>,
 ) -> Response {
-    let storage_dir = state.settings.read().unwrap().storage_dir();
+    let storage_dir = state.server_storage_dir();
     let summaries = match state
         .store
         .list_runs(&fabro_store::ListRunsQuery::default())
@@ -1606,17 +1656,19 @@ async fn get_github_repo(
     State(state): State<Arc<AppState>>,
     Path((owner, name)): Path<(String, String)>,
 ) -> Response {
-    let settings = state
-        .settings
-        .read()
-        .expect("settings lock poisoned")
-        .clone();
-    let Some(app_id) = settings.github_app_id_str() else {
+    let settings = state.server_settings();
+    let Some(app_id) = settings.integrations.github.app_id.as_ref() else {
         return ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "server.integrations.github.app_id is not configured",
         )
         .into_response();
+    };
+    let app_id = match resolve_interp_string(app_id) {
+        Ok(app_id) => app_id,
+        Err(err) => {
+            return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.to_string()).into_response();
+        }
     };
 
     let creds = match state.github_app_credentials(Some(&app_id)).await {
@@ -1642,10 +1694,16 @@ async fn get_github_repo(
 
     let base_url = fabro_github::github_api_base_url();
     let client = reqwest::Client::new();
-    let install_url = settings.github_slug_str().map_or_else(
-        || format!("https://github.com/organizations/{owner}/settings/installations"),
-        |slug| format!("https://github.com/apps/{slug}/installations/new"),
-    );
+    let install_url = match settings.integrations.github.slug.as_ref() {
+        Some(slug) => match resolve_interp_string(slug) {
+            Ok(slug) => format!("https://github.com/apps/{slug}/installations/new"),
+            Err(err) => {
+                return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.to_string())
+                    .into_response();
+            }
+        },
+        None => format!("https://github.com/organizations/{owner}/settings/installations"),
+    };
 
     let installed =
         match fabro_github::check_app_installed(&client, &jwt, &owner, &name, &base_url).await {
@@ -2013,11 +2071,32 @@ pub(crate) fn build_app_state_with_path(
 ) -> anyhow::Result<Arc<AppState>> {
     let secret_store = SecretStore::load(secret_store_path)?;
     let (global_event_tx, _) = broadcast::channel(4096);
-    let slack_service = {
+    let resolved_server_settings = {
         let settings = settings.read().expect("settings lock poisoned");
-        settings
-            .server_integrations_slack()
-            .and_then(|slack| slack.default_channel.as_ref().map(InterpString::as_source))
+        Arc::new(resolve_server_from_file(&settings).map_err(|errors| {
+            anyhow::anyhow!(
+                "failed to resolve server settings:\n{}",
+                errors
+                    .into_iter()
+                    .map(|error| error.to_string())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )
+        })?)
+    };
+    let slack_service = {
+        resolved_server_settings
+            .integrations
+            .slack
+            .default_channel
+            .as_ref()
+            .map(|value| {
+                value
+                    .resolve(|name| std::env::var(name).ok())
+                    .map(|resolved| resolved.value)
+                    .map_err(anyhow::Error::from)
+            })
+            .transpose()?
             .and_then(|default_channel| {
                 resolve_slack_credentials().map(|credentials| {
                     Arc::new(SlackService::new(
@@ -2040,6 +2119,7 @@ pub(crate) fn build_app_state_with_path(
         global_event_tx,
         secret_store: AsyncRwLock::new(secret_store),
         settings,
+        server_settings: RwLock::new(resolved_server_settings),
         config_path,
         local_daemon_mode,
         shutting_down: AtomicBool::new(false),
@@ -2210,7 +2290,7 @@ async fn delete_run_internal(state: &Arc<AppState>, id: RunId) -> Result<(), Res
             })?;
         }
     } else {
-        let storage = Storage::new(state.settings.read().unwrap().storage_dir());
+        let storage = Storage::new(state.server_storage_dir());
         let run_dir = storage.run_scratch(&id).root().to_path_buf();
         remove_run_dir(&run_dir).map_err(|err| {
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
@@ -2890,11 +2970,7 @@ fn worker_command(
 ) -> anyhow::Result<Command> {
     let exe =
         std::env::var_os("CARGO_BIN_EXE_fabro").map_or(std::env::current_exe()?, PathBuf::from);
-    let storage_dir = state
-        .settings
-        .read()
-        .expect("settings lock poisoned")
-        .storage_dir();
+    let storage_dir = state.server_storage_dir();
     let server_target = current_server_target(&storage_dir)?;
     let artifact_upload_token = state
         .issue_artifact_upload_token(&run_id)

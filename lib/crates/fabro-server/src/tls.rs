@@ -2,6 +2,9 @@ use std::path::Path;
 use std::sync::Arc;
 use std::{future::Future, pin::Pin};
 
+use anyhow::Context;
+use fabro_types::settings::InterpString;
+use fabro_types::settings::TlsConfig;
 use rustls::ServerConfig;
 use rustls::server::WebPkiClientVerifier;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
@@ -9,7 +12,6 @@ use tokio::net::TcpListener;
 use tracing::error;
 
 use crate::jwt_auth::PeerCertificates;
-use crate::tls_config::TlsSettings;
 
 /// How client certificates should be verified.
 #[derive(Clone, Copy)]
@@ -24,11 +26,14 @@ pub enum ClientAuth {
 
 /// Build a rustls `ServerConfig` from the `[api.tls]` configuration.
 pub fn build_rustls_config(
-    tls_settings: &TlsSettings,
+    tls_settings: &TlsConfig,
     client_auth: ClientAuth,
-) -> Arc<ServerConfig> {
-    let certs = load_certs(&tls_settings.cert);
-    let key = load_private_key(&tls_settings.key);
+) -> anyhow::Result<Arc<ServerConfig>> {
+    let cert = resolve_path(&tls_settings.cert)?;
+    let key_path = resolve_path(&tls_settings.key)?;
+
+    let certs = load_certs(&cert);
+    let key = load_private_key(&key_path);
 
     let config = match client_auth {
         ClientAuth::None => ServerConfig::builder()
@@ -36,7 +41,8 @@ pub fn build_rustls_config(
             .with_single_cert(certs, key)
             .expect("invalid server certificate or key"),
         ClientAuth::Required | ClientAuth::Optional => {
-            let ca_certs = load_certs(&tls_settings.ca);
+            let ca_path = resolve_path(&tls_settings.ca)?;
+            let ca_certs = load_certs(&ca_path);
             let mut root_store = rustls::RootCertStore::empty();
             for cert in ca_certs {
                 root_store
@@ -60,7 +66,7 @@ pub fn build_rustls_config(
         }
     };
 
-    Arc::new(config)
+    Ok(Arc::new(config))
 }
 
 /// Serve requests over TLS, extracting peer certificates into request extensions.
@@ -135,6 +141,13 @@ where
 }
 
 pub use fabro_config::expand_tilde;
+
+fn resolve_path(value: &InterpString) -> anyhow::Result<std::path::PathBuf> {
+    let resolved = value
+        .resolve(|name| std::env::var(name).ok())
+        .with_context(|| format!("failed to resolve {}", value.as_source()))?;
+    Ok(expand_tilde(Path::new(&resolved.value)))
+}
 
 fn load_certs(path: &Path) -> Vec<CertificateDer<'static>> {
     let path = expand_tilde(path);
