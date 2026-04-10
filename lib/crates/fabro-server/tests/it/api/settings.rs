@@ -1,25 +1,34 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use fabro_config::ConfigLayer;
 use fabro_server::jwt_auth::AuthMode;
 use fabro_server::server::{build_router, create_app_state_with_options};
-use fabro_types::Settings;
+use fabro_types::settings::SettingsFile;
 use tower::ServiceExt;
 
 use crate::helpers::body_json;
 
 #[tokio::test]
 async fn retrieve_server_settings_returns_runtime_settings() {
-    let settings: Settings = toml::from_str(
+    let settings: SettingsFile = ConfigLayer::parse(
         r#"
-storage_dir = "/srv/fabro"
-max_concurrent_runs = 9
-verbose = true
+_version = 1
 
-[vars]
+[server.storage]
+root = "/srv/fabro"
+
+[server.scheduler]
+max_concurrent_runs = 9
+
+[cli.output]
+verbosity = "verbose"
+
+[run.inputs]
 server_only = "1"
 "#,
     )
-    .expect("settings fixture should parse");
+    .expect("settings fixture should parse")
+    .into();
     let app = build_router(
         create_app_state_with_options(settings, 5),
         AuthMode::Disabled,
@@ -34,8 +43,10 @@ server_only = "1"
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response.into_body()).await;
-    assert_eq!(body["storage_dir"], "/srv/fabro");
-    assert_eq!(body["max_concurrent_runs"], 9);
-    assert_eq!(body["verbose"], true);
-    assert_eq!(body["vars"]["server_only"], "1");
+    // `/api/v1/settings` emits the v2 SettingsFile shape directly now.
+    // Stage 6.6 will replace this with an explicit allow-list DTO.
+    assert_eq!(body["server"]["storage"]["root"], "/srv/fabro");
+    assert_eq!(body["server"]["scheduler"]["max_concurrent_runs"], 9);
+    assert_eq!(body["cli"]["output"]["verbosity"], "verbose");
+    assert_eq!(body["run"]["inputs"]["server_only"], "1");
 }

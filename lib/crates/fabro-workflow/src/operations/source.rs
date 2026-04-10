@@ -3,8 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use fabro_config::project as project_config;
-use fabro_types::Settings;
-use fabro_util::path::expand_tilde;
+use fabro_types::settings::SettingsFile;
 
 use crate::file_resolver::{FileResolver, FilesystemFileResolver};
 use crate::workflow_bundle::BundledWorkflow;
@@ -22,14 +21,14 @@ pub enum WorkflowInput {
 #[derive(Clone, Debug)]
 pub(crate) struct ResolveWorkflowInput {
     pub workflow: WorkflowInput,
-    pub settings: Settings,
+    pub settings: SettingsFile,
     pub cwd: PathBuf,
 }
 
 #[derive(Clone)]
 pub(crate) struct ResolvedWorkflow {
     pub raw_source: String,
-    pub settings: Settings,
+    pub settings: SettingsFile,
     pub workflow_slug: Option<String>,
     pub workflow_toml_path: Option<PathBuf>,
     pub dot_path: Option<PathBuf>,
@@ -37,25 +36,6 @@ pub(crate) struct ResolvedWorkflow {
     pub file_resolver: Option<Arc<dyn FileResolver>>,
     pub goal_override: Option<String>,
     pub working_directory: PathBuf,
-}
-
-fn resolve_goal_file(
-    goal_file: Option<&Path>,
-    working_directory: &Path,
-) -> anyhow::Result<Option<String>> {
-    let Some(goal_file) = goal_file else {
-        return Ok(None);
-    };
-    let expanded = expand_tilde(goal_file);
-    let goal_path = if expanded.is_absolute() {
-        expanded
-    } else {
-        working_directory.join(expanded)
-    };
-    let content = std::fs::read_to_string(&goal_path)
-        .with_context(|| format!("failed to read goal file: {}", goal_path.display()))?;
-    tracing::debug!(path = %goal_path.display(), "Goal loaded from file");
-    Ok(Some(content))
 }
 
 fn workflow_slug_from_path(workflow_path: &Path) -> Option<String> {
@@ -85,10 +65,7 @@ pub(crate) fn resolve_workflow(request: ResolveWorkflowInput) -> anyhow::Result<
                 project_config::resolve_working_directory(&settings, &request.cwd);
             let raw_source = std::fs::read_to_string(&resolution.dot_path)
                 .with_context(|| format!("Failed to read {}", resolution.dot_path.display()))?;
-            let goal_override = settings.goal.clone().or(resolve_goal_file(
-                settings.goal_file.as_deref(),
-                &working_directory,
-            )?);
+            let goal_override = resolve_goal_override(&settings, &working_directory)?;
             let current_dir = resolution
                 .dot_path
                 .parent()
@@ -113,10 +90,7 @@ pub(crate) fn resolve_workflow(request: ResolveWorkflowInput) -> anyhow::Result<
             let settings = request.settings;
             let working_directory =
                 project_config::resolve_working_directory(&settings, &request.cwd);
-            let goal_override = settings.goal.clone().or(resolve_goal_file(
-                settings.goal_file.as_deref(),
-                &working_directory,
-            )?);
+            let goal_override = resolve_goal_override(&settings, &working_directory)?;
             let has_base_dir = base_dir.is_some();
             Ok(ResolvedWorkflow {
                 raw_source: source,
@@ -138,20 +112,35 @@ pub(crate) fn resolve_workflow(request: ResolveWorkflowInput) -> anyhow::Result<
             let settings = request.settings;
             let working_directory =
                 project_config::resolve_working_directory(&settings, &request.cwd);
+            let goal_override = resolve_goal_override(&settings, &working_directory)?;
 
             Ok(ResolvedWorkflow {
                 raw_source: workflow.source.clone(),
-                settings: settings.clone(),
+                settings,
                 workflow_slug: workflow_slug_from_path(&workflow.logical_path),
                 workflow_toml_path: None,
                 dot_path: Some(workflow.logical_path.clone()),
                 current_dir: Some(workflow.current_dir()),
                 file_resolver: Some(workflow.file_resolver()),
-                goal_override: settings.goal.clone(),
+                goal_override,
                 working_directory,
             })
         }
     }
+}
+
+/// Resolve the `run.goal` override for a direct (non-manifest) workflow
+/// run. Reads the file from disk if the goal layer is the `file` variant.
+/// Relative paths that survived config load (e.g. env-interpolated ones)
+/// are anchored at `working_directory`.
+fn resolve_goal_override(
+    settings: &SettingsFile,
+    working_directory: &Path,
+) -> anyhow::Result<Option<String>> {
+    settings
+        .resolve_run_goal(working_directory)
+        .map(|opt| opt.map(|resolved| resolved.text))
+        .map_err(anyhow::Error::from)
 }
 
 #[cfg(test)]
@@ -160,15 +149,21 @@ mod tests {
 
     #[test]
     fn resolve_workflow_uses_explicit_cwd_for_relative_work_dir() {
+        use fabro_types::settings::InterpString;
+        use fabro_types::settings::run::RunLayer;
+
         let dir = tempfile::tempdir().unwrap();
         let resolved = resolve_workflow(ResolveWorkflowInput {
             workflow: WorkflowInput::DotSource {
                 source: "digraph Test { start -> exit }".to_string(),
                 base_dir: None,
             },
-            settings: Settings {
-                work_dir: Some("workspace".to_string()),
-                ..Default::default()
+            settings: SettingsFile {
+                run: Some(RunLayer {
+                    working_dir: Some(InterpString::parse("workspace")),
+                    ..RunLayer::default()
+                }),
+                ..SettingsFile::default()
             },
             cwd: dir.path().to_path_buf(),
         })

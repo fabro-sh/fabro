@@ -14,7 +14,6 @@ use crate::event::{Emitter, Event, StageScope};
 use crate::outcome::{
     BilledModelUsage, FailureCategory, FailureDetail, Outcome, OutcomeExt, StageStatus,
 };
-use crate::run_dir::visit_from_context;
 use crate::transforms::variable_expansion::expand_vars;
 use fabro_graphviz::graph::{Graph, Node};
 
@@ -250,7 +249,6 @@ impl Handler for AgentHandler {
             format!("{preamble}\n\n{expanded}")
         };
 
-        let visit = u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX);
         let prompt_provider = node
             .provider()
             .map(String::from)
@@ -260,7 +258,7 @@ impl Handler for AgentHandler {
         services.emitter.emit_scoped(
             &Event::Prompt {
                 stage: node.id.clone(),
-                visit,
+                visit: stage_scope.visit,
                 text: prompt.clone(),
                 mode: Some("agent".to_string()),
                 provider: prompt_provider,
@@ -720,8 +718,7 @@ mod tests {
                 emitter.emit_scoped(
                     &crate::event::Event::Agent {
                         stage: node.id.clone(),
-                        visit: u32::try_from(crate::run_dir::visit_from_context(context))
-                            .unwrap_or(u32::MAX),
+                        visit: scope.visit,
                         event: fabro_agent::AgentEvent::SessionStarted {
                             provider: Some("openai".to_string()),
                             model: Some("gpt-5.4".to_string()),

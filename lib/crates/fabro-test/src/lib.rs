@@ -335,7 +335,7 @@ fn write_marker(root: &Path) {
 
 fn managed_storage_settings(storage_dir: &Path, rest: &str) -> String {
     format!(
-        "{MANAGED_STORAGE_MARKER}\nstorage_dir = \"{}\"\n{rest}",
+        "{MANAGED_STORAGE_MARKER}\n_version = 1\n\n[server.storage]\nroot = \"{}\"\n\n{rest}",
         storage_dir.display()
     )
 }
@@ -349,24 +349,24 @@ fn strip_managed_storage_settings(contents: &str) -> &str {
         .strip_prefix(MANAGED_STORAGE_MARKER)
         .and_then(|rest| rest.strip_prefix('\n'))
         .unwrap_or("");
-    let (first_line, mut rest) = after_marker.split_once('\n').unwrap_or((after_marker, ""));
-    if !first_line.starts_with("storage_dir = ") {
-        return after_marker;
-    }
-    if let Some((maybe_target, tail)) = rest.split_once('\n') {
-        if maybe_target.starts_with("server.target = ") {
-            rest = tail;
-        }
-    }
-    rest
+    after_marker
 }
 
 fn settings_storage_dir(settings_path: &Path) -> Option<PathBuf> {
     let content = std::fs::read_to_string(settings_path).ok()?;
-    let value = toml::from_str::<toml::Value>(strip_managed_storage_settings(&content)).ok()?;
+    // Settings files that fabro-test injected with its managed marker are
+    // not treated as user-explicit storage overrides — the override tracks
+    // ONLY what the test itself asked for.
+    if content.starts_with(MANAGED_STORAGE_MARKER) {
+        return None;
+    }
+    let value = toml::from_str::<toml::Value>(&content).ok()?;
     value
-        .get("storage_dir")
-        .or_else(|| value.get("data_dir"))
+        .get("server")
+        .and_then(toml::Value::as_table)
+        .and_then(|server| server.get("storage"))
+        .and_then(toml::Value::as_table)
+        .and_then(|storage| storage.get("root"))
         .and_then(toml::Value::as_str)
         .map(PathBuf::from)
 }
@@ -379,7 +379,10 @@ fn write_settings_file(path: &Path, storage_dir: &Path, rest: &str) {
     ensure_parent_dir(path);
     std::fs::write(
         path,
-        format!("storage_dir = \"{}\"\n{rest}", storage_dir.display()),
+        format!(
+            "_version = 1\n\n[server.storage]\nroot = \"{}\"\n\n{rest}",
+            storage_dir.display()
+        ),
     )
     .unwrap_or_else(|err| panic!("failed to write {}: {err}", path.display()));
 }
@@ -407,36 +410,45 @@ fn write_settings_table(path: &Path, table: &TomlMap<String, TomlValue>) {
 
 fn server_target_from_table(table: &TomlMap<String, TomlValue>) -> Option<String> {
     table
-        .get("server")
+        .get("cli")
         .and_then(TomlValue::as_table)
-        .and_then(|server| server.get("target"))
+        .and_then(|cli| cli.get("target"))
+        .and_then(TomlValue::as_table)
+        .and_then(|target| target.get("path").or_else(|| target.get("url")))
         .and_then(TomlValue::as_str)
         .map(ToOwned::to_owned)
 }
 
 fn set_server_target(table: &mut TomlMap<String, TomlValue>, socket_path: &Path) {
-    let server_entry = table
-        .entry("server".to_string())
+    let cli_entry = table
+        .entry("cli".to_string())
         .or_insert_with(|| TomlValue::Table(TomlMap::new()));
-    let Some(server_table) = server_entry.as_table_mut() else {
-        panic!("expected [server] to be a TOML table");
+    let Some(cli_table) = cli_entry.as_table_mut() else {
+        panic!("expected [cli] to be a TOML table");
     };
-    server_table.insert(
-        "target".to_string(),
+    let target_entry = cli_table
+        .entry("target".to_string())
+        .or_insert_with(|| TomlValue::Table(TomlMap::new()));
+    let Some(target_table) = target_entry.as_table_mut() else {
+        panic!("expected [cli.target] to be a TOML table");
+    };
+    target_table.insert("type".to_string(), TomlValue::String("unix".to_string()));
+    target_table.insert(
+        "path".to_string(),
         TomlValue::String(socket_path.display().to_string()),
     );
 }
 
 fn clear_server_target(table: &mut TomlMap<String, TomlValue>) {
-    let Some(server_entry) = table.get_mut("server") else {
+    let Some(cli_entry) = table.get_mut("cli") else {
         return;
     };
-    let Some(server_table) = server_entry.as_table_mut() else {
+    let Some(cli_table) = cli_entry.as_table_mut() else {
         return;
     };
-    server_table.remove("target");
-    if server_table.is_empty() {
-        table.remove("server");
+    cli_table.remove("target");
+    if cli_table.is_empty() {
+        table.remove("cli");
     }
 }
 
@@ -451,8 +463,8 @@ fn sync_home_settings(
             Ok(contents) => {
                 let had_managed_storage = contents.starts_with(MANAGED_STORAGE_MARKER);
                 let table = parse_settings_table(&contents, settings_path);
-                let had_explicit_storage = !had_managed_storage
-                    && (table.contains_key("storage_dir") || table.contains_key("data_dir"));
+                let had_explicit_storage =
+                    !had_managed_storage && has_explicit_storage_root(&table);
                 let had_explicit_target = server_target_from_table(&table).is_some();
                 (table, had_explicit_storage, had_explicit_target)
             }
@@ -462,12 +474,12 @@ fn sync_home_settings(
             Err(err) => panic!("failed to read {}: {err}", settings_path.display()),
         };
 
+    table
+        .entry("_version".to_string())
+        .or_insert(TomlValue::Integer(1));
+
     if !had_explicit_storage {
-        table.insert(
-            "storage_dir".to_string(),
-            TomlValue::String(storage_dir.display().to_string()),
-        );
-        table.remove("data_dir");
+        set_server_storage_root(&mut table, storage_dir);
     }
 
     if force_server_target || (!had_explicit_storage && !had_explicit_target) {
@@ -478,21 +490,23 @@ fn sync_home_settings(
 
     if !had_explicit_storage {
         let mut rest = table.clone();
-        rest.remove("storage_dir");
+        clear_server_storage(&mut rest);
+        rest.remove("_version");
         let managed_target = !had_explicit_target && !force_server_target;
         if managed_target {
             clear_server_target(&mut rest);
         }
-        let rest = toml::to_string(&rest)
+        let rest_toml = toml::to_string(&rest)
             .unwrap_or_else(|err| panic!("failed to serialize {}: {err}", settings_path.display()));
-        let mut contents = managed_storage_settings(storage_dir, &rest);
-        if managed_target {
-            contents = format!(
-                "{MANAGED_STORAGE_MARKER}\nstorage_dir = \"{}\"\nserver.target = \"{}\"\n{rest}",
+        let contents = if managed_target {
+            format!(
+                "{MANAGED_STORAGE_MARKER}\n_version = 1\n\n[server.storage]\nroot = \"{}\"\n\n[cli.target]\ntype = \"unix\"\npath = \"{}\"\n\n{rest_toml}",
                 storage_dir.display(),
                 socket_path.display()
-            );
-        }
+            )
+        } else {
+            managed_storage_settings(storage_dir, &rest_toml)
+        };
         ensure_parent_dir(settings_path);
         std::fs::write(settings_path, contents)
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", settings_path.display()));
@@ -500,6 +514,48 @@ fn sync_home_settings(
     }
 
     write_settings_table(settings_path, &table);
+}
+
+fn has_explicit_storage_root(table: &TomlMap<String, TomlValue>) -> bool {
+    table
+        .get("server")
+        .and_then(TomlValue::as_table)
+        .and_then(|server| server.get("storage"))
+        .and_then(TomlValue::as_table)
+        .and_then(|storage| storage.get("root"))
+        .is_some()
+}
+
+fn set_server_storage_root(table: &mut TomlMap<String, TomlValue>, storage_dir: &Path) {
+    let server_entry = table
+        .entry("server".to_string())
+        .or_insert_with(|| TomlValue::Table(TomlMap::new()));
+    let Some(server_table) = server_entry.as_table_mut() else {
+        panic!("expected [server] to be a TOML table");
+    };
+    let storage_entry = server_table
+        .entry("storage".to_string())
+        .or_insert_with(|| TomlValue::Table(TomlMap::new()));
+    let Some(storage_table) = storage_entry.as_table_mut() else {
+        panic!("expected [server.storage] to be a TOML table");
+    };
+    storage_table.insert(
+        "root".to_string(),
+        TomlValue::String(storage_dir.display().to_string()),
+    );
+}
+
+fn clear_server_storage(table: &mut TomlMap<String, TomlValue>) {
+    let Some(server_entry) = table.get_mut("server") else {
+        return;
+    };
+    let Some(server_table) = server_entry.as_table_mut() else {
+        return;
+    };
+    server_table.remove("storage");
+    if server_table.is_empty() {
+        table.remove("server");
+    }
 }
 
 fn server_record_path(storage_dir: &Path) -> PathBuf {

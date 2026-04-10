@@ -12,9 +12,9 @@ Fabro uses a [GitHub App](https://docs.github.com/en/apps/overview) to authentic
 | **OAuth login** | Users sign in to the web UI with their GitHub account |
 | **Private repo cloning** | Daytona and Docker sandboxes clone private repositories using short-lived Installation Access Tokens |
 | **Checkpoint pushing** | After each workflow stage, Fabro pushes the run branch and metadata branch back to origin from inside the sandbox |
-| **Auto-PR** | When `[pull_request] enabled = true` in the [run config](/execution/run-configuration#pull_request), Fabro opens a PR from the agent's working branch after a successful run |
-| **Auto-merge** | When `[pull_request] auto_merge = true`, Fabro enables GitHub's auto-merge on created PRs so they merge automatically once required checks pass |
-| **Sandbox GITHUB_TOKEN** | When `[github] permissions` are declared in the run config, Fabro mints a scoped Installation Access Token and injects it as `GITHUB_TOKEN` in the sandbox |
+| **Auto-PR** | When `[run.pull_request] enabled = true` in the [run config](/execution/run-configuration#runpull_request), Fabro opens a PR from the agent's working branch after a successful run |
+| **Auto-merge** | When `[run.pull_request] auto_merge = true`, Fabro enables GitHub's auto-merge on created PRs so they merge automatically once required checks pass |
+| **Sandbox GITHUB_TOKEN** | When `[server.integrations.github.permissions]` are declared in the server config, Fabro mints a scoped Installation Access Token and injects it as `GITHUB_TOKEN` in the sandbox |
 
 ## Setup
 
@@ -61,8 +61,8 @@ The GitHub App check verifies five fields:
 
 | Field | Source |
 |---|---|
-| `git.app_id` | `~/.fabro/settings.toml` |
-| `git.client_id` | `~/.fabro/settings.toml` |
+| `server.integrations.github.app_id` | `~/.fabro/settings.toml` |
+| `server.integrations.github.client_id` | `~/.fabro/settings.toml` |
 | `GITHUB_APP_CLIENT_SECRET` | Server secret store |
 | `GITHUB_APP_WEBHOOK_SECRET` | Server secret store |
 | `GITHUB_APP_PRIVATE_KEY` | Server secret store |
@@ -76,8 +76,7 @@ The GitHub App configuration lives in two places:
 ### `~/.fabro/settings.toml`
 
 ```toml title="settings.toml"
-[git]
-provider = "github"
+[server.integrations.github]
 app_id = "123456"
 client_id = "Iv1.abc123def"
 slug = "fabro-a3f2"
@@ -85,7 +84,6 @@ slug = "fabro-a3f2"
 
 | Field | Description |
 |---|---|
-| `provider` | Always `"github"` (the only supported provider) |
 | `app_id` | Numeric GitHub App ID |
 | `client_id` | OAuth Client ID for the app |
 | `slug` | App slug, used for linking to the GitHub App settings page |

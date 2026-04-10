@@ -203,7 +203,10 @@ fn detach_uses_configured_server_target_without_server_flag() {
     });
     context.write_home(
         ".fabro/settings.toml",
-        format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
+        format!(
+            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
+            server.base_url()
+        ),
     );
 
     let output = context
@@ -288,7 +291,7 @@ fn detach_cli_server_target_overrides_configured_server_target() {
     context.write_home(
         ".fabro/settings.toml",
         format!(
-            "[server]\ntarget = \"{}/api/v1\"\n",
+            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
             config_server.base_url()
         ),
     );
@@ -450,18 +453,22 @@ fn local_foreground_run_prints_artifact_paths_from_server_artifact_list() {
     );
     context.write_temp(
         "artifact-summary/run.toml",
-        r#"version = 1
+        r#"_version = 1
+
+[workflow]
 graph = "workflow.fabro"
+
+[run]
 goal = "Show stored artifacts"
 
-[sandbox]
+[run.sandbox]
 provider = "local"
 preserve = true
 
-[sandbox.local]
+[run.sandbox.local]
 worktree_mode = "never"
 
-[artifacts]
+[run.artifacts]
 include = ["assets/**"]
 "#,
     );
@@ -532,6 +539,62 @@ fn dry_run_simple() {
 }
 
 #[test]
+fn dry_run_with_goal_file_reads_contents_into_goal() {
+    // Regression test for the `--goal-file` flag that was previously
+    // being silently ignored in the v2 path. The file content must end
+    // up in the effective goal displayed in the preflight summary.
+    let context = test_context!();
+
+    let goal_dir = tempfile::tempdir().unwrap();
+    let goal_path = goal_dir.path().join("goal.md");
+    std::fs::write(&goal_path, "Ship the rate-limiting feature end to end.\n").unwrap();
+
+    let mut cmd = context.run_cmd();
+    cmd.args(["--dry-run", "--auto-approve", "--goal-file"]);
+    cmd.arg(&goal_path);
+    cmd.arg(example_fixture("simple.fabro"));
+
+    let output = cmd.output().expect("run command should execute");
+    assert!(
+        output.status.success(),
+        "run should succeed:\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Ship the rate-limiting feature end to end."),
+        "goal file content should appear in preflight summary, got:\n{stderr}"
+    );
+}
+
+#[test]
+fn dry_run_rejects_goal_and_goal_file_together() {
+    // clap `conflicts_with` must fire when both flags are supplied.
+    let context = test_context!();
+
+    let goal_dir = tempfile::tempdir().unwrap();
+    let goal_path = goal_dir.path().join("goal.md");
+    std::fs::write(&goal_path, "never read").unwrap();
+
+    let mut cmd = context.run_cmd();
+    cmd.args(["--dry-run", "--goal", "inline override", "--goal-file"]);
+    cmd.arg(&goal_path);
+    cmd.arg(example_fixture("simple.fabro"));
+    let output = cmd.output().expect("run command should execute");
+    assert!(
+        !output.status.success(),
+        "run should fail when --goal and --goal-file are both set"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("cannot be used with")
+            || stderr.contains("conflict")
+            || stderr.to_lowercase().contains("mutually exclusive"),
+        "expected conflicts_with error, got:\n{stderr}"
+    );
+}
+
+#[test]
 fn dry_run_persists_event_history_in_store() {
     let context = test_context!();
     let run_id = unique_run_id();
@@ -581,9 +644,9 @@ fn dry_run_persists_event_history_in_store() {
     assert_eq!(
         progress
             .first()
-            .and_then(|event| event.pointer("/properties/settings/auto_approve"))
-            .and_then(Value::as_bool),
-        Some(true)
+            .and_then(|event| event.pointer("/properties/settings/run/execution/approval"))
+            .and_then(Value::as_str),
+        Some("auto")
     );
     assert!(
         progress
@@ -713,17 +776,35 @@ fn json_run_implies_auto_approve_for_human_gates() {
                 );
             }
         }
-        let Some(llm) = event.pointer_mut("/properties/settings/llm") else {
+        // Strip fields that vary between runs (version, server stanzas that
+        // carry machine-specific values, cli.target sockets).
+        if let Some(settings) = event
+            .pointer_mut("/properties/settings")
+            .and_then(Value::as_object_mut)
+        {
+            settings.remove("_version");
+            settings.remove("server");
+            settings.remove("version");
+        }
+        if let Some(target) = event
+            .pointer_mut("/properties/settings/cli/target")
+            .and_then(Value::as_object_mut)
+        {
+            if target.contains_key("path") {
+                target.insert(
+                    "path".to_string(),
+                    Value::String("[CLI_SOCKET]".to_string()),
+                );
+            }
+        }
+        let Some(model) = event.pointer_mut("/properties/settings/run/model") else {
             continue;
         };
-        let Some(llm) = llm.as_object_mut() else {
+        let Some(model) = model.as_object_mut() else {
             continue;
         };
-        llm.insert(
-            "model".to_string(),
-            Value::String("[LLM_MODEL]".to_string()),
-        );
-        llm.insert(
+        model.insert("name".to_string(), Value::String("[LLM_MODEL]".to_string()));
+        model.insert(
             "provider".to_string(),
             Value::String("[LLM_PROVIDER]".to_string()),
         );
@@ -851,23 +932,26 @@ fn json_run_implies_auto_approve_for_human_gates() {
           },
           "run_dir": "[RUN_DIR]",
           "settings": {
-            "auto_approve": true,
-            "goal": "Route through the default approval path",
-            "llm": {
-              "fallbacks": null,
-              "model": "[LLM_MODEL]",
-              "provider": "[LLM_PROVIDER]"
+            "run": {
+              "execution": {
+                "approval": "auto",
+                "retros": false
+              },
+              "goal": "Route through the default approval path",
+              "model": {
+                "name": "[LLM_MODEL]",
+                "provider": "[LLM_PROVIDER]"
+              },
+              "sandbox": {
+                "provider": "local"
+              }
             },
-            "no_retro": true,
-            "sandbox": {
-              "daytona": null,
-              "devcontainer": null,
-              "env": null,
-              "local": null,
-              "preserve": null,
-              "provider": "local"
-            },
-            "storage_dir": "[STORAGE_DIR]"
+            "cli": {
+              "target": {
+                "path": "[CLI_SOCKET]",
+                "type": "unix"
+              }
+            }
           },
           "workflow_slug": "human-gate",
           "workflow_source": "digraph HumanGate {/n  graph [goal=\"Route through the default approval path\"]/n  start [shape=Mdiamond, label=\"Start\"]/n  exit  [shape=Msquare, label=\"Exit\"]/n  approve [shape=hexagon, label=\"Approve?\"]/n  ship   [shape=parallelogram, script=\"echo shipped\"]/n  revise [shape=parallelogram, script=\"echo revised\"]/n  start -> approve/n  approve -> ship   [label=\"[A] Approve\"]/n  approve -> revise [label=\"[R] Revise\"]/n  ship -> exit/n  revise -> exit/n}/n",
@@ -1429,8 +1513,8 @@ fn json_run_implies_auto_approve_for_human_gates() {
     "#);
 
     assert_eq!(
-        progress[0].pointer("/properties/settings/auto_approve"),
-        Some(&serde_json::json!(true))
+        progress[0].pointer("/properties/settings/run/execution/approval"),
+        Some(&serde_json::json!("auto"))
     );
 }
 

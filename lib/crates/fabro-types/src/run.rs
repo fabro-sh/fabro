@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::graph::Graph;
 use crate::run_blob_id::RunBlobId;
 use crate::run_id::RunId;
-use crate::settings::Settings;
+use crate::settings::SettingsFile;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -52,7 +52,7 @@ pub struct RunProvenance {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunRecord {
     pub run_id: RunId,
-    pub settings: Settings,
+    pub settings: SettingsFile,
     pub graph: Graph,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow_slug: Option<String>,

@@ -1,3 +1,4 @@
+use fabro_server::jwt_auth::FABRO_LOCAL_NO_AUTH_ENV;
 use fabro_test::{fabro_snapshot, test_context};
 use std::process::Stdio;
 use std::sync::{Arc, Barrier};
@@ -143,8 +144,12 @@ fn start_with_tcp_host_only_bind_resolves_to_host_and_port() {
     let storage_root = isolated_storage_dir();
     let storage_dir = storage_root.path().join("storage");
 
+    // TCP binds don't auto-enable `FABRO_LOCAL_NO_AUTH`; the test is
+    // exercising bind resolution, not auth, so opt into insecure
+    // startup explicitly.
     let mut cmd = context.command();
     cmd.env("FABRO_STORAGE_DIR", &storage_dir);
+    cmd.env(FABRO_LOCAL_NO_AUTH_ENV, "1");
     cmd.args(["server", "start", "--dry-run", "--bind", "127.0.0.1"]);
     let output = cmd.output().expect("server start command should run");
     assert!(
@@ -202,8 +207,12 @@ fn start_with_tcp_host_only_bind_warns_and_falls_back_when_default_port_is_unava
     filters.push((r"pid \d+".to_string(), "pid [PID]".to_string()));
     filters.push((r"127\.0\.0\.1:\d+".to_string(), "[TCP_BIND]".to_string()));
 
+    // TCP binds don't auto-enable `FABRO_LOCAL_NO_AUTH`; the test is
+    // exercising bind resolution, not auth, so opt into insecure
+    // startup explicitly.
     let mut cmd = context.command();
     cmd.env("FABRO_STORAGE_DIR", &storage_dir);
+    cmd.env(FABRO_LOCAL_NO_AUTH_ENV, "1");
     cmd.args(["server", "start", "--dry-run", "--bind", "127.0.0.1"]);
     fabro_snapshot!(filters, cmd, @"
     success: true
@@ -368,7 +377,7 @@ fn concurrent_autostart_converges_on_one_shared_daemon_and_cleans_up() {
     std::fs::write(
         &config_path,
         format!(
-            "storage_dir = \"{}\"\n[server]\ntarget = \"{}\"\n",
+            "_version = 1\n\n[server.storage]\nroot = \"{}\"\n\n[cli.target]\ntype = \"unix\"\npath = \"{}\"\n",
             storage_dir.display(),
             socket_path.display()
         ),

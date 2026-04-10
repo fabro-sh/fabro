@@ -1,202 +1,118 @@
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+//! v2-backed configuration layer.
+//!
+//! `ConfigLayer` is a newtype over [`SettingsFile`] — the v2 namespaced
+//! parse tree in `fabro_types::settings::v2`. Loading functions (`parse`,
+//! `load`, `for_workflow`, `project`, `settings`) all hard-fail on legacy
+//! top-level keys with targeted rename hints. `ConfigLayer::combine` walks
+//! the v2 merge matrix from [`crate::merge`].
+//!
+//! Consumers that need the inner tree call [`ConfigLayer::as_v2`] (borrow)
+//! or `.into()` to move out an owned `SettingsFile`. The legacy flat
+//! `Settings` shape is no longer reachable from this layer.
 
+use std::path::Path;
+
+use anyhow::Context;
+use fabro_types::settings::accessors::resolve_goal_file_path;
+use fabro_types::settings::interp::InterpString;
+use fabro_types::settings::run::RunGoalLayer;
+use fabro_types::settings::{SettingsFile, parse_settings_file as parse_v2_settings_file};
 use serde::{Deserialize, Serialize};
 
-use crate::combine::Combine;
-use crate::hook::{HookDefinition, HookSettings};
-use crate::mcp::McpServerEntry;
-use crate::project::{self, ProjectConfig};
-use crate::run::{
-    ArtifactsConfig, CheckpointConfig, GitHubConfig, LlmConfig, PullRequestConfig, SetupConfig,
-};
-use crate::sandbox::SandboxConfig;
-use crate::server::{ApiConfig, FeaturesConfig, GitConfig, LogConfig, SlackConfig, WebConfig};
-use crate::user::{self, ExecConfig, ServerConfig};
-use fabro_types::Settings;
+use crate::merge::combine_files;
+use crate::project::{self};
+use crate::user;
 
-fn is_default_checkpoint(c: &CheckpointConfig) -> bool {
-    c.exclude_globs.is_empty()
-}
-
-/// Unified sparse configuration type for all Fabro config sources.
+/// Rewrite any relative `run.goal = { file = "..." }` path in `file` to an
+/// absolute path anchored at `base_dir`.
 ///
-/// Loading functions (`load_settings_config`, `load_run_config`,
-/// `parse_project_config`) all return this type. Fields irrelevant to a
-/// particular source are left unset (`None` / empty).
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-pub struct ConfigLayer {
-    // --- Workflow run config fields ---
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub version: Option<u32>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub goal: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub goal_file: Option<PathBuf>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub graph: Option<String>,
-
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub labels: HashMap<String, String>,
-
-    // --- Run defaults fields (inlined) ---
-    #[serde(default, alias = "directory", skip_serializing_if = "Option::is_none")]
-    pub work_dir: Option<String>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub llm: Option<LlmConfig>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub setup: Option<SetupConfig>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sandbox: Option<SandboxConfig>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vars: Option<HashMap<String, String>>,
-
-    #[serde(default, skip_serializing_if = "is_default_checkpoint")]
-    pub checkpoint: CheckpointConfig,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pull_request: Option<PullRequestConfig>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub artifacts: Option<ArtifactsConfig>,
-
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub hooks: Vec<HookDefinition>,
-
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub mcp_servers: HashMap<String, McpServerEntry>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub github: Option<GitHubConfig>,
-
-    // --- User config fields ---
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub server: Option<ServerConfig>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub exec: Option<ExecConfig>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prevent_idle_sleep: Option<bool>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub verbose: Option<bool>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub upgrade_check: Option<bool>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dry_run: Option<bool>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auto_approve: Option<bool>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub no_retro: Option<bool>,
-
-    // --- Server config fields ---
-    #[serde(default, alias = "data_dir", skip_serializing_if = "Option::is_none")]
-    pub storage_dir: Option<PathBuf>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_concurrent_runs: Option<usize>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub artifact_storage: Option<fabro_types::ArtifactStorageSettings>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub web: Option<WebConfig>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub slack: Option<SlackConfig>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub api: Option<ApiConfig>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub features: Option<FeaturesConfig>,
-
-    // --- Shared fields ---
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub log: Option<LogConfig>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub git: Option<GitConfig>,
-
-    // --- Project config fields ---
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fabro: Option<ProjectConfig>,
+/// Called from `ConfigLayer::load` so that layers coming from different
+/// config files can be merged without losing the "relative to my source
+/// file" context. Paths that contain `${env.NAME}` interpolation are left
+/// alone (they get resolved against the run's working directory at consume
+/// time via [`SettingsFile::resolve_run_goal`]).
+fn resolve_goal_file_paths(file: &mut SettingsFile, base_dir: &Path) {
+    let Some(run) = file.run.as_mut() else {
+        return;
+    };
+    let Some(RunGoalLayer::File { file: goal_file }) = run.goal.as_mut() else {
+        return;
+    };
+    if !goal_file.is_literal() {
+        // Env-tokenized paths stay unresolved until consume time.
+        return;
+    }
+    let literal = goal_file.as_source();
+    if Path::new(&literal).is_absolute() {
+        return;
+    }
+    let absolute = resolve_goal_file_path(&literal, base_dir);
+    *goal_file = InterpString::parse(&absolute.to_string_lossy());
 }
 
-impl Combine for ConfigLayer {
-    fn combine(self, other: Self) -> Self {
-        let hooks = if self.hooks.is_empty() {
-            other.hooks
-        } else if other.hooks.is_empty() {
-            self.hooks
-        } else {
-            HookSettings { hooks: other.hooks }
-                .merge(HookSettings { hooks: self.hooks })
-                .hooks
-        };
+/// A parsed settings file layer.
+///
+/// Thin newtype around the v2 [`SettingsFile`] parse tree. The newtype
+/// exists so fabro-config can attach helper methods and evolve the
+/// internal representation without forcing every caller to import v2
+/// types.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ConfigLayer {
+    pub file: SettingsFile,
+}
 
-        Self {
-            version: self.version.combine(other.version),
-            goal: self.goal.combine(other.goal),
-            goal_file: self.goal_file.combine(other.goal_file),
-            graph: self.graph.combine(other.graph),
-            labels: self.labels.combine(other.labels),
-            work_dir: self.work_dir.combine(other.work_dir),
-            llm: self.llm.combine(other.llm),
-            setup: self.setup.combine(other.setup),
-            sandbox: self.sandbox.combine(other.sandbox),
-            vars: self.vars.combine(other.vars),
-            checkpoint: self.checkpoint.combine(other.checkpoint),
-            pull_request: self.pull_request.combine(other.pull_request),
-            artifacts: self.artifacts.combine(other.artifacts),
-            hooks,
-            mcp_servers: self.mcp_servers.combine(other.mcp_servers),
-            github: self.github.combine(other.github),
-            server: self.server.combine(other.server),
-            exec: self.exec.combine(other.exec),
-            prevent_idle_sleep: self.prevent_idle_sleep.combine(other.prevent_idle_sleep),
-            verbose: self.verbose.combine(other.verbose),
-            upgrade_check: self.upgrade_check.combine(other.upgrade_check),
-            dry_run: self.dry_run.combine(other.dry_run),
-            auto_approve: self.auto_approve.combine(other.auto_approve),
-            no_retro: self.no_retro.combine(other.no_retro),
-            storage_dir: self.storage_dir.combine(other.storage_dir),
-            max_concurrent_runs: self.max_concurrent_runs.combine(other.max_concurrent_runs),
-            artifact_storage: self.artifact_storage.combine(other.artifact_storage),
-            web: self.web.combine(other.web),
-            slack: self.slack.combine(other.slack),
-            api: self.api.combine(other.api),
-            features: self.features.combine(other.features),
-            log: self.log.combine(other.log),
-            git: self.git.combine(other.git),
-            fabro: self.fabro.combine(other.fabro),
-        }
+impl From<SettingsFile> for ConfigLayer {
+    fn from(file: SettingsFile) -> Self {
+        Self { file }
+    }
+}
+
+impl From<ConfigLayer> for SettingsFile {
+    fn from(layer: ConfigLayer) -> Self {
+        layer.file
     }
 }
 
 impl ConfigLayer {
+    /// Combine two layers using the v2 merge matrix.
     #[must_use]
     pub fn combine(self, other: Self) -> Self {
-        Combine::combine(self, other)
+        // In the legacy contract `self.combine(other)` means `self` is the
+        // higher-precedence layer and `other` is the lower-precedence one.
+        // The merge matrix walker takes (lower, higher).
+        Self {
+            file: combine_files(other.file, self.file),
+        }
+    }
+
+    /// Parse a v2 TOML settings file into a layer.
+    pub fn parse(content: &str) -> anyhow::Result<Self> {
+        let file = parse_v2_settings_file(content)
+            .map_err(|e| anyhow::anyhow!("{e}"))
+            .context("Failed to parse settings file")?;
+        Ok(Self { file })
+    }
+
+    /// Load a v2 TOML settings file from disk.
+    ///
+    /// Relative `run.goal = { file = "..." }` paths are resolved against
+    /// the directory of `path` at load time. Subsequent merging with other
+    /// layers can then safely treat the path as self-contained.
+    pub fn load(path: &Path) -> anyhow::Result<Self> {
+        let content = std::fs::read_to_string(path)
+            .with_context(|| format!("Failed to read {}", path.display()))?;
+        let mut layer = Self::parse(&content)?;
+        let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
+        resolve_goal_file_paths(&mut layer.file, base_dir);
+        Ok(layer)
     }
 
     /// Load workflow config + project config for a workflow path.
     ///
     /// Resolves the workflow path, loads its config, discovers project config
-    /// (`fabro.toml`) from the resolved workflow's parent directory, and combines
-    /// them (workflow takes precedence over project).
+    /// (`fabro.toml`) from the resolved workflow's parent directory, and
+    /// combines them (workflow takes precedence over project).
     pub fn for_workflow(path: &Path, cwd: &Path) -> anyhow::Result<Self> {
         let resolution = project::resolve_workflow_path(path, cwd)?;
         if resolution.workflow_config.is_none() && !resolution.resolved_workflow_path.is_file() {
@@ -231,8 +147,230 @@ impl ConfigLayer {
         user::load_settings_config(None)
     }
 
-    /// Convert this combined config layer into final resolved settings.
-    pub fn resolve(self) -> anyhow::Result<Settings> {
-        self.try_into()
+    /// Borrow the inner v2 settings file for direct access.
+    #[must_use]
+    pub fn as_v2(&self) -> &SettingsFile {
+        &self.file
+    }
+
+    /// Mutably borrow the inner v2 settings file.
+    pub fn as_v2_mut(&mut self) -> &mut SettingsFile {
+        &mut self.file
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use fabro_types::settings::run::RunGoalLayer;
+
+    use super::*;
+
+    #[test]
+    fn parse_rejects_legacy_flat_keys() {
+        let err = ConfigLayer::parse("[llm]\nprovider = \"openai\"").unwrap_err();
+        let text = format!("{err:#}");
+        assert!(
+            text.contains("run.model") || text.contains("llm"),
+            "expected rename hint in error: {text}"
+        );
+    }
+
+    #[test]
+    fn parse_accepts_inline_goal() {
+        let layer = ConfigLayer::parse(
+            r#"
+_version = 1
+[run]
+goal = "Do things"
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            layer.file.run_goal_inline_str().as_deref(),
+            Some("Do things")
+        );
+    }
+
+    #[test]
+    fn parse_accepts_file_variant() {
+        let layer = ConfigLayer::parse(
+            r#"
+_version = 1
+[run.goal]
+file = "prompts/goal.md"
+"#,
+        )
+        .unwrap();
+        let Some(RunGoalLayer::File { file }) = layer.file.run_goal_layer() else {
+            panic!("expected run.goal.file variant");
+        };
+        assert_eq!(file.as_source(), "prompts/goal.md");
+    }
+
+    #[test]
+    fn parse_rejects_goal_with_unknown_sibling_fields() {
+        // The untagged enum should reject any `{ file = ..., extra = ... }`
+        // shape because neither the inline nor the file variant matches.
+        let err = ConfigLayer::parse(
+            r#"
+_version = 1
+[run.goal]
+file = "prompts/goal.md"
+extra = "boom"
+"#,
+        )
+        .unwrap_err();
+        let text = format!("{err:#}");
+        assert!(text.to_lowercase().contains("run.goal") || text.contains("extra"));
+    }
+
+    #[test]
+    fn combine_prefers_higher_precedence_self() {
+        let higher = ConfigLayer::parse(
+            r#"
+_version = 1
+[run]
+goal = "higher goal"
+"#,
+        )
+        .unwrap();
+        let lower = ConfigLayer::parse(
+            r#"
+_version = 1
+[run]
+goal = "lower goal"
+"#,
+        )
+        .unwrap();
+        let merged = higher.combine(lower);
+        assert_eq!(
+            merged.file.run_goal_inline_str().as_deref(),
+            Some("higher goal")
+        );
+    }
+
+    #[test]
+    fn combine_replaces_file_goal_with_inline_from_higher_layer() {
+        // A higher-precedence `run.goal = "inline"` must fully override a
+        // lower layer's `run.goal = { file = "..." }` — the scalar merge
+        // treats `goal` as one field regardless of which variant each
+        // layer picked.
+        let higher = ConfigLayer::parse(
+            r#"
+_version = 1
+[run]
+goal = "inline override"
+"#,
+        )
+        .unwrap();
+        let lower = ConfigLayer::parse(
+            r#"
+_version = 1
+[run.goal]
+file = "/tmp/goal.md"
+"#,
+        )
+        .unwrap();
+        let merged = higher.combine(lower);
+        assert_eq!(
+            merged.file.run_goal_inline_str().as_deref(),
+            Some("inline override")
+        );
+    }
+
+    #[test]
+    fn combine_replaces_inline_goal_with_file_from_higher_layer() {
+        let higher = ConfigLayer::parse(
+            r#"
+_version = 1
+[run.goal]
+file = "/tmp/goal.md"
+"#,
+        )
+        .unwrap();
+        let lower = ConfigLayer::parse(
+            r#"
+_version = 1
+[run]
+goal = "inline loser"
+"#,
+        )
+        .unwrap();
+        let merged = higher.combine(lower);
+        assert!(matches!(
+            merged.file.run_goal_layer(),
+            Some(RunGoalLayer::File { .. })
+        ));
+    }
+
+    #[test]
+    fn load_rewrites_relative_goal_file_to_absolute() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_path = tmp.path().join("fabro.toml");
+        std::fs::write(
+            &config_path,
+            r#"
+_version = 1
+[run.goal]
+file = "prompts/goal.md"
+"#,
+        )
+        .unwrap();
+
+        let layer = ConfigLayer::load(&config_path).unwrap();
+        let Some(RunGoalLayer::File { file }) = layer.file.run_goal_layer() else {
+            panic!("expected file variant");
+        };
+        let resolved = file.as_source();
+        let expected = tmp.path().join("prompts").join("goal.md");
+        assert_eq!(resolved, expected.to_string_lossy());
+    }
+
+    #[test]
+    fn load_leaves_absolute_goal_file_untouched() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_path = tmp.path().join("fabro.toml");
+        let abs_goal = "/etc/fabro/goal.md";
+        std::fs::write(
+            &config_path,
+            format!(
+                r#"
+_version = 1
+[run.goal]
+file = "{abs_goal}"
+"#
+            ),
+        )
+        .unwrap();
+
+        let layer = ConfigLayer::load(&config_path).unwrap();
+        let Some(RunGoalLayer::File { file }) = layer.file.run_goal_layer() else {
+            panic!("expected file variant");
+        };
+        assert_eq!(file.as_source(), abs_goal);
+    }
+
+    #[test]
+    fn load_leaves_env_interpolated_goal_file_untouched() {
+        // InterpString paths aren't resolved at load time because env
+        // lookups happen at consume time. The loader should leave them
+        // alone.
+        let tmp = tempfile::tempdir().unwrap();
+        let config_path = tmp.path().join("fabro.toml");
+        std::fs::write(
+            &config_path,
+            r#"
+_version = 1
+[run.goal]
+file = "${env.GOALS_DIR}/goal.md"
+"#,
+        )
+        .unwrap();
+
+        let layer = ConfigLayer::load(&config_path).unwrap();
+        let Some(RunGoalLayer::File { file }) = layer.file.run_goal_layer() else {
+            panic!("expected file variant");
+        };
+        assert_eq!(file.as_source(), "${env.GOALS_DIR}/goal.md");
     }
 }

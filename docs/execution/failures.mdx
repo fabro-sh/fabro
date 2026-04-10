@@ -115,16 +115,13 @@ When a handler returns a `Retry` status instead of `Fail`, retries always procee
 When a model provider fails with a transient error or quota exhaustion, Fabro can automatically switch to a different provider. Configure fallback chains in your [run configuration](/execution/run-configuration):
 
 ```toml title="run.toml"
-[llm]
-model = "claude-opus-4-6"
+[run.model]
+name = "claude-opus-4-6"
 provider = "anthropic"
-
-[llm.fallbacks]
-anthropic = ["gemini", "openai"]
-gemini = ["anthropic", "openai"]
+fallbacks = ["gemini", "openai"]
 ```
 
-When Anthropic is unavailable, Fabro tries Gemini first, then OpenAI. For each fallback provider, Fabro selects the closest model by matching required capabilities (tool use, vision, reasoning) and minimizing cost difference.
+When Anthropic is unavailable, Fabro tries Gemini first, then OpenAI. Each fallback entry may be a bare provider token (like `"gemini"`), a bare model alias (like `"gpt-5.4"`), or a qualified `"provider/model"` reference. For each fallback provider, Fabro selects the closest model by matching required capabilities (tool use, vision, reasoning) and minimizing cost difference.
 
 ### What triggers failover
 

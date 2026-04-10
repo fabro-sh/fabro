@@ -40,16 +40,13 @@ pub(crate) async fn run_init(args: &RepoInitArgs, globals: &GlobalArgs) -> Resul
 # Fabro project configuration
 # https://docs.fabro.computer/getting-started/quick-start
 
-version = 1
+_version = 1
 
-[fabro]
-root = \"fabro/\"
-
-# Disable retrospective analysis after workflow runs:
-# retro = false
+[project]
+directory = \"fabro/\"
 
 # Auto-create pull requests on successful workflow runs.
-[pull_request]
+[run.pull_request]
 enabled = true
 draft = true
 # auto_merge = true
@@ -101,7 +98,7 @@ draft = true
     let toml_path = workflow_dir.join("workflow.toml");
     std::fs::write(
         &toml_path,
-        "version = 1\ngraph = \"workflow.fabro\"\n\n[sandbox]\nprovider = \"local\"\n",
+        "_version = 1\n\n[workflow]\ngraph = \"workflow.fabro\"\n\n[run.sandbox]\nprovider = \"local\"\n",
     )
     .with_context(|| format!("failed to write {}", toml_path.display()))?;
     created.push("fabro/workflows/hello/workflow.toml".to_string());

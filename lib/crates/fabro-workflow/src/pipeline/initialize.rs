@@ -534,8 +534,16 @@ pub async fn initialize(
             build_registry(&options.llm, Arc::clone(&options.interviewer), &env, &graph).await?
         };
     if effective_dry_run {
+        use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
+
         options.dry_run = true;
-        options.run_options.settings.dry_run = Some(true);
+        let run = options
+            .run_options
+            .settings
+            .run
+            .get_or_insert_with(RunLayer::default);
+        let execution = run.execution.get_or_insert_with(RunExecutionLayer::default);
+        execution.mode = Some(RunMode::DryRun);
     }
 
     let has_run_branch = options
@@ -680,7 +688,8 @@ mod tests {
     use fabro_interview::AutoApproveInterviewer;
     use fabro_sandbox::SandboxSpec;
     use fabro_store::Database;
-    use fabro_types::{RunId, Settings, fixtures};
+    use fabro_types::settings::SettingsFile;
+    use fabro_types::{RunId, fixtures};
     use object_store::memory::InMemory;
 
     use super::*;
@@ -727,7 +736,7 @@ mod tests {
 
     fn test_settings(run_dir: &std::path::Path) -> RunOptions {
         RunOptions {
-            settings: Settings::default(),
+            settings: SettingsFile::default(),
             run_dir: run_dir.to_path_buf(),
             cancel_token: None,
             run_id: test_run_id(),
@@ -749,7 +758,7 @@ mod tests {
             run_dir.to_path_buf(),
             RunRecord {
                 run_id: test_run_id(),
-                settings: Settings::default(),
+                settings: SettingsFile::default(),
                 graph,
                 workflow_slug: Some("test".to_string()),
                 working_directory: std::env::current_dir().unwrap(),

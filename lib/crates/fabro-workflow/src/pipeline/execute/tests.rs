@@ -13,7 +13,8 @@ use fabro_hooks::HookSettings;
 use fabro_interview::AutoApproveInterviewer;
 use fabro_sandbox::SandboxSpec;
 use fabro_store::Database;
-use fabro_types::{RunId, Settings, fixtures};
+use fabro_types::settings::SettingsFile;
+use fabro_types::{RunId, fixtures};
 use object_store::memory::InMemory;
 
 use super::*;
@@ -90,7 +91,7 @@ fn test_run_options(run_dir: &Path, run_id: &str) -> RunOptions {
         run_dir: run_dir.to_path_buf(),
         cancel_token: None,
         run_id: test_run_id(run_id),
-        settings: Settings::default(),
+        settings: SettingsFile::default(),
         git: None,
         host_repo_path: None,
         labels: HashMap::new(),
@@ -132,7 +133,7 @@ fn persisted_workflow(graph: Graph, source: String, run_dir: &Path, run_id: RunI
         run_dir.to_path_buf(),
         RunRecord {
             run_id,
-            settings: Settings::default(),
+            settings: SettingsFile::default(),
             graph,
             workflow_slug: Some("test".to_string()),
             working_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),

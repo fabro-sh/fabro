@@ -42,8 +42,6 @@ import type { RunEvent } from '../models';
 // @ts-ignore
 import type { RunProjection } from '../models';
 // @ts-ignore
-import type { RunSettings } from '../models';
-// @ts-ignore
 import type { WriteBlobResponse } from '../models';
 // @ts-ignore
 import type { WriteRunBlobRequest } from '../models';
@@ -896,7 +894,7 @@ export const RunInternalsApiFp = function(configuration?: Configuration) {
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async retrieveRunSettings(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RunSettings>> {
+        async retrieveRunSettings(id: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.retrieveRunSettings(id, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['RunInternalsApi.retrieveRunSettings']?.[localVarOperationServerIndex]?.url;
@@ -1068,7 +1066,7 @@ export const RunInternalsApiFactory = function (configuration?: Configuration, b
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        retrieveRunSettings(id: string, options?: RawAxiosRequestConfig): AxiosPromise<RunSettings> {
+        retrieveRunSettings(id: string, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
             return localVarFp.retrieveRunSettings(id, options).then((request) => request(axios, basePath));
         },
         /**

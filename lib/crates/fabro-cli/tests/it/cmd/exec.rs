@@ -100,7 +100,7 @@ fn exec_uses_user_config_defaults() {
     let context = test_context!();
     context.write_home(
         ".fabro/settings.toml",
-        "[exec]\nprovider = \"openai\"\nmodel = \"gpt-4.1-mini\"\npermissions = \"read-only\"\noutput_format = \"json\"\n",
+        "_version = 1\n\n[cli.exec.model]\nprovider = \"openai\"\nname = \"gpt-4.1-mini\"\n\n[cli.exec.agent]\npermissions = \"read-only\"\n\n[cli.output]\nformat = \"json\"\n",
     );
 
     let mut cmd = context.exec_cmd();
@@ -166,7 +166,10 @@ fn exec_configured_server_target_alone_does_not_reroute_exec() {
     });
     context.write_home(
         ".fabro/settings.toml",
-        format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
+        format!(
+            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
+            server.base_url()
+        ),
     );
 
     let mut cmd = context.exec_cmd();
@@ -211,7 +214,7 @@ fn exec_cli_server_target_overrides_configured_server_target() {
     context.write_home(
         ".fabro/settings.toml",
         format!(
-            "[server]\ntarget = \"{}/api/v1\"\n",
+            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
             config_server.base_url()
         ),
     );

@@ -58,16 +58,13 @@ fn repo_init_creates_fabro_toml_and_hello_workflow() {
     # Fabro project configuration
     # https://docs.fabro.computer/getting-started/quick-start
 
-    version = 1
+    _version = 1
 
-    [fabro]
-    root = "fabro/"
-
-    # Disable retrospective analysis after workflow runs:
-    # retro = false
+    [project]
+    directory = "fabro/"
 
     # Auto-create pull requests on successful workflow runs.
-    [pull_request]
+    [run.pull_request]
     enabled = true
     draft = true
     # auto_merge = true
@@ -94,10 +91,12 @@ fn repo_init_creates_fabro_toml_and_hello_workflow() {
         std::fs::read_to_string(context.temp_dir.join("fabro/workflows/hello/workflow.toml"))
             .unwrap(),
         @r###"
-    version = 1
+    _version = 1
+
+    [workflow]
     graph = "workflow.fabro"
 
-    [sandbox]
+    [run.sandbox]
     provider = "local"
     "###
     );
@@ -107,7 +106,7 @@ fn repo_init_creates_fabro_toml_and_hello_workflow() {
 fn repo_init_rejects_already_initialized_repo() {
     let context = test_context!();
     context.git_init();
-    std::fs::write(context.temp_dir.join("fabro.toml"), "version = 1\n").unwrap();
+    std::fs::write(context.temp_dir.join("fabro.toml"), "_version = 1\n").unwrap();
 
     let mut cmd = context.command();
     cmd.args(["repo", "init"]);

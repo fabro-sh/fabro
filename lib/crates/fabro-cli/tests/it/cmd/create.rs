@@ -101,7 +101,10 @@ fn create_uses_configured_server_target_without_server_flag() {
     });
     context.write_home(
         ".fabro/settings.toml",
-        format!("[server]\ntarget = \"{}/api/v1\"\n", server.base_url()),
+        format!(
+            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
+            server.base_url()
+        ),
     );
 
     let output = context
@@ -162,7 +165,7 @@ fn create_cli_server_target_overrides_configured_server_target() {
     context.write_home(
         ".fabro/settings.toml",
         format!(
-            "[server]\ntarget = \"{}/api/v1\"\n",
+            "_version = 1\n\n[cli.target]\ntype = \"http\"\nurl = \"{}/api/v1\"\n",
             config_server.base_url()
         ),
     );
@@ -349,21 +352,22 @@ fn create_persists_requested_overrides_into_store() {
         "env": run_record.labels.get("env"),
         "team": run_record.labels.get("team"),
     });
+    let settings = &run_record.settings;
     let compact = json!({
         "workflow_slug": run_record.workflow_slug,
         "settings": {
-            "goal": run_record.settings.goal,
-            "dry_run": run_record.settings.dry_run,
-            "auto_approve": run_record.settings.auto_approve,
-            "no_retro": run_record.settings.no_retro,
-            "verbose": run_record.settings.verbose,
+            "goal": settings.run_goal_inline_str(),
+            "dry_run": settings.dry_run_enabled(),
+            "auto_approve": settings.auto_approve_enabled(),
+            "no_retro": settings.no_retro_enabled(),
+            "verbose": settings.verbose_enabled(),
             "llm": {
-                "model": run_record.settings.llm.as_ref().and_then(|llm| llm.model.clone()),
-                "provider": run_record.settings.llm.as_ref().and_then(|llm| llm.provider.clone()),
+                "model": settings.run_model_name_str(),
+                "provider": settings.run_model_provider_str(),
             },
             "sandbox": {
-                "provider": run_record.settings.sandbox.as_ref().and_then(|sandbox| sandbox.provider.clone()),
-                "preserve": run_record.settings.sandbox.as_ref().and_then(|sandbox| sandbox.preserve),
+                "provider": settings.run_sandbox().and_then(|sb| sb.provider.clone()),
+                "preserve": settings.preserve_sandbox_enabled(),
             },
         },
         "labels": labels,
@@ -419,14 +423,13 @@ fn create_json_implies_auto_approve() {
         .expect("create JSON should include run_id");
     let run = resolve_run(&context, run_id);
 
-    assert_eq!(
+    assert!(
         run_state(&run.run_dir)
             .run
             .as_ref()
             .expect("run record should exist")
             .settings
-            .auto_approve,
-        Some(true)
+            .auto_approve_enabled()
     );
 }
 

@@ -8,15 +8,22 @@ use fabro_config::ConfigLayer;
 use fabro_config::effective_settings;
 use fabro_config::effective_settings::{EffectiveSettingsLayers, EffectiveSettingsMode};
 use fabro_config::project::resolve_working_directory;
-use fabro_config::run::{LlmConfig, parse_run_config};
-use fabro_config::sandbox::{DockerfileSource, SandboxConfig};
+use fabro_config::run::parse_run_config;
 use fabro_graphviz::graph::{Graph, is_llm_handler_type};
 use fabro_graphviz::render::apply_direction;
 use fabro_llm::Provider;
 use fabro_model::Catalog;
+use fabro_sandbox::config::bridge_sandbox;
 use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxProvider, SandboxSpec};
-use fabro_types::{RunId, Settings};
+use fabro_types::RunId;
+use fabro_types::settings::SettingsFile;
+use fabro_types::settings::cli::{CliLayer, CliOutputLayer, OutputVerbosity};
+use fabro_types::settings::interp::InterpString;
+use fabro_types::settings::run::{
+    ApprovalMode, DaytonaDockerfileLayer, RunExecutionLayer, RunGoalLayer, RunLayer, RunMode,
+    RunModelLayer, RunSandboxLayer,
+};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_validate::Severity;
 use fabro_workflow::error::FabroError;
@@ -32,7 +39,7 @@ pub(crate) struct PreparedManifest {
     pub git: Option<types::ManifestGit>,
     pub root_source: String,
     pub run_id: Option<RunId>,
-    pub settings: Settings,
+    pub settings: SettingsFile,
     pub target_path: PathBuf,
     pub workflow_bundle: WorkflowBundle,
     pub workflow_input: BundledWorkflow,
@@ -40,7 +47,7 @@ pub(crate) struct PreparedManifest {
 }
 
 pub(crate) fn prepare_manifest_with_mode(
-    server_settings: &Settings,
+    server_settings: &SettingsFile,
     manifest: &types::RunManifest,
     local_daemon_mode: bool,
 ) -> Result<PreparedManifest> {
@@ -83,8 +90,11 @@ pub(crate) fn prepare_manifest_with_mode(
         },
     )?;
     if let Some(goal) = manifest.goal.as_ref() {
-        settings.goal = Some(goal.text.clone());
-        settings.goal_file = None;
+        let run = settings.run.get_or_insert_with(RunLayer::default);
+        // The CLI has already resolved any goal-file reads into
+        // `manifest.goal.text`, so the server side always stores the
+        // final text inline.
+        run.goal = Some(RunGoalLayer::Inline(InterpString::parse(&goal.text)));
     }
 
     Ok(PreparedManifest {
@@ -200,7 +210,7 @@ fn parse_manifest_config(config: &types::ManifestConfig) -> Result<ConfigLayer> 
     let Some(source) = config.source.as_deref() else {
         return Ok(ConfigLayer::default());
     };
-    toml::from_str(source).map_err(Into::into)
+    ConfigLayer::parse(source)
 }
 
 fn manifest_args_layer(args: Option<&types::ManifestArgs>) -> ConfigLayer {
@@ -208,28 +218,61 @@ fn manifest_args_layer(args: Option<&types::ManifestArgs>) -> ConfigLayer {
         return ConfigLayer::default();
     };
 
-    let llm = (args.model.is_some() || args.provider.is_some()).then(|| LlmConfig {
-        model: args.model.clone(),
-        provider: args.provider.clone(),
-        fallbacks: None,
+    let model = (args.model.is_some() || args.provider.is_some()).then(|| RunModelLayer {
+        provider: args.provider.as_deref().map(InterpString::parse),
+        name: args.model.as_deref().map(InterpString::parse),
+        fallbacks: Vec::new(),
     });
     let sandbox =
-        (args.sandbox.is_some() || args.preserve_sandbox.is_some()).then(|| SandboxConfig {
+        (args.sandbox.is_some() || args.preserve_sandbox.is_some()).then(|| RunSandboxLayer {
             provider: args.sandbox.clone(),
             preserve: args.preserve_sandbox,
-            ..Default::default()
+            ..RunSandboxLayer::default()
         });
 
-    ConfigLayer {
-        llm,
+    let execution_has_any =
+        args.dry_run.is_some() || args.auto_approve.is_some() || args.no_retro.is_some();
+    let execution = execution_has_any.then(|| RunExecutionLayer {
+        mode: args
+            .dry_run
+            .map(|d| if d { RunMode::DryRun } else { RunMode::Normal }),
+        approval: args.auto_approve.map(|a| {
+            if a {
+                ApprovalMode::Auto
+            } else {
+                ApprovalMode::Prompt
+            }
+        }),
+        retros: args.no_retro.map(|nr| !nr),
+    });
+
+    let run_has_any =
+        model.is_some() || sandbox.is_some() || execution.is_some() || !args.label.is_empty();
+
+    let run = run_has_any.then(|| RunLayer {
+        model,
         sandbox,
-        verbose: args.verbose,
-        dry_run: args.dry_run,
-        auto_approve: args.auto_approve,
-        no_retro: args.no_retro,
-        labels: parse_labels(&args.label),
-        ..Default::default()
-    }
+        execution,
+        metadata: parse_labels(&args.label),
+        ..RunLayer::default()
+    });
+
+    // Verbose is a CLI output concern in v2; route it through cli.output.verbosity.
+    let cli = args.verbose.and_then(|verbose| {
+        verbose.then(|| CliLayer {
+            output: Some(CliOutputLayer {
+                verbosity: Some(OutputVerbosity::Verbose),
+                ..CliOutputLayer::default()
+            }),
+            ..CliLayer::default()
+        })
+    });
+
+    ConfigLayer::from(SettingsFile {
+        run,
+        cli,
+        ..SettingsFile::default()
+    })
 }
 
 fn parse_labels(labels: &[String]) -> HashMap<String, String> {
@@ -246,22 +289,27 @@ fn resolve_manifest_dockerfile(
     files: &HashMap<PathBuf, String>,
 ) -> Result<()> {
     let source = layer
-        .sandbox
+        .as_v2_mut()
+        .run
         .as_mut()
+        .and_then(|run| run.sandbox.as_mut())
         .and_then(|sandbox| sandbox.daytona.as_mut())
         .and_then(|daytona| daytona.snapshot.as_mut())
         .and_then(|snapshot| snapshot.dockerfile.as_mut());
-    let Some(DockerfileSource::Path { path }) = source else {
+    let Some(DaytonaDockerfileLayer::Path { path }) = source else {
         return Ok(());
     };
-    let logical_path =
-        normalize_logical_path(config_path.parent().unwrap_or_else(|| Path::new(".")), path)
-            .ok_or_else(|| anyhow!("unsupported dockerfile reference: {path}"))?;
+    let path_owned = path.clone();
+    let logical_path = normalize_logical_path(
+        config_path.parent().unwrap_or_else(|| Path::new(".")),
+        &path_owned,
+    )
+    .ok_or_else(|| anyhow!("unsupported dockerfile reference: {path_owned}"))?;
     let content = files
         .get(&logical_path)
         .cloned()
         .ok_or_else(|| anyhow!("missing bundled dockerfile: {}", logical_path.display()))?;
-    *source.unwrap() = DockerfileSource::Inline(content);
+    *source.unwrap() = DaytonaDockerfileLayer::Inline(content);
     Ok(())
 }
 
@@ -294,12 +342,12 @@ async fn build_preflight_report(
     let settings = &prepared.settings;
     let sandbox_provider = resolve_sandbox_provider(settings)?;
     let github_app = state
-        .github_app_credentials(settings.app_id())
+        .github_app_credentials(settings.github_app_id_str().as_deref())
         .await
         .map_err(|err| anyhow!(err))?;
     let mut checks = Vec::new();
 
-    let setup_command_count = settings.setup_commands().len();
+    let setup_command_count = settings.run_prepare_commands().len();
     let repo_summary = prepared.git.as_ref().map_or_else(
         || "unknown".to_string(),
         |git| {
@@ -361,20 +409,19 @@ async fn build_preflight_report(
     ))
 }
 
-fn resolve_sandbox_provider(settings: &Settings) -> Result<SandboxProvider> {
+fn resolve_sandbox_provider(settings: &SettingsFile) -> Result<SandboxProvider> {
     Ok(settings
-        .sandbox_settings()
-        .and_then(|sandbox| sandbox.provider.as_deref())
+        .run_sandbox()
+        .and_then(|sb| sb.provider.as_deref())
         .map(str::parse::<SandboxProvider>)
         .transpose()
         .map_err(|err| anyhow!("Invalid sandbox provider: {err}"))?
         .unwrap_or_default())
 }
 
-fn resolve_daytona_config(settings: &Settings) -> Option<DaytonaConfig> {
-    settings
-        .sandbox_settings()
-        .and_then(|sandbox| sandbox.daytona.clone())
+fn resolve_daytona_config(settings: &SettingsFile) -> Option<DaytonaConfig> {
+    let sandbox = settings.run_sandbox()?;
+    bridge_sandbox(sandbox).daytona
 }
 
 async fn run_sandbox_check(
@@ -453,7 +500,7 @@ async fn run_llm_check(
     state: &AppState,
     checks: &mut Vec<CheckResult>,
     graph: &Graph,
-    settings: &Settings,
+    settings: &SettingsFile,
 ) -> bool {
     let (model, provider) = resolve_model_provider(settings, graph);
     let default_provider = provider.as_deref().unwrap_or("anthropic");
@@ -544,40 +591,34 @@ async fn run_llm_check(
     }
 }
 
-fn resolve_model_provider(settings: &Settings, graph: &Graph) -> (String, Option<String>) {
-    let configured_model = settings.llm.as_ref().and_then(|llm| llm.model.as_deref());
-    let configured_provider = settings
-        .llm
-        .as_ref()
-        .and_then(|llm| llm.provider.as_deref());
+fn resolve_model_provider(settings: &SettingsFile, graph: &Graph) -> (String, Option<String>) {
+    let configured_model = settings.run_model_name_str();
+    let configured_provider = settings.run_model_provider_str();
 
-    let provider = configured_provider
-        .or_else(|| {
-            graph
-                .attrs
-                .get("default_provider")
-                .and_then(|value| value.as_str())
-        })
-        .map(String::from);
+    let provider = configured_provider.or_else(|| {
+        graph
+            .attrs
+            .get("default_provider")
+            .and_then(|value| value.as_str())
+            .map(String::from)
+    });
     let model = configured_model
         .or_else(|| {
             graph
                 .attrs
                 .get("default_model")
                 .and_then(|value| value.as_str())
+                .map(String::from)
         })
-        .map_or_else(
-            || {
-                let catalog = Catalog::builtin();
-                let info = provider
-                    .as_deref()
-                    .and_then(|value| value.parse::<Provider>().ok())
-                    .and_then(|provider| catalog.default_for_provider(provider))
-                    .unwrap_or_else(|| catalog.default_from_env());
-                info.id.clone()
-            },
-            String::from,
-        );
+        .unwrap_or_else(|| {
+            let catalog = Catalog::builtin();
+            let info = provider
+                .as_deref()
+                .and_then(|value| value.parse::<Provider>().ok())
+                .and_then(|provider| catalog.default_for_provider(provider))
+                .unwrap_or_else(|| catalog.default_from_env());
+            info.id.clone()
+        });
 
     match Catalog::builtin().get(&model) {
         Some(info) => (
@@ -591,15 +632,22 @@ fn resolve_model_provider(settings: &Settings, graph: &Graph) -> (String, Option
 async fn run_github_token_check(
     checks: &mut Vec<CheckResult>,
     prepared: &PreparedManifest,
-    settings: &Settings,
+    settings: &SettingsFile,
     github_app: Option<fabro_github::GitHubAppCredentials>,
 ) {
-    let Some(github_permissions) = settings.github_permissions() else {
+    let Some(v2_permissions) = settings.github_permissions() else {
         return;
     };
-    if github_permissions.is_empty() {
+    if v2_permissions.is_empty() {
         return;
     }
+
+    // Resolve InterpString permission values eagerly for token minting and
+    // for display in the preflight report.
+    let github_permissions: HashMap<String, String> = v2_permissions
+        .iter()
+        .map(|(k, v)| (k.clone(), v.as_source()))
+        .collect();
 
     let perm_details = github_permissions
         .iter()
@@ -607,7 +655,7 @@ async fn run_github_token_check(
         .collect::<Vec<_>>();
     match (&github_app, prepared.git.as_ref()) {
         (Some(creds), Some(git)) => {
-            match mint_github_token(creds, &git.origin_url, github_permissions).await {
+            match mint_github_token(creds, &git.origin_url, &github_permissions).await {
                 Ok(_) => checks.push(CheckResult {
                     name: "GitHub Token".into(),
                     status: CheckStatus::Pass,
@@ -766,31 +814,49 @@ mod tests {
         }
     }
 
+    fn server_settings_fixture(source: &str) -> SettingsFile {
+        fabro_config::ConfigLayer::parse(source)
+            .expect("v2 fixture should parse")
+            .into()
+    }
+
     #[test]
     fn prepare_manifest_does_not_inherit_server_dry_run_fallback() {
-        let server_settings = Settings {
-            dry_run: Some(true),
-            storage_dir: Some(PathBuf::from("/srv/fabro")),
-            ..Default::default()
-        };
+        let server_settings = server_settings_fixture(
+            r#"
+_version = 1
+
+[run.execution]
+mode = "dry_run"
+
+[server.storage]
+root = "/srv/fabro"
+"#,
+        );
 
         let prepared =
             prepare_manifest_with_mode(&server_settings, &minimal_manifest(), false).unwrap();
 
-        assert_eq!(prepared.settings.dry_run, None);
+        assert!(!prepared.settings.dry_run_enabled());
         assert_eq!(
-            prepared.settings.storage_dir,
-            Some(PathBuf::from("/srv/fabro"))
+            prepared.settings.server_storage_root_str().as_deref(),
+            Some("/srv/fabro"),
         );
     }
 
     #[test]
     fn prepare_manifest_preserves_explicit_manifest_dry_run() {
-        let server_settings = Settings {
-            dry_run: Some(true),
-            storage_dir: Some(PathBuf::from("/srv/fabro")),
-            ..Default::default()
-        };
+        let server_settings = server_settings_fixture(
+            r#"
+_version = 1
+
+[run.execution]
+mode = "dry_run"
+
+[server.storage]
+root = "/srv/fabro"
+"#,
+        );
         let mut manifest = minimal_manifest();
         manifest.args = Some(types::ManifestArgs {
             auto_approve: None,
@@ -806,33 +872,35 @@ mod tests {
 
         let prepared = prepare_manifest_with_mode(&server_settings, &manifest, false).unwrap();
 
-        assert_eq!(prepared.settings.dry_run, Some(true));
+        assert!(prepared.settings.dry_run_enabled());
     }
 
     #[test]
     fn prepare_manifest_local_daemon_prefers_bundled_settings_without_duplication() {
-        let server_settings: Settings = toml::from_str(
+        let server_settings = server_settings_fixture(
             r#"
-storage_dir = "/srv/fabro"
+_version = 1
 
-[setup]
-commands = ["cli-setup"]
+[server.storage]
+root = "/srv/fabro"
 
-[git]
+[[run.prepare.steps]]
+script = "cli-setup"
+
+[server.integrations.github]
 app_id = "snapshotted-app-id"
 "#,
-        )
-        .unwrap();
+        );
 
         let mut manifest = minimal_manifest();
         manifest.workflows.get_mut("workflow.fabro").unwrap().config =
             Some(types::ManifestWorkflowConfig {
                 path: "workflow.toml".to_string(),
                 source: r#"
-version = 1
+_version = 1
 
-[setup]
-commands = ["workflow-setup"]
+[[run.prepare.steps]]
+script = "workflow-setup"
 "#
                 .to_string(),
             });
@@ -840,10 +908,12 @@ commands = ["workflow-setup"]
             path: Some("/tmp/home/.fabro/settings.toml".to_string()),
             source: Some(
                 r#"
-[setup]
-commands = ["cli-setup"]
+_version = 1
 
-[git]
+[[run.prepare.steps]]
+script = "cli-setup"
+
+[server.integrations.github]
 app_id = "snapshotted-app-id"
 "#
                 .to_string(),
@@ -853,18 +923,19 @@ app_id = "snapshotted-app-id"
 
         let prepared = prepare_manifest_with_mode(&server_settings, &manifest, true).unwrap();
 
+        // v2 merge matrix: run.prepare.steps replaces the whole list across
+        // layers, so the higher-precedence workflow layer wins over cli.
         assert_eq!(
-            prepared
-                .settings
-                .setup
-                .as_ref()
-                .map(|setup| setup.commands.clone()),
-            Some(vec!["workflow-setup".to_string(), "cli-setup".to_string(),])
+            prepared.settings.run_prepare_commands(),
+            vec!["workflow-setup".to_string()]
         );
-        assert_eq!(prepared.settings.app_id(), Some("snapshotted-app-id"));
         assert_eq!(
-            prepared.settings.storage_dir,
-            Some(PathBuf::from("/srv/fabro"))
+            prepared.settings.github_app_id_str().as_deref(),
+            Some("snapshotted-app-id")
+        );
+        assert_eq!(
+            prepared.settings.server_storage_root_str().as_deref(),
+            Some("/srv/fabro"),
         );
     }
 }

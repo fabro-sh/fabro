@@ -297,10 +297,11 @@ mod tests {
 
     use chrono::{DateTime, Utc};
     use fabro_store::{Database, EventEnvelope, EventPayload};
+    use fabro_types::settings::SettingsFile;
     use fabro_types::{
         AggregateStats, AttrValue, BilledTokenCounts, Checkpoint, Conclusion, Graph,
         NodeStatusRecord, Retro, RunId, RunRecord, RunStatus, RunStatusRecord, SandboxRecord,
-        Settings, StageStatus, StartRecord, StatusReason, fixtures,
+        StageStatus, StartRecord, StatusReason, fixtures,
     };
     use fabro_workflow::event::{Event, append_event};
     use object_store::{ObjectStore, memory::InMemory};
@@ -334,7 +335,7 @@ mod tests {
         );
         RunRecord {
             run_id,
-            settings: Settings::default(),
+            settings: SettingsFile::default(),
             graph,
             workflow_slug: Some("night-sky".to_string()),
             working_directory: PathBuf::from("/tmp/night-sky"),

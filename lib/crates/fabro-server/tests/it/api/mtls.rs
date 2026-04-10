@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use fabro_server::jwt_auth::{AuthMode, AuthStrategy};
 use fabro_server::server::{build_router, create_app_state};
-use fabro_server::server_config::TlsSettings;
 use fabro_server::tls::{ClientAuth, build_rustls_config};
+use fabro_server::tls_config::TlsSettings;
 use tokio::net::TcpListener;
 
 fn fixture_path(name: &str) -> PathBuf {

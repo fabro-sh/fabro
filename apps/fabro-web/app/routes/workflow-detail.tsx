@@ -1,8 +1,7 @@
 import { ChevronRightIcon } from "@heroicons/react/20/solid";
 import { Link, Outlet, useLocation, useParams } from "react-router";
 import { apiJson } from "../api";
-import type { RunSettings } from "@qltysh/fabro-api-client";
-import type { WorkflowDetailResponse as ApiWorkflowDetail } from "../lib/workflow-api";
+import type { RunSettings, WorkflowDetailResponse as ApiWorkflowDetail } from "../lib/workflow-api";
 
 export interface WorkflowEntry {
   name: string;
@@ -13,8 +12,11 @@ export interface WorkflowEntry {
   graph: string;
 }
 
-// Keep this exported for backward compatibility with other routes that import it.
-// It will be populated by the loader, but the static version is kept as fallback.
+// Static sample data used by the `workflow-definition` index route for the
+// hardcoded showcase workflows. Shape mirrors the v2 `SettingsFile` JSON
+// returned by `/api/v1/runs/:id/settings` (see the Rust
+// `fabro_types::settings::SettingsFile` type). Fields are opaque to the
+// `RunSettings` TypeScript type, which is a bare `Record<string, unknown>`.
 export const workflowData: Record<string, WorkflowEntry> = {
   fix_build: {
     name: "Fix Build",
@@ -22,17 +24,18 @@ export const workflowData: Record<string, WorkflowEntry> = {
     filename: "fix_build.fabro",
     description: "Automatically diagnoses and fixes CI build failures by analyzing error logs, identifying root causes, and applying targeted code changes.",
     settings: {
-      version: 1,
-      goal: "Diagnose and fix CI build failures",
-      graph: "fix_build.fabro",
-      llm: { model: "claude-sonnet" },
-      vars: { repo_url: "https://github.com/org/service", branch: "main" },
-      sandbox: {
-        provider: "daytona",
-        daytona: {
-          auto_stop_interval: 60,
-          labels: { project: "fix-build" },
-          snapshot: { name: "fix-build-dev", cpu: 4, memory: 8, disk: 10 },
+      _version: 1,
+      run: {
+        goal: "Diagnose and fix CI build failures",
+        inputs: { repo_url: "https://github.com/org/service", branch: "main" },
+        model: { name: "claude-sonnet" },
+        sandbox: {
+          provider: "daytona",
+          daytona: {
+            auto_stop_interval: 60,
+            labels: { project: "fix-build" },
+            snapshot: { name: "fix-build-dev", cpu: 4, memory: "8GB", disk: "10GB" },
+          },
         },
       },
     },
@@ -63,18 +66,25 @@ export const workflowData: Record<string, WorkflowEntry> = {
     filename: "implement.fabro",
     description: "Generates production-ready code from a technical blueprint, including tests, documentation, and a pull request ready for review.",
     settings: {
-      version: 1,
-      goal: "Implement feature from technical blueprint",
-      graph: "implement.fabro",
-      llm: { model: "claude-sonnet" },
-      vars: { spec_path: "specs/feature.md", test_framework: "vitest" },
-      setup: { commands: ["bun install", "bun run typecheck"], timeout_ms: 120000 },
-      sandbox: {
-        provider: "daytona",
-        daytona: {
-          auto_stop_interval: 120,
-          labels: { project: "implement", team: "engineering" },
-          snapshot: { name: "implement-dev", cpu: 4, memory: 8, disk: 20 },
+      _version: 1,
+      run: {
+        goal: "Implement feature from technical blueprint",
+        inputs: { spec_path: "specs/feature.md", test_framework: "vitest" },
+        model: { name: "claude-sonnet" },
+        prepare: {
+          steps: [
+            { command: ["bun", "install"] },
+            { command: ["bun", "run", "typecheck"] },
+          ],
+          timeout: "120s",
+        },
+        sandbox: {
+          provider: "daytona",
+          daytona: {
+            auto_stop_interval: 120,
+            labels: { project: "implement", team: "engineering" },
+            snapshot: { name: "implement-dev", cpu: 4, memory: "8GB", disk: "20GB" },
+          },
         },
       },
     },
@@ -119,17 +129,18 @@ export const workflowData: Record<string, WorkflowEntry> = {
     filename: "sync_drift.fabro",
     description: "Detects configuration and code drift between environments, then generates reconciliation patches to bring everything back in sync.",
     settings: {
-      version: 1,
-      goal: "Detect and reconcile configuration drift across environments",
-      graph: "sync_drift.fabro",
-      llm: { model: "claude-sonnet" },
-      vars: { source_env: "production", target_env: "staging", drift_threshold: "warn" },
-      sandbox: {
-        provider: "daytona",
-        daytona: {
-          auto_stop_interval: 120,
-          labels: { project: "sync-drift", team: "platform" },
-          snapshot: { name: "sync-drift-dev", cpu: 2, memory: 4, disk: 10 },
+      _version: 1,
+      run: {
+        goal: "Detect and reconcile configuration drift across environments",
+        inputs: { source_env: "production", target_env: "staging", drift_threshold: "warn" },
+        model: { name: "claude-sonnet" },
+        sandbox: {
+          provider: "daytona",
+          daytona: {
+            auto_stop_interval: 120,
+            labels: { project: "sync-drift", team: "platform" },
+            snapshot: { name: "sync-drift-dev", cpu: 2, memory: "4GB", disk: "10GB" },
+          },
         },
       },
     },
@@ -164,17 +175,18 @@ export const workflowData: Record<string, WorkflowEntry> = {
     filename: "expand.fabro",
     description: "Evolves the product by analyzing usage patterns and specifications to propose and implement incremental improvements.",
     settings: {
-      version: 1,
-      goal: "Propose and implement incremental product improvements",
-      graph: "expand.fabro",
-      llm: { model: "claude-sonnet" },
-      vars: { analytics_window: "30d", min_confidence: "0.8" },
-      sandbox: {
-        provider: "daytona",
-        daytona: {
-          auto_stop_interval: 180,
-          labels: { project: "expand", team: "product" },
-          snapshot: { name: "expand-dev", cpu: 2, memory: 4, disk: 10 },
+      _version: 1,
+      run: {
+        goal: "Propose and implement incremental product improvements",
+        inputs: { analytics_window: "30d", min_confidence: "0.8" },
+        model: { name: "claude-sonnet" },
+        sandbox: {
+          provider: "daytona",
+          daytona: {
+            auto_stop_interval: 180,
+            labels: { project: "expand", team: "product" },
+            snapshot: { name: "expand-dev", cpu: 2, memory: "4GB", disk: "10GB" },
+          },
         },
       },
     },

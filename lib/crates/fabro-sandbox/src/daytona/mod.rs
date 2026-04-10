@@ -22,7 +22,7 @@ use tokio_util::sync::CancellationToken;
 const WORKING_DIRECTORY: &str = "/home/daytona/workspace";
 const DEFAULT_SNAPSHOT: &str = "daytona-medium";
 
-pub use fabro_config::sandbox::{
+pub use crate::config::{
     DaytonaNetwork, DaytonaSettings as DaytonaConfig,
     DaytonaSnapshotSettings as DaytonaSnapshotConfig, DockerfileSource,
 };

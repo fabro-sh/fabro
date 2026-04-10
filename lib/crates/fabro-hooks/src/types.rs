@@ -1,4 +1,4 @@
-pub use fabro_config::hook::HookEvent;
+pub use crate::config::HookEvent;
 
 use fabro_types::RunId;
 use serde::{Deserialize, Serialize};

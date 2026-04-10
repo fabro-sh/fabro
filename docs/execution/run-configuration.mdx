@@ -3,7 +3,7 @@ title: "Run Configuration"
 description: "Configure workflow runs with TOML files"
 ---
 
-A run config is a TOML file that bundles a workflow graph with all the settings needed to execute it — the goal, model, sandbox, setup commands, variables, and hooks. Instead of passing a dozen CLI flags, you check a `.toml` file into version control and launch with a single command:
+A run config is a TOML file that bundles a workflow graph with all the settings needed to execute it — the goal, model, sandbox, prepare steps, inputs, and hooks. Instead of passing a dozen CLI flags, you check a `.toml` file into version control and launch with a single command:
 
 ```bash
 fabro run run.toml
@@ -11,142 +11,154 @@ fabro run run.toml
 
 ## Minimal example
 
-A run config requires two fields:
+A run config needs at minimum a schema version and a goal:
 
 ```toml title="run.toml"
-version = 1
+_version = 1
+
+[workflow]
 graph = "workflow.fabro"
+
+[run]
 goal = "Implement the login feature"
 ```
 
 | Field | Required | Description |
 |---|---|---|
-| `version` | Yes | Config format version. Must be `1`. |
-| `graph` | Yes | Path to the Graphviz workflow file, resolved relative to the TOML file's directory. |
-| `goal` | No | What the workflow should accomplish. Passed to agents and used in retrospectives. Can also be provided via `--goal` CLI flag or Graphviz graph `goal` attribute. |
+| `_version` | No (defaults to `1`) | Schema version. Must be `1` in the first pass. |
+| `[workflow].graph` | No | Path to the Graphviz workflow file, relative to the TOML file's directory. Defaults to `workflow.fabro`. |
+| `[run].goal` | No | What the workflow should accomplish. Passed to agents and used in retrospectives. Can also be provided via `--goal` CLI flag or Graphviz graph `goal` attribute. |
 
-Goal precedence: CLI `--goal` > TOML `goal` > Graphviz graph attribute.
+Goal precedence: CLI `--goal` > `[run].goal` > Graphviz graph attribute.
 
 ## Full example
 
 ```toml title="run.toml"
-version = 1
-goal = "Run the CI pipeline for $repo_name"
+_version = 1
+
+[workflow]
 graph = "fabro/workflows/ci.fabro"
-directory = "/tmp/workdir"
 
-[llm]
-model = "claude-sonnet-4-5"
+[run]
+goal = "Run the CI pipeline for $repo_name"
+working_dir = "/tmp/workdir"
 
-[llm.fallbacks]
-anthropic = ["gemini", "openai"]
-gemini = ["anthropic", "openai"]
+[run.model]
+name = "claude-sonnet-4-5"
+fallbacks = ["openai", "gemini"]
 
-[setup]
-commands = ["git clone $repo_url repo", "cd repo && npm install"]
-timeout_ms = 120000
+[[run.prepare.steps]]
+script = "git clone $repo_url repo"
 
-[sandbox]
+[[run.prepare.steps]]
+script = "cd repo && npm install"
+
+[run.sandbox]
 provider = "daytona"
 preserve = false
 
-[sandbox.daytona]
+[run.sandbox.daytona]
 auto_stop_interval = 60
 
-[sandbox.daytona.labels]
+[run.sandbox.daytona.labels]
 project = "fabro"
 env = "ci"
 
-[sandbox.daytona.snapshot]
+[run.sandbox.daytona.snapshot]
 name = "node-20"
 cpu = 4
-memory = 8
-disk = 20
+memory = "8GB"
+disk = "20GB"
 dockerfile = "FROM node:20-slim\nRUN apt-get update && apt-get install -y git"
 
-[sandbox.env]
+[run.sandbox.env]
 API_KEY = "${env.MY_API_KEY}"
 NODE_ENV = "production"
 
-[checkpoint]
+[run.checkpoint]
 exclude_globs = ["**/node_modules/**", "**/.cache/**"]
 
-[vars]
+[run.inputs]
 repo_name = "fabro"
 repo_url = "https://github.com/fabro-sh/fabro"
 
-[artifacts]
+[run.artifacts]
 include = ["test-results/**", "playwright-report/**"]
 
-[mcp_servers.playwright]
+[run.agent.mcps.playwright]
 type = "sandbox"
 command = ["npx", "@playwright/mcp@latest", "--port", "3100", "--headless"]
 port = 3100
 
-[pull_request]
+[run.pull_request]
 enabled = true
 draft = false
 
-[[hooks]]
+[[run.hooks]]
+id = "pre-check"
 event = "stage_start"
-command = "./scripts/pre-check.sh"
+script = "./scripts/pre-check.sh"
 blocking = true
 sandbox = false
 
-[[hooks]]
+[[run.hooks]]
 event = "run_complete"
-command = "echo done"
+script = "echo done"
 ```
 
 ## Sections
 
-### `[llm]`
+### `[run.model]`
 
 Override the default model and provider for all nodes that don't have an explicit model assigned via a [stylesheet](/workflows/stylesheets).
 
 ```toml title="run.toml"
-[llm]
-model = "claude-sonnet-4-5"
+[run.model]
+name = "claude-sonnet-4-5"
 ```
 
 | Field | Description |
 |---|---|
-| `model` | Model ID or alias (e.g. `claude-sonnet-4-5`, `opus`, `gemini-pro`). See [Models](/core-concepts/models). |
+| `name` | Model ID or alias (e.g. `claude-sonnet-4-5`, `opus`, `gemini-pro`). See [Models](/core-concepts/models). |
 | `provider` | Provider name (optional — auto-inferred from the model catalog). Only needed for models not in the catalog or to force a specific provider. |
+| `fallbacks` | Ordered list of model references to try when the primary is unavailable. Entries can be bare provider tokens (`"openai"`), bare model aliases, or qualified `"provider/model"` references. |
 
-#### `[llm.fallbacks]`
+#### Fallbacks with splice
 
-Map each provider to an ordered list of fallback providers. When the primary provider is unavailable, Fabro tries the fallbacks in order:
+Use the reserved `"..."` marker in `fallbacks` to splice in the inherited list from lower-precedence layers:
 
 ```toml title="run.toml"
-[llm.fallbacks]
-anthropic = ["gemini", "openai"]
-gemini = ["anthropic", "openai"]
+[run.model]
+# Prepend "anthropic" to whatever fallbacks the project config already defines.
+fallbacks = ["anthropic", "..."]
 ```
 
-### `[setup]`
+### `[run.prepare]`
 
-Shell commands to run before the workflow starts. Use this to clone repositories, install dependencies, or prepare the environment.
+Ordered list of steps to run before the workflow starts. Use this to clone repositories, install dependencies, or prepare the environment.
 
 ```toml title="run.toml"
-[setup]
-commands = ["pip install -r requirements.txt", "npm install"]
-timeout_ms = 60000
+[[run.prepare.steps]]
+script = "pip install -r requirements.txt"
+
+[[run.prepare.steps]]
+script = "npm install"
 ```
 
 | Field | Description |
 |---|---|
-| `commands` | List of shell commands, executed sequentially via `sh -c`. |
-| `timeout_ms` | Per-command timeout in milliseconds. Default: `300000` (5 minutes). |
+| `script` | Shell-evaluated command (runs through `sh -c`). |
+| `command` | Argv-style command, mutually exclusive with `script`. |
+| `env` | Additional environment variables for this step. |
 
-Each command must exit with status 0. If any command fails or times out, the run aborts before the workflow starts.
+Each step must exit with status 0. If any step fails, the run aborts before the workflow starts. Prepare steps replace across layers — the higher-precedence layer wins wholesale.
 
-### `[sandbox]`
+### `[run.sandbox]`
 
 Configure how agent tools (bash, file edits) are executed.
 
 ```toml title="run.toml"
-[sandbox]
+[run.sandbox]
 provider = "docker"
 preserve = true
 ```
@@ -157,23 +169,23 @@ preserve = true
 | `preserve` | When `true`, keep the sandbox alive after the run finishes. Useful for debugging. |
 | `devcontainer` | When `true`, use the repo's `devcontainer.json` to configure the sandbox. See [Devcontainers](/execution/devcontainers). |
 
-#### `[sandbox.daytona]`
+#### `[run.sandbox.daytona]`
 
 Additional settings when using the Daytona cloud sandbox:
 
 ```toml title="run.toml"
-[sandbox.daytona]
+[run.sandbox.daytona]
 auto_stop_interval = 60
 
-[sandbox.daytona.labels]
+[run.sandbox.daytona.labels]
 project = "fabro"
 env = "staging"
 
-[sandbox.daytona.snapshot]
+[run.sandbox.daytona.snapshot]
 name = "my-snapshot"
 cpu = 4
-memory = 8
-disk = 20
+memory = "8GB"
+disk = "20GB"
 dockerfile = "FROM rust:1.85-slim-bookworm\nRUN apt-get update"
 # Or reference an external Dockerfile:
 # dockerfile = { path = "./Dockerfile" }
@@ -182,20 +194,20 @@ dockerfile = "FROM rust:1.85-slim-bookworm\nRUN apt-get update"
 | Field | Description |
 |---|---|
 | `auto_stop_interval` | Minutes of inactivity before the sandbox auto-stops. |
-| `labels` | Key-value labels attached to the sandbox for filtering and identification. |
+| `labels` | Key-value labels attached to the sandbox for filtering and identification. Labels merge across layers (sticky merge-by-key). |
 | `snapshot.name` | Snapshot name to create or use for the sandbox. |
-| `snapshot.cpu` | CPU cores for the snapshot. |
-| `snapshot.memory` | Memory in GB for the snapshot. |
-| `snapshot.disk` | Disk in GB for the snapshot. |
+| `snapshot.cpu` | CPU cores for the snapshot (integer). |
+| `snapshot.memory` | Memory size using human-readable units: `"8GB"`, `"16GiB"`, or bare integers that default to GB. |
+| `snapshot.disk` | Disk size using the same units as `memory`. |
 | `snapshot.dockerfile` | Dockerfile content (inline string) or path (`{ path = "..." }`) for building the snapshot image. Paths are resolved relative to the TOML file's directory. |
 | `network` | Network access mode: `"allow_all"` (default), `"block"`, or `{ allow_list = ["..."] }`. See [Sandboxing](/administration/sandboxing#network-access-control). |
 
-#### `[sandbox.local]`
+#### `[run.sandbox.local]`
 
 Additional settings when using the local sandbox:
 
 ```toml title="run.toml"
-[sandbox.local]
+[run.sandbox.local]
 worktree_mode = "always"
 ```
 
@@ -203,29 +215,31 @@ worktree_mode = "always"
 |---|---|
 | `worktree_mode` | When to create a git worktree for the run: `always`, `clean` (default — only when the working tree is clean), `dirty` (also when dirty), or `never`. |
 
-#### `[sandbox.env]`
+#### `[run.sandbox.env]`
 
-Pass environment variables into sandbox command and agent execution. Values can be literal strings or host environment passthrough using `${env.VARNAME}` syntax:
+Pass environment variables into sandbox command and agent execution. Values can be literal strings or host environment references using `${env.VARNAME}` syntax:
 
 ```toml title="run.toml"
-[sandbox.env]
+[run.sandbox.env]
 API_KEY = "${env.MY_API_KEY}"
 NODE_ENV = "production"
+SERVICE_URL = "https://api.${env.REGION}.example.com"
 ```
 
 | Syntax | Description |
 |---|---|
 | `"literal"` | Static value passed as-is |
-| `"${env.VARNAME}"` | Resolved from the host environment at load time. Missing vars produce a hard error. |
+| `"${env.VARNAME}"` | Whole-value reference resolved from the host environment at consumption time |
+| `"prefix-${env.X}-suffix"` | Substring interpolation; multiple tokens per string are supported |
 
-Host env references must be whole-value only — partial interpolation like `"prefix-${env.X}"` is not supported. Sandbox env vars from `settings.toml` defaults and the run config are merged, with the run config winning on key collisions.
+Missing host variables produce a hard error pointing at the specific field and unresolved token. `run.sandbox.env` is a sticky merge-by-key map: entries from all layers combine, with higher-precedence layers overriding individual keys.
 
-### `[checkpoint]`
+### `[run.checkpoint]`
 
 Configure how git checkpoint commits behave.
 
 ```toml title="run.toml"
-[checkpoint]
+[run.checkpoint]
 exclude_globs = ["**/node_modules/**", "**/.cache/**", "**/dist/**"]
 ```
 
@@ -233,20 +247,20 @@ exclude_globs = ["**/node_modules/**", "**/.cache/**", "**/dist/**"]
 |---|---|
 | `exclude_globs` | Glob patterns for files to exclude from checkpoint commits. Uses git pathspec `:(glob,exclude)` syntax. |
 
-Exclude globs from `settings.toml` defaults and the run config are merged (union, deduplicated).
+`exclude_globs` replaces across layers — the higher-precedence layer wins wholesale.
 
-### `[vars]`
+### `[run.inputs]`
 
-Define variables that are expanded into the Graphviz source before the graph is parsed. See [Variables](/workflows/variables) for the full reference.
+Define inputs that are expanded into the Graphviz source before the graph is parsed. See [Variables](/workflows/variables) for the full reference.
 
 ```toml title="run.toml"
-[vars]
+[run.inputs]
 repo_name = "fabro"
 repo_url = "https://github.com/fabro-sh/fabro"
 language = "rust"
 ```
 
-Variables can be used anywhere in the Graphviz file with `$name` syntax:
+Inputs can be used anywhere in the Graphviz file with `$name` syntax:
 
 ```dot title="c-i.fabro"
 digraph CI {
@@ -256,14 +270,16 @@ digraph CI {
 }
 ```
 
-If a `$variable` in the Graphviz file has no matching entry in `[vars]`, Fabro raises an error immediately. A bare `$` not followed by an identifier (e.g. `costs $5`) is left as-is.
+If a `$variable` in the Graphviz file has no matching entry in `[run.inputs]`, Fabro raises an error immediately. A bare `$` not followed by an identifier (e.g. `costs $5`) is left as-is.
 
-### `[artifacts]`
+`[run.inputs]` replaces wholesale across layers. Unlike labels, inputs do not merge by key — the highest-precedence layer that sets `inputs` wins its entire map.
+
+### `[run.artifacts]`
 
 Configure automatic collection of test artifacts (Playwright reports, JUnit XML, screenshots, etc.) from the execution environment after each stage.
 
 ```toml title="run.toml"
-[artifacts]
+[run.artifacts]
 include = ["test-results/**", "playwright-report/**", "*.trace.zip"]
 ```
 
@@ -271,40 +287,41 @@ include = ["test-results/**", "playwright-report/**", "*.trace.zip"]
 |---|---|
 | `include` | Glob patterns for files to collect as assets. Matched against the working directory after each stage completes. |
 
-Artifact collection is opt-in — when no `[artifacts]` section is present, no file scanning occurs. This avoids the overhead of scanning large working directories when assets aren't needed.
+Artifact collection is opt-in — when no `[run.artifacts]` section is present, no file scanning occurs.
 
-### `[mcp_servers]`
+### `[run.agent.mcps]`
 
-Configure [MCP servers](/agents/mcp) available to agent stages during the workflow run. Each server is a named TOML table. All three transport types are supported: `stdio`, `http`, and `sandbox`.
+Configure [MCP servers](/agents/mcp) available to agent stages during the workflow run. Each server is a named TOML table under `[run.agent.mcps]`. All three transport types are supported: `stdio`, `http`, and `sandbox`.
 
 ```toml title="run.toml"
-[mcp_servers.playwright]
+[run.agent.mcps.playwright]
 type = "sandbox"
 command = ["npx", "@playwright/mcp@latest", "--port", "3100", "--headless", "--browser", "chromium"]
 port = 3100
-startup_timeout_secs = 60
-tool_timeout_secs = 120
+startup_timeout = "60s"
+tool_timeout = "2m"
 ```
 
 | Field | Description | Default |
 |---|---|---|
 | `type` | Transport type: `"stdio"`, `"http"`, or `"sandbox"`. | — |
-| `command` | (stdio, sandbox) Array: executable + arguments. | — |
+| `script` | (stdio, sandbox) Shell-evaluated startup command, mutually exclusive with `command`. | — |
+| `command` | (stdio, sandbox) Argv array: executable + arguments. | — |
 | `port` | (sandbox) Port the server listens on inside the sandbox. | — |
 | `url` | (http) The MCP server endpoint URL. | — |
 | `env` | (stdio, sandbox) Additional environment variables. | `{}` |
 | `headers` | (http) Optional HTTP headers for authentication. | `{}` |
-| `startup_timeout_secs` | Max seconds for server startup + MCP handshake. | `10` |
-| `tool_timeout_secs` | Max seconds for a single tool call. | `60` |
+| `startup_timeout` | Max duration for server startup + MCP handshake (e.g. `"10s"`, `"1m"`). | `"10s"` |
+| `tool_timeout` | Max duration for a single tool call. | `"60s"` |
 
 The `sandbox` transport runs the MCP server inside the workflow's sandbox. This is useful for tools that need access to the sandbox environment, such as browser automation with Playwright. See [MCP](/agents/mcp#sandbox) for details.
 
-### `[pull_request]`
+### `[run.pull_request]`
 
 Automatically open a GitHub pull request when the workflow run completes successfully. Requires a [GitHub App](/integrations/github) to be configured.
 
 ```toml title="run.toml"
-[pull_request]
+[run.pull_request]
 enabled = true
 draft = true
 auto_merge = false
@@ -318,64 +335,46 @@ merge_strategy = "squash"
 | `auto_merge` | When `true`, enables GitHub auto-merge on the created PR. Implies `draft = false` since GitHub doesn't allow auto-merge on draft PRs. The repository must have auto-merge enabled in GitHub settings. Default: `false`. |
 | `merge_strategy` | Merge method when `auto_merge` is enabled: `squash` (default), `merge`, or `rebase`. |
 
-### `[github]`
-
-Request a scoped GitHub Installation Access Token and inject it into the sandbox as `GITHUB_TOKEN`. The token is minted from the configured [GitHub App](/integrations/github) with only the permissions you specify.
-
-```toml title="run.toml"
-[github]
-permissions = { contents = "write", pull_requests = "read" }
-```
-
-| Field | Description |
-|---|---|
-| `permissions` | Map of GitHub API permission names to access levels (`"read"` or `"write"`). Only the listed permissions are requested. |
-
-This requires a GitHub App to be configured. If the app is missing or the repository doesn't have an installation, the run logs a warning and continues without injecting the token.
-
-### `[[hooks]]`
+### `[[run.hooks]]`
 
 Define hooks that run in response to lifecycle events. Each hook is a TOML array entry:
 
 ```toml title="run.toml"
-[[hooks]]
-name = "pre-check"
+[[run.hooks]]
+id = "pre-check"
+name = "Pre-check script"
 event = "stage_start"
-command = "./scripts/pre-check.sh"
+script = "./scripts/pre-check.sh"
 matcher = "agent_loop"
 blocking = true
-timeout_ms = 30000
+timeout = "30s"
 sandbox = false
 ```
 
 | Field | Description |
 |---|---|
+| `id` | Optional merge identity. Hooks with the same `id` replace each other across layers. |
 | `name` | Optional display name for the hook. |
-| `event` | Lifecycle event: `run_start`, `run_complete`, `stage_start`, `stage_complete`. |
-| `command` | Shell command to execute (shorthand for `type = "command"`). |
+| `event` | Lifecycle event: `run_start`, `run_complete`, `stage_start`, `stage_complete`, etc. |
+| `script` | Shell-evaluated command (equivalent to the old `type = "command"` shorthand). |
+| `command` | Argv-style command (alternative to `script`). |
 | `matcher` | Regex matched against node ID or handler type. Limits which stages trigger this hook. |
 | `blocking` | Whether the hook must complete before execution continues. Defaults vary by event. |
-| `timeout_ms` | Hook timeout in milliseconds. Default: `60000` (60s). |
+| `timeout` | Human-readable hook timeout (e.g. `"30s"`, `"1m"`). Default: `"60s"`. |
 | `sandbox` | Run inside the sandbox (`true`, default) or on the host (`false`). |
 
-See [Hooks](/agents/hooks) for hook types beyond simple commands (HTTP, prompt, agent).
+Hook merge semantics: hooks with matching `id` values replace in place. Hooks without an `id` from a higher-precedence layer append after the fully merged inherited hook list.
 
-## Top-level fields
-
-In addition to the sections above, two optional top-level fields are available:
-
-| Field | Description |
-|---|---|
-| `directory` | Working directory for the run. Defaults to the current directory. |
+See [Hooks](/agents/hooks) for hook types beyond scripts (HTTP, prompt, agent).
 
 ## Graph path resolution
 
-The `graph` path is resolved relative to the TOML file's parent directory, not the current working directory. This means a run config and its workflow can live side by side:
+The `[workflow].graph` path is resolved relative to the TOML file's parent directory, not the current working directory. This means a run config and its workflow can live side by side:
 
 ```
 project/
   runs/
-    ci.toml       # graph = "ci.fabro"
+    ci.toml       # [workflow] graph = "ci.fabro"
     ci.fabro
 ```
 
@@ -388,67 +387,50 @@ Settings can come from multiple sources. Fabro resolves them in this order (firs
 | Source | Priority |
 |---|---|
 | Node-level [stylesheet](/workflows/stylesheets) | Highest |
-| Run config TOML | |
 | CLI flags (`--model`, `--provider`, `--sandbox`) | |
+| Run config TOML (`workflow.toml` or equivalent) | |
 | Project defaults (`fabro.toml`) | |
-| Server defaults (`~/.fabro/settings.toml`) | |
+| Machine defaults (`~/.fabro/settings.toml`) | |
 | Graphviz graph attributes (`default_model`, `default_provider`) | |
 | Built-in defaults | Lowest |
 
 <Note>
-For model and provider specifically, the precedence is: CLI flags > TOML config > project defaults > server defaults > Graphviz graph attributes > built-in defaults. Stylesheet rules on individual nodes always take priority over all of these.
+Stylesheet rules on individual nodes always take priority over run config values.
 </Note>
 
 ### Project defaults (`fabro.toml`)
 
-The `fabro.toml` project config can set default values for `[llm]`, `[setup]`, `[sandbox]`, `[vars]`, `[checkpoint]`, `[pull_request]`, `[github]`, `[artifacts]`, `[[hooks]]`, and `[mcp_servers]`. These defaults apply to all runs in the project unless the run config overrides them:
+The `fabro.toml` project config can set default values for any of the `[run.*]` sections described above. These defaults apply to all runs in the project unless the workflow config overrides them:
 
 ```toml title="fabro.toml"
-version = 1
+_version = 1
 
-[llm]
-model = "claude-sonnet-4-5"
+[project]
+directory = "fabro/"
 
-[sandbox]
+[run.model]
+name = "claude-sonnet-4-5"
+
+[run.sandbox]
 provider = "daytona"
 
-[sandbox.daytona.snapshot]
+[run.sandbox.daytona.snapshot]
 name = "my-project-snapshot"
-
-[github]
-permissions = { contents = "write" }
 ```
 
-Project defaults are merged with run config values using the same rules as server defaults — run config wins on key collisions.
+Project defaults and workflow config values merge per the normative merge matrix: most fields merge by field (higher-precedence wins per key), `run.inputs` replaces wholesale, `run.sandbox.env` sticky-merges by key, and `run.prepare.steps` replaces whole-list.
 
-### Server defaults
+### Machine defaults
 
-When running via `fabro server start`, the server config at `~/.fabro/settings.toml` can set default values for `[llm]`, `[setup]`, `[sandbox]`, and `[vars]`. These defaults are applied to every run unless the run config overrides them.
-
-For variables, defaults and run config are **merged** — the run config wins on key collisions:
-
-```toml
-# ~/.fabro/settings.toml
-[vars]
-default_key = "from_server"
-shared = "from_server"
-
-# run.toml
-[vars]
-shared = "from_run"       # wins
-task_key = "from_run"
-```
-
-The same merge behavior applies to Daytona labels. All other fields use simple "first non-empty wins" precedence.
+When running locally, the machine defaults at `~/.fabro/settings.toml` can set run-scoped defaults too. Same merge rules apply.
 
 ## Validation
 
 Fabro validates the run config when it loads:
 
-- **Version check** — Only `version = 1` is accepted. Other versions are rejected immediately.
-- **Required fields** — `version` and `graph` are required. `goal` is optional (can be provided via `--goal` or Graphviz graph attribute).
-- **Unknown fields** — Extra fields not listed above are silently ignored.
-- **Variable check** — Any `$variable` in the Graphviz file without a matching `[vars]` entry produces an error.
+- **`_version` check** — Only `_version = 1` (or missing, which defaults to `1`) is accepted. The legacy top-level `version` key is rejected with a rename hint.
+- **Unknown keys** — Any top-level key not in `[project]`, `[workflow]`, `[run]`, `[cli]`, `[server]`, `[features]`, or `_version` is rejected with a targeted rename hint pointing at the v2 replacement path.
+- **Variable check** — Any `$variable` in the Graphviz file without a matching `[run.inputs]` entry produces an error.
 
 Use `fabro preflight` to validate a run config without executing it:
 

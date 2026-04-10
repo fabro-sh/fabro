@@ -177,9 +177,9 @@ fn runner_uses_snapshotted_app_id_for_github_credentials() {
     context.write_home(
         ".fabro/settings.toml",
         "\
-version = 1
+_version = 1
 
-[git]
+[server.integrations.github]
 app_id = \"snapshotted-app-id\"
 ",
     );
@@ -213,7 +213,7 @@ digraph GitHubApp {
     fabro_json_snapshot!(
         context,
         serde_json::json!({
-            "app_id": run.settings.git.clone().and_then(|git| git.app_id),
+            "app_id": run.settings.github_app_id_str(),
         }),
         @r#"
         {
@@ -222,7 +222,7 @@ digraph GitHubApp {
         "#
     );
 
-    context.write_home(".fabro/settings.toml", "version = 1\n");
+    context.write_home(".fabro/settings.toml", "_version = 1\n");
 
     let server = server_target(&context.storage_dir);
     let mut cmd = context.command();

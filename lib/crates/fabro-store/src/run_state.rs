@@ -599,9 +599,10 @@ mod tests {
     use super::{NodeState, RunProjection};
     use crate::{EventEnvelope, EventPayload, StageId};
     use fabro_types::run_event::{InterviewCompletedProps, InterviewOption, InterviewStartedProps};
+    use fabro_types::settings::SettingsFile;
     use fabro_types::{
         Checkpoint, EventBody, InterviewQuestionType, RunBlobId, RunControlAction, RunEvent,
-        Settings, fixtures,
+        fixtures,
     };
 
     fn test_event(seq: u32, body: EventBody, node_id: Option<&str>) -> EventEnvelope {
@@ -813,7 +814,7 @@ mod tests {
                         "run_id": fixtures::RUN_1,
                         "event": "run.created",
                         "properties": {
-                            "settings": Settings::default(),
+                            "settings": SettingsFile::default(),
                             "graph": {
                                 "name": "test",
                                 "nodes": {},

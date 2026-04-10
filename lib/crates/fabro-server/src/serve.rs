@@ -3,7 +3,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use fabro_config::Storage;
-use fabro_config::server::{ArtifactStorageBackend, resolve_storage_dir};
+use fabro_config::resolve_storage_dir;
 use fabro_config::user::{active_settings_path, load_settings_config};
 use fabro_util::terminal::Styles;
 use object_store::ObjectStore;
@@ -17,7 +17,7 @@ use tracing::{error, info, warn};
 
 use clap::Args;
 
-use fabro_types::Settings;
+use fabro_types::settings::SettingsFile;
 
 use crate::bind::{self, Bind, BindRequest};
 use crate::github_webhooks::WebhookManager;
@@ -28,6 +28,7 @@ use crate::server::{
     reconcile_incomplete_runs_on_startup, shutdown_active_workers, spawn_scheduler,
 };
 use crate::tls::{ClientAuth, build_rustls_config, serve_tls_with_shutdown};
+use crate::tls_config::TlsSettings;
 use fabro_llm::client::Client as LlmClient;
 use fabro_sandbox::SandboxProvider;
 
@@ -80,42 +81,70 @@ pub struct ServeArgs {
     pub config: Option<PathBuf>,
 }
 
-fn load_settings(path: Option<&Path>) -> anyhow::Result<Settings> {
-    load_settings_config(path)?.try_into()
+fn load_settings(path: Option<&Path>) -> anyhow::Result<SettingsFile> {
+    Ok(load_settings_config(path)?.into())
 }
 
 fn resolved_config_path(path: Option<&Path>) -> PathBuf {
     active_settings_path(path)
 }
 
-fn apply_serve_overrides(base: &Settings, args: &ServeArgs, dry_run_mode: bool) -> Settings {
+fn apply_serve_overrides(
+    base: &SettingsFile,
+    args: &ServeArgs,
+    dry_run_mode: bool,
+) -> SettingsFile {
+    use fabro_types::settings::cli::CliLayer;
+    use fabro_types::settings::interp::InterpString;
+    use fabro_types::settings::run::{
+        RunExecutionLayer, RunLayer, RunMode, RunModelLayer, RunSandboxLayer,
+    };
+    use fabro_types::settings::server::{ServerLayer, ServerWebLayer};
     let mut settings = base.clone();
     if dry_run_mode {
-        settings.dry_run = Some(true);
+        let run = settings.run.get_or_insert_with(RunLayer::default);
+        let execution = run.execution.get_or_insert_with(RunExecutionLayer::default);
+        execution.mode = Some(RunMode::DryRun);
     }
     if args.web || args.no_web {
-        settings.web.get_or_insert_default().enabled = args.web;
+        let server = settings.server.get_or_insert_with(ServerLayer::default);
+        let web = server.web.get_or_insert_with(ServerWebLayer::default);
+        web.enabled = Some(args.web);
     }
     if let Some(ref model) = args.model {
-        settings.llm.get_or_insert_default().model = Some(model.clone());
+        let run = settings.run.get_or_insert_with(RunLayer::default);
+        let model_layer = run.model.get_or_insert_with(RunModelLayer::default);
+        model_layer.name = Some(InterpString::parse(model));
     }
     if let Some(ref provider) = args.provider {
-        settings.llm.get_or_insert_default().provider = Some(provider.clone());
+        let run = settings.run.get_or_insert_with(RunLayer::default);
+        let model_layer = run.model.get_or_insert_with(RunModelLayer::default);
+        model_layer.provider = Some(InterpString::parse(provider));
     }
     if let Some(sandbox) = args.sandbox {
-        settings.sandbox.get_or_insert_default().provider = Some(sandbox.to_string());
+        let run = settings.run.get_or_insert_with(RunLayer::default);
+        let sandbox_layer = run.sandbox.get_or_insert_with(RunSandboxLayer::default);
+        sandbox_layer.provider = Some(sandbox.to_string());
     }
+    // CliLayer is namespaced; nothing to populate from flag overrides today.
+    let _ = CliLayer::default();
     settings
 }
 
 fn apply_runtime_settings(
-    base: &Settings,
+    base: &SettingsFile,
     args: &ServeArgs,
     dry_run_mode: bool,
     data_dir: &Path,
-) -> Settings {
+) -> SettingsFile {
+    use fabro_types::settings::interp::InterpString;
+    use fabro_types::settings::server::{ServerLayer, ServerStorageLayer};
     let mut settings = apply_serve_overrides(base, args, dry_run_mode);
-    settings.storage_dir = Some(data_dir.to_path_buf());
+    let server = settings.server.get_or_insert_with(ServerLayer::default);
+    let storage = server
+        .storage
+        .get_or_insert_with(ServerStorageLayer::default);
+    storage.root = Some(InterpString::parse(&data_dir.to_string_lossy()));
     settings
 }
 
@@ -143,38 +172,55 @@ fn build_object_store(store_path: &Path) -> anyhow::Result<Arc<dyn ObjectStore>>
 }
 
 fn build_artifact_object_store(
-    settings: &Settings,
+    settings: &SettingsFile,
     storage: &Storage,
 ) -> anyhow::Result<(Arc<dyn ObjectStore>, String)> {
-    let artifact_settings = settings.artifact_storage.clone().unwrap_or_default();
+    use fabro_types::settings::interp::InterpString;
+    use fabro_types::settings::server::ObjectStoreProvider;
+
+    let artifacts = settings.server_artifacts();
+    let prefix = artifacts
+        .and_then(|a| a.prefix.as_ref())
+        .map_or_else(|| "artifacts".to_string(), InterpString::as_source);
 
     if use_in_memory_store() {
-        return Ok((Arc::new(InMemory::new()), artifact_settings.prefix));
+        return Ok((Arc::new(InMemory::new()), prefix));
     }
 
-    match artifact_settings.backend {
-        ArtifactStorageBackend::Local => {
+    let provider = artifacts
+        .and_then(|a| a.provider)
+        .unwrap_or(ObjectStoreProvider::Local);
+
+    let s3_cfg = artifacts.and_then(|a| a.s3.as_ref());
+    match provider {
+        ObjectStoreProvider::Local => {
             std::fs::create_dir_all(storage.artifact_store_dir())?;
             let object_store = Arc::new(LocalFileSystem::new_with_prefix(storage.root())?);
-            Ok((object_store, artifact_settings.prefix))
+            Ok((object_store, prefix))
         }
-        ArtifactStorageBackend::S3 => {
-            let bucket = artifact_settings
+        ObjectStoreProvider::S3 => {
+            let s3 = s3_cfg.ok_or_else(|| {
+                anyhow::anyhow!("server.artifacts.s3 is required for provider = 's3'")
+            })?;
+            let bucket = s3
                 .bucket
-                .ok_or_else(|| anyhow::anyhow!("artifact_storage.bucket is required for s3"))?;
-            let region = artifact_settings
+                .as_ref()
+                .map(InterpString::as_source)
+                .ok_or_else(|| anyhow::anyhow!("server.artifacts.s3.bucket is required"))?;
+            let region = s3
                 .region
-                .ok_or_else(|| anyhow::anyhow!("artifact_storage.region is required for s3"))?;
-
+                .as_ref()
+                .map(InterpString::as_source)
+                .ok_or_else(|| anyhow::anyhow!("server.artifacts.s3.region is required"))?;
             let mut builder = AmazonS3Builder::from_env()
                 .with_bucket_name(bucket)
                 .with_region(region)
-                .with_virtual_hosted_style_request(!artifact_settings.path_style.unwrap_or(false));
-            if let Some(endpoint) = artifact_settings.endpoint {
+                .with_virtual_hosted_style_request(!s3.path_style.unwrap_or(false));
+            if let Some(endpoint) = s3.endpoint.as_ref().map(InterpString::as_source) {
                 builder = builder.with_endpoint(endpoint);
             }
             let object_store = Arc::new(builder.build()?);
-            Ok((object_store, artifact_settings.prefix))
+            Ok((object_store, prefix))
         }
     }
 }
@@ -241,32 +287,28 @@ where
     let shared_settings = Arc::new(RwLock::new(effective_settings));
     std::fs::create_dir_all(&data_dir)?;
     let (auth_mode, client_auth, max_concurrent_runs) = {
-        let cfg = shared_settings.read().expect("config lock poisoned");
-        let api = cfg.api.clone().unwrap_or_default();
-        let allowed_usernames = cfg
-            .web
-            .as_ref()
-            .map(|w| w.auth.allowed_usernames.clone())
-            .unwrap_or_default();
-        let auth_mode = resolve_auth_mode_with_lookup(&api, &allowed_usernames, |name| {
+        let cfg_file = shared_settings.read().expect("config lock poisoned");
+        let auth_mode = resolve_auth_mode_with_lookup(&cfg_file, |name| {
             secret_snapshot
                 .get(name)
                 .cloned()
                 .or_else(|| std::env::var(name).ok())
-        });
-        let client_auth = api.tls.as_ref().map(|_| client_auth_from_mode(&auth_mode));
+        })?;
+        let tls_present = TlsSettings::from_settings(&cfg_file).is_some();
+        let client_auth = tls_present.then(|| client_auth_from_mode(&auth_mode));
         let max_concurrent_runs = args
             .max_concurrent_runs
-            .or(cfg.max_concurrent_runs)
+            .or_else(|| cfg_file.max_concurrent_runs())
             .unwrap_or(5);
         (auth_mode, client_auth, max_concurrent_runs)
     };
-    let web_enabled = shared_settings
-        .read()
-        .expect("config lock poisoned")
-        .web
-        .as_ref()
-        .is_none_or(|web| web.enabled);
+    let web_enabled = {
+        let cfg_file = shared_settings.read().expect("config lock poisoned");
+        cfg_file
+            .server_web()
+            .and_then(|w| w.enabled)
+            .unwrap_or(true)
+    };
 
     let store_path = storage.store_dir();
     let object_store = build_object_store(&store_path)?;
@@ -308,11 +350,13 @@ where
 
     // Optionally start webhook listener
     let webhook_app_id = {
-        let cfg = shared_settings.read().expect("config lock poisoned");
-        cfg.git
-            .as_ref()
-            .and_then(|g| g.webhooks.as_ref().and(g.app_id.as_ref()))
-            .cloned()
+        use fabro_types::settings::InterpString;
+        let cfg_file = shared_settings.read().expect("config lock poisoned");
+        cfg_file
+            .server_integrations_github()
+            .filter(|github| github.webhooks.is_some())
+            .and_then(|github| github.app_id.as_ref())
+            .map(InterpString::as_source)
     };
     let webhook_manager = match webhook_app_id {
         Some(app_id) => {
@@ -401,12 +445,10 @@ where
     });
 
     // Branch: TLS, plain TCP, or Unix socket
-    let tls_settings = shared_settings
-        .read()
-        .expect("config lock poisoned")
-        .api
-        .as_ref()
-        .and_then(|a| a.tls.clone());
+    let tls_settings = {
+        let cfg_file = shared_settings.read().expect("config lock poisoned");
+        TlsSettings::from_settings(&cfg_file)
+    };
 
     let bound_listener = bind_listener(&bind_request).await?;
     let bind_addr = bound_listener.bind.clone();
@@ -638,11 +680,18 @@ mod tests {
         build_object_store_with_preference, server_bind_title, server_title,
     };
     use crate::bind::Bind;
-    use fabro_types::Settings;
+    use fabro_config::ConfigLayer;
+    use fabro_types::settings::SettingsFile;
+
+    fn parse_settings(source: &str) -> SettingsFile {
+        ConfigLayer::parse(source)
+            .expect("v2 fixture should parse")
+            .into()
+    }
 
     #[test]
     fn apply_runtime_settings_preserves_storage_dir() {
-        let base = Settings::default();
+        let base = SettingsFile::default();
         let args = ServeArgs {
             bind: None,
             model: None,
@@ -659,20 +708,21 @@ mod tests {
             apply_runtime_settings(&base, &args, false, &PathBuf::from("/srv/fabro-storage"));
 
         assert_eq!(
-            resolved.storage_dir,
-            Some(PathBuf::from("/srv/fabro-storage"))
+            resolved.server_storage_root_str().as_deref(),
+            Some("/srv/fabro-storage")
         );
     }
 
     #[test]
     fn apply_runtime_settings_enables_web_from_cli_flag() {
-        let base: Settings = toml::from_str(
+        let base = parse_settings(
             r#"
-[web]
+_version = 1
+
+[server.web]
 enabled = false
 "#,
-        )
-        .unwrap();
+        );
         let args = ServeArgs {
             bind: None,
             model: None,
@@ -687,12 +737,12 @@ enabled = false
 
         let resolved = apply_runtime_settings(&base, &args, false, &PathBuf::from("/srv/fabro"));
 
-        assert!(resolved.web.expect("web settings should exist").enabled);
+        assert_eq!(resolved.server_web().and_then(|w| w.enabled), Some(true));
     }
 
     #[test]
     fn apply_runtime_settings_disables_web_from_cli_flag() {
-        let base = Settings::default();
+        let base = SettingsFile::default();
         let args = ServeArgs {
             bind: None,
             model: None,
@@ -707,7 +757,7 @@ enabled = false
 
         let resolved = apply_runtime_settings(&base, &args, false, &PathBuf::from("/srv/fabro"));
 
-        assert!(!resolved.web.expect("web settings should exist").enabled);
+        assert_eq!(resolved.server_web().and_then(|w| w.enabled), Some(false));
     }
 
     #[test]

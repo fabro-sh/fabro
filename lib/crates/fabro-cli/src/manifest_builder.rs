@@ -6,12 +6,13 @@ use fabro_api::types;
 use fabro_config::ConfigLayer;
 use fabro_config::project::{self, discover_project_config, resolve_workflow_path};
 use fabro_config::run::parse_run_config;
-use fabro_config::sandbox::DockerfileSource;
 use fabro_config::user::active_settings_path;
 use fabro_graphviz::graph::AttrValue;
 use fabro_graphviz::parser;
 use fabro_sandbox::daytona::detect_repo_info;
-use fabro_types::{RunId, Settings};
+use fabro_types::RunId;
+use fabro_types::settings::SettingsFile;
+use fabro_types::settings::run::{DaytonaDockerfileLayer, ResolvedGoalSource, ResolvedRunGoal};
 use fabro_workflow::git::{GitSyncStatus, head_sha, sync_status};
 
 use crate::args::{PreflightArgs, RunArgs};
@@ -46,12 +47,12 @@ struct WorkflowScanInput {
 
 pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManifest> {
     let user_layer = ConfigLayer::settings()?;
-    let merged_settings = input
+    let merged_settings: SettingsFile = input
         .args_layer
         .clone()
         .combine(ConfigLayer::for_workflow(&input.workflow, &input.cwd)?)
         .combine(user_layer.clone())
-        .resolve()?;
+        .into();
 
     let root_resolution = resolve_workflow_path(&input.workflow, &input.cwd)?;
     let target_path = root_resolution.dot_path.clone();
@@ -320,13 +321,15 @@ fn collect_workflow_config_files(
 ) -> Result<()> {
     let config_layer = parse_run_config(&config.source)?;
     let dockerfile = config_layer
-        .sandbox
+        .as_v2()
+        .run
         .as_ref()
+        .and_then(|run| run.sandbox.as_ref())
         .and_then(|sandbox| sandbox.daytona.as_ref())
         .and_then(|daytona| daytona.snapshot.as_ref())
         .and_then(|snapshot| snapshot.dockerfile.as_ref());
 
-    let Some(DockerfileSource::Path { path }) = dockerfile else {
+    let Some(DaytonaDockerfileLayer::Path { path }) = dockerfile else {
         return Ok(());
     };
 
@@ -383,44 +386,35 @@ fn collect_bundled_file(
 
 fn resolve_manifest_goal(
     args_layer: &ConfigLayer,
-    settings: &Settings,
+    settings: &SettingsFile,
     root_source: &str,
     root_dot_path: &Path,
     cwd: &Path,
 ) -> Result<Option<types::ManifestGoal>> {
     let working_directory = project::resolve_working_directory(settings, cwd);
 
-    if let Some(goal) = args_layer.goal.as_ref() {
-        return Ok(Some(types::ManifestGoal {
-            path: None,
-            text: goal.clone(),
-            type_: types::ManifestGoalType::Value,
-        }));
-    }
-    if let Some(goal_file) = args_layer.goal_file.as_ref() {
-        return Ok(Some(types::ManifestGoal {
-            path: Some(goal_file.display().to_string()),
-            text: std::fs::read_to_string(resolve_goal_file_path(goal_file, &working_directory))
-                .with_context(|| format!("Failed to read {}", goal_file.display()))?,
-            type_: types::ManifestGoalType::File,
-        }));
-    }
-    if let Some(goal) = settings.goal.as_ref() {
-        return Ok(Some(types::ManifestGoal {
-            path: None,
-            text: goal.clone(),
-            type_: types::ManifestGoalType::Value,
-        }));
-    }
-    if let Some(goal_file) = settings.goal_file.as_ref() {
-        return Ok(Some(types::ManifestGoal {
-            path: Some(goal_file.display().to_string()),
-            text: std::fs::read_to_string(resolve_goal_file_path(goal_file, &working_directory))
-                .with_context(|| format!("Failed to read {}", goal_file.display()))?,
-            type_: types::ManifestGoalType::File,
-        }));
+    // Precedence 1: CLI args (`--goal` / `--goal-file`). These are already
+    // resolved to absolute paths by `overrides::goal_layer_from_args`.
+    if let Some(resolved) = args_layer
+        .as_v2()
+        .resolve_run_goal(&working_directory)
+        .context("failed to resolve --goal-file contents")?
+    {
+        return Ok(Some(resolved_goal_to_manifest(resolved)));
     }
 
+    // Precedence 2: merged config `run.goal`. Config-sourced `goal.file`
+    // paths were rewritten to absolute by `ConfigLayer::load` at the
+    // directory of the config file that declared them.
+    if let Some(resolved) = settings
+        .resolve_run_goal(&working_directory)
+        .context("failed to resolve run.goal.file contents")?
+    {
+        return Ok(Some(resolved_goal_to_manifest(resolved)));
+    }
+
+    // Precedence 3: graph-level `goal` attribute in the DOT, with `@file`
+    // sugar for workflow-colocated goal files.
     let graph = parser::parse(root_source)
         .map_err(|err| anyhow!("Failed to parse {}: {err}", root_dot_path.display()))?;
     let Some(goal) = graph.attrs.get("goal").and_then(AttrValue::as_str) else {
@@ -447,11 +441,21 @@ fn resolve_manifest_goal(
     }))
 }
 
-fn resolve_goal_file_path(goal_file: &Path, working_directory: &Path) -> PathBuf {
-    if goal_file.is_absolute() {
-        goal_file.to_path_buf()
-    } else {
-        working_directory.join(goal_file)
+/// Translate a [`ResolvedRunGoal`] into the wire-level `ManifestGoal`
+/// shape. Inline goals get `type = Value`; file-sourced goals keep their
+/// absolute path as the `path` field and use `type = File`.
+fn resolved_goal_to_manifest(resolved: ResolvedRunGoal) -> types::ManifestGoal {
+    match resolved.source {
+        ResolvedGoalSource::Inline => types::ManifestGoal {
+            path: None,
+            text: resolved.text,
+            type_: types::ManifestGoalType::Value,
+        },
+        ResolvedGoalSource::File { path } => types::ManifestGoal {
+            path: Some(path.to_string_lossy().into_owned()),
+            text: resolved.text,
+            type_: types::ManifestGoalType::File,
+        },
     }
 }
 
@@ -555,6 +559,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(unsafe_code, clippy::allow_attributes)]
     fn build_manifest_bundles_imports_prompts_and_children() {
         let temp = tempfile::tempdir().unwrap();
         let project = temp.path();
@@ -563,10 +568,10 @@ mod tests {
         std::fs::create_dir_all(workflow_dir.join("prompts")).unwrap();
         std::fs::create_dir_all(workflow_dir.join("imports")).unwrap();
         std::fs::create_dir_all(&child_dir).unwrap();
-        std::fs::write(project.join("fabro.toml"), "version = 1\n").unwrap();
+        std::fs::write(project.join("fabro.toml"), "_version = 1\n").unwrap();
         std::fs::write(
             workflow_dir.join("workflow.toml"),
-            "version = 1\ngraph = \"workflow.fabro\"\n",
+            "_version = 1\n\n[workflow]\ngraph = \"workflow.fabro\"\n",
         )
         .unwrap();
         std::fs::write(
@@ -601,6 +606,16 @@ mod tests {
         )
         .unwrap();
 
+        // Isolate from the developer's real ~/.fabro/settings.toml which may
+        // still be in the legacy shape. Setting FABRO_CONFIG to a path inside
+        // the test tempdir forces the loader to produce an empty ConfigLayer.
+        let sandboxed_settings = temp.path().join("empty-settings.toml");
+        std::fs::write(&sandboxed_settings, "_version = 1\n").unwrap();
+        // SAFETY: single-threaded unit test body.
+        unsafe {
+            std::env::set_var("FABRO_CONFIG", &sandboxed_settings);
+        }
+
         let built = build_run_manifest(ManifestBuildInput {
             workflow: PathBuf::from("fabro/workflows/demo/workflow.toml"),
             cwd: project.to_path_buf(),
@@ -609,6 +624,11 @@ mod tests {
             run_id: None,
         })
         .unwrap();
+
+        // SAFETY: single-threaded unit test body.
+        unsafe {
+            std::env::remove_var("FABRO_CONFIG");
+        }
 
         assert_eq!(
             built.manifest.target.path,
@@ -639,5 +659,133 @@ mod tests {
                 .workflows
                 .contains_key("fabro/workflows/child/workflow.fabro")
         );
+    }
+
+    /// A relative `[run.goal] file = "..."` declared in `fabro.toml` must
+    /// resolve against the directory of `fabro.toml`, not against the
+    /// invocation cwd. We exercise this by invoking from a subdirectory
+    /// below the project root.
+    #[test]
+    #[allow(unsafe_code, clippy::allow_attributes)]
+    fn build_manifest_resolves_relative_goal_file_in_project_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path();
+        let workflow_dir = project.join("fabro/workflows/demo");
+        std::fs::create_dir_all(&workflow_dir).unwrap();
+        std::fs::create_dir_all(project.join("prompts")).unwrap();
+
+        std::fs::write(
+            project.join("fabro.toml"),
+            r#"_version = 1
+
+[run.goal]
+file = "prompts/goal.md"
+"#,
+        )
+        .unwrap();
+        std::fs::write(project.join("prompts/goal.md"), "ship from project root").unwrap();
+
+        std::fs::write(
+            workflow_dir.join("workflow.toml"),
+            "_version = 1\n\n[workflow]\ngraph = \"workflow.fabro\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            workflow_dir.join("workflow.fabro"),
+            r"digraph Demo { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }",
+        )
+        .unwrap();
+
+        let sandboxed_settings = temp.path().join("empty-settings.toml");
+        std::fs::write(&sandboxed_settings, "_version = 1\n").unwrap();
+        // SAFETY: single-threaded unit test body.
+        unsafe {
+            std::env::set_var("FABRO_CONFIG", &sandboxed_settings);
+        }
+
+        let built = build_run_manifest(ManifestBuildInput {
+            workflow: PathBuf::from("fabro/workflows/demo/workflow.toml"),
+            cwd: project.to_path_buf(),
+            args_layer: ConfigLayer::default(),
+            args: None,
+            run_id: None,
+        })
+        .unwrap();
+
+        // SAFETY: single-threaded unit test body.
+        unsafe {
+            std::env::remove_var("FABRO_CONFIG");
+        }
+
+        let goal = built.manifest.goal.expect("manifest goal should be set");
+        assert_eq!(goal.text, "ship from project root");
+        assert_eq!(goal.type_, types::ManifestGoalType::File);
+        let resolved = goal.path.expect("file goal must carry a path");
+        let expected = project.join("prompts").join("goal.md");
+        assert_eq!(PathBuf::from(resolved), expected);
+    }
+
+    /// A relative `[run.goal] file = "..."` declared in `workflow.toml`
+    /// must resolve against the directory of `workflow.toml`, not against
+    /// the invocation cwd or project root.
+    #[test]
+    #[allow(unsafe_code, clippy::allow_attributes)]
+    fn build_manifest_resolves_relative_goal_file_in_workflow_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path();
+        let workflow_dir = project.join("fabro/workflows/demo");
+        std::fs::create_dir_all(workflow_dir.join("prompts")).unwrap();
+
+        std::fs::write(project.join("fabro.toml"), "_version = 1\n").unwrap();
+        std::fs::write(
+            workflow_dir.join("workflow.toml"),
+            r#"_version = 1
+
+[workflow]
+graph = "workflow.fabro"
+
+[run.goal]
+file = "prompts/goal.md"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            workflow_dir.join("prompts/goal.md"),
+            "ship from workflow dir",
+        )
+        .unwrap();
+        std::fs::write(
+            workflow_dir.join("workflow.fabro"),
+            r"digraph Demo { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }",
+        )
+        .unwrap();
+
+        let sandboxed_settings = temp.path().join("empty-settings.toml");
+        std::fs::write(&sandboxed_settings, "_version = 1\n").unwrap();
+        // SAFETY: single-threaded unit test body.
+        unsafe {
+            std::env::set_var("FABRO_CONFIG", &sandboxed_settings);
+        }
+
+        let built = build_run_manifest(ManifestBuildInput {
+            workflow: PathBuf::from("fabro/workflows/demo/workflow.toml"),
+            cwd: project.to_path_buf(),
+            args_layer: ConfigLayer::default(),
+            args: None,
+            run_id: None,
+        })
+        .unwrap();
+
+        // SAFETY: single-threaded unit test body.
+        unsafe {
+            std::env::remove_var("FABRO_CONFIG");
+        }
+
+        let goal = built.manifest.goal.expect("manifest goal should be set");
+        assert_eq!(goal.text, "ship from workflow dir");
+        assert_eq!(goal.type_, types::ManifestGoalType::File);
+        let resolved = goal.path.expect("file goal must carry a path");
+        let expected = workflow_dir.join("prompts").join("goal.md");
+        assert_eq!(PathBuf::from(resolved), expected);
     }
 }

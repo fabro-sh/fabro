@@ -9,7 +9,7 @@ use fabro_config::ConfigLayer;
 use fabro_config::effective_settings;
 use fabro_config::effective_settings::{EffectiveSettingsLayers, EffectiveSettingsMode};
 use fabro_config::project;
-use fabro_types::Settings;
+use fabro_types::settings::SettingsFile;
 
 fn config_layers(
     ctx: &CommandContext,
@@ -57,7 +57,7 @@ fn workflow_and_project_layers(
     Ok((workflow_layer, project_layer))
 }
 
-async fn merged_config(args: &SettingsArgs) -> anyhow::Result<Settings> {
+async fn merged_config(args: &SettingsArgs) -> anyhow::Result<SettingsFile> {
     let base_ctx = CommandContext::base()?;
     let layers = config_layers(&base_ctx, args.workflow.as_deref())?;
     if args.local {
@@ -80,7 +80,7 @@ async fn merged_config(args: &SettingsArgs) -> anyhow::Result<Settings> {
 }
 
 pub(crate) async fn execute(args: &SettingsArgs, globals: &GlobalArgs) -> anyhow::Result<()> {
-    let config = merged_config(args).await?;
+    let config = Box::pin(merged_config(args)).await?;
     if globals.json {
         print_json_pretty(&config)?;
         return Ok(());

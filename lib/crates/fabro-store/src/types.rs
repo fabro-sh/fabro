@@ -91,7 +91,10 @@ pub struct EventEnvelope {
 mod tests {
     use chrono::{TimeZone, Utc};
 
-    use fabro_types::{EventBody, RunEvent, StageId, fixtures, run_event::RunCompletedProps};
+    use fabro_types::{
+        ActorRef, EventBody, ParallelBranchId, RunEvent, StageId, fixtures,
+        run_event::RunCompletedProps,
+    };
 
     use super::{EventEnvelope, EventPayload};
 
@@ -127,6 +130,59 @@ mod tests {
         let wire = serde_json::to_value(&envelope).unwrap();
         assert_eq!(wire["seq"], 7);
         assert_eq!(wire["id"], "evt_1");
+        assert_eq!(wire["event"], "run.completed");
+        assert!(wire.get("payload").is_none(), "wire shape must be flat");
+
+        let parsed: EventEnvelope = serde_json::from_value(wire).unwrap();
+        assert_eq!(parsed, envelope);
+    }
+
+    #[test]
+    fn wire_event_envelope_round_trips_with_all_envelope_fields() {
+        let group = StageId::new("review", 2);
+        let branch = ParallelBranchId::new(group.clone(), 3);
+        let event = RunEvent {
+            id: "evt_2".to_string(),
+            ts: Utc.with_ymd_and_hms(2026, 4, 9, 13, 0, 0).unwrap(),
+            run_id: fixtures::RUN_1,
+            node_id: Some("review".to_string()),
+            node_label: Some("Review".to_string()),
+            stage_id: Some(StageId::new("review", 2)),
+            parallel_group_id: Some(group),
+            parallel_branch_id: Some(branch),
+            session_id: Some("ses_42".to_string()),
+            parent_session_id: Some("ses_root".to_string()),
+            tool_call_id: Some("tool_call_xyz".to_string()),
+            actor: Some(ActorRef::agent(
+                Some("ses_42".to_string()),
+                Some("claude-sonnet".to_string()),
+            )),
+            body: EventBody::RunCompleted(RunCompletedProps {
+                duration_ms: 100,
+                artifact_count: 1,
+                status: "success".to_string(),
+                reason: None,
+                total_usd_micros: None,
+                final_git_commit_sha: None,
+                final_patch: None,
+                billing: None,
+            }),
+        };
+        let payload = EventPayload::new(event.to_value().unwrap(), &fixtures::RUN_1).unwrap();
+        let envelope = EventEnvelope { seq: 99, payload };
+
+        let wire = serde_json::to_value(&envelope).unwrap();
+        assert_eq!(wire["seq"], 99);
+        assert_eq!(wire["id"], "evt_2");
+        assert_eq!(wire["stage_id"], "review@2");
+        assert_eq!(wire["parallel_group_id"], "review@2");
+        assert_eq!(wire["parallel_branch_id"], "review@2:3");
+        assert_eq!(wire["session_id"], "ses_42");
+        assert_eq!(wire["parent_session_id"], "ses_root");
+        assert_eq!(wire["tool_call_id"], "tool_call_xyz");
+        assert_eq!(wire["actor"]["kind"], "agent");
+        assert_eq!(wire["actor"]["id"], "ses_42");
+        assert_eq!(wire["actor"]["display"], "claude-sonnet");
         assert_eq!(wire["event"], "run.completed");
         assert!(wire.get("payload").is_none(), "wire shape must be flat");
 

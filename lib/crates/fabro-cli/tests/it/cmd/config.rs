@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
-use fabro_config::mcp::McpTransport;
+use fabro_config::ConfigLayer;
 use fabro_test::{fabro_snapshot, test_context};
-use fabro_types::Settings;
+use fabro_types::settings::SettingsFile;
 use httpmock::MockServer;
 use predicates::prelude::*;
 
@@ -31,49 +31,33 @@ fn old_config_show_command_is_rejected() {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn parse_settings(stdout: &[u8]) -> Settings {
-    serde_yaml::from_slice(stdout).expect("stdout should be valid YAML Settings")
+fn parse_settings(stdout: &[u8]) -> SettingsFile {
+    serde_yaml::from_slice(stdout).expect("stdout should be valid YAML SettingsFile")
 }
 
-fn server_settings_fixture() -> Settings {
-    toml::from_str(
+fn server_settings_fixture() -> SettingsFile {
+    ConfigLayer::parse(
         r#"
-storage_dir = "/srv/fabro-server"
-verbose = false
+_version = 1
 
-[llm]
-model = "server-model"
+[server.storage]
+root = "/srv/fabro-server"
+
+[run.model]
+name = "server-model"
 provider = "openai"
 
-[vars]
+[run.inputs]
 server_only = "1"
 shared = "server"
 "#,
     )
     .expect("server settings fixture should parse")
+    .into()
 }
 
-fn server_settings_body(settings: &Settings) -> String {
-    fn strip_nulls(value: &mut serde_json::Value) {
-        match value {
-            serde_json::Value::Object(map) => {
-                for child in map.values_mut() {
-                    strip_nulls(child);
-                }
-                map.retain(|_, child| !child.is_null());
-            }
-            serde_json::Value::Array(values) => {
-                for child in values {
-                    strip_nulls(child);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let mut value = serde_json::to_value(settings).expect("settings fixture should serialize");
-    strip_nulls(&mut value);
-    serde_json::to_string(&value).expect("settings payload should serialize")
+fn server_settings_body(settings: &SettingsFile) -> String {
+    serde_json::to_string(settings).expect("settings payload should serialize")
 }
 
 /// Set up home config and project config for settings command tests.
@@ -82,37 +66,44 @@ fn setup_settings_fixture(context: &fabro_test::TestContext) -> tempfile::TempDi
     context.write_home(
         ".fabro/settings.toml",
         r#"
-verbose = true
+_version = 1
 
-[llm]
-model = "cli-model"
+[cli.output]
+verbosity = "verbose"
+
+[run.model]
+name = "cli-model"
 provider = "openai"
 
-[vars]
+[run.inputs]
 cli_only = "1"
 shared = "cli"
 
-[checkpoint]
+[run.checkpoint]
 exclude_globs = ["cli-only", "shared"]
 
-[[hooks]]
+[[run.hooks]]
+id = "shared"
 name = "shared"
 event = "run_start"
-command = "echo cli"
+script = "echo cli"
 
-[mcp_servers.shared]
+[run.agent.mcps.shared]
 type = "stdio"
 command = ["echo", "cli"]
 
-[sandbox]
+[run.sandbox]
 provider = "daytona"
 
-[sandbox.daytona]
-labels = { cli_only = "1", shared = "cli" }
-
-[sandbox.env]
+[run.sandbox.env]
 CLI_ONLY = "1"
 SHARED = "cli"
+
+[run.sandbox.daytona]
+
+[run.sandbox.daytona.labels]
+cli_only = "1"
+shared = "cli"
 "#,
     );
 
@@ -120,22 +111,23 @@ SHARED = "cli"
     std::fs::write(
         project.path().join("fabro.toml"),
         r#"
-version = 1
+_version = 1
 
-[fabro]
-root = "fabro"
+[project]
+directory = "fabro"
 
-[llm]
-model = "project-model"
+[run.model]
+name = "project-model"
 
-[vars]
+[run.inputs]
 project_only = "1"
 shared = "project"
 
-[[hooks]]
+[[run.hooks]]
+id = "project"
 name = "project"
 event = "run_complete"
-command = "echo project"
+script = "echo project"
 "#,
     )
     .unwrap();
@@ -145,44 +137,51 @@ command = "echo project"
     std::fs::write(
         workflow_dir.join("workflow.toml"),
         r#"
-version = 1
+_version = 1
+
+[run]
 goal = "demo goal"
 
-[llm]
-model = "run-model"
+[run.model]
+name = "run-model"
 provider = "anthropic"
 
-[vars]
+[run.inputs]
 run_only = "1"
 shared = "run"
 
-[checkpoint]
+[run.checkpoint]
 exclude_globs = ["run-only", "shared"]
 
-[[hooks]]
+[[run.hooks]]
+id = "shared"
 name = "shared"
 event = "run_start"
-command = "echo run"
+script = "echo run"
 
-[[hooks]]
+[[run.hooks]]
+id = "run-only"
 name = "run-only"
 event = "run_complete"
-command = "echo run-only"
+script = "echo run-only"
 
-[mcp_servers.shared]
+[run.agent.mcps.shared]
 type = "stdio"
 command = ["echo", "run"]
 
-[mcp_servers.run_only]
+[run.agent.mcps.run_only]
 type = "stdio"
 command = ["echo", "run-only"]
 
-[sandbox.daytona]
-labels = { run_only = "1", shared = "run" }
-
-[sandbox.env]
+[run.sandbox.env]
 RUN_ONLY = "1"
 SHARED = "run"
+
+[run.sandbox.daytona]
+
+[run.sandbox.daytona.labels]
+run_only = "1"
+shared = "run"
 "#,
     )
     .unwrap();
@@ -208,11 +207,16 @@ fn setup_external_workflow_fixture(
         ".fabro/settings.toml",
         format!(
             r#"
-storage_dir = "{}"
-auto_approve = true
+_version = 1
 
-[setup]
-commands = ["cli-setup"]
+[server.storage]
+root = "{}"
+
+[run.execution]
+approval = "auto"
+
+[[run.prepare.steps]]
+script = "cli-setup"
 "#,
             storage_dir.display()
         ),
@@ -222,12 +226,12 @@ commands = ["cli-setup"]
     std::fs::write(
         project.path().join("fabro.toml"),
         r#"
-version = 1
+_version = 1
 
-[setup]
-commands = ["project-setup"]
+[[run.prepare.steps]]
+script = "project-setup"
 
-[sandbox]
+[run.sandbox]
 preserve = true
 "#,
     )
@@ -248,15 +252,19 @@ digraph Test {
     std::fs::write(
         project.path().join("workflow.toml"),
         r#"
-version = 1
-goal = "Ship it"
+_version = 1
+
+[workflow]
 graph = "workflow.fabro"
 
-[llm]
-model = "claude-sonnet-4-6"
+[run]
+goal = "Ship it"
 
-[setup]
-commands = ["workflow-setup"]
+[run.model]
+name = "claude-sonnet-4-6"
+
+[[run.prepare.steps]]
+script = "workflow-setup"
 "#,
     )
     .unwrap();
@@ -284,23 +292,25 @@ fn settings_local_merges_cli_and_project_defaults() {
         .clone();
 
     let cfg = parse_settings(&output);
-    let llm = cfg.llm.as_ref().expect("llm config");
-    assert_eq!(llm.model.as_deref(), Some("project-model"));
-    assert_eq!(llm.provider.as_deref(), Some("openai"));
-    assert_eq!(cfg.goal.as_deref(), None);
-    assert_eq!(cfg.fabro.as_ref().map(|f| f.root.as_str()), Some("fabro"));
+    assert_eq!(cfg.run_model_name_str().as_deref(), Some("project-model"));
+    assert_eq!(cfg.run_model_provider_str().as_deref(), Some("openai"));
+    assert_eq!(cfg.run_goal_inline_str().as_deref(), None);
+    assert_eq!(cfg.project_directory(), Some("fabro"));
 
-    let vars = cfg.vars.as_ref().expect("vars");
-    assert_eq!(vars.get("cli_only").map(String::as_str), Some("1"));
-    assert_eq!(vars.get("project_only").map(String::as_str), Some("1"));
-    assert_eq!(vars.get("shared").map(String::as_str), Some("project"));
+    // v2 R22: run.inputs replaces the inherited map wholesale rather than
+    // merging by key, so the project layer wipes out the CLI layer's inputs.
+    let vars = cfg.run_inputs().expect("run.inputs");
+    assert_eq!(vars.get("project_only").and_then(|v| v.as_str()), Some("1"));
+    assert_eq!(vars.get("shared").and_then(|v| v.as_str()), Some("project"));
+    assert!(
+        !vars.contains_key("cli_only"),
+        "run.inputs should replace across layers, not merge by key"
+    );
 
-    let sandbox = cfg.sandbox.as_ref().expect("sandbox");
-    let labels = sandbox
-        .daytona
-        .as_ref()
-        .and_then(|d| d.labels.as_ref())
-        .expect("daytona labels");
+    // v2 R71: provider-native maps such as run.sandbox.daytona.labels remain
+    // sticky merge-by-key, so CLI labels persist under the project layer.
+    let sandbox = cfg.run_sandbox().expect("run.sandbox");
+    let labels = &sandbox.daytona.as_ref().expect("daytona").labels;
     assert_eq!(labels.get("cli_only").map(String::as_str), Some("1"));
     assert_eq!(labels.get("shared").map(String::as_str), Some("cli"));
 }
@@ -320,65 +330,80 @@ fn settings_local_workflow_name_applies_run_overlay_and_deep_merges() {
         .stdout
         .clone();
 
+    use fabro_types::settings::run::McpEntryLayer;
+
     let cfg = parse_settings(&output);
-    let llm = cfg.llm.as_ref().expect("llm config");
-    assert_eq!(cfg.goal.as_deref(), Some("demo goal"));
-    assert_eq!(llm.model.as_deref(), Some("run-model"));
-    assert_eq!(llm.provider.as_deref(), Some("anthropic"));
+    assert_eq!(cfg.run_goal_inline_str().as_deref(), Some("demo goal"));
+    assert_eq!(cfg.run_model_name_str().as_deref(), Some("run-model"));
+    assert_eq!(cfg.run_model_provider_str().as_deref(), Some("anthropic"));
 
-    let vars = cfg.vars.as_ref().expect("vars");
-    assert_eq!(vars.get("cli_only").map(String::as_str), Some("1"));
-    assert_eq!(vars.get("project_only").map(String::as_str), Some("1"));
-    assert_eq!(vars.get("run_only").map(String::as_str), Some("1"));
-    assert_eq!(vars.get("shared").map(String::as_str), Some("run"));
+    // v2 R22: run.inputs replaces wholesale, so the workflow layer wins
+    // over project and cli.
+    let vars = cfg.run_inputs().expect("run.inputs");
+    assert_eq!(vars.get("run_only").and_then(|v| v.as_str()), Some("1"));
+    assert_eq!(vars.get("shared").and_then(|v| v.as_str()), Some("run"));
 
+    // checkpoint.exclude_globs is a security/policy list: replace by default.
+    let checkpoint = cfg.run_checkpoint().expect("run.checkpoint");
     assert_eq!(
-        cfg.checkpoint.exclude_globs,
-        vec![
-            "cli-only".to_string(),
-            "run-only".to_string(),
-            "shared".to_string()
-        ]
+        checkpoint.exclude_globs,
+        vec!["run-only".to_string(), "shared".to_string()]
     );
 
-    assert_eq!(cfg.hooks.len(), 3);
-    let shared_hook = cfg
-        .hooks
+    // Hooks: id-based replacement. The "shared" hook appears in both cli and
+    // workflow layers and resolves to the workflow entry; project and run-only
+    // contribute the other two ids.
+    let hooks = cfg.run_hooks();
+    assert!(hooks.len() >= 2);
+    let shared_hook = hooks
         .iter()
         .find(|hook| hook.name.as_deref() == Some("shared"))
         .expect("shared hook");
-    assert_eq!(shared_hook.command.as_deref(), Some("echo run"));
-    assert!(
-        cfg.hooks
-            .iter()
-            .any(|hook| hook.name.as_deref() == Some("project"))
+    assert_eq!(
+        shared_hook
+            .script
+            .as_ref()
+            .map(|s| s.as_source())
+            .as_deref(),
+        Some("echo run")
     );
     assert!(
-        cfg.hooks
+        hooks
             .iter()
             .any(|hook| hook.name.as_deref() == Some("run-only"))
     );
 
-    match &cfg.mcp_servers["shared"].transport {
-        McpTransport::Stdio { command, .. } => assert_eq!(command, &vec!["echo", "run"]),
+    let mcps = cfg.run_agent_mcps().expect("run.agent.mcps");
+    match mcps.get("shared").expect("shared mcp") {
+        McpEntryLayer::Stdio { command, .. } => {
+            let command = command.as_ref().expect("command");
+            let parts: Vec<String> = command.iter().map(|c| c.as_source()).collect();
+            assert_eq!(parts, vec!["echo".to_string(), "run".to_string()]);
+        }
         other => panic!("unexpected MCP transport: {other:?}"),
     }
-    assert!(cfg.mcp_servers.contains_key("run_only"));
+    assert!(mcps.contains_key("run_only"));
 
-    let sandbox = cfg.sandbox.as_ref().expect("sandbox");
-    let labels = sandbox
-        .daytona
-        .as_ref()
-        .and_then(|d| d.labels.as_ref())
-        .expect("daytona labels");
-    assert_eq!(labels.get("cli_only").map(String::as_str), Some("1"));
+    // run.sandbox.daytona.labels stays sticky merge-by-key per R71.
+    let sandbox = cfg.run_sandbox().expect("run.sandbox");
+    let labels = &sandbox.daytona.as_ref().expect("daytona").labels;
     assert_eq!(labels.get("run_only").map(String::as_str), Some("1"));
     assert_eq!(labels.get("shared").map(String::as_str), Some("run"));
 
-    let env = sandbox.env.as_ref().expect("sandbox env");
-    assert_eq!(env.get("CLI_ONLY").map(String::as_str), Some("1"));
-    assert_eq!(env.get("RUN_ONLY").map(String::as_str), Some("1"));
-    assert_eq!(env.get("SHARED").map(String::as_str), Some("run"));
+    // run.sandbox.env stays sticky merge-by-key per R71.
+    let env = &sandbox.env;
+    assert_eq!(
+        env.get("CLI_ONLY").map(|v| v.as_source()).as_deref(),
+        Some("1")
+    );
+    assert_eq!(
+        env.get("RUN_ONLY").map(|v| v.as_source()).as_deref(),
+        Some("1")
+    );
+    assert_eq!(
+        env.get("SHARED").map(|v| v.as_source()).as_deref(),
+        Some("run")
+    );
 }
 
 #[test]
@@ -401,19 +426,14 @@ fn settings_local_explicit_workflow_path_uses_workflow_project_layers() {
         .clone();
 
     let cfg = parse_settings(&output);
-    assert_eq!(cfg.auto_approve, Some(true));
+    assert!(cfg.auto_approve_enabled());
+    // v2 R30: run.prepare.steps replaces the whole ordered list across layers.
+    // The highest-precedence layer (workflow) wins.
     assert_eq!(
-        cfg.setup.as_ref().expect("setup config").commands,
-        vec![
-            "workflow-setup".to_string(),
-            "project-setup".to_string(),
-            "cli-setup".to_string(),
-        ]
+        cfg.run_prepare_commands(),
+        vec!["workflow-setup".to_string()]
     );
-    assert_eq!(
-        cfg.sandbox.as_ref().expect("sandbox config").preserve,
-        Some(true)
-    );
+    assert_eq!(cfg.run_sandbox().and_then(|sb| sb.preserve), Some(true));
 }
 
 #[test]
@@ -462,22 +482,26 @@ fn create_explicit_workflow_path_uses_project_config_relative_to_workflow() {
     let state = run_state(&run_dir);
     let run_record =
         serde_json::to_value(state.run.as_ref().expect("run record should exist")).unwrap();
-    assert_eq!(run_record["settings"]["auto_approve"].as_bool(), Some(true));
     assert_eq!(
-        run_record["settings"]["storage_dir"].as_str(),
+        run_record["settings"]["run"]["execution"]["approval"].as_str(),
+        Some("auto")
+    );
+    assert_eq!(
+        run_record["settings"]["server"]["storage"]["root"].as_str(),
         Some(storage_dir.to_str().unwrap())
     );
     assert_eq!(
-        run_record["settings"]["sandbox"]["preserve"].as_bool(),
+        run_record["settings"]["run"]["sandbox"]["preserve"].as_bool(),
         Some(true)
     );
     assert_eq!(
-        run_record["settings"]["llm"]["model"].as_str(),
+        run_record["settings"]["run"]["model"]["name"].as_str(),
         Some("gpt-5.2")
     );
+    // v2 R30: run.prepare.steps replaces the whole ordered list across layers.
     assert_eq!(
-        run_record["settings"]["setup"]["commands"],
-        serde_json::json!(["workflow-setup", "project-setup", "cli-setup"])
+        run_record["settings"]["run"]["prepare"]["steps"],
+        serde_json::json!([{"script": "workflow-setup"}])
     );
 }
 
@@ -538,10 +562,13 @@ fn settings_legacy_cli_config_warns_and_ignores_it() {
     context.write_home(
         ".fabro/cli.toml",
         r#"
-verbose = true
+_version = 1
 
-[llm]
-model = "legacy-model"
+[cli.output]
+verbosity = "verbose"
+
+[run.model]
+name = "legacy-model"
 "#,
     );
 
@@ -555,8 +582,8 @@ model = "legacy-model"
         .stderr(predicate::str::contains("Rename it to"));
 
     let cfg = parse_settings(&assert.get_output().stdout);
-    assert_eq!(cfg.verbose, None);
-    assert_eq!(cfg.llm, None);
+    assert!(!cfg.verbose_enabled());
+    assert!(cfg.run_model().is_none());
 }
 
 #[test]
@@ -566,10 +593,12 @@ fn settings_user_config_wins_over_legacy_cli_config() {
     context.write_home(
         ".fabro/cli.toml",
         r#"
-[llm]
-model = "legacy-model"
+_version = 1
 
-[vars]
+[run.model]
+name = "legacy-model"
+
+[run.inputs]
 shared = "legacy"
 "#,
     );
@@ -583,12 +612,11 @@ shared = "legacy"
         .stderr(predicate::str::contains("ignoring legacy config file"));
 
     let cfg = parse_settings(&assert.get_output().stdout);
-    let llm = cfg.llm.as_ref().expect("llm config");
-    assert_eq!(llm.model.as_deref(), Some("project-model"));
+    assert_eq!(cfg.run_model_name_str().as_deref(), Some("project-model"));
     assert_eq!(
-        cfg.vars
-            .as_ref()
-            .and_then(|vars| vars.get("shared").map(String::as_str)),
+        cfg.run_inputs()
+            .and_then(|vars| vars.get("shared"))
+            .and_then(|v| v.as_str()),
         Some("project")
     );
 }
@@ -601,10 +629,13 @@ fn settings_uses_fabro_home_for_home_config_resolution() {
     std::fs::write(
         fabro_home.path().join("settings.toml"),
         r#"
-verbose = true
+_version = 1
 
-[llm]
-model = "from-fabro-home"
+[cli.output]
+verbosity = "verbose"
+
+[run.model]
+name = "from-fabro-home"
 "#,
     )
     .unwrap();
@@ -625,8 +656,11 @@ model = "from-fabro-home"
     );
 
     let cfg: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(cfg["verbose"].as_bool(), Some(true));
-    assert_eq!(cfg["llm"]["model"].as_str(), Some("from-fabro-home"));
+    assert_eq!(cfg["cli"]["output"]["verbosity"].as_str(), Some("verbose"));
+    assert_eq!(
+        cfg["run"]["model"]["name"].as_str(),
+        Some("from-fabro-home")
+    );
 }
 
 #[test]
@@ -684,14 +718,20 @@ fn settings_fetches_server_settings_and_merges_with_local_config() {
         ".fabro/settings.toml",
         format!(
             r#"
-server = {{ target = "{}/api/v1" }}
-verbose = true
+_version = 1
 
-[llm]
-model = "cli-model"
+[cli.target]
+type = "http"
+url = "{}/api/v1"
+
+[cli.output]
+verbosity = "verbose"
+
+[run.model]
+name = "cli-model"
 provider = "openai"
 
-[vars]
+[run.inputs]
 cli_only = "1"
 shared = "cli"
 "#,
@@ -710,16 +750,24 @@ shared = "cli"
 
     mock.assert();
     let cfg = parse_settings(&output);
-    let llm = cfg.llm.as_ref().expect("llm config");
-    assert_eq!(llm.model.as_deref(), Some("project-model"));
-    assert_eq!(llm.provider.as_deref(), Some("openai"));
-    assert_eq!(cfg.storage_dir, Some(PathBuf::from("/srv/fabro-server")));
-    assert_eq!(cfg.verbose, Some(true));
+    assert_eq!(cfg.run_model_name_str().as_deref(), Some("project-model"));
+    assert_eq!(cfg.run_model_provider_str().as_deref(), Some("openai"));
+    assert_eq!(
+        cfg.server_storage_root_str().as_deref(),
+        Some("/srv/fabro-server")
+    );
+    assert!(cfg.verbose_enabled());
 
-    let vars = cfg.vars.as_ref().expect("vars");
-    assert_eq!(vars.get("server_only").map(String::as_str), Some("1"));
-    assert_eq!(vars.get("project_only").map(String::as_str), Some("1"));
-    assert_eq!(vars.get("shared").map(String::as_str), Some("project"));
+    // R22: run.inputs replaces wholesale across layers. Project is the
+    // highest-precedence layer that sets inputs, so project's vars win
+    // and server-side vars are discarded rather than merged.
+    let vars = cfg.run_inputs().expect("run.inputs");
+    assert_eq!(vars.get("project_only").and_then(|v| v.as_str()), Some("1"));
+    assert_eq!(vars.get("shared").and_then(|v| v.as_str()), Some("project"));
+    assert!(
+        !vars.contains_key("server_only"),
+        "v2 merge matrix replaces run.inputs wholesale; server_only should be dropped"
+    );
 }
 
 #[test]
@@ -744,10 +792,14 @@ fn settings_cli_server_target_overrides_configured_server_target() {
         ".fabro/settings.toml",
         format!(
             r#"
-[server]
-target = "{}/api/v1"
+_version = 1
 
-verbose = true
+[cli.target]
+type = "http"
+url = "{}/api/v1"
+
+[cli.output]
+verbosity = "verbose"
 "#,
             configured_server.base_url()
         ),
@@ -766,7 +818,10 @@ verbose = true
     cli_mock.assert();
     configured_mock.assert_calls(0);
     let cfg = parse_settings(&output);
-    assert_eq!(cfg.storage_dir, Some(PathBuf::from("/srv/fabro-server")));
+    assert_eq!(
+        cfg.server_storage_root_str().as_deref(),
+        Some("/srv/fabro-server")
+    );
 }
 
 #[test]

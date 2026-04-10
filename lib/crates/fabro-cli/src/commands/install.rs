@@ -205,48 +205,51 @@ fn ensure_table<'a>(table: &'a mut toml::Table, key: &str) -> Result<&'a mut tom
 
 fn merge_server_settings(doc: &mut toml::Value, username: &str) -> Result<()> {
     let root = root_table_mut(doc)?;
-    let web = ensure_table(root, "web")?;
+    root.insert("_version".to_string(), toml::Value::Integer(1));
+
+    let server = ensure_table(root, "server")?;
+
+    let api = ensure_table(server, "api")?;
+    api.insert(
+        "url".to_string(),
+        toml::Value::String("https://localhost:3000/api/v1".to_string()),
+    );
+
+    let listen = ensure_table(server, "listen")?;
+    listen.insert("type".to_string(), toml::Value::String("tcp".to_string()));
+    let listen_tls = ensure_table(listen, "tls")?;
+    let certs_dir = fabro_util::Home::from_env().certs_dir();
+    listen_tls.insert(
+        "cert".to_string(),
+        toml::Value::String(certs_dir.join("server.crt").to_string_lossy().to_string()),
+    );
+    listen_tls.insert(
+        "key".to_string(),
+        toml::Value::String(certs_dir.join("server.key").to_string_lossy().to_string()),
+    );
+    listen_tls.insert(
+        "ca".to_string(),
+        toml::Value::String(certs_dir.join("ca.crt").to_string_lossy().to_string()),
+    );
+
+    let web = ensure_table(server, "web")?;
+    web.insert("enabled".to_string(), toml::Value::Boolean(true));
     web.insert(
         "url".to_string(),
         toml::Value::String("http://localhost:3000".to_string()),
     );
 
-    let auth = ensure_table(web, "auth")?;
-    auth.insert(
-        "provider".to_string(),
-        toml::Value::String("github".to_string()),
-    );
-    auth.insert(
+    let auth = ensure_table(server, "auth")?;
+    let auth_api = ensure_table(auth, "api")?;
+    let jwt = ensure_table(auth_api, "jwt")?;
+    jwt.insert("enabled".to_string(), toml::Value::Boolean(true));
+    let mtls = ensure_table(auth_api, "mtls")?;
+    mtls.insert("enabled".to_string(), toml::Value::Boolean(true));
+
+    let auth_web = ensure_table(auth, "web")?;
+    auth_web.insert(
         "allowed_usernames".to_string(),
         toml::Value::Array(vec![toml::Value::String(username.to_string())]),
-    );
-
-    let api = ensure_table(root, "api")?;
-    api.insert(
-        "base_url".to_string(),
-        toml::Value::String("https://localhost:3000/api/v1".to_string()),
-    );
-    api.insert(
-        "authentication_strategies".to_string(),
-        toml::Value::Array(vec![
-            toml::Value::String("jwt".to_string()),
-            toml::Value::String("mtls".to_string()),
-        ]),
-    );
-
-    let tls = ensure_table(api, "tls")?;
-    let certs_dir = fabro_util::Home::from_env().certs_dir();
-    tls.insert(
-        "cert".to_string(),
-        toml::Value::String(certs_dir.join("server.crt").to_string_lossy().to_string()),
-    );
-    tls.insert(
-        "key".to_string(),
-        toml::Value::String(certs_dir.join("server.key").to_string_lossy().to_string()),
-    );
-    tls.insert(
-        "ca".to_string(),
-        toml::Value::String(certs_dir.join("ca.crt").to_string_lossy().to_string()),
     );
 
     Ok(())
@@ -1114,99 +1117,111 @@ mod tests {
 
     #[test]
     fn config_toml_roundtrips() {
+        use fabro_types::settings::SettingsFile;
         let toml_str = format_config_toml("brynary");
-        let settings: fabro_types::Settings =
-            toml::from_str(&toml_str).expect("config should parse");
-        assert_eq!(
-            settings.web.unwrap().auth.allowed_usernames,
-            vec!["brynary"]
-        );
+        let cfg: SettingsFile = fabro_config::ConfigLayer::parse(&toml_str)
+            .expect("generated config should parse as v2")
+            .into();
+        let allowed = cfg
+            .server
+            .as_ref()
+            .and_then(|s| s.auth.as_ref())
+            .and_then(|a| a.web.as_ref())
+            .map(|w| w.allowed_usernames.clone())
+            .expect("server.auth.web.allowed_usernames should be set");
+        assert_eq!(allowed, vec!["brynary".to_string()]);
     }
 
     #[test]
     fn config_toml_has_auth_strategies() {
+        use fabro_types::settings::SettingsFile;
         let toml_str = format_config_toml("alice");
-        let settings: fabro_types::Settings = toml::from_str(&toml_str).unwrap();
-        assert_eq!(
-            settings.api.unwrap().authentication_strategies,
-            vec![
-                fabro_config::server::ApiAuthStrategy::Jwt,
-                fabro_config::server::ApiAuthStrategy::Mtls,
-            ]
+        let cfg: SettingsFile = fabro_config::ConfigLayer::parse(&toml_str).unwrap().into();
+        let auth_api = cfg
+            .server
+            .as_ref()
+            .and_then(|s| s.auth.as_ref())
+            .and_then(|a| a.api.as_ref())
+            .expect("server.auth.api should be set");
+        assert!(
+            auth_api
+                .jwt
+                .as_ref()
+                .is_some_and(|jwt| jwt.enabled.unwrap_or(false))
+        );
+        assert!(
+            auth_api
+                .mtls
+                .as_ref()
+                .is_some_and(|mtls| mtls.enabled.unwrap_or(false))
         );
     }
 
     #[test]
     fn config_toml_has_tls_paths() {
+        use fabro_types::settings::SettingsFile;
+        use fabro_types::settings::server::ServerListenLayer;
         let toml_str = format_config_toml("bob");
-        let settings: fabro_types::Settings = toml::from_str(&toml_str).unwrap();
-        let tls = settings.api.unwrap().tls.expect("tls should be set");
+        let cfg: SettingsFile = fabro_config::ConfigLayer::parse(&toml_str).unwrap().into();
+        let listen = cfg
+            .server
+            .as_ref()
+            .and_then(|s| s.listen.as_ref())
+            .expect("server.listen should be set");
+        let tls = match listen {
+            ServerListenLayer::Tcp { tls, .. } => tls.as_ref().expect("server.listen.tls"),
+            ServerListenLayer::Unix { .. } => panic!("expected tcp listen"),
+        };
         let certs_dir = fabro_util::Home::from_env().certs_dir();
-        assert_eq!(tls.cert, certs_dir.join("server.crt"));
-        assert_eq!(tls.key, certs_dir.join("server.key"));
-        assert_eq!(tls.ca, certs_dir.join("ca.crt"));
+        assert_eq!(
+            tls.cert.as_ref().map(|c| c.as_source()),
+            Some(certs_dir.join("server.crt").to_string_lossy().into_owned())
+        );
+        assert_eq!(
+            tls.key.as_ref().map(|c| c.as_source()),
+            Some(certs_dir.join("server.key").to_string_lossy().into_owned())
+        );
+        assert_eq!(
+            tls.ca.as_ref().map(|c| c.as_source()),
+            Some(certs_dir.join("ca.crt").to_string_lossy().into_owned())
+        );
     }
 
     #[test]
-    fn merge_server_settings_preserves_existing_git_table() {
+    fn merge_server_settings_preserves_existing_top_level_sections() {
         let mut doc: toml::Value = toml::from_str(
             r#"
-[git]
-app_id = "123"
+_version = 1
 
-[git.author]
-name = "fabro"
-email = "fabro@example.com"
+[project]
+name = "custom"
 "#,
         )
         .unwrap();
 
         merge_server_settings(&mut doc, "alice").unwrap();
 
-        let git = doc.get("git").and_then(toml::Value::as_table).unwrap();
-        assert_eq!(git.get("app_id").and_then(toml::Value::as_str), Some("123"));
-        let author = git.get("author").and_then(toml::Value::as_table).unwrap();
+        // Existing top-level [project] stays.
         assert_eq!(
-            author.get("name").and_then(toml::Value::as_str),
-            Some("fabro")
-        );
-        assert_eq!(
-            author.get("email").and_then(toml::Value::as_str),
-            Some("fabro@example.com")
-        );
-        assert_eq!(
-            doc.get("web")
+            doc.get("project")
                 .and_then(toml::Value::as_table)
-                .and_then(|web| web.get("auth"))
+                .and_then(|p| p.get("name"))
+                .and_then(toml::Value::as_str),
+            Some("custom")
+        );
+        // New server.auth.web.allowed_usernames is added.
+        assert_eq!(
+            doc.get("server")
                 .and_then(toml::Value::as_table)
-                .and_then(|auth| auth.get("allowed_usernames"))
+                .and_then(|s| s.get("auth"))
+                .and_then(toml::Value::as_table)
+                .and_then(|a| a.get("web"))
+                .and_then(toml::Value::as_table)
+                .and_then(|w| w.get("allowed_usernames"))
                 .and_then(toml::Value::as_array)
-                .and_then(|allowed| allowed.first())
+                .and_then(|u| u.first())
                 .and_then(toml::Value::as_str),
             Some("alice")
-        );
-    }
-
-    #[test]
-    fn merge_server_settings_preserves_existing_api_nested_keys() {
-        let mut doc: toml::Value = toml::from_str(
-            r#"
-[api]
-base_url = "https://example.com/api/v1"
-
-[api.extra]
-mode = "keep-me"
-"#,
-        )
-        .unwrap();
-
-        merge_server_settings(&mut doc, "alice").unwrap();
-
-        let api = doc.get("api").and_then(toml::Value::as_table).unwrap();
-        let extra = api.get("extra").and_then(toml::Value::as_table).unwrap();
-        assert_eq!(
-            extra.get("mode").and_then(toml::Value::as_str),
-            Some("keep-me")
         );
     }
 

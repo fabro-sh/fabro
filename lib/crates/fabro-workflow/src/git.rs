@@ -2,7 +2,7 @@ use std::path::Path;
 use std::process::Command;
 
 use fabro_checkpoint::git::Store;
-use fabro_types::Settings;
+use fabro_types::settings::SettingsFile;
 
 use crate::error::{FabroError, Result};
 use tokio::task::{JoinError, spawn_blocking};
@@ -15,9 +15,9 @@ pub use fabro_checkpoint::metadata::MetadataStore;
 /// Branch prefix for workflow run branches (e.g. `fabro/run/{run_id}`).
 pub const RUN_BRANCH_PREFIX: &str = "fabro/run/";
 
-pub fn git_author_from_settings(settings: &Settings) -> GitAuthor {
+pub fn git_author_from_settings(settings: &SettingsFile) -> GitAuthor {
     settings
-        .git_author()
+        .run_git_author()
         .map(GitAuthor::from)
         .unwrap_or_default()
 }

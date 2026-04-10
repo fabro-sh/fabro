@@ -339,13 +339,13 @@ impl WorkflowRunner {
             .unwrap()
             .take()
             .expect("WorkflowRunner may only be used once");
-        run_graph(
+        Box::pin(run_graph(
             registry,
             Arc::clone(&self.emitter),
             Arc::clone(&self.sandbox),
             graph,
             run_options,
-        )
+        ))
         .await
     }
 
@@ -382,14 +382,14 @@ impl WorkflowRunner {
             .unwrap()
             .take()
             .expect("WorkflowRunner may only be used once");
-        run_graph_from_checkpoint(
+        Box::pin(run_graph_from_checkpoint(
             registry,
             Arc::clone(&self.emitter),
             Arc::clone(&self.sandbox),
             graph,
             run_options,
             checkpoint,
-        )
+        ))
         .await
     }
 

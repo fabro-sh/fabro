@@ -1487,6 +1487,7 @@ dependencies = [
  "fabro-model",
  "fabro-sandbox",
  "fabro-test",
+ "fabro-types",
  "fabro-util",
  "futures",
  "glob",
@@ -1928,6 +1929,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-stream",
  "toml 0.8.23",
+ "toml_edit",
  "tower",
  "tower-http",
  "tower-service",
@@ -2059,6 +2061,8 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
+ "toml 0.8.23",
  "ulid",
 ]
 

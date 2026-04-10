@@ -24,22 +24,29 @@ Connection-target flags like `--storage-dir` and `--server` are command-specific
 CLI defaults can be set in `~/.fabro/settings.toml` so you don't have to pass common flags every time:
 
 ```toml title="settings.toml"
-[exec]
+_version = 1
+
+[cli.exec.model]
 provider = "anthropic"
-model = "claude-opus-4-6"
+name = "claude-opus-4-6"
+
+[cli.exec.agent]
 permissions = "read-write"
-output_format = "text"
 
-[llm]
-model = "claude-sonnet-4-5"
+[cli.output]
+format = "text"
 
-[server]
-target = "https://fabro.example.com:3000/api/v1"
+[run.model]
+name = "claude-sonnet-4-5"
+
+[cli.target]
+type = "http"
+url = "https://fabro.example.com:3000/api/v1"
 ```
 
-`[exec]` config applies to `fabro exec`. `[llm]` sets the default workflow model/provider for commands like `fabro run` and `fabro preflight`. `[server]` stores connection info for commands that can target a remote Fabro server.
+`[cli.exec]` config applies to `fabro exec`. `[run.model]` sets the default workflow model/provider for commands like `fabro run` and `fabro preflight`. `[cli.target]` stores connection info for commands that can target a remote Fabro server.
 
-`fabro model` uses `[server].target` by default when no explicit `--storage-dir` is passed. `fabro exec` remains a local session unless you pass `--server`, even if `[server].target` is configured.
+`fabro model` uses `[cli.target]` by default when no explicit `--storage-dir` is passed. `fabro exec` remains a local session unless you pass `--server`, even if `[cli.target]` is configured.
 
 CLI flags always override `settings.toml` values, which override hardcoded defaults.
 

@@ -3,7 +3,9 @@ use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::{Catalog, Provider};
 use fabro_sandbox::SandboxProvider;
 use fabro_store::Database;
-use fabro_types::{RunId, RunProvenance, Settings};
+use fabro_types::settings::run::{RunGoalLayer, RunLayer, RunModelLayer};
+use fabro_types::settings::{InterpString, SettingsFile};
+use fabro_types::{RunId, RunProvenance};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -26,7 +28,7 @@ use crate::event::{Event, append_event, to_run_event_at};
 #[derive(Clone, Debug)]
 pub struct CreateRunInput {
     pub workflow: WorkflowInput,
-    pub settings: Settings,
+    pub settings: SettingsFile,
     pub cwd: PathBuf,
     pub workflow_slug: Option<String>,
     pub workflow_path: Option<PathBuf>,
@@ -48,7 +50,7 @@ pub struct CreatedRun {
 }
 
 struct PersistCreateOptions {
-    settings: Settings,
+    settings: SettingsFile,
     run_id: Option<RunId>,
     run_dir: Option<PathBuf>,
     workflow_slug: Option<String>,
@@ -125,7 +127,7 @@ pub async fn create(store: &Database, request: CreateRunInput) -> Result<Created
             run_id: Some(run_id),
             run_dir: Some(run_dir.clone()),
             workflow_slug: workflow_slug.or(resolved.workflow_slug.clone()),
-            labels: resolved.settings.labels.clone(),
+            labels: resolved.settings.all_labels(),
             base_branch,
             working_directory,
             host_repo_path,
@@ -247,9 +249,9 @@ fn store_error(err: impl std::fmt::Display) -> FabroError {
     FabroError::engine(err.to_string())
 }
 
-fn validate_sandbox_provider(settings: &Settings) -> Result<(), FabroError> {
+fn validate_sandbox_provider(settings: &SettingsFile) -> Result<(), FabroError> {
     if let Some(provider) = settings
-        .sandbox_settings()
+        .run_sandbox()
         .and_then(|sandbox| sandbox.provider.as_deref())
     {
         provider
@@ -290,12 +292,11 @@ pub(super) fn preprocess_and_validate(
     current_dir: Option<PathBuf>,
     file_resolver: Option<Arc<dyn FileResolver>>,
     custom_transforms: Vec<Box<dyn Transform>>,
-    settings: Option<&Settings>,
+    settings: Option<&SettingsFile>,
     goal_override: Option<&str>,
 ) -> Result<Validated, FabroError> {
-    let source = match settings.and_then(|resolved| resolved.vars.as_ref()) {
-        Some(vars) => {
-            let mut vars = vars.clone();
+    let source = match settings.and_then(SettingsFile::run_inputs_as_strings) {
+        Some(mut vars) => {
             vars.insert("goal".to_string(), "$goal".to_string());
             expand_vars(dot_source, &vars)
                 .map_err(|e| FabroError::Parse(format!("var expansion failed: {e}")))?
@@ -372,28 +373,32 @@ fn persist_validated(
     )
 }
 
-pub(crate) fn resolve_run_settings(mut settings: Settings, graph: &Graph) -> Settings {
-    let llm_settings = settings.llm.as_ref();
-    let configured_model = llm_settings.and_then(|l| l.model.as_deref());
-    let configured_provider = llm_settings.and_then(|l| l.provider.as_deref());
-    let graph_provider = graph.attrs.get("default_provider").and_then(|v| v.as_str());
-    let graph_model = graph.attrs.get("default_model").and_then(|v| v.as_str());
+pub(crate) fn resolve_run_settings(mut settings: SettingsFile, graph: &Graph) -> SettingsFile {
+    let configured_model = settings.run_model_name_str();
+    let configured_provider = settings.run_model_provider_str();
+    let graph_provider = graph
+        .attrs
+        .get("default_provider")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let graph_model = graph
+        .attrs
+        .get("default_model")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
 
-    let provider = configured_provider.or(graph_provider).map(str::to_string);
+    let provider = configured_provider.or(graph_provider);
 
-    let model = configured_model.or(graph_model).map_or_else(
-        || {
-            let catalog = Catalog::builtin();
-            provider
-                .as_deref()
-                .and_then(|value| value.parse::<Provider>().ok())
-                .and_then(|provider| catalog.default_for_provider(provider))
-                .unwrap_or_else(|| catalog.default_from_env())
-                .id
-                .clone()
-        },
-        str::to_string,
-    );
+    let model = configured_model.or(graph_model).unwrap_or_else(|| {
+        let catalog = Catalog::builtin();
+        provider
+            .as_deref()
+            .and_then(|value| value.parse::<Provider>().ok())
+            .and_then(|provider| catalog.default_for_provider(provider))
+            .unwrap_or_else(|| catalog.default_from_env())
+            .id
+            .clone()
+    });
 
     let (resolved_model, resolved_provider) = match Catalog::builtin().get(&model) {
         Some(info) => (
@@ -403,16 +408,26 @@ pub(crate) fn resolve_run_settings(mut settings: Settings, graph: &Graph) -> Set
         None => (model, provider),
     };
 
-    let llm = settings.llm.get_or_insert_default();
-    llm.model = Some(resolved_model);
-    llm.provider = resolved_provider;
+    let run = settings.run.get_or_insert_with(RunLayer::default);
+    let model_layer = run.model.get_or_insert_with(RunModelLayer::default);
+    model_layer.name = Some(InterpString::parse(&resolved_model));
+    model_layer.provider = resolved_provider.as_deref().map(InterpString::parse);
 
     let goal = graph.goal().to_string();
-    settings.goal = if goal.is_empty() { None } else { Some(goal) };
-    settings.pull_request = settings
+    run.goal = if goal.is_empty() {
+        None
+    } else {
+        Some(RunGoalLayer::Inline(InterpString::parse(&goal)))
+    };
+    // Strip disabled pull_request entries so downstream consumers can
+    // treat `Some(_)` as "PR creation is on".
+    if run
         .pull_request
-        .take()
-        .filter(|pull_request| pull_request.enabled);
+        .as_ref()
+        .is_some_and(|pr| !pr.enabled.unwrap_or(false))
+    {
+        run.pull_request = None;
+    }
 
     settings
 }
@@ -449,7 +464,7 @@ mod tests {
         ))
     }
 
-    fn validate_dot(dot_source: &str, settings: Settings) -> Validated {
+    fn validate_dot(dot_source: &str, settings: SettingsFile) -> Validated {
         validate(ValidateInput {
             workflow: WorkflowInput::DotSource {
                 source: dot_source.to_string(),
@@ -471,7 +486,7 @@ mod tests {
 
     #[test]
     fn validate_minimal() {
-        let validated = validate_dot(MINIMAL_DOT, Settings::default());
+        let validated = validate_dot(MINIMAL_DOT, SettingsFile::default());
         validated.raise_on_errors().unwrap();
 
         assert_eq!(validated.graph().name, "Test");
@@ -488,7 +503,7 @@ mod tests {
             exit  [shape=Msquare]
             start -> work -> exit
         }"#;
-        let validated = validate_dot(dot, Settings::default());
+        let validated = validate_dot(dot, SettingsFile::default());
         validated.raise_on_errors().unwrap();
 
         let prompt = validated.graph().nodes["work"]
@@ -526,7 +541,7 @@ mod tests {
             exit  [shape=Msquare]
             start -> work -> exit
         }"#;
-        let validated = validate_dot(dot, Settings::default());
+        let validated = validate_dot(dot, SettingsFile::default());
         validated.raise_on_errors().unwrap();
 
         assert_eq!(
@@ -544,14 +559,19 @@ mod tests {
             exit [shape=Msquare]
             start -> work -> exit
         }"#;
-        let validated = validate_dot(
-            dot,
-            Settings {
-                vars: Some(HashMap::from([("who".to_string(), "agent".to_string())])),
-                goal: Some("override".to_string()),
-                ..Default::default()
-            },
-        );
+        let validated = validate_dot(dot, {
+            use fabro_types::settings::run::{RunGoalLayer, RunLayer};
+            let mut inputs = std::collections::HashMap::new();
+            inputs.insert("who".to_string(), toml::Value::String("agent".to_string()));
+            SettingsFile {
+                run: Some(RunLayer {
+                    goal: Some(RunGoalLayer::Inline(InterpString::parse("override"))),
+                    inputs: Some(inputs),
+                    ..RunLayer::default()
+                }),
+                ..SettingsFile::default()
+            }
+        });
         validated.raise_on_errors().unwrap();
 
         assert_eq!(validated.graph().goal(), "override");
@@ -570,7 +590,7 @@ mod tests {
                 source: "not a graph".to_string(),
                 base_dir: None,
             },
-            settings: Settings::default(),
+            settings: SettingsFile::default(),
             cwd: PathBuf::from("."),
             custom_transforms: Vec::new(),
         });
@@ -583,7 +603,7 @@ mod tests {
             graph [goal="Test"]
             work [label="Work"]
         }"#;
-        let validated = validate_dot(dot, Settings::default());
+        let validated = validate_dot(dot, SettingsFile::default());
 
         assert!(validated.has_errors());
         assert!(validated.raise_on_errors().is_err());
@@ -610,7 +630,7 @@ mod tests {
                 source: MINIMAL_DOT.to_string(),
                 base_dir: None,
             },
-            settings: Settings::default(),
+            settings: SettingsFile::default(),
             cwd: PathBuf::from("."),
             custom_transforms: vec![Box::new(TagTransform)],
         })
@@ -643,7 +663,7 @@ mod tests {
 
         let validated = validate(ValidateInput {
             workflow: WorkflowInput::Path(dot_path),
-            settings: Settings::default(),
+            settings: SettingsFile::default(),
             cwd: dir.path().to_path_buf(),
             custom_transforms: Vec::new(),
         })
@@ -679,7 +699,7 @@ mod tests {
                     (PathBuf::from("prompts/lint.md"), "Lint $goal".to_string()),
                 ]),
             }),
-            settings: Settings::default(),
+            settings: SettingsFile::default(),
             cwd: PathBuf::from("."),
             custom_transforms: Vec::new(),
         })
@@ -710,7 +730,7 @@ mod tests {
                     source: dot.to_string(),
                     base_dir: None,
                 },
-                settings: Settings::default(),
+                settings: SettingsFile::default(),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: None,
                 workflow_path: None,
@@ -745,20 +765,33 @@ mod tests {
                     source: MINIMAL_DOT.to_string(),
                     base_dir: None,
                 },
-                settings: Settings {
-                    llm: Some(fabro_config::run::LlmSettings {
-                        model: Some("sonnet".to_string()),
-                        provider: None,
-                        fallbacks: None,
-                    }),
-                    pull_request: Some(fabro_config::run::PullRequestSettings {
-                        enabled: false,
-                        ..Default::default()
-                    }),
-                    goal: Some("override goal".to_string()),
-                    dry_run: Some(true),
-                    labels: HashMap::from([("env".to_string(), "test".to_string())]),
-                    ..Default::default()
+                settings: {
+                    use fabro_types::settings::run::{
+                        RunExecutionLayer, RunGoalLayer, RunLayer, RunMode, RunModelLayer,
+                        RunPullRequestLayer,
+                    };
+                    let mut metadata = HashMap::new();
+                    metadata.insert("env".to_string(), "test".to_string());
+                    SettingsFile {
+                        run: Some(RunLayer {
+                            goal: Some(RunGoalLayer::Inline(InterpString::parse("override goal"))),
+                            metadata,
+                            model: Some(RunModelLayer {
+                                name: Some(InterpString::parse("sonnet")),
+                                ..RunModelLayer::default()
+                            }),
+                            pull_request: Some(RunPullRequestLayer {
+                                enabled: Some(false),
+                                ..RunPullRequestLayer::default()
+                            }),
+                            execution: Some(RunExecutionLayer {
+                                mode: Some(RunMode::DryRun),
+                                ..RunExecutionLayer::default()
+                            }),
+                            ..RunLayer::default()
+                        }),
+                        ..SettingsFile::default()
+                    }
                 },
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: Some("slug".to_string()),
@@ -782,9 +815,8 @@ mod tests {
                 .persisted
                 .run_record()
                 .settings
-                .llm
-                .as_ref()
-                .and_then(|llm| llm.model.as_deref()),
+                .run_model_name_str()
+                .as_deref(),
             Some("claude-sonnet-4-6")
         );
         assert_eq!(
@@ -792,13 +824,17 @@ mod tests {
                 .persisted
                 .run_record()
                 .settings
-                .llm
-                .as_ref()
-                .and_then(|llm| llm.provider.as_deref()),
+                .run_model_provider_str()
+                .as_deref(),
             Some("anthropic")
         );
         assert_eq!(
-            created.persisted.run_record().settings.goal.as_deref(),
+            created
+                .persisted
+                .run_record()
+                .settings
+                .run_goal_inline_str()
+                .as_deref(),
             Some("override goal")
         );
         assert!(
@@ -806,7 +842,7 @@ mod tests {
                 .persisted
                 .run_record()
                 .settings
-                .pull_request
+                .run_pull_request()
                 .is_none()
         );
         assert_eq!(
@@ -836,10 +872,19 @@ mod tests {
                     source: MINIMAL_DOT.to_string(),
                     base_dir: None,
                 },
-                settings: Settings {
-                    work_dir: Some("workspace".to_string()),
-                    dry_run: Some(true),
-                    ..Default::default()
+                settings: {
+                    use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
+                    SettingsFile {
+                        run: Some(RunLayer {
+                            working_dir: Some(InterpString::parse("workspace")),
+                            execution: Some(RunExecutionLayer {
+                                mode: Some(RunMode::DryRun),
+                                ..RunExecutionLayer::default()
+                            }),
+                            ..RunLayer::default()
+                        }),
+                        ..SettingsFile::default()
+                    }
                 },
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: None,
@@ -881,10 +926,7 @@ mod tests {
                     source: MINIMAL_DOT.to_string(),
                     base_dir: None,
                 },
-                settings: Settings {
-                    dry_run: Some(true),
-                    ..Default::default()
-                },
+                settings: dry_run_only_settings(),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: None,
                 workflow_path: None,
@@ -906,6 +948,41 @@ mod tests {
         );
     }
 
+    fn dry_run_only_settings() -> SettingsFile {
+        use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
+        SettingsFile {
+            run: Some(RunLayer {
+                execution: Some(RunExecutionLayer {
+                    mode: Some(RunMode::DryRun),
+                    ..RunExecutionLayer::default()
+                }),
+                ..RunLayer::default()
+            }),
+            ..SettingsFile::default()
+        }
+    }
+
+    fn dry_run_with_storage(storage_dir: &Path) -> SettingsFile {
+        use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
+        use fabro_types::settings::server::{ServerLayer, ServerStorageLayer};
+        SettingsFile {
+            run: Some(RunLayer {
+                execution: Some(RunExecutionLayer {
+                    mode: Some(RunMode::DryRun),
+                    ..RunExecutionLayer::default()
+                }),
+                ..RunLayer::default()
+            }),
+            server: Some(ServerLayer {
+                storage: Some(ServerStorageLayer {
+                    root: Some(InterpString::parse(&storage_dir.to_string_lossy())),
+                }),
+                ..ServerLayer::default()
+            }),
+            ..SettingsFile::default()
+        }
+    }
+
     #[tokio::test]
     async fn create_hydrates_run_created_event_into_store() {
         let dir = tempfile::tempdir().unwrap();
@@ -921,11 +998,7 @@ mod tests {
                     source: MINIMAL_DOT.to_string(),
                     base_dir: None,
                 },
-                settings: Settings {
-                    storage_dir: Some(storage_dir.clone()),
-                    dry_run: Some(true),
-                    ..Default::default()
-                },
+                settings: dry_run_with_storage(&storage_dir),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: Some("slug".to_string()),
                 workflow_path: None,
@@ -964,11 +1037,7 @@ mod tests {
                     source: MINIMAL_DOT.to_string(),
                     base_dir: None,
                 },
-                settings: Settings {
-                    storage_dir: Some(storage_dir.clone()),
-                    dry_run: Some(true),
-                    ..Default::default()
-                },
+                settings: dry_run_with_storage(&storage_dir),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: Some("slug".to_string()),
                 workflow_path: None,

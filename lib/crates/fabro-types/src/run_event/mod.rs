@@ -53,6 +53,15 @@ impl ActorRef {
             display: Some(login),
         }
     }
+
+    #[must_use]
+    pub fn agent(session_id: Option<String>, display: Option<String>) -> Self {
+        Self {
+            kind: ActorKind::Agent,
+            id: session_id,
+            display,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -768,7 +777,8 @@ mod tests {
 
     use serde_json::json;
 
-    use crate::{Edge, Graph, Node, RunBlobId, Settings, fixtures};
+    use crate::settings::SettingsFile;
+    use crate::{Edge, Graph, Node, RunBlobId, fixtures};
 
     use super::*;
 
@@ -819,7 +829,7 @@ mod tests {
 
     #[test]
     fn run_event_deserializes_adjacent_layout() {
-        let settings = Settings::default();
+        let settings = SettingsFile::default();
         let graph = Graph {
             name: "test".to_string(),
             nodes: HashMap::from([(
@@ -864,7 +874,7 @@ mod tests {
             "run_id": fixtures::RUN_1,
             "event": "run.created",
             "properties": {
-                "settings": Settings::default(),
+                "settings": SettingsFile::default(),
                 "graph": Graph::new("test"),
                 "labels": {},
                 "run_dir": "/tmp/run",

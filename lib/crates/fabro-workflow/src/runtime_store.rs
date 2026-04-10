@@ -113,7 +113,8 @@ mod tests {
     use fabro_store::Database;
     use fabro_types::fixtures;
     use fabro_types::run_event::RunSubmittedProps;
-    use fabro_types::{EventBody, RunEvent, Settings};
+    use fabro_types::settings::SettingsFile;
+    use fabro_types::{EventBody, RunEvent};
     use object_store::memory::InMemory;
 
     use super::RunStoreHandle;
@@ -132,7 +133,7 @@ mod tests {
     fn test_run_record() -> RunRecord {
         RunRecord {
             run_id: fixtures::RUN_1,
-            settings: Settings::default(),
+            settings: SettingsFile::default(),
             graph: Graph::new("test"),
             workflow_slug: Some("test".to_string()),
             working_directory: PathBuf::from("/tmp/test"),

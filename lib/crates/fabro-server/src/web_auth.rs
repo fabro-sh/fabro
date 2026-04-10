@@ -6,8 +6,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::{Json, Router, routing::get, routing::post};
 use cookie::{Cookie, CookieJar, Expiration, Key, SameSite, time::Duration};
-use fabro_types::Settings;
-use fabro_types::settings::{ApiAuthStrategy, GitProvider, GitSettings};
+use fabro_types::settings::{InterpString, SettingsFile};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{debug, error, info, warn};
@@ -147,11 +146,18 @@ fn json_response(status: StatusCode, body: serde_json::Value) -> Response {
     (status, Json(body)).into_response()
 }
 
-fn features_json(settings: &Settings) -> serde_json::Value {
-    let features = settings.features.clone().unwrap_or_default();
+fn features_json(settings: &SettingsFile) -> serde_json::Value {
+    let features = settings.features.as_ref();
+    let session_sandboxes = features.and_then(|f| f.session_sandboxes).unwrap_or(false);
+    // Retros in v2 live under `run.execution.retros` (positive form) rather
+    // than the top-level features stanza.
+    let retros = settings
+        .run_execution()
+        .and_then(|e| e.retros)
+        .unwrap_or(false);
     json!({
-        "session_sandboxes": features.session_sandboxes,
-        "retros": features.retros,
+        "session_sandboxes": session_sandboxes,
+        "retros": retros,
     })
 }
 
@@ -161,18 +167,22 @@ async fn login_github(State(state): State<Arc<AppState>>) -> Response {
         .read()
         .expect("settings lock poisoned")
         .clone();
-    let Some(client_id) = settings.client_id().map(str::to_string) else {
+    let Some(client_id) = settings.github_client_id_str() else {
         warn!("OAuth login failed: client_id not configured");
         return json_response(
             StatusCode::CONFLICT,
             json!({"error": "GitHub App client_id is not configured"}),
         );
     };
-    let Some(web_url) = settings.web.as_ref().map(|web| web.url.clone()) else {
-        warn!("OAuth login failed: web.url not configured");
+    let Some(web_url) = settings
+        .server_web()
+        .and_then(|w| w.url.as_ref())
+        .map(InterpString::as_source)
+    else {
+        warn!("OAuth login failed: server.web.url not configured");
         return json_response(
             StatusCode::CONFLICT,
-            json!({"error": "web.url is not configured"}),
+            json!({"error": "server.web.url is not configured"}),
         );
     };
 
@@ -228,7 +238,7 @@ async fn callback_github(
         return Redirect::to("/login").into_response();
     }
 
-    let Some(client_id) = settings.client_id().map(str::to_string) else {
+    let Some(client_id) = settings.github_client_id_str() else {
         error!("OAuth callback failed: client_id not configured");
         return json_response(
             StatusCode::CONFLICT,
@@ -242,10 +252,13 @@ async fn callback_github(
             json!({"error": "GITHUB_APP_CLIENT_SECRET is not configured"}),
         );
     };
-    let web_url = settings.web.as_ref().map_or_else(
-        || "http://localhost:3000".to_string(),
-        |web| web.url.clone(),
-    );
+    let web_url = settings
+        .server_web()
+        .and_then(|w| w.url.as_ref())
+        .map_or_else(
+            || "http://localhost:3000".to_string(),
+            InterpString::as_source,
+        );
 
     let http = reqwest::Client::new();
     let token = match http
@@ -344,9 +357,11 @@ async fn callback_github(
     };
 
     let allowed_usernames = settings
-        .web
+        .server
         .as_ref()
-        .map(|web| web.auth.allowed_usernames.clone())
+        .and_then(|s| s.auth.as_ref())
+        .and_then(|a| a.web.as_ref())
+        .map(|w| w.allowed_usernames.clone())
         .unwrap_or_default();
     if !allowed_usernames.is_empty() && !allowed_usernames.iter().any(|user| user == &profile.login)
     {
@@ -460,10 +475,7 @@ async fn setup_status(State(state): State<Arc<AppState>>) -> Response {
         .read()
         .expect("settings lock poisoned")
         .clone();
-    let configured = settings
-        .git
-        .as_ref()
-        .is_some_and(|git| git.client_id.is_some());
+    let configured = settings.github_client_id_str().is_some();
     Json(SetupStatusResponse { configured }).into_response()
 }
 
@@ -547,30 +559,26 @@ async fn setup_register(
 
     let settings_path = state.config_path.clone();
 
-    let mut settings = state
-        .settings
-        .read()
-        .expect("settings lock poisoned")
-        .clone();
-    let mut git = settings.git.clone().unwrap_or_default();
-    git.provider = GitProvider::Github;
-    git.app_id = Some(data.id.to_string());
-    git.client_id = Some(data.client_id.clone());
-    git.slug = Some(data.slug.clone());
-    settings.git = Some(git.clone());
-    if let Some(ref origin) = origin {
-        let web = settings.web.get_or_insert_default();
-        web.url.clone_from(origin);
-    }
-
+    // Edit the settings file in place via `toml_edit::DocumentMut`, which
+    // preserves existing comments, whitespace, and key ordering. The value-
+    // tree parser (`toml::Value`) would strip all of that on round-trip.
     if let Some(parent) = settings_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        if let Err(err) = std::fs::create_dir_all(parent) {
+            error!(error = %err, path = %parent.display(), "Setup register failed: could not create settings parent directory");
+            return json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({"error": format!("Failed to create settings directory: {err}")}),
+            );
+        }
     }
     let existing = std::fs::read_to_string(&settings_path).unwrap_or_default();
-    let mut doc: toml::Value = if existing.is_empty() {
-        toml::Value::Table(toml::Table::default())
+    let mut doc: toml_edit::DocumentMut = if existing.is_empty() {
+        toml_edit::DocumentMut::new()
     } else {
-        match toml::from_str(&existing).context("failed to parse existing settings config") {
+        match existing
+            .parse::<toml_edit::DocumentMut>()
+            .context("failed to parse existing settings config")
+        {
             Ok(doc) => doc,
             Err(err) => {
                 error!(error = %err, path = %settings_path.display(), "Setup register failed: could not parse settings config");
@@ -581,17 +589,14 @@ async fn setup_register(
             }
         }
     };
-    if let Err(err) = merge_settings_keys(&mut doc, &settings, &git, origin.as_deref()) {
+    if let Err(err) = merge_settings_keys(&mut doc, &data, origin.as_deref()) {
         error!(error = %err, "Setup register failed: could not merge settings");
         return json_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             json!({"error": format!("Failed to update settings config: {err}")}),
         );
     }
-    if let Err(err) = std::fs::write(
-        &settings_path,
-        toml::to_string_pretty(&doc).unwrap_or_default(),
-    ) {
+    if let Err(err) = std::fs::write(&settings_path, doc.to_string()) {
         error!(error = %err, path = %settings_path.display(), "Setup register failed: could not write settings config");
         return json_response(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -622,176 +627,232 @@ async fn setup_register(
         }
     }
 
-    {
-        let mut shared = state.settings.write().expect("settings lock poisoned");
-        *shared = settings;
+    // Re-parse the freshly-written settings file and swap it into the
+    // in-memory state so subsequent OAuth requests see the new GitHub
+    // App credentials without a server restart.
+    match fabro_config::ConfigLayer::load(&settings_path) {
+        Ok(reloaded) => {
+            let mut shared = state.settings.write().expect("settings lock poisoned");
+            *shared = reloaded.into();
+        }
+        Err(err) => {
+            error!(error = %err, path = %settings_path.display(), "Setup register failed: could not reload written settings config");
+            return json_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({"error": format!("Failed to reload settings config after write: {err}")}),
+            );
+        }
     }
 
     info!(slug = %data.slug, app_id = %data.id, "GitHub App registered successfully");
     Json(json!({"ok": true})).into_response()
 }
 
-fn root_table_mut(doc: &mut toml::Value) -> anyhow::Result<&mut toml::Table> {
-    doc.as_table_mut()
-        .ok_or_else(|| anyhow!("settings config root is not a table"))
+/// Walk dotted `path` into `doc`, creating missing intermediate tables,
+/// and return a mutable reference to the terminal table.
+///
+/// Uses `toml_edit`'s [`toml_edit::Entry::or_insert`] so existing tables
+/// keep their comments, ordering, and any sibling keys untouched.
+fn ensure_nested_table<'a>(
+    doc: &'a mut toml_edit::DocumentMut,
+    path: &[&str],
+) -> anyhow::Result<&'a mut toml_edit::Table> {
+    let mut current: &mut toml_edit::Table = doc.as_table_mut();
+    for segment in path {
+        let next = current
+            .entry(segment)
+            .or_insert(toml_edit::Item::Table(toml_edit::Table::new()));
+        current = next
+            .as_table_mut()
+            .ok_or_else(|| anyhow!("settings config [{segment}] is not a table"))?;
+    }
+    Ok(current)
 }
 
-fn ensure_table<'a>(table: &'a mut toml::Table, key: &str) -> anyhow::Result<&'a mut toml::Table> {
-    table
-        .entry(key.to_string())
-        .or_insert_with(|| toml::Value::Table(toml::Table::default()))
-        .as_table_mut()
-        .ok_or_else(|| anyhow!("settings config [{key}] is not a table"))
+/// Set a scalar value on `table[key]`, preserving any key-level decor
+/// (leading comments, blank lines) that was attached to the existing entry.
+///
+/// `toml_edit`'s default `Table::insert` replaces the entry wholesale and
+/// drops its prefix decoration, which would strip a top-of-file comment
+/// attached to a key we're updating. Copying the decor forward keeps the
+/// user's formatting intact.
+fn set_preserving_decor(table: &mut toml_edit::Table, key: &str, value: toml_edit::Item) {
+    let preserved_decor = table.key(key).map(|existing| existing.leaf_decor().clone());
+    table.insert(key, value);
+    if let (Some(decor), Some(mut updated)) = (preserved_decor, table.key_mut(key)) {
+        *updated.leaf_decor_mut() = decor;
+    }
 }
 
 fn merge_settings_keys(
-    doc: &mut toml::Value,
-    settings: &Settings,
-    git: &GitSettings,
+    doc: &mut toml_edit::DocumentMut,
+    data: &GitHubManifestConversion,
     origin: Option<&str>,
 ) -> anyhow::Result<()> {
-    let web_url = origin
-        .map(str::to_string)
-        .or_else(|| settings.web.as_ref().map(|web| web.url.clone()))
-        .unwrap_or_else(|| "http://localhost:3000".to_string());
-    let allowed = settings
-        .web
-        .as_ref()
-        .map(|web| web.auth.allowed_usernames.clone())
-        .unwrap_or_default();
-    let api = settings.api.clone().unwrap_or_default();
+    let web_url = origin.map_or_else(|| "http://localhost:3000".to_string(), str::to_string);
 
-    let root = root_table_mut(doc)?;
-    let web = ensure_table(root, "web")?;
-    web.insert("url".to_string(), toml::Value::String(web_url.clone()));
-    let auth = ensure_table(web, "auth")?;
-    auth.insert(
-        "provider".to_string(),
-        toml::Value::String("github".to_string()),
-    );
-    auth.insert(
-        "allowed_usernames".to_string(),
-        toml::Value::Array(allowed.into_iter().map(toml::Value::String).collect()),
-    );
+    // Make sure the freshly-written file is a valid v2 file. `_version` is
+    // always `1` at the moment, so skip the write entirely if it's already
+    // there -- otherwise we'd trample any top-of-file comment attached to
+    // the key.
+    let root = doc.as_table_mut();
+    if !root.contains_key("_version") {
+        root.insert("_version", toml_edit::value(1_i64));
+    }
 
-    let base_url = format!("{web_url}/api/v1");
-    let api_table = ensure_table(root, "api")?;
-    api_table.insert("base_url".to_string(), toml::Value::String(base_url));
-    api_table.insert(
-        "authentication_strategies".to_string(),
-        toml::Value::Array(
-            api.authentication_strategies
-                .iter()
-                .map(|strategy| match strategy {
-                    ApiAuthStrategy::Jwt => "jwt",
-                    ApiAuthStrategy::Mtls => "mtls",
-                })
-                .map(|value| toml::Value::String(value.to_string()))
-                .collect(),
-        ),
-    );
+    let web = ensure_nested_table(doc, &["server", "web"])?;
+    set_preserving_decor(web, "enabled", toml_edit::value(true));
+    set_preserving_decor(web, "url", toml_edit::value(web_url));
 
-    let git_table = ensure_table(root, "git")?;
-    git_table.insert(
-        "provider".to_string(),
-        toml::Value::String("github".to_string()),
+    // Ensure the auth subtrees exist so a freshly-registered GitHub App
+    // resolves `[server.auth.web]` / `[server.auth.api.jwt]` strategies on
+    // the next startup without a second manual edit.
+    ensure_nested_table(doc, &["server", "auth", "web"])?;
+    ensure_nested_table(doc, &["server", "auth", "api", "jwt"])?;
+
+    let github = ensure_nested_table(doc, &["server", "integrations", "github"])?;
+    set_preserving_decor(github, "app_id", toml_edit::value(data.id.to_string()));
+    set_preserving_decor(
+        github,
+        "client_id",
+        toml_edit::value(data.client_id.clone()),
     );
-    git_table.insert(
-        "app_id".to_string(),
-        toml::Value::String(git.app_id.clone().unwrap_or_default()),
-    );
-    git_table.insert(
-        "client_id".to_string(),
-        toml::Value::String(git.client_id.clone().unwrap_or_default()),
-    );
-    git_table.insert(
-        "slug".to_string(),
-        toml::Value::String(git.slug.clone().unwrap_or_default()),
-    );
+    set_preserving_decor(github, "slug", toml_edit::value(data.slug.clone()));
 
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::merge_settings_keys;
-    use fabro_types::Settings;
+    use super::{GitHubManifestConversion, merge_settings_keys};
+
+    fn sample_conversion() -> GitHubManifestConversion {
+        GitHubManifestConversion {
+            id: 123,
+            slug: "fabro".to_string(),
+            client_id: "abc".to_string(),
+            client_secret: "shh".to_string(),
+            pem: String::new(),
+            webhook_secret: None,
+        }
+    }
+
+    fn parse_doc(source: &str) -> toml_edit::DocumentMut {
+        source
+            .parse::<toml_edit::DocumentMut>()
+            .expect("fixture should parse as TOML")
+    }
 
     #[test]
-    fn merge_settings_keys_preserves_unrelated_git_nested_keys() {
-        let mut doc: toml::Value = toml::from_str(
-            r#"
-[git]
-provider = "github"
+    fn merge_settings_keys_writes_v2_server_integrations_github() {
+        let mut doc = parse_doc("_version = 1\n");
+        merge_settings_keys(&mut doc, &sample_conversion(), Some("https://example.test")).unwrap();
 
-[git.author]
-name = "fabro"
-email = "fabro@example.com"
+        let github = doc["server"]["integrations"]["github"]
+            .as_table()
+            .expect("server.integrations.github should exist");
+        assert_eq!(github["app_id"].as_str(), Some("123"));
+        assert_eq!(github["slug"].as_str(), Some("fabro"));
+        assert_eq!(github["client_id"].as_str(), Some("abc"));
 
-[git.webhooks]
-strategy = "tailscale_funnel"
-"#,
-        )
-        .unwrap();
+        let web = doc["server"]["web"]
+            .as_table()
+            .expect("server.web should exist");
+        assert_eq!(web["url"].as_str(), Some("https://example.test"));
+        assert_eq!(web["enabled"].as_bool(), Some(true));
 
-        let mut settings = Settings::default();
-        settings.web.get_or_insert_default().auth.allowed_usernames = vec!["alice".to_string()];
-        settings.git.get_or_insert_default().provider = fabro_config::server::GitProvider::Github;
-        settings.git.get_or_insert_default().app_id = Some("123".to_string());
-        settings.git.get_or_insert_default().client_id = Some("abc".to_string());
-        settings.git.get_or_insert_default().slug = Some("fabro".to_string());
-
-        merge_settings_keys(&mut doc, &settings, settings.git.as_ref().unwrap(), None).unwrap();
-
-        let git = doc.get("git").and_then(toml::Value::as_table).unwrap();
-        assert_eq!(git.get("app_id").and_then(toml::Value::as_str), Some("123"));
-        let author = git.get("author").and_then(toml::Value::as_table).unwrap();
+        // Re-parse the emitted document to prove it round-trips into a
+        // valid v2 `SettingsFile`.
+        let emitted = doc.to_string();
+        let file = fabro_config::ConfigLayer::parse(&emitted)
+            .expect("merged output should parse as a v2 SettingsFile");
+        let server = file
+            .as_v2()
+            .server
+            .as_ref()
+            .expect("[server] should be present");
+        let integrations = server
+            .integrations
+            .as_ref()
+            .expect("[server.integrations] should be present");
+        let github = integrations
+            .github
+            .as_ref()
+            .expect("[server.integrations.github] should be present");
         assert_eq!(
-            author.get("name").and_then(toml::Value::as_str),
-            Some("fabro")
-        );
-        let webhooks = git.get("webhooks").and_then(toml::Value::as_table).unwrap();
-        assert_eq!(
-            webhooks.get("strategy").and_then(toml::Value::as_str),
-            Some("tailscale_funnel")
+            github.app_id.as_ref().map(|s| s.as_source()),
+            Some("123".to_string())
         );
     }
 
     #[test]
-    fn merge_settings_keys_preserves_unrelated_top_level_sections() {
-        let mut doc: toml::Value = toml::from_str(
-            r#"
-[exec]
-provider = "anthropic"
+    fn merge_settings_keys_preserves_comments_and_unrelated_keys() {
+        let existing = r##"# Top-of-file comment explaining the settings layout.
+_version = 1
 
-[server]
-target = "https://fabro.example.com/api/v1"
-"#,
+# Storage root comment — should survive the edit.
+[server.storage]
+root = "/srv/fabro-data"
+
+# A pre-existing integration that is NOT github.
+[server.integrations.slack]
+default_channel = "#ops"
+
+[run.model]
+provider = "anthropic"
+name = "claude-sonnet"
+"##;
+        let mut doc = parse_doc(existing);
+        merge_settings_keys(
+            &mut doc,
+            &sample_conversion(),
+            Some("https://fabro.example"),
         )
         .unwrap();
 
-        let mut settings = Settings::default();
-        settings.web.get_or_insert_default().auth.allowed_usernames = vec!["alice".to_string()];
-        settings.git.get_or_insert_default().provider = fabro_config::server::GitProvider::Github;
-        settings.git.get_or_insert_default().app_id = Some("123".to_string());
-        settings.git.get_or_insert_default().client_id = Some("abc".to_string());
-        settings.git.get_or_insert_default().slug = Some("fabro".to_string());
+        let emitted = doc.to_string();
 
-        merge_settings_keys(&mut doc, &settings, settings.git.as_ref().unwrap(), None).unwrap();
+        // Comments must survive the round-trip.
+        assert!(
+            emitted.contains("# Top-of-file comment explaining the settings layout."),
+            "top-of-file comment was stripped:\n{emitted}"
+        );
+        assert!(
+            emitted.contains("# Storage root comment — should survive the edit."),
+            "inline table comment was stripped:\n{emitted}"
+        );
+        assert!(
+            emitted.contains("# A pre-existing integration that is NOT github."),
+            "sibling-table comment was stripped:\n{emitted}"
+        );
 
-        assert_eq!(
-            doc.get("exec")
-                .and_then(toml::Value::as_table)
-                .and_then(|exec| exec.get("provider"))
-                .and_then(toml::Value::as_str),
-            Some("anthropic")
+        // Unrelated keys must still be intact.
+        assert!(
+            emitted.contains(r#"root = "/srv/fabro-data""#),
+            "server.storage.root was lost:\n{emitted}"
         );
-        assert_eq!(
-            doc.get("server")
-                .and_then(toml::Value::as_table)
-                .and_then(|server| server.get("target"))
-                .and_then(toml::Value::as_str),
-            Some("https://fabro.example.com/api/v1")
+        assert!(
+            emitted.contains(r##"default_channel = "#ops""##),
+            "server.integrations.slack.default_channel was lost:\n{emitted}"
         );
+        assert!(
+            emitted.contains(r#"provider = "anthropic""#),
+            "run.model.provider was lost:\n{emitted}"
+        );
+
+        // And the new keys must be present.
+        assert!(
+            emitted.contains(r#"app_id = "123""#),
+            "server.integrations.github.app_id missing:\n{emitted}"
+        );
+        assert!(
+            emitted.contains(r#"url = "https://fabro.example""#),
+            "server.web.url missing:\n{emitted}"
+        );
+
+        // Finally, the whole thing must still parse as a valid v2
+        // SettingsFile.
+        fabro_config::ConfigLayer::parse(&emitted)
+            .expect("merged output should still parse as v2 after the edit");
     }
 }

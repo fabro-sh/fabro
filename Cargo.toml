@@ -53,6 +53,7 @@ mime_guess = "2"
 indicatif = "0.18"
 termimad = "0.34"
 toml = "0.8"
+toml_edit = "0.22"
 jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 hmac = "0.12"
 sha2 = "0.10"

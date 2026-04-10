@@ -152,25 +152,29 @@ If the server marks the result as an error (`is_error: true`), the tool result i
 A workflow that uses Playwright MCP to automate a browser inside a Daytona sandbox:
 
 ```toml title="run.toml"
-version = 1
-goal = "Test the login page"
+_version = 1
+
+[workflow]
 graph = "workflow.fabro"
 
-[sandbox]
+[run]
+goal = "Test the login page"
+
+[run.sandbox]
 provider = "daytona"
 
-[sandbox.daytona.snapshot]
+[run.sandbox.daytona.snapshot]
 name = "daytona-medium"
 
-[artifacts]
+[run.artifacts]
 include = ["screenshots/**"]
 
-[mcp_servers.playwright]
+[run.agent.mcps.playwright]
 type = "sandbox"
 command = ["npx", "@playwright/mcp@latest", "--port", "3100", "--headless", "--browser", "chromium"]
 port = 3100
-startup_timeout_secs = 60
-tool_timeout_secs = 120
+startup_timeout = "60s"
+tool_timeout = "2m"
 ```
 
 After startup, the agent sees 22 Playwright tools including:

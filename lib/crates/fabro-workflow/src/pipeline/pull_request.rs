@@ -1,4 +1,4 @@
-use fabro_config::run::MergeStrategy;
+use crate::config::MergeStrategy;
 use fabro_store::RunProjection;
 use fabro_types::PullRequestRecord;
 use tracing::{debug, info};
@@ -595,7 +595,8 @@ mod tests {
         AggregateStats, FrictionKind, FrictionPoint, OpenItem, OpenItemKind, StageRetro,
     };
     use fabro_store::Database;
-    use fabro_types::{BilledTokenCounts, RunRecord, Settings, fixtures};
+    use fabro_types::settings::SettingsFile;
+    use fabro_types::{BilledTokenCounts, RunRecord, fixtures};
     use futures::stream;
     use object_store::memory::InMemory;
     use std::time::Duration;
@@ -1082,7 +1083,7 @@ mod tests {
 
         let run_record = RunRecord {
             run_id: fixtures::RUN_1,
-            settings: Settings::default(),
+            settings: SettingsFile::default(),
             graph: Graph::new("test"),
             workflow_slug: Some("test".to_string()),
             working_directory: PathBuf::from("/tmp/project"),
@@ -1155,7 +1156,7 @@ mod tests {
 
         let run_record = RunRecord {
             run_id: fixtures::RUN_1,
-            settings: Settings::default(),
+            settings: SettingsFile::default(),
             graph: Graph::new("test"),
             workflow_slug: Some("test".to_string()),
             working_directory: PathBuf::from("/tmp/project"),
@@ -1381,7 +1382,7 @@ mod tests {
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         let run_record = RunRecord {
             run_id: fixtures::RUN_1,
-            settings: Settings::default(),
+            settings: SettingsFile::default(),
             graph: Graph::new("test"),
             workflow_slug: None,
             working_directory: tmp.path().to_path_buf(),

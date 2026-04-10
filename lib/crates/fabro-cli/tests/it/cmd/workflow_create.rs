@@ -79,7 +79,7 @@ fn workflow_create_writes_scaffold_files() {
         std::fs::read_to_string(project.fabro_root.join("workflows/hello-world/workflow.toml"))
             .unwrap(),
         @r###"
-    version = 1
+    _version = 1
     "###
     );
 }
@@ -125,7 +125,7 @@ fn workflow_create_rejects_existing_workflow() {
     std::fs::create_dir_all(project.fabro_root.join("workflows/existing")).unwrap();
     std::fs::write(
         project.fabro_root.join("workflows/existing/workflow.toml"),
-        "version = 1\n",
+        "_version = 1\n",
     )
     .unwrap();
 
@@ -163,7 +163,7 @@ fn workflow_create_json_uses_resolved_custom_root_paths() {
     let project_dir = context.temp_dir.join("project");
     context.write_temp(
         "project/fabro.toml",
-        "version = 1\n[fabro]\nroot = \"custom/fabro-data\"\n",
+        "_version = 1\n\n[project]\ndirectory = \"custom/fabro-data\"\n",
     );
 
     let output = context

@@ -26,7 +26,7 @@ fabro run workflow.fabro --sandbox daytona
 
 ```toml title="run.toml"
 # Run config TOML
-[sandbox]
+[run.sandbox]
 provider = "daytona"
 ```
 
@@ -94,7 +94,7 @@ fabro run workflow.fabro --sandbox docker --preserve-sandbox
 Or in the run config:
 
 ```toml title="run.toml"
-[sandbox]
+[run.sandbox]
 provider = "docker"
 preserve = true
 ```
@@ -123,17 +123,17 @@ The Daytona sandbox runs all tool operations inside a cloud-hosted VM managed by
 Snapshots let you pre-build an environment image so each run starts with dependencies already installed. If the named snapshot doesn't exist and a `dockerfile` is provided, Fabro creates it automatically and polls until it's ready (up to 10 minutes).
 
 ```toml title="run.toml"
-[sandbox]
+[run.sandbox]
 provider = "daytona"
 
-[sandbox.daytona]
+[run.sandbox.daytona]
 auto_stop_interval = 60
 
-[sandbox.daytona.snapshot]
+[run.sandbox.daytona.snapshot]
 name = "rust-dev"
 cpu = 4
-memory = 8
-disk = 20
+memory = "8GB"
+disk = "20GB"
 dockerfile = "FROM rust:1.85-slim-bookworm\nRUN apt-get update && apt-get install -y git ripgrep"
 ```
 
@@ -152,7 +152,7 @@ If the snapshot already exists and is in `Active` state, Fabro uses it directly.
 Attach key-value labels to sandboxes for filtering and identification in the Daytona dashboard:
 
 ```toml title="run.toml"
-[sandbox.daytona.labels]
+[run.sandbox.daytona.labels]
 project = "fabro"
 env = "ci"
 team = "platform"
@@ -185,7 +185,7 @@ Fabro prints the sandbox name so you can find it in the [Daytona dashboard](http
 The `auto_stop_interval` setting (in minutes) tells Daytona to stop the sandbox after a period of inactivity. This saves costs for long-running sandboxes that may sit idle:
 
 ```toml title="run.toml"
-[sandbox.daytona]
+[run.sandbox.daytona]
 auto_stop_interval = 30
 ```
 
@@ -215,15 +215,15 @@ Each provider handles outbound network access differently:
 | `docker` | Bridge network | Set via the `network_mode` config option. Supports all Docker network modes (`bridge`, `none`, `host`, etc.). |
 | `daytona` | Full access | Configurable via the `network` setting with three modes: `"allow_all"`, `"block"`, or CIDR-based allow lists. |
 
-For Daytona, network access is configured in the `[sandbox.daytona]` section:
+For Daytona, network access is configured in the `[run.sandbox.daytona]` section:
 
 ```toml title="run.toml"
 # Block all egress
-[sandbox.daytona]
+[run.sandbox.daytona]
 network = "block"
 
 # Allow only specific CIDRs
-[sandbox.daytona]
+[run.sandbox.daytona]
 network = { allow_list = ["208.80.154.232/32", "10.0.0.0/8"] }
 ```
 

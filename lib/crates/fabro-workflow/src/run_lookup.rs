@@ -5,7 +5,8 @@ use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use fabro_config::Storage;
 use fabro_store::{Database, RunSummary};
-use fabro_types::{RunId, Settings};
+use fabro_types::RunId;
+use fabro_types::settings::SettingsFile;
 use serde::Serialize;
 
 use crate::operations::make_run_dir;
@@ -141,7 +142,7 @@ pub fn scratch_base(storage_dir: &Path) -> PathBuf {
 }
 
 pub fn default_scratch_base() -> PathBuf {
-    scratch_base(&Settings::default().storage_dir())
+    scratch_base(&SettingsFile::default().storage_dir())
 }
 
 fn scan_orphan_runs(base: &Path) -> Result<Vec<RunInfo>> {
@@ -396,7 +397,8 @@ mod tests {
 
     use fabro_graphviz::graph::Graph;
     use fabro_store::Database;
-    use fabro_types::{RunStatus, Settings, fixtures};
+    use fabro_types::settings::SettingsFile;
+    use fabro_types::{RunStatus, fixtures};
     use object_store::memory::InMemory;
 
     use super::scan_runs_combined;
@@ -415,7 +417,7 @@ mod tests {
     fn sample_run_record() -> RunRecord {
         RunRecord {
             run_id: fixtures::RUN_1,
-            settings: Settings::default(),
+            settings: SettingsFile::default(),
             graph: Graph::new("test"),
             workflow_slug: Some("test".to_string()),
             working_directory: PathBuf::from("/tmp/project"),

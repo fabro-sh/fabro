@@ -4,7 +4,8 @@ import { DocumentTextIcon, MapIcon } from "@heroicons/react/24/outline";
 import { CollapsibleFile } from "../components/collapsible-file";
 import { apiJson } from "../api";
 import { formatDurationSecs } from "../lib/format";
-import type { PaginatedRunStageList, RunSettings } from "@qltysh/fabro-api-client";
+import type { PaginatedRunStageList } from "@qltysh/fabro-api-client";
+import type { RunSettings } from "../lib/workflow-api";
 
 export const handle = { wide: true };
 

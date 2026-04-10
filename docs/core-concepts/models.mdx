@@ -92,16 +92,17 @@ These flags set the default model for all nodes that don't have an explicit mode
 For repeatable runs, set the model in a run config file:
 
 ```toml title="run.toml"
-version = 1
-goal = "Implement the feature"
+_version = 1
+
+[workflow]
 graph = "implement.fabro"
 
-[llm]
-model = "claude-sonnet-4-5"
+[run]
+goal = "Implement the feature"
 
-[llm.fallbacks]
-anthropic = ["gemini", "openai"]
-gemini = ["anthropic", "openai"]
+[run.model]
+name = "claude-sonnet-4-5"
+fallbacks = ["gemini", "openai"]
 ```
 
 Then launch with:
@@ -110,7 +111,7 @@ Then launch with:
 fabro run run.toml
 ```
 
-The `[llm.fallbacks]` table is optional. It maps each provider to an ordered list of fallback providers to try when the primary is unavailable.
+The `fallbacks` array is optional. Each entry may be a bare provider token (like `"gemini"`), a bare model alias (like `"gpt-5.4"`), or a qualified `"provider/model"` reference. Fabro tries them in order when the primary provider is unavailable.
 
 <Note>
 The precedence order is: node-level stylesheet > run config TOML > CLI flags > server defaults. More specific settings always win.

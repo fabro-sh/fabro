@@ -25,6 +25,7 @@ workspace = true
 clap.workspace = true
 anyhow.workspace = true
 fabro-config = { path = "../fabro-config", features = ["clap"] }
+fabro-types = { path = "../fabro-types" }
 fabro-llm = { path = "../fabro-llm" }
 fabro-model = { path = "../fabro-model" }
 fabro-mcp = { path = "../fabro-mcp" }

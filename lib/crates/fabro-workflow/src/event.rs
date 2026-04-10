@@ -5,8 +5,8 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use ::fabro_types::run_event as fabro_types;
 use ::fabro_types::{
-    ActorKind, ActorRef, BilledTokenCounts, ParallelBranchId, RunBlobId, RunControlAction,
-    RunEvent, RunId, RunProvenance, StageId, StageStatus, StatusReason,
+    ActorRef, BilledTokenCounts, ParallelBranchId, RunBlobId, RunControlAction, RunEvent, RunId,
+    RunProvenance, StageId, StageStatus, StatusReason,
 };
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -1141,6 +1141,7 @@ impl Event {
     }
 }
 
+#[must_use]
 pub fn event_name(event: &Event) -> &'static str {
     match event {
         Event::RunCreated { .. } => "run.created",
@@ -1453,11 +1454,10 @@ fn agent_tool_call_id(event: &AgentEvent) -> Option<&str> {
 
 fn agent_actor_for_event(event: &AgentEvent, session_id: Option<&str>) -> Option<ActorRef> {
     match event {
-        AgentEvent::AssistantMessage { model, .. } => Some(ActorRef {
-            kind: ActorKind::Agent,
-            id: session_id.map(str::to_string),
-            display: Some(model.clone()),
-        }),
+        AgentEvent::AssistantMessage { model, .. } => Some(ActorRef::agent(
+            session_id.map(str::to_string),
+            Some(model.clone()),
+        )),
         _ => None,
     }
 }
@@ -2487,7 +2487,7 @@ impl StageScope {
     }
 
     /// Build scope for a handler invocation. Prefers the `current_stage_scope`
-    /// seeded by the fidelity lifecycle before_attempt hook, and falls back to
+    /// seeded by the fidelity lifecycle `before_node` hook, and falls back to
     /// synthesizing one from `node_id` for direct-handler call sites (tests,
     /// etc.) that don't go through the full lifecycle.
     pub fn for_handler(context: &WfContext, node_id: impl Into<String>) -> Self {
@@ -2495,12 +2495,38 @@ impl StageScope {
             .current_stage_scope()
             .unwrap_or_else(|| Self::from_context(context, node_id))
     }
+
+    /// Build scope for the branch-lifecycle events emitted by the parallel
+    /// handler (`ParallelBranchStarted`, `ParallelBranchCompleted`, and the
+    /// pre-dispatch `GitCommit` for the branch worktree).
+    ///
+    /// `target_visit` is the visit count of `target_node_id` for this
+    /// particular branch dispatch. The parallel handler currently passes
+    /// `1` because branches haven't been re-entered yet at the point of
+    /// scope construction; a future change that loops a parallel node
+    /// must pass the actual visit so envelope `stage_id`s stay accurate.
+    #[must_use]
+    pub fn for_parallel_branch(
+        target_node_id: impl Into<String>,
+        target_visit: u32,
+        parallel_group_id: StageId,
+        parallel_branch_id: ParallelBranchId,
+    ) -> Self {
+        Self {
+            node_id: target_node_id.into(),
+            visit: target_visit,
+            parallel_group_id: Some(parallel_group_id),
+            parallel_branch_id: Some(parallel_branch_id),
+        }
+    }
 }
 
+#[must_use]
 pub fn to_run_event(run_id: &RunId, event: &Event) -> RunEvent {
     to_run_event_at(run_id, event, Utc::now(), None)
 }
 
+#[must_use]
 pub fn to_run_event_at(
     run_id: &RunId,
     event: &Event,
@@ -2846,6 +2872,7 @@ impl Emitter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ::fabro_types::ActorKind;
     use ::fabro_types::fixtures;
     use std::sync::{Arc, Mutex};
 
@@ -3394,7 +3421,8 @@ mod tests {
 
     #[test]
     fn run_created_populates_user_actor_from_provenance() {
-        use ::fabro_types::{Graph, RunAuthMethod, RunSubjectProvenance, Settings, fixtures};
+        use ::fabro_types::settings::SettingsFile;
+        use ::fabro_types::{Graph, RunAuthMethod, RunSubjectProvenance, fixtures};
 
         let provenance = RunProvenance {
             server: None,
@@ -3409,7 +3437,7 @@ mod tests {
             &fixtures::RUN_1,
             &Event::RunCreated {
                 run_id: fixtures::RUN_1,
-                settings: serde_json::to_value(Settings::default()).unwrap(),
+                settings: serde_json::to_value(SettingsFile::default()).unwrap(),
                 graph: serde_json::to_value(Graph::new("test")).unwrap(),
                 workflow_source: None,
                 workflow_config: None,

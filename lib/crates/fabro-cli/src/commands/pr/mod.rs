@@ -15,7 +15,8 @@ use crate::shared::github::build_github_app_credentials;
 
 pub(crate) async fn dispatch(ns: PrNamespace, globals: &GlobalArgs) -> Result<()> {
     let ctx = CommandContext::base()?;
-    let github_app = build_github_app_credentials(ctx.machine_settings().app_id())?;
+    let github_app =
+        build_github_app_credentials(ctx.machine_settings().github_app_id_str().as_deref())?;
     match ns.command {
         PrCommand::Create(args) => {
             Box::pin(create::create_command(args, github_app, globals)).await

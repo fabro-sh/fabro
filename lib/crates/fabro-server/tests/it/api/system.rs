@@ -3,8 +3,13 @@ use std::time::Duration;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fabro_config::Storage;
-use fabro_types::{RunId, Settings};
+use fabro_types::RunId;
+use fabro_types::settings::SettingsFile;
+use fabro_types::settings::interp::InterpString;
+use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
+use fabro_types::settings::server::{ServerLayer, ServerStorageLayer};
 use http_body_util::BodyExt;
+use std::path::PathBuf;
 use tempfile::tempdir;
 use tokio::time::timeout;
 use tower::ServiceExt;
@@ -14,12 +19,18 @@ use crate::helpers::{
     test_app_with_scheduler, test_settings, wait_for_run_status,
 };
 
-fn temp_storage_settings() -> (tempfile::TempDir, Settings) {
+fn temp_storage_settings() -> (tempfile::TempDir, SettingsFile, PathBuf) {
     let temp = tempdir().expect("tempdir should create");
     let mut settings = test_settings();
-    settings.dry_run = Some(true);
-    settings.storage_dir = Some(temp.path().join("storage"));
-    (temp, settings)
+    let storage_dir = temp.path().join("storage");
+    let run = settings.run.get_or_insert_with(RunLayer::default);
+    let execution = run.execution.get_or_insert_with(RunExecutionLayer::default);
+    execution.mode = Some(RunMode::DryRun);
+    let server = settings.server.get_or_insert_with(ServerLayer::default);
+    server.storage = Some(ServerStorageLayer {
+        root: Some(InterpString::parse(&storage_dir.to_string_lossy())),
+    });
+    (temp, settings, storage_dir)
 }
 
 async fn create_run(app: &axum::Router, manifest: serde_json::Value) -> String {
@@ -46,8 +57,7 @@ async fn start_run(app: &axum::Router, run_id: &str) {
 
 #[tokio::test]
 async fn get_system_info_returns_runtime_fields() {
-    let (_temp, settings) = temp_storage_settings();
-    let expected_storage_dir = settings.storage_dir.clone().unwrap();
+    let (_temp, settings, expected_storage_dir) = temp_storage_settings();
     let app = fabro_server::server::build_router(
         test_app_state_with_options(settings, 5),
         fabro_server::jwt_auth::AuthMode::Disabled,
@@ -75,8 +85,7 @@ async fn get_system_info_returns_runtime_fields() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn get_system_disk_usage_returns_summary_and_verbose_rows() {
-    let (_temp, settings) = temp_storage_settings();
-    let storage_dir = settings.storage_dir.clone().unwrap();
+    let (_temp, settings, storage_dir) = temp_storage_settings();
     let app = test_app_with_scheduler(test_app_state_with_options(settings, 5));
 
     let run_id = create_run(&app, minimal_manifest_json_with_dry_run(MINIMAL_DOT)).await;
@@ -108,8 +117,7 @@ async fn get_system_disk_usage_returns_summary_and_verbose_rows() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn prune_runs_supports_dry_run_and_deletion() {
-    let (_temp, settings) = temp_storage_settings();
-    let storage_dir = settings.storage_dir.clone().unwrap();
+    let (_temp, settings, storage_dir) = temp_storage_settings();
     let app = test_app_with_scheduler(test_app_state_with_options(settings, 5));
 
     let run_id = create_run(&app, minimal_manifest_json_with_dry_run(MINIMAL_DOT)).await;
@@ -154,7 +162,7 @@ async fn prune_runs_supports_dry_run_and_deletion() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn attach_events_streams_only_matching_run_ids() {
-    let (_temp, settings) = temp_storage_settings();
+    let (_temp, settings, _storage_dir) = temp_storage_settings();
     let app = test_app_with_scheduler(test_app_state_with_options(settings, 5));
 
     let run_one = create_run(&app, minimal_manifest_json_with_dry_run(MINIMAL_DOT)).await;

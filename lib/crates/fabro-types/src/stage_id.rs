@@ -76,7 +76,7 @@ impl Serialize for StageId {
     where
         S: Serializer,
     {
-        serializer.serialize_str(&self.to_string())
+        serializer.collect_str(self)
     }
 }
 
@@ -157,7 +157,7 @@ impl Serialize for ParallelBranchId {
     where
         S: Serializer,
     {
-        serializer.serialize_str(&self.to_string())
+        serializer.collect_str(self)
     }
 }
 

@@ -131,19 +131,27 @@ async fn main_inner() -> (String, Result<()>) {
                 }),
         }) = command.as_ref()
         {
-            match load_settings_config(args.config.as_deref())
-                .and_then(fabro_types::Settings::try_from)
-            {
-                Ok(server_settings) => (
-                    server_settings.log.as_ref().and_then(|l| l.level.clone()),
-                    false,
-                ),
+            match load_settings_config(args.config.as_deref()) {
+                Ok(layer) => {
+                    use fabro_types::settings::SettingsFile;
+                    let server_settings: SettingsFile = layer.into();
+                    (
+                        server_settings
+                            .server_logging()
+                            .and_then(|l| l.level.clone()),
+                        false,
+                    )
+                }
                 Err(err) => return (command_name, Err(err)),
             }
         } else {
             match user_config::load_settings() {
                 Ok(cli_settings) => (
-                    cli_settings.log.as_ref().and_then(|l| l.level.clone()),
+                    cli_settings
+                        .cli
+                        .as_ref()
+                        .and_then(|c| c.logging.as_ref())
+                        .and_then(|l| l.level.clone()),
                     cli_settings.upgrade_check_enabled(),
                 ),
                 Err(err) => return (command_name, Err(err)),
@@ -196,7 +204,7 @@ async fn main_inner() -> (String, Result<()>) {
             Commands::RunsCmd(cmd) => commands::runs::dispatch(cmd, &globals).await?,
             Commands::Model { command } => commands::model::execute(command, &globals).await?,
             Commands::Server(ns) => {
-                commands::server::dispatch(ns.command, &globals).await?;
+                Box::pin(commands::server::dispatch(ns.command, &globals)).await?;
             }
             Commands::Doctor(args) => {
                 let cli_settings = user_config::load_settings()?;
@@ -231,7 +239,9 @@ async fn main_inner() -> (String, Result<()>) {
             }
             Commands::Pr(ns) => Box::pin(commands::pr::dispatch(ns, &globals)).await?,
             Commands::Secret(ns) => commands::secret::dispatch(ns, &globals).await?,
-            Commands::Settings(args) => commands::config::execute(&args, &globals).await?,
+            Commands::Settings(args) => {
+                Box::pin(commands::config::execute(&args, &globals)).await?;
+            }
             Commands::Workflow(ns) => commands::workflow::dispatch(ns, &globals)?,
             Commands::Upgrade(args) => {
                 commands::upgrade::run_upgrade(args, &globals).await?;
