@@ -9,7 +9,76 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use super::interp::InterpString;
-use super::run::{AgentPermissions, McpEntryLayer};
+use super::run::{AgentPermissions, McpEntryLayer, McpServerSettings};
+
+/// A structurally resolved `[cli]` view for consumers.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CliSettings {
+    pub target: Option<CliTargetSettings>,
+    pub auth: CliAuthSettings,
+    pub exec: CliExecSettings,
+    pub output: CliOutputSettings,
+    pub updates: CliUpdatesSettings,
+    pub logging: CliLoggingSettings,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CliTargetSettings {
+    Http {
+        url: InterpString,
+        tls: Option<CliTargetTlsSettings>,
+    },
+    Unix {
+        path: InterpString,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CliTargetTlsSettings {
+    pub cert: InterpString,
+    pub key: InterpString,
+    pub ca: InterpString,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CliAuthSettings {
+    pub strategy: Option<CliAuthStrategy>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CliExecSettings {
+    pub prevent_idle_sleep: bool,
+    pub model: CliExecModelSettings,
+    pub agent: CliExecAgentSettings,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CliExecModelSettings {
+    pub provider: Option<InterpString>,
+    pub name: Option<InterpString>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CliExecAgentSettings {
+    pub permissions: Option<AgentPermissions>,
+    pub mcps: HashMap<String, McpServerSettings>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CliOutputSettings {
+    pub format: OutputFormat,
+    pub verbosity: OutputVerbosity,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CliUpdatesSettings {
+    pub check: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CliLoggingSettings {
+    pub level: Option<String>,
+}
 
 /// A sparse `[cli]` layer as it appears in a single settings file.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -115,17 +184,19 @@ pub struct CliOutputLayer {
     pub verbosity: Option<OutputVerbosity>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum OutputFormat {
+    #[default]
     Text,
     Json,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum OutputVerbosity {
     Quiet,
+    #[default]
     Normal,
     Verbose,
 }

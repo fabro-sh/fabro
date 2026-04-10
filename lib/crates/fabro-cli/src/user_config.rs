@@ -4,7 +4,8 @@ pub(crate) use fabro_config::user::*;
 
 use anyhow::{Result, bail};
 use fabro_config::ConfigLayer;
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::cli::CliTargetSettings;
+use fabro_types::settings::{CliSettings, SettingsFile};
 use fabro_util::version::FABRO_VERSION;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
@@ -50,6 +51,21 @@ pub(crate) fn load_settings_with_config_and_storage_dir(
     Ok(settings_layer_with_config_and_storage_dir(config_path, storage_dir)?.into())
 }
 
+fn render_resolve_errors(errors: Vec<fabro_config::ResolveError>) -> anyhow::Error {
+    anyhow::anyhow!(
+        "failed to resolve cli settings:\n{}",
+        errors
+            .into_iter()
+            .map(|error| error.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    )
+}
+
+pub(crate) fn resolve_cli_settings(file: &SettingsFile) -> anyhow::Result<CliSettings> {
+    fabro_config::resolve_cli_from_file(file).map_err(render_resolve_errors)
+}
+
 pub(crate) fn apply_storage_dir_override(
     mut layer: ConfigLayer,
     storage_dir: Option<&Path>,
@@ -77,36 +93,29 @@ pub(crate) enum ServerTarget {
     UnixSocket(PathBuf),
 }
 
-/// Pull the CLI target configuration out of the v2 `[cli.target]` stanza.
+/// Pull the resolved CLI target configuration out of `[cli.target]`.
 /// Returns `(target_string, tls)` where `target_string` is either an
-/// http(s) URL or a unix socket path. `tls` is the CLI-side client TLS
-/// settings extracted from `[cli.target.http.tls]`.
-fn cli_target_from_v2(settings: &SettingsFile) -> Option<(String, Option<ClientTlsSettings>)> {
-    use fabro_types::settings::cli::CliTargetLayer;
-    use fabro_types::settings::interp::InterpString;
-
-    let target = settings.cli.as_ref()?.target.as_ref()?;
+/// http(s) URL or a unix socket path.
+fn cli_target_from_settings(settings: &CliSettings) -> Option<(String, Option<ClientTlsSettings>)> {
+    let target = settings.target.as_ref()?;
     match target {
-        CliTargetLayer::Http { url, tls } => {
-            let url_str = url.as_ref().map(InterpString::as_source)?;
+        CliTargetSettings::Http { url, tls } => {
             let tls_settings = tls.as_ref().and_then(|tls| {
                 Some(ClientTlsSettings {
-                    cert: PathBuf::from(tls.cert.as_ref().map(InterpString::as_source)?),
-                    key: PathBuf::from(tls.key.as_ref().map(InterpString::as_source)?),
-                    ca: PathBuf::from(tls.ca.as_ref().map(InterpString::as_source)?),
+                    cert: PathBuf::from(tls.cert.as_source()),
+                    key: PathBuf::from(tls.key.as_source()),
+                    ca: PathBuf::from(tls.ca.as_source()),
                 })
             });
-            Some((url_str, tls_settings))
+            Some((url.as_source(), tls_settings))
         }
-        CliTargetLayer::Unix { path } => path
-            .as_ref()
-            .map(InterpString::as_source)
-            .map(|path_str| (path_str, None)),
+        CliTargetSettings::Unix { path } => Some((path.as_source(), None)),
     }
 }
 
 fn configured_server_target(settings: &SettingsFile) -> Result<Option<ServerTarget>> {
-    let Some((value, tls)) = cli_target_from_v2(settings) else {
+    let cli_settings = resolve_cli_settings(settings)?;
+    let Some((value, tls)) = cli_target_from_settings(&cli_settings) else {
         return Ok(None);
     };
     parse_server_target(&value, tls).map(Some)
@@ -136,9 +145,13 @@ fn explicit_server_target(
     args: &ServerTargetArgs,
     settings: &SettingsFile,
 ) -> Result<Option<ServerTarget>> {
+    let cli_settings = resolve_cli_settings(settings)?;
     args.as_deref()
         .map(|value| {
-            parse_server_target(value, cli_target_from_v2(settings).and_then(|(_, tls)| tls))
+            parse_server_target(
+                value,
+                cli_target_from_settings(&cli_settings).and_then(|(_, tls)| tls),
+            )
         })
         .transpose()
 }

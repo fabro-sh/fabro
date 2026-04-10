@@ -12,6 +12,7 @@ use fabro_types::{EventBody, RunEvent, RunId};
 use fabro_api::types;
 use fabro_interview::{AnswerValue, ConsoleInterviewer, Question, QuestionOption, QuestionType};
 use fabro_store::EventEnvelope;
+use fabro_types::settings::cli::OutputVerbosity;
 use fabro_util::json::normalize_json_value;
 use fabro_util::terminal::Styles;
 use fabro_workflow::outcome::StageStatus;
@@ -69,10 +70,11 @@ pub(crate) async fn attach_run_with_client(
             })
             .unwrap_or(false)
     });
-    let verbose = state
-        .run
-        .as_ref()
-        .is_some_and(|record| record.settings.verbose_enabled());
+    let verbose = state.run.as_ref().is_some_and(|record| {
+        fabro_config::resolve_cli_from_file(&record.settings)
+            .map(|settings| settings.output.verbosity == OutputVerbosity::Verbose)
+            .unwrap_or(false)
+    });
     let events = client.list_run_events(run_id, None, None).await?;
     let replay_events = events.clone();
     let next_seq = events.last().map_or(1, |event| event.seq.saturating_add(1));

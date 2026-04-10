@@ -24,7 +24,11 @@ pub mod tree;
 pub mod version;
 pub mod workflow;
 
-pub use cli::CliLayer;
+pub use cli::{
+    CliAuthSettings, CliExecAgentSettings, CliExecModelSettings, CliExecSettings, CliLayer,
+    CliLoggingSettings, CliOutputSettings, CliSettings, CliTargetSettings, CliTargetTlsSettings,
+    CliUpdatesSettings,
+};
 pub use duration::{Duration, ParseDurationError};
 pub use features::FeaturesLayer;
 pub use interp::{InterpString, Provenance, ResolveEnvError, Resolved};

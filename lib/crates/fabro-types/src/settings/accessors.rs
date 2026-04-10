@@ -8,7 +8,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use super::cli::{CliExecLayer, CliLayer, CliOutputLayer};
 use super::interp::InterpString;
 use super::project::ProjectLayer;
 use super::run::{
@@ -282,49 +281,6 @@ impl SettingsFile {
         self.run_sandbox()
             .and_then(|sb| sb.preserve)
             .unwrap_or(false)
-    }
-
-    // ---------- cli-scope ----------
-
-    #[must_use]
-    pub fn cli_layer(&self) -> Option<&CliLayer> {
-        self.cli.as_ref()
-    }
-
-    #[must_use]
-    pub fn cli_exec(&self) -> Option<&CliExecLayer> {
-        self.cli.as_ref().and_then(|c| c.exec.as_ref())
-    }
-
-    #[must_use]
-    pub fn cli_output(&self) -> Option<&CliOutputLayer> {
-        self.cli.as_ref().and_then(|c| c.output.as_ref())
-    }
-
-    #[must_use]
-    pub fn verbose_enabled(&self) -> bool {
-        use super::cli::OutputVerbosity;
-        matches!(
-            self.cli_output().and_then(|o| o.verbosity),
-            Some(OutputVerbosity::Verbose)
-        )
-    }
-
-    #[must_use]
-    pub fn prevent_idle_sleep_enabled(&self) -> bool {
-        self.cli_exec()
-            .and_then(|e| e.prevent_idle_sleep)
-            .unwrap_or(false)
-    }
-
-    /// Upgrade check defaults to `true` when unset.
-    #[must_use]
-    pub fn upgrade_check_enabled(&self) -> bool {
-        self.cli
-            .as_ref()
-            .and_then(|c| c.updates.as_ref())
-            .and_then(|u| u.check)
-            .unwrap_or(true)
     }
 
     // ---------- server-scope ----------
@@ -609,12 +565,6 @@ mod tests {
             file.run_model_name_str().as_deref(),
             Some("claude-sonnet-4-6")
         );
-    }
-
-    #[test]
-    fn upgrade_check_defaults_to_true_when_unset() {
-        let file = SettingsFile::default();
-        assert!(file.upgrade_check_enabled());
     }
 
     #[test]

@@ -97,7 +97,7 @@ pub(crate) async fn dispatch(cmd: RunCommands, globals: &GlobalArgs) -> Result<(
             #[cfg(feature = "sleep_inhibitor")]
             let _sleep_guard = {
                 let ctx = CommandContext::for_target(&args.server)?;
-                crate::sleep_inhibitor::guard(ctx.machine_settings().prevent_idle_sleep_enabled())
+                crate::sleep_inhibitor::guard(ctx.cli_settings().exec.prevent_idle_sleep)
             };
             resume::resume_command(args, styles, globals).await
         }

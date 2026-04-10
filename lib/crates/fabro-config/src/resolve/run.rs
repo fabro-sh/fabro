@@ -269,7 +269,7 @@ fn resolve_agent(agent: Option<&RunAgentLayer>) -> RunAgentSettings {
     }
 }
 
-fn resolve_mcp_entry(name: &str, entry: &McpEntryLayer) -> McpServerSettings {
+pub(crate) fn resolve_mcp_entry(name: &str, entry: &McpEntryLayer) -> McpServerSettings {
     let transport = match entry {
         McpEntryLayer::Stdio {
             script,

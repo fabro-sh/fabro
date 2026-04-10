@@ -18,6 +18,7 @@ use args::{Commands, GlobalArgs, LONG_VERSION, RunCommands, ServerCommand, Serve
 use clap::{CommandFactory, Parser};
 use fabro_config::user::load_settings_config;
 use fabro_telemetry::{git, panic as tel_panic, sanitize, sender};
+use fabro_types::settings::cli::OutputVerbosity;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use rustls::crypto::ring::default_provider;
@@ -145,14 +146,10 @@ async fn main_inner() -> (String, Result<()>) {
             }
         } else {
             match user_config::load_settings() {
-                Ok(cli_settings) => (
-                    cli_settings
-                        .cli
-                        .as_ref()
-                        .and_then(|c| c.logging.as_ref())
-                        .and_then(|l| l.level.clone()),
-                    cli_settings.upgrade_check_enabled(),
-                ),
+                Ok(cli_settings) => match user_config::resolve_cli_settings(&cli_settings) {
+                    Ok(resolved_cli) => (resolved_cli.logging.level, resolved_cli.updates.check),
+                    Err(err) => return (command_name, Err(err)),
+                },
                 Err(err) => return (command_name, Err(err)),
             }
         }
@@ -207,7 +204,11 @@ async fn main_inner() -> (String, Result<()>) {
             }
             Commands::Doctor(args) => {
                 let cli_settings = user_config::load_settings()?;
-                let verbose = args.verbose || cli_settings.verbose_enabled();
+                let verbose = args.verbose
+                    || user_config::resolve_cli_settings(&cli_settings)?
+                        .output
+                        .verbosity
+                        == OutputVerbosity::Verbose;
                 let exit_code = commands::doctor::run_doctor(&args, verbose, &globals).await?;
                 std::process::exit(exit_code);
             }

@@ -3,6 +3,7 @@ use fabro_agent::cli::{OutputFormat, run_with_args, run_with_args_and_client};
 use fabro_llm::client::Client;
 use fabro_llm::providers::FabroServerAdapter;
 use fabro_types::settings::InterpString;
+use fabro_types::settings::cli::OutputFormat as SettingsOutputFormat;
 use fabro_types::settings::run::McpEntryLayer;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -99,29 +100,35 @@ pub(crate) async fn execute(mut args: ExecArgs, globals: &GlobalArgs) -> Result<
     use fabro_types::settings::run::AgentPermissions;
 
     let cli_settings = user_config::load_settings()?;
+    let resolved_cli = user_config::resolve_cli_settings(&cli_settings)?;
     #[cfg(feature = "sleep_inhibitor")]
-    let _sleep_guard = crate::sleep_inhibitor::guard(cli_settings.prevent_idle_sleep_enabled());
-    let exec_defaults = cli_settings.cli_exec();
-    let exec_model = exec_defaults.and_then(|e| e.model.as_ref());
-    let exec_agent = exec_defaults.and_then(|e| e.agent.as_ref());
-    let provider_str = exec_model
-        .and_then(|m| m.provider.as_ref())
+    let _sleep_guard = crate::sleep_inhibitor::guard(resolved_cli.exec.prevent_idle_sleep);
+    let provider_str = resolved_cli
+        .exec
+        .model
+        .provider
+        .as_ref()
         .map(InterpString::as_source);
-    let model_str = exec_model
-        .and_then(|m| m.name.as_ref())
+    let model_str = resolved_cli
+        .exec
+        .model
+        .name
+        .as_ref()
         .map(InterpString::as_source);
-    let permissions = exec_agent
-        .and_then(|agent| agent.permissions)
-        .map(|p| match p {
-            AgentPermissions::ReadOnly => AgentPermissionLevel::ReadOnly,
-            AgentPermissions::ReadWrite => AgentPermissionLevel::ReadWrite,
-            AgentPermissions::Full => AgentPermissionLevel::Full,
-        });
+    let permissions = resolved_cli.exec.agent.permissions.map(|p| match p {
+        AgentPermissions::ReadOnly => AgentPermissionLevel::ReadOnly,
+        AgentPermissions::ReadWrite => AgentPermissionLevel::ReadWrite,
+        AgentPermissions::Full => AgentPermissionLevel::Full,
+    });
+    let output_format = Some(match resolved_cli.output.format {
+        SettingsOutputFormat::Text => OutputFormat::Text,
+        SettingsOutputFormat::Json => OutputFormat::Json,
+    });
     args.agent.apply_cli_defaults(
         provider_str.as_deref(),
         model_str.as_deref(),
         permissions,
-        None,
+        output_format,
     );
     if globals.json {
         args.agent.output_format = Some(OutputFormat::Json);
@@ -130,52 +137,48 @@ pub(crate) async fn execute(mut args: ExecArgs, globals: &GlobalArgs) -> Result<
     // v2 MCPs live under `cli.exec.agent.mcps` (owner-specific) or
     // `run.agent.mcps`. For `fabro exec` we use the cli.exec path, falling
     // back to run.agent.mcps if unset.
-    let mcp_servers: Vec<fabro_mcp::config::McpServerSettings> = if let Some(mcps) = exec_agent
-        .map(|agent| &agent.mcps)
-        .filter(|mcps| !mcps.is_empty())
-    {
-        mcps.iter()
-            .map(|(name, entry)| runtime_mcp_server(name, entry))
-            .collect()
-    } else {
-        fabro_config::resolve_run_from_file(&cli_settings)
-            .map(|settings| {
-                settings
-                    .agent
-                    .mcps
-                    .values()
-                    .map(|server| fabro_mcp::config::McpServerSettings {
-                        name: server.name.clone(),
-                        transport: match &server.transport {
-                            fabro_types::settings::run::McpTransport::Stdio { command, env } => {
-                                fabro_mcp::config::McpTransport::Stdio {
-                                    command: command.clone(),
-                                    env: env.clone(),
-                                }
-                            }
-                            fabro_types::settings::run::McpTransport::Http { url, headers } => {
-                                fabro_mcp::config::McpTransport::Http {
-                                    url: url.clone(),
-                                    headers: headers.clone(),
-                                }
-                            }
-                            fabro_types::settings::run::McpTransport::Sandbox {
-                                command,
-                                port,
-                                env,
-                            } => fabro_mcp::config::McpTransport::Sandbox {
-                                command: command.clone(),
-                                port: *port,
-                                env: env.clone(),
-                            },
-                        },
-                        startup_timeout_secs: server.startup_timeout_secs,
-                        tool_timeout_secs: server.tool_timeout_secs,
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
-    };
+    let mcp_servers: Vec<fabro_mcp::config::McpServerSettings> =
+        if !resolved_cli.exec.agent.mcps.is_empty() {
+            resolved_cli
+                .exec
+                .agent
+                .mcps
+                .values()
+                .map(|server| fabro_mcp::config::McpServerSettings {
+                    name: server.name.clone(),
+                    transport: server.transport.clone(),
+                    startup_timeout_secs: server.startup_timeout_secs,
+                    tool_timeout_secs: server.tool_timeout_secs,
+                })
+                .collect()
+        } else if let Some(mcps) = cli_settings
+            .cli
+            .as_ref()
+            .and_then(|cli| cli.exec.as_ref())
+            .and_then(|exec| exec.agent.as_ref())
+            .map(|agent| &agent.mcps)
+            .filter(|mcps| !mcps.is_empty())
+        {
+            mcps.iter()
+                .map(|(name, entry)| runtime_mcp_server(name, entry))
+                .collect()
+        } else {
+            fabro_config::resolve_run_from_file(&cli_settings)
+                .map(|settings| {
+                    settings
+                        .agent
+                        .mcps
+                        .values()
+                        .map(|server| fabro_mcp::config::McpServerSettings {
+                            name: server.name.clone(),
+                            transport: server.transport.clone(),
+                            startup_timeout_secs: server.startup_timeout_secs,
+                            tool_timeout_secs: server.tool_timeout_secs,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
     if let Some(target) = server_target {
         tracing::info!(transport = "server", "Agent session starting");
         let provider_name = args

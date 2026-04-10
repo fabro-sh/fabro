@@ -1,5 +1,6 @@
 use anyhow::bail;
 use fabro_config::ConfigLayer;
+use fabro_types::settings::cli::OutputVerbosity;
 use fabro_util::terminal::Styles;
 
 use crate::args::{GlobalArgs, PreflightArgs};
@@ -13,7 +14,7 @@ use crate::shared::print_json_pretty;
 pub(crate) async fn execute(mut args: PreflightArgs, globals: &GlobalArgs) -> anyhow::Result<()> {
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
     let ctx = CommandContext::for_target(&args.target)?;
-    args.verbose = args.verbose || ctx.machine_settings().verbose_enabled();
+    args.verbose = args.verbose || ctx.cli_settings().output.verbosity == OutputVerbosity::Verbose;
 
     let manifest = build_run_manifest(ManifestBuildInput {
         workflow: args.workflow.clone(),

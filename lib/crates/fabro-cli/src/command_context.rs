@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail};
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::{CliSettings, SettingsFile};
 use tokio::sync::OnceCell;
 
 use crate::args::{ServerConnectionArgs, ServerTargetArgs};
@@ -25,6 +25,7 @@ pub(crate) struct CommandContext {
     cwd: PathBuf,
     base_config_path: PathBuf,
     machine_settings: SettingsFile,
+    cli_settings: CliSettings,
     server_mode: ServerMode,
     server: OnceCell<Arc<ServerStoreClient>>,
 }
@@ -57,11 +58,13 @@ impl CommandContext {
                 ..
             } => user_config::load_settings_with_storage_dir(storage_dir_override.as_deref())?,
         };
+        let cli_settings = user_config::resolve_cli_settings(&machine_settings)?;
 
         Ok(Self {
             cwd,
             base_config_path,
             machine_settings,
+            cli_settings,
             server_mode,
             server: OnceCell::new(),
         })
@@ -77,6 +80,10 @@ impl CommandContext {
 
     pub(crate) fn machine_settings(&self) -> &SettingsFile {
         &self.machine_settings
+    }
+
+    pub(crate) fn cli_settings(&self) -> &CliSettings {
+        &self.cli_settings
     }
 
     pub(crate) async fn server(&self) -> Result<Arc<ServerStoreClient>> {

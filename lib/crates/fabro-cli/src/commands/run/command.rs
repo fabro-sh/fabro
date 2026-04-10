@@ -1,4 +1,5 @@
 use anyhow::Result;
+use fabro_types::settings::cli::OutputVerbosity;
 use fabro_util::terminal::Styles;
 
 use crate::args::{GlobalArgs, RunArgs};
@@ -10,10 +11,10 @@ pub(crate) async fn execute(mut args: RunArgs, globals: &GlobalArgs) -> Result<(
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
     let ctx = CommandContext::for_target(&args.target)?;
     let cli = settings_layer_with_storage_dir(None)?;
-    args.verbose = args.verbose || ctx.machine_settings().verbose_enabled();
+    args.verbose = args.verbose || ctx.cli_settings().output.verbosity == OutputVerbosity::Verbose;
 
     let quiet = args.detach;
-    let prevent_idle_sleep = ctx.machine_settings().prevent_idle_sleep_enabled();
+    let prevent_idle_sleep = ctx.cli_settings().exec.prevent_idle_sleep;
     let created_run = Box::pin(super::create::create_run(&ctx, &args, cli, styles, quiet)).await?;
 
     #[cfg(feature = "sleep_inhibitor")]

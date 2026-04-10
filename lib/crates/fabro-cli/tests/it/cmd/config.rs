@@ -35,6 +35,10 @@ fn parse_settings(stdout: &[u8]) -> SettingsFile {
     serde_yaml::from_slice(stdout).expect("stdout should be valid YAML SettingsFile")
 }
 
+fn resolve_cli(settings: &SettingsFile) -> fabro_types::settings::CliSettings {
+    fabro_config::resolve_cli_from_file(settings).expect("cli settings should resolve")
+}
+
 fn server_settings_fixture() -> SettingsFile {
     ConfigLayer::parse(
         r#"
@@ -582,7 +586,10 @@ name = "legacy-model"
         .stderr(predicate::str::contains("Rename it to"));
 
     let cfg = parse_settings(&assert.get_output().stdout);
-    assert!(!cfg.verbose_enabled());
+    assert_eq!(
+        resolve_cli(&cfg).output.verbosity,
+        fabro_types::settings::cli::OutputVerbosity::Normal
+    );
     assert!(cfg.run_model().is_none());
 }
 
@@ -756,7 +763,10 @@ shared = "cli"
         cfg.server_storage_root_str().as_deref(),
         Some("/srv/fabro-server")
     );
-    assert!(cfg.verbose_enabled());
+    assert_eq!(
+        resolve_cli(&cfg).output.verbosity,
+        fabro_types::settings::cli::OutputVerbosity::Verbose
+    );
 
     // R22: run.inputs replaces wholesale across layers. Project is the
     // highest-precedence layer that sets inputs, so project's vars win

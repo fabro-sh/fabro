@@ -353,6 +353,7 @@ fn create_persists_requested_overrides_into_store() {
         "team": run_record.labels.get("team"),
     });
     let settings = &run_record.settings;
+    let cli_settings = fabro_config::resolve_cli_from_file(settings).expect("cli settings");
     let compact = json!({
         "workflow_slug": run_record.workflow_slug,
         "settings": {
@@ -360,7 +361,7 @@ fn create_persists_requested_overrides_into_store() {
             "dry_run": settings.dry_run_enabled(),
             "auto_approve": settings.auto_approve_enabled(),
             "no_retro": settings.no_retro_enabled(),
-            "verbose": settings.verbose_enabled(),
+            "verbose": cli_settings.output.verbosity == fabro_types::settings::cli::OutputVerbosity::Verbose,
             "llm": {
                 "model": settings.run_model_name_str(),
                 "provider": settings.run_model_provider_str(),
