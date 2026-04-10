@@ -3,6 +3,7 @@
 mod args;
 mod command_context;
 mod commands;
+mod gh;
 mod logging;
 mod manifest_builder;
 mod server_client;
