@@ -27,6 +27,7 @@ use tokio::task::spawn_blocking;
 use super::doctor;
 use crate::args::{DoctorArgs, GlobalArgs, InstallArgs, ServerTargetArgs};
 use crate::commands::server::record;
+use crate::gh::GhCli;
 use crate::server_client;
 use crate::shared::provider_auth::{
     prompt_and_validate_key, prompt_confirm, provider_display_name, run_openai_oauth_or_api_key,
@@ -301,6 +302,100 @@ fn prompt_multiselect(prompt: &str, items: &[String]) -> Result<Vec<usize>> {
 }
 
 // ---------------------------------------------------------------------------
+// GitHub App owner selection
+// ---------------------------------------------------------------------------
+
+enum GitHubAppOwner {
+    Personal,
+    Organization(String),
+}
+
+impl GitHubAppOwner {
+    fn manifest_form_action(&self) -> String {
+        match self {
+            Self::Personal => "https://github.com/settings/apps/new".to_string(),
+            Self::Organization(org) => {
+                format!("https://github.com/organizations/{org}/settings/apps/new")
+            }
+        }
+    }
+
+    fn app_name(&self, username: Option<&str>) -> String {
+        match self {
+            Self::Organization(org) => format!("{org}-fabro"),
+            Self::Personal => {
+                if let Some(user) = username {
+                    format!("{user}-fabro")
+                } else {
+                    let mut rng = rand::thread_rng();
+                    let suffix: String = (0..6).fold(String::with_capacity(6), |mut s, _| {
+                        use std::fmt::Write;
+                        let _ = write!(s, "{:x}", rng.gen::<u8>() % 16);
+                        s
+                    });
+                    format!("Fabro-{suffix}")
+                }
+            }
+        }
+    }
+}
+
+/// Ask the user where to create the GitHub App.
+///
+/// Uses the `gh` CLI to discover the username and admin orgs. If `gh` is
+/// unavailable or the user has no admin orgs, falls back gracefully.
+/// Always offers a manual "Other" option so org app managers can enter a slug.
+///
+/// Returns `(owner, username)`.
+async fn prompt_github_app_owner(_s: &Styles) -> Result<(GitHubAppOwner, Option<String>)> {
+    let spinner = indicatif::ProgressBar::new_spinner();
+    spinner.set_style(
+        indicatif::ProgressStyle::with_template("{spinner:.cyan} {msg}")
+            .expect("valid template")
+            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏", ""]),
+    );
+    spinner.set_message("Checking GitHub CLI...");
+    spinner.enable_steady_tick(std::time::Duration::from_millis(80));
+
+    let Some(gh) = GhCli::detect().await else {
+        spinner.finish_and_clear();
+        return Ok((GitHubAppOwner::Personal, None));
+    };
+
+    let (username, orgs) = tokio::join!(gh.authenticated_user(), gh.list_admin_orgs());
+    spinner.finish_and_clear();
+
+    // Build the selection menu
+    let personal_label = match &username {
+        Some(user) => format!("Personal account ({user})"),
+        None => "Personal account".to_string(),
+    };
+    let mut items = vec![personal_label];
+    for org in &orgs {
+        items.push(format!("Organization: {org}"));
+    }
+    items.push("Other (enter organization name)".to_string());
+
+    let selected: usize = spawn_blocking({
+        let items = items.clone();
+        move || prompt_select("Where should the GitHub App be created?", &items)
+    })
+    .await??;
+
+    let other_index = 1 + orgs.len();
+    let owner = if selected == 0 {
+        GitHubAppOwner::Personal
+    } else if selected == other_index {
+        let org_slug: String = spawn_blocking(|| prompt_input("Organization name")).await??;
+        GitHubAppOwner::Organization(org_slug)
+    } else {
+        GitHubAppOwner::Organization(orgs[selected - 1].clone())
+    };
+
+    Ok((owner, username))
+}
+
+// ---------------------------------------------------------------------------
 // GitHub App manifest flow
 // ---------------------------------------------------------------------------
 
@@ -335,15 +430,10 @@ async fn setup_github_app(
     fabro_dir: &Path,
     s: &Styles,
     web_url: &str,
+    owner: &GitHubAppOwner,
+    username: Option<&str>,
 ) -> Result<Vec<(String, String)>> {
-    // Random suffix so app names don't collide
-    let mut rng = rand::thread_rng();
-    let suffix: String = (0..6).fold(String::with_capacity(6), |mut s, _| {
-        use std::fmt::Write;
-        let _ = write!(s, "{:x}", rng.gen::<u8>() % 16);
-        s
-    });
-    let app_name = format!("Fabro-{suffix}");
+    let app_name = owner.app_name(username);
 
     // Bind to random port
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -369,12 +459,13 @@ async fn setup_github_app(
     let code_tx = std::sync::Arc::new(std::sync::Mutex::new(Some(code_tx)));
     let shutdown_tx = std::sync::Arc::new(std::sync::Mutex::new(Some(shutdown_tx)));
 
+    let form_action = owner.manifest_form_action();
     let index_html = format!(
         r#"<!DOCTYPE html>
 <html>
 <body>
   <p>Redirecting to GitHub...</p>
-  <form id="f" method="post" action="https://github.com/settings/apps/new">
+  <form id="f" method="post" action="{form_action}">
     <input type="hidden" name="manifest" value="{escaped_manifest}">
   </form>
   <script>document.getElementById('f').submit();</script>
@@ -741,7 +832,9 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
             spawn_blocking(|| prompt_confirm("Set up a GitHub App? (Recommended)", true)).await??;
 
         if setup_github {
-            let github_env_pairs = setup_github_app(&fabro_dir, &s, web_url).await?;
+            let (owner, username) = prompt_github_app_owner(&s).await?;
+            let github_env_pairs =
+                setup_github_app(&fabro_dir, &s, web_url, &owner, username.as_deref()).await?;
             let slug = {
                 let user_toml_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);
                 let toml_content = std::fs::read_to_string(&user_toml_path).unwrap_or_default();
@@ -1135,6 +1228,46 @@ name = "custom"
                 .and_then(toml::Value::as_str),
             Some("alice")
         );
+    }
+
+    // -- GitHub App owner --
+
+    #[test]
+    fn github_app_owner_personal_url() {
+        let owner = GitHubAppOwner::Personal;
+        assert_eq!(
+            owner.manifest_form_action(),
+            "https://github.com/settings/apps/new"
+        );
+    }
+
+    #[test]
+    fn github_app_owner_org_url() {
+        let owner = GitHubAppOwner::Organization("my-org".to_string());
+        assert_eq!(
+            owner.manifest_form_action(),
+            "https://github.com/organizations/my-org/settings/apps/new"
+        );
+    }
+
+    #[test]
+    fn github_app_owner_app_name_with_org() {
+        let owner = GitHubAppOwner::Organization("acme-corp".to_string());
+        assert_eq!(owner.app_name(Some("alice")), "acme-corp-fabro");
+    }
+
+    #[test]
+    fn github_app_owner_app_name_personal_with_username() {
+        let owner = GitHubAppOwner::Personal;
+        assert_eq!(owner.app_name(Some("brynary")), "brynary-fabro");
+    }
+
+    #[test]
+    fn github_app_owner_app_name_personal_without_username() {
+        let owner = GitHubAppOwner::Personal;
+        let name = owner.app_name(None);
+        assert!(name.starts_with("Fabro-"), "expected Fabro- prefix: {name}");
+        assert_eq!(name.len(), 12); // "Fabro-" (6) + 6 hex chars
     }
 
     // -- GitHub App manifest --
