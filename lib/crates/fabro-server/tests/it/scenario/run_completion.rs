@@ -73,7 +73,7 @@ async fn attach_run_events_replays_terminal_event_after_completion() {
         .lines()
         .filter_map(|line| line.strip_prefix("data:"))
         .filter_map(|line| serde_json::from_str::<serde_json::Value>(line.trim()).ok())
-        .filter_map(|event| event["payload"]["event"].as_str().map(ToString::to_string))
+        .filter_map(|event| event["event"].as_str().map(ToString::to_string))
         .collect::<Vec<_>>();
 
     assert!(

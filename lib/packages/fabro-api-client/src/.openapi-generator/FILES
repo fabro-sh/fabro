@@ -16,6 +16,8 @@ base.ts
 common.ts
 configuration.ts
 index.ts
+models/actor-kind.ts
+models/actor-ref.ts
 models/aggregate-billing-totals.ts
 models/aggregate-billing.ts
 models/api-question-option.ts
@@ -52,6 +54,7 @@ models/disk-usage-summary-row.ts
 models/error-response-entry.ts
 models/error-response.ts
 models/event-envelope.ts
+models/event-seq.ts
 models/execute-query-request.ts
 models/execute-query-response-rows-inner-inner.ts
 models/execute-query-response.ts

@@ -10,7 +10,7 @@ use tokio::time::sleep;
 use super::super::agent::{CodergenBackend, CodergenResult};
 use crate::context::Context;
 use crate::error::FabroError;
-use crate::event::{Emitter, Event};
+use crate::event::{Emitter, Event, StageScope};
 use crate::outcome::billed_model_usage_from_llm;
 use crate::run_dir::visit_from_context;
 use fabro_graphviz::graph::Node;
@@ -496,14 +496,18 @@ impl CodergenBackend for AgentCliBackend {
         ensure_cli(cli, provider, sandbox, emitter).await?;
 
         let command = cli_command_for_provider(provider, model, &prompt_path);
-        emitter.emit(&Event::AgentCliStarted {
-            node_id: node.id.clone(),
-            visit: current_visit(_context),
-            mode: "cli".to_string(),
-            provider: provider.as_str().to_string(),
-            model: model.to_string(),
-            command: command.clone(),
-        });
+        let stage_scope = StageScope::for_handler(_context, &node.id);
+        emitter.emit_scoped(
+            &Event::AgentCliStarted {
+                node_id: node.id.clone(),
+                visit: current_visit(_context),
+                mode: "cli".to_string(),
+                provider: provider.as_str().to_string(),
+                model: model.to_string(),
+                command: command.clone(),
+            },
+            &stage_scope,
+        );
 
         // Forward provider API key and custom env vars so the CLI tool can authenticate.
         // Build a HashMap to pass via exec_command's env_vars parameter — this
@@ -620,13 +624,16 @@ impl CodergenBackend for AgentCliBackend {
             timed_out: false,
             duration_ms,
         };
-        emitter.emit(&Event::AgentCliCompleted {
-            node_id: node.id.clone(),
-            stdout: result.stdout.clone(),
-            stderr: result.stderr.clone(),
-            exit_code: result.exit_code,
-            duration_ms: result.duration_ms,
-        });
+        emitter.emit_scoped(
+            &Event::AgentCliCompleted {
+                node_id: node.id.clone(),
+                stdout: result.stdout.clone(),
+                stderr: result.stderr.clone(),
+                exit_code: result.exit_code,
+                duration_ms: result.duration_ms,
+            },
+            &stage_scope,
+        );
 
         // 3e. Cleanup temp files
         let _ = sandbox

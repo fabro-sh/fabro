@@ -221,6 +221,7 @@ async fn persist_created_run(
             manifest_blob,
         },
         record.run_id.created_at(),
+        None,
     );
     let payload = fabro_store::EventPayload::new(
         serde_json::to_value(&stored).map_err(|err| FabroError::engine(err.to_string()))?,

@@ -23,6 +23,8 @@ pub mod keys {
     pub const INTERNAL_THREAD_ID: &str = "internal.thread_id";
     pub const INTERNAL_NODE_VISIT_COUNT: &str = "internal.node_visit_count";
     pub const INTERNAL_PARENT_PREAMBLE: &str = "internal.parent_preamble";
+    pub const INTERNAL_PARALLEL_GROUP_ID: &str = "internal.parallel_group_id";
+    pub const INTERNAL_PARALLEL_BRANCH_ID: &str = "internal.parallel_branch_id";
 
     // --- current.* keys ---
     pub const CURRENT_PREAMBLE: &str = "current.preamble";
@@ -133,7 +135,9 @@ pub mod keys {
 
 pub use fabro_core::Context;
 
+use crate::event::StageScope;
 use fabro_graphviz::Fidelity;
+use fabro_types::{ParallelBranchId, StageId};
 
 /// Domain-specific typed accessors for workflow context values.
 pub trait WorkflowContext {
@@ -141,6 +145,12 @@ pub trait WorkflowContext {
     fn thread_id(&self) -> Option<String>;
     fn preamble(&self) -> String;
     fn run_id(&self) -> String;
+    fn parallel_group_id(&self) -> Option<StageId>;
+    fn parallel_branch_id(&self) -> Option<ParallelBranchId>;
+    /// Build the stage-level emit scope from the currently-executing node and its
+    /// accumulated visit count. Returns `None` for run-level emissions where no
+    /// stage is active (i.e., `CURRENT_NODE` is unset).
+    fn current_stage_scope(&self) -> Option<StageScope>;
 }
 
 impl WorkflowContext for Context {
@@ -161,6 +171,23 @@ impl WorkflowContext for Context {
 
     fn run_id(&self) -> String {
         self.get_string(keys::INTERNAL_RUN_ID, "unknown")
+    }
+
+    fn parallel_group_id(&self) -> Option<StageId> {
+        self.get(keys::INTERNAL_PARALLEL_GROUP_ID)
+            .and_then(|value| serde_json::from_value(value).ok())
+    }
+
+    fn parallel_branch_id(&self) -> Option<ParallelBranchId> {
+        self.get(keys::INTERNAL_PARALLEL_BRANCH_ID)
+            .and_then(|value| serde_json::from_value(value).ok())
+    }
+
+    fn current_stage_scope(&self) -> Option<StageScope> {
+        let node_id = self
+            .get(keys::CURRENT_NODE)
+            .and_then(|value| value.as_str().map(String::from))?;
+        Some(StageScope::from_context(self, node_id))
     }
 }
 
@@ -307,6 +334,31 @@ mod tests {
         let ctx = Context::new();
         ctx.set(keys::INTERNAL_THREAD_ID, serde_json::json!("main"));
         assert_eq!(ctx.thread_id(), Some("main".to_string()));
+    }
+
+    #[test]
+    fn parallel_ids_default() {
+        let ctx = Context::new();
+        assert_eq!(ctx.parallel_group_id(), None);
+        assert_eq!(ctx.parallel_branch_id(), None);
+    }
+
+    #[test]
+    fn parallel_ids_set() {
+        let ctx = Context::new();
+        ctx.set(
+            keys::INTERNAL_PARALLEL_GROUP_ID,
+            serde_json::json!("fanout@2"),
+        );
+        ctx.set(
+            keys::INTERNAL_PARALLEL_BRANCH_ID,
+            serde_json::json!("fanout@2:1"),
+        );
+        assert_eq!(ctx.parallel_group_id(), Some(StageId::new("fanout", 2)));
+        assert_eq!(
+            ctx.parallel_branch_id(),
+            Some(ParallelBranchId::new(StageId::new("fanout", 2), 1))
+        );
     }
 
     #[test]

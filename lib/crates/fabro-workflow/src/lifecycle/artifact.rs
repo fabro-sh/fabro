@@ -19,6 +19,7 @@ use crate::artifact_upload::ArtifactSink;
 use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
+use crate::lifecycle::event::stage_scope_for;
 use crate::outcome::BilledModelUsage;
 use crate::runtime_store::RunStoreHandle;
 use fabro_core::lifecycle::NodeDecision;
@@ -136,18 +137,22 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
                     });
                     return Ok(());
                 }
+                let scope = stage_scope_for(state, node_id);
                 for asset in &summary.captured_assets {
                     self.captured_artifact_count.fetch_add(1, Ordering::Relaxed);
-                    self.emitter.emit(&Event::ArtifactCaptured {
-                        node_id: node_id.to_string(),
-                        attempt: ctx.attempt,
-                        node_slug: node_slug.clone(),
-                        path: asset.path.clone(),
-                        mime: asset.mime.clone(),
-                        content_md5: asset.content_md5.clone(),
-                        content_sha256: asset.content_sha256.clone(),
-                        bytes: asset.bytes,
-                    });
+                    self.emitter.emit_scoped(
+                        &Event::ArtifactCaptured {
+                            node_id: node_id.to_string(),
+                            attempt: ctx.attempt,
+                            node_slug: node_slug.clone(),
+                            path: asset.path.clone(),
+                            mime: asset.mime.clone(),
+                            content_md5: asset.content_md5.clone(),
+                            content_sha256: asset.content_sha256.clone(),
+                            bytes: asset.bytes,
+                        },
+                        &scope,
+                    );
                 }
             }
             Ok(_) => {} // no files collected

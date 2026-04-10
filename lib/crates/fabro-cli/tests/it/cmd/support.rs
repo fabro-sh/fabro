@@ -673,7 +673,7 @@ pub(crate) fn run_events(run_dir: &Path) -> Vec<EventEnvelope> {
         run_dir,
         &format!("/api/v1/runs/{run_id}/events"),
     ));
-    serde_json::from_value(response["data"].clone()).expect("event list should parse")
+    crate::support::parse_event_envelopes(&response)
 }
 
 pub(crate) fn wait_for_event_names(run_dir: &Path, expected: &[&str]) {

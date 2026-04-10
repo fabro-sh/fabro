@@ -17,8 +17,9 @@ use super::circuit_breaker::CircuitBreakerLifecycle;
 use super::git::GitCheckpointResult;
 use crate::artifact;
 use crate::context;
+use crate::context::WorkflowContext;
 use crate::error::FabroError;
-use crate::event::{Emitter, Event};
+use crate::event::{Emitter, Event, StageScope};
 use crate::graph::WorkflowGraph;
 use crate::graph::WorkflowNode;
 use crate::outcome::{BilledModelUsage, FailureCategory, FailureDetail, Outcome, StageStatus};
@@ -79,6 +80,20 @@ fn response_from_outcome(node_id: &str, outcome: &Outcome) -> Option<String> {
         .and_then(|value| value.as_str().map(ToOwned::to_owned))
 }
 
+fn stage_visit(state: &WfRunState, node_id: &str) -> u32 {
+    let visits = state.node_visits.get(node_id).copied().unwrap_or(1);
+    u32::try_from(visits.max(1)).unwrap_or(u32::MAX)
+}
+
+pub(crate) fn stage_scope_for(state: &WfRunState, node_id: &str) -> StageScope {
+    StageScope {
+        node_id: node_id.to_string(),
+        visit: stage_visit(state, node_id),
+        parallel_group_id: state.context.parallel_group_id(),
+        parallel_branch_id: state.context.parallel_branch_id(),
+    }
+}
+
 #[async_trait]
 impl RunLifecycle<WorkflowGraph> for EventLifecycle {
     async fn on_run_start(&self, _graph: &WorkflowGraph, _state: &WfRunState) -> CoreResult<()> {
@@ -120,41 +135,48 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         }
         let gv = node.inner();
         let stage_index = state.stage_index;
+        let scope = stage_scope_for(state, &gv.id);
         let (loop_failure_signatures, restart_failure_signatures) =
             snapshot_failure_signatures(&self.circuit_breaker);
-        self.emitter.emit(&Event::StageStarted {
-            node_id: gv.id.clone(),
-            name: gv.label().to_string(),
-            index: stage_index,
-            handler_type: gv.handler_type().unwrap_or_default().to_string(),
-            attempt: 1,
-            max_attempts: 1,
-        });
-        self.emitter.emit(&Event::StageCompleted {
-            node_id: gv.id.clone(),
-            name: gv.label().to_string(),
-            index: stage_index,
-            duration_ms: 0,
-            status: StageStatus::Success.to_string(),
-            preferred_label: None,
-            suggested_next_ids: Vec::new(),
-            billing: None,
-            failure: None,
-            notes: None,
-            files_touched: Vec::new(),
-            context_updates: None,
-            jump_to_node: None,
-            context_values: None,
-            node_visits: None,
-            loop_failure_signatures,
-            restart_failure_signatures,
-            response: state
-                .context
-                .get(&context::keys::response_key(&gv.id))
-                .and_then(|value| value.as_str().map(ToOwned::to_owned)),
-            attempt: 1,
-            max_attempts: 1,
-        });
+        self.emitter.emit_scoped(
+            &Event::StageStarted {
+                node_id: gv.id.clone(),
+                name: gv.label().to_string(),
+                index: stage_index,
+                handler_type: gv.handler_type().unwrap_or_default().to_string(),
+                attempt: 1,
+                max_attempts: 1,
+            },
+            &scope,
+        );
+        self.emitter.emit_scoped(
+            &Event::StageCompleted {
+                node_id: gv.id.clone(),
+                name: gv.label().to_string(),
+                index: stage_index,
+                duration_ms: 0,
+                status: StageStatus::Success.to_string(),
+                preferred_label: None,
+                suggested_next_ids: Vec::new(),
+                billing: None,
+                failure: None,
+                notes: None,
+                files_touched: Vec::new(),
+                context_updates: None,
+                jump_to_node: None,
+                context_values: None,
+                node_visits: None,
+                loop_failure_signatures,
+                restart_failure_signatures,
+                response: state
+                    .context
+                    .get(&context::keys::response_key(&gv.id))
+                    .and_then(|value| value.as_str().map(ToOwned::to_owned)),
+                attempt: 1,
+                max_attempts: 1,
+            },
+            &scope,
+        );
     }
 
     async fn before_attempt(
@@ -163,14 +185,18 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         state: &WfRunState,
     ) -> CoreResult<NodeDecision<Option<BilledModelUsage>>> {
         let gv = ctx.node.inner();
-        self.emitter.emit(&Event::StageStarted {
-            node_id: gv.id.clone(),
-            name: gv.label().to_string(),
-            index: state.stage_index,
-            handler_type: gv.handler_type().unwrap_or_default().to_string(),
-            attempt: ctx.attempt as usize,
-            max_attempts: ctx.max_attempts as usize,
-        });
+        let scope = stage_scope_for(state, &gv.id);
+        self.emitter.emit_scoped(
+            &Event::StageStarted {
+                node_id: gv.id.clone(),
+                name: gv.label().to_string(),
+                index: state.stage_index,
+                handler_type: gv.handler_type().unwrap_or_default().to_string(),
+                attempt: ctx.attempt as usize,
+                max_attempts: ctx.max_attempts as usize,
+            },
+            &scope,
+        );
         Ok(NodeDecision::Continue)
     }
 
@@ -183,27 +209,34 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
             let gv = ctx.node.inner();
             let outcome = &ctx.result.outcome;
             let stage_index = state.stage_index;
+            let scope = stage_scope_for(state, &gv.id);
 
-            self.emitter.emit(&Event::StageFailed {
-                node_id: gv.id.clone(),
-                name: gv.label().to_string(),
-                index: stage_index,
-                failure: outcome.failure.clone().unwrap_or_else(|| {
-                    FailureDetail::new("handler failed", FailureCategory::TransientInfra)
-                }),
-                will_retry: true,
-            });
+            self.emitter.emit_scoped(
+                &Event::StageFailed {
+                    node_id: gv.id.clone(),
+                    name: gv.label().to_string(),
+                    index: stage_index,
+                    failure: outcome.failure.clone().unwrap_or_else(|| {
+                        FailureDetail::new("handler failed", FailureCategory::TransientInfra)
+                    }),
+                    will_retry: true,
+                },
+                &scope,
+            );
 
-            self.emitter.emit(&Event::StageRetrying {
-                node_id: gv.id.clone(),
-                name: gv.label().to_string(),
-                index: stage_index,
-                attempt: ctx.attempt as usize,
-                max_attempts: ctx.result.max_attempts as usize,
-                delay_ms: ctx
-                    .backoff_delay
-                    .map_or(0, |d| u64::try_from(d.as_millis()).unwrap()),
-            });
+            self.emitter.emit_scoped(
+                &Event::StageRetrying {
+                    node_id: gv.id.clone(),
+                    name: gv.label().to_string(),
+                    index: stage_index,
+                    attempt: ctx.attempt as usize,
+                    max_attempts: ctx.result.max_attempts as usize,
+                    delay_ms: ctx
+                        .backoff_delay
+                        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap()),
+                },
+                &scope,
+            );
         }
         Ok(())
     }
@@ -221,58 +254,66 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         }
         let gv = node.inner();
         let stage_index = state.stage_index;
+        let scope = stage_scope_for(state, &gv.id);
         let duration_ms = u64::try_from(result.duration.as_millis()).unwrap();
         let (loop_failure_signatures, restart_failure_signatures) =
             snapshot_failure_signatures(&self.circuit_breaker);
 
         if outcome.status == StageStatus::Fail {
-            self.emitter.emit(&Event::StageFailed {
-                node_id: gv.id.clone(),
-                name: gv.label().to_string(),
-                index: stage_index,
-                failure: outcome.failure.clone().unwrap_or_else(|| {
-                    FailureDetail::new("handler failed", FailureCategory::Deterministic)
-                }),
-                will_retry: false,
-            });
-        } else {
-            self.emitter.emit(&Event::StageCompleted {
-                node_id: gv.id.clone(),
-                name: gv.label().to_string(),
-                index: stage_index,
-                duration_ms,
-                status: outcome.status.to_string(),
-                preferred_label: outcome.preferred_label.clone(),
-                suggested_next_ids: outcome.suggested_next_ids.clone(),
-                billing: outcome.usage.clone(),
-                failure: outcome.failure.clone(),
-                notes: outcome.notes.clone(),
-                files_touched: outcome.files_touched.clone(),
-                context_updates: (!outcome.context_updates.is_empty()).then(|| {
-                    outcome
-                        .context_updates
-                        .clone()
-                        .into_iter()
-                        .collect::<BTreeMap<_, _>>()
-                }),
-                jump_to_node: outcome.jump_to_node.clone(),
-                context_values: {
-                    let snapshot = state.context.snapshot();
-                    (!snapshot.is_empty()).then(|| snapshot.into_iter().collect::<BTreeMap<_, _>>())
+            self.emitter.emit_scoped(
+                &Event::StageFailed {
+                    node_id: gv.id.clone(),
+                    name: gv.label().to_string(),
+                    index: stage_index,
+                    failure: outcome.failure.clone().unwrap_or_else(|| {
+                        FailureDetail::new("handler failed", FailureCategory::Deterministic)
+                    }),
+                    will_retry: false,
                 },
-                node_visits: (!state.node_visits.is_empty()).then(|| {
-                    state
-                        .node_visits
-                        .clone()
-                        .into_iter()
-                        .collect::<BTreeMap<_, _>>()
-                }),
-                loop_failure_signatures,
-                restart_failure_signatures,
-                response: response_from_outcome(&gv.id, outcome),
-                attempt: result.attempts as usize,
-                max_attempts: result.max_attempts as usize,
-            });
+                &scope,
+            );
+        } else {
+            self.emitter.emit_scoped(
+                &Event::StageCompleted {
+                    node_id: gv.id.clone(),
+                    name: gv.label().to_string(),
+                    index: stage_index,
+                    duration_ms,
+                    status: outcome.status.to_string(),
+                    preferred_label: outcome.preferred_label.clone(),
+                    suggested_next_ids: outcome.suggested_next_ids.clone(),
+                    billing: outcome.usage.clone(),
+                    failure: outcome.failure.clone(),
+                    notes: outcome.notes.clone(),
+                    files_touched: outcome.files_touched.clone(),
+                    context_updates: (!outcome.context_updates.is_empty()).then(|| {
+                        outcome
+                            .context_updates
+                            .clone()
+                            .into_iter()
+                            .collect::<BTreeMap<_, _>>()
+                    }),
+                    jump_to_node: outcome.jump_to_node.clone(),
+                    context_values: {
+                        let snapshot = state.context.snapshot();
+                        (!snapshot.is_empty())
+                            .then(|| snapshot.into_iter().collect::<BTreeMap<_, _>>())
+                    },
+                    node_visits: (!state.node_visits.is_empty()).then(|| {
+                        state
+                            .node_visits
+                            .clone()
+                            .into_iter()
+                            .collect::<BTreeMap<_, _>>()
+                    }),
+                    loop_failure_signatures,
+                    restart_failure_signatures,
+                    response: response_from_outcome(&gv.id, outcome),
+                    attempt: result.attempts as usize,
+                    max_attempts: result.max_attempts as usize,
+                },
+                &scope,
+            );
         }
         Ok(())
     }
@@ -326,37 +367,44 @@ impl RunLifecycle<WorkflowGraph> for EventLifecycle {
         node_outcomes.insert(node.id().to_string(), result.outcome.clone());
         artifact::normalize_durable_outcomes(&mut node_outcomes);
 
-        self.emitter.emit(&Event::CheckpointCompleted {
-            node_id: node.id().to_string(),
-            status,
-            current_node: node.id().to_string(),
-            completed_nodes: state.completed_nodes.clone(),
-            node_retries: state
-                .node_retries
-                .clone()
-                .into_iter()
-                .collect::<BTreeMap<_, _>>(),
-            context_values: context_values.into_iter().collect::<BTreeMap<_, _>>(),
-            node_outcomes: node_outcomes.into_iter().collect::<BTreeMap<_, _>>(),
-            next_node_id: next_node_id.map(ToOwned::to_owned),
-            git_commit_sha: git_sha.clone(),
-            loop_failure_signatures: loop_failure_signatures.unwrap_or_default(),
-            restart_failure_signatures: restart_failure_signatures.unwrap_or_default(),
-            node_visits: state
-                .node_visits
-                .clone()
-                .into_iter()
-                .collect::<BTreeMap<_, _>>(),
-            diff,
-        });
+        let scope = stage_scope_for(state, node.id());
+        self.emitter.emit_scoped(
+            &Event::CheckpointCompleted {
+                node_id: node.id().to_string(),
+                status,
+                current_node: node.id().to_string(),
+                completed_nodes: state.completed_nodes.clone(),
+                node_retries: state
+                    .node_retries
+                    .clone()
+                    .into_iter()
+                    .collect::<BTreeMap<_, _>>(),
+                context_values: context_values.into_iter().collect::<BTreeMap<_, _>>(),
+                node_outcomes: node_outcomes.into_iter().collect::<BTreeMap<_, _>>(),
+                next_node_id: next_node_id.map(ToOwned::to_owned),
+                git_commit_sha: git_sha.clone(),
+                loop_failure_signatures: loop_failure_signatures.unwrap_or_default(),
+                restart_failure_signatures: restart_failure_signatures.unwrap_or_default(),
+                node_visits: state
+                    .node_visits
+                    .clone()
+                    .into_iter()
+                    .collect::<BTreeMap<_, _>>(),
+                diff,
+            },
+            &scope,
+        );
 
         // Emit GitCommit + GitPush events if git produced results
         if let Some(ref result) = git_result {
             if let Some(ref sha) = result.commit_sha {
-                self.emitter.emit(&Event::GitCommit {
-                    node_id: Some(node.id().to_string()),
-                    sha: sha.clone(),
-                });
+                self.emitter.emit_scoped(
+                    &Event::GitCommit {
+                        node_id: Some(node.id().to_string()),
+                        sha: sha.clone(),
+                    },
+                    &scope,
+                );
             }
             for (branch, success) in &result.push_results {
                 self.emitter.emit(&Event::GitPush {

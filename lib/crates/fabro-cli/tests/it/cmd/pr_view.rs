@@ -90,8 +90,13 @@ fn pr_view_reads_pull_request_from_store_without_pull_request_json() {
             run_id,
             node_id: None,
             node_label: None,
+            stage_id: None,
+            parallel_group_id: None,
+            parallel_branch_id: None,
             session_id: None,
             parent_session_id: None,
+            tool_call_id: None,
+            actor: None,
             body: EventBody::PullRequestCreated(PullRequestCreatedProps {
                 pr_url: "https://github.com/fabro-sh/fabro/pull/123".to_string(),
                 pr_number: 123,

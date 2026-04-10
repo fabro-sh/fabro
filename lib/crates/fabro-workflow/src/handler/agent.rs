@@ -10,7 +10,7 @@ use fabro_types::RunId;
 use crate::context::keys;
 use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
-use crate::event::{Emitter, Event};
+use crate::event::{Emitter, Event, StageScope};
 use crate::outcome::{
     BilledModelUsage, FailureCategory, FailureDetail, Outcome, OutcomeExt, StageStatus,
 };
@@ -256,14 +256,18 @@ impl Handler for AgentHandler {
             .map(String::from)
             .or_else(|| Some(Provider::default_from_env().as_str().to_string()));
         let prompt_model = node.model().map(String::from);
-        services.emitter.emit(&Event::Prompt {
-            stage: node.id.clone(),
-            visit,
-            text: prompt.clone(),
-            mode: Some("agent".to_string()),
-            provider: prompt_provider,
-            model: prompt_model,
-        });
+        let stage_scope = StageScope::for_handler(context, &node.id);
+        services.emitter.emit_scoped(
+            &Event::Prompt {
+                stage: node.id.clone(),
+                visit,
+                text: prompt.clone(),
+                mode: Some("agent".to_string()),
+                provider: prompt_provider,
+                model: prompt_model,
+            },
+            &stage_scope,
+        );
 
         // 3. Call LLM backend (agent loop)
         let thread_id = context.thread_id();
@@ -329,13 +333,16 @@ impl Handler for AgentHandler {
             .map(String::from)
             .or_else(|| Some(Provider::default_from_env().as_str().to_string()))
             .unwrap_or_default();
-        services.emitter.emit(&Event::PromptCompleted {
-            node_id: node.id.clone(),
-            response: response_text.clone(),
-            model: response_model,
-            provider: response_provider,
-            billing: stage_usage.clone(),
-        });
+        services.emitter.emit_scoped(
+            &Event::PromptCompleted {
+                node_id: node.id.clone(),
+                response: response_text.clone(),
+                model: response_model,
+                provider: response_provider,
+                billing: stage_usage.clone(),
+            },
+            &stage_scope,
+        );
 
         // Build and write status
         let mut outcome = Outcome::success();
@@ -709,17 +716,21 @@ mod tests {
                 _sandbox: &Arc<dyn fabro_agent::Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
-                emitter.emit(&crate::event::Event::Agent {
-                    stage: node.id.clone(),
-                    visit: u32::try_from(crate::run_dir::visit_from_context(context))
-                        .unwrap_or(u32::MAX),
-                    event: fabro_agent::AgentEvent::SessionStarted {
-                        provider: Some("openai".to_string()),
-                        model: Some("gpt-5.4".to_string()),
+                let scope = StageScope::for_handler(context, &node.id);
+                emitter.emit_scoped(
+                    &crate::event::Event::Agent {
+                        stage: node.id.clone(),
+                        visit: u32::try_from(crate::run_dir::visit_from_context(context))
+                            .unwrap_or(u32::MAX),
+                        event: fabro_agent::AgentEvent::SessionStarted {
+                            provider: Some("openai".to_string()),
+                            model: Some("gpt-5.4".to_string()),
+                        },
+                        session_id: Some("session_123".to_string()),
+                        parent_session_id: None,
                     },
-                    session_id: Some("session_123".to_string()),
-                    parent_session_id: None,
-                });
+                    &scope,
+                );
                 Ok(CodergenResult::Text {
                     text: "done".to_string(),
                     usage: None,

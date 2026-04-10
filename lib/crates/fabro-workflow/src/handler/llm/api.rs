@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
+use crate::event::StageScope;
 use fabro_agent::{
     AgentEvent, AgentProfile, AnthropicProfile, GeminiProfile, OpenAiProfile, Sandbox, Session,
     SessionOptions, Turn,
@@ -21,7 +22,6 @@ use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
 use crate::event::{Emitter, Event};
 use crate::outcome::billed_model_usage_from_llm;
-use crate::run_dir::visit_from_context;
 use fabro_graphviz::graph::Node;
 
 fn build_profile(model: &str, provider: Provider) -> Box<dyn AgentProfile> {
@@ -35,10 +35,6 @@ fn build_profile(model: &str, provider: Provider) -> Box<dyn AgentProfile> {
         Provider::Gemini => Box::new(GeminiProfile::new(model)),
         Provider::Anthropic => Box::new(AnthropicProfile::new(model)),
     }
-}
-
-fn current_visit(context: &Context) -> u32 {
-    u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX)
 }
 
 /// Shared state for tracking file modifications from agent tool calls.
@@ -86,7 +82,7 @@ fn track_file_event(event: &AgentEvent, state: &mut FileTracking) {
 fn spawn_event_forwarder(
     session: &Session,
     node_id: String,
-    visit: u32,
+    scope: StageScope,
     emitter: Arc<Emitter>,
     file_tracking: Arc<Mutex<FileTracking>>,
 ) {
@@ -103,13 +99,16 @@ fn spawn_event_forwarder(
             if !event.event.is_streaming_noise()
                 && !matches!(&event.event, AgentEvent::ProcessingEnd)
             {
-                emitter.emit(&Event::Agent {
-                    stage: node_id.clone(),
-                    visit,
-                    event: event.event.clone(),
-                    session_id: Some(event.session_id.clone()),
-                    parent_session_id: event.parent_session_id.clone(),
-                });
+                emitter.emit_scoped(
+                    &Event::Agent {
+                        stage: node_id.clone(),
+                        visit: scope.visit,
+                        event: event.event.clone(),
+                        session_id: Some(event.session_id.clone()),
+                        parent_session_id: event.parent_session_id.clone(),
+                    },
+                    &scope,
+                );
             }
         }
     });
@@ -455,12 +454,13 @@ impl CodergenBackend for AgentApiBackend {
             touched: HashSet::new(),
             last: None,
         }));
+        let event_scope = StageScope::for_handler(context, &node.id);
 
         // Subscribe to session events: forward to pipeline emitter + track files.
         spawn_event_forwarder(
             &session,
             node.id.clone(),
-            current_visit(context),
+            event_scope.clone(),
             Arc::clone(emitter),
             Arc::clone(&file_tracking),
         );
@@ -488,14 +488,17 @@ impl CodergenBackend for AgentApiBackend {
                 let mut succeeded = false;
 
                 for target in &self.fallback_chain {
-                    emitter.emit(&Event::Failover {
-                        stage: node.id.clone(),
-                        from_provider: from_provider.clone(),
-                        from_model: from_model.clone(),
-                        to_provider: target.provider.clone(),
-                        to_model: target.model.clone(),
-                        error: error_msg.clone(),
-                    });
+                    emitter.emit_scoped(
+                        &Event::Failover {
+                            stage: node.id.clone(),
+                            from_provider: from_provider.clone(),
+                            from_model: from_model.clone(),
+                            to_provider: target.provider.clone(),
+                            to_model: target.model.clone(),
+                            error: error_msg.clone(),
+                        },
+                        &event_scope,
+                    );
 
                     let target_provider: Provider = match target.provider.parse() {
                         Ok(p) => p,
@@ -525,7 +528,7 @@ impl CodergenBackend for AgentApiBackend {
                     spawn_event_forwarder(
                         &session,
                         node.id.clone(),
-                        current_visit(context),
+                        event_scope.clone(),
                         Arc::clone(emitter),
                         Arc::clone(&file_tracking),
                     );
