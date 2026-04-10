@@ -33,8 +33,15 @@ pub fn legacy_default_storage_root() -> PathBuf {
 }
 
 pub fn active_settings_path(path: Option<&Path>) -> PathBuf {
+    active_settings_path_with_lookup(path, |name| std::env::var_os(name))
+}
+
+fn active_settings_path_with_lookup(
+    path: Option<&Path>,
+    lookup: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> PathBuf {
     path.map(Path::to_path_buf)
-        .or_else(|| std::env::var_os(FABRO_CONFIG_ENV).map(PathBuf::from))
+        .or_else(|| lookup(FABRO_CONFIG_ENV).map(PathBuf::from))
         .unwrap_or_else(default_settings_path)
 }
 
@@ -110,36 +117,11 @@ fn load_v2_layer_from_path(path: &Path) -> anyhow::Result<SettingsLayer> {
 #[cfg(test)]
 mod tests {
     use super::{
-        FABRO_CONFIG_ENV, LEGACY_OLD_USER_CONFIG_FILENAME, LEGACY_SERVER_CONFIG_FILENAME,
-        LEGACY_USER_CONFIG_FILENAME, SETTINGS_CONFIG_FILENAME, active_settings_path,
+        LEGACY_OLD_USER_CONFIG_FILENAME, LEGACY_SERVER_CONFIG_FILENAME,
+        LEGACY_USER_CONFIG_FILENAME, SETTINGS_CONFIG_FILENAME, active_settings_path_with_lookup,
         default_settings_path, default_socket_path, legacy_old_user_config_path,
         legacy_server_config_path, legacy_user_config_path, should_warn_about_legacy_user_config,
     };
-
-    struct EnvGuard {
-        key: &'static str,
-        original: Option<std::ffi::OsString>,
-    }
-
-    impl EnvGuard {
-        fn set(key: &'static str, value: Option<&std::path::Path>) -> Self {
-            let original = std::env::var_os(key);
-            match value {
-                Some(value) => std::env::set_var(key, value),
-                None => std::env::remove_var(key),
-            }
-            Self { key, original }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            match &self.original {
-                Some(value) => std::env::set_var(self.key, value),
-                None => std::env::remove_var(self.key),
-            }
-        }
-    }
 
     #[test]
     fn should_warn_about_legacy_user_config_once_per_path() {
@@ -193,8 +175,10 @@ mod tests {
     fn active_settings_path_honors_fabro_config_env() {
         let dir = tempfile::tempdir().unwrap();
         let custom_path = dir.path().join("custom-settings.toml");
-        let _guard = EnvGuard::set(FABRO_CONFIG_ENV, Some(&custom_path));
-
-        assert_eq!(active_settings_path(None), custom_path);
+        let custom_os = custom_path.clone().into_os_string();
+        assert_eq!(
+            active_settings_path_with_lookup(None, |_| Some(custom_os.clone())),
+            custom_path,
+        );
     }
 }
