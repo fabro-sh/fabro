@@ -12,7 +12,6 @@ use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::{Emitter, Event, StageScope};
 use crate::outcome::billed_model_usage_from_llm;
-use crate::run_dir::visit_from_context;
 use fabro_graphviz::graph::Node;
 use fabro_llm::types::TokenCounts;
 
@@ -53,10 +52,6 @@ impl AgentCli {
             Self::Gemini => "@anthropic-ai/gemini-cli",
         }
     }
-}
-
-fn current_visit(context: &Context) -> u32 {
-    u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX)
 }
 
 /// Ensure the CLI tool for the given provider is installed in the sandbox.
@@ -461,7 +456,7 @@ impl CodergenBackend for AgentCliBackend {
         &self,
         node: &Node,
         prompt: &str,
-        _context: &Context,
+        context: &Context,
         _thread_id: Option<&str>,
         emitter: &Arc<Emitter>,
         sandbox: &Arc<dyn Sandbox>,
@@ -496,11 +491,11 @@ impl CodergenBackend for AgentCliBackend {
         ensure_cli(cli, provider, sandbox, emitter).await?;
 
         let command = cli_command_for_provider(provider, model, &prompt_path);
-        let stage_scope = StageScope::for_handler(_context, &node.id);
+        let stage_scope = StageScope::for_handler(context, &node.id);
         emitter.emit_scoped(
             &Event::AgentCliStarted {
                 node_id: node.id.clone(),
-                visit: current_visit(_context),
+                visit: stage_scope.visit,
                 mode: "cli".to_string(),
                 provider: provider.as_str().to_string(),
                 model: model.to_string(),

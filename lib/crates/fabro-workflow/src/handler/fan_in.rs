@@ -6,7 +6,6 @@ use crate::context::keys;
 use crate::error::FabroError;
 use crate::event::{Emitter, Event, StageScope};
 use crate::outcome::{Outcome, OutcomeExt};
-use crate::run_dir::visit_from_context;
 use crate::sandbox_git::git_merge_ff_only;
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
@@ -231,13 +230,12 @@ async fn llm_evaluate(
          Respond with the ID of the best candidate."
     );
 
-    let visit_u32 = u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX);
     let stage_scope = StageScope::for_handler(context, node_id);
 
     emitter.emit_scoped(
         &Event::Prompt {
             stage: node_id.to_string(),
-            visit: visit_u32,
+            visit: stage_scope.visit,
             text: full_prompt.clone(),
             mode: Some("fan_in".to_string()),
             provider: None,

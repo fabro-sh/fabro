@@ -5,7 +5,6 @@ use crate::context::{Context, WorkflowContext};
 use crate::error::FabroError;
 use crate::event::{Event, StageScope};
 use crate::outcome::Outcome;
-use crate::run_dir::visit_from_context;
 use async_trait::async_trait;
 use fabro_graphviz::graph::{Graph, Node};
 use fabro_model::Provider;
@@ -60,7 +59,6 @@ impl Handler for PromptHandler {
         } else {
             format!("{preamble}\n\n{expanded}")
         };
-        let _visit = u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX);
 
         // 1b. Discover project docs for system prompt when project_memory is enabled
         let system_prompt = if node.project_memory() {
@@ -95,7 +93,7 @@ impl Handler for PromptHandler {
         services.emitter.emit_scoped(
             &Event::Prompt {
                 stage: node.id.clone(),
-                visit: u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX),
+                visit: stage_scope.visit,
                 text: prompt.clone(),
                 mode: Some("prompt".to_string()),
                 provider: prompt_provider.clone(),

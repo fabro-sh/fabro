@@ -151,15 +151,18 @@ impl Handler for ParallelHandler {
                 .unwrap_or("wait_all"),
         );
 
-        let parallel_visit = u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX);
-        let parallel_group_id = StageId::new(node.id.clone(), parallel_visit);
+        let parallel_stage_scope = StageScope::for_handler(context, &node.id);
+        let parallel_group_id = StageId::new(node.id.clone(), parallel_stage_scope.visit);
 
-        services.emitter.emit(&Event::ParallelStarted {
-            node_id: node.id.clone(),
-            visit: parallel_visit,
-            branch_count: branches.len(),
-            join_policy: join_policy.to_string(),
-        });
+        services.emitter.emit_scoped(
+            &Event::ParallelStarted {
+                node_id: node.id.clone(),
+                visit: parallel_stage_scope.visit,
+                branch_count: branches.len(),
+                join_policy: join_policy.to_string(),
+            },
+            &parallel_stage_scope,
+        );
         {
             let run_id = context
                 .run_id()
@@ -301,12 +304,12 @@ impl Handler for ParallelHandler {
                 .map(|gs| gs.git_author.clone())
                 .unwrap_or_default();
             let group_id = parallel_group_id.clone();
-            let branch_scope = StageScope {
-                node_id: setup.target_id.clone(),
-                visit: 1,
-                parallel_group_id: Some(group_id.clone()),
-                parallel_branch_id: Some(setup.parallel_branch_id.clone()),
-            };
+            let branch_scope = StageScope::for_parallel_branch(
+                setup.target_id.clone(),
+                1,
+                group_id.clone(),
+                setup.parallel_branch_id.clone(),
+            );
 
             let handle = tokio::spawn(async move {
                 let _permit = sem
@@ -526,14 +529,17 @@ impl Handler for ParallelHandler {
         context.set(keys::PARALLEL_RESULTS, serde_json::json!(results_json));
         context.set(keys::PARALLEL_BRANCH_COUNT, serde_json::json!(total));
 
-        services.emitter.emit(&Event::ParallelCompleted {
-            node_id: node.id.clone(),
-            visit: u32::try_from(visit_from_context(context)).unwrap_or(u32::MAX),
-            duration_ms: millis_u64(parallel_start.elapsed()),
-            success_count,
-            failure_count: fail_count,
-            results: results_json.clone(),
-        });
+        services.emitter.emit_scoped(
+            &Event::ParallelCompleted {
+                node_id: node.id.clone(),
+                visit: parallel_stage_scope.visit,
+                duration_ms: millis_u64(parallel_start.elapsed()),
+                success_count,
+                failure_count: fail_count,
+                results: results_json.clone(),
+            },
+            &parallel_stage_scope,
+        );
         {
             let run_id = context
                 .run_id()

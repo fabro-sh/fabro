@@ -454,13 +454,13 @@ impl CodergenBackend for AgentApiBackend {
             touched: HashSet::new(),
             last: None,
         }));
-        let event_scope = StageScope::for_handler(context, &node.id);
+        let stage_scope = StageScope::for_handler(context, &node.id);
 
         // Subscribe to session events: forward to pipeline emitter + track files.
         spawn_event_forwarder(
             &session,
             node.id.clone(),
-            event_scope.clone(),
+            stage_scope.clone(),
             Arc::clone(emitter),
             Arc::clone(&file_tracking),
         );
@@ -497,7 +497,7 @@ impl CodergenBackend for AgentApiBackend {
                             to_model: target.model.clone(),
                             error: error_msg.clone(),
                         },
-                        &event_scope,
+                        &stage_scope,
                     );
 
                     let target_provider: Provider = match target.provider.parse() {
@@ -528,7 +528,7 @@ impl CodergenBackend for AgentApiBackend {
                     spawn_event_forwarder(
                         &session,
                         node.id.clone(),
-                        event_scope.clone(),
+                        stage_scope.clone(),
                         Arc::clone(emitter),
                         Arc::clone(&file_tracking),
                     );
