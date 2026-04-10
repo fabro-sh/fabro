@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use crate::args::RunArgs;
 use crate::command_context::CommandContext;
 use fabro_config::Storage;
+use fabro_config::load::load_settings_user;
+use fabro_config::user::active_settings_path;
 use fabro_types::RunId;
 use fabro_types::settings::SettingsLayer;
 use fabro_util::terminal::Styles;
@@ -46,6 +48,8 @@ pub(crate) async fn create_run(
         args_layer: cli_args_config,
         args: run_manifest_args(args),
         run_id,
+        user_layer: load_settings_user()?,
+        user_settings_path: Some(active_settings_path(None)),
     })?;
     let target = user_config::resolve_server_target(&args.target, ctx.machine_settings())?;
     let client = ctx.server().await?;

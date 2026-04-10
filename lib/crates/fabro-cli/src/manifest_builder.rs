@@ -3,11 +3,10 @@ use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use fabro_api::types;
-use fabro_config::load::{load_settings_for_workflow, load_settings_user};
+use fabro_config::load::load_settings_for_workflow;
 use fabro_config::merge::combine_files;
 use fabro_config::project::{self, discover_project_config, resolve_workflow_path};
 use fabro_config::run::{parse_run_config, resolve_run_goal};
-use fabro_config::user::active_settings_path;
 use fabro_graphviz::graph::AttrValue;
 use fabro_graphviz::parser;
 use fabro_sandbox::daytona::detect_repo_info;
@@ -25,6 +24,12 @@ pub(crate) struct ManifestBuildInput {
     pub args_layer: SettingsLayer,
     pub args: Option<types::ManifestArgs>,
     pub run_id: Option<RunId>,
+    /// User-level settings layer. Production callers load via
+    /// `load_settings_user()`; tests pass `SettingsLayer::default()`.
+    pub user_layer: SettingsLayer,
+    /// Path to the user settings file (for inclusion in
+    /// `RunManifest.configs`). `None` skips the user config entry.
+    pub user_settings_path: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -47,10 +52,9 @@ struct WorkflowScanInput {
 }
 
 pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManifest> {
-    let user_layer = load_settings_user()?;
     let workflow_layer = load_settings_for_workflow(&input.workflow, &input.cwd)?;
     let merged_settings = combine_files(
-        combine_files(user_layer, workflow_layer),
+        combine_files(input.user_layer, workflow_layer),
         input.args_layer.clone(),
     );
 
@@ -87,9 +91,7 @@ pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManif
             type_: types::ManifestConfigType::Project,
         });
     }
-    let settings_path = active_settings_path(None);
-    if settings_path.is_file() {
-        let path = settings_path;
+    if let Some(path) = input.user_settings_path.filter(|p| p.is_file()) {
         let source = std::fs::read_to_string(&path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
         configs.push(types::ManifestConfig {
@@ -555,7 +557,6 @@ mod tests {
     use super::*;
 
     #[test]
-    #[allow(unsafe_code, clippy::allow_attributes)]
     fn build_manifest_bundles_imports_prompts_and_children() {
         let temp = tempfile::tempdir().unwrap();
         let project = temp.path();
@@ -602,29 +603,16 @@ mod tests {
         )
         .unwrap();
 
-        // Isolate from the developer's real ~/.fabro/settings.toml which may
-        // still be in the legacy shape. Setting FABRO_CONFIG to a path inside
-        // the test tempdir forces the loader to produce an empty user layer.
-        let sandboxed_settings = temp.path().join("empty-settings.toml");
-        std::fs::write(&sandboxed_settings, "_version = 1\n").unwrap();
-        // SAFETY: single-threaded unit test body.
-        unsafe {
-            std::env::set_var("FABRO_CONFIG", &sandboxed_settings);
-        }
-
         let built = build_run_manifest(ManifestBuildInput {
             workflow: PathBuf::from("fabro/workflows/demo/workflow.toml"),
             cwd: project.to_path_buf(),
             args_layer: SettingsLayer::default(),
             args: None,
             run_id: None,
+            user_layer: SettingsLayer::default(),
+            user_settings_path: None,
         })
         .unwrap();
-
-        // SAFETY: single-threaded unit test body.
-        unsafe {
-            std::env::remove_var("FABRO_CONFIG");
-        }
 
         assert_eq!(
             built.manifest.target.path,
@@ -662,7 +650,6 @@ mod tests {
     /// invocation cwd. We exercise this by invoking from a subdirectory
     /// below the project root.
     #[test]
-    #[allow(unsafe_code, clippy::allow_attributes)]
     fn build_manifest_resolves_relative_goal_file_in_project_config() {
         let temp = tempfile::tempdir().unwrap();
         let project = temp.path();
@@ -692,26 +679,16 @@ file = "prompts/goal.md"
         )
         .unwrap();
 
-        let sandboxed_settings = temp.path().join("empty-settings.toml");
-        std::fs::write(&sandboxed_settings, "_version = 1\n").unwrap();
-        // SAFETY: single-threaded unit test body.
-        unsafe {
-            std::env::set_var("FABRO_CONFIG", &sandboxed_settings);
-        }
-
         let built = build_run_manifest(ManifestBuildInput {
             workflow: PathBuf::from("fabro/workflows/demo/workflow.toml"),
             cwd: project.to_path_buf(),
             args_layer: SettingsLayer::default(),
             args: None,
             run_id: None,
+            user_layer: SettingsLayer::default(),
+            user_settings_path: None,
         })
         .unwrap();
-
-        // SAFETY: single-threaded unit test body.
-        unsafe {
-            std::env::remove_var("FABRO_CONFIG");
-        }
 
         let goal = built.manifest.goal.expect("manifest goal should be set");
         assert_eq!(goal.text, "ship from project root");
@@ -725,7 +702,6 @@ file = "prompts/goal.md"
     /// must resolve against the directory of `workflow.toml`, not against
     /// the invocation cwd or project root.
     #[test]
-    #[allow(unsafe_code, clippy::allow_attributes)]
     fn build_manifest_resolves_relative_goal_file_in_workflow_config() {
         let temp = tempfile::tempdir().unwrap();
         let project = temp.path();
@@ -756,26 +732,16 @@ file = "prompts/goal.md"
         )
         .unwrap();
 
-        let sandboxed_settings = temp.path().join("empty-settings.toml");
-        std::fs::write(&sandboxed_settings, "_version = 1\n").unwrap();
-        // SAFETY: single-threaded unit test body.
-        unsafe {
-            std::env::set_var("FABRO_CONFIG", &sandboxed_settings);
-        }
-
         let built = build_run_manifest(ManifestBuildInput {
             workflow: PathBuf::from("fabro/workflows/demo/workflow.toml"),
             cwd: project.to_path_buf(),
             args_layer: SettingsLayer::default(),
             args: None,
             run_id: None,
+            user_layer: SettingsLayer::default(),
+            user_settings_path: None,
         })
         .unwrap();
-
-        // SAFETY: single-threaded unit test body.
-        unsafe {
-            std::env::remove_var("FABRO_CONFIG");
-        }
 
         let goal = built.manifest.goal.expect("manifest goal should be set");
         assert_eq!(goal.text, "ship from workflow dir");
