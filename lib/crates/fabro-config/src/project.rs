@@ -33,10 +33,11 @@ pub fn parse_project_config(content: &str) -> anyhow::Result<ConfigLayer> {
 }
 
 /// Load a project config from a file path.
+///
+/// Goes through [`ConfigLayer::load`] so that relative `run.goal.file`
+/// paths are anchored at the directory of `path` at load time.
 pub fn load_project_config(path: &Path) -> anyhow::Result<ConfigLayer> {
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read {}", path.display()))?;
-    let config = parse_project_config(&content)?;
+    let config = ConfigLayer::load(path).context("Failed to parse project config")?;
     let root = config
         .as_v2()
         .project
@@ -476,5 +477,29 @@ retros = true
         let (found_path, config) = discover_project_config(&sub).unwrap().unwrap();
         assert_eq!(found_path, tmp.path().join("fabro.toml"));
         assert_eq!(config.as_v2().version, Some(1));
+    }
+
+    #[test]
+    fn load_project_config_rewrites_relative_goal_file_path() {
+        use fabro_types::settings::run::RunGoalLayer;
+
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("fabro.toml");
+        fs::write(
+            &path,
+            r#"_version = 1
+
+[run.goal]
+file = "prompts/goal.md"
+"#,
+        )
+        .unwrap();
+
+        let config = load_project_config(&path).unwrap();
+        let Some(RunGoalLayer::File { file }) = config.as_v2().run_goal_layer() else {
+            panic!("expected file variant");
+        };
+        let expected = tmp.path().join("prompts").join("goal.md");
+        assert_eq!(file.as_source(), expected.to_string_lossy());
     }
 }

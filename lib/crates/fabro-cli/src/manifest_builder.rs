@@ -660,4 +660,132 @@ mod tests {
                 .contains_key("fabro/workflows/child/workflow.fabro")
         );
     }
+
+    /// A relative `[run.goal] file = "..."` declared in `fabro.toml` must
+    /// resolve against the directory of `fabro.toml`, not against the
+    /// invocation cwd. We exercise this by invoking from a subdirectory
+    /// below the project root.
+    #[test]
+    #[allow(unsafe_code, clippy::allow_attributes)]
+    fn build_manifest_resolves_relative_goal_file_in_project_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path();
+        let workflow_dir = project.join("fabro/workflows/demo");
+        std::fs::create_dir_all(&workflow_dir).unwrap();
+        std::fs::create_dir_all(project.join("prompts")).unwrap();
+
+        std::fs::write(
+            project.join("fabro.toml"),
+            r#"_version = 1
+
+[run.goal]
+file = "prompts/goal.md"
+"#,
+        )
+        .unwrap();
+        std::fs::write(project.join("prompts/goal.md"), "ship from project root").unwrap();
+
+        std::fs::write(
+            workflow_dir.join("workflow.toml"),
+            "_version = 1\n\n[workflow]\ngraph = \"workflow.fabro\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            workflow_dir.join("workflow.fabro"),
+            r"digraph Demo { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }",
+        )
+        .unwrap();
+
+        let sandboxed_settings = temp.path().join("empty-settings.toml");
+        std::fs::write(&sandboxed_settings, "_version = 1\n").unwrap();
+        // SAFETY: single-threaded unit test body.
+        unsafe {
+            std::env::set_var("FABRO_CONFIG", &sandboxed_settings);
+        }
+
+        let built = build_run_manifest(ManifestBuildInput {
+            workflow: PathBuf::from("fabro/workflows/demo/workflow.toml"),
+            cwd: project.to_path_buf(),
+            args_layer: ConfigLayer::default(),
+            args: None,
+            run_id: None,
+        })
+        .unwrap();
+
+        // SAFETY: single-threaded unit test body.
+        unsafe {
+            std::env::remove_var("FABRO_CONFIG");
+        }
+
+        let goal = built.manifest.goal.expect("manifest goal should be set");
+        assert_eq!(goal.text, "ship from project root");
+        assert_eq!(goal.type_, types::ManifestGoalType::File);
+        let resolved = goal.path.expect("file goal must carry a path");
+        let expected = project.join("prompts").join("goal.md");
+        assert_eq!(PathBuf::from(resolved), expected);
+    }
+
+    /// A relative `[run.goal] file = "..."` declared in `workflow.toml`
+    /// must resolve against the directory of `workflow.toml`, not against
+    /// the invocation cwd or project root.
+    #[test]
+    #[allow(unsafe_code, clippy::allow_attributes)]
+    fn build_manifest_resolves_relative_goal_file_in_workflow_config() {
+        let temp = tempfile::tempdir().unwrap();
+        let project = temp.path();
+        let workflow_dir = project.join("fabro/workflows/demo");
+        std::fs::create_dir_all(workflow_dir.join("prompts")).unwrap();
+
+        std::fs::write(project.join("fabro.toml"), "_version = 1\n").unwrap();
+        std::fs::write(
+            workflow_dir.join("workflow.toml"),
+            r#"_version = 1
+
+[workflow]
+graph = "workflow.fabro"
+
+[run.goal]
+file = "prompts/goal.md"
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            workflow_dir.join("prompts/goal.md"),
+            "ship from workflow dir",
+        )
+        .unwrap();
+        std::fs::write(
+            workflow_dir.join("workflow.fabro"),
+            r"digraph Demo { start [shape=Mdiamond] exit [shape=Msquare] start -> exit }",
+        )
+        .unwrap();
+
+        let sandboxed_settings = temp.path().join("empty-settings.toml");
+        std::fs::write(&sandboxed_settings, "_version = 1\n").unwrap();
+        // SAFETY: single-threaded unit test body.
+        unsafe {
+            std::env::set_var("FABRO_CONFIG", &sandboxed_settings);
+        }
+
+        let built = build_run_manifest(ManifestBuildInput {
+            workflow: PathBuf::from("fabro/workflows/demo/workflow.toml"),
+            cwd: project.to_path_buf(),
+            args_layer: ConfigLayer::default(),
+            args: None,
+            run_id: None,
+        })
+        .unwrap();
+
+        // SAFETY: single-threaded unit test body.
+        unsafe {
+            std::env::remove_var("FABRO_CONFIG");
+        }
+
+        let goal = built.manifest.goal.expect("manifest goal should be set");
+        assert_eq!(goal.text, "ship from workflow dir");
+        assert_eq!(goal.type_, types::ManifestGoalType::File);
+        let resolved = goal.path.expect("file goal must carry a path");
+        let expected = workflow_dir.join("prompts").join("goal.md");
+        assert_eq!(PathBuf::from(resolved), expected);
+    }
 }
