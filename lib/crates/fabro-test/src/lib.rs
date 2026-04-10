@@ -924,6 +924,15 @@ impl TestContext {
     pub fn command(&self) -> Command {
         let mut cmd = Command::new(&self.fabro_bin);
         cmd.current_dir(&self.temp_dir);
+        // Scrub all inherited FABRO_* env so a developer running with
+        // e.g. FABRO_CONFIG=/some/path doesn't pollute child processes.
+        for (key, _) in std::env::vars_os() {
+            if let Some(s) = key.to_str() {
+                if s.starts_with("FABRO_") {
+                    cmd.env_remove(&key);
+                }
+            }
+        }
         cmd.env("NO_COLOR", "1");
         cmd.env("HOME", &self.home_dir);
         cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
