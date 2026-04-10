@@ -276,6 +276,7 @@ fn parse_object_path(raw: &str) -> Result<ObjectPath> {
 mod tests {
     use super::*;
 
+    use futures::stream;
     use object_store::memory::InMemory;
 
     use fabro_types::fixtures;
@@ -324,7 +325,7 @@ mod tests {
                 &run_id,
                 &node,
                 filename,
-                futures::stream::iter(vec![
+                stream::iter(vec![
                     Ok(Bytes::from_static(b"hello ")),
                     Ok(Bytes::from_static(b"world")),
                 ]),

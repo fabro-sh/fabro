@@ -725,19 +725,19 @@ mod tests {
             .as_ref()
             .and_then(|server| server.storage.as_ref())
             .and_then(|storage| storage.root.as_ref())
-            .map(|value| value.as_source());
+            .map(fabro_types::settings::InterpString::as_source);
         assert_eq!(storage_root.as_deref(), Some("/srv/fabro-storage"));
     }
 
     #[test]
     fn apply_runtime_settings_enables_web_from_cli_flag() {
         let base = parse_settings(
-            r#"
+            r"
 _version = 1
 
 [server.web]
 enabled = false
-"#,
+",
         );
         let args = ServeArgs {
             bind: None,

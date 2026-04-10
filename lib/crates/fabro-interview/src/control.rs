@@ -124,6 +124,8 @@ impl Interviewer for ControlInterviewer {
 mod tests {
     use std::sync::Arc;
 
+    use tokio::task;
+
     use crate::{AnswerValue, QuestionType};
 
     use super::*;
@@ -180,7 +182,7 @@ mod tests {
 
         let ask_interviewer = Arc::clone(&interviewer);
         let ask = tokio::spawn(async move { ask_interviewer.ask(question).await });
-        tokio::task::yield_now().await;
+        task::yield_now().await;
 
         interviewer.interrupt_all().await;
 
@@ -208,7 +210,7 @@ mod tests {
 
         let ask_interviewer = Arc::clone(&interviewer);
         let ask = tokio::spawn(async move { ask_interviewer.ask(question).await });
-        tokio::task::yield_now().await;
+        task::yield_now().await;
 
         interviewer.cancel_all().await;
 

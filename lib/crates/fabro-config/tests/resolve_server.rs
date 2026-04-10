@@ -16,7 +16,7 @@ fn resolves_server_defaults_from_empty_settings() {
         settings.storage.root.as_source(),
         Home::from_env().storage_dir().to_string_lossy()
     );
-    assert_eq!(settings.web.enabled, true);
+    assert!(settings.web.enabled);
     assert_eq!(settings.web.url.as_source(), "http://localhost:3000");
     assert_eq!(settings.scheduler.max_concurrent_runs, 5);
 

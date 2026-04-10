@@ -1187,11 +1187,11 @@ mod tests {
                 PathBuf::from("children/review.fabro"),
                 BundledWorkflow {
                     logical_path: PathBuf::from("children/review.fabro"),
-                    source: r#"digraph Review {
+                    source: r"digraph Review {
                         start [shape=Mdiamond]
                         exit [shape=Msquare]
                         start -> exit
-                    }"#
+                    }"
                     .to_string(),
                     files: HashMap::new(),
                 },

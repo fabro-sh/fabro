@@ -1,11 +1,12 @@
 use fabro_graphviz::graph::Graph;
+use fabro_graphviz::parser;
 use fabro_model::Catalog;
 use fabro_types::settings::run::{RunGoalLayer, RunLayer, RunModelLayer, RunPullRequestLayer};
 use fabro_types::settings::{InterpString, SettingsLayer};
 use fabro_workflow::run_materialization::materialize_run;
 
 fn graph(source: &str) -> Graph {
-    fabro_graphviz::parser::parse(source).expect("graph should parse")
+    parser::parse(source).expect("graph should parse")
 }
 
 #[test]
@@ -32,7 +33,7 @@ fn materialize_run_applies_graph_and_catalog_defaults() {
         ..SettingsLayer::default()
     };
 
-    let materialized = materialize_run(settings, &graph(source), &Catalog::builtin());
+    let materialized = materialize_run(settings, &graph(source), Catalog::builtin());
     let resolved = fabro_config::resolve_run_from_file(&materialized).unwrap();
 
     assert_eq!(
@@ -40,7 +41,7 @@ fn materialize_run_applies_graph_and_catalog_defaults() {
             .model
             .name
             .as_ref()
-            .map(|value| value.as_source())
+            .map(InterpString::as_source)
             .as_deref(),
         Some("claude-sonnet-4-6")
     );
@@ -49,7 +50,7 @@ fn materialize_run_applies_graph_and_catalog_defaults() {
             .model
             .provider
             .as_ref()
-            .map(|value| value.as_source())
+            .map(InterpString::as_source)
             .as_deref(),
         Some("anthropic")
     );

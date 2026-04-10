@@ -373,8 +373,8 @@ fn create_persists_requested_overrides_into_store() {
             "no_retro": !resolved_run.execution.retros,
             "verbose": cli_settings.output.verbosity == fabro_types::settings::cli::OutputVerbosity::Verbose,
             "llm": {
-                "model": resolved_run.model.name.as_ref().map(|value| value.as_source()),
-                "provider": resolved_run.model.provider.as_ref().map(|value| value.as_source()),
+                "model": resolved_run.model.name.as_ref().map(fabro_types::settings::InterpString::as_source),
+                "provider": resolved_run.model.provider.as_ref().map(fabro_types::settings::InterpString::as_source),
             },
             "sandbox": {
                 "provider": resolved_run.sandbox.provider,

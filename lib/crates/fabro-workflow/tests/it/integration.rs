@@ -3,6 +3,7 @@
     clippy::get_unwrap,
     clippy::ignore_without_reason,
     clippy::items_after_statements,
+    clippy::large_futures,
     clippy::manual_let_else,
     clippy::print_stderr,
     clippy::unnecessary_box_returns,
@@ -169,9 +170,9 @@ fn load_run_checkpoint(run_dir: &Path) -> Result<Checkpoint, Box<dyn std::error:
             unreachable!()
         })?
     };
-    return state
+    state
         .checkpoint
-        .ok_or_else(|| "checkpoint should exist in run store".into());
+        .ok_or_else(|| "checkpoint should exist in run store".into())
 }
 
 fn save_checkpoint(path: &Path, checkpoint: &Checkpoint) {

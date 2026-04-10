@@ -3441,7 +3441,7 @@ mod tests {
                 graph: serde_json::to_value(Graph::new("test")).unwrap(),
                 workflow_source: None,
                 workflow_config: None,
-                labels: Default::default(),
+                labels: BTreeMap::default(),
                 run_dir: "/tmp/run".to_string(),
                 working_directory: "/tmp/run".to_string(),
                 host_repo_path: None,

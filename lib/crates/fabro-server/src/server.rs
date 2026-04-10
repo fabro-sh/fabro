@@ -7586,7 +7586,7 @@ level = "debug"
                 .model
                 .name
                 .as_ref()
-                .map(|value| value.as_source())
+                .map(fabro_types::settings::InterpString::as_source)
                 .as_deref(),
             Some("claude-sonnet-4-5"),
         );
@@ -7596,7 +7596,7 @@ level = "debug"
                 .github
                 .app_id
                 .as_ref()
-                .map(|value| value.as_source())
+                .map(fabro_types::settings::InterpString::as_source)
                 .as_deref(),
             Some("12345"),
         );

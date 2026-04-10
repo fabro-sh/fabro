@@ -137,9 +137,9 @@ fn load_run_checkpoint(run_dir: &Path) -> Result<Checkpoint, Box<dyn std::error:
             unreachable!()
         })?
     };
-    return state
+    state
         .checkpoint
-        .ok_or_else(|| "checkpoint should exist in run store".into());
+        .ok_or_else(|| "checkpoint should exist in run store".into())
 }
 
 async fn create_env() -> DaytonaSandbox {

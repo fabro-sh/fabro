@@ -482,7 +482,7 @@ mod tests {
     #[test]
     fn fail_closed_when_all_strategies_disabled() {
         let file = settings(
-            r#"
+            r"
 _version = 1
 
 [server.auth.api.jwt]
@@ -490,7 +490,7 @@ enabled = false
 
 [server.auth.api.mtls]
 enabled = false
-"#,
+",
         );
         let err =
             resolve_auth_mode_with_lookup(&file, empty_lookup).expect_err("should refuse startup");
@@ -1008,7 +1008,7 @@ enabled = true
             avatar_url: "https://example.com/avatar.png".to_string(),
             user_url: "https://github.com/brynary".to_string(),
             github_id: 1,
-            exp: 9999999999,
+            exp: 9_999_999_999,
         });
 
         let response = app.oneshot(req).await.unwrap();

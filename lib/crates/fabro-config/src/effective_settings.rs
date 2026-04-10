@@ -183,6 +183,7 @@ mod tests {
     use crate::parse::parse_settings_layer;
     use fabro_types::settings::InterpString;
     use fabro_types::settings::SettingsLayer;
+    use fabro_types::settings::run::RunGoalLayer;
     use fabro_types::settings::server::{ServerLayer, ServerSchedulerLayer, ServerStorageLayer};
 
     use super::{EffectiveSettingsLayers, EffectiveSettingsMode, resolve_settings};
@@ -236,7 +237,7 @@ shared = "user"
                 .as_ref()
                 .and_then(|run| run.model.as_ref())
                 .and_then(|model| model.name.as_ref())
-                .map(|value| value.as_source())
+                .map(InterpString::as_source)
                 .as_deref(),
             Some("project-model")
         );
@@ -299,7 +300,7 @@ provider = "openai"
 
         assert_eq!(
             match settings.run.as_ref().and_then(|run| run.goal.as_ref()) {
-                Some(fabro_types::settings::run::RunGoalLayer::Inline(value)) => {
+                Some(RunGoalLayer::Inline(value)) => {
                     Some(value.as_source())
                 }
                 _ => None,
@@ -313,7 +314,7 @@ provider = "openai"
                 .as_ref()
                 .and_then(|run| run.model.as_ref())
                 .and_then(|model| model.name.as_ref())
-                .map(|value| value.as_source())
+                .map(InterpString::as_source)
                 .as_deref(),
             Some("workflow-model")
         );
@@ -323,7 +324,7 @@ provider = "openai"
                 .as_ref()
                 .and_then(|run| run.model.as_ref())
                 .and_then(|model| model.provider.as_ref())
-                .map(|value| value.as_source())
+                .map(InterpString::as_source)
                 .as_deref(),
             Some("openai")
         );
@@ -331,16 +332,18 @@ provider = "openai"
 
     #[test]
     fn cli_and_server_domains_from_fabro_toml_are_inert_under_remote_mode() {
-        let mut server_settings = fabro_types::settings::SettingsLayer::default();
-        server_settings.server = Some(ServerLayer {
-            storage: Some(ServerStorageLayer {
-                root: Some(InterpString::parse("/srv/fabro")),
+        let server_settings = SettingsLayer {
+            server: Some(ServerLayer {
+                storage: Some(ServerStorageLayer {
+                    root: Some(InterpString::parse("/srv/fabro")),
+                }),
+                scheduler: Some(ServerSchedulerLayer {
+                    max_concurrent_runs: Some(9),
+                }),
+                ..ServerLayer::default()
             }),
-            scheduler: Some(ServerSchedulerLayer {
-                max_concurrent_runs: Some(9),
-            }),
-            ..ServerLayer::default()
-        });
+            ..SettingsLayer::default()
+        };
 
         let project_with_server = layer(
             r#"
@@ -372,13 +375,13 @@ root = "/tmp/should-be-inert"
                 .as_ref()
                 .and_then(|server| server.storage.as_ref())
                 .and_then(|storage| storage.root.as_ref())
-                .map(|value| value.as_source())
+                .map(InterpString::as_source)
                 .as_deref(),
             Some("/srv/fabro")
         );
         assert_eq!(
             match settings.run.as_ref().and_then(|run| run.goal.as_ref()) {
-                Some(fabro_types::settings::run::RunGoalLayer::Inline(value)) => {
+                Some(RunGoalLayer::Inline(value)) => {
                     Some(value.as_source())
                 }
                 _ => None,
@@ -390,16 +393,18 @@ root = "/tmp/should-be-inert"
 
     #[test]
     fn local_daemon_mode_only_applies_server_owned_overrides() {
-        let mut server_settings = fabro_types::settings::SettingsLayer::default();
-        server_settings.server = Some(ServerLayer {
-            storage: Some(ServerStorageLayer {
-                root: Some(InterpString::parse("/srv/fabro")),
+        let server_settings = SettingsLayer {
+            server: Some(ServerLayer {
+                storage: Some(ServerStorageLayer {
+                    root: Some(InterpString::parse("/srv/fabro")),
+                }),
+                scheduler: Some(ServerSchedulerLayer {
+                    max_concurrent_runs: Some(7),
+                }),
+                ..ServerLayer::default()
             }),
-            scheduler: Some(ServerSchedulerLayer {
-                max_concurrent_runs: Some(7),
-            }),
-            ..ServerLayer::default()
-        });
+            ..SettingsLayer::default()
+        };
 
         let settings = resolve_settings(
             EffectiveSettingsLayers::default(),
@@ -414,7 +419,7 @@ root = "/tmp/should-be-inert"
                 .as_ref()
                 .and_then(|server| server.storage.as_ref())
                 .and_then(|storage| storage.root.as_ref())
-                .map(|value| value.as_source())
+                .map(InterpString::as_source)
                 .as_deref(),
             Some("/srv/fabro")
         );

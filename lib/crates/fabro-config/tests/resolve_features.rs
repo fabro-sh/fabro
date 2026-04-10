@@ -14,12 +14,12 @@ fn resolves_features_defaults_from_empty_settings() {
 #[test]
 fn resolves_session_sandboxes_flag() {
     let settings: SettingsLayer = parse_settings_layer(
-        r#"
+        r"
 _version = 1
 
 [features]
 session_sandboxes = true
-"#,
+",
     )
     .expect("fixture should parse");
 

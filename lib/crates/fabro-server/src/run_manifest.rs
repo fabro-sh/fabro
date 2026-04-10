@@ -992,7 +992,7 @@ app_id = "snapshotted-app-id"
                 .github
                 .app_id
                 .as_ref()
-                .map(|value| value.as_source())
+                .map(fabro_types::settings::InterpString::as_source)
                 .as_deref(),
             Some("snapshotted-app-id")
         );

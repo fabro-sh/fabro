@@ -307,7 +307,7 @@ mod tests {
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let url = format!("ws://{}", addr);
+        let url = format!("ws://{addr}");
 
         let registry = registry();
         let submissions = Arc::new(Mutex::new(Vec::new()));

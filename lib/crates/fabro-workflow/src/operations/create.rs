@@ -810,7 +810,7 @@ mod tests {
                 .model
                 .name
                 .as_ref()
-                .map(|value| value.as_source())
+                .map(fabro_types::settings::InterpString::as_source)
                 .as_deref(),
             Some("claude-sonnet-4-6")
         );
@@ -820,7 +820,7 @@ mod tests {
                 .model
                 .provider
                 .as_ref()
-                .map(|value| value.as_source())
+                .map(fabro_types::settings::InterpString::as_source)
                 .as_deref(),
             Some("anthropic")
         );

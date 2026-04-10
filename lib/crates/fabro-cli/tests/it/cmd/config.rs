@@ -63,7 +63,7 @@ fn run_model_name(settings: &SettingsLayer) -> Option<String> {
         .model
         .name
         .as_ref()
-        .map(|value| value.as_source())
+        .map(fabro_types::settings::InterpString::as_source)
 }
 
 fn run_model_provider(settings: &SettingsLayer) -> Option<String> {
@@ -71,7 +71,7 @@ fn run_model_provider(settings: &SettingsLayer) -> Option<String> {
         .model
         .provider
         .as_ref()
-        .map(|value| value.as_source())
+        .map(fabro_types::settings::InterpString::as_source)
 }
 
 fn run_inputs(settings: &SettingsLayer) -> &std::collections::HashMap<String, toml::Value> {
@@ -102,8 +102,7 @@ fn run_hooks(settings: &SettingsLayer) -> &[fabro_types::settings::run::HookEntr
     settings
         .run
         .as_ref()
-        .map(|run| run.hooks.as_slice())
-        .unwrap_or(&[])
+        .map_or(&[], |run| run.hooks.as_slice())
 }
 
 fn run_agent_mcps(
@@ -410,6 +409,7 @@ fn settings_local_merges_cli_and_project_defaults() {
 
 #[test]
 fn settings_local_workflow_name_applies_run_overlay_and_deep_merges() {
+    use fabro_types::settings::run::McpEntryLayer;
     let context = test_context!();
     let project = setup_settings_fixture(&context);
 
@@ -422,8 +422,6 @@ fn settings_local_workflow_name_applies_run_overlay_and_deep_merges() {
         .get_output()
         .stdout
         .clone();
-
-    use fabro_types::settings::run::McpEntryLayer;
 
     let cfg = parse_settings(&output);
     assert_eq!(run_goal_inline(&cfg).as_deref(), Some("demo goal"));
@@ -456,7 +454,7 @@ fn settings_local_workflow_name_applies_run_overlay_and_deep_merges() {
         shared_hook
             .script
             .as_ref()
-            .map(|s| s.as_source())
+            .map(fabro_types::settings::InterpString::as_source)
             .as_deref(),
         Some("echo run")
     );
@@ -470,7 +468,10 @@ fn settings_local_workflow_name_applies_run_overlay_and_deep_merges() {
     match mcps.get("shared").expect("shared mcp") {
         McpEntryLayer::Stdio { command, .. } => {
             let command = command.as_ref().expect("command");
-            let parts: Vec<String> = command.iter().map(|c| c.as_source()).collect();
+            let parts: Vec<String> = command
+                .iter()
+                .map(fabro_types::settings::InterpString::as_source)
+                .collect();
             assert_eq!(parts, vec!["echo".to_string(), "run".to_string()]);
         }
         other => panic!("unexpected MCP transport: {other:?}"),
@@ -486,15 +487,21 @@ fn settings_local_workflow_name_applies_run_overlay_and_deep_merges() {
     // run.sandbox.env stays sticky merge-by-key per R71.
     let env = &sandbox.env;
     assert_eq!(
-        env.get("CLI_ONLY").map(|v| v.as_source()).as_deref(),
+        env.get("CLI_ONLY")
+            .map(fabro_types::settings::InterpString::as_source)
+            .as_deref(),
         Some("1")
     );
     assert_eq!(
-        env.get("RUN_ONLY").map(|v| v.as_source()).as_deref(),
+        env.get("RUN_ONLY")
+            .map(fabro_types::settings::InterpString::as_source)
+            .as_deref(),
         Some("1")
     );
     assert_eq!(
-        env.get("SHARED").map(|v| v.as_source()).as_deref(),
+        env.get("SHARED")
+            .map(fabro_types::settings::InterpString::as_source)
+            .as_deref(),
         Some("run")
     );
 }

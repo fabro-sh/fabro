@@ -1,8 +1,8 @@
 use fabro_config::parse_settings_layer;
 use fabro_config::resolve_cli_from_file;
-use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::cli::{CliTargetSettings, OutputFormat, OutputVerbosity};
 use fabro_types::settings::run::AgentPermissions;
+use fabro_types::settings::{InterpString, SettingsLayer};
 
 #[test]
 fn resolves_cli_defaults_from_empty_settings() {
@@ -77,11 +77,11 @@ level = "debug"
             .model
             .provider
             .as_ref()
-            .map(|value| value.as_source()),
+            .map(InterpString::as_source),
         Some("openai".to_string())
     );
     assert_eq!(
-        cli.exec.model.name.as_ref().map(|value| value.as_source()),
+        cli.exec.model.name.as_ref().map(InterpString::as_source),
         Some("gpt-5".to_string())
     );
     assert_eq!(cli.exec.agent.permissions, Some(AgentPermissions::ReadOnly));

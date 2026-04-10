@@ -1,6 +1,6 @@
 use fabro_config::effective_settings::{EffectiveSettingsLayers, EffectiveSettingsMode};
 use fabro_config::parse_settings_layer;
-use fabro_types::settings::SettingsLayer;
+use fabro_types::settings::{InterpString, SettingsLayer};
 
 fn parse(source: &str) -> SettingsLayer {
     parse_settings_layer(source).expect("fixture should parse")
@@ -13,10 +13,10 @@ fn resolves_root_settings_defaults() {
 
     assert_eq!(settings.project.directory, "fabro/");
     assert_eq!(settings.workflow.graph, "workflow.fabro");
-    assert_eq!(settings.run.execution.retros, true);
-    assert_eq!(settings.cli.updates.check, true);
+    assert!(settings.run.execution.retros);
+    assert!(settings.cli.updates.check);
     assert_eq!(settings.server.scheduler.max_concurrent_runs, 5);
-    assert_eq!(settings.features.session_sandboxes, false);
+    assert!(!settings.features.session_sandboxes);
 }
 
 #[test]
@@ -100,7 +100,7 @@ name = "gpt-5"
             .model
             .provider
             .as_ref()
-            .map(|value| value.as_source()),
+            .map(InterpString::as_source),
         Some("openai".to_string())
     );
     assert_eq!(
@@ -109,7 +109,7 @@ name = "gpt-5"
             .model
             .name
             .as_ref()
-            .map(|value| value.as_source()),
+            .map(InterpString::as_source),
         Some("gpt-5".to_string())
     );
 }

@@ -4,11 +4,12 @@ use std::path::PathBuf;
 use fabro_types::fixtures;
 use fabro_types::graph::Graph;
 use fabro_types::run::RunRecord;
+use fabro_types::settings::InterpString;
+use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::run::{RunGoalLayer, RunLayer};
 use fabro_types::settings::server::{
     GithubIntegrationLayer, ServerIntegrationsLayer, ServerLayer, ServerStorageLayer,
 };
-use fabro_types::settings::{InterpString, SettingsLayer};
 
 fn templated_settings() -> SettingsLayer {
     SettingsLayer {
@@ -78,7 +79,7 @@ fn run_record_round_trips_templated_settings() {
             .as_ref()
             .and_then(|server| server.storage.as_ref())
             .and_then(|storage| storage.root.as_ref())
-            .map(|value| value.as_source()),
+            .map(InterpString::as_source),
         Some("${env.FABRO_STORAGE}".to_string())
     );
     assert_eq!(
@@ -89,7 +90,7 @@ fn run_record_round_trips_templated_settings() {
             .and_then(|server| server.integrations.as_ref())
             .and_then(|integrations| integrations.github.as_ref())
             .and_then(|github| github.app_id.as_ref())
-            .map(|value| value.as_source()),
+            .map(InterpString::as_source),
         Some("${env.GITHUB_APP_ID}".to_string())
     );
 }

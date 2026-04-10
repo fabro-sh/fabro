@@ -122,12 +122,12 @@ async fn web_enabled_serves_web_only_routes() {
 #[tokio::test]
 async fn web_disabled_returns_404_for_web_routes_and_keeps_machine_api() {
     let settings: SettingsLayer = parse_settings_layer(
-        r#"
+        r"
 _version = 1
 
 [server.web]
 enabled = false
-"#,
+",
     )
     .expect("settings fixture should parse");
     let app = build_router_with_options(
@@ -179,12 +179,12 @@ enabled = false
 #[tokio::test]
 async fn web_disabled_ignores_demo_header_dispatch() {
     let settings: SettingsLayer = parse_settings_layer(
-        r#"
+        r"
 _version = 1
 
 [server.web]
 enabled = false
-"#,
+",
     )
     .expect("settings fixture should parse");
     let app = build_router_with_options(

@@ -1080,15 +1080,21 @@ mod tests {
         };
         let certs_dir = fabro_util::Home::from_env().certs_dir();
         assert_eq!(
-            tls.cert.as_ref().map(|c| c.as_source()),
+            tls.cert
+                .as_ref()
+                .map(fabro_types::settings::InterpString::as_source),
             Some(certs_dir.join("server.crt").to_string_lossy().into_owned())
         );
         assert_eq!(
-            tls.key.as_ref().map(|c| c.as_source()),
+            tls.key
+                .as_ref()
+                .map(fabro_types::settings::InterpString::as_source),
             Some(certs_dir.join("server.key").to_string_lossy().into_owned())
         );
         assert_eq!(
-            tls.ca.as_ref().map(|c| c.as_source()),
+            tls.ca
+                .as_ref()
+                .map(fabro_types::settings::InterpString::as_source),
             Some(certs_dir.join("ca.crt").to_string_lossy().into_owned())
         );
     }

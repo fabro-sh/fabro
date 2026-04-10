@@ -793,7 +793,10 @@ mod tests {
             .as_ref()
             .expect("[server.integrations.github] should be present");
         assert_eq!(
-            github.app_id.as_ref().map(|s| s.as_source()),
+            github
+                .app_id
+                .as_ref()
+                .map(fabro_types::settings::InterpString::as_source),
             Some("123".to_string())
         );
     }

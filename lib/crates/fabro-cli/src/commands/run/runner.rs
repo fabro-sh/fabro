@@ -488,6 +488,7 @@ fn install_signal_handlers(
 }
 
 #[cfg(test)]
+#[allow(clippy::absolute_paths)]
 mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};

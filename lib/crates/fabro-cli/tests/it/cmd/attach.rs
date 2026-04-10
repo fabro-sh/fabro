@@ -83,7 +83,7 @@ fn wait_for_output_signal(
     child: &mut std::process::Child,
     stdout: &mut impl Read,
     stderr_reader: std::thread::JoinHandle<Vec<u8>>,
-    signal_rx: mpsc::Receiver<()>,
+    signal_rx: &mpsc::Receiver<()>,
     needle: &str,
 ) -> std::thread::JoinHandle<Vec<u8>> {
     let deadline = Instant::now() + SHARED_DAEMON_TIMEOUT;
@@ -96,8 +96,7 @@ fn wait_for_output_signal(
                     .take()
                     .expect("stderr reader should still be available");
             }
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => {}
+            Err(mpsc::RecvTimeoutError::Timeout | mpsc::RecvTimeoutError::Disconnected) => {}
         }
 
         if let Some(status) = child.try_wait().expect("attach should stay alive") {
@@ -252,8 +251,13 @@ fn attach_before_completion_streams_to_finished_state() {
 
         stderr_bytes
     });
-    let stderr_reader =
-        wait_for_output_signal(&mut child, &mut stdout, stderr_reader, signal_rx, "✓ start");
+    let stderr_reader = wait_for_output_signal(
+        &mut child,
+        &mut stdout,
+        stderr_reader,
+        &signal_rx,
+        "✓ start",
+    );
     gate.release();
     let status = child.wait().expect("attach should exit");
     let mut stdout_bytes = Vec::new();
