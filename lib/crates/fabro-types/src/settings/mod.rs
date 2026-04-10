@@ -30,7 +30,7 @@ pub use cli::{
     CliUpdatesSettings,
 };
 pub use duration::{Duration, ParseDurationError};
-pub use features::FeaturesLayer;
+pub use features::{FeaturesLayer, FeaturesSettings};
 pub use interp::{InterpString, Provenance, ResolveEnvError, Resolved};
 pub use model_ref::{
     AmbiguousModelRef, ModelRef, ModelRegistry, ParseModelRefError, ResolvedModelRef,

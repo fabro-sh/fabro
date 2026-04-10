@@ -147,8 +147,9 @@ fn json_response(status: StatusCode, body: serde_json::Value) -> Response {
 }
 
 fn features_json(settings: &SettingsFile) -> serde_json::Value {
-    let features = settings.features.as_ref();
-    let session_sandboxes = features.and_then(|f| f.session_sandboxes).unwrap_or(false);
+    let session_sandboxes = fabro_config::resolve_features_from_file(settings)
+        .map(|settings| settings.session_sandboxes)
+        .unwrap_or(false);
     let retros = fabro_config::resolve_run_from_file(settings)
         .map(|settings| settings.execution.retros)
         .unwrap_or(false);

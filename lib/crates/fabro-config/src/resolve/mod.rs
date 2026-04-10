@@ -1,16 +1,19 @@
 mod cli;
 mod error;
+mod features;
 mod project;
 mod run;
 mod server;
 mod workflow;
 
 use fabro_types::settings::{
-    CliSettings, ProjectSettings, RunSettings, ServerSettings, SettingsFile, WorkflowSettings,
+    CliSettings, FeaturesSettings, ProjectSettings, RunSettings, ServerSettings, SettingsFile,
+    WorkflowSettings,
 };
 
 pub use cli::resolve_cli;
 pub use error::ResolveError;
+pub use features::resolve_features;
 pub use project::resolve_project;
 pub use run::resolve_run;
 pub use server::resolve_server;
@@ -44,6 +47,19 @@ pub fn resolve_project_from_file(
     let mut errors = Vec::new();
     let layer = file.project.as_ref().cloned().unwrap_or_default();
     let resolved = resolve_project(&layer, &mut errors);
+    if errors.is_empty() {
+        Ok(resolved)
+    } else {
+        Err(errors)
+    }
+}
+
+pub fn resolve_features_from_file(
+    file: &SettingsFile,
+) -> Result<FeaturesSettings, Vec<ResolveError>> {
+    let mut errors = Vec::new();
+    let layer = file.features.as_ref().cloned().unwrap_or_default();
+    let resolved = resolve_features(&layer, &mut errors);
     if errors.is_empty() {
         Ok(resolved)
     } else {

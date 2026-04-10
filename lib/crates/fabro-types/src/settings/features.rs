@@ -5,6 +5,12 @@
 
 use serde::{Deserialize, Serialize};
 
+/// A structurally resolved `[features]` view for consumers.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FeaturesSettings {
+    pub session_sandboxes: bool,
+}
+
 /// A sparse `[features]` layer as it appears in a single settings file.
 ///
 /// Every field is an `Option<bool>` so layers can independently set or
