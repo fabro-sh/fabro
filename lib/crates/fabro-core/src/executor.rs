@@ -126,14 +126,19 @@ impl<G: Graph + 'static> Executor<G> {
                             .await;
                         // Check if there's a retry target for goal gate failure
                         if let Some(retry_target) = graph.get_retry_target(&failed_node_id) {
-                            tracing::debug!(
-                                node = %node.id(),
-                                retry_target = %retry_target,
-                                failed_node = %failed_node_id,
-                                "Goal gate unsatisfied, retrying"
-                            );
-                            state.advance(&retry_target);
-                            continue;
+                            if graph
+                                .get_node(&retry_target)
+                                .is_some_and(|retry_node| !retry_node.is_terminal())
+                            {
+                                tracing::debug!(
+                                    node = %node.id(),
+                                    retry_target = %retry_target,
+                                    failed_node = %failed_node_id,
+                                    "Goal gate unsatisfied, retrying"
+                                );
+                                state.advance(&retry_target);
+                                continue;
+                            }
                         }
                         let outcome = Outcome::fail(&format!(
                             "goal gate unsatisfied for node {failed_node_id} and no retry target"
@@ -1924,6 +1929,53 @@ mod tests {
         let (result, _) = executor.run(&g, state).await.unwrap();
         assert_eq!(result.status, StageStatus::Success);
         assert_eq!(handler.calls(), 2);
+    }
+
+    #[tokio::test]
+    async fn executor_goal_gate_retry_target_to_terminal_fails_without_looping() {
+        let terminal_visits = Arc::new(AtomicU32::new(0));
+
+        struct SingleTerminalVisit(Arc<AtomicU32>);
+        #[async_trait]
+        impl RunLifecycle<TestGraph> for SingleTerminalVisit {
+            async fn on_terminal_reached(
+                &self,
+                _node: &TestNode,
+                _goal_gates_passed: bool,
+                _s: &ExecutionState,
+            ) {
+                let visits = self.0.fetch_add(1, Ordering::SeqCst);
+                assert_eq!(visits, 0, "terminal node reached more than once");
+            }
+        }
+
+        let g = TestGraph::new(
+            vec![
+                TestNode::new("work"),
+                TestNode::terminal("end").with_goal_gate("work", StageStatus::Success),
+            ],
+            vec![TestEdge::new("work", "end")],
+            "work",
+        )
+        .with_retry_target("work", "end");
+
+        let state = ExecutionState::new(&g).unwrap();
+        let executor = ExecutorBuilder::new(
+            Arc::new(AlwaysFailHandler::new("boom")) as Arc<dyn NodeHandler<TestGraph>>
+        )
+        .lifecycle(Box::new(SingleTerminalVisit(terminal_visits.clone())))
+        .build();
+
+        let (result, _) = executor.run(&g, state).await.unwrap();
+        assert_eq!(result.status, StageStatus::Fail);
+        assert_eq!(
+            result
+                .failure
+                .as_ref()
+                .map(|failure| failure.message.as_str()),
+            Some("goal gate unsatisfied for node work and no retry target")
+        );
+        assert_eq!(terminal_visits.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
