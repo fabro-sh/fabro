@@ -3421,7 +3421,7 @@ mod tests {
 
     #[test]
     fn run_created_populates_user_actor_from_provenance() {
-        use ::fabro_types::settings::SettingsFile;
+        use ::fabro_types::settings::SettingsLayer;
         use ::fabro_types::{Graph, RunAuthMethod, RunSubjectProvenance, fixtures};
 
         let provenance = RunProvenance {
@@ -3437,7 +3437,7 @@ mod tests {
             &fixtures::RUN_1,
             &Event::RunCreated {
                 run_id: fixtures::RUN_1,
-                settings: serde_json::to_value(SettingsFile::default()).unwrap(),
+                settings: serde_json::to_value(SettingsLayer::default()).unwrap(),
                 graph: serde_json::to_value(Graph::new("test")).unwrap(),
                 workflow_source: None,
                 workflow_config: None,

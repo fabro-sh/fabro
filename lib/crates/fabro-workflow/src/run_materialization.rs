@@ -1,9 +1,13 @@
 use fabro_graphviz::graph::Graph;
 use fabro_model::{Catalog, Provider};
 use fabro_types::settings::run::{RunGoalLayer, RunLayer, RunModelLayer};
-use fabro_types::settings::{InterpString, SettingsFile};
+use fabro_types::settings::{InterpString, SettingsLayer};
 
-pub fn materialize_run(mut layer: SettingsFile, graph: &Graph, catalog: &Catalog) -> SettingsFile {
+pub fn materialize_run(
+    mut layer: SettingsLayer,
+    graph: &Graph,
+    catalog: &Catalog,
+) -> SettingsLayer {
     let configured_model = layer
         .run
         .as_ref()

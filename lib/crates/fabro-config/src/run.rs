@@ -1,6 +1,6 @@
 //! Workflow / run config loading helpers.
 //!
-//! Thin wrappers around `parse_settings_file` / `load_settings_path` plus
+//! Thin wrappers around `parse_settings_layer` / `load_settings_path` plus
 //! path resolution for the `[workflow] graph` override. Runtime types
 //! that used to be re-exported from here live under
 //! `fabro_types::settings::run` now.
@@ -10,12 +10,13 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 
 use crate::load::{load_settings_path, resolve_goal_file_path};
+use crate::parse::parse_settings_layer;
+use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::run::{ResolvedGoalSource, ResolvedRunGoal, RunGoalLayer};
-use fabro_types::settings::{SettingsFile, parse_settings_file};
 
 /// Load and parse a run config from a TOML file.
-pub fn parse_run_config(contents: &str) -> anyhow::Result<SettingsFile> {
-    parse_settings_file(contents)
+pub fn parse_run_config(contents: &str) -> anyhow::Result<SettingsLayer> {
+    parse_settings_layer(contents)
         .map_err(|err| anyhow::anyhow!("{err}"))
         .context("Failed to parse run config TOML")
 }
@@ -24,7 +25,7 @@ pub fn parse_run_config(contents: &str) -> anyhow::Result<SettingsFile> {
 ///
 /// Goes through [`load_settings_path`] so that relative `run.goal.file`
 /// paths are anchored at the directory of `path` at load time.
-pub fn load_run_config(path: &Path) -> anyhow::Result<SettingsFile> {
+pub fn load_run_config(path: &Path) -> anyhow::Result<SettingsLayer> {
     load_settings_path(path)
         .with_context(|| format!("Failed to parse workflow config at {}", path.display()))
 }
@@ -73,7 +74,7 @@ impl std::error::Error for ResolveRunGoalError {
 }
 
 pub fn resolve_run_goal(
-    settings: &SettingsFile,
+    settings: &SettingsLayer,
     base_dir: &Path,
 ) -> Result<Option<ResolvedRunGoal>, ResolveRunGoalError> {
     let Some(goal) = settings.run.as_ref().and_then(|run| run.goal.as_ref()) else {

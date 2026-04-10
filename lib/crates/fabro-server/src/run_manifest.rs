@@ -7,6 +7,7 @@ use fabro_api::types;
 use fabro_config::effective_settings;
 use fabro_config::effective_settings::{EffectiveSettingsLayers, EffectiveSettingsMode};
 use fabro_config::merge::combine_files;
+use fabro_config::parse_settings_layer;
 use fabro_config::project::resolve_working_directory;
 use fabro_config::run::parse_run_config;
 use fabro_graphviz::graph::{Graph, is_llm_handler_type};
@@ -20,6 +21,7 @@ use fabro_sandbox::daytona::DaytonaConfig;
 use fabro_sandbox::{DockerSandboxOptions, Sandbox, SandboxProvider, SandboxSpec};
 use fabro_types::RunId;
 use fabro_types::settings::ServerSettings;
+use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::cli::{CliLayer, CliOutputLayer, OutputVerbosity};
 use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::run::{
@@ -27,7 +29,6 @@ use fabro_types::settings::run::{
     RunExecutionLayer, RunGoalLayer, RunLayer, RunMode, RunModelLayer, RunSandboxLayer,
     RunSettings,
 };
-use fabro_types::settings::{SettingsFile, parse_settings_file};
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
 use fabro_validate::Severity;
 use fabro_workflow::error::FabroError;
@@ -44,7 +45,7 @@ pub(crate) struct PreparedManifest {
     pub git: Option<types::ManifestGit>,
     pub root_source: String,
     pub run_id: Option<RunId>,
-    pub settings: SettingsFile,
+    pub settings: SettingsLayer,
     pub target_path: PathBuf,
     pub workflow_bundle: WorkflowBundle,
     pub workflow_input: BundledWorkflow,
@@ -52,7 +53,7 @@ pub(crate) struct PreparedManifest {
 }
 
 pub(crate) fn prepare_manifest_with_mode(
-    server_settings: &SettingsFile,
+    server_settings: &SettingsLayer,
     manifest: &types::RunManifest,
     local_daemon_mode: bool,
 ) -> Result<PreparedManifest> {
@@ -75,14 +76,14 @@ pub(crate) fn prepare_manifest_with_mode(
         .configs
         .iter()
         .filter(|config| config.type_ == types::ManifestConfigType::Project)
-        .try_fold(SettingsFile::default(), |layer, config| {
+        .try_fold(SettingsLayer::default(), |layer, config| {
             Ok::<_, anyhow::Error>(combine_files(layer, parse_manifest_config(config)?))
         })?;
     let user_layer = manifest
         .configs
         .iter()
         .filter(|config| config.type_ == types::ManifestConfigType::User)
-        .try_fold(SettingsFile::default(), |layer, config| {
+        .try_fold(SettingsLayer::default(), |layer, config| {
             Ok::<_, anyhow::Error>(combine_files(layer, parse_manifest_config(config)?))
         })?;
     let mut settings = effective_settings::resolve_settings(
@@ -198,12 +199,12 @@ fn workflow_bundle_from_manifest(
 fn root_workflow_config_layer(
     manifest: &types::RunManifest,
     workflow: &BundledWorkflow,
-) -> Result<SettingsFile> {
+) -> Result<SettingsLayer> {
     let Some(root) = manifest.workflows.get(&manifest.target.path) else {
         bail!("manifest target path is missing from workflows map");
     };
     let Some(config) = root.config.as_ref() else {
-        return Ok(SettingsFile::default());
+        return Ok(SettingsLayer::default());
     };
 
     let mut layer = parse_run_config(&config.source)?;
@@ -211,16 +212,16 @@ fn root_workflow_config_layer(
     Ok(layer)
 }
 
-fn parse_manifest_config(config: &types::ManifestConfig) -> Result<SettingsFile> {
+fn parse_manifest_config(config: &types::ManifestConfig) -> Result<SettingsLayer> {
     let Some(source) = config.source.as_deref() else {
-        return Ok(SettingsFile::default());
+        return Ok(SettingsLayer::default());
     };
-    parse_settings_file(source).map_err(|err| anyhow!("Failed to parse settings file: {err}"))
+    parse_settings_layer(source).map_err(|err| anyhow!("Failed to parse settings file: {err}"))
 }
 
-fn manifest_args_layer(args: Option<&types::ManifestArgs>) -> SettingsFile {
+fn manifest_args_layer(args: Option<&types::ManifestArgs>) -> SettingsLayer {
     let Some(args) = args else {
-        return SettingsFile::default();
+        return SettingsLayer::default();
     };
 
     let model = (args.model.is_some() || args.provider.is_some()).then(|| RunModelLayer {
@@ -273,10 +274,10 @@ fn manifest_args_layer(args: Option<&types::ManifestArgs>) -> SettingsFile {
         })
     });
 
-    SettingsFile {
+    SettingsLayer {
         run,
         cli,
-        ..SettingsFile::default()
+        ..SettingsLayer::default()
     }
 }
 
@@ -289,7 +290,7 @@ fn parse_labels(labels: &[String]) -> HashMap<String, String> {
 }
 
 fn resolve_manifest_dockerfile(
-    layer: &mut SettingsFile,
+    layer: &mut SettingsLayer,
     config_path: &Path,
     files: &HashMap<PathBuf, String>,
 ) -> Result<()> {
@@ -865,8 +866,8 @@ mod tests {
         }
     }
 
-    fn server_settings_fixture(source: &str) -> SettingsFile {
-        fabro_types::settings::parse_settings_file(source).expect("v2 fixture should parse")
+    fn server_settings_fixture(source: &str) -> SettingsLayer {
+        fabro_config::parse_settings_layer(source).expect("v2 fixture should parse")
     }
 
     #[test]

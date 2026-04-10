@@ -5,6 +5,7 @@ pub mod home;
 pub mod legacy_env;
 pub mod load;
 pub mod merge;
+pub mod parse;
 pub mod project;
 pub mod resolve;
 pub mod run;
@@ -16,6 +17,7 @@ pub use home::Home;
 pub use load::{
     load_settings_for_workflow, load_settings_path, load_settings_project, load_settings_user,
 };
+pub use parse::{ParseError, parse_settings_layer};
 pub use resolve::{
     ResolveError, resolve, resolve_cli, resolve_cli_from_file, resolve_features,
     resolve_features_from_file, resolve_project, resolve_project_from_file, resolve_run,
@@ -26,12 +28,12 @@ pub use storage::{RunScratch, ServerState, Storage};
 
 use std::path::Path;
 
-use fabro_types::settings::{Settings, SettingsFile};
+use fabro_types::settings::{Settings, SettingsLayer};
 use serde::de::DeserializeOwned;
 
 pub fn load_and_resolve(
     layers: effective_settings::EffectiveSettingsLayers,
-    server_settings: Option<&SettingsFile>,
+    server_settings: Option<&SettingsLayer>,
     mode: effective_settings::EffectiveSettingsMode,
 ) -> anyhow::Result<Settings> {
     let layer = effective_settings::resolve_settings(layers, server_settings, mode)?;

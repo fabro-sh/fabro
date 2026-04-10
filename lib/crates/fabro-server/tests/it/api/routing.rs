@@ -1,11 +1,12 @@
 use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, StatusCode};
+use fabro_config::parse_settings_layer;
 use fabro_server::jwt_auth::AuthMode;
 use fabro_server::server::{
     RouterOptions, build_router, build_router_with_options, create_app_state,
     create_app_state_with_options,
 };
-use fabro_types::settings::{SettingsFile, parse_settings_file};
+use fabro_types::settings::SettingsLayer;
 use tower::ServiceExt;
 
 use crate::helpers::body_json;
@@ -120,7 +121,7 @@ async fn web_enabled_serves_web_only_routes() {
 
 #[tokio::test]
 async fn web_disabled_returns_404_for_web_routes_and_keeps_machine_api() {
-    let settings: SettingsFile = parse_settings_file(
+    let settings: SettingsLayer = parse_settings_layer(
         r#"
 _version = 1
 
@@ -177,7 +178,7 @@ enabled = false
 
 #[tokio::test]
 async fn web_disabled_ignores_demo_header_dispatch() {
-    let settings: SettingsFile = parse_settings_file(
+    let settings: SettingsLayer = parse_settings_layer(
         r#"
 _version = 1
 

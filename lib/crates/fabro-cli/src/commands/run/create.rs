@@ -4,7 +4,7 @@ use crate::args::RunArgs;
 use crate::command_context::CommandContext;
 use fabro_config::Storage;
 use fabro_types::RunId;
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::SettingsLayer;
 use fabro_util::terminal::Styles;
 
 use super::output::{api_diagnostics_to_local, print_preflight_workflow_summary};
@@ -23,7 +23,7 @@ pub(crate) struct CreatedRun {
 pub(crate) async fn create_run(
     ctx: &CommandContext,
     args: &RunArgs,
-    _cli_defaults: SettingsFile,
+    _cli_defaults: SettingsLayer,
     styles: &Styles,
     quiet: bool,
 ) -> anyhow::Result<CreatedRun> {

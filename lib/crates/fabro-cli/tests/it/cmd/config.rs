@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
+use fabro_config::parse_settings_layer;
 use fabro_test::{fabro_snapshot, test_context};
-use fabro_types::settings::{SettingsFile, parse_settings_file};
+use fabro_types::settings::SettingsLayer;
 use httpmock::MockServer;
 use predicates::prelude::*;
 
@@ -30,34 +31,34 @@ fn old_config_show_command_is_rejected() {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn parse_settings(stdout: &[u8]) -> SettingsFile {
-    serde_yaml::from_slice(stdout).expect("stdout should be valid YAML SettingsFile")
+fn parse_settings(stdout: &[u8]) -> SettingsLayer {
+    serde_yaml::from_slice(stdout).expect("stdout should be valid YAML SettingsLayer")
 }
 
-fn resolve_cli(settings: &SettingsFile) -> fabro_types::settings::CliSettings {
+fn resolve_cli(settings: &SettingsLayer) -> fabro_types::settings::CliSettings {
     fabro_config::resolve_cli_from_file(settings).expect("cli settings should resolve")
 }
 
-fn resolve_project(settings: &SettingsFile) -> fabro_types::settings::ProjectSettings {
+fn resolve_project(settings: &SettingsLayer) -> fabro_types::settings::ProjectSettings {
     fabro_config::resolve_project_from_file(settings).expect("project settings should resolve")
 }
 
-fn resolve_run(settings: &SettingsFile) -> fabro_types::settings::RunSettings {
+fn resolve_run(settings: &SettingsLayer) -> fabro_types::settings::RunSettings {
     fabro_config::resolve_run_from_file(settings).expect("run settings should resolve")
 }
 
-fn resolve_server(settings: &SettingsFile) -> fabro_types::settings::ServerSettings {
+fn resolve_server(settings: &SettingsLayer) -> fabro_types::settings::ServerSettings {
     fabro_config::resolve_server_from_file(settings).expect("server settings should resolve")
 }
 
-fn run_goal_inline(settings: &SettingsFile) -> Option<String> {
+fn run_goal_inline(settings: &SettingsLayer) -> Option<String> {
     match resolve_run(settings).goal {
         Some(fabro_types::settings::run::RunGoal::Inline(value)) => Some(value.as_source()),
         _ => None,
     }
 }
 
-fn run_model_name(settings: &SettingsFile) -> Option<String> {
+fn run_model_name(settings: &SettingsLayer) -> Option<String> {
     resolve_run(settings)
         .model
         .name
@@ -65,7 +66,7 @@ fn run_model_name(settings: &SettingsFile) -> Option<String> {
         .map(|value| value.as_source())
 }
 
-fn run_model_provider(settings: &SettingsFile) -> Option<String> {
+fn run_model_provider(settings: &SettingsLayer) -> Option<String> {
     resolve_run(settings)
         .model
         .provider
@@ -73,7 +74,7 @@ fn run_model_provider(settings: &SettingsFile) -> Option<String> {
         .map(|value| value.as_source())
 }
 
-fn run_inputs(settings: &SettingsFile) -> &std::collections::HashMap<String, toml::Value> {
+fn run_inputs(settings: &SettingsLayer) -> &std::collections::HashMap<String, toml::Value> {
     settings
         .run
         .as_ref()
@@ -81,7 +82,7 @@ fn run_inputs(settings: &SettingsFile) -> &std::collections::HashMap<String, tom
         .expect("run.inputs")
 }
 
-fn run_sandbox(settings: &SettingsFile) -> &fabro_types::settings::run::RunSandboxLayer {
+fn run_sandbox(settings: &SettingsLayer) -> &fabro_types::settings::run::RunSandboxLayer {
     settings
         .run
         .as_ref()
@@ -89,7 +90,7 @@ fn run_sandbox(settings: &SettingsFile) -> &fabro_types::settings::run::RunSandb
         .expect("run.sandbox")
 }
 
-fn run_checkpoint(settings: &SettingsFile) -> &fabro_types::settings::run::RunCheckpointLayer {
+fn run_checkpoint(settings: &SettingsLayer) -> &fabro_types::settings::run::RunCheckpointLayer {
     settings
         .run
         .as_ref()
@@ -97,7 +98,7 @@ fn run_checkpoint(settings: &SettingsFile) -> &fabro_types::settings::run::RunCh
         .expect("run.checkpoint")
 }
 
-fn run_hooks(settings: &SettingsFile) -> &[fabro_types::settings::run::HookEntry] {
+fn run_hooks(settings: &SettingsLayer) -> &[fabro_types::settings::run::HookEntry] {
     settings
         .run
         .as_ref()
@@ -106,7 +107,7 @@ fn run_hooks(settings: &SettingsFile) -> &[fabro_types::settings::run::HookEntry
 }
 
 fn run_agent_mcps(
-    settings: &SettingsFile,
+    settings: &SettingsLayer,
 ) -> &std::collections::HashMap<String, fabro_types::settings::run::McpEntryLayer> {
     settings
         .run
@@ -116,20 +117,20 @@ fn run_agent_mcps(
         .expect("run.agent.mcps")
 }
 
-fn auto_approve_enabled(settings: &SettingsFile) -> bool {
+fn auto_approve_enabled(settings: &SettingsLayer) -> bool {
     resolve_run(settings).execution.approval == fabro_types::settings::run::ApprovalMode::Auto
 }
 
-fn run_prepare_commands(settings: &SettingsFile) -> Vec<String> {
+fn run_prepare_commands(settings: &SettingsLayer) -> Vec<String> {
     resolve_run(settings).prepare.commands
 }
 
-fn server_storage_root(settings: &SettingsFile) -> String {
+fn server_storage_root(settings: &SettingsLayer) -> String {
     resolve_server(settings).storage.root.as_source()
 }
 
-fn server_settings_fixture() -> SettingsFile {
-    parse_settings_file(
+fn server_settings_fixture() -> SettingsLayer {
+    parse_settings_layer(
         r#"
 _version = 1
 
@@ -148,7 +149,7 @@ shared = "server"
     .expect("server settings fixture should parse")
 }
 
-fn server_settings_body(settings: &SettingsFile) -> String {
+fn server_settings_body(settings: &SettingsLayer) -> String {
     serde_json::to_string(settings).expect("settings payload should serialize")
 }
 

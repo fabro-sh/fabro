@@ -982,7 +982,7 @@ mod tests {
     use chrono::Utc;
     use fabro_store::Database;
     use fabro_types::fixtures;
-    use fabro_types::settings::SettingsFile;
+    use fabro_types::settings::SettingsLayer;
     use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
     use object_store::memory::InMemory;
 
@@ -1021,7 +1021,7 @@ mod tests {
                     source: dot.to_string(),
                     base_dir: None,
                 },
-                settings: SettingsFile {
+                settings: SettingsLayer {
                     run: Some(RunLayer {
                         execution: Some(RunExecutionLayer {
                             mode: Some(RunMode::DryRun),
@@ -1029,7 +1029,7 @@ mod tests {
                         }),
                         ..RunLayer::default()
                     }),
-                    ..SettingsFile::default()
+                    ..SettingsLayer::default()
                 },
                 cwd: run_dir
                     .parent()
@@ -1207,7 +1207,7 @@ mod tests {
                         .unwrap()
                         .clone(),
                 ),
-                settings: SettingsFile {
+                settings: SettingsLayer {
                     run: Some(RunLayer {
                         execution: Some(RunExecutionLayer {
                             mode: Some(RunMode::DryRun),
@@ -1215,7 +1215,7 @@ mod tests {
                         }),
                         ..RunLayer::default()
                     }),
-                    ..SettingsFile::default()
+                    ..SettingsLayer::default()
                 },
                 cwd: temp.path().to_path_buf(),
                 workflow_slug: Some("bundle-child".to_string()),

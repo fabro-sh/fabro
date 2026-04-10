@@ -233,7 +233,7 @@ mod tests {
     use super::*;
 
     use chrono::{DateTime, Utc};
-    use fabro_types::settings::SettingsFile;
+    use fabro_types::settings::SettingsLayer;
     use fabro_types::{AttrValue, Graph, RunControlAction, RunRecord, RunStatus, StatusReason};
     use futures::TryStreamExt;
     use object_store::memory::InMemory;
@@ -279,7 +279,7 @@ mod tests {
         );
         RunRecord {
             run_id: test_run_id(label),
-            settings: SettingsFile::default(),
+            settings: SettingsLayer::default(),
             graph,
             workflow_slug: Some("night-sky".to_string()),
             working_directory: PathBuf::from(format!("/tmp/{label}")),

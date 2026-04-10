@@ -777,7 +777,7 @@ mod tests {
 
     use serde_json::json;
 
-    use crate::settings::SettingsFile;
+    use crate::settings::SettingsLayer;
     use crate::{Edge, Graph, Node, RunBlobId, fixtures};
 
     use super::*;
@@ -829,7 +829,7 @@ mod tests {
 
     #[test]
     fn run_event_deserializes_adjacent_layout() {
-        let settings = SettingsFile::default();
+        let settings = SettingsLayer::default();
         let graph = Graph {
             name: "test".to_string(),
             nodes: HashMap::from([(
@@ -874,7 +874,7 @@ mod tests {
             "run_id": fixtures::RUN_1,
             "event": "run.created",
             "properties": {
-                "settings": SettingsFile::default(),
+                "settings": SettingsLayer::default(),
                 "graph": Graph::new("test"),
                 "labels": {},
                 "run_dir": "/tmp/run",

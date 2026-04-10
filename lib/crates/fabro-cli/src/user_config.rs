@@ -4,7 +4,7 @@ pub(crate) use fabro_config::user::*;
 
 use anyhow::{Result, bail};
 use fabro_types::settings::cli::CliTargetSettings;
-use fabro_types::settings::{CliSettings, SettingsFile};
+use fabro_types::settings::{CliSettings, SettingsLayer};
 use fabro_util::version::FABRO_VERSION;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
@@ -19,34 +19,34 @@ pub(crate) struct ClientTlsSettings {
 
 use crate::args::ServerTargetArgs;
 
-pub(crate) fn load_settings() -> anyhow::Result<SettingsFile> {
+pub(crate) fn load_settings() -> anyhow::Result<SettingsLayer> {
     load_settings_with_config_and_storage_dir(None, None)
 }
 
 pub(crate) fn settings_layer_with_config_and_storage_dir(
     config_path: Option<&Path>,
     storage_dir: Option<&Path>,
-) -> anyhow::Result<SettingsFile> {
+) -> anyhow::Result<SettingsLayer> {
     let layer = load_settings_config(config_path)?;
     Ok(apply_storage_dir_override(layer, storage_dir))
 }
 
 pub(crate) fn settings_layer_with_storage_dir(
     storage_dir: Option<&Path>,
-) -> anyhow::Result<SettingsFile> {
+) -> anyhow::Result<SettingsLayer> {
     settings_layer_with_config_and_storage_dir(None, storage_dir)
 }
 
 pub(crate) fn load_settings_with_storage_dir(
     storage_dir: Option<&Path>,
-) -> anyhow::Result<SettingsFile> {
+) -> anyhow::Result<SettingsLayer> {
     settings_layer_with_storage_dir(storage_dir)
 }
 
 pub(crate) fn load_settings_with_config_and_storage_dir(
     config_path: Option<&Path>,
     storage_dir: Option<&Path>,
-) -> anyhow::Result<SettingsFile> {
+) -> anyhow::Result<SettingsLayer> {
     settings_layer_with_config_and_storage_dir(config_path, storage_dir)
 }
 
@@ -61,14 +61,14 @@ fn render_resolve_errors(errors: Vec<fabro_config::ResolveError>) -> anyhow::Err
     )
 }
 
-pub(crate) fn resolve_cli_settings(file: &SettingsFile) -> anyhow::Result<CliSettings> {
+pub(crate) fn resolve_cli_settings(file: &SettingsLayer) -> anyhow::Result<CliSettings> {
     fabro_config::resolve_cli_from_file(file).map_err(render_resolve_errors)
 }
 
 pub(crate) fn apply_storage_dir_override(
-    mut layer: SettingsFile,
+    mut layer: SettingsLayer,
     storage_dir: Option<&Path>,
-) -> SettingsFile {
+) -> SettingsLayer {
     use fabro_types::settings::interp::InterpString;
     use fabro_types::settings::server::{ServerLayer, ServerStorageLayer};
     if let Some(dir) = storage_dir {
@@ -109,7 +109,7 @@ fn cli_target_from_settings(settings: &CliSettings) -> Option<(String, Option<Cl
     }
 }
 
-fn configured_server_target(settings: &SettingsFile) -> Result<Option<ServerTarget>> {
+fn configured_server_target(settings: &SettingsLayer) -> Result<Option<ServerTarget>> {
     let cli_settings = resolve_cli_settings(settings)?;
     let Some((value, tls)) = cli_target_from_settings(&cli_settings) else {
         return Ok(None);
@@ -121,7 +121,7 @@ pub(crate) fn default_server_target() -> ServerTarget {
     ServerTarget::UnixSocket(default_socket_path())
 }
 
-pub(crate) fn storage_dir(settings: &SettingsFile) -> anyhow::Result<PathBuf> {
+pub(crate) fn storage_dir(settings: &SettingsLayer) -> anyhow::Result<PathBuf> {
     let resolved = fabro_config::resolve_server_from_file(settings).map_err(|errors| {
         anyhow::anyhow!(
             "failed to resolve server settings:\n{}",
@@ -163,7 +163,7 @@ fn parse_server_target(value: &str, tls: Option<ClientTlsSettings>) -> Result<Se
 
 fn explicit_server_target(
     args: &ServerTargetArgs,
-    settings: &SettingsFile,
+    settings: &SettingsLayer,
 ) -> Result<Option<ServerTarget>> {
     let cli_settings = resolve_cli_settings(settings)?;
     args.as_deref()
@@ -178,7 +178,7 @@ fn explicit_server_target(
 
 pub(crate) fn resolve_server_target(
     args: &ServerTargetArgs,
-    settings: &SettingsFile,
+    settings: &SettingsLayer,
 ) -> Result<ServerTarget> {
     explicit_server_target(args, settings)?
         .or(configured_server_target(settings)?)
@@ -187,7 +187,7 @@ pub(crate) fn resolve_server_target(
 
 pub(crate) fn exec_server_target(
     args: &ServerTargetArgs,
-    settings: &SettingsFile,
+    settings: &SettingsLayer,
 ) -> Result<Option<ServerTarget>> {
     let target = explicit_server_target(args, settings)?;
     debug!(?target, "Resolved exec server target");
@@ -233,7 +233,7 @@ pub(crate) fn build_server_client(
 mod tests {
     use super::*;
     use crate::args::ServerTargetArgs;
-    use fabro_types::settings::parse_settings_file;
+    use fabro_config::parse_settings_layer;
 
     fn server_target_args(value: Option<&str>) -> ServerTargetArgs {
         ServerTargetArgs {
@@ -241,13 +241,13 @@ mod tests {
         }
     }
 
-    fn parse_v2(source: &str) -> SettingsFile {
-        parse_settings_file(source).expect("fixture should parse")
+    fn parse_v2(source: &str) -> SettingsLayer {
+        parse_settings_layer(source).expect("fixture should parse")
     }
 
     #[test]
     fn exec_has_no_server_target_by_default() {
-        let settings = SettingsFile::default();
+        let settings = SettingsLayer::default();
         assert_eq!(
             exec_server_target(&server_target_args(None), &settings).unwrap(),
             None
@@ -256,7 +256,7 @@ mod tests {
 
     #[test]
     fn exec_uses_cli_server_target() {
-        let settings = SettingsFile::default();
+        let settings = SettingsLayer::default();
         assert_eq!(
             exec_server_target(
                 &server_target_args(Some("https://cli.example.com")),
@@ -272,7 +272,7 @@ mod tests {
 
     #[test]
     fn exec_supports_explicit_unix_socket_target() {
-        let settings = SettingsFile::default();
+        let settings = SettingsLayer::default();
         assert_eq!(
             exec_server_target(&server_target_args(Some("/tmp/fabro.sock")), &settings).unwrap(),
             Some(ServerTarget::UnixSocket(PathBuf::from("/tmp/fabro.sock")))
@@ -342,7 +342,7 @@ url = "https://config.example.com"
 
     #[test]
     fn resolve_server_target_defaults_to_default_unix_socket_target() {
-        let settings = SettingsFile::default();
+        let settings = SettingsLayer::default();
         assert_eq!(
             resolve_server_target(&server_target_args(None), &settings).unwrap(),
             ServerTarget::UnixSocket(dirs::home_dir().unwrap().join(".fabro/fabro.sock"))
@@ -409,7 +409,7 @@ ca = "ca.pem"
 
     #[test]
     fn invalid_server_target_is_rejected() {
-        let settings = SettingsFile::default();
+        let settings = SettingsLayer::default();
         let error =
             exec_server_target(&server_target_args(Some("fabro.internal")), &settings).unwrap_err();
         assert_eq!(

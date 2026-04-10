@@ -8,7 +8,7 @@ use fabro_server::server::{
     AppState, build_router, create_app_state, create_app_state_with_settings_and_registry_factory,
     spawn_scheduler,
 };
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::run::{
     LocalSandboxLayer, RunExecutionLayer, RunLayer, RunMode, RunSandboxLayer, WorktreeMode,
 };
@@ -30,7 +30,7 @@ pub(crate) fn test_app_state() -> Arc<AppState> {
 }
 
 pub(crate) fn test_app_state_with_options(
-    settings: SettingsFile,
+    settings: SettingsLayer,
     max_concurrent_runs: usize,
 ) -> Arc<AppState> {
     let _ = max_concurrent_runs;
@@ -39,8 +39,8 @@ pub(crate) fn test_app_state_with_options(
     })
 }
 
-pub(crate) fn test_settings() -> SettingsFile {
-    SettingsFile {
+pub(crate) fn test_settings() -> SettingsLayer {
+    SettingsLayer {
         run: Some(RunLayer {
             sandbox: Some(RunSandboxLayer {
                 local: Some(LocalSandboxLayer {
@@ -50,11 +50,11 @@ pub(crate) fn test_settings() -> SettingsFile {
             }),
             ..RunLayer::default()
         }),
-        ..SettingsFile::default()
+        ..SettingsLayer::default()
     }
 }
 
-pub(crate) fn dry_run_settings() -> SettingsFile {
+pub(crate) fn dry_run_settings() -> SettingsLayer {
     let mut settings = test_settings();
     let run = settings.run.get_or_insert_with(RunLayer::default);
     let execution = run.execution.get_or_insert_with(RunExecutionLayer::default);

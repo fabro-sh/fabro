@@ -9,7 +9,7 @@ use crate::support::{fabro_json_snapshot, unique_run_id};
 use super::support::{fixture, output_stdout, resolve_run, run_count_for_test_case, run_state};
 
 fn resolved_run(
-    settings: &fabro_types::settings::SettingsFile,
+    settings: &fabro_types::settings::SettingsLayer,
 ) -> fabro_types::settings::RunSettings {
     fabro_config::resolve_run_from_file(settings).expect("run settings should resolve")
 }

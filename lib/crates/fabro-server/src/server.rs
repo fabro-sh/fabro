@@ -35,7 +35,9 @@ use fabro_store::{
     ArtifactStore, Database, EventEnvelope, EventPayload, PendingInterviewRecord, StageId,
 };
 use fabro_types::settings::run::RunMode;
-use fabro_types::settings::{InterpString, ServerSettings as ResolvedServerSettings, SettingsFile};
+use fabro_types::settings::{
+    InterpString, ServerSettings as ResolvedServerSettings, SettingsLayer,
+};
 use fabro_types::{
     ActorRef, EventBody, InterviewQuestionRecord, InterviewQuestionType, RunBlobId,
     RunClientProvenance, RunControlAction, RunEvent, RunId, RunProvenance, RunServerProvenance,
@@ -524,7 +526,7 @@ pub struct AppState {
     global_event_tx: broadcast::Sender<EventEnvelope>,
 
     pub(crate) secret_store: AsyncRwLock<SecretStore>,
-    pub(crate) settings: Arc<RwLock<SettingsFile>>,
+    pub(crate) settings: Arc<RwLock<SettingsLayer>>,
     pub(crate) server_settings: RwLock<Arc<ResolvedServerSettings>>,
     pub(crate) config_path: PathBuf,
     pub(crate) local_daemon_mode: bool,
@@ -690,7 +692,7 @@ impl AppState {
         self.shutting_down.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn replace_settings(&self, settings: SettingsFile) -> anyhow::Result<()> {
+    pub(crate) fn replace_settings(&self, settings: SettingsLayer) -> anyhow::Result<()> {
         let resolved = Arc::new(resolve_server_from_file(&settings).map_err(|errors| {
             anyhow::anyhow!(
                 "failed to resolve server settings:\n{}",
@@ -1467,7 +1469,7 @@ fn build_prune_plan(
     })
 }
 
-fn system_sandbox_provider(settings: &SettingsFile) -> String {
+fn system_sandbox_provider(settings: &SettingsLayer) -> String {
     fabro_config::resolve_run_from_file(settings).map_or_else(
         |_| SandboxProvider::default().to_string(),
         |settings| settings.sandbox.provider,
@@ -1482,7 +1484,7 @@ fn render_resolve_errors(errors: &[fabro_config::ResolveError]) -> String {
         .join("; ")
 }
 
-fn resolved_storage_dir(settings: &SettingsFile) -> Result<PathBuf, String> {
+fn resolved_storage_dir(settings: &SettingsLayer) -> Result<PathBuf, String> {
     let resolved =
         resolve_server_from_file(settings).map_err(|errors| render_resolve_errors(&errors))?;
     resolved
@@ -1498,7 +1500,7 @@ fn resolved_storage_dir(settings: &SettingsFile) -> Result<PathBuf, String> {
         })
 }
 
-fn resolved_github_app_id(settings: &SettingsFile) -> Result<Option<String>, String> {
+fn resolved_github_app_id(settings: &SettingsLayer) -> Result<Option<String>, String> {
     let resolved =
         resolve_server_from_file(settings).map_err(|errors| render_resolve_errors(&errors))?;
     Ok(resolved
@@ -2021,7 +2023,7 @@ async fn get_run_billing(
 
 /// Create an `AppState` with default settings.
 pub fn create_app_state() -> Arc<AppState> {
-    create_app_state_with_options(SettingsFile::default(), 5)
+    create_app_state_with_options(SettingsLayer::default(), 5)
 }
 
 #[doc(hidden)]
@@ -2029,14 +2031,14 @@ pub fn create_app_state_with_registry_factory(
     registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
     create_app_state_with_settings_and_registry_factory(
-        SettingsFile::default(),
+        SettingsLayer::default(),
         registry_factory_override,
     )
 }
 
 #[doc(hidden)]
 pub fn create_app_state_with_settings_and_registry_factory(
-    settings: SettingsFile,
+    settings: SettingsLayer,
     registry_factory_override: impl Fn(Arc<dyn Interviewer>) -> HandlerRegistry + Send + Sync + 'static,
 ) -> Arc<AppState> {
     let (store, artifact_store) = test_store_bundle();
@@ -2055,7 +2057,7 @@ pub fn create_app_state_with_settings_and_registry_factory(
 
 /// Create an `AppState` with the given settings and concurrency limit.
 pub fn create_app_state_with_options(
-    settings: SettingsFile,
+    settings: SettingsLayer,
     max_concurrent_runs: usize,
 ) -> Arc<AppState> {
     let (store, artifact_store) = test_store_bundle();
@@ -2079,7 +2081,7 @@ fn test_store_bundle() -> (Arc<Database>, ArtifactStore) {
 }
 
 pub fn create_app_state_with_store(
-    settings: Arc<RwLock<SettingsFile>>,
+    settings: Arc<RwLock<SettingsLayer>>,
     max_concurrent_runs: usize,
     store: Arc<Database>,
     artifact_store: ArtifactStore,
@@ -2098,7 +2100,7 @@ pub fn create_app_state_with_store(
 }
 
 pub(crate) fn build_app_state_with_path(
-    settings: Arc<RwLock<SettingsFile>>,
+    settings: Arc<RwLock<SettingsLayer>>,
     registry_factory_override: Option<Box<RegistryFactoryOverride>>,
     max_concurrent_runs: usize,
     store: Arc<Database>,
@@ -6057,9 +6059,9 @@ mod tests {
         start -> exit
     }"#;
 
-    fn dry_run_settings() -> SettingsFile {
+    fn dry_run_settings() -> SettingsLayer {
         use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
-        SettingsFile {
+        SettingsLayer {
             run: Some(RunLayer {
                 execution: Some(RunExecutionLayer {
                     mode: Some(RunMode::DryRun),
@@ -6067,7 +6069,7 @@ mod tests {
                 }),
                 ..RunLayer::default()
             }),
-            ..SettingsFile::default()
+            ..SettingsLayer::default()
         }
     }
 
@@ -6350,7 +6352,7 @@ mod tests {
 
     #[tokio::test]
     async fn auth_login_github_redirects_to_github() {
-        let settings: SettingsFile = fabro_types::settings::parse_settings_file(
+        let settings: SettingsLayer = fabro_config::parse_settings_layer(
             r#"
 _version = 1
 
@@ -7490,7 +7492,7 @@ slug = "fabro"
 
     #[tokio::test]
     async fn start_run_persists_full_settings_snapshot() {
-        let settings: SettingsFile = fabro_types::settings::parse_settings_file(
+        let settings: SettingsLayer = fabro_config::parse_settings_layer(
             r#"
 _version = 1
 
@@ -7960,7 +7962,7 @@ level = "debug"
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cancel_during_startup_persists_cancelled_reason() {
-        let settings: SettingsFile = fabro_types::settings::parse_settings_file(
+        let settings: SettingsLayer = fabro_config::parse_settings_layer(
             r#"
 _version = 1
 
@@ -8074,7 +8076,7 @@ timeout = "30s"
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrency_limit_respected() {
-        let state = create_app_state_with_options(SettingsFile::default(), 1);
+        let state = create_app_state_with_options(SettingsLayer::default(), 1);
         let app = test_app_with_scheduler(Arc::clone(&state));
 
         // Create and start two runs with max_concurrent_runs=1

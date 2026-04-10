@@ -306,7 +306,7 @@ mod tests {
 
     use fabro_graphviz::graph::Graph;
     use fabro_store::Database;
-    use fabro_types::settings::SettingsFile;
+    use fabro_types::settings::SettingsLayer;
     use fabro_types::{RunId, fixtures};
     use object_store::memory::InMemory;
 
@@ -321,7 +321,7 @@ mod tests {
 
     fn test_run_options(run_dir: &std::path::Path) -> RunOptions {
         RunOptions {
-            settings: SettingsFile::default(),
+            settings: SettingsLayer::default(),
             run_dir: run_dir.to_path_buf(),
             cancel_token: None,
             run_id: test_run_id(),

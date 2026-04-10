@@ -2,14 +2,14 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::settings::SettingsFile;
+use crate::settings::SettingsLayer;
 use crate::{Graph, RunBlobId, RunControlAction, RunProvenance, StatusReason};
 
 use super::{BilledTokenCounts, RunNoticeLevel};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunCreatedProps {
-    pub settings: SettingsFile,
+    pub settings: SettingsLayer,
     pub graph: Graph,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow_source: Option<String>,

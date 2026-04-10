@@ -1024,9 +1024,9 @@ mod tests {
 
     #[test]
     fn config_toml_roundtrips() {
-        use fabro_types::settings::SettingsFile;
+        use fabro_types::settings::SettingsLayer;
         let toml_str = format_config_toml("brynary");
-        let cfg: SettingsFile = fabro_types::settings::parse_settings_file(&toml_str)
+        let cfg: SettingsLayer = fabro_config::parse_settings_layer(&toml_str)
             .expect("generated config should parse as v2");
         let allowed = cfg
             .server
@@ -1040,9 +1040,9 @@ mod tests {
 
     #[test]
     fn config_toml_has_auth_strategies() {
-        use fabro_types::settings::SettingsFile;
+        use fabro_types::settings::SettingsLayer;
         let toml_str = format_config_toml("alice");
-        let cfg: SettingsFile = fabro_types::settings::parse_settings_file(&toml_str).unwrap();
+        let cfg: SettingsLayer = fabro_config::parse_settings_layer(&toml_str).unwrap();
         let auth_api = cfg
             .server
             .as_ref()
@@ -1065,10 +1065,10 @@ mod tests {
 
     #[test]
     fn config_toml_has_tls_paths() {
-        use fabro_types::settings::SettingsFile;
+        use fabro_types::settings::SettingsLayer;
         use fabro_types::settings::server::ServerListenLayer;
         let toml_str = format_config_toml("bob");
-        let cfg: SettingsFile = fabro_types::settings::parse_settings_file(&toml_str).unwrap();
+        let cfg: SettingsLayer = fabro_config::parse_settings_layer(&toml_str).unwrap();
         let listen = cfg
             .server
             .as_ref()

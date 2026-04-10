@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Result, anyhow};
 use fabro_sandbox::SandboxProvider;
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::cli::{CliLayer, CliOutputLayer, OutputVerbosity};
 use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::run::{
@@ -116,7 +116,7 @@ fn current_dir_or_dot() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
-pub(crate) fn run_args_layer(args: &RunArgs) -> Result<SettingsFile> {
+pub(crate) fn run_args_layer(args: &RunArgs) -> Result<SettingsLayer> {
     let model = model_from_args(args.model.as_deref(), args.provider.as_deref());
     let sandbox = sandbox_layer(
         args.sandbox.map(Into::into),
@@ -140,14 +140,14 @@ pub(crate) fn run_args_layer(args: &RunArgs) -> Result<SettingsFile> {
         ..RunLayer::default()
     };
 
-    Ok(SettingsFile {
+    Ok(SettingsLayer {
         run: Some(run),
         cli: cli_layer_for_verbose(args.verbose),
-        ..SettingsFile::default()
+        ..SettingsLayer::default()
     })
 }
 
-pub(crate) fn preflight_args_layer(args: &PreflightArgs) -> Result<SettingsFile> {
+pub(crate) fn preflight_args_layer(args: &PreflightArgs) -> Result<SettingsLayer> {
     let model = model_from_args(args.model.as_deref(), args.provider.as_deref());
     let sandbox = args.sandbox.map(|s| RunSandboxLayer {
         provider: Some(SandboxProvider::from(s).to_string()),
@@ -164,10 +164,10 @@ pub(crate) fn preflight_args_layer(args: &PreflightArgs) -> Result<SettingsFile>
         ..RunLayer::default()
     };
 
-    Ok(SettingsFile {
+    Ok(SettingsLayer {
         run: Some(run),
         cli: cli_layer_for_verbose(args.verbose),
-        ..SettingsFile::default()
+        ..SettingsLayer::default()
     })
 }
 

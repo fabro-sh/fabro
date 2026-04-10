@@ -396,7 +396,7 @@ mod tests {
 
     use fabro_graphviz::graph::Graph;
     use fabro_store::Database;
-    use fabro_types::settings::SettingsFile;
+    use fabro_types::settings::SettingsLayer;
     use fabro_types::{RunStatus, fixtures};
     use object_store::memory::InMemory;
 
@@ -416,7 +416,7 @@ mod tests {
     fn sample_run_record() -> RunRecord {
         RunRecord {
             run_id: fixtures::RUN_1,
-            settings: SettingsFile::default(),
+            settings: SettingsLayer::default(),
             graph: Graph::new("test"),
             workflow_slug: Some("test".to_string()),
             working_directory: PathBuf::from("/tmp/project"),

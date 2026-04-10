@@ -297,7 +297,7 @@ mod tests {
 
     use chrono::{DateTime, Utc};
     use fabro_store::{Database, EventEnvelope, EventPayload};
-    use fabro_types::settings::SettingsFile;
+    use fabro_types::settings::SettingsLayer;
     use fabro_types::{
         AggregateStats, AttrValue, BilledTokenCounts, Checkpoint, Conclusion, Graph,
         NodeStatusRecord, Retro, RunId, RunRecord, RunStatus, RunStatusRecord, SandboxRecord,
@@ -335,7 +335,7 @@ mod tests {
         );
         RunRecord {
             run_id,
-            settings: SettingsFile::default(),
+            settings: SettingsLayer::default(),
             graph,
             workflow_slug: Some("night-sky".to_string()),
             working_directory: PathBuf::from("/tmp/night-sky"),

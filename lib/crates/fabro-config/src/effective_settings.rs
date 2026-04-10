@@ -1,4 +1,4 @@
-//! Effective settings resolution: combine layers into one resolved [`SettingsFile`].
+//! Effective settings resolution: combine layers into one resolved [`SettingsLayer`].
 //!
 //! Shared layered domains (`project`, `workflow`, `run`, `features`) merge
 //! across all three config files (settings.toml, fabro.toml, workflow.toml).
@@ -7,7 +7,7 @@
 //! stanzas in `fabro.toml` and `workflow.toml` remain schema-valid but inert.
 
 use anyhow::{Result, anyhow};
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::run::{RunExecutionLayer, RunLayer};
 use fabro_types::settings::server::ServerLayer;
 
@@ -22,19 +22,19 @@ pub enum EffectiveSettingsMode {
 
 #[derive(Clone, Debug, Default)]
 pub struct EffectiveSettingsLayers {
-    pub args: SettingsFile,
-    pub workflow: SettingsFile,
-    pub project: SettingsFile,
-    pub user: SettingsFile,
+    pub args: SettingsLayer,
+    pub workflow: SettingsLayer,
+    pub project: SettingsLayer,
+    pub user: SettingsLayer,
 }
 
 impl EffectiveSettingsLayers {
     #[must_use]
     pub fn new(
-        args: SettingsFile,
-        workflow: SettingsFile,
-        project: SettingsFile,
-        user: SettingsFile,
+        args: SettingsLayer,
+        workflow: SettingsLayer,
+        project: SettingsLayer,
+        user: SettingsLayer,
     ) -> Self {
         Self {
             args,
@@ -45,12 +45,12 @@ impl EffectiveSettingsLayers {
     }
 }
 
-/// Resolve layered configuration down to a single effective [`SettingsFile`].
+/// Resolve layered configuration down to a single effective [`SettingsLayer`].
 pub fn resolve_settings(
     layers: EffectiveSettingsLayers,
-    server_settings: Option<&SettingsFile>,
+    server_settings: Option<&SettingsLayer>,
     mode: EffectiveSettingsMode,
-) -> Result<SettingsFile> {
+) -> Result<SettingsLayer> {
     let EffectiveSettingsLayers {
         args,
         mut workflow,
@@ -103,7 +103,7 @@ pub fn resolve_settings(
     }
 }
 
-fn strip_owner_domains(file: &mut SettingsFile) {
+fn strip_owner_domains(file: &mut SettingsLayer) {
     file.cli = None;
     file.server = None;
 }
@@ -111,7 +111,7 @@ fn strip_owner_domains(file: &mut SettingsFile) {
 /// Copy of the server settings with startup-time dry-run fallback cleared.
 /// Run manifests carry their own dry-run intent; a daemon's startup-time
 /// fallback mode must not silently force every submitted run into simulation.
-fn server_defaults_file(settings: &SettingsFile) -> SettingsFile {
+fn server_defaults_file(settings: &SettingsLayer) -> SettingsLayer {
     let mut out = settings.clone();
     if let Some(run) = out.run.as_mut() {
         if let Some(execution) = run.execution.as_mut() {
@@ -121,14 +121,14 @@ fn server_defaults_file(settings: &SettingsFile) -> SettingsFile {
     out
 }
 
-/// Apply server-side defaults to a client-layered [`SettingsFile`].
+/// Apply server-side defaults to a client-layered [`SettingsLayer`].
 ///
 /// Server-owned domains (`server`, `features`, and parts of `run`) flow from
 /// the server's local `~/.fabro/settings.toml` when the corresponding client
 /// value is absent. Run-shaped defaults (model, prepare, sandbox, checkpoint,
 /// hooks, agent mcps, etc.) also flow from server to client so the persisted
 /// run record matches the server's local configuration.
-fn apply_server_defaults(mut settings: SettingsFile, server: &SettingsFile) -> SettingsFile {
+fn apply_server_defaults(mut settings: SettingsLayer, server: &SettingsLayer) -> SettingsLayer {
     // Server-owned domains: server-side always wins when client left blank.
     // Use the v2 merge matrix with the server layer in lower precedence so
     // that client-supplied values still dominate when present.
@@ -141,7 +141,10 @@ fn apply_server_defaults(mut settings: SettingsFile, server: &SettingsFile) -> S
 /// In LocalDaemon mode, a subset of server-owned fields unconditionally
 /// override any client-side values. Client-controlled run-level fields are
 /// left alone.
-fn apply_local_daemon_overrides(mut settings: SettingsFile, server: &SettingsFile) -> SettingsFile {
+fn apply_local_daemon_overrides(
+    mut settings: SettingsLayer,
+    server: &SettingsLayer,
+) -> SettingsLayer {
     if let Some(server_layer) = server.server.clone() {
         let client = settings.server.get_or_insert_with(ServerLayer::default);
         if let Some(storage) = server_layer.storage {
@@ -177,22 +180,23 @@ fn apply_local_daemon_overrides(mut settings: SettingsFile, server: &SettingsFil
 
 #[cfg(test)]
 mod tests {
+    use crate::parse::parse_settings_layer;
     use fabro_types::settings::InterpString;
+    use fabro_types::settings::SettingsLayer;
     use fabro_types::settings::server::{ServerLayer, ServerSchedulerLayer, ServerStorageLayer};
-    use fabro_types::settings::{SettingsFile, parse_settings_file};
 
     use super::{EffectiveSettingsLayers, EffectiveSettingsMode, resolve_settings};
 
-    fn layer(source: &str) -> SettingsFile {
-        parse_settings_file(source).expect("v2 fixture should parse")
+    fn layer(source: &str) -> SettingsLayer {
+        parse_settings_layer(source).expect("v2 fixture should parse")
     }
 
     #[test]
     fn local_only_merges_project_and_user_layers() {
         let settings = resolve_settings(
             EffectiveSettingsLayers::new(
-                SettingsFile::default(),
-                SettingsFile::default(),
+                SettingsLayer::default(),
+                SettingsLayer::default(),
                 layer(
                     r#"
 _version = 1
@@ -259,7 +263,7 @@ shared = "user"
     fn local_only_merges_workflow_project_user() {
         let settings = resolve_settings(
             EffectiveSettingsLayers::new(
-                SettingsFile::default(),
+                SettingsLayer::default(),
                 layer(
                     r#"
 _version = 1
@@ -327,7 +331,7 @@ provider = "openai"
 
     #[test]
     fn cli_and_server_domains_from_fabro_toml_are_inert_under_remote_mode() {
-        let mut server_settings = fabro_types::settings::SettingsFile::default();
+        let mut server_settings = fabro_types::settings::SettingsLayer::default();
         server_settings.server = Some(ServerLayer {
             storage: Some(ServerStorageLayer {
                 root: Some(InterpString::parse("/srv/fabro")),
@@ -352,10 +356,10 @@ root = "/tmp/should-be-inert"
 
         let settings = resolve_settings(
             EffectiveSettingsLayers::new(
-                SettingsFile::default(),
-                SettingsFile::default(),
+                SettingsLayer::default(),
+                SettingsLayer::default(),
                 project_with_server,
-                SettingsFile::default(),
+                SettingsLayer::default(),
             ),
             Some(&server_settings),
             EffectiveSettingsMode::RemoteServer,
@@ -386,7 +390,7 @@ root = "/tmp/should-be-inert"
 
     #[test]
     fn local_daemon_mode_only_applies_server_owned_overrides() {
-        let mut server_settings = fabro_types::settings::SettingsFile::default();
+        let mut server_settings = fabro_types::settings::SettingsLayer::default();
         server_settings.server = Some(ServerLayer {
             storage: Some(ServerStorageLayer {
                 root: Some(InterpString::parse("/srv/fabro")),

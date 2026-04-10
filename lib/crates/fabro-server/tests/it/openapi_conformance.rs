@@ -99,6 +99,6 @@ async fn all_spec_routes_are_routable() {
 // was deleted in Stage 6.3b alongside the legacy flat `fabro_types::Settings`
 // struct that it instantiated. The v2 `/api/v1/settings` and
 // `/api/v1/runs/:id/settings` endpoints now return the freely-shaped
-// `SettingsFile` tree which the OpenAPI spec declares as
+// `SettingsLayer` tree which the OpenAPI spec declares as
 // `type: object, additionalProperties: true`, so there is nothing to diff
 // at the property-key level.

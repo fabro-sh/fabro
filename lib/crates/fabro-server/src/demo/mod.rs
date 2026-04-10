@@ -1319,7 +1319,7 @@ mod runs {
     }
 
     pub(super) fn settings() -> serde_json::Value {
-        // v2 SettingsFile shape — matches what /api/v1/runs/:id/settings
+        // v2 SettingsLayer shape — matches what /api/v1/runs/:id/settings
         // returns in production, so the demo renders identically.
         serde_json::json!({
             "_version": 1,
@@ -1464,7 +1464,7 @@ mod insights {
 
 mod settings {
     pub(super) fn server_settings() -> serde_json::Value {
-        // v2 SettingsFile shape — matches what /api/v1/settings returns in
+        // v2 SettingsLayer shape — matches what /api/v1/settings returns in
         // production, so the demo renders identically.
         serde_json::json!({
             "_version": 1,

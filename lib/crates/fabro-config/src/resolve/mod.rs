@@ -8,7 +8,7 @@ mod workflow;
 
 use fabro_types::settings::{
     CliSettings, FeaturesSettings, InterpString, ProjectSettings, RunSettings, ServerSettings,
-    Settings, SettingsFile, WorkflowSettings,
+    Settings, SettingsLayer, WorkflowSettings,
 };
 
 pub use cli::resolve_cli;
@@ -19,7 +19,7 @@ pub use run::resolve_run;
 pub use server::resolve_server;
 pub use workflow::resolve_workflow;
 
-pub fn resolve(file: &SettingsFile) -> Result<Settings, Vec<ResolveError>> {
+pub fn resolve(file: &SettingsLayer) -> Result<Settings, Vec<ResolveError>> {
     let mut errors = Vec::new();
     let project_layer = file.project.clone().unwrap_or_default();
     let workflow_layer = file.workflow.clone().unwrap_or_default();
@@ -44,32 +44,32 @@ pub fn resolve(file: &SettingsFile) -> Result<Settings, Vec<ResolveError>> {
     }
 }
 
-pub fn resolve_cli_from_file(file: &SettingsFile) -> Result<CliSettings, Vec<ResolveError>> {
+pub fn resolve_cli_from_file(file: &SettingsLayer) -> Result<CliSettings, Vec<ResolveError>> {
     resolve(file).map(|settings| settings.cli)
 }
 
-pub fn resolve_server_from_file(file: &SettingsFile) -> Result<ServerSettings, Vec<ResolveError>> {
+pub fn resolve_server_from_file(file: &SettingsLayer) -> Result<ServerSettings, Vec<ResolveError>> {
     resolve(file).map(|settings| settings.server)
 }
 
 pub fn resolve_project_from_file(
-    file: &SettingsFile,
+    file: &SettingsLayer,
 ) -> Result<ProjectSettings, Vec<ResolveError>> {
     resolve(file).map(|settings| settings.project)
 }
 
 pub fn resolve_features_from_file(
-    file: &SettingsFile,
+    file: &SettingsLayer,
 ) -> Result<FeaturesSettings, Vec<ResolveError>> {
     resolve(file).map(|settings| settings.features)
 }
 
-pub fn resolve_run_from_file(file: &SettingsFile) -> Result<RunSettings, Vec<ResolveError>> {
+pub fn resolve_run_from_file(file: &SettingsLayer) -> Result<RunSettings, Vec<ResolveError>> {
     resolve(file).map(|settings| settings.run)
 }
 
 pub fn resolve_workflow_from_file(
-    file: &SettingsFile,
+    file: &SettingsLayer,
 ) -> Result<WorkflowSettings, Vec<ResolveError>> {
     resolve(file).map(|settings| settings.workflow)
 }

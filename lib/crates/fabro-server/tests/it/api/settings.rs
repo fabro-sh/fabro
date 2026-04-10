@@ -1,15 +1,16 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use fabro_config::parse_settings_layer;
 use fabro_server::jwt_auth::AuthMode;
 use fabro_server::server::{build_router, create_app_state_with_options};
-use fabro_types::settings::{SettingsFile, parse_settings_file};
+use fabro_types::settings::SettingsLayer;
 use tower::ServiceExt;
 
 use crate::helpers::body_json;
 
 #[tokio::test]
 async fn retrieve_server_settings_returns_runtime_settings() {
-    let settings: SettingsFile = parse_settings_file(
+    let settings: SettingsLayer = parse_settings_layer(
         r#"
 _version = 1
 
@@ -41,7 +42,7 @@ server_only = "1"
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_json(response.into_body()).await;
-    // `/api/v1/settings` emits the v2 SettingsFile shape directly now.
+    // `/api/v1/settings` emits the v2 SettingsLayer shape directly now.
     // Stage 6.6 will replace this with an explicit allow-list DTO.
     assert_eq!(body["server"]["storage"]["root"], "/srv/fabro");
     assert_eq!(body["server"]["scheduler"]["max_concurrent_runs"], 9);

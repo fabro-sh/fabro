@@ -20,7 +20,7 @@ use clap::Args;
 
 use fabro_types::settings::{
     InterpString, ObjectStoreSettings, ServerListenSettings,
-    ServerSettings as ResolvedServerSettings, SettingsFile,
+    ServerSettings as ResolvedServerSettings, SettingsLayer,
 };
 
 use crate::bind::{self, Bind, BindRequest};
@@ -84,7 +84,7 @@ pub struct ServeArgs {
     pub config: Option<PathBuf>,
 }
 
-fn load_settings(path: Option<&Path>) -> anyhow::Result<SettingsFile> {
+fn load_settings(path: Option<&Path>) -> anyhow::Result<SettingsLayer> {
     load_settings_config(path)
 }
 
@@ -93,10 +93,10 @@ fn resolved_config_path(path: Option<&Path>) -> PathBuf {
 }
 
 fn apply_serve_overrides(
-    base: &SettingsFile,
+    base: &SettingsLayer,
     args: &ServeArgs,
     dry_run_mode: bool,
-) -> SettingsFile {
+) -> SettingsLayer {
     use fabro_types::settings::cli::CliLayer;
     use fabro_types::settings::interp::InterpString;
     use fabro_types::settings::run::{
@@ -135,11 +135,11 @@ fn apply_serve_overrides(
 }
 
 fn apply_runtime_settings(
-    base: &SettingsFile,
+    base: &SettingsLayer,
     args: &ServeArgs,
     dry_run_mode: bool,
     data_dir: &Path,
-) -> SettingsFile {
+) -> SettingsLayer {
     use fabro_types::settings::interp::InterpString;
     use fabro_types::settings::server::{ServerLayer, ServerStorageLayer};
     let mut settings = apply_serve_overrides(base, args, dry_run_mode);
@@ -174,7 +174,7 @@ fn build_object_store(store_path: &Path) -> anyhow::Result<Arc<dyn ObjectStore>>
     build_object_store_with_preference(store_path, use_in_memory_store())
 }
 
-fn resolve_server_settings(file: &SettingsFile) -> anyhow::Result<ResolvedServerSettings> {
+fn resolve_server_settings(file: &SettingsLayer) -> anyhow::Result<ResolvedServerSettings> {
     resolve_server_from_file(file).map_err(|errors| {
         anyhow::anyhow!(
             "failed to resolve server settings:\n{}",
@@ -695,15 +695,16 @@ mod tests {
         build_object_store_with_preference, server_bind_title, server_title,
     };
     use crate::bind::Bind;
-    use fabro_types::settings::{SettingsFile, parse_settings_file};
+    use fabro_config::parse_settings_layer;
+    use fabro_types::settings::SettingsLayer;
 
-    fn parse_settings(source: &str) -> SettingsFile {
-        parse_settings_file(source).expect("v2 fixture should parse")
+    fn parse_settings(source: &str) -> SettingsLayer {
+        parse_settings_layer(source).expect("v2 fixture should parse")
     }
 
     #[test]
     fn apply_runtime_settings_preserves_storage_dir() {
-        let base = SettingsFile::default();
+        let base = SettingsLayer::default();
         let args = ServeArgs {
             bind: None,
             model: None,
@@ -764,7 +765,7 @@ enabled = false
 
     #[test]
     fn apply_runtime_settings_disables_web_from_cli_flag() {
-        let base = SettingsFile::default();
+        let base = SettingsLayer::default();
         let args = ServeArgs {
             bind: None,
             model: None,

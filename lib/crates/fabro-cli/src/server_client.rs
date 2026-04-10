@@ -8,7 +8,7 @@ use bytes::Bytes;
 use fabro_api::types;
 use fabro_server::bind::Bind;
 use fabro_store::{EventEnvelope, RunSummary, StageId};
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::SettingsLayer;
 use fabro_types::{RunBlobId, RunEvent, RunId};
 use fabro_workflow::artifact_snapshot::CapturedArtifactInfo;
 use futures::StreamExt;
@@ -100,7 +100,7 @@ pub(crate) async fn connect_server_target_direct(target: &str) -> Result<ServerS
 
 pub(crate) async fn connect_server_with_settings(
     args: &ServerTargetArgs,
-    settings: &SettingsFile,
+    settings: &SettingsLayer,
     base_config_path: &Path,
 ) -> Result<ServerStoreClient> {
     let target = user_config::resolve_server_target(args, settings)?;
@@ -278,7 +278,7 @@ impl ServerStoreClient {
         &self.base_url
     }
 
-    pub(crate) async fn retrieve_server_settings(&self) -> Result<SettingsFile> {
+    pub(crate) async fn retrieve_server_settings(&self) -> Result<SettingsLayer> {
         let response = self
             .client
             .retrieve_server_settings()
@@ -286,7 +286,7 @@ impl ServerStoreClient {
             .await
             .map_err(map_api_error)?;
         let raw = serde_json::Value::Object(response.into_inner().into());
-        serde_json::from_value::<SettingsFile>(raw)
+        serde_json::from_value::<SettingsLayer>(raw)
             .context("server returned a settings payload that does not match the v2 schema")
     }
 

@@ -1,7 +1,7 @@
 use fabro_graphviz::graph::Graph;
 use fabro_model::Catalog;
 use fabro_types::settings::run::{RunGoalLayer, RunLayer, RunModelLayer, RunPullRequestLayer};
-use fabro_types::settings::{InterpString, SettingsFile};
+use fabro_types::settings::{InterpString, SettingsLayer};
 use fabro_workflow::run_materialization::materialize_run;
 
 fn graph(source: &str) -> Graph {
@@ -17,7 +17,7 @@ fn materialize_run_applies_graph_and_catalog_defaults() {
         start -> exit
     }"#;
 
-    let settings = SettingsFile {
+    let settings = SettingsLayer {
         run: Some(RunLayer {
             model: Some(RunModelLayer {
                 name: Some(InterpString::parse("sonnet")),
@@ -29,7 +29,7 @@ fn materialize_run_applies_graph_and_catalog_defaults() {
             }),
             ..RunLayer::default()
         }),
-        ..SettingsFile::default()
+        ..SettingsLayer::default()
     };
 
     let materialized = materialize_run(settings, &graph(source), &Catalog::builtin());

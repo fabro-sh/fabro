@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use fabro_types::RunId;
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::run::RunMode;
 
 use crate::git::{GitAuthor, git_author_from_settings};
@@ -20,7 +20,7 @@ pub struct GitCheckpointOptions {
 /// Options for a workflow run.
 #[derive(Clone)]
 pub struct RunOptions {
-    pub settings: SettingsFile,
+    pub settings: SettingsLayer,
     pub run_dir: PathBuf,
     pub cancel_token: Option<Arc<AtomicBool>>,
     /// Unique identifier for this workflow run.

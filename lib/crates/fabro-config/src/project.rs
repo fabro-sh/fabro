@@ -11,23 +11,24 @@ use anyhow::{Context, bail};
 use serde::Serialize;
 
 use crate::load::load_settings_path;
+use crate::parse::parse_settings_layer;
 use crate::run;
 use crate::{resolve_project_from_file, resolve_run_from_file, resolve_workflow_from_file};
-use fabro_types::settings::{SettingsFile, parse_settings_file};
+use fabro_types::settings::SettingsLayer;
 
 const CONFIG_FILENAME: &str = "fabro.toml";
 #[derive(Clone, Debug)]
 pub struct WorkflowPathResolution {
     pub resolved_workflow_path: PathBuf,
     pub dot_path: PathBuf,
-    pub workflow_config: Option<SettingsFile>,
+    pub workflow_config: Option<SettingsLayer>,
     pub workflow_toml_path: Option<PathBuf>,
     pub workflow_slug: Option<String>,
 }
 
 /// Parse a project config from a TOML string.
-pub fn parse_project_config(content: &str) -> anyhow::Result<SettingsFile> {
-    parse_settings_file(content)
+pub fn parse_project_config(content: &str) -> anyhow::Result<SettingsLayer> {
+    parse_settings_layer(content)
         .map_err(|err| anyhow::anyhow!("{err}"))
         .context("Failed to parse project config")
 }
@@ -36,7 +37,7 @@ pub fn parse_project_config(content: &str) -> anyhow::Result<SettingsFile> {
 ///
 /// Goes through [`load_settings_path`] so that relative `run.goal.file`
 /// paths are anchored at the directory of `path` at load time.
-pub fn load_project_config(path: &Path) -> anyhow::Result<SettingsFile> {
+pub fn load_project_config(path: &Path) -> anyhow::Result<SettingsLayer> {
     let config = load_settings_path(path).context("Failed to parse project config")?;
     let root = resolve_project_from_file(&config)
         .map_err(|errors| anyhow::anyhow!("Failed to resolve project settings: {errors:?}"))?
@@ -47,7 +48,7 @@ pub fn load_project_config(path: &Path) -> anyhow::Result<SettingsFile> {
 
 /// Walk ancestor directories from `start` looking for `fabro.toml`.
 /// Returns the config file path and parsed config, or `None` if not found.
-pub fn discover_project_config(start: &Path) -> anyhow::Result<Option<(PathBuf, SettingsFile)>> {
+pub fn discover_project_config(start: &Path) -> anyhow::Result<Option<(PathBuf, SettingsLayer)>> {
     for ancestor in start.ancestors() {
         let candidate = ancestor.join(CONFIG_FILENAME);
         if candidate.is_file() {
@@ -118,7 +119,7 @@ pub fn resolve_workflow_path(
     }
 }
 
-pub fn resolve_working_directory(settings: &SettingsFile, caller_cwd: &Path) -> PathBuf {
+pub fn resolve_working_directory(settings: &SettingsLayer, caller_cwd: &Path) -> PathBuf {
     let Some(work_dir) = resolve_run_from_file(settings)
         .ok()
         .and_then(|settings| settings.working_dir)
@@ -338,7 +339,7 @@ fn find_closest_match(input: &str, candidates: &[String]) -> Option<String> {
 }
 
 /// Resolve a workflow argument to a DOT path and optional run config.
-pub fn resolve_workflow(arg: &Path) -> anyhow::Result<(PathBuf, Option<SettingsFile>)> {
+pub fn resolve_workflow(arg: &Path) -> anyhow::Result<(PathBuf, Option<SettingsLayer>)> {
     let start = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let resolution = resolve_workflow_path(arg, &start)?;
     Ok((resolution.dot_path, resolution.workflow_config))
@@ -362,7 +363,7 @@ pub fn is_retro_enabled() -> bool {
 /// Resolve the fabro root directory from a config file path and its config.
 /// The returned path is the directory containing `fabro.toml` joined with the
 /// `project.directory` value (default: `fabro/`).
-pub fn resolve_fabro_root(config_path: &Path, config: &SettingsFile) -> PathBuf {
+pub fn resolve_fabro_root(config_path: &Path, config: &SettingsLayer) -> PathBuf {
     let project_dir = config_path
         .parent()
         .expect("config_path should have a parent directory");

@@ -335,7 +335,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use fabro_graphviz::graph::Graph;
     use fabro_store::{Database, StageId};
-    use fabro_types::settings::SettingsFile;
+    use fabro_types::settings::SettingsLayer;
     use fabro_types::{RunId, RunRecord, SandboxRecord, StartRecord, fixtures};
     use object_store::memory::InMemory;
     use std::collections::HashMap;
@@ -371,7 +371,7 @@ mod tests {
     fn sample_run_record(run_id: RunId, host_repo_path: Option<&str>) -> RunRecord {
         RunRecord {
             run_id,
-            settings: SettingsFile::default(),
+            settings: SettingsLayer::default(),
             graph: Graph::new("test"),
             workflow_slug: None,
             working_directory: PathBuf::from("/tmp/project"),

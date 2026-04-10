@@ -12,7 +12,7 @@ use fabro_graphviz::graph::AttrValue;
 use fabro_graphviz::parser;
 use fabro_sandbox::daytona::detect_repo_info;
 use fabro_types::RunId;
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::run::{DaytonaDockerfileLayer, ResolvedGoalSource, ResolvedRunGoal};
 use fabro_workflow::git::{GitSyncStatus, head_sha, sync_status};
 
@@ -22,7 +22,7 @@ use crate::args::{PreflightArgs, RunArgs};
 pub(crate) struct ManifestBuildInput {
     pub workflow: PathBuf,
     pub cwd: PathBuf,
-    pub args_layer: SettingsFile,
+    pub args_layer: SettingsLayer,
     pub args: Option<types::ManifestArgs>,
     pub run_id: Option<RunId>,
 }
@@ -384,8 +384,8 @@ fn collect_bundled_file(
 }
 
 fn resolve_manifest_goal(
-    args_layer: &SettingsFile,
-    settings: &SettingsFile,
+    args_layer: &SettingsLayer,
+    settings: &SettingsLayer,
     root_source: &str,
     root_dot_path: &Path,
     cwd: &Path,
@@ -615,7 +615,7 @@ mod tests {
         let built = build_run_manifest(ManifestBuildInput {
             workflow: PathBuf::from("fabro/workflows/demo/workflow.toml"),
             cwd: project.to_path_buf(),
-            args_layer: SettingsFile::default(),
+            args_layer: SettingsLayer::default(),
             args: None,
             run_id: None,
         })
@@ -702,7 +702,7 @@ file = "prompts/goal.md"
         let built = build_run_manifest(ManifestBuildInput {
             workflow: PathBuf::from("fabro/workflows/demo/workflow.toml"),
             cwd: project.to_path_buf(),
-            args_layer: SettingsFile::default(),
+            args_layer: SettingsLayer::default(),
             args: None,
             run_id: None,
         })
@@ -766,7 +766,7 @@ file = "prompts/goal.md"
         let built = build_run_manifest(ManifestBuildInput {
             workflow: PathBuf::from("fabro/workflows/demo/workflow.toml"),
             cwd: project.to_path_buf(),
-            args_layer: SettingsFile::default(),
+            args_layer: SettingsLayer::default(),
             args: None,
             run_id: None,
         })

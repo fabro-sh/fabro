@@ -9,7 +9,7 @@ use fabro_config::effective_settings;
 use fabro_config::effective_settings::{EffectiveSettingsLayers, EffectiveSettingsMode};
 use fabro_config::load_settings_project;
 use fabro_config::project;
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::SettingsLayer;
 
 fn config_layers(
     ctx: &CommandContext,
@@ -18,14 +18,14 @@ fn config_layers(
     let cwd = ctx.cwd();
     let (workflow_layer, project_layer) = match workflow {
         Some(path) => workflow_and_project_layers(path, cwd)?,
-        None => (SettingsFile::default(), load_settings_project(cwd)?),
+        None => (SettingsLayer::default(), load_settings_project(cwd)?),
     };
     let user_layer = user_config::settings_layer_with_config_and_storage_dir(
         Some(ctx.base_config_path()),
         None,
     )?;
     Ok(EffectiveSettingsLayers::new(
-        SettingsFile::default(),
+        SettingsLayer::default(),
         workflow_layer,
         project_layer,
         user_layer,
@@ -35,7 +35,7 @@ fn config_layers(
 fn workflow_and_project_layers(
     path: &Path,
     cwd: &Path,
-) -> anyhow::Result<(SettingsFile, SettingsFile)> {
+) -> anyhow::Result<(SettingsLayer, SettingsLayer)> {
     let resolution = project::resolve_workflow_path(path, cwd)?;
     if resolution.workflow_config.is_none() && !resolution.resolved_workflow_path.is_file() {
         anyhow::bail!(
@@ -57,7 +57,7 @@ fn workflow_and_project_layers(
     Ok((workflow_layer, project_layer))
 }
 
-async fn merged_config(args: &SettingsArgs) -> anyhow::Result<SettingsFile> {
+async fn merged_config(args: &SettingsArgs) -> anyhow::Result<SettingsLayer> {
     let base_ctx = CommandContext::base()?;
     let layers = config_layers(&base_ctx, args.workflow.as_deref())?;
     if args.local {

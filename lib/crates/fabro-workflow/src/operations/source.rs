@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use fabro_config::project as project_config;
 use fabro_config::run::resolve_run_goal;
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::SettingsLayer;
 
 use crate::file_resolver::{FileResolver, FilesystemFileResolver};
 use crate::workflow_bundle::BundledWorkflow;
@@ -22,14 +22,14 @@ pub enum WorkflowInput {
 #[derive(Clone, Debug)]
 pub(crate) struct ResolveWorkflowInput {
     pub workflow: WorkflowInput,
-    pub settings: SettingsFile,
+    pub settings: SettingsLayer,
     pub cwd: PathBuf,
 }
 
 #[derive(Clone)]
 pub(crate) struct ResolvedWorkflow {
     pub raw_source: String,
-    pub settings: SettingsFile,
+    pub settings: SettingsLayer,
     pub workflow_slug: Option<String>,
     pub workflow_toml_path: Option<PathBuf>,
     pub dot_path: Option<PathBuf>,
@@ -135,7 +135,7 @@ pub(crate) fn resolve_workflow(request: ResolveWorkflowInput) -> anyhow::Result<
 /// Relative paths that survived config load (e.g. env-interpolated ones)
 /// are anchored at `working_directory`.
 fn resolve_goal_override(
-    settings: &SettingsFile,
+    settings: &SettingsLayer,
     working_directory: &Path,
 ) -> anyhow::Result<Option<String>> {
     resolve_run_goal(settings, working_directory)
@@ -158,12 +158,12 @@ mod tests {
                 source: "digraph Test { start -> exit }".to_string(),
                 base_dir: None,
             },
-            settings: SettingsFile {
+            settings: SettingsLayer {
                 run: Some(RunLayer {
                     working_dir: Some(InterpString::parse("workspace")),
                     ..RunLayer::default()
                 }),
-                ..SettingsFile::default()
+                ..SettingsLayer::default()
             },
             cwd: dir.path().to_path_buf(),
         })

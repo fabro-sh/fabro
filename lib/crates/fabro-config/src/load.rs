@@ -2,16 +2,17 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context;
 use fabro_types::settings::run::RunGoalLayer;
-use fabro_types::settings::{InterpString, SettingsFile, parse_settings_file};
+use fabro_types::settings::{InterpString, SettingsLayer};
 
 use crate::merge::combine_files;
+use crate::parse::parse_settings_layer;
 use crate::project;
 use crate::user;
 
-pub fn load_settings_path(path: &Path) -> anyhow::Result<SettingsFile> {
+pub fn load_settings_path(path: &Path) -> anyhow::Result<SettingsLayer> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("Failed to read {}", path.display()))?;
-    let mut layer = parse_settings_file(&content)
+    let mut layer = parse_settings_layer(&content)
         .map_err(|err| anyhow::anyhow!("{err}"))
         .context("Failed to parse settings file")?;
     let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
@@ -19,7 +20,7 @@ pub fn load_settings_path(path: &Path) -> anyhow::Result<SettingsFile> {
     Ok(layer)
 }
 
-pub fn load_settings_for_workflow(path: &Path, cwd: &Path) -> anyhow::Result<SettingsFile> {
+pub fn load_settings_for_workflow(path: &Path, cwd: &Path) -> anyhow::Result<SettingsLayer> {
     let resolution = project::resolve_workflow_path(path, cwd)?;
     if resolution.workflow_config.is_none() && !resolution.resolved_workflow_path.is_file() {
         anyhow::bail!(
@@ -41,17 +42,17 @@ pub fn load_settings_for_workflow(path: &Path, cwd: &Path) -> anyhow::Result<Set
     Ok(combine_files(project_config, workflow_config))
 }
 
-pub fn load_settings_project(start: &Path) -> anyhow::Result<SettingsFile> {
+pub fn load_settings_project(start: &Path) -> anyhow::Result<SettingsLayer> {
     Ok(project::discover_project_config(start)?
         .map(|(_, config)| config)
         .unwrap_or_default())
 }
 
-pub fn load_settings_user() -> anyhow::Result<SettingsFile> {
+pub fn load_settings_user() -> anyhow::Result<SettingsLayer> {
     user::load_settings_config(None)
 }
 
-pub(crate) fn resolve_goal_file_paths(file: &mut SettingsFile, base_dir: &Path) {
+pub(crate) fn resolve_goal_file_paths(file: &mut SettingsLayer, base_dir: &Path) {
     let Some(run) = file.run.as_mut() else {
         return;
     };

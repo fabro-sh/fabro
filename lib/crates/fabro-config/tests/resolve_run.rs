@@ -1,13 +1,14 @@
+use fabro_config::parse_settings_layer;
 use fabro_types::settings::run::{ApprovalMode, RunGoal, RunMode, WorktreeMode};
-use fabro_types::settings::{InterpString, SettingsFile, parse_settings_file};
+use fabro_types::settings::{InterpString, SettingsLayer};
 
-fn parse(source: &str) -> SettingsFile {
-    parse_settings_file(source).expect("fixture should parse")
+fn parse(source: &str) -> SettingsLayer {
+    parse_settings_layer(source).expect("fixture should parse")
 }
 
 #[test]
 fn resolves_run_defaults_from_empty_settings() {
-    let settings = fabro_config::resolve_run_from_file(&SettingsFile::default())
+    let settings = fabro_config::resolve_run_from_file(&SettingsLayer::default())
         .expect("empty settings should resolve");
 
     assert_eq!(settings.execution.mode, RunMode::Normal);

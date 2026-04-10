@@ -55,7 +55,7 @@ mod tests {
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
     use fabro_store::{Database, RunDatabase};
     use fabro_types::fixtures;
-    use fabro_types::settings::SettingsFile;
+    use fabro_types::settings::SettingsLayer;
     use fabro_types::settings::cli::{CliLayer, CliOutputLayer, OutputVerbosity};
     use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
     use object_store::memory::InMemory;
@@ -121,7 +121,7 @@ mod tests {
     fn sample_record(graph: Graph) -> RunRecord {
         RunRecord {
             run_id: fixtures::RUN_1,
-            settings: SettingsFile {
+            settings: SettingsLayer {
                 run: Some(RunLayer {
                     execution: Some(RunExecutionLayer {
                         mode: Some(RunMode::DryRun),
@@ -136,7 +136,7 @@ mod tests {
                     }),
                     ..CliLayer::default()
                 }),
-                ..SettingsFile::default()
+                ..SettingsLayer::default()
             },
             graph,
             workflow_slug: Some("ship".to_string()),

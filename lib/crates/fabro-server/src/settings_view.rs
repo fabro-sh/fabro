@@ -1,7 +1,7 @@
-//! Outward-facing view of [`SettingsFile`] for API responses.
+//! Outward-facing view of [`SettingsLayer`] for API responses.
 //!
 //! `/api/v1/settings` and `/api/v1/runs/:id/settings` return the server's v2
-//! [`SettingsFile`] directly as JSON so authenticated clients (the `fabro
+//! [`SettingsLayer`] directly as JSON so authenticated clients (the `fabro
 //! settings` CLI, the web UI) can see the effective configuration. Before
 //! serialization, this module drops the handful of fields that would leak
 //! operational secrets or host-specific filesystem layout.
@@ -34,13 +34,13 @@
 //! Any future field that carries a raw secret in-band (without env
 //! interpolation) must be added to the drop list below.
 
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::SettingsLayer;
 
 /// Build a redacted clone of `settings` safe to serialize outward.
 ///
 /// See the module docs for the drop-list rationale.
 #[must_use]
-pub(crate) fn redact_for_api(settings: &SettingsFile) -> SettingsFile {
+pub(crate) fn redact_for_api(settings: &SettingsLayer) -> SettingsLayer {
     let mut out = settings.clone();
 
     if let Some(server) = out.server.as_mut() {
@@ -73,10 +73,10 @@ pub(crate) fn redact_for_api(settings: &SettingsFile) -> SettingsFile {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fabro_types::settings::parse_settings_file;
+    use fabro_config::parse_settings_layer;
 
-    fn parse(source: &str) -> SettingsFile {
-        parse_settings_file(source).expect("fixture should parse")
+    fn parse(source: &str) -> SettingsLayer {
+        parse_settings_layer(source).expect("fixture should parse")
     }
 
     #[test]

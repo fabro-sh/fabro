@@ -1,5 +1,5 @@
 use anyhow::bail;
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::SettingsLayer;
 use fabro_util::terminal::Styles;
 
 use crate::args::{GlobalArgs, ValidateArgs};
@@ -17,7 +17,7 @@ pub(crate) async fn run(
     let built = build_run_manifest(ManifestBuildInput {
         workflow: args.workflow.clone(),
         cwd: ctx.cwd().to_path_buf(),
-        args_layer: SettingsFile::default(),
+        args_layer: SettingsLayer::default(),
         args: None,
         run_id: None,
     })?;

@@ -1,9 +1,10 @@
+use fabro_config::parse_settings_layer;
 use fabro_config::resolve_project_from_file;
-use fabro_types::settings::{SettingsFile, parse_settings_file};
+use fabro_types::settings::SettingsLayer;
 
 #[test]
 fn resolves_project_defaults_from_empty_settings() {
-    let settings = SettingsFile::default();
+    let settings = SettingsLayer::default();
 
     let project = resolve_project_from_file(&settings).expect("empty settings should resolve");
 
@@ -15,7 +16,7 @@ fn resolves_project_defaults_from_empty_settings() {
 
 #[test]
 fn resolves_project_directory_and_metadata() {
-    let settings: SettingsFile = parse_settings_file(
+    let settings: SettingsLayer = parse_settings_layer(
         r#"
 _version = 1
 

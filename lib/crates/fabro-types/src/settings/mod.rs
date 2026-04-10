@@ -13,6 +13,7 @@ pub mod cli;
 pub mod duration;
 pub mod features;
 pub mod interp;
+pub mod layer;
 pub mod model_ref;
 pub mod project;
 pub mod resolved;
@@ -20,8 +21,6 @@ pub mod run;
 pub mod server;
 pub mod size;
 pub mod splice_array;
-pub mod tree;
-pub mod version;
 pub mod workflow;
 
 pub use cli::{
@@ -32,6 +31,7 @@ pub use cli::{
 pub use duration::{Duration, ParseDurationError};
 pub use features::{FeaturesLayer, FeaturesSettings};
 pub use interp::{InterpString, Provenance, ResolveEnvError, Resolved};
+pub use layer::SettingsLayer;
 pub use model_ref::{
     AmbiguousModelRef, ModelRef, ModelRegistry, ParseModelRefError, ResolvedModelRef,
 };
@@ -56,6 +56,4 @@ pub use server::{
 };
 pub use size::{ParseSizeError, Size};
 pub use splice_array::{SPLICE_MARKER, SpliceArray, SpliceArrayError};
-pub use tree::{ParseError, SettingsFile, parse_settings_file};
-pub use version::{CURRENT_VERSION, SchemaVersion, VersionError, validate_version};
 pub use workflow::{WorkflowLayer, WorkflowSettings};

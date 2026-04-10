@@ -4,7 +4,7 @@ use fabro_model::Catalog;
 use fabro_sandbox::SandboxProvider;
 use fabro_store::Database;
 use fabro_types::settings::run::RunMode;
-use fabro_types::settings::{Settings, SettingsFile};
+use fabro_types::settings::{Settings, SettingsLayer};
 use fabro_types::{RunId, RunProvenance};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -29,7 +29,7 @@ use crate::event::{Event, append_event, to_run_event_at};
 #[derive(Clone, Debug)]
 pub struct CreateRunInput {
     pub workflow: WorkflowInput,
-    pub settings: SettingsFile,
+    pub settings: SettingsLayer,
     pub cwd: PathBuf,
     pub workflow_slug: Option<String>,
     pub workflow_path: Option<PathBuf>,
@@ -51,7 +51,7 @@ pub struct CreatedRun {
 }
 
 struct PersistCreateOptions {
-    settings: SettingsFile,
+    settings: SettingsLayer,
     run_id: Option<RunId>,
     run_dir: Option<PathBuf>,
     workflow_slug: Option<String>,
@@ -273,7 +273,7 @@ fn render_resolve_errors(errors: &[fabro_config::ResolveError]) -> String {
         .join("; ")
 }
 
-fn resolve_settings_tree(settings: &SettingsFile) -> Result<Settings, FabroError> {
+fn resolve_settings_tree(settings: &SettingsLayer) -> Result<Settings, FabroError> {
     fabro_config::resolve(settings)
         .map_err(|errors| FabroError::Precondition(render_resolve_errors(&errors)))
 }
@@ -285,7 +285,7 @@ fn combined_labels(settings: &Settings) -> HashMap<String, String> {
     labels
 }
 
-fn validate_sandbox_provider(settings: &SettingsFile) -> Result<(), FabroError> {
+fn validate_sandbox_provider(settings: &SettingsLayer) -> Result<(), FabroError> {
     let resolved = fabro_config::resolve_run_from_file(settings)
         .map_err(|errors| FabroError::Precondition(render_resolve_errors(&errors)))?;
     resolved
@@ -327,7 +327,7 @@ pub(super) fn preprocess_and_validate(
     current_dir: Option<PathBuf>,
     file_resolver: Option<Arc<dyn FileResolver>>,
     custom_transforms: Vec<Box<dyn Transform>>,
-    settings: Option<&SettingsFile>,
+    settings: Option<&SettingsLayer>,
     goal_override: Option<&str>,
 ) -> Result<Validated, FabroError> {
     let source = match run_inputs_as_strings(settings) {
@@ -353,7 +353,7 @@ pub(super) fn preprocess_and_validate(
     Ok(pipeline::validate(transformed, &[]))
 }
 
-fn run_inputs_as_strings(settings: Option<&SettingsFile>) -> Option<HashMap<String, String>> {
+fn run_inputs_as_strings(settings: Option<&SettingsLayer>) -> Option<HashMap<String, String>> {
     settings
         .and_then(|settings| settings.run.as_ref())
         .and_then(|run| run.inputs.as_ref())
@@ -458,7 +458,7 @@ mod tests {
         ))
     }
 
-    fn validate_dot(dot_source: &str, settings: SettingsFile) -> Validated {
+    fn validate_dot(dot_source: &str, settings: SettingsLayer) -> Validated {
         validate(ValidateInput {
             workflow: WorkflowInput::DotSource {
                 source: dot_source.to_string(),
@@ -480,7 +480,7 @@ mod tests {
 
     #[test]
     fn validate_minimal() {
-        let validated = validate_dot(MINIMAL_DOT, SettingsFile::default());
+        let validated = validate_dot(MINIMAL_DOT, SettingsLayer::default());
         validated.raise_on_errors().unwrap();
 
         assert_eq!(validated.graph().name, "Test");
@@ -497,7 +497,7 @@ mod tests {
             exit  [shape=Msquare]
             start -> work -> exit
         }"#;
-        let validated = validate_dot(dot, SettingsFile::default());
+        let validated = validate_dot(dot, SettingsLayer::default());
         validated.raise_on_errors().unwrap();
 
         let prompt = validated.graph().nodes["work"]
@@ -535,7 +535,7 @@ mod tests {
             exit  [shape=Msquare]
             start -> work -> exit
         }"#;
-        let validated = validate_dot(dot, SettingsFile::default());
+        let validated = validate_dot(dot, SettingsLayer::default());
         validated.raise_on_errors().unwrap();
 
         assert_eq!(
@@ -557,13 +557,13 @@ mod tests {
             use fabro_types::settings::run::{RunGoalLayer, RunLayer};
             let mut inputs = std::collections::HashMap::new();
             inputs.insert("who".to_string(), toml::Value::String("agent".to_string()));
-            SettingsFile {
+            SettingsLayer {
                 run: Some(RunLayer {
                     goal: Some(RunGoalLayer::Inline(InterpString::parse("override"))),
                     inputs: Some(inputs),
                     ..RunLayer::default()
                 }),
-                ..SettingsFile::default()
+                ..SettingsLayer::default()
             }
         });
         validated.raise_on_errors().unwrap();
@@ -584,7 +584,7 @@ mod tests {
                 source: "not a graph".to_string(),
                 base_dir: None,
             },
-            settings: SettingsFile::default(),
+            settings: SettingsLayer::default(),
             cwd: PathBuf::from("."),
             custom_transforms: Vec::new(),
         });
@@ -597,7 +597,7 @@ mod tests {
             graph [goal="Test"]
             work [label="Work"]
         }"#;
-        let validated = validate_dot(dot, SettingsFile::default());
+        let validated = validate_dot(dot, SettingsLayer::default());
 
         assert!(validated.has_errors());
         assert!(validated.raise_on_errors().is_err());
@@ -624,7 +624,7 @@ mod tests {
                 source: MINIMAL_DOT.to_string(),
                 base_dir: None,
             },
-            settings: SettingsFile::default(),
+            settings: SettingsLayer::default(),
             cwd: PathBuf::from("."),
             custom_transforms: vec![Box::new(TagTransform)],
         })
@@ -657,7 +657,7 @@ mod tests {
 
         let validated = validate(ValidateInput {
             workflow: WorkflowInput::Path(dot_path),
-            settings: SettingsFile::default(),
+            settings: SettingsLayer::default(),
             cwd: dir.path().to_path_buf(),
             custom_transforms: Vec::new(),
         })
@@ -693,7 +693,7 @@ mod tests {
                     (PathBuf::from("prompts/lint.md"), "Lint $goal".to_string()),
                 ]),
             }),
-            settings: SettingsFile::default(),
+            settings: SettingsLayer::default(),
             cwd: PathBuf::from("."),
             custom_transforms: Vec::new(),
         })
@@ -724,7 +724,7 @@ mod tests {
                     source: dot.to_string(),
                     base_dir: None,
                 },
-                settings: SettingsFile::default(),
+                settings: SettingsLayer::default(),
                 cwd: dir.path().to_path_buf(),
                 workflow_slug: None,
                 workflow_path: None,
@@ -766,7 +766,7 @@ mod tests {
                     };
                     let mut metadata = HashMap::new();
                     metadata.insert("env".to_string(), "test".to_string());
-                    SettingsFile {
+                    SettingsLayer {
                         run: Some(RunLayer {
                             goal: Some(RunGoalLayer::Inline(InterpString::parse("override goal"))),
                             metadata,
@@ -784,7 +784,7 @@ mod tests {
                             }),
                             ..RunLayer::default()
                         }),
-                        ..SettingsFile::default()
+                        ..SettingsLayer::default()
                     }
                 },
                 cwd: dir.path().to_path_buf(),
@@ -872,7 +872,7 @@ mod tests {
                 },
                 settings: {
                     use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
-                    SettingsFile {
+                    SettingsLayer {
                         run: Some(RunLayer {
                             working_dir: Some(InterpString::parse("workspace")),
                             execution: Some(RunExecutionLayer {
@@ -881,7 +881,7 @@ mod tests {
                             }),
                             ..RunLayer::default()
                         }),
-                        ..SettingsFile::default()
+                        ..SettingsLayer::default()
                     }
                 },
                 cwd: dir.path().to_path_buf(),
@@ -946,9 +946,9 @@ mod tests {
         );
     }
 
-    fn dry_run_only_settings() -> SettingsFile {
+    fn dry_run_only_settings() -> SettingsLayer {
         use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
-        SettingsFile {
+        SettingsLayer {
             run: Some(RunLayer {
                 execution: Some(RunExecutionLayer {
                     mode: Some(RunMode::DryRun),
@@ -956,14 +956,14 @@ mod tests {
                 }),
                 ..RunLayer::default()
             }),
-            ..SettingsFile::default()
+            ..SettingsLayer::default()
         }
     }
 
-    fn dry_run_with_storage(storage_dir: &Path) -> SettingsFile {
+    fn dry_run_with_storage(storage_dir: &Path) -> SettingsLayer {
         use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
         use fabro_types::settings::server::{ServerLayer, ServerStorageLayer};
-        SettingsFile {
+        SettingsLayer {
             run: Some(RunLayer {
                 execution: Some(RunExecutionLayer {
                     mode: Some(RunMode::DryRun),
@@ -977,7 +977,7 @@ mod tests {
                 }),
                 ..ServerLayer::default()
             }),
-            ..SettingsFile::default()
+            ..SettingsLayer::default()
         }
     }
 

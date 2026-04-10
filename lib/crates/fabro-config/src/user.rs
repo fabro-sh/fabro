@@ -10,7 +10,7 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::home::Home;
 use crate::load::load_settings_path;
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::SettingsLayer;
 
 pub const SETTINGS_CONFIG_FILENAME: &str = "settings.toml";
 pub const LEGACY_USER_CONFIG_FILENAME: &str = "cli.toml";
@@ -69,7 +69,7 @@ fn should_warn_about_legacy_user_config(path: &Path) -> bool {
 /// returning defaults if the default file doesn't exist. An explicit path that
 /// doesn't exist is an error.
 #[allow(clippy::print_stderr)]
-pub fn load_settings_config(path: Option<&Path>) -> anyhow::Result<SettingsFile> {
+pub fn load_settings_config(path: Option<&Path>) -> anyhow::Result<SettingsLayer> {
     if let Some(explicit) = path
         .map(Path::to_path_buf)
         .or_else(|| std::env::var_os(FABRO_CONFIG_ENV).map(PathBuf::from))
@@ -99,11 +99,11 @@ pub fn load_settings_config(path: Option<&Path>) -> anyhow::Result<SettingsFile>
     if default.is_file() {
         load_v2_layer_from_path(&default)
     } else {
-        Ok(SettingsFile::default())
+        Ok(SettingsLayer::default())
     }
 }
 
-fn load_v2_layer_from_path(path: &Path) -> anyhow::Result<SettingsFile> {
+fn load_v2_layer_from_path(path: &Path) -> anyhow::Result<SettingsLayer> {
     load_settings_path(path)
 }
 

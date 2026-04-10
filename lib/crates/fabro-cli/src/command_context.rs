@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail};
-use fabro_types::settings::{CliSettings, SettingsFile};
+use fabro_types::settings::{CliSettings, SettingsLayer};
 use tokio::sync::OnceCell;
 
 use crate::args::{ServerConnectionArgs, ServerTargetArgs};
@@ -24,7 +24,7 @@ pub(crate) enum ServerMode {
 pub(crate) struct CommandContext {
     cwd: PathBuf,
     base_config_path: PathBuf,
-    machine_settings: SettingsFile,
+    machine_settings: SettingsLayer,
     cli_settings: CliSettings,
     server_mode: ServerMode,
     server: OnceCell<Arc<ServerStoreClient>>,
@@ -78,7 +78,7 @@ impl CommandContext {
         &self.base_config_path
     }
 
-    pub(crate) fn machine_settings(&self) -> &SettingsFile {
+    pub(crate) fn machine_settings(&self) -> &SettingsLayer {
         &self.machine_settings
     }
 

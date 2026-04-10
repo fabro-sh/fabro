@@ -1,16 +1,17 @@
 use fabro_config::effective_settings::{EffectiveSettingsLayers, EffectiveSettingsMode};
+use fabro_config::parse_settings_layer;
 use fabro_types::run::RunRecord;
 use fabro_types::run_event::run::RunCreatedProps;
-use fabro_types::settings::{SettingsFile, parse_settings_file};
+use fabro_types::settings::SettingsLayer;
 
-fn parse(source: &str) -> SettingsFile {
-    parse_settings_file(source).expect("fixture should parse")
+fn parse(source: &str) -> SettingsLayer {
+    parse_settings_layer(source).expect("fixture should parse")
 }
 
 #[test]
 fn resolves_root_settings_defaults() {
     let settings =
-        fabro_config::resolve(&SettingsFile::default()).expect("empty settings should resolve");
+        fabro_config::resolve(&SettingsLayer::default()).expect("empty settings should resolve");
 
     assert_eq!(settings.project.directory, "fabro/");
     assert_eq!(settings.workflow.graph, "workflow.fabro");
@@ -57,7 +58,7 @@ provider = "not-a-provider"
 fn load_and_resolve_merges_layers_before_resolution() {
     let settings = fabro_config::load_and_resolve(
         EffectiveSettingsLayers::new(
-            SettingsFile::default(),
+            SettingsLayer::default(),
             parse(
                 r#"
 _version = 1

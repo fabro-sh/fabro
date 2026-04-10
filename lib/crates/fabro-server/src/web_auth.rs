@@ -6,7 +6,7 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::{Json, Router, routing::get, routing::post};
 use cookie::{Cookie, CookieJar, Expiration, Key, SameSite, time::Duration};
-use fabro_types::settings::{InterpString, SettingsFile};
+use fabro_types::settings::{InterpString, SettingsLayer};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{debug, error, info, warn};
@@ -146,7 +146,7 @@ fn json_response(status: StatusCode, body: serde_json::Value) -> Response {
     (status, Json(body)).into_response()
 }
 
-fn features_json(settings: &SettingsFile) -> serde_json::Value {
+fn features_json(settings: &SettingsLayer) -> serde_json::Value {
     let session_sandboxes = fabro_config::resolve_features_from_file(settings)
         .map(|settings| settings.session_sandboxes)
         .unwrap_or(false);
@@ -779,10 +779,10 @@ mod tests {
         assert_eq!(web["enabled"].as_bool(), Some(true));
 
         // Re-parse the emitted document to prove it round-trips into a
-        // valid v2 `SettingsFile`.
+        // valid v2 `SettingsLayer`.
         let emitted = doc.to_string();
-        let file = fabro_types::settings::parse_settings_file(&emitted)
-            .expect("merged output should parse as a v2 SettingsFile");
+        let file = fabro_config::parse_settings_layer(&emitted)
+            .expect("merged output should parse as a v2 SettingsLayer");
         let server = file.server.as_ref().expect("[server] should be present");
         let integrations = server
             .integrations
@@ -864,8 +864,8 @@ name = "claude-sonnet"
         );
 
         // Finally, the whole thing must still parse as a valid v2
-        // SettingsFile.
-        fabro_types::settings::parse_settings_file(&emitted)
+        // SettingsLayer.
+        fabro_config::parse_settings_layer(&emitted)
             .expect("merged output should still parse as v2 after the edit");
     }
 }

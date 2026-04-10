@@ -4,7 +4,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fabro_config::Storage;
 use fabro_types::RunId;
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::interp::InterpString;
 use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
 use fabro_types::settings::server::{ServerLayer, ServerStorageLayer};
@@ -19,7 +19,7 @@ use crate::helpers::{
     test_app_with_scheduler, test_settings, wait_for_run_status,
 };
 
-fn temp_storage_settings() -> (tempfile::TempDir, SettingsFile, PathBuf) {
+fn temp_storage_settings() -> (tempfile::TempDir, SettingsLayer, PathBuf) {
     let temp = tempdir().expect("tempdir should create");
     let mut settings = test_settings();
     let storage_dir = temp.path().join("storage");

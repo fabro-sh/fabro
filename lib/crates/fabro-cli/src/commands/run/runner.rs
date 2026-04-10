@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use fabro_interview::{ControlInterviewer, WorkerControlEnvelope, WorkerControlMessage};
 use fabro_store::{EventEnvelope, EventPayload, RunProjection};
 use fabro_types::settings::InterpString;
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::SettingsLayer;
 use fabro_types::{EventBody, RunBlobId, RunEvent, RunId, StatusReason};
 use fabro_workflow::artifact_snapshot::CapturedArtifactInfo;
 use fabro_workflow::artifact_upload::{ArtifactSink, StageArtifactUploader};
@@ -420,7 +420,7 @@ fn update_worker_title_from_event(event: &RunEvent) {
 }
 
 fn maybe_build_github_app_credentials(
-    settings: &SettingsFile,
+    settings: &SettingsLayer,
 ) -> Result<Option<fabro_github::GitHubAppCredentials>> {
     let resolved_run = fabro_config::resolve_run_from_file(settings).ok();
     let resolved_server = fabro_config::resolve_server_from_file(settings).ok();

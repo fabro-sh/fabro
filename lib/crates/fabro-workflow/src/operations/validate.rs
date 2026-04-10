@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use fabro_types::settings::SettingsFile;
+use fabro_types::settings::SettingsLayer;
 
 use crate::error::FabroError;
 use crate::pipeline::Validated;
@@ -11,7 +11,7 @@ use super::source::{ResolveWorkflowInput, WorkflowInput, resolve_workflow};
 
 pub struct ValidateInput {
     pub workflow: WorkflowInput,
-    pub settings: SettingsFile,
+    pub settings: SettingsLayer,
     pub cwd: PathBuf,
     pub custom_transforms: Vec<Box<dyn Transform>>,
 }

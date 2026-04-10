@@ -1,14 +1,15 @@
+use fabro_config::parse_settings_layer;
 use fabro_types::settings::server::{ObjectStoreSettings, ServerListenSettings};
-use fabro_types::settings::{InterpString, SettingsFile, parse_settings_file};
+use fabro_types::settings::{InterpString, SettingsLayer};
 use fabro_util::Home;
 
-fn parse(source: &str) -> SettingsFile {
-    parse_settings_file(source).expect("fixture should parse")
+fn parse(source: &str) -> SettingsLayer {
+    parse_settings_layer(source).expect("fixture should parse")
 }
 
 #[test]
 fn resolves_server_defaults_from_empty_settings() {
-    let settings = fabro_config::resolve_server_from_file(&SettingsFile::default())
+    let settings = fabro_config::resolve_server_from_file(&SettingsLayer::default())
         .expect("empty settings should resolve");
 
     assert_eq!(
