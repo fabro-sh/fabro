@@ -1,9 +1,16 @@
+use std::io::Read;
+use std::process::{Child, ExitStatus, Output, Stdio};
+use std::time::{Duration, Instant};
+
 use fabro_store::EventEnvelope;
 use fabro_test::{fabro_snapshot, test_context};
-use fabro_types::{EventBody, RunEvent};
+use fabro_types::{EventBody, RunEvent, StatusReason};
 use httpmock::MockServer;
 
-use super::support::{output_stderr, run_events, run_state, server_target};
+use super::support::{
+    output_stderr, run_events, run_state, server_target, wait_for_event_names, wait_for_status,
+    write_gated_workflow,
+};
 use crate::support::{fabro_json_snapshot, unique_run_id};
 
 const SHARED_DAEMON_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
@@ -26,6 +33,69 @@ fn assert_worker_succeeded(run_dir: &std::path::Path, stdout: &[u8]) {
         &event.body,
         EventBody::RunCompleted(props) if props.status == "success"
     )));
+}
+
+fn spawn_worker_process(
+    context: &fabro_test::TestContext,
+    server: &str,
+    run_dir: &std::path::Path,
+    run_id: &str,
+    mode: &str,
+) -> Child {
+    let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_fabro"));
+    cmd.current_dir(&context.temp_dir);
+    cmd.env("NO_COLOR", "1");
+    cmd.env("HOME", &context.home_dir);
+    cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
+    cmd.env("FABRO_SERVER_MAX_CONCURRENT_RUNS", "64");
+    cmd.env("FABRO_TEST_IN_MEMORY_STORE", "1");
+    cmd.args([
+        "__run-worker",
+        "--server",
+        server,
+        "--run-dir",
+        run_dir.to_str().unwrap(),
+        "--run-id",
+        run_id,
+        "--mode",
+        mode,
+    ]);
+    cmd.stdin(Stdio::piped());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+    cmd.spawn().expect("worker should spawn")
+}
+
+fn wait_for_child_exit(child: &mut Child, timeout: Duration) -> ExitStatus {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(status) = child.try_wait().expect("worker wait should succeed") {
+            return status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting for worker to exit"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn child_output(mut child: Child, status: ExitStatus) -> Output {
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    if let Some(mut pipe) = child.stdout.take() {
+        pipe.read_to_end(&mut stdout)
+            .expect("worker stdout should be readable");
+    }
+    if let Some(mut pipe) = child.stderr.take() {
+        pipe.read_to_end(&mut stderr)
+            .expect("worker stderr should be readable");
+    }
+    Output {
+        status,
+        stdout,
+        stderr,
+    }
 }
 
 fn server_endpoint(storage_dir: &std::path::Path) -> (reqwest::Client, String) {
@@ -556,4 +626,127 @@ fn detached_run_answers_pending_question_without_interview_scratch_files() {
         EventBody::InterviewCompleted(props)
             if props.question_id == question_id && props.answer == "A"
     )));
+}
+
+#[test]
+fn worker_exits_with_retro_enabled_even_when_stdin_stays_open() {
+    let context = test_context!();
+    let run_id = unique_run_id();
+    let workflow_path = context.temp_dir.join("retro-success.fabro");
+
+    context.write_temp(
+        "fabro.toml",
+        r#"_version = 1
+
+[run.execution]
+retros = true
+"#,
+    );
+    context.write_temp(
+        "retro-success.fabro",
+        r#"digraph RetroSuccess {
+  graph [goal="Finish successfully with retro enabled"]
+  start [shape=Mdiamond, label="Start"]
+  exit  [shape=Msquare, label="Exit"]
+  work  [shape=parallelogram, label="Work", script="true"]
+  start -> work -> exit
+}
+"#,
+    );
+
+    context
+        .command()
+        .args([
+            "create",
+            "--dry-run",
+            "--auto-approve",
+            "--run-id",
+            run_id.as_str(),
+            workflow_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let run_dir = context.find_run_dir(&run_id);
+    let server = server_target(&context.storage_dir);
+    let mut child = spawn_worker_process(&context, &server, &run_dir, &run_id, "start");
+    let stdin = child.stdin.take().expect("worker stdin should be piped");
+
+    wait_for_event_names(&run_dir, &["run.completed", "retro.completed"]);
+    let status = wait_for_child_exit(&mut child, SHARED_DAEMON_TIMEOUT);
+    drop(stdin);
+    let output = child_output(child, status);
+
+    assert!(
+        output.status.success(),
+        "worker should exit successfully after retro even with stdin open:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let events = stored_worker_events(&run_dir);
+    let run_completed_index = events
+        .iter()
+        .position(|event| matches!(&event.body, EventBody::RunCompleted(_)))
+        .expect("run.completed should be present");
+    let retro_completed_index = events
+        .iter()
+        .position(|event| matches!(&event.body, EventBody::RetroCompleted(_)))
+        .expect("retro.completed should be present");
+    assert!(
+        run_completed_index < retro_completed_index,
+        "retro should still run after run.completed"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn worker_exits_after_sigterm_cancel_even_when_stdin_stays_open() {
+    let context = test_context!();
+    let run_id = unique_run_id();
+    let workflow_path = context.temp_dir.join("cancel-gated.fabro");
+    let _gate = write_gated_workflow(&workflow_path, "cancel_gated", "Wait for cancellation");
+
+    context
+        .command()
+        .args([
+            "create",
+            "--auto-approve",
+            "--no-retro",
+            "--sandbox",
+            "local",
+            "--run-id",
+            run_id.as_str(),
+            workflow_path.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
+
+    let run_dir = context.find_run_dir(&run_id);
+    let server = server_target(&context.storage_dir);
+    let mut child = spawn_worker_process(&context, &server, &run_dir, &run_id, "start");
+    let stdin = child.stdin.take().expect("worker stdin should be piped");
+
+    wait_for_event_names(&run_dir, &["run.running"]);
+    let worker_pid = child.id();
+    assert!(worker_pid > 0, "worker pid should be present");
+    fabro_proc::sigterm(worker_pid);
+
+    wait_for_status(&run_dir, &["failed"]);
+    let status = wait_for_child_exit(&mut child, SHARED_DAEMON_TIMEOUT);
+    drop(stdin);
+    let output = child_output(child, status);
+
+    assert!(
+        output.status.success(),
+        "worker should exit cleanly after SIGTERM cancellation:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let status_record = run_state(&run_dir)
+        .status
+        .expect("cancelled run should have a status record");
+    assert_eq!(status_record.status.to_string(), "failed");
+    assert_eq!(status_record.reason, Some(StatusReason::Cancelled));
 }

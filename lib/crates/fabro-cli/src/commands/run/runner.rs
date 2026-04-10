@@ -1,3 +1,4 @@
+use std::io::{BufRead as StdBufRead, BufReader as StdBufReader};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,10 +17,9 @@ use fabro_workflow::event::{Emitter, RunEventSink};
 use fabro_workflow::operations::{self, StartServices};
 use fabro_workflow::run_control::RunControlState;
 use fabro_workflow::runtime_store::{RunStoreBackend, RunStoreHandle};
-use tokio::io::{self, AsyncBufReadExt, AsyncRead, BufReader};
 #[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, mpsc};
 use tokio::time::sleep;
 
 use crate::args::RunWorkerMode;
@@ -72,11 +72,7 @@ pub(crate) async fn execute(
     )));
     let interviewer = Arc::new(ControlInterviewer::new());
     let cancel_token = Arc::new(AtomicBool::new(false));
-    tokio::spawn(read_worker_control_stream(
-        io::stdin(),
-        Arc::clone(&interviewer),
-        Arc::clone(&cancel_token),
-    ));
+    spawn_worker_control_stream(Arc::clone(&interviewer), Arc::clone(&cancel_token))?;
     let run_control = RunControlState::new();
     install_signal_handlers(Arc::clone(&run_control), Arc::clone(&cancel_token))?;
     let github_app = maybe_build_github_app_credentials(&run_record.settings)?;
@@ -112,22 +108,77 @@ pub(crate) async fn execute(
     Ok(())
 }
 
-async fn read_worker_control_stream<R>(
-    reader: R,
+#[derive(Debug, PartialEq, Eq)]
+enum WorkerControlStreamEvent {
+    Line(String),
+    Eof,
+}
+
+fn spawn_worker_control_stream(
     interviewer: Arc<ControlInterviewer>,
     cancel_token: Arc<AtomicBool>,
+) -> Result<()> {
+    let (event_tx, event_rx) = mpsc::unbounded_channel();
+    tokio::spawn(handle_worker_control_stream_events(
+        interviewer,
+        cancel_token,
+        event_rx,
+    ));
+    std::thread::Builder::new()
+        .name("fabro-worker-control".to_string())
+        .spawn(move || {
+            read_worker_control_stream_blocking(StdBufReader::new(std::io::stdin()), event_tx);
+        })
+        .context("failed to spawn worker control reader thread")?;
+    Ok(())
+}
+
+fn read_worker_control_stream_blocking<R>(
+    mut reader: R,
+    event_tx: mpsc::UnboundedSender<WorkerControlStreamEvent>,
 ) where
-    R: AsyncRead + Unpin,
+    R: StdBufRead,
 {
-    let mut lines = BufReader::new(reader).lines();
+    let mut line = String::new();
     loop {
-        if let Ok(Some(line)) = lines.next_line().await {
-            apply_worker_control_line(&interviewer, &cancel_token, &line).await;
-        } else {
-            interviewer.interrupt_all().await;
-            break;
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) => {
+                let _ = event_tx.send(WorkerControlStreamEvent::Eof);
+                break;
+            }
+            Ok(_) => {
+                let line = line.trim_end_matches(['\r', '\n']).to_string();
+                if event_tx.send(WorkerControlStreamEvent::Line(line)).is_err() {
+                    break;
+                }
+            }
+            Err(_) => {
+                let _ = event_tx.send(WorkerControlStreamEvent::Eof);
+                break;
+            }
         }
     }
+}
+
+async fn handle_worker_control_stream_events(
+    interviewer: Arc<ControlInterviewer>,
+    cancel_token: Arc<AtomicBool>,
+    mut event_rx: mpsc::UnboundedReceiver<WorkerControlStreamEvent>,
+) {
+    while let Some(event) = event_rx.recv().await {
+        match event {
+            WorkerControlStreamEvent::Line(line) => {
+                apply_worker_control_line(&interviewer, &cancel_token, &line).await;
+            }
+            WorkerControlStreamEvent::Eof => {
+                interviewer.interrupt_all().await;
+                return;
+            }
+        }
+    }
+
+    interviewer.interrupt_all().await;
 }
 
 async fn apply_worker_control_line(
@@ -494,9 +545,9 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     use super::{
-        MissingArtifactUploadTokenUploader, WorkerTitlePhase, apply_worker_control_line,
-        initial_worker_title_phase, read_worker_control_stream, worker_title,
-        worker_title_phase_for_event,
+        MissingArtifactUploadTokenUploader, WorkerControlStreamEvent, WorkerTitlePhase,
+        apply_worker_control_line, handle_worker_control_stream_events, initial_worker_title_phase,
+        read_worker_control_stream_blocking, worker_title, worker_title_phase_for_event,
     };
     use crate::args::RunWorkerMode;
     use fabro_interview::{AnswerValue, ControlInterviewer, Interviewer, Question, QuestionType};
@@ -664,18 +715,49 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn worker_control_stream_eof_interrupts_pending_interviews() {
+    async fn blocking_worker_control_stream_emits_lines_and_eof() {
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        read_worker_control_stream_blocking(
+            std::io::Cursor::new(
+                b"{\"v\":1,\"type\":\"run.cancel\"}\n{\"v\":1,\"type\":\"interview.answer\",\"qid\":\"q-1\",\"answer\":{\"kind\":\"yes\"}}\n",
+            ),
+            event_tx,
+        );
+
+        assert_eq!(
+            event_rx.try_recv(),
+            Ok(WorkerControlStreamEvent::Line(
+                r#"{"v":1,"type":"run.cancel"}"#.to_string()
+            ))
+        );
+        assert_eq!(
+            event_rx.try_recv(),
+            Ok(WorkerControlStreamEvent::Line(
+                r#"{"v":1,"type":"interview.answer","qid":"q-1","answer":{"kind":"yes"}}"#
+                    .to_string()
+            ))
+        );
+        assert_eq!(event_rx.try_recv(), Ok(WorkerControlStreamEvent::Eof));
+    }
+
+    #[tokio::test]
+    async fn worker_control_event_loop_eof_interrupts_pending_interviews() {
         let interviewer = Arc::new(ControlInterviewer::new());
         let cancel_token = Arc::new(AtomicBool::new(false));
         let mut question = Question::new("Approve?", QuestionType::YesNo);
         question.id = "q-1".to_string();
         let ask_interviewer = Arc::clone(&interviewer);
         let answer_task = tokio::spawn(async move { ask_interviewer.ask(question).await });
+        let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
 
-        read_worker_control_stream(
-            tokio::io::empty(),
+        event_tx.send(WorkerControlStreamEvent::Eof).unwrap();
+        drop(event_tx);
+
+        handle_worker_control_stream_events(
             Arc::clone(&interviewer),
             Arc::clone(&cancel_token),
+            event_rx,
         )
         .await;
 
