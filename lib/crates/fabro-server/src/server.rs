@@ -2495,15 +2495,19 @@ fn octet_stream_response(bytes: Bytes) -> Response {
 
 #[allow(clippy::result_large_err)]
 fn api_event_envelope_from_store(event: &EventEnvelope) -> Result<ApiEventEnvelope, Response> {
-    serde_json::to_value(event)
-        .and_then(serde_json::from_value)
-        .map_err(|err| {
-            ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to serialize stored event: {err}"),
-            )
-            .into_response()
-        })
+    // The payload is already a serde_json::Value; merge `seq` into it
+    // instead of serializing the whole envelope and re-parsing.
+    let mut obj = event.payload.as_value().clone();
+    if let serde_json::Value::Object(ref mut map) = obj {
+        map.insert("seq".into(), serde_json::Value::from(event.seq));
+    }
+    serde_json::from_value(obj).map_err(|err| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to deserialize stored event: {err}"),
+        )
+        .into_response()
+    })
 }
 
 fn clear_live_run_state(run: &mut ManagedRun) {

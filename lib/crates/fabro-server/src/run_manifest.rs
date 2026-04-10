@@ -97,9 +97,6 @@ pub(crate) fn prepare_manifest_with_mode(
     )?;
     if let Some(goal) = manifest.goal.as_ref() {
         let run = settings.run.get_or_insert_with(RunLayer::default);
-        // The CLI has already resolved any goal-file reads into
-        // `manifest.goal.text`, so the server side always stores the
-        // final text inline.
         run.goal = Some(RunGoalLayer::Inline(InterpString::parse(&goal.text)));
     }
 
