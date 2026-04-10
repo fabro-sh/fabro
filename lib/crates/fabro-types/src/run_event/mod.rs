@@ -53,6 +53,15 @@ impl ActorRef {
             display: Some(login),
         }
     }
+
+    #[must_use]
+    pub fn agent(session_id: Option<String>, display: Option<String>) -> Self {
+        Self {
+            kind: ActorKind::Agent,
+            id: session_id,
+            display,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
