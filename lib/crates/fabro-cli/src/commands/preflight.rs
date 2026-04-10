@@ -1,4 +1,6 @@
 use anyhow::bail;
+use fabro_config::load::load_settings_user;
+use fabro_config::user::active_settings_path;
 use fabro_types::settings::cli::OutputVerbosity;
 use fabro_util::terminal::Styles;
 
@@ -22,6 +24,8 @@ pub(crate) async fn execute(mut args: PreflightArgs, globals: &GlobalArgs) -> an
         args_layer: preflight_args_layer(&args)?,
         args: preflight_manifest_args(&args),
         run_id: None,
+        user_layer: load_settings_user()?,
+        user_settings_path: Some(active_settings_path(None)),
     })?;
     let client = ctx.server().await?;
     let response = client.run_preflight(manifest.manifest).await?;
