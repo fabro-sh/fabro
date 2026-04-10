@@ -69,14 +69,13 @@ pub enum AuthMode {
 pub struct PeerCertificates(pub Option<Vec<CertificateDer<'static>>>);
 
 /// Decode a PEM env var that may be raw PEM or base64-encoded PEM.
-pub fn decode_pem_env(name: &str, value: &str) -> String {
+pub fn decode_pem_env(name: &str, value: &str) -> Result<String> {
     if value.starts_with("-----") {
-        return value.to_string();
+        return Ok(value.to_string());
     }
     let bytes = base64::Engine::decode(&BASE64_STANDARD, value)
-        .unwrap_or_else(|e| panic!("{name} is not valid PEM or base64: {e}"));
-    String::from_utf8(bytes)
-        .unwrap_or_else(|e| panic!("{name} base64 decoded to invalid UTF-8: {e}"))
+        .map_err(|e| anyhow!("{name} is not valid PEM or base64: {e}"))?;
+    String::from_utf8(bytes).map_err(|e| anyhow!("{name} base64 decoded to invalid UTF-8: {e}"))
 }
 
 /// Resolve the authentication mode from a [`SettingsFile`].
@@ -87,9 +86,9 @@ pub fn decode_pem_env(name: &str, value: &str) -> String {
 /// when `server.auth` resolves to at least one enabled strategy.
 ///
 /// Fails closed when `server.auth` is absent or resolves to zero enabled
-/// strategies: startup refuses rather than silently accepting every
-/// request. Panics if a configured strategy is missing its required
-/// material (JWT public key, mTLS TLS config).
+/// strategies, or when a configured strategy is missing its required
+/// material (JWT public key, mTLS TLS config): startup refuses rather
+/// than silently accepting every request or panicking the binary.
 ///
 /// Walks the v2 `server.auth.api.{jwt,mtls}` subtree and
 /// `server.auth.web.allowed_usernames`.
@@ -159,15 +158,20 @@ where
     }
 
     if jwt_enabled {
-        let raw = lookup("FABRO_JWT_PUBLIC_KEY").unwrap_or_else(|| {
-            panic!(
-                "FABRO_JWT_PUBLIC_KEY is not set. Provide an Ed25519 public key in PEM format \
+        let raw = lookup("FABRO_JWT_PUBLIC_KEY").ok_or_else(|| {
+            anyhow!(
+                "Fabro server refuses to start: [server.auth.api.jwt] is enabled but \
+                 FABRO_JWT_PUBLIC_KEY is not set. Provide an Ed25519 public key in PEM format \
                  (or base64-encoded PEM) for JWT authentication."
             )
-        });
-        let pem = decode_pem_env("FABRO_JWT_PUBLIC_KEY", &raw);
-        let key = DecodingKey::from_ed_pem(pem.as_bytes())
-            .expect("FABRO_JWT_PUBLIC_KEY contains an invalid Ed25519 PEM public key");
+        })?;
+        let pem = decode_pem_env("FABRO_JWT_PUBLIC_KEY", &raw)?;
+        let key = DecodingKey::from_ed_pem(pem.as_bytes()).map_err(|e| {
+            anyhow!(
+                "Fabro server refuses to start: FABRO_JWT_PUBLIC_KEY contains an invalid \
+                 Ed25519 PEM public key: {e}"
+            )
+        })?;
         strategies.push(AuthStrategy::Jwt {
             key: Arc::new(key),
             validation: Arc::new(jwt_validation()),
@@ -176,10 +180,12 @@ where
     }
 
     if mtls_enabled {
-        assert!(
-            tls_present,
-            "mTLS authentication strategy requires [server.listen.tls] configuration with cert, key, and ca"
-        );
+        if !tls_present {
+            return Err(anyhow!(
+                "Fabro server refuses to start: [server.auth.api.mtls] is enabled but \
+                 [server.listen.tls] is missing required cert, key, or ca paths."
+            ));
+        }
         strategies.push(AuthStrategy::Mtls);
     }
 
@@ -548,6 +554,55 @@ ca = "/etc/fabro/tls/ca.pem"
             panic!("expected Strategies, got Disabled");
         };
         assert!(strategies.iter().any(|s| matches!(s, AuthStrategy::Mtls)));
+    }
+
+    #[test]
+    fn fail_closed_when_jwt_enabled_without_public_key_env() {
+        let file = settings(
+            r"
+_version = 1
+
+[server.auth.api.jwt]
+enabled = true
+",
+        );
+        let err = resolve_auth_mode_with_lookup(&file, empty_lookup)
+            .expect_err("missing FABRO_JWT_PUBLIC_KEY should refuse startup");
+        assert!(err.to_string().contains("FABRO_JWT_PUBLIC_KEY"));
+    }
+
+    #[test]
+    fn fail_closed_when_jwt_public_key_is_invalid_pem() {
+        let file = settings(
+            r"
+_version = 1
+
+[server.auth.api.jwt]
+enabled = true
+",
+        );
+        let err = resolve_auth_mode_with_lookup(&file, |name| {
+            (name == "FABRO_JWT_PUBLIC_KEY").then(|| {
+                "-----BEGIN PUBLIC KEY-----\ngarbage\n-----END PUBLIC KEY-----".to_string()
+            })
+        })
+        .expect_err("invalid PEM should refuse startup");
+        assert!(err.to_string().contains("invalid"));
+    }
+
+    #[test]
+    fn fail_closed_when_mtls_enabled_without_listen_tls() {
+        let file = settings(
+            r"
+_version = 1
+
+[server.auth.api.mtls]
+enabled = true
+",
+        );
+        let err = resolve_auth_mode_with_lookup(&file, empty_lookup)
+            .expect_err("mTLS without [server.listen.tls] should refuse startup");
+        assert!(err.to_string().contains("server.listen.tls"));
     }
 
     async fn protected_handler(_auth: AuthenticatedService) -> impl IntoResponse {
