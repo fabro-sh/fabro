@@ -1,7 +1,5 @@
 use fabro_config::effective_settings::{EffectiveSettingsLayers, EffectiveSettingsMode};
 use fabro_config::parse_settings_layer;
-use fabro_types::run::RunRecord;
-use fabro_types::run_event::run::RunCreatedProps;
 use fabro_types::settings::SettingsLayer;
 
 fn parse(source: &str) -> SettingsLayer {
@@ -113,89 +111,5 @@ name = "gpt-5"
             .as_ref()
             .map(|value| value.as_source()),
         Some("gpt-5".to_string())
-    );
-}
-
-#[test]
-fn run_record_round_trips_templated_settings() {
-    let settings = parse(
-        r#"
-_version = 1
-
-[server.storage]
-root = "${env.FABRO_STORAGE}"
-"#,
-    );
-    let record = RunRecord {
-        run_id: fabro_types::fixtures::RUN_1,
-        settings,
-        graph: fabro_types::graph::Graph::new("test"),
-        workflow_slug: Some("demo".to_string()),
-        working_directory: std::path::PathBuf::from("/tmp/project"),
-        host_repo_path: Some("/tmp/project".to_string()),
-        repo_origin_url: None,
-        base_branch: Some("main".to_string()),
-        labels: std::collections::HashMap::new(),
-        provenance: None,
-        manifest_blob: None,
-        definition_blob: None,
-    };
-
-    let json = serde_json::to_value(&record).expect("record should serialize");
-    let round_trip: RunRecord = serde_json::from_value(json).expect("record should deserialize");
-
-    assert_eq!(
-        round_trip
-            .settings
-            .server
-            .as_ref()
-            .and_then(|server| server.storage.as_ref())
-            .and_then(|storage| storage.root.as_ref())
-            .map(|value| value.as_source()),
-        Some("${env.FABRO_STORAGE}".to_string())
-    );
-}
-
-#[test]
-fn run_created_props_round_trips_templated_settings() {
-    let settings = parse(
-        r#"
-_version = 1
-
-[server.integrations.github]
-app_id = "${env.GITHUB_APP_ID}"
-"#,
-    );
-    let event = RunCreatedProps {
-        settings,
-        graph: fabro_types::graph::Graph::new("test"),
-        workflow_source: Some("digraph test { start -> exit }".to_string()),
-        workflow_config: None,
-        labels: std::collections::BTreeMap::new(),
-        run_dir: "/tmp/run".to_string(),
-        working_directory: "/tmp/project".to_string(),
-        host_repo_path: Some("/tmp/project".to_string()),
-        repo_origin_url: None,
-        base_branch: Some("main".to_string()),
-        workflow_slug: Some("demo".to_string()),
-        db_prefix: None,
-        provenance: None,
-        manifest_blob: None,
-    };
-
-    let json = serde_json::to_value(&event).expect("event should serialize");
-    let round_trip: RunCreatedProps =
-        serde_json::from_value(json).expect("event should deserialize");
-
-    assert_eq!(
-        round_trip
-            .settings
-            .server
-            .as_ref()
-            .and_then(|server| server.integrations.as_ref())
-            .and_then(|integrations| integrations.github.as_ref())
-            .and_then(|github| github.app_id.as_ref())
-            .map(|value| value.as_source()),
-        Some("${env.GITHUB_APP_ID}".to_string())
     );
 }

@@ -6,17 +6,9 @@
 //! behavior methods (`is_blocking`, `timeout`, `resolved_hook_type`,
 //! `runs_in_sandbox`, `effective_name`) are runtime concerns owned by the
 //! executor.
-//!
-//! [`bridge_hook`] converts a v2 `HookEntry` into the runtime
-//! [`HookDefinition`] and lives here (not in `fabro-types`) so the runtime
-//! shape stays owned by this crate.
 
 use std::borrow::Cow;
 
-use fabro_types::settings::InterpString;
-use fabro_types::settings::run::{
-    HookAgentMarker, HookEntry, HookEvent as V2HookEvent, HookTlsMode as V2HookTlsMode,
-};
 use serde::{Deserialize, Serialize};
 
 /// Lifecycle events that can trigger user-defined hooks.
@@ -243,108 +235,4 @@ impl HookSettings {
 
         Self { hooks }
     }
-}
-
-/// Convert a v2 [`HookEntry`] into the runtime [`HookDefinition`] shape
-/// this crate's executor consumes.
-#[must_use]
-pub fn bridge_hook(hook: &HookEntry) -> HookDefinition {
-    let hook_type = resolve_hook_type(hook);
-    // If the hook is a script/command form, emit via the shorthand so
-    // HookDefinition.command holds the full command and
-    // HookDefinition.hook_type stays None. This avoids the duplicate
-    // `command` key that would otherwise appear under `#[serde(flatten)]`.
-    let command = if let Some(script) = &hook.script {
-        Some(interp_to_string(script))
-    } else {
-        hook.command.as_ref().map(|command| {
-            command
-                .iter()
-                .map(interp_to_string)
-                .collect::<Vec<_>>()
-                .join(" ")
-        })
-    };
-    HookDefinition {
-        name: hook.name.clone().or_else(|| hook.id.clone()),
-        event: bridge_hook_event(hook.event),
-        command,
-        hook_type,
-        matcher: hook.matcher.clone(),
-        blocking: hook.blocking,
-        timeout_ms: hook
-            .timeout
-            .map(|d| u64::try_from(d.as_std().as_millis()).unwrap_or(u64::MAX)),
-        sandbox: hook.sandbox,
-    }
-}
-
-fn resolve_hook_type(hook: &HookEntry) -> Option<HookType> {
-    if hook.script.is_some() || hook.command.is_some() {
-        return None;
-    }
-    if let Some(url) = &hook.url {
-        let headers = if hook.headers.is_empty() {
-            None
-        } else {
-            Some(
-                hook.headers
-                    .iter()
-                    .map(|(k, v)| (k.clone(), interp_to_string(v)))
-                    .collect(),
-            )
-        };
-        let tls = match hook.tls {
-            Some(V2HookTlsMode::Verify) => TlsMode::Verify,
-            Some(V2HookTlsMode::NoVerify) => TlsMode::NoVerify,
-            Some(V2HookTlsMode::Off) => TlsMode::Off,
-            None => TlsMode::default(),
-        };
-        return Some(HookType::Http {
-            url: interp_to_string(url),
-            headers,
-            allowed_env_vars: hook.allowed_env_vars.clone(),
-            tls,
-        });
-    }
-    if matches!(hook.agent, Some(HookAgentMarker::Enabled)) {
-        return Some(HookType::Agent {
-            prompt: hook
-                .prompt
-                .as_ref()
-                .map(interp_to_string)
-                .unwrap_or_default(),
-            model: hook.model.as_ref().map(interp_to_string),
-            max_tool_rounds: hook.max_tool_rounds,
-        });
-    }
-    hook.prompt.as_ref().map(|prompt| HookType::Prompt {
-        prompt: interp_to_string(prompt),
-        model: hook.model.as_ref().map(interp_to_string),
-    })
-}
-
-fn bridge_hook_event(event: V2HookEvent) -> HookEvent {
-    match event {
-        V2HookEvent::RunStart => HookEvent::RunStart,
-        V2HookEvent::RunComplete => HookEvent::RunComplete,
-        V2HookEvent::RunFailed => HookEvent::RunFailed,
-        V2HookEvent::StageStart => HookEvent::StageStart,
-        V2HookEvent::StageComplete => HookEvent::StageComplete,
-        V2HookEvent::StageFailed => HookEvent::StageFailed,
-        V2HookEvent::StageRetrying => HookEvent::StageRetrying,
-        V2HookEvent::EdgeSelected => HookEvent::EdgeSelected,
-        V2HookEvent::ParallelStart => HookEvent::ParallelStart,
-        V2HookEvent::ParallelComplete => HookEvent::ParallelComplete,
-        V2HookEvent::SandboxReady => HookEvent::SandboxReady,
-        V2HookEvent::SandboxCleanup => HookEvent::SandboxCleanup,
-        V2HookEvent::CheckpointSaved => HookEvent::CheckpointSaved,
-        V2HookEvent::PreToolUse => HookEvent::PreToolUse,
-        V2HookEvent::PostToolUse => HookEvent::PostToolUse,
-        V2HookEvent::PostToolUseFailure => HookEvent::PostToolUseFailure,
-    }
-}
-
-fn interp_to_string(value: &InterpString) -> String {
-    value.as_source()
 }

@@ -1,8 +1,6 @@
 //! Sandbox configuration runtime types.
 //!
 //! These types are the runtime shape that the sandbox providers consume.
-//! The v2 parse tree lives in `fabro_types::settings::run::RunSandboxLayer`.
-//! Conversion from the v2 shape lives in [`bridge_sandbox`].
 //!
 //! The `DaytonaSettings`/`DaytonaSnapshotSettings` names are kept for
 //! backward compatibility with the old import path; [`crate::daytona`]
@@ -11,10 +9,7 @@
 
 use std::collections::HashMap;
 
-use fabro_types::settings::InterpString;
-use fabro_types::settings::run::{
-    DaytonaDockerfileLayer, DaytonaNetworkLayer, RunSandboxLayer, WorktreeMode as V2WorktreeMode,
-};
+use fabro_types::settings::run::WorktreeMode as V2WorktreeMode;
 use serde::de::{self, MapAccess, Visitor};
 use serde::{Deserialize, Serialize};
 
@@ -139,80 +134,6 @@ pub enum WorktreeMode {
     Never,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-pub struct LocalSandboxSettings {
-    #[serde(default)]
-    pub worktree_mode: WorktreeMode,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
-pub struct SandboxSettings {
-    pub provider: Option<String>,
-    pub preserve: Option<bool>,
-    pub devcontainer: Option<bool>,
-    pub local: Option<LocalSandboxSettings>,
-    pub daytona: Option<DaytonaSettings>,
-    pub env: Option<HashMap<String, String>>,
-}
-
-/// Convert a v2 [`RunSandboxLayer`] into the runtime [`SandboxSettings`] shape.
-#[must_use]
-pub fn bridge_sandbox(sb: &RunSandboxLayer) -> SandboxSettings {
-    SandboxSettings {
-        provider: sb.provider.clone(),
-        preserve: sb.preserve,
-        devcontainer: sb.devcontainer,
-        local: sb.local.as_ref().map(|local| LocalSandboxSettings {
-            worktree_mode: local
-                .worktree_mode
-                .map(bridge_worktree_mode)
-                .unwrap_or_default(),
-        }),
-        daytona: sb.daytona.as_ref().map(|d| DaytonaSettings {
-            auto_stop_interval: d.auto_stop_interval,
-            labels: if d.labels.is_empty() {
-                None
-            } else {
-                Some(d.labels.clone())
-            },
-            snapshot: d.snapshot.as_ref().and_then(|s| {
-                s.name.as_ref().map(|name| DaytonaSnapshotSettings {
-                    name: name.clone(),
-                    cpu: s.cpu,
-                    memory: s.memory.map(|sz| size_to_gb_i32(sz.as_bytes())),
-                    disk: s.disk.map(|sz| size_to_gb_i32(sz.as_bytes())),
-                    dockerfile: s.dockerfile.as_ref().map(|d| match d {
-                        DaytonaDockerfileLayer::Inline(text) => {
-                            DockerfileSource::Inline(text.clone())
-                        }
-                        DaytonaDockerfileLayer::Path { path } => {
-                            DockerfileSource::Path { path: path.clone() }
-                        }
-                    }),
-                })
-            }),
-            network: d.network.as_ref().map(|n| match n {
-                DaytonaNetworkLayer::Block => DaytonaNetwork::Block,
-                DaytonaNetworkLayer::AllowAll => DaytonaNetwork::AllowAll,
-                DaytonaNetworkLayer::AllowList { allow_list } => {
-                    DaytonaNetwork::AllowList(allow_list.clone())
-                }
-            }),
-            skip_clone: d.skip_clone.unwrap_or(false),
-        }),
-        env: if sb.env.is_empty() {
-            None
-        } else {
-            Some(
-                sb.env
-                    .iter()
-                    .map(|(k, v)| (k.clone(), interp_to_string(v)))
-                    .collect(),
-            )
-        },
-    }
-}
-
 /// Convert a v2 [`V2WorktreeMode`] into the runtime [`WorktreeMode`].
 #[must_use]
 pub fn bridge_worktree_mode(m: V2WorktreeMode) -> WorktreeMode {
@@ -222,13 +143,4 @@ pub fn bridge_worktree_mode(m: V2WorktreeMode) -> WorktreeMode {
         V2WorktreeMode::Dirty => WorktreeMode::Dirty,
         V2WorktreeMode::Never => WorktreeMode::Never,
     }
-}
-
-fn interp_to_string(value: &InterpString) -> String {
-    value.as_source()
-}
-
-fn size_to_gb_i32(bytes: u64) -> i32 {
-    let gb = bytes / 1_000_000_000;
-    i32::try_from(gb).unwrap_or(i32::MAX)
 }
