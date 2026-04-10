@@ -12,11 +12,10 @@ use serde::Serialize;
 
 use crate::config::ConfigLayer;
 use crate::run;
-use crate::{resolve_project_from_file, resolve_run_from_file};
+use crate::{resolve_project_from_file, resolve_run_from_file, resolve_workflow_from_file};
 use fabro_types::settings::SettingsFile;
 
 const CONFIG_FILENAME: &str = "fabro.toml";
-const RUN_GRAPH_FILE: &str = "workflow.fabro";
 #[derive(Clone, Debug)]
 pub struct WorkflowPathResolution {
     pub resolved_workflow_path: PathBuf,
@@ -91,13 +90,10 @@ pub fn resolve_workflow_path(
     if path.extension().is_some_and(|ext| ext == "toml") {
         match run::load_run_config(&path) {
             Ok(cfg) => {
-                let graph = cfg
-                    .as_v2()
-                    .workflow
-                    .as_ref()
-                    .and_then(|w| w.graph.as_deref())
-                    .unwrap_or(RUN_GRAPH_FILE);
-                let dot_path = run::resolve_graph_path(&path, graph);
+                let workflow = resolve_workflow_from_file(cfg.as_v2()).map_err(|errors| {
+                    anyhow::anyhow!("Failed to resolve workflow settings: {errors:?}")
+                })?;
+                let dot_path = run::resolve_graph_path(&path, &workflow.graph);
                 Ok(WorkflowPathResolution {
                     resolved_workflow_path: path.clone(),
                     dot_path,

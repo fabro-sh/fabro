@@ -57,4 +57,4 @@ pub use size::{ParseSizeError, Size};
 pub use splice_array::{SPLICE_MARKER, SpliceArray, SpliceArrayError};
 pub use tree::{ParseError, SettingsFile, parse_settings_file};
 pub use version::{CURRENT_VERSION, SchemaVersion, VersionError, validate_version};
-pub use workflow::WorkflowLayer;
+pub use workflow::{WorkflowLayer, WorkflowSettings};

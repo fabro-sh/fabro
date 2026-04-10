@@ -16,7 +16,8 @@ pub use fabro_util::path::expand_tilde;
 pub use home::Home;
 pub use resolve::{
     ResolveError, resolve_cli, resolve_cli_from_file, resolve_project, resolve_project_from_file,
-    resolve_run, resolve_run_from_file, resolve_server, resolve_server_from_file,
+    resolve_run, resolve_run_from_file, resolve_server, resolve_server_from_file, resolve_workflow,
+    resolve_workflow_from_file,
 };
 pub use storage::{RunScratch, ServerState, Storage};
 
