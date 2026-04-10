@@ -62,10 +62,13 @@ pub(crate) async fn attach_run_with_client(
     json_output: bool,
 ) -> Result<ExitCode> {
     let state = client.get_run_state(run_id).await?;
-    let auto_approve = state
-        .run
-        .as_ref()
-        .is_some_and(|record| record.settings.auto_approve_enabled());
+    let auto_approve = state.run.as_ref().is_some_and(|record| {
+        fabro_config::resolve_run_from_file(&record.settings)
+            .map(|settings| {
+                settings.execution.approval == fabro_types::settings::run::ApprovalMode::Auto
+            })
+            .unwrap_or(false)
+    });
     let verbose = state
         .run
         .as_ref()

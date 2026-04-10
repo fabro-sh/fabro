@@ -594,7 +594,9 @@ impl AppState {
     }
 
     pub(crate) fn dry_run(&self) -> bool {
-        self.settings.read().unwrap().dry_run_enabled()
+        fabro_config::resolve_run_from_file(&self.settings.read().unwrap())
+            .map(|settings| settings.execution.mode == fabro_types::settings::run::RunMode::DryRun)
+            .unwrap_or(false)
     }
 
     pub(crate) async fn build_llm_client(&self) -> Result<LlmClient, String> {
@@ -1465,10 +1467,9 @@ fn build_prune_plan(
 }
 
 fn system_sandbox_provider(settings: &SettingsFile) -> String {
-    settings
-        .run_sandbox()
-        .and_then(|sb| sb.provider.clone())
-        .unwrap_or_else(|| SandboxProvider::default().to_string())
+    fabro_config::resolve_run_from_file(settings)
+        .map(|settings| settings.sandbox.provider)
+        .unwrap_or_else(|_| SandboxProvider::default().to_string())
 }
 
 fn parse_system_duration(raw: &str) -> anyhow::Result<chrono::Duration> {

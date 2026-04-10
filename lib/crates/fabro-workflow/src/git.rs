@@ -16,9 +16,10 @@ pub use fabro_checkpoint::metadata::MetadataStore;
 pub const RUN_BRANCH_PREFIX: &str = "fabro/run/";
 
 pub fn git_author_from_settings(settings: &SettingsFile) -> GitAuthor {
-    settings
-        .run_git_author()
-        .map(GitAuthor::from)
+    fabro_config::resolve_run_from_file(settings)
+        .ok()
+        .and_then(|settings| settings.git.author)
+        .map(|author| GitAuthor::from(&author))
         .unwrap_or_default()
 }
 

@@ -125,7 +125,12 @@ pub fn resolve_workflow_path(
 }
 
 pub fn resolve_working_directory(settings: &SettingsFile, caller_cwd: &Path) -> PathBuf {
-    let Some(work_dir) = settings.run_working_dir().map(InterpString::as_source) else {
+    let Some(work_dir) = settings
+        .run
+        .as_ref()
+        .and_then(|run| run.working_dir.as_ref())
+        .map(InterpString::as_source)
+    else {
         return caller_cwd.to_path_buf();
     };
     let path = PathBuf::from(&work_dir);

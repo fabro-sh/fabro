@@ -1,10 +1,9 @@
 use fabro_config::Storage;
 use fabro_graphviz::graph::{AttrValue, Graph};
-use fabro_model::{Catalog, Provider};
+use fabro_model::Catalog;
 use fabro_sandbox::SandboxProvider;
 use fabro_store::Database;
-use fabro_types::settings::run::{RunGoalLayer, RunLayer, RunModelLayer};
-use fabro_types::settings::{InterpString, SettingsFile};
+use fabro_types::settings::SettingsFile;
 use fabro_types::{RunId, RunProvenance};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -17,6 +16,7 @@ use crate::pipeline::types::PersistOptions;
 use crate::pipeline::{self, Persisted, TransformOptions, Validated};
 use crate::records::RunRecord;
 use crate::run_lookup::default_scratch_base;
+use crate::run_materialization::materialize_run;
 use crate::transforms::{Transform, expand_vars};
 use crate::workflow_bundle::{RunDefinition, WorkflowBundle};
 use fabro_sandbox::daytona::detect_repo_info;
@@ -71,7 +71,10 @@ pub async fn create(store: &Database, request: CreateRunInput) -> Result<Created
     })
     .map_err(|err| FabroError::Parse(err.to_string()))?;
 
-    if !resolved.settings.dry_run_enabled() {
+    if fabro_config::resolve_run_from_file(&resolved.settings)
+        .map(|settings| settings.execution.mode != fabro_types::settings::run::RunMode::DryRun)
+        .unwrap_or(true)
+    {
         validate_sandbox_provider(&resolved.settings)?;
     }
 
@@ -250,14 +253,20 @@ fn store_error(err: impl std::fmt::Display) -> FabroError {
 }
 
 fn validate_sandbox_provider(settings: &SettingsFile) -> Result<(), FabroError> {
-    if let Some(provider) = settings
-        .run_sandbox()
-        .and_then(|sandbox| sandbox.provider.as_deref())
-    {
-        provider
-            .parse::<SandboxProvider>()
-            .map_err(|err| FabroError::Precondition(format!("Invalid sandbox provider: {err}")))?;
-    }
+    let resolved = fabro_config::resolve_run_from_file(settings).map_err(|errors| {
+        FabroError::Precondition(
+            errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; "),
+        )
+    })?;
+    resolved
+        .sandbox
+        .provider
+        .parse::<SandboxProvider>()
+        .map_err(|err| FabroError::Precondition(format!("Invalid sandbox provider: {err}")))?;
 
     Ok(())
 }
@@ -344,7 +353,7 @@ fn persist_validated(
         provenance,
     } = options;
 
-    let settings = resolve_run_settings(settings, validated.graph());
+    let settings = materialize_run(settings, validated.graph(), &Catalog::builtin());
 
     let run_id = run_id.unwrap_or_else(RunId::new);
     let run_dir = run_dir.unwrap_or_else(|| default_run_dir(&run_id));
@@ -373,65 +382,6 @@ fn persist_validated(
     )
 }
 
-pub(crate) fn resolve_run_settings(mut settings: SettingsFile, graph: &Graph) -> SettingsFile {
-    let configured_model = settings.run_model_name_str();
-    let configured_provider = settings.run_model_provider_str();
-    let graph_provider = graph
-        .attrs
-        .get("default_provider")
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
-    let graph_model = graph
-        .attrs
-        .get("default_model")
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
-
-    let provider = configured_provider.or(graph_provider);
-
-    let model = configured_model.or(graph_model).unwrap_or_else(|| {
-        let catalog = Catalog::builtin();
-        provider
-            .as_deref()
-            .and_then(|value| value.parse::<Provider>().ok())
-            .and_then(|provider| catalog.default_for_provider(provider))
-            .unwrap_or_else(|| catalog.default_from_env())
-            .id
-            .clone()
-    });
-
-    let (resolved_model, resolved_provider) = match Catalog::builtin().get(&model) {
-        Some(info) => (
-            info.id.clone(),
-            provider.or(Some(info.provider.to_string())),
-        ),
-        None => (model, provider),
-    };
-
-    let run = settings.run.get_or_insert_with(RunLayer::default);
-    let model_layer = run.model.get_or_insert_with(RunModelLayer::default);
-    model_layer.name = Some(InterpString::parse(&resolved_model));
-    model_layer.provider = resolved_provider.as_deref().map(InterpString::parse);
-
-    let goal = graph.goal().to_string();
-    run.goal = if goal.is_empty() {
-        None
-    } else {
-        Some(RunGoalLayer::Inline(InterpString::parse(&goal)))
-    };
-    // Strip disabled pull_request entries so downstream consumers can
-    // treat `Some(_)` as "PR creation is on".
-    if run
-        .pull_request
-        .as_ref()
-        .is_some_and(|pr| !pr.enabled.unwrap_or(false))
-    {
-        run.pull_request = None;
-    }
-
-    settings
-}
-
 pub(crate) fn default_run_dir(run_id: &RunId) -> PathBuf {
     make_run_dir(&default_scratch_base(), run_id)
 }
@@ -449,6 +399,7 @@ mod tests {
     use fabro_graphviz::graph::AttrValue;
     use fabro_store::Database;
     use fabro_types::fixtures;
+    use fabro_types::settings::InterpString;
     use object_store::local::LocalFileSystem;
     use object_store::memory::InMemory;
     use std::sync::Arc;
