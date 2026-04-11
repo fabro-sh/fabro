@@ -17,6 +17,7 @@ fabro-agent = { path = "../fabro-agent" }
 fabro-config = { path = "../fabro-config" }
 fabro-llm = { path = "../fabro-llm" }
 fabro-model = { path = "../fabro-model" }
+fabro-template = { path = "../fabro-template" }
 fabro-types = { path = "../fabro-types" }
 fabro-util = { path = "../fabro-util" }
 serde.workspace = true

@@ -6,7 +6,7 @@ use super::Transform;
 pub struct ModelResolutionTransform;
 
 impl Transform for ModelResolutionTransform {
-    fn apply(&self, graph: Graph) -> Graph {
+    fn apply(&self, graph: Graph) -> Result<Graph, crate::error::FabroError> {
         let mut graph = graph;
         for node in graph.nodes.values_mut() {
             let model = node
@@ -31,7 +31,7 @@ impl Transform for ModelResolutionTransform {
             }
         }
 
-        graph
+        Ok(graph)
     }
 }
 
@@ -51,7 +51,7 @@ mod tests {
         );
         graph.nodes.insert("a".to_string(), node);
 
-        let graph = ModelResolutionTransform.apply(graph);
+        let graph = ModelResolutionTransform.apply(graph).unwrap();
 
         assert_eq!(
             graph.nodes["a"]
@@ -76,7 +76,7 @@ mod tests {
         );
         graph.nodes.insert("a".to_string(), node);
 
-        let graph = ModelResolutionTransform.apply(graph);
+        let graph = ModelResolutionTransform.apply(graph).unwrap();
 
         assert_eq!(
             graph.nodes["a"]
@@ -97,7 +97,7 @@ mod tests {
         );
         graph.nodes.insert("a".to_string(), node);
 
-        let graph = ModelResolutionTransform.apply(graph);
+        let graph = ModelResolutionTransform.apply(graph).unwrap();
 
         assert_eq!(graph.nodes["a"].attrs.get("provider"), None);
     }
@@ -108,7 +108,7 @@ mod tests {
         let node = Node::new("a");
         graph.nodes.insert("a".to_string(), node);
 
-        let graph = ModelResolutionTransform.apply(graph);
+        let graph = ModelResolutionTransform.apply(graph).unwrap();
 
         assert_eq!(graph.nodes["a"].attrs.get("provider"), None);
     }
@@ -121,7 +121,7 @@ mod tests {
             .insert("model".to_string(), AttrValue::String("gpt-54".to_string()));
         graph.nodes.insert("a".to_string(), node);
 
-        let graph = ModelResolutionTransform.apply(graph);
+        let graph = ModelResolutionTransform.apply(graph).unwrap();
 
         assert_eq!(
             graph.nodes["a"]
@@ -149,7 +149,7 @@ mod tests {
         );
         graph.nodes.insert("a".to_string(), node);
 
-        let graph = ModelResolutionTransform.apply(graph);
+        let graph = ModelResolutionTransform.apply(graph).unwrap();
 
         assert_eq!(
             graph.nodes["a"]

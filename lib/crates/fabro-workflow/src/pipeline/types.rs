@@ -259,6 +259,7 @@ pub struct InitOptions {
 pub struct Initialized {
     pub graph: Graph,
     pub source: String,
+    pub inputs: HashMap<String, toml::Value>,
     pub run_options: RunOptions,
     pub workflow_path: Option<PathBuf>,
     pub workflow_bundle: Option<Arc<WorkflowBundle>>,
@@ -336,6 +337,7 @@ pub struct Finalized {
 pub struct TransformOptions {
     pub current_dir: Option<PathBuf>,
     pub file_resolver: Option<Arc<dyn FileResolver>>,
+    pub inputs: HashMap<String, toml::Value>,
     pub custom_transforms: Vec<Box<dyn Transform>>,
 }
 

@@ -51,6 +51,8 @@ pub struct EngineServices {
     pub hook_runner: Option<Arc<HookRunner>>,
     /// Environment variables from `[sandbox.env]` config, injected into command nodes.
     pub env: HashMap<String, String>,
+    /// Typed values from `[run.inputs]`, available to prompt templates.
+    pub inputs: HashMap<String, toml::Value>,
     /// When true, handlers should skip real execution and return simulated results.
     pub dry_run: bool,
     /// Optional run-scoped cancellation flag from the core executor.
@@ -120,6 +122,7 @@ impl EngineServices {
             git_state: std::sync::RwLock::new(None),
             hook_runner: None,
             env: HashMap::new(),
+            inputs: HashMap::new(),
             dry_run: false,
             cancel_requested: None,
             workflow_path: None,

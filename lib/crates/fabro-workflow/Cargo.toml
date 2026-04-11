@@ -28,6 +28,7 @@ fabro-sandbox = { path = "../fabro-sandbox", features = ["daytona"] }
 fabro-mcp = { path = "../fabro-mcp" }
 fabro-github = { path = "../fabro-github" }
 fabro-interview = { path = "../fabro-interview" }
+fabro-template = { path = "../fabro-template" }
 fabro-util = { path = "../fabro-util" }
 fabro-checkpoint = { path = "../fabro-checkpoint" }
 fabro-llm = { path = "../fabro-llm" }
@@ -62,9 +63,9 @@ tracing.workspace = true
 walkdir.workspace = true
 reqwest.workspace = true
 tempfile = "3"
+toml.workspace = true
 [dev-dependencies]
 base64.workspace = true
-toml.workspace = true
 fabro-mcp = { path = "../fabro-mcp" }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 object_store.workspace = true

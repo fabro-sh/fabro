@@ -94,7 +94,7 @@ fabro run run.toml
 | `-v, --verbose` | Enable verbose output |
 | `--sandbox <SANDBOX>` | Sandbox for agent tools: `local`, `docker`, or `daytona` |
 | `--label <KEY=VALUE>` | Attach a label to this run (repeatable) |
-| `--goal <GOAL>` | Override the workflow goal (exposed as `$goal` in prompts) |
+| `--goal <GOAL>` | Override the workflow goal (available as `{{ goal }}` in prompts) |
 | `--goal-file <FILE>` | Read the goal from a file instead of inline text |
 | `--no-retro` | Skip retro generation after the run |
 | `--preserve-sandbox` | Keep the sandbox alive after the run finishes (for debugging) |
@@ -112,7 +112,7 @@ fabro preflight run.toml
 | Argument / Flag | Description |
 |---|---|
 | `<WORKFLOW>` | Path to a `.fabro` workflow file, `.toml` task config, or workflow name. |
-| `--goal <GOAL>` | Override the workflow goal (exposed as `$goal` in prompts) |
+| `--goal <GOAL>` | Override the workflow goal (available as `{{ goal }}` in prompts) |
 | `--goal-file <FILE>` | Read the goal from a file instead of inline text |
 | `--model <MODEL>` | Override default LLM model |
 | `--provider <PROVIDER>` | Override default LLM provider |

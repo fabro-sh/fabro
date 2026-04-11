@@ -656,6 +656,13 @@ pub async fn initialize(
     Ok(Initialized {
         graph,
         source,
+        inputs: options
+            .run_options
+            .settings
+            .run
+            .as_ref()
+            .and_then(|run| run.inputs.clone())
+            .unwrap_or_default(),
         run_options: options.run_options,
         workflow_path: options.workflow_path,
         workflow_bundle: options.workflow_bundle,

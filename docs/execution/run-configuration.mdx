@@ -40,7 +40,7 @@ _version = 1
 graph = "fabro/workflows/ci.fabro"
 
 [run]
-goal = "Run the CI pipeline for $repo_name"
+goal = "Run the CI pipeline"
 working_dir = "/tmp/workdir"
 
 [run.model]
@@ -48,7 +48,7 @@ name = "claude-sonnet-4-5"
 fallbacks = ["openai", "gemini"]
 
 [[run.prepare.steps]]
-script = "git clone $repo_url repo"
+script = "git clone https://github.com/fabro-sh/fabro repo"
 
 [[run.prepare.steps]]
 script = "cd repo && npm install"
@@ -72,7 +72,7 @@ disk = "20GB"
 dockerfile = "FROM node:20-slim\nRUN apt-get update && apt-get install -y git"
 
 [run.sandbox.env]
-API_KEY = "${env.MY_API_KEY}"
+API_KEY = "{{ env.MY_API_KEY }}"
 NODE_ENV = "production"
 
 [run.checkpoint]
@@ -217,20 +217,20 @@ worktree_mode = "always"
 
 #### `[run.sandbox.env]`
 
-Pass environment variables into sandbox command and agent execution. Values can be literal strings or host environment references using `${env.VARNAME}` syntax:
+Pass environment variables into sandbox command and agent execution. Values can be literal strings or host environment references using `{{ env.VARNAME }}` syntax:
 
 ```toml title="run.toml"
 [run.sandbox.env]
-API_KEY = "${env.MY_API_KEY}"
+API_KEY = "{{ env.MY_API_KEY }}"
 NODE_ENV = "production"
-SERVICE_URL = "https://api.${env.REGION}.example.com"
+SERVICE_URL = "https://api.{{ env.REGION }}.example.com"
 ```
 
 | Syntax | Description |
 |---|---|
 | `"literal"` | Static value passed as-is |
-| `"${env.VARNAME}"` | Whole-value reference resolved from the host environment at consumption time |
-| `"prefix-${env.X}-suffix"` | Substring interpolation; multiple tokens per string are supported |
+| `"{{ env.VARNAME }}"` | Whole-value reference resolved from the host environment at consumption time |
+| `"prefix-{{ env.X }}-suffix"` | Substring interpolation; multiple tokens per string are supported |
 
 Missing host variables produce a hard error pointing at the specific field and unresolved token. `run.sandbox.env` is a sticky merge-by-key map: entries from all layers combine, with higher-precedence layers overriding individual keys.
 
@@ -260,17 +260,17 @@ repo_url = "https://github.com/fabro-sh/fabro"
 language = "rust"
 ```
 
-Inputs can be used anywhere in the Graphviz file with `$name` syntax:
+Inputs can be used anywhere in the Graphviz file with `{{ inputs.name }}` syntax:
 
 ```dot title="c-i.fabro"
 digraph CI {
-    graph [goal="Run tests for $repo_name"]
-    clone [shape=parallelogram, script="git clone $repo_url repo"]
-    test  [label="Test", prompt="Run the $language test suite."]
+    graph [goal="Run tests for {{ inputs.repo_name }}"]
+    clone [shape=parallelogram, script="git clone {{ inputs.repo_url }} repo"]
+    test  [label="Test", prompt="Run the {{ inputs.language }} test suite."]
 }
 ```
 
-If a `$variable` in the Graphviz file has no matching entry in `[run.inputs]`, Fabro raises an error immediately. A bare `$` not followed by an identifier (e.g. `costs $5`) is left as-is.
+If a workflow template references an undefined input like `{{ inputs.langauge }}`, Fabro raises an error immediately.
 
 `[run.inputs]` replaces wholesale across layers. Unlike labels, inputs do not merge by key — the highest-precedence layer that sets `inputs` wins its entire map.
 
@@ -430,7 +430,7 @@ Fabro validates the run config when it loads:
 
 - **`_version` check** — Only `_version = 1` (or missing, which defaults to `1`) is accepted. The legacy top-level `version` key is rejected with a rename hint.
 - **Unknown keys** — Any top-level key not in `[project]`, `[workflow]`, `[run]`, `[cli]`, `[server]`, `[features]`, or `_version` is rejected with a targeted rename hint pointing at the v2 replacement path.
-- **Variable check** — Any `$variable` in the Graphviz file without a matching `[run.inputs]` entry produces an error.
+- **Variable check** — Any undefined workflow template variable in the Graphviz file produces an error.
 
 Use `fabro preflight` to validate a run config without executing it:
 

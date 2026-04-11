@@ -64,7 +64,7 @@ digraph Research {
     start [shape=Mdiamond, label="Start"]
     exit  [shape=Msquare, label="Exit"]
 
-    research  [label="Research", prompt="Use web_search to find recent information about $goal. Save your findings to research.md."]
+    research  [label="Research", prompt="Use web_search to find recent information about {{ goal }}. Save your findings to research.md."]
     summarize [label="Summarize", shape=tab, prompt="Read research.md and write a concise summary of the key findings."]
 
     start -> research -> summarize -> exit

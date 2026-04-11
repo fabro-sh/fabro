@@ -73,6 +73,7 @@ slatedb = "0.11.2"
 object_store = { version = "0.12.5", features = ["aws"] }
 rust-embed = "8"
 percent-encoding = "2"
+minijinja = "2"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

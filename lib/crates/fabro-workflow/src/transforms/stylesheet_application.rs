@@ -7,17 +7,17 @@ use super::stylesheet::{apply_stylesheet, parse_stylesheet};
 pub struct StylesheetApplicationTransform;
 
 impl Transform for StylesheetApplicationTransform {
-    fn apply(&self, graph: Graph) -> Graph {
+    fn apply(&self, graph: Graph) -> Result<Graph, crate::error::FabroError> {
         let mut graph = graph;
         let stylesheet_text = graph.model_stylesheet().to_string();
         if stylesheet_text.is_empty() {
-            return graph;
+            return Ok(graph);
         }
         let Ok(stylesheet) = parse_stylesheet(&stylesheet_text) else {
-            return graph;
+            return Ok(graph);
         };
         apply_stylesheet(&stylesheet, &mut graph);
-        graph
+        Ok(graph)
     }
 }
 
@@ -34,6 +34,6 @@ mod tests {
 
         let transform = StylesheetApplicationTransform;
         // Should not panic with empty stylesheet
-        let _graph = transform.apply(graph);
+        let _graph = transform.apply(graph).unwrap();
     }
 }

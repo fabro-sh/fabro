@@ -23,7 +23,7 @@ fn help() {
           --json                   Output as JSON [env: FABRO_JSON=]
           --server <SERVER>        Fabro server target: http(s) URL or absolute Unix socket path [env: FABRO_SERVER=]
           --debug                  Enable DEBUG-level logging (default is INFO) [env: FABRO_DEBUG=]
-          --goal <GOAL>            Override the workflow goal (exposed as $goal in prompts)
+          --goal <GOAL>            Override the workflow goal (available as {{ goal }} in prompts)
           --goal-file <GOAL_FILE>  Read the workflow goal from a file
           --no-upgrade-check       Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
           --model <MODEL>          Override default LLM model

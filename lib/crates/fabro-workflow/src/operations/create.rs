@@ -3,6 +3,7 @@ use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::Catalog;
 use fabro_sandbox::SandboxProvider;
 use fabro_store::Database;
+use fabro_template::{TemplateContext, render as render_template};
 use fabro_types::settings::run::RunMode;
 use fabro_types::settings::{Settings, SettingsLayer};
 use fabro_types::{RunId, RunProvenance};
@@ -18,7 +19,7 @@ use crate::pipeline::{self, Persisted, TransformOptions, Validated};
 use crate::records::RunRecord;
 use crate::run_lookup::default_scratch_base;
 use crate::run_materialization::materialize_run;
-use crate::transforms::{Transform, expand_vars};
+use crate::transforms::Transform;
 use crate::workflow_bundle::{RunDefinition, WorkflowBundle};
 use fabro_sandbox::daytona::detect_repo_info;
 use fabro_util::json::normalize_json_value;
@@ -330,14 +331,14 @@ pub(super) fn preprocess_and_validate(
     settings: Option<&SettingsLayer>,
     goal_override: Option<&str>,
 ) -> Result<Validated, FabroError> {
-    let source = match run_inputs_as_strings(settings) {
-        Some(mut vars) => {
-            vars.insert("goal".to_string(), "$goal".to_string());
-            expand_vars(dot_source, &vars)
-                .map_err(|e| FabroError::Parse(format!("var expansion failed: {e}")))?
-        }
-        None => dot_source.to_string(),
-    };
+    let inputs = run_inputs(settings);
+    let source = render_template(
+        dot_source,
+        &TemplateContext::new()
+            .with_goal("{{ goal }}")
+            .with_inputs(inputs.clone()),
+    )
+    .map_err(|error| FabroError::Parse(format!("template expansion failed: {error}")))?;
 
     let mut parsed = pipeline::parse(&source)?;
     apply_goal_override(&mut parsed.graph, goal_override);
@@ -347,27 +348,19 @@ pub(super) fn preprocess_and_validate(
         &TransformOptions {
             current_dir,
             file_resolver,
+            inputs,
             custom_transforms,
         },
-    );
+    )?;
     Ok(pipeline::validate(transformed, &[]))
 }
 
-fn run_inputs_as_strings(settings: Option<&SettingsLayer>) -> Option<HashMap<String, String>> {
+fn run_inputs(settings: Option<&SettingsLayer>) -> HashMap<String, toml::Value> {
     settings
         .and_then(|settings| settings.run.as_ref())
         .and_then(|run| run.inputs.as_ref())
-        .map(|inputs| {
-            inputs
-                .iter()
-                .map(|(key, value)| {
-                    let stringified = value
-                        .as_str()
-                        .map_or_else(|| value.to_string(), ToString::to_string);
-                    (key.clone(), stringified)
-                })
-                .collect()
-        })
+        .cloned()
+        .unwrap_or_default()
 }
 
 fn apply_goal_override(graph: &mut Graph, goal_override: Option<&str>) {
@@ -493,7 +486,7 @@ mod tests {
         let dot = r#"digraph Test {
             graph [goal="Fix bugs"]
             start [shape=Mdiamond]
-            work  [prompt="Goal: $goal"]
+            work  [prompt="Goal: {{ goal }}"]
             exit  [shape=Msquare]
             start -> work -> exit
         }"#;
@@ -549,7 +542,7 @@ mod tests {
         let dot = r#"digraph Test {
             graph [goal="original"]
             start [shape=Mdiamond]
-            work [prompt="$who: $goal"]
+            work [prompt="{{ inputs.who }}: {{ goal }}"]
             exit [shape=Msquare]
             start -> work -> exit
         }"#;
@@ -608,14 +601,17 @@ mod tests {
         struct TagTransform;
 
         impl Transform for TagTransform {
-            fn apply(&self, graph: fabro_graphviz::graph::Graph) -> fabro_graphviz::graph::Graph {
+            fn apply(
+                &self,
+                graph: fabro_graphviz::graph::Graph,
+            ) -> Result<fabro_graphviz::graph::Graph, FabroError> {
                 let mut graph = graph;
                 for node in graph.nodes.values_mut() {
                     node.attrs
                         .insert("tagged".to_string(), AttrValue::Boolean(true));
                 }
 
-                graph
+                Ok(graph)
             }
         }
 
@@ -690,7 +686,10 @@ mod tests {
                         }"#
                         .to_string(),
                     ),
-                    (PathBuf::from("prompts/lint.md"), "Lint $goal".to_string()),
+                    (
+                        PathBuf::from("prompts/lint.md"),
+                        "Lint {{ goal }}".to_string(),
+                    ),
                 ]),
             }),
             settings: SettingsLayer::default(),

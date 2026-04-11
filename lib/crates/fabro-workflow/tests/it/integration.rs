@@ -49,9 +49,7 @@ use fabro_workflow::records::{Checkpoint, CheckpointExt};
 use fabro_workflow::run_options::{GitCheckpointOptions, RunOptions};
 use fabro_workflow::test_support::{WorkflowRunner, run_graph_with_hooks, test_store_dir};
 use fabro_workflow::transforms::stylesheet::{apply_stylesheet, parse_stylesheet};
-use fabro_workflow::transforms::{
-    StylesheetApplicationTransform, Transform, VariableExpansionTransform,
-};
+use fabro_workflow::transforms::{StylesheetApplicationTransform, TemplateTransform, Transform};
 use object_store::local::LocalFileSystem;
 use ulid::Ulid;
 
@@ -1070,14 +1068,14 @@ fn variable_expansion_replaces_goal_in_prompts() {
     let mut plan_node = Node::new("plan");
     plan_node.attrs.insert(
         "prompt".to_string(),
-        AttrValue::String("Plan to achieve: $goal".to_string()),
+        AttrValue::String("Plan to achieve: {{ goal }}".to_string()),
     );
     graph.nodes.insert("plan".to_string(), plan_node);
 
     let mut impl_node = Node::new("implement");
     impl_node.attrs.insert(
         "prompt".to_string(),
-        AttrValue::String("Implement $goal now".to_string()),
+        AttrValue::String("Implement {{ goal }} now".to_string()),
     );
     graph.nodes.insert("implement".to_string(), impl_node);
 
@@ -1088,8 +1086,10 @@ fn variable_expansion_replaces_goal_in_prompts() {
     );
     graph.nodes.insert("report".to_string(), no_var_node);
 
-    let transform = VariableExpansionTransform;
-    let graph = transform.apply(graph);
+    let transform = TemplateTransform {
+        inputs: std::collections::HashMap::new(),
+    };
+    let graph = transform.apply(graph).unwrap();
 
     let plan_prompt = graph.nodes["plan"]
         .attrs
@@ -1154,7 +1154,7 @@ fn stylesheet_application_by_specificity() {
     graph.nodes.insert("explicit_node".to_string(), explicit);
 
     let transform = StylesheetApplicationTransform;
-    let graph = transform.apply(graph);
+    let graph = transform.apply(graph).unwrap();
 
     // plan: universal -> claude-sonnet-4-5
     assert_eq!(
@@ -1214,7 +1214,7 @@ fn stylesheet_application_via_parsed_graph() {
     validate_or_raise(&graph, &[]).expect("validation should pass");
 
     let transform = StylesheetApplicationTransform;
-    let graph = transform.apply(graph);
+    let graph = transform.apply(graph).unwrap();
 
     // All nodes without explicit model should get "sonnet"
     assert_eq!(
@@ -1691,7 +1691,7 @@ async fn smoke_test_with_mock_codergen_backend() {
         .insert("shape".to_string(), AttrValue::String("box".to_string()));
     plan.attrs.insert(
         "prompt".to_string(),
-        AttrValue::String("Plan to achieve: $goal".to_string()),
+        AttrValue::String("Plan to achieve: {{ goal }}".to_string()),
     );
     graph.nodes.insert("plan".to_string(), plan);
 
@@ -2615,7 +2615,7 @@ async fn scenario_ship_a_feature() {
         rankdir=LR
         start [shape=Mdiamond]
         exit  [shape=Msquare]
-        plan  [shape=box, prompt="Plan to achieve: $goal"]
+        plan  [shape=box, prompt="Plan to achieve: {{ goal }}"]
         implement [shape=box, prompt="Implement the plan"]
         test  [shape=parallelogram, script="echo PASS"]
         review [shape=hexagon, label="Review Changes"]
@@ -2625,7 +2625,11 @@ async fn scenario_ship_a_feature() {
     }"#;
     let graph = parse(dot).expect("parse");
     validate_or_raise(&graph, &[]).expect("validate");
-    let graph = VariableExpansionTransform.apply(graph);
+    let graph = TemplateTransform {
+        inputs: std::collections::HashMap::new(),
+    }
+    .apply(graph)
+    .unwrap();
     assert_eq!(
         graph.nodes["plan"].prompt().unwrap(),
         "Plan to achieve: Ship the widget"
@@ -3573,7 +3577,7 @@ async fn stylesheet_applies_model_override() {
     }"#;
     let graph = parse(input).expect("parse");
     validate_or_raise(&graph, &[]).expect("validate");
-    let graph = StylesheetApplicationTransform.apply(graph);
+    let graph = StylesheetApplicationTransform.apply(graph).unwrap();
     assert_eq!(graph.nodes["work"].model(), Some("custom-model"));
 
     let dir = tempfile::tempdir().unwrap();
@@ -3672,7 +3676,7 @@ async fn integration_smoke_plan_implement_review_done() {
         rankdir=LR
         start [shape=Mdiamond]
         exit  [shape=Msquare]
-        plan  [shape=box, prompt="Plan: $goal"]
+        plan  [shape=box, prompt="Plan: {{ goal }}"]
         implement [shape=box, prompt="Implement"]
         review [shape=hexagon, label="Review"]
         start -> plan -> implement -> review
@@ -3690,8 +3694,12 @@ async fn integration_smoke_plan_implement_review_done() {
     assert!(errors.is_empty());
 
     // Apply transforms
-    let graph = VariableExpansionTransform.apply(graph);
-    let graph = StylesheetApplicationTransform.apply(graph);
+    let graph = TemplateTransform {
+        inputs: std::collections::HashMap::new(),
+    }
+    .apply(graph)
+    .unwrap();
+    let graph = StylesheetApplicationTransform.apply(graph).unwrap();
 
     // Verify transforms applied
     assert_eq!(
@@ -4076,9 +4084,11 @@ async fn import_e2e_through_engine() {
             file_resolver: Some(std::sync::Arc::new(
                 fabro_workflow::file_resolver::FilesystemFileResolver::new(None),
             )),
+            inputs: std::collections::HashMap::new(),
             custom_transforms: vec![],
         },
-    );
+    )
+    .unwrap();
     let validated = validate(transformed, &[]);
     validated
         .raise_on_errors()

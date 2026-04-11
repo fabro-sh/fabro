@@ -4062,7 +4062,7 @@ components:
         - `server.auth.api.{jwt,mtls}` internals
         - `server.artifacts.s3` / `server.slatedb.s3` credentials
         - `server.integrations.github.webhooks`, Slack/Discord/Teams tokens
-        - Every `${env.NAME}` InterpString is serialized in its unresolved
+        - Every `{{ env.NAME }}` InterpString is serialized in its unresolved
           template form, never the resolved secret value.
 
         The top-level object keys follow the v2 schema: `_version`, `project`,

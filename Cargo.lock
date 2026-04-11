@@ -1706,6 +1706,7 @@ dependencies = [
  "fabro-config",
  "fabro-llm",
  "fabro-model",
+ "fabro-template",
  "fabro-types",
  "fabro-util",
  "httpmock",
@@ -2015,6 +2016,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fabro-template"
+version = "0.176.2"
+dependencies = [
+ "anyhow",
+ "fabro-util",
+ "minijinja",
+ "serde",
+ "thiserror 2.0.18",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "fabro-test"
 version = "0.176.2"
 dependencies = [
@@ -2125,6 +2138,7 @@ dependencies = [
  "fabro-retro",
  "fabro-sandbox",
  "fabro-store",
+ "fabro-template",
  "fabro-test",
  "fabro-types",
  "fabro-util",
@@ -3701,6 +3715,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
+name = "memo-map"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38d1115007560874e373613744c6fba374c17688327a71c1476d1a5954cc857b"
+
+[[package]]
 name = "memoffset"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3723,6 +3743,16 @@ checksum = "f7c44f8e672c00fe5308fa235f821cb4198414e1c77935c1ab6948d3fd78550e"
 dependencies = [
  "mime",
  "unicase",
+]
+
+[[package]]
+name = "minijinja"
+version = "2.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "805bfd7352166bae857ee569628b52bcd85a1cecf7810861ebceb1686b72b75d"
+dependencies = [
+ "memo-map",
+ "serde",
 ]
 
 [[package]]

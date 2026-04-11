@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_graphviz::parser;
+use fabro_template::{TemplateContext, render as render_template};
 
+use crate::error::FabroError;
 use crate::file_resolver::{FileResolver, ResolvedFile};
 
 use super::{FileInliningTransform, Transform};
@@ -12,6 +14,7 @@ use super::{FileInliningTransform, Transform};
 pub struct ImportTransform {
     current_dir: PathBuf,
     resolver: Arc<dyn FileResolver>,
+    inputs: HashMap<String, toml::Value>,
 }
 
 struct PlaceholderOptions {
@@ -28,12 +31,28 @@ struct PreparedImport {
     exit_predecessor_id: String,
 }
 
+enum ImportPrepareError {
+    Hard(FabroError),
+    Soft(String),
+}
+
+impl From<FabroError> for ImportPrepareError {
+    fn from(error: FabroError) -> Self {
+        Self::Hard(error)
+    }
+}
+
 impl ImportTransform {
     #[must_use]
-    pub fn new(current_dir: PathBuf, resolver: Arc<dyn FileResolver>) -> Self {
+    pub fn new(
+        current_dir: PathBuf,
+        resolver: Arc<dyn FileResolver>,
+        inputs: HashMap<String, toml::Value>,
+    ) -> Self {
         Self {
             current_dir,
             resolver,
+            inputs,
         }
     }
 
@@ -57,9 +76,9 @@ impl ImportTransform {
         import_path: &str,
         current_base_dir: &Path,
         import_stack: &mut Vec<PathBuf>,
-    ) {
+    ) -> Result<(), FabroError> {
         if !graph.nodes.contains_key(placeholder_id) {
-            return;
+            return Ok(());
         }
 
         if graph
@@ -72,14 +91,14 @@ impl ImportTransform {
                 placeholder_id,
                 &format!("import placeholder '{placeholder_id}' cannot have a self-loop"),
             );
-            return;
+            return Ok(());
         }
 
         let placeholder = match Self::placeholder_config(graph, placeholder_id) {
             Ok(placeholder) => placeholder,
             Err(message) => {
                 Self::poison_placeholder(graph, placeholder_id, &message);
-                return;
+                return Ok(());
             }
         };
 
@@ -89,7 +108,7 @@ impl ImportTransform {
                 placeholder_id,
                 &format!("file not found: {import_path}"),
             );
-            return;
+            return Ok(());
         };
 
         if import_stack.contains(&resolved_file.logical_path) {
@@ -104,14 +123,15 @@ impl ImportTransform {
                 placeholder_id,
                 &format!("circular import detected: {cycle}"),
             );
-            return;
+            return Ok(());
         }
 
         let prepared = match self.prepare_import(&resolved_file, import_stack) {
             Ok(prepared) => prepared,
-            Err(message) => {
+            Err(ImportPrepareError::Hard(error)) => return Err(error),
+            Err(ImportPrepareError::Soft(message)) => {
                 Self::poison_placeholder(graph, placeholder_id, &message);
-                return;
+                return Ok(());
             }
         };
 
@@ -124,22 +144,34 @@ impl ImportTransform {
         ) {
             Self::poison_placeholder(graph, placeholder_id, &message);
         }
+
+        Ok(())
     }
 
     fn prepare_import(
         &self,
         resolved_file: &ResolvedFile,
         import_stack: &mut Vec<PathBuf>,
-    ) -> Result<PreparedImport, String> {
+    ) -> Result<PreparedImport, ImportPrepareError> {
         Self::with_import_stack(
             import_stack,
             resolved_file.logical_path.clone(),
             |import_stack| {
-                let mut graph = parser::parse(&resolved_file.content).map_err(|error| {
-                    format!(
+                let rendered_source = render_template(
+                    &resolved_file.content,
+                    &TemplateContext::new()
+                        .with_goal("{{ goal }}")
+                        .with_inputs(self.inputs.clone()),
+                )
+                .map_err(|error| {
+                    ImportPrepareError::Hard(FabroError::Validation(error.to_string()))
+                })?;
+
+                let mut graph = parser::parse(&rendered_source).map_err(|error| {
+                    ImportPrepareError::Soft(format!(
                         "failed to parse {}: {error}",
                         resolved_file.logical_path.display()
-                    )
+                    ))
                 })?;
 
                 let import_base_dir = resolved_file
@@ -148,10 +180,11 @@ impl ImportTransform {
                     .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
                 graph =
                     FileInliningTransform::new(import_base_dir.clone(), Arc::clone(&self.resolver))
-                        .apply(graph);
+                        .apply(graph)
+                        .map_err(ImportPrepareError::Hard)?;
 
                 if let Some(message) = Self::unresolved_imported_prompt_error(&graph) {
-                    return Err(message);
+                    return Err(ImportPrepareError::Soft(message));
                 }
 
                 let nested_imports = Self::collect_import_nodes(&graph);
@@ -162,10 +195,10 @@ impl ImportTransform {
                         &import_path,
                         &import_base_dir,
                         import_stack,
-                    );
+                    )?;
                 }
 
-                Self::validate_imported_graph(graph)
+                Self::validate_imported_graph(graph).map_err(ImportPrepareError::Soft)
             },
         )
     }
@@ -565,7 +598,7 @@ impl PreparedImport {
 }
 
 impl Transform for ImportTransform {
-    fn apply(&self, graph: Graph) -> Graph {
+    fn apply(&self, graph: Graph) -> Result<Graph, FabroError> {
         let mut graph = graph;
         let imports = Self::collect_import_nodes(&graph);
         let mut import_stack = Vec::new();
@@ -577,10 +610,10 @@ impl Transform for ImportTransform {
                 &import_path,
                 &self.current_dir,
                 &mut import_stack,
-            );
+            )?;
         }
 
-        graph
+        Ok(graph)
     }
 }
 
@@ -613,8 +646,10 @@ mod tests {
             Arc::new(FilesystemFileResolver::new(
                 fallback_dir.map(Path::to_path_buf),
             )),
+            HashMap::new(),
         )
         .apply(graph)
+        .unwrap()
     }
 
     fn basic_import_source() -> &'static str {
@@ -1319,8 +1354,10 @@ mod tests {
         let graph = ImportTransform::new(
             dir.path().to_path_buf(),
             Arc::new(FilesystemFileResolver::new(None)),
+            HashMap::new(),
         )
-        .apply(graph);
+        .apply(graph)
+        .unwrap();
 
         assert_eq!(
             graph.nodes["validate"]

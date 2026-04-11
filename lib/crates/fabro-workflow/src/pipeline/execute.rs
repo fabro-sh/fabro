@@ -38,6 +38,7 @@ pub async fn execute(init: Initialized) -> Executed {
     let Initialized {
         graph,
         source: _,
+        inputs,
         run_options,
         workflow_path,
         workflow_bundle,
@@ -57,6 +58,8 @@ pub async fn execute(init: Initialized) -> Executed {
         model,
         provider,
     } = init;
+
+    let service_inputs = inputs;
 
     let mut checkpoint = checkpoint;
     if let Some(cp) = checkpoint.as_mut() {
@@ -87,6 +90,7 @@ pub async fn execute(init: Initialized) -> Executed {
         git_state: std::sync::RwLock::new(git_state),
         hook_runner: hook_runner.clone(),
         env,
+        inputs: service_inputs,
         dry_run,
         cancel_requested: run_options.cancel_token.clone(),
         workflow_path,

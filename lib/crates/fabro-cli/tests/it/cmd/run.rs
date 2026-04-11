@@ -120,7 +120,7 @@ fn help() {
           --dry-run                Execute with simulated LLM backend
           --auto-approve           Auto-approve all human gates
           --no-upgrade-check       Disable automatic upgrade check [env: FABRO_NO_UPGRADE_CHECK=true]
-          --goal <GOAL>            Override the workflow goal (exposed as $goal in prompts)
+          --goal <GOAL>            Override the workflow goal (available as {{ goal }} in prompts)
           --quiet                  Suppress non-essential output [env: FABRO_QUIET=]
           --goal-file <GOAL_FILE>  Read the workflow goal from a file
           --model <MODEL>          Override default LLM model

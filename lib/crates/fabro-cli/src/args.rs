@@ -127,7 +127,7 @@ pub(crate) struct RunArgs {
     #[arg(long)]
     pub(crate) auto_approve: bool,
 
-    /// Override the workflow goal (exposed as $goal in prompts)
+    /// Override the workflow goal (available as {{ goal }} in prompts)
     #[arg(long)]
     pub(crate) goal: Option<String>,
 
@@ -180,7 +180,7 @@ pub(crate) struct PreflightArgs {
     /// Path to a .fabro workflow file or .toml task config
     pub(crate) workflow: PathBuf,
 
-    /// Override the workflow goal (exposed as $goal in prompts)
+    /// Override the workflow goal (available as {{ goal }} in prompts)
     #[arg(long)]
     pub(crate) goal: Option<String>,
 

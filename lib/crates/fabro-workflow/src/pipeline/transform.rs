@@ -2,23 +2,31 @@ use std::sync::Arc;
 
 use crate::transforms::{
     FileInliningTransform, ImportTransform, ModelResolutionTransform,
-    StylesheetApplicationTransform, Transform, VariableExpansionTransform,
+    StylesheetApplicationTransform, TemplateTransform, Transform,
 };
 
 use super::types::{Parsed, TransformOptions, Transformed};
 
 /// TRANSFORM phase: apply built-in and custom transforms to a parsed graph.
 ///
-/// Infallible. Returns `Transformed` with a graph for post-transform
-/// adjustments (e.g. goal override) before validation.
-pub fn transform(parsed: Parsed, options: &TransformOptions) -> Transformed {
+/// Returns `Transformed` with a graph for post-transform adjustments
+/// (e.g. goal override) before validation.
+pub fn transform(
+    parsed: Parsed,
+    options: &TransformOptions,
+) -> Result<Transformed, crate::error::FabroError> {
     let Parsed { graph, source } = parsed;
 
     // Built-in transforms (PreambleTransform moved to engine execution time)
     let graph = if let (Some(current_dir), Some(file_resolver)) =
         (&options.current_dir, &options.file_resolver)
     {
-        ImportTransform::new(current_dir.clone(), Arc::clone(file_resolver)).apply(graph)
+        ImportTransform::new(
+            current_dir.clone(),
+            Arc::clone(file_resolver),
+            options.inputs.clone(),
+        )
+        .apply(graph)?
     } else {
         graph
     };
@@ -26,26 +34,30 @@ pub fn transform(parsed: Parsed, options: &TransformOptions) -> Transformed {
     let graph = if let (Some(current_dir), Some(file_resolver)) =
         (&options.current_dir, &options.file_resolver)
     {
-        FileInliningTransform::new(current_dir.clone(), Arc::clone(file_resolver)).apply(graph)
+        FileInliningTransform::new(current_dir.clone(), Arc::clone(file_resolver)).apply(graph)?
     } else {
         graph
     };
 
-    let graph = VariableExpansionTransform.apply(graph);
-    let graph = StylesheetApplicationTransform.apply(graph);
-    let graph = ModelResolutionTransform.apply(graph);
+    let graph = TemplateTransform {
+        inputs: options.inputs.clone(),
+    }
+    .apply(graph)?;
+    let graph = StylesheetApplicationTransform.apply(graph)?;
+    let graph = ModelResolutionTransform.apply(graph)?;
 
     // Custom transforms
     let graph = options
         .custom_transforms
         .iter()
-        .fold(graph, |graph, transform| transform.apply(graph));
+        .try_fold(graph, |graph, transform| transform.apply(graph))?;
 
-    Transformed { graph, source }
+    Ok(Transformed { graph, source })
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::path::Path;
     use std::sync::Arc;
 
@@ -66,7 +78,7 @@ mod tests {
         let dot = r#"digraph Test {
             graph [goal="Fix bugs"]
             start [shape=Mdiamond]
-            work  [prompt="Goal: $goal"]
+            work  [prompt="Goal: {{ goal }}"]
             exit  [shape=Msquare]
             start -> work -> exit
         }"#;
@@ -76,9 +88,11 @@ mod tests {
             &TransformOptions {
                 current_dir: None,
                 file_resolver: None,
+                inputs: HashMap::new(),
                 custom_transforms: vec![],
             },
-        );
+        )
+        .unwrap();
         let prompt = transformed.graph.nodes["work"]
             .attrs
             .get("prompt")
@@ -102,9 +116,11 @@ mod tests {
             &TransformOptions {
                 current_dir: None,
                 file_resolver: None,
+                inputs: HashMap::new(),
                 custom_transforms: vec![],
             },
-        );
+        )
+        .unwrap();
         assert_eq!(
             transformed.graph.nodes["work"].attrs.get("model"),
             Some(&AttrValue::String("claude-sonnet-4-6".into()))
@@ -114,7 +130,7 @@ mod tests {
     #[test]
     fn transform_inlines_files_before_variable_expansion() {
         let dir = tempfile::tempdir().unwrap();
-        write_file(&dir.path().join("goal.md"), "Expand $goal");
+        write_file(&dir.path().join("goal.md"), "Expand {{ goal }}");
 
         let parsed = parse(
             r#"digraph Test {
@@ -131,9 +147,11 @@ mod tests {
             &TransformOptions {
                 current_dir: Some(dir.path().to_path_buf()),
                 file_resolver: Some(Arc::new(FilesystemFileResolver::new(None))),
+                inputs: HashMap::new(),
                 custom_transforms: vec![],
             },
-        );
+        )
+        .unwrap();
 
         assert_eq!(
             transformed.graph.nodes["work"]
@@ -147,7 +165,10 @@ mod tests {
     #[test]
     fn transform_imports_before_variable_expansion_and_stylesheet() {
         let dir = tempfile::tempdir().unwrap();
-        write_file(&dir.path().join("prompts/lint.md"), "Run checks for $goal");
+        write_file(
+            &dir.path().join("prompts/lint.md"),
+            "Run checks for {{ inputs.task }}",
+        );
         write_file(
             &dir.path().join("validate.fabro"),
             r#"digraph validate {
@@ -173,9 +194,14 @@ mod tests {
             &TransformOptions {
                 current_dir: Some(dir.path().to_path_buf()),
                 file_resolver: Some(Arc::new(FilesystemFileResolver::new(None))),
+                inputs: HashMap::from([(
+                    "task".to_string(),
+                    toml::Value::String("Launch".to_string()),
+                )]),
                 custom_transforms: vec![],
             },
-        );
+        )
+        .unwrap();
 
         let lint = &transformed.graph.nodes["validate.lint"];
         assert_eq!(

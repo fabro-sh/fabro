@@ -28,7 +28,7 @@ ca = "/etc/fabro/tls/ca.pem"
 [server.auth.api.jwt]
 enabled = true
 issuer = "https://auth.example.com"
-audience = "${{env.JWT_AUDIENCE}}"
+audience = "{{{{ env.JWT_AUDIENCE }}}}"
 
 [server.auth.api.mtls]
 enabled = true
@@ -37,7 +37,7 @@ ca = "/etc/fabro/tls/ca.pem"
 [server.auth.web.providers.github]
 enabled = true
 client_id = "Iv1.abcdef"
-client_secret = "${{env.GITHUB_OAUTH_SECRET}}"
+client_secret = "{{{{ env.GITHUB_OAUTH_SECRET }}}}"
 
 [server.storage]
 root = "{}"
@@ -46,7 +46,7 @@ root = "{}"
 max_concurrent_runs = 9
 
 [server.integrations.github]
-app_id = "${{env.GITHUB_APP_ID}}"
+app_id = "{{{{ env.GITHUB_APP_ID }}}}"
 client_id = "Iv1.github"
 slug = "fabro-app"
 "#,
@@ -107,7 +107,7 @@ session_sandboxes = true
     assert_eq!(body["server"]["scheduler"]["max_concurrent_runs"], 9);
     assert_eq!(
         body["server"]["integrations"]["github"]["app_id"],
-        "${env.GITHUB_APP_ID}"
+        "{{ env.GITHUB_APP_ID }}"
     );
     assert_eq!(
         body["server"]["auth"]["api"]["jwt"]["enabled"],

@@ -52,7 +52,7 @@ impl Handler for PromptHandler {
             .prompt()
             .filter(|p| !p.is_empty())
             .unwrap_or_else(|| node.label());
-        let expanded = expand_variables(raw_prompt, graph)?;
+        let expanded = expand_variables(raw_prompt, graph, &services.inputs)?;
         let preamble = context.preamble();
         let prompt = if preamble.is_empty() {
             expanded

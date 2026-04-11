@@ -232,6 +232,7 @@ impl Handler for SubWorkflowHandler {
         let registry = Arc::clone(&services.registry);
         let hook_runner = services.hook_runner.clone();
         let env = services.env.clone();
+        let inputs = services.inputs.clone();
         let dry_run = services.dry_run;
         let workflow_bundle = services.workflow_bundle.clone();
         let object_store = Arc::new(InMemory::new());
@@ -251,6 +252,7 @@ impl Handler for SubWorkflowHandler {
             let initialized = Initialized {
                 graph: child_graph,
                 source: String::new(),
+                inputs,
                 run_options: child_run_options,
                 workflow_path: child_workflow_path,
                 workflow_bundle,

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
 use fabro_model::Provider;
+use fabro_template::{TemplateContext, render as render_template};
 use fabro_types::RunId;
 
 use crate::context::keys;
@@ -14,7 +15,6 @@ use crate::event::{Emitter, Event, StageScope};
 use crate::outcome::{
     BilledModelUsage, FailureCategory, FailureDetail, Outcome, OutcomeExt, StageStatus,
 };
-use crate::transforms::variable_expansion::expand_vars;
 use fabro_graphviz::graph::{Graph, Node};
 
 use super::{EngineServices, Handler};
@@ -71,14 +71,16 @@ impl AgentHandler {
     }
 }
 
-/// Expand `$variable` placeholders in text using graph attributes.
-///
-/// Known variables are built from graph attributes (e.g. `$goal`). Any
-/// `$identifier` not in the map produces an error, catching typos like
-/// `$gaol` at runtime.
-pub(crate) fn expand_variables(text: &str, graph: &Graph) -> Result<String, FabroError> {
-    let vars = HashMap::from([("goal".to_string(), graph.goal().to_string())]);
-    expand_vars(text, &vars).map_err(|e| FabroError::Validation(e.to_string()))
+/// Expand `{{ goal }}` / `{{ inputs.* }}` placeholders in handler prompts.
+pub(crate) fn expand_variables(
+    text: &str,
+    graph: &Graph,
+    inputs: &HashMap<String, toml::Value>,
+) -> Result<String, FabroError> {
+    let ctx = TemplateContext::new()
+        .with_goal(graph.goal())
+        .with_inputs(inputs.clone());
+    render_template(text, &ctx).map_err(|error| FabroError::Validation(error.to_string()))
 }
 
 /// Status fields that indicate a JSON object contains routing directives.
@@ -241,7 +243,7 @@ impl Handler for AgentHandler {
             .prompt()
             .filter(|p| !p.is_empty())
             .unwrap_or_else(|| node.label());
-        let expanded = expand_variables(raw_prompt, graph)?;
+        let expanded = expand_variables(raw_prompt, graph, &services.inputs)?;
         let preamble = context.preamble();
         let prompt = if preamble.is_empty() {
             expanded
@@ -476,7 +478,7 @@ mod tests {
         let mut node = Node::new("plan");
         node.attrs.insert(
             "prompt".to_string(),
-            AttrValue::String("Achieve: $goal".to_string()),
+            AttrValue::String("Achieve: {{ goal }}".to_string()),
         );
         let context = test_context();
         let mut graph = Graph::new("test");
@@ -765,16 +767,17 @@ mod tests {
             "goal".to_string(),
             AttrValue::String("Fix bugs".to_string()),
         );
-        let result = expand_variables("Goal is: $goal, do it", &graph).unwrap();
+        let result =
+            expand_variables("Goal is: {{ goal }}, do it", &graph, &HashMap::new()).unwrap();
         assert_eq!(result, "Goal is: Fix bugs, do it");
     }
 
     #[test]
     fn expand_variables_errors_on_unknown_variable() {
         let graph = Graph::new("test");
-        let err = expand_variables("Do $foo now", &graph).unwrap_err();
+        let err = expand_variables("Do {{ inputs.foo }} now", &graph, &HashMap::new()).unwrap_err();
         assert!(
-            err.to_string().contains("Undefined variable: $foo"),
+            err.to_string().contains("undefined"),
             "unexpected error: {err}"
         );
     }
@@ -782,14 +785,14 @@ mod tests {
     #[test]
     fn expand_variables_allows_bare_dollar() {
         let graph = Graph::new("test");
-        let result = expand_variables("costs $5", &graph).unwrap();
+        let result = expand_variables("costs $5", &graph, &HashMap::new()).unwrap();
         assert_eq!(result, "costs $5");
     }
 
     #[test]
     fn expand_variables_allows_dollar_alone() {
         let graph = Graph::new("test");
-        let result = expand_variables("just a $ sign", &graph).unwrap();
+        let result = expand_variables("just a $ sign", &graph, &HashMap::new()).unwrap();
         assert_eq!(result, "just a $ sign");
     }
 

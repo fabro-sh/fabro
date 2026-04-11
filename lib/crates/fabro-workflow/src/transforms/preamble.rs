@@ -6,7 +6,7 @@ use super::Transform;
 pub struct PreambleTransform;
 
 impl Transform for PreambleTransform {
-    fn apply(&self, graph: Graph) -> Graph {
+    fn apply(&self, graph: Graph) -> Result<Graph, crate::error::FabroError> {
         use crate::context::keys::Fidelity;
 
         let mut graph = graph;
@@ -30,7 +30,7 @@ impl Transform for PreambleTransform {
             }
         }
 
-        graph
+        Ok(graph)
     }
 }
 
@@ -54,7 +54,7 @@ mod tests {
         );
         graph.nodes.insert("work".to_string(), node);
 
-        let graph = PreambleTransform.apply(graph);
+        let graph = PreambleTransform.apply(graph).unwrap();
 
         let prompt = graph.nodes["work"]
             .attrs
@@ -78,7 +78,7 @@ mod tests {
         );
         graph.nodes.insert("work".to_string(), node);
 
-        let graph = PreambleTransform.apply(graph);
+        let graph = PreambleTransform.apply(graph).unwrap();
 
         let prompt = graph.nodes["work"]
             .attrs
@@ -102,7 +102,7 @@ mod tests {
         );
         graph.nodes.insert("work".to_string(), node);
 
-        let graph = PreambleTransform.apply(graph);
+        let graph = PreambleTransform.apply(graph).unwrap();
 
         let prompt = graph.nodes["work"]
             .attrs
@@ -122,7 +122,7 @@ mod tests {
         );
         graph.nodes.insert("work".to_string(), node);
 
-        let graph = PreambleTransform.apply(graph);
+        let graph = PreambleTransform.apply(graph).unwrap();
 
         assert!(!graph.nodes["work"].attrs.contains_key("prompt"));
     }

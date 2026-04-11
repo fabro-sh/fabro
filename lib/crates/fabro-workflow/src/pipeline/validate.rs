@@ -26,9 +26,11 @@ mod tests {
             &TransformOptions {
                 current_dir: None,
                 file_resolver: None,
+                inputs: std::collections::HashMap::new(),
                 custom_transforms: vec![],
             },
-        );
+        )
+        .unwrap();
         validate(transformed, &[])
     }
 

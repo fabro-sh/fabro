@@ -290,6 +290,7 @@ impl Handler for ParallelHandler {
             let hook_runner = services.hook_runner.clone();
             let run_store = services.run_store.clone();
             let env = services.env.clone();
+            let inputs = services.inputs.clone();
             let dry_run = services.dry_run;
             let cancel_requested = services.cancel_requested.clone();
             let workflow_path = services.workflow_path.clone();
@@ -361,6 +362,7 @@ impl Handler for ParallelHandler {
                     git_state: std::sync::RwLock::new(None),
                     hook_runner: hook_runner.clone(),
                     env: env.clone(),
+                    inputs: inputs.clone(),
                     dry_run,
                     cancel_requested,
                     workflow_path,

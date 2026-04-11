@@ -16,17 +16,17 @@ fn templated_settings() -> SettingsLayer {
         version: Some(1),
         run: Some(RunLayer {
             goal: Some(RunGoalLayer::Inline(InterpString::parse(
-                "Ship ${env.TASK}",
+                "Ship {{ env.TASK }}",
             ))),
             ..RunLayer::default()
         }),
         server: Some(ServerLayer {
             storage: Some(ServerStorageLayer {
-                root: Some(InterpString::parse("${env.FABRO_STORAGE}")),
+                root: Some(InterpString::parse("{{ env.FABRO_STORAGE }}")),
             }),
             integrations: Some(ServerIntegrationsLayer {
                 github: Some(GithubIntegrationLayer {
-                    app_id: Some(InterpString::parse("${env.GITHUB_APP_ID}")),
+                    app_id: Some(InterpString::parse("{{ env.GITHUB_APP_ID }}")),
                     ..GithubIntegrationLayer::default()
                 }),
                 ..ServerIntegrationsLayer::default()
@@ -69,7 +69,7 @@ fn run_record_round_trips_templated_settings() {
             .as_ref()
             .and_then(|run| run.goal.as_ref()),
         Some(&RunGoalLayer::Inline(InterpString::parse(
-            "Ship ${env.TASK}"
+            "Ship {{ env.TASK }}"
         )))
     );
     assert_eq!(
@@ -80,7 +80,7 @@ fn run_record_round_trips_templated_settings() {
             .and_then(|server| server.storage.as_ref())
             .and_then(|storage| storage.root.as_ref())
             .map(InterpString::as_source),
-        Some("${env.FABRO_STORAGE}".to_string())
+        Some("{{ env.FABRO_STORAGE }}".to_string())
     );
     assert_eq!(
         round_trip
@@ -91,6 +91,6 @@ fn run_record_round_trips_templated_settings() {
             .and_then(|integrations| integrations.github.as_ref())
             .and_then(|github| github.app_id.as_ref())
             .map(InterpString::as_source),
-        Some("${env.GITHUB_APP_ID}".to_string())
+        Some("{{ env.GITHUB_APP_ID }}".to_string())
     );
 }

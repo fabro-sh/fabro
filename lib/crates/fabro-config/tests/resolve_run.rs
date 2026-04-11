@@ -27,10 +27,10 @@ fn preserves_goal_variants_and_model_sources() {
 _version = 1
 
 [run]
-working_dir = "${env.FABRO_WORKDIR}"
+working_dir = "{{ env.FABRO_WORKDIR }}"
 
 [run.goal]
-file = "${env.GOAL_FILE}"
+file = "{{ env.GOAL_FILE }}"
 
 [run.model]
 provider = "anthropic"
@@ -42,13 +42,13 @@ name = "sonnet"
 
     match settings.goal {
         Some(RunGoal::File(path)) => {
-            assert_eq!(path, InterpString::parse("${env.GOAL_FILE}"));
+            assert_eq!(path, InterpString::parse("{{ env.GOAL_FILE }}"));
         }
         other => panic!("expected file goal, got {other:?}"),
     }
     assert_eq!(
         settings.working_dir,
-        Some(InterpString::parse("${env.FABRO_WORKDIR}"))
+        Some(InterpString::parse("{{ env.FABRO_WORKDIR }}"))
     );
     assert_eq!(
         settings.model.provider,

@@ -1,6 +1,6 @@
 //! Env var interpolation for config strings.
 //!
-//! Any string field may use `${env.NAME}` tokens, either as a whole value or
+//! Any string field may use `{{ env.NAME }}` tokens, either as a whole value or
 //! as one or more substrings inside a larger string. Resolution happens only
 //! when the field is consumed, and provenance tracking lets outward-facing
 //! renderers redact env-sourced values uniformly.
@@ -10,7 +10,7 @@ use std::fmt;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-/// A config string that may contain `${env.NAME}` tokens.
+/// A config string that may contain `{{ env.NAME }}` tokens.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterpString {
     segments: Vec<Segment>,
@@ -23,6 +23,30 @@ enum Segment {
 }
 
 impl InterpString {
+    fn push_literal(segments: &mut Vec<Segment>, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+
+        match segments.last_mut() {
+            Some(Segment::Literal(existing)) => existing.push_str(text),
+            Some(Segment::EnvVar(_)) | None => segments.push(Segment::Literal(text.to_owned())),
+        }
+    }
+
+    fn parse_env_token(token: &str) -> Option<String> {
+        let trimmed = token.trim();
+        let name = trimmed.strip_prefix("env.")?;
+        if name.is_empty()
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        {
+            return None;
+        }
+        Some(name.to_owned())
+    }
+
     /// Parse a raw string into its literal/env-var segments.
     ///
     /// Parsing is infallible: the token grammar is intentionally permissive so
@@ -32,26 +56,28 @@ impl InterpString {
         let mut segments: Vec<Segment> = Vec::new();
         let mut rest = input;
 
-        while let Some(start) = rest.find("${env.") {
-            if start > 0 {
-                segments.push(Segment::Literal(rest[..start].to_owned()));
-            }
-            // rest[start..] begins with "${env."
-            let after_prefix = &rest[start + "${env.".len()..];
-            if let Some(close) = after_prefix.find('}') {
-                let name = after_prefix[..close].to_owned();
-                segments.push(Segment::EnvVar(name));
-                rest = &after_prefix[close + 1..];
+        while let Some(start) = rest.find("{{") {
+            Self::push_literal(&mut segments, &rest[..start]);
+
+            let after_open = &rest[start + 2..];
+            if let Some(close) = after_open.find("}}") {
+                let token = &after_open[..close];
+                if let Some(name) = Self::parse_env_token(token) {
+                    segments.push(Segment::EnvVar(name));
+                } else {
+                    Self::push_literal(&mut segments, &rest[start..start + 2 + close + 2]);
+                }
+                rest = &after_open[close + 2..];
             } else {
                 // Unterminated token — treat the remainder as literal text.
-                segments.push(Segment::Literal(rest[start..].to_owned()));
+                Self::push_literal(&mut segments, &rest[start..]);
                 rest = "";
                 break;
             }
         }
 
         if !rest.is_empty() {
-            segments.push(Segment::Literal(rest.to_owned()));
+            Self::push_literal(&mut segments, rest);
         }
 
         if segments.is_empty() {
@@ -97,9 +123,9 @@ impl InterpString {
             match seg {
                 Segment::Literal(text) => out.push_str(text),
                 Segment::EnvVar(name) => {
-                    out.push_str("${env.");
+                    out.push_str("{{ env.");
                     out.push_str(name);
-                    out.push('}');
+                    out.push_str(" }}");
                 }
             }
         }
@@ -179,7 +205,7 @@ impl fmt::Display for ResolveEnvError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "environment variable {:?} referenced by ${{env.{}}} is not set",
+            "environment variable {:?} referenced by {{{{ env.{} }}}} is not set",
             self.name, self.name
         )
     }
@@ -201,7 +227,7 @@ impl<'de> Deserialize<'de> for InterpString {
             type Value = InterpString;
 
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("a string, optionally containing ${env.NAME} interpolation tokens")
+                f.write_str("a string, optionally containing {{ env.NAME }} interpolation tokens")
             }
 
             fn visit_str<E: de::Error>(self, value: &str) -> Result<InterpString, E> {
@@ -241,21 +267,21 @@ mod tests {
 
     #[test]
     fn whole_value_env_reference() {
-        let s = InterpString::parse("${env.API_KEY}");
+        let s = InterpString::parse("{{ env.API_KEY }}");
         assert!(!s.is_literal());
         assert_eq!(s.env_var_names(), vec!["API_KEY"]);
-        assert_eq!(s.as_source(), "${env.API_KEY}");
+        assert_eq!(s.as_source(), "{{ env.API_KEY }}");
     }
 
     #[test]
     fn substring_env_reference() {
-        let s = InterpString::parse("Bearer ${env.TOKEN}");
+        let s = InterpString::parse("Bearer {{ env.TOKEN }}");
         assert_eq!(s.env_var_names(), vec!["TOKEN"]);
     }
 
     #[test]
     fn multi_token_env_reference() {
-        let s = InterpString::parse("${env.USER}@${env.HOST}:${env.PORT}");
+        let s = InterpString::parse("{{ env.USER }}@{{ env.HOST }}:{{env.PORT}}");
         assert_eq!(s.env_var_names(), vec!["USER", "HOST", "PORT"]);
     }
 
@@ -269,7 +295,7 @@ mod tests {
 
     #[test]
     fn resolve_whole_value() {
-        let s = InterpString::parse("${env.API_KEY}");
+        let s = InterpString::parse("{{ env.API_KEY }}");
         let resolved = s
             .resolve(lookup_from(&[("API_KEY", "secret-123")]))
             .unwrap();
@@ -284,14 +310,14 @@ mod tests {
 
     #[test]
     fn resolve_substring() {
-        let s = InterpString::parse("Bearer ${env.TOKEN}");
+        let s = InterpString::parse("Bearer {{ env.TOKEN }}");
         let resolved = s.resolve(lookup_from(&[("TOKEN", "abc")])).unwrap();
         assert_eq!(resolved.value, "Bearer abc");
     }
 
     #[test]
     fn resolve_multiple_tokens() {
-        let s = InterpString::parse("${env.USER}@${env.HOST}");
+        let s = InterpString::parse("{{ env.USER }}@{{ env.HOST }}");
         let resolved = s
             .resolve(lookup_from(&[("USER", "root"), ("HOST", "example.com")]))
             .unwrap();
@@ -306,16 +332,16 @@ mod tests {
 
     #[test]
     fn resolve_missing_env_fails_with_name() {
-        let s = InterpString::parse("${env.MISSING}");
+        let s = InterpString::parse("{{ env.MISSING }}");
         let err = s.resolve(lookup_from(&[])).unwrap_err();
         assert_eq!(err.name, "MISSING");
     }
 
     #[test]
     fn unterminated_token_treated_as_literal() {
-        let s = InterpString::parse("${env.OPEN");
+        let s = InterpString::parse("{{ env.OPEN");
         let resolved = s.resolve(lookup_from(&[])).unwrap();
-        assert_eq!(resolved.value, "${env.OPEN");
+        assert_eq!(resolved.value, "{{ env.OPEN");
         assert_eq!(resolved.provenance, Provenance::Literal);
     }
 
@@ -326,9 +352,9 @@ mod tests {
             s: InterpString,
         }
 
-        let input = r#"{"s":"Bearer ${env.TOKEN}"}"#;
+        let input = r#"{"s":"Bearer {{ env.TOKEN }}"}"#;
         let parsed: Wrap = serde_json::from_str(input).unwrap();
-        assert_eq!(parsed.s.as_source(), "Bearer ${env.TOKEN}");
+        assert_eq!(parsed.s.as_source(), "Bearer {{ env.TOKEN }}");
         let rendered = serde_json::to_string(&parsed).unwrap();
         assert_eq!(rendered, input);
     }

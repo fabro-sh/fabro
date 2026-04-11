@@ -38,7 +38,7 @@ impl FileInliningTransform {
 }
 
 impl Transform for FileInliningTransform {
-    fn apply(&self, graph: Graph) -> Graph {
+    fn apply(&self, graph: Graph) -> Result<Graph, crate::error::FabroError> {
         let mut graph = graph;
 
         // Inline @file refs in node prompts
@@ -62,7 +62,7 @@ impl Transform for FileInliningTransform {
             }
         }
 
-        graph
+        Ok(graph)
     }
 }
 
@@ -155,7 +155,7 @@ mod tests {
             dir.path().to_path_buf(),
             Arc::new(FilesystemFileResolver::new(None)),
         );
-        let graph = transform.apply(graph);
+        let graph = transform.apply(graph).unwrap();
 
         assert_eq!(
             graph.nodes["work"]
@@ -288,7 +288,7 @@ mod tests {
                 fallback.path().to_path_buf(),
             ))),
         );
-        let graph = transform.apply(graph);
+        let graph = transform.apply(graph).unwrap();
 
         assert_eq!(
             graph.nodes["work"]

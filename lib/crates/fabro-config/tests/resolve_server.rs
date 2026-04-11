@@ -83,7 +83,7 @@ _version = 1
 provider = "s3"
 
 [server.artifacts.s3]
-endpoint = "${env.S3_ENDPOINT}"
+endpoint = "{{ env.S3_ENDPOINT }}"
 "#,
     );
 
@@ -107,11 +107,11 @@ _version = 1
 
 [server.listen]
 type = "unix"
-path = "${env.FABRO_SOCKET}"
+path = "{{ env.FABRO_SOCKET }}"
 
 [server.integrations.github]
-app_id = "${env.GITHUB_APP_ID}"
-client_id = "${env.GITHUB_CLIENT_ID}"
+app_id = "{{ env.GITHUB_APP_ID }}"
+client_id = "{{ env.GITHUB_CLIENT_ID }}"
 slug = "fabro-app"
 "#,
     );
@@ -121,18 +121,18 @@ slug = "fabro-app"
 
     match settings.listen {
         ServerListenSettings::Unix { path } => {
-            assert_eq!(path, InterpString::parse("${env.FABRO_SOCKET}"));
+            assert_eq!(path, InterpString::parse("{{ env.FABRO_SOCKET }}"));
         }
         ServerListenSettings::Tcp { .. } => panic!("expected unix listen transport"),
     }
 
     assert_eq!(
         settings.integrations.github.app_id,
-        Some(InterpString::parse("${env.GITHUB_APP_ID}"))
+        Some(InterpString::parse("{{ env.GITHUB_APP_ID }}"))
     );
     assert_eq!(
         settings.integrations.github.client_id,
-        Some(InterpString::parse("${env.GITHUB_CLIENT_ID}"))
+        Some(InterpString::parse("{{ env.GITHUB_CLIENT_ID }}"))
     );
     assert_eq!(
         settings.integrations.github.slug,
