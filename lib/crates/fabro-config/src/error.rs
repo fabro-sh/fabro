@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use toml::de::Error as TomlError;
+
 use crate::parse::ParseError;
 use crate::resolve::ResolveError;
 
@@ -11,6 +13,13 @@ fn format_resolve_errors(errors: &[ResolveError]) -> String {
         .join("\n")
 }
 
+fn format_path_suffix(path: Option<&PathBuf>) -> String {
+    match path {
+        Some(p) => format!(" at {}", p.display()),
+        None => String::new(),
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("reading config file {path}: {source}")]
@@ -20,9 +29,10 @@ pub enum Error {
         source: std::io::Error,
     },
 
-    #[error("{context}: {source}")]
+    #[error("{context}{}: {source}", format_path_suffix(.path.as_ref()))]
     ParseSettings {
         context: &'static str,
+        path: Option<PathBuf>,
         #[source]
         source: ParseError,
     },
@@ -31,7 +41,7 @@ pub enum Error {
     TomlParse {
         path: PathBuf,
         #[source]
-        source: toml::de::Error,
+        source: TomlError,
     },
 
     #[error("{context}:\n{}", format_resolve_errors(.errors))]
@@ -67,10 +77,22 @@ impl Error {
     }
 
     pub fn parse(context: &'static str, source: ParseError) -> Self {
-        Self::ParseSettings { context, source }
+        Self::ParseSettings {
+            context,
+            path: None,
+            source,
+        }
     }
 
-    pub fn toml_parse(path: &Path, source: toml::de::Error) -> Self {
+    pub fn parse_file(context: &'static str, path: &Path, source: ParseError) -> Self {
+        Self::ParseSettings {
+            context,
+            path: Some(path.to_path_buf()),
+            source,
+        }
+    }
+
+    pub fn toml_parse(path: &Path, source: TomlError) -> Self {
         Self::TomlParse {
             path: path.to_path_buf(),
             source,

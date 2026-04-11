@@ -436,10 +436,10 @@ fn settings_local_workflow_name_applies_run_overlay_and_deep_merges() {
 
     // checkpoint.exclude_globs is a security/policy list: replace by default.
     let checkpoint = run_checkpoint(&cfg);
-    assert_eq!(checkpoint.exclude_globs, vec![
-        "run-only".to_string(),
-        "shared".to_string()
-    ]);
+    assert_eq!(
+        checkpoint.exclude_globs,
+        vec!["run-only".to_string(), "shared".to_string()]
+    );
 
     // Hooks: id-based replacement. The "shared" hook appears in both cli and
     // workflow layers and resolves to the workflow entry; project and run-only
@@ -529,9 +529,10 @@ fn settings_local_explicit_workflow_path_uses_workflow_project_layers() {
     assert!(auto_approve_enabled(&cfg));
     // v2 R30: run.prepare.steps replaces the whole ordered list across layers.
     // The highest-precedence layer (workflow) wins.
-    assert_eq!(run_prepare_commands(&cfg), vec![
-        "workflow-setup".to_string()
-    ]);
+    assert_eq!(
+        run_prepare_commands(&cfg),
+        vec!["workflow-setup".to_string()]
+    );
     assert_eq!(run_sandbox(&cfg).preserve, Some(true));
 }
 
@@ -644,7 +645,7 @@ fn settings_missing_run_config_errors() {
     assert!(String::from_utf8_lossy(&output.stdout).trim().is_empty());
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("error: Workflow not found:"),
+        stderr.contains("workflow not found:"),
         "stderr should report missing workflow path, got:\n{stderr}"
     );
     assert!(

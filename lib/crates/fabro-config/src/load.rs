@@ -10,7 +10,7 @@ use crate::{Error, Result, project, user};
 pub fn load_settings_path(path: &Path) -> Result<SettingsLayer> {
     let content = std::fs::read_to_string(path).map_err(|source| Error::read_file(path, source))?;
     let mut layer = parse_settings_layer(&content)
-        .map_err(|err| Error::parse("Failed to parse settings file", err))?;
+        .map_err(|err| Error::parse_file("Failed to parse settings file", path, err))?;
     let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
     resolve_goal_file_paths(&mut layer, base_dir);
     Ok(layer)
