@@ -43,7 +43,7 @@ pub enum ResolveRunGoalError {
         var: String,
     },
     Io {
-        path: PathBuf,
+        path:   PathBuf,
         source: std::io::Error,
     },
 }
@@ -81,7 +81,7 @@ pub fn resolve_run_goal(
 
     match goal {
         RunGoalLayer::Inline(text) => Ok(Some(ResolvedRunGoal {
-            text: text.as_source(),
+            text:   text.as_source(),
             source: ResolvedGoalSource::Inline,
         })),
         RunGoalLayer::File { file } => {
