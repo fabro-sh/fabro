@@ -10,6 +10,7 @@ use fabro_server::bind::{Bind, BindRequest};
 use fabro_server::jwt_auth::FABRO_LOCAL_NO_AUTH_ENV;
 use fabro_server::serve;
 use fabro_server::serve::{DEFAULT_TCP_PORT, ServeArgs};
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 
 use super::record;
@@ -20,13 +21,14 @@ pub(crate) async fn execute(
     mut serve_args: ServeArgs,
     storage_dir: PathBuf,
     styles: &'static Styles,
+    printer: Printer,
 ) -> Result<()> {
     serve_args.bind = Some(bind.to_string());
 
     if foreground {
         Box::pin(execute_foreground(bind, serve_args, storage_dir, styles)).await
     } else {
-        execute_daemon(&bind, &serve_args, &storage_dir, true)
+        execute_daemon(&bind, &serve_args, &storage_dir, true, printer)
     }
 }
 
@@ -85,7 +87,13 @@ fn ensure_server_running_with_bind(
         Bind::Tcp(addr) => BindRequest::Tcp(*addr),
     };
 
-    match execute_daemon(&bind_request, &serve_args, storage_dir, false) {
+    match execute_daemon(
+        &bind_request,
+        &serve_args,
+        storage_dir,
+        false,
+        Printer::Silent,
+    ) {
         Ok(()) => Ok(bind),
         Err(err) => {
             if let Some(existing) = record::active_server_record(storage_dir) {
@@ -168,6 +176,7 @@ fn execute_daemon(
     serve_args: &ServeArgs,
     storage_dir: &Path,
     announce: bool,
+    printer: Printer,
 ) -> Result<()> {
     let lock_file = acquire_lock(storage_dir)?;
     let _lock_file = lock_file; // keep alive until function returns
@@ -245,7 +254,7 @@ fn execute_daemon(
         record::remove_server_record(&record_path);
         let tail = read_log_tail(&log_path, 20);
         if !tail.is_empty() {
-            eprintln!("{tail}");
+            fabro_util::printerr!(printer, "{tail}");
         }
         bail!("Server exited immediately with status {status}");
     }
@@ -258,8 +267,13 @@ fn execute_daemon(
         if let Some(record) = record::read_server_record(&record_path) {
             if try_connect(&record.bind) {
                 if announce {
-                    maybe_warn_host_port_fallback(bind, &record.bind);
-                    eprintln!("Server started (pid {}) on {}", child.id(), record.bind);
+                    maybe_warn_host_port_fallback(bind, &record.bind, printer);
+                    fabro_util::printerr!(
+                        printer,
+                        "Server started (pid {}) on {}",
+                        child.id(),
+                        record.bind
+                    );
                 }
                 return Ok(());
             }
@@ -269,7 +283,7 @@ fn execute_daemon(
             record::remove_server_record(&record_path);
             let tail = read_log_tail(&log_path, 20);
             if !tail.is_empty() {
-                eprintln!("{tail}");
+                fabro_util::printerr!(printer, "{tail}");
             }
             bail!("Server exited during startup with status {status}");
         }
@@ -283,7 +297,7 @@ fn execute_daemon(
     let _ = child.wait();
     let tail = read_log_tail(&log_path, 20);
     if !tail.is_empty() {
-        eprintln!("{tail}");
+        fabro_util::printerr!(printer, "{tail}");
     }
     bail!("Server did not become ready within {timeout:?}");
 }
@@ -327,7 +341,7 @@ fn try_connect(bind: &Bind) -> bool {
     }
 }
 
-fn maybe_warn_host_port_fallback(requested: &BindRequest, resolved: &Bind) {
+fn maybe_warn_host_port_fallback(requested: &BindRequest, resolved: &Bind, printer: Printer) {
     let BindRequest::TcpHost(host) = requested else {
         return;
     };
@@ -335,7 +349,8 @@ fn maybe_warn_host_port_fallback(requested: &BindRequest, resolved: &Bind) {
         return;
     };
     if addr.ip() == *host && addr.port() != DEFAULT_TCP_PORT {
-        eprintln!(
+        fabro_util::printerr!(
+            printer,
             "Warning: TCP port {DEFAULT_TCP_PORT} is unavailable on {host}; falling back to a random port."
         );
     }

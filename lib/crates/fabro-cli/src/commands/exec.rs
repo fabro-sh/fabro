@@ -9,6 +9,7 @@ use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_types::settings::InterpString;
 use fabro_types::settings::cli::OutputFormat as SettingsOutputFormat;
 use fabro_types::settings::run::McpEntryLayer;
+use fabro_util::printer::Printer;
 
 use crate::args::{ExecArgs, GlobalArgs};
 use crate::user_config;
@@ -97,7 +98,11 @@ fn runtime_mcp_server(name: &str, entry: &McpEntryLayer) -> McpServerSettings {
     }
 }
 
-pub(crate) async fn execute(mut args: ExecArgs, globals: &GlobalArgs) -> Result<()> {
+pub(crate) async fn execute(
+    mut args: ExecArgs,
+    globals: &GlobalArgs,
+    _printer: Printer,
+) -> Result<()> {
     use fabro_agent::cli::PermissionLevel as AgentPermissionLevel;
     use fabro_types::settings::run::AgentPermissions;
 

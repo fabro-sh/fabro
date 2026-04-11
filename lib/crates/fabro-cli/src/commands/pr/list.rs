@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use fabro_util::printer::Printer;
 use futures::future::join_all;
 use serde::Serialize;
 use tracing::info;
@@ -21,11 +22,12 @@ pub(super) async fn list_command(
     args: PrListArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
     globals: &GlobalArgs,
+    printer: Printer,
 ) -> Result<()> {
     let creds = github_app.context(
         "GitHub App credentials required — set GITHUB_APP_PRIVATE_KEY and configure app_id",
     )?;
-    let ctx = CommandContext::for_target(&args.server)?;
+    let ctx = CommandContext::for_target(&args.server, printer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
 
     let mut entries = Vec::new();
@@ -42,7 +44,7 @@ pub(super) async fn list_command(
             print_json_pretty(&Vec::<PrRow>::new())?;
             return Ok(());
         }
-        println!("No pull requests found.");
+        fabro_util::printout!(printer, "No pull requests found.");
         return Ok(());
     }
 
@@ -104,13 +106,20 @@ pub(super) async fn list_command(
     }
 
     if rows.is_empty() {
-        println!("No open pull requests found. Use --all to include closed/merged.");
+        fabro_util::printout!(
+            printer,
+            "No open pull requests found. Use --all to include closed/merged."
+        );
         return Ok(());
     }
 
-    println!(
+    fabro_util::printout!(
+        printer,
         "{:<12} {:<6} {:<8} {:<50} URL",
-        "RUN", "#", "STATE", "TITLE"
+        "RUN",
+        "#",
+        "STATE",
+        "TITLE"
     );
     for row in &rows {
         let short_id = if row.run_id.len() > 12 {
@@ -123,9 +132,14 @@ pub(super) async fn list_command(
         } else {
             row.title.clone()
         };
-        println!(
+        fabro_util::printout!(
+            printer,
             "{:<12} {:<6} {:<8} {:<50} {}",
-            short_id, row.number, row.state, short_title, row.url
+            short_id,
+            row.number,
+            row.state,
+            short_title,
+            row.url
         );
     }
 

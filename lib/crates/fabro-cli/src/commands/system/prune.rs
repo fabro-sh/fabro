@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result, bail};
 use fabro_api::types;
+use fabro_util::printer::Printer;
 use tracing::{debug, info};
 
 use crate::args::{GlobalArgs, RunsPruneArgs};
@@ -9,8 +10,12 @@ use crate::command_context::CommandContext;
 use crate::server_client;
 use crate::shared::{format_size, print_json_pretty};
 
-pub(super) async fn prune_command(args: &RunsPruneArgs, globals: &GlobalArgs) -> Result<()> {
-    let ctx = CommandContext::for_connection(&args.connection)?;
+pub(super) async fn prune_command(
+    args: &RunsPruneArgs,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
+    let ctx = CommandContext::for_connection(&args.connection, printer)?;
     let server = ctx.server().await?;
     let response = server
         .api()
@@ -27,7 +32,7 @@ pub(super) async fn prune_command(args: &RunsPruneArgs, globals: &GlobalArgs) ->
         .await
         .map_err(server_client::map_api_error)?
         .into_inner();
-    prune_from(&response, globals)
+    prune_from(&response, globals, printer)
 }
 
 pub(crate) fn parse_duration(s: &str) -> Result<chrono::Duration> {
@@ -46,7 +51,11 @@ pub(crate) fn parse_duration(s: &str) -> Result<chrono::Duration> {
     }
 }
 
-fn prune_from(response: &types::PruneRunsResponse, globals: &GlobalArgs) -> Result<()> {
+fn prune_from(
+    response: &types::PruneRunsResponse,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
     let total_count = response.total_count.unwrap_or_default();
     let total_size_bytes = response.total_size_bytes.unwrap_or_default();
 
@@ -63,7 +72,7 @@ fn prune_from(response: &types::PruneRunsResponse, globals: &GlobalArgs) -> Resu
     }
 
     if total_count == 0 {
-        eprintln!("No matching runs to prune.");
+        fabro_util::printerr!(printer, "No matching runs to prune.");
         return Ok(());
     }
 
@@ -73,13 +82,15 @@ fn prune_from(response: &types::PruneRunsResponse, globals: &GlobalArgs) -> Resu
                 run_id = run.run_id.as_deref().unwrap_or("-"),
                 "would delete run (dry-run)"
             );
-            println!(
+            fabro_util::printout!(
+                printer,
                 "would delete: {} ({})",
                 run.dir_name.as_deref().unwrap_or("-"),
                 run.workflow_name.as_deref().unwrap_or("-")
             );
         }
-        eprintln!(
+        fabro_util::printerr!(
+            printer,
             "\n{} run(s) would be deleted ({} freed). Pass --yes to confirm.",
             total_count,
             format_size(as_u64(total_size_bytes))
@@ -87,7 +98,8 @@ fn prune_from(response: &types::PruneRunsResponse, globals: &GlobalArgs) -> Resu
         return Ok(());
     }
 
-    eprintln!(
+    fabro_util::printerr!(
+        printer,
         "{} run(s) deleted ({} freed).",
         response.deleted_count.unwrap_or(total_count),
         format_size(as_u64(response.freed_bytes.unwrap_or(total_size_bytes)))

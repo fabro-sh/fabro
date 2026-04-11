@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use fabro_util::Home;
+use fabro_util::printer::Printer;
 use serde::Serialize;
 use tracing::warn;
 
@@ -26,7 +27,11 @@ struct Inventory {
 }
 
 #[allow(clippy::unused_async)] // call site requires async
-pub(crate) async fn run_uninstall(args: &UninstallArgs, globals: &GlobalArgs) -> Result<()> {
+pub(crate) async fn run_uninstall(
+    args: &UninstallArgs,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
     let home = Home::from_env();
     let home_root = home.root().to_path_buf();
 
@@ -34,7 +39,7 @@ pub(crate) async fn run_uninstall(args: &UninstallArgs, globals: &GlobalArgs) ->
         if globals.json {
             print_json_pretty(&serde_json::json!({ "status": "not_installed" }))?;
         } else {
-            eprintln!("Fabro is not installed.");
+            fabro_util::printerr!(printer, "Fabro is not installed.");
         }
         return Ok(());
     }
@@ -50,12 +55,12 @@ pub(crate) async fn run_uninstall(args: &UninstallArgs, globals: &GlobalArgs) ->
         if globals.json {
             print_json_pretty(&inventory)?;
         } else {
-            print_preview(&inventory);
+            print_preview(&inventory, printer);
         }
         return Ok(());
     }
 
-    execute_uninstall(&inventory, globals.json)
+    execute_uninstall(&inventory, globals.json, printer)
 }
 
 fn build_inventory(home_root: &Path, storage_dir: &Path) -> Inventory {
@@ -135,13 +140,18 @@ fn resolve_binary(home_root: &Path) -> (Option<PathBuf>, bool) {
     (binary_path, is_managed)
 }
 
-fn print_preview(inventory: &Inventory) {
+fn print_preview(inventory: &Inventory, printer: Printer) {
     let green = console::Style::new().green();
     let dim = console::Style::new().dim();
     let bold = console::Style::new().bold();
 
-    eprintln!("\n{}", bold.apply_to("The following will be removed:"));
-    eprintln!(
+    fabro_util::printerr!(
+        printer,
+        "\n{}",
+        bold.apply_to("The following will be removed:")
+    );
+    fabro_util::printerr!(
+        printer,
         "  {} {} {}",
         green.apply_to("~"),
         tilde_path(&inventory.home_root),
@@ -152,7 +162,8 @@ fn print_preview(inventory: &Inventory) {
         && !inventory.storage_dir.starts_with(&inventory.home_root)
     {
         let storage_size = dir_size(&inventory.storage_dir);
-        eprintln!(
+        fabro_util::printerr!(
+            printer,
             "  {} {} {}",
             green.apply_to("~"),
             tilde_path(&inventory.storage_dir),
@@ -161,29 +172,32 @@ fn print_preview(inventory: &Inventory) {
     }
 
     if inventory.server_running {
-        eprintln!(
+        fabro_util::printerr!(
+            printer,
             "\n  {} A running server will be stopped first.",
             console::Style::new().yellow().apply_to("!")
         );
     }
 
     if !inventory.shell_configs.is_empty() {
-        eprintln!("\n  Shell configs with PATH entries:");
+        fabro_util::printerr!(printer, "\n  Shell configs with PATH entries:");
         for path in &inventory.shell_configs {
-            eprintln!("    {}", tilde_path(path));
+            fabro_util::printerr!(printer, "    {}", tilde_path(path));
         }
     }
 
     match (&inventory.binary_path, inventory.binary_is_managed) {
         (Some(_), true) => {
-            eprintln!(
+            fabro_util::printerr!(
+                printer,
                 "\n  {} Binary is inside {} and will be removed.",
                 dim.apply_to("i"),
                 tilde_path(&inventory.home_root)
             );
         }
         (Some(bin), false) => {
-            eprintln!(
+            fabro_util::printerr!(
+                printer,
                 "\n  {} Binary at {} is outside {} and must be removed manually.",
                 dim.apply_to("i"),
                 tilde_path(bin),
@@ -191,14 +205,15 @@ fn print_preview(inventory: &Inventory) {
             );
         }
         (None, _) => {
-            eprintln!(
+            fabro_util::printerr!(
+                printer,
                 "\n  {} Could not determine binary location.",
                 dim.apply_to("i")
             );
         }
     }
 
-    eprintln!("\nPass --yes to confirm.");
+    fabro_util::printerr!(printer, "\nPass --yes to confirm.");
 }
 
 #[derive(Debug, Serialize)]
@@ -211,7 +226,7 @@ struct UninstallResult {
     binary_hint:           Option<String>,
 }
 
-fn execute_uninstall(inventory: &Inventory, json: bool) -> Result<()> {
+fn execute_uninstall(inventory: &Inventory, json: bool, printer: Printer) -> Result<()> {
     let green = console::Style::new().green();
     let dim = console::Style::new().dim();
     let bold = console::Style::new().bold();
@@ -227,13 +242,17 @@ fn execute_uninstall(inventory: &Inventory, json: bool) -> Result<()> {
 
     // Unit 3a: Server stop
     if inventory.server_running {
-        server::stop::execute(&inventory.storage_dir, Duration::from_secs(5));
+        server::stop::execute(&inventory.storage_dir, Duration::from_secs(5), printer);
         result.server_stopped = true;
     }
 
     // Unit 3b: Safety guardrails
     if let Err(e) = validate_safe_to_delete(&inventory.home_root) {
-        eprintln!("Refusing to delete {}: {e}", inventory.home_root.display());
+        fabro_util::printerr!(
+            printer,
+            "Refusing to delete {}: {e}",
+            inventory.home_root.display()
+        );
         return Err(e);
     }
 
@@ -242,7 +261,8 @@ fn execute_uninstall(inventory: &Inventory, json: bool) -> Result<()> {
         Ok(()) => {
             result.home_removed = true;
             if !json {
-                eprintln!(
+                fabro_util::printerr!(
+                    printer,
                     "  {} Removed {}",
                     green.apply_to("\u{2714}"),
                     tilde_path(&inventory.home_root)
@@ -252,7 +272,8 @@ fn execute_uninstall(inventory: &Inventory, json: bool) -> Result<()> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             result.home_removed = true;
             if !json {
-                eprintln!(
+                fabro_util::printerr!(
+                    printer,
                     "  {} {} already removed",
                     dim.apply_to("-"),
                     tilde_path(&inventory.home_root)
@@ -261,7 +282,8 @@ fn execute_uninstall(inventory: &Inventory, json: bool) -> Result<()> {
         }
         Err(e) => {
             if !json {
-                eprintln!(
+                fabro_util::printerr!(
+                    printer,
                     "  Failed to remove {}: {e}",
                     tilde_path(&inventory.home_root)
                 );
@@ -274,7 +296,8 @@ fn execute_uninstall(inventory: &Inventory, json: bool) -> Result<()> {
     if !inventory.storage_dir.starts_with(&inventory.home_root) && inventory.storage_dir.exists() {
         if let Err(e) = validate_safe_to_delete(&inventory.storage_dir) {
             if !json {
-                eprintln!(
+                fabro_util::printerr!(
+                    printer,
                     "Refusing to delete storage dir {}: {e}",
                     inventory.storage_dir.display()
                 );
@@ -284,7 +307,8 @@ fn execute_uninstall(inventory: &Inventory, json: bool) -> Result<()> {
             match fs::remove_dir_all(&inventory.storage_dir) {
                 Ok(()) => {
                     if !json {
-                        eprintln!(
+                        fabro_util::printerr!(
+                            printer,
                             "  {} Removed {}",
                             green.apply_to("\u{2714}"),
                             tilde_path(&inventory.storage_dir)
@@ -294,7 +318,8 @@ fn execute_uninstall(inventory: &Inventory, json: bool) -> Result<()> {
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => {
                     if !json {
-                        eprintln!(
+                        fabro_util::printerr!(
+                            printer,
                             "  Failed to remove {}: {e}",
                             tilde_path(&inventory.storage_dir)
                         );
@@ -311,7 +336,8 @@ fn execute_uninstall(inventory: &Inventory, json: bool) -> Result<()> {
             Ok(()) => {
                 result.shell_configs_cleaned.push(path.clone());
                 if !json {
-                    eprintln!(
+                    fabro_util::printerr!(
+                        printer,
                         "  {} Cleaned {}",
                         green.apply_to("\u{2714}"),
                         tilde_path(path)
@@ -321,7 +347,8 @@ fn execute_uninstall(inventory: &Inventory, json: bool) -> Result<()> {
             Err(e) => {
                 warn!("Failed to clean shell config {}: {e}", path.display());
                 if !json {
-                    eprintln!(
+                    fabro_util::printerr!(
+                        printer,
                         "  {} Could not clean {}: {e}",
                         console::Style::new().yellow().apply_to("!"),
                         tilde_path(path)
@@ -336,7 +363,8 @@ fn execute_uninstall(inventory: &Inventory, json: bool) -> Result<()> {
         (Some(_), true) => {
             result.binary_removed = true;
             if !json {
-                eprintln!(
+                fabro_util::printerr!(
+                    printer,
                     "  {} Binary removed {}",
                     green.apply_to("\u{2714}"),
                     dim.apply_to("(was inside ~/.fabro/bin/)")
@@ -347,7 +375,7 @@ fn execute_uninstall(inventory: &Inventory, json: bool) -> Result<()> {
             let hint = binary_removal_hint(bin);
             result.binary_hint = Some(hint.clone());
             if !json {
-                eprintln!("\n  {} {}", dim.apply_to("i"), hint);
+                fabro_util::printerr!(printer, "\n  {} {}", dim.apply_to("i"), hint);
             }
         }
         (None, _) => {
@@ -363,7 +391,11 @@ fn execute_uninstall(inventory: &Inventory, json: bool) -> Result<()> {
     if json {
         print_json_pretty(&result)?;
     } else {
-        eprintln!("\n{}", bold.apply_to("Fabro has been uninstalled."));
+        fabro_util::printerr!(
+            printer,
+            "\n{}",
+            bold.apply_to("Fabro has been uninstalled.")
+        );
     }
 
     if critical_failure {

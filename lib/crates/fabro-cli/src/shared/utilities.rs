@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use cli_table::Color;
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_validate::{Diagnostic, Severity};
 use serde::Serialize;
@@ -23,7 +24,7 @@ where
     Ok(())
 }
 
-pub(crate) fn print_diagnostics(diagnostics: &[Diagnostic], styles: &Styles) {
+pub(crate) fn print_diagnostics(diagnostics: &[Diagnostic], styles: &Styles, printer: Printer) {
     for d in diagnostics {
         let location = match (&d.node_id, &d.edge) {
             (Some(node), _) => format!(" [node: {node}]"),
@@ -31,19 +32,22 @@ pub(crate) fn print_diagnostics(diagnostics: &[Diagnostic], styles: &Styles) {
             _ => String::new(),
         };
         match d.severity {
-            Severity::Error => eprintln!(
+            Severity::Error => fabro_util::printerr!(
+                printer,
                 "{}{location}: {} ({})",
                 styles.red.apply_to("error"),
                 d.message,
                 styles.dim.apply_to(&d.rule),
             ),
-            Severity::Warning => eprintln!(
+            Severity::Warning => fabro_util::printerr!(
+                printer,
                 "{}{location}: {} ({})",
                 styles.yellow.apply_to("warning"),
                 d.message,
                 styles.dim.apply_to(&d.rule),
             ),
-            Severity::Info => eprintln!(
+            Severity::Info => fabro_util::printerr!(
+                printer,
                 "{}",
                 styles
                     .dim

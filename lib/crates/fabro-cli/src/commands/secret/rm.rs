@@ -1,5 +1,6 @@
 use anyhow::Result;
 use fabro_api::Client;
+use fabro_util::printer::Printer;
 
 use crate::args::{GlobalArgs, SecretRmArgs};
 use crate::server_client;
@@ -9,6 +10,7 @@ pub(super) async fn rm_command(
     client: &Client,
     args: &SecretRmArgs,
     globals: &GlobalArgs,
+    printer: Printer,
 ) -> Result<()> {
     client
         .delete_secret()
@@ -19,7 +21,7 @@ pub(super) async fn rm_command(
     if globals.json {
         print_json_pretty(&serde_json::json!({ "key": args.key }))?;
     } else {
-        eprintln!("Removed {}", args.key);
+        fabro_util::printerr!(printer, "Removed {}", args.key);
     }
     Ok(())
 }

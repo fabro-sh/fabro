@@ -5,6 +5,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use fabro_util::json::normalize_json_value;
+use fabro_util::printer::Printer;
 use fabro_util::redact::redact_jsonl_line;
 use fabro_util::terminal::Styles;
 use tokio::time;
@@ -18,8 +19,13 @@ use crate::shared::format_usd_micros;
 
 const FOLLOW_TERMINAL_GRACE: Duration = Duration::from_millis(500);
 
-pub(crate) async fn run(args: &LogsArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
-    let ctx = CommandContext::for_target(&args.server)?;
+pub(crate) async fn run(
+    args: &LogsArgs,
+    styles: &Styles,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
+    let ctx = CommandContext::for_target(&args.server, printer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run)?;
     let client = lookup.client();

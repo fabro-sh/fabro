@@ -7,6 +7,7 @@ use fabro_types::{
     PullRequestRecord, RunBlobId, RunId, parse_blob_ref, parse_legacy_blob_file_ref,
 };
 use fabro_util::check_report::{CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus};
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_util::text::strip_goal_decoration;
 use fabro_workflow::outcome::StageStatus;
@@ -22,6 +23,7 @@ pub(crate) fn print_preflight_workflow_summary(
     workflow: &types::PreflightWorkflowSummary,
     graph_path_override: Option<&Path>,
     styles: &Styles,
+    printer: Printer,
 ) {
     let graph_path = graph_path_override
         .map(relative_path)
@@ -42,7 +44,8 @@ pub(crate) fn print_preflight_workflow_summary(
         .map(api_diagnostic_to_local)
         .collect::<Vec<_>>();
 
-    eprintln!(
+    fabro_util::printerr!(
+        printer,
         "{} {} {}",
         styles.bold.apply_to("Workflow:"),
         workflow.name,
@@ -51,7 +54,8 @@ pub(crate) fn print_preflight_workflow_summary(
             workflow.nodes, workflow.edges
         )),
     );
-    eprintln!(
+    fabro_util::printerr!(
+        printer,
         "{} {}",
         styles.dim.apply_to("Graph:"),
         styles.dim.apply_to(graph_path),
@@ -59,10 +63,10 @@ pub(crate) fn print_preflight_workflow_summary(
 
     if !workflow.goal.is_empty() {
         let stripped = strip_goal_decoration(&workflow.goal);
-        eprintln!("{} {stripped}\n", styles.bold.apply_to("Goal:"));
+        fabro_util::printerr!(printer, "{} {stripped}\n", styles.bold.apply_to("Goal:"));
     }
 
-    print_diagnostics(&diagnostics, styles);
+    print_diagnostics(&diagnostics, styles, printer);
 }
 
 fn api_diagnostic_to_local(diagnostic: &types::WorkflowDiagnostic) -> fabro_validate::Diagnostic {
@@ -129,6 +133,7 @@ pub(crate) async fn print_run_summary_with_client(
     run_id: &fabro_types::RunId,
     local_run_dir: Option<&Path>,
     styles: &Styles,
+    printer: Printer,
 ) -> Result<()> {
     let run_state = client.get_run_state(run_id).await?;
     let checkpoint = run_state.checkpoint.clone();
@@ -148,12 +153,13 @@ pub(crate) async fn print_run_summary_with_client(
         None,
         pr_url.as_deref(),
         styles,
+        printer,
     );
     let final_output =
         resolve_final_output_with_client(client, run_id, checkpoint.as_ref()).await?;
-    print_final_output(final_output.as_deref(), styles);
+    print_final_output(final_output.as_deref(), styles, printer);
     if local_run_dir.is_some() {
-        print_assets_with_client(client, run_id, styles).await?;
+        print_assets_with_client(client, run_id, styles, printer).await?;
     }
     Ok(())
 }
@@ -165,18 +171,24 @@ pub(crate) fn print_run_conclusion(
     pushed_branch: Option<&str>,
     pr_url: Option<&str>,
     styles: &Styles,
+    printer: Printer,
 ) {
     let run_id = run_id.to_string();
-    eprintln!("\n{}", styles.bold.apply_to("=== Run Result ==="));
-    eprintln!("{}", styles.dim.apply_to(format!("Run:       {run_id}")));
+    fabro_util::printerr!(printer, "\n{}", styles.bold.apply_to("=== Run Result ==="));
+    fabro_util::printerr!(
+        printer,
+        "{}",
+        styles.dim.apply_to(format!("Run:       {run_id}"))
+    );
 
     let status_str = conclusion.status.to_string().to_uppercase();
     let status_color = match conclusion.status {
         StageStatus::Success | StageStatus::PartialSuccess => &styles.bold_green,
         _ => &styles.bold_red,
     };
-    eprintln!("Status:    {}", status_color.apply_to(&status_str));
-    eprintln!(
+    fabro_util::printerr!(printer, "Status:    {}", status_color.apply_to(&status_str));
+    fabro_util::printerr!(
+        printer,
         "Duration:  {}",
         HumanDuration(Duration::from_millis(conclusion.duration_ms))
     );
@@ -186,7 +198,8 @@ pub(crate) fn print_run_conclusion(
         if total_tokens > 0 {
             if let Some(total_usd_micros) = billing.total_usd_micros {
                 if total_usd_micros > 0 {
-                    eprintln!(
+                    fabro_util::printerr!(
+                        printer,
                         "{}",
                         styles.dim.apply_to(format!(
                             "Cost:      {} ({} toks)",
@@ -196,7 +209,8 @@ pub(crate) fn print_run_conclusion(
                     );
                 }
             } else {
-                eprintln!(
+                fabro_util::printerr!(
+                    printer,
                     "{}",
                     styles
                         .dim
@@ -204,7 +218,8 @@ pub(crate) fn print_run_conclusion(
                 );
             }
             if billing.cache_read_tokens > 0 || billing.cache_write_tokens > 0 {
-                eprintln!(
+                fabro_util::printerr!(
+                    printer,
                     "{}",
                     styles.dim.apply_to(format!(
                         "Cache:     {} read, {} write",
@@ -214,7 +229,8 @@ pub(crate) fn print_run_conclusion(
                 );
             }
             if billing.reasoning_tokens > 0 {
-                eprintln!(
+                fabro_util::printerr!(
+                    printer,
                     "{}",
                     styles.dim.apply_to(format!(
                         "Reasoning: {} tokens",
@@ -223,7 +239,8 @@ pub(crate) fn print_run_conclusion(
                 );
             }
         } else if billing.total_usd_micros.is_none() {
-            eprintln!(
+            fabro_util::printerr!(
+                printer,
                 "{}",
                 styles
                     .dim
@@ -233,7 +250,8 @@ pub(crate) fn print_run_conclusion(
     }
 
     if let Some(run_dir) = run_dir {
-        eprintln!(
+        fabro_util::printerr!(
+            printer,
             "{}",
             styles
                 .dim
@@ -242,28 +260,32 @@ pub(crate) fn print_run_conclusion(
     }
 
     if let Some(ref failure) = conclusion.failure_reason {
-        eprintln!("Failure:   {}", styles.red.apply_to(failure));
+        fabro_util::printerr!(printer, "Failure:   {}", styles.red.apply_to(failure));
     }
 
     if pushed_branch.is_some() || pr_url.is_some() {
-        eprintln!();
+        fabro_util::printerr!(printer, "");
         if let Some(branch) = pushed_branch {
-            eprintln!("{} {branch}", styles.bold.apply_to("Pushed branch:"));
+            fabro_util::printerr!(
+                printer,
+                "{} {branch}",
+                styles.bold.apply_to("Pushed branch:")
+            );
         }
         if let Some(url) = pr_url {
-            eprintln!("{} {url}", styles.bold.apply_to("Pull request:"));
+            fabro_util::printerr!(printer, "{} {url}", styles.bold.apply_to("Pull request:"));
         }
     }
 }
 
-pub(crate) fn print_final_output(output: Option<&str>, styles: &Styles) {
+pub(crate) fn print_final_output(output: Option<&str>, styles: &Styles, printer: Printer) {
     let Some(output) = output else {
         return;
     };
     let text = output.trim();
     if !text.is_empty() {
-        eprintln!("\n{}", styles.bold.apply_to("=== Output ==="));
-        eprintln!("{}", styles.render_markdown(text));
+        fabro_util::printerr!(printer, "\n{}", styles.bold.apply_to("=== Output ==="));
+        fabro_util::printerr!(printer, "{}", styles.render_markdown(text));
     }
 }
 
@@ -335,6 +357,7 @@ async fn print_assets_with_client(
     client: &server_client::ServerStoreClient,
     run_id: &RunId,
     styles: &Styles,
+    printer: Printer,
 ) -> Result<()> {
     let entries = list_artifact_display_entries_with_client(client, run_id).await?;
     if entries.is_empty() {
@@ -354,13 +377,22 @@ async fn print_assets_with_client(
         .unwrap_or(5)
         .max(5);
 
-    eprintln!("\n{}", styles.bold.apply_to("=== Artifacts ==="));
-    eprintln!("{:<node_width$}  {:>retry_width$}  PATH", "NODE", "RETRY");
+    fabro_util::printerr!(printer, "\n{}", styles.bold.apply_to("=== Artifacts ==="));
+    fabro_util::printerr!(
+        printer,
+        "{:<node_width$}  {:>retry_width$}  PATH",
+        "NODE",
+        "RETRY"
+    );
     for (node_slug, retry, relative_path) in &entries {
-        eprintln!("{node_slug:<node_width$}  {retry:>retry_width$}  {relative_path}");
+        fabro_util::printerr!(
+            printer,
+            "{node_slug:<node_width$}  {retry:>retry_width$}  {relative_path}"
+        );
     }
-    eprintln!();
-    eprintln!(
+    fabro_util::printerr!(printer, "");
+    fabro_util::printerr!(
+        printer,
         "{}",
         styles.dim.apply_to(format!(
             "Copy with: fabro artifact cp {run_id}:<path> <dest> --node <node_slug> --retry <retry>"

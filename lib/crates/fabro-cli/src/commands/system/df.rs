@@ -3,14 +3,19 @@ use chrono::{DateTime, Utc};
 use cli_table::format::{Border, Justify, Separator};
 use cli_table::{Cell, CellStruct, Style, Table};
 use fabro_api::types;
+use fabro_util::printer::Printer;
 
 use crate::args::{DfArgs, GlobalArgs};
 use crate::command_context::CommandContext;
 use crate::server_client;
 use crate::shared::{format_size, print_json_pretty};
 
-pub(super) async fn df_command(args: &DfArgs, globals: &GlobalArgs) -> Result<()> {
-    let ctx = CommandContext::for_connection(&args.connection)?;
+pub(super) async fn df_command(
+    args: &DfArgs,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
+    let ctx = CommandContext::for_connection(&args.connection, printer)?;
     let server = ctx.server().await?;
     let output = server
         .api()

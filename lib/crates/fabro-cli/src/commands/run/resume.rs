@@ -1,3 +1,4 @@
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 
 use crate::args::{GlobalArgs, ResumeArgs};
@@ -14,8 +15,9 @@ pub(crate) async fn resume_command(
     args: ResumeArgs,
     styles: &'static Styles,
     globals: &GlobalArgs,
+    printer: Printer,
 ) -> anyhow::Result<()> {
-    let ctx = CommandContext::for_target(&args.server)?;
+    let ctx = CommandContext::for_target(&args.server, printer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();
@@ -26,7 +28,7 @@ pub(crate) async fn resume_command(
         if globals.json {
             print_json_pretty(&serde_json::json!({ "run_id": run_id }))?;
         } else {
-            println!("{run_id}");
+            fabro_util::printout!(printer, "{run_id}");
         }
     } else {
         let exit_code = super::attach::attach_run_with_client(
@@ -35,11 +37,18 @@ pub(crate) async fn resume_command(
             true,
             styles,
             globals.json,
+            printer,
         )
         .await?;
         if !globals.json {
-            super::output::print_run_summary_with_client(lookup.client(), &run_id, None, styles)
-                .await?;
+            super::output::print_run_summary_with_client(
+                lookup.client(),
+                &run_id,
+                None,
+                styles,
+                printer,
+            )
+            .await?;
         }
         if exit_code != std::process::ExitCode::SUCCESS {
             std::process::exit(1);

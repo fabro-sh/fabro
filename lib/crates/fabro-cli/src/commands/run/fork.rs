@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use fabro_checkpoint::git::Store;
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_workflow::operations::{ForkRunInput, RewindTarget, build_timeline_or_rebuild, fork};
 use git2::Repository;
@@ -11,9 +12,14 @@ use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
 use crate::shared::repo::ensure_matching_repo_origin;
 
-pub(crate) async fn run(args: &ForkArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
+pub(crate) async fn run(
+    args: &ForkArgs,
+    styles: &Styles,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
     let repo = Repository::discover(".").context("not in a git repository")?;
-    let ctx = CommandContext::for_target(&args.server)?;
+    let ctx = CommandContext::for_target(&args.server, printer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run_id)?;
     let run_id = run.run_id();
@@ -31,7 +37,7 @@ pub(crate) async fn run(args: &ForkArgs, styles: &Styles, globals: &GlobalArgs) 
             print_json_pretty(&super::rewind::timeline_entries_json(&timeline))?;
             return Ok(());
         }
-        super::rewind::print_timeline(&timeline, styles);
+        super::rewind::print_timeline(&timeline, styles, printer);
         return Ok(());
     }
 
@@ -57,12 +63,14 @@ pub(crate) async fn run(args: &ForkArgs, styles: &Styles, globals: &GlobalArgs) 
             "target": target,
         }))?;
     } else {
-        eprintln!(
+        fabro_util::printerr!(
+            printer,
             "\nForked run {} -> {}",
             &run_id_string[..8.min(run_id_string.len())],
             &new_run_id_string[..8.min(new_run_id_string.len())]
         );
-        eprintln!(
+        fabro_util::printerr!(
+            printer,
             "To resume: fabro resume {}",
             &new_run_id_string[..8.min(new_run_id_string.len())]
         );

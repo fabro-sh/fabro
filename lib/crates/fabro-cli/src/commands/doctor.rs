@@ -12,6 +12,7 @@ use fabro_config::user::{
 pub(crate) use fabro_util::check_report::{
     CheckDetail, CheckReport, CheckResult, CheckSection, CheckStatus,
 };
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_util::version::FABRO_VERSION;
 use regex::Regex;
@@ -301,18 +302,23 @@ fn render_report_text(
     report.render(styles, verbose, None, max_width)
 }
 
-fn render_report(report: &CheckReport, styles: &Styles, verbose: bool) {
+fn render_report(report: &CheckReport, styles: &Styles, verbose: bool, printer: Printer) {
     let term_width = console::Term::stderr().size().1;
-    print!(
-        "{}",
-        render_report_text(report, styles, verbose, Some(term_width))
-    );
+    {
+        use std::fmt::Write as _;
+        let _ = write!(
+            printer.stdout(),
+            "{}",
+            render_report_text(report, styles, verbose, Some(term_width))
+        );
+    }
 }
 
 pub(crate) async fn run_doctor(
     args: &DoctorArgs,
     verbose: bool,
     globals: &GlobalArgs,
+    printer: Printer,
 ) -> Result<i32, anyhow::Error> {
     let styles = Styles::detect_stdout();
     let spinner = if globals.json {
@@ -360,7 +366,7 @@ pub(crate) async fn run_doctor(
         }],
     };
 
-    let ctx = match CommandContext::for_target(&args.target) {
+    let ctx = match CommandContext::for_target(&args.target, printer) {
         Ok(ctx) => ctx,
         Err(err) => {
             report.sections.push(CheckSection {
@@ -384,7 +390,7 @@ pub(crate) async fn run_doctor(
             if globals.json {
                 print_json_pretty(&report)?;
             } else {
-                render_report(&report, &styles, verbose);
+                render_report(&report, &styles, verbose, printer);
             }
             return Ok(1);
         }
@@ -414,7 +420,7 @@ pub(crate) async fn run_doctor(
             if globals.json {
                 print_json_pretty(&report)?;
             } else {
-                render_report(&report, &styles, verbose);
+                render_report(&report, &styles, verbose, printer);
             }
             return Ok(1);
         }
@@ -443,7 +449,7 @@ pub(crate) async fn run_doctor(
             if globals.json {
                 print_json_pretty(&report)?;
             } else {
-                render_report(&report, &styles, verbose);
+                render_report(&report, &styles, verbose, printer);
             }
             return Ok(1);
         }
@@ -484,7 +490,7 @@ pub(crate) async fn run_doctor(
     if globals.json {
         print_json_pretty(&report)?;
     } else {
-        render_report(&report, &styles, verbose);
+        render_report(&report, &styles, verbose, printer);
     }
 
     Ok(i32::from(report.has_errors()))

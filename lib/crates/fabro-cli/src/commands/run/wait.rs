@@ -2,6 +2,7 @@ use std::io::Write;
 
 use anyhow::{Result, bail};
 use fabro_types::RunId;
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_workflow::records::Conclusion;
 use fabro_workflow::run_status::RunStatus;
@@ -17,8 +18,13 @@ const WAIT_STARTUP_GRACE: std::time::Duration = std::time::Duration::from_millis
 #[cfg(not(test))]
 const WAIT_STARTUP_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
 
-pub(crate) async fn run(args: &WaitArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
-    let ctx = CommandContext::for_target(&args.server)?;
+pub(crate) async fn run(
+    args: &WaitArgs,
+    styles: &Styles,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
+    let ctx = CommandContext::for_target(&args.server, printer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run_info = lookup.resolve(&args.run)?;
     let client = lookup.client();
@@ -73,7 +79,7 @@ pub(crate) async fn run(args: &WaitArgs, styles: &Styles, globals: &GlobalArgs) 
         serde_json::to_writer_pretty(&mut out, &json_value)?;
         writeln!(out)?;
     } else {
-        print_human_output(final_status, &run_id, conclusion.as_ref(), styles);
+        print_human_output(final_status, &run_id, conclusion.as_ref(), styles, printer);
     }
 
     if final_status == RunStatus::Succeeded {
@@ -110,6 +116,7 @@ fn print_human_output(
     run_id: &RunId,
     conclusion: Option<&Conclusion>,
     styles: &Styles,
+    printer: Printer,
 ) {
     let (style, label) = match status {
         RunStatus::Succeeded => (&styles.bold_green, "Succeeded"),
@@ -134,7 +141,8 @@ fn print_human_output(
         None => String::new(),
     };
 
-    eprintln!(
+    fabro_util::printerr!(
+        printer,
         "{} {}{details}",
         status_display,
         styles.dim.apply_to(run_id),
@@ -239,13 +247,25 @@ mod tests {
             total_retries:        0,
         };
         // Just verify no panic; actual stderr output is hard to capture
-        print_human_output(RunStatus::Succeeded, &run_id, Some(&conclusion), &styles);
+        print_human_output(
+            RunStatus::Succeeded,
+            &run_id,
+            Some(&conclusion),
+            &styles,
+            Printer::Default,
+        );
     }
 
     #[test]
     fn human_output_failed_no_conclusion() {
         let styles = no_color_styles();
-        print_human_output(RunStatus::Failed, &fixtures::RUN_6, None, &styles);
+        print_human_output(
+            RunStatus::Failed,
+            &fixtures::RUN_6,
+            None,
+            &styles,
+            Printer::Default,
+        );
     }
 
     #[test]

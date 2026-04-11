@@ -1,12 +1,17 @@
 use anyhow::Result;
+use fabro_util::printer::Printer;
 
 use crate::args::{GlobalArgs, SystemInfoArgs};
 use crate::command_context::CommandContext;
 use crate::server_client;
 use crate::shared::print_json_pretty;
 
-pub(super) async fn info_command(args: &SystemInfoArgs, globals: &GlobalArgs) -> Result<()> {
-    let ctx = CommandContext::for_connection(&args.connection)?;
+pub(super) async fn info_command(
+    args: &SystemInfoArgs,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
+    let ctx = CommandContext::for_connection(&args.connection, printer)?;
     let server = ctx.server().await?;
     let response = server
         .api()

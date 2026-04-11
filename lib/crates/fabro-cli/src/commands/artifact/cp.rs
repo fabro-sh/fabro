@@ -1,18 +1,24 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use fabro_util::printer::Printer;
 
 use crate::args::{ArtifactCpArgs, GlobalArgs};
 use crate::server_client::ServerStoreClient;
 use crate::shared::{print_json_pretty, split_run_path};
 
-pub(super) async fn cp_command(args: &ArtifactCpArgs, globals: &GlobalArgs) -> Result<()> {
+pub(super) async fn cp_command(
+    args: &ArtifactCpArgs,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
     let (run_id_selector, asset_path) = parse_source(&args.source);
     let (run_id, client, entries) = super::resolve_artifacts(
         &args.server,
         run_id_selector,
         args.node.as_deref(),
         args.retry,
+        printer,
     )
     .await?;
 
@@ -57,7 +63,12 @@ pub(super) async fn cp_command(args: &ArtifactCpArgs, globals: &GlobalArgs) -> R
                 }],
             }))?;
         } else {
-            println!("Copied {} to {}", entry.relative_path, dest_file.display());
+            fabro_util::printout!(
+                printer,
+                "Copied {} to {}",
+                entry.relative_path,
+                dest_file.display()
+            );
         }
         return Ok(());
     }
@@ -108,7 +119,8 @@ pub(super) async fn cp_command(args: &ArtifactCpArgs, globals: &GlobalArgs) -> R
     if globals.json {
         print_json_pretty(&serde_json::json!({ "copied": copied }))?;
     } else {
-        println!(
+        fabro_util::printout!(
+            printer,
             "Copied {} artifact(s) to {}",
             entries.len(),
             args.dest.display()

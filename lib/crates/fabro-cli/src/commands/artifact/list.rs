@@ -1,19 +1,29 @@
 use anyhow::Result;
+use fabro_util::printer::Printer;
 
 use crate::args::{ArtifactListArgs, GlobalArgs};
 
-pub(super) async fn list_command(args: &ArtifactListArgs, globals: &GlobalArgs) -> Result<()> {
-    let (_run_id, _client, entries) =
-        super::resolve_artifacts(&args.server, &args.run_id, args.node.as_deref(), args.retry)
-            .await?;
+pub(super) async fn list_command(
+    args: &ArtifactListArgs,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
+    let (_run_id, _client, entries) = super::resolve_artifacts(
+        &args.server,
+        &args.run_id,
+        args.node.as_deref(),
+        args.retry,
+        printer,
+    )
+    .await?;
 
     if globals.json {
-        println!("{}", serde_json::to_string_pretty(&entries)?);
+        fabro_util::printout!(printer, "{}", serde_json::to_string_pretty(&entries)?);
         return Ok(());
     }
 
     if entries.is_empty() {
-        println!("No artifacts found for this run.");
+        fabro_util::printout!(printer, "No artifacts found for this run.");
         return Ok(());
     }
 
@@ -30,15 +40,23 @@ pub(super) async fn list_command(args: &ArtifactListArgs, globals: &GlobalArgs) 
         .unwrap_or(5)
         .max(5);
 
-    println!("{:<node_width$}  {:>retry_width$}  PATH", "NODE", "RETRY");
+    fabro_util::printout!(
+        printer,
+        "{:<node_width$}  {:>retry_width$}  PATH",
+        "NODE",
+        "RETRY"
+    );
     for entry in &entries {
-        println!(
+        fabro_util::printout!(
+            printer,
             "{:<node_width$}  {:>retry_width$}  {}",
-            entry.node_slug, entry.retry, entry.relative_path
+            entry.node_slug,
+            entry.retry,
+            entry.relative_path
         );
     }
-    println!();
-    println!("{} artifact(s)", entries.len());
+    fabro_util::printout!(printer, "");
+    fabro_util::printout!(printer, "{} artifact(s)", entries.len());
 
     Ok(())
 }

@@ -47,7 +47,15 @@ pub(crate) async fn attach_run(
 
     if let (Some(storage_dir), Some(run_id)) = (storage_dir.as_deref(), run_id.as_ref()) {
         let client = server_client::connect_server(storage_dir).await?;
-        return attach_run_with_client(&client, run_id, kill_on_detach, styles, json_output).await;
+        return attach_run_with_client(
+            &client,
+            run_id,
+            kill_on_detach,
+            styles,
+            json_output,
+            fabro_util::printer::Printer::Default,
+        )
+        .await;
     }
 
     Err(anyhow::anyhow!(
@@ -61,6 +69,7 @@ pub(crate) async fn attach_run_with_client(
     kill_on_detach: bool,
     styles: &'static Styles,
     json_output: bool,
+    printer: fabro_util::printer::Printer,
 ) -> Result<ExitCode> {
     let state = client.get_run_state(run_id).await?;
     let auto_approve = state.run.as_ref().is_some_and(|record| {
@@ -103,6 +112,7 @@ pub(crate) async fn attach_run_with_client(
             kill_on_detach,
             json_output,
         },
+        printer,
     )
     .await
 }
@@ -140,6 +150,7 @@ async fn attach_live_run_with_client(
     mut stream: server_client::RunAttachEventStream,
     styles: &'static Styles,
     opts: AttachOptions,
+    printer: fabro_util::printer::Printer,
 ) -> Result<ExitCode> {
     let is_tty = std::io::stderr().is_terminal();
     let mut progress_ui = run_progress::ProgressUI::new(is_tty, opts.verbose);
@@ -158,6 +169,7 @@ async fn attach_live_run_with_client(
         &mut progress_ui,
         styles,
         opts.json_output,
+        printer,
     )
     .await?
     {
@@ -167,7 +179,7 @@ async fn attach_live_run_with_client(
     loop {
         let next_event = tokio::select! {
             _ = &mut ctrl_c_signal => {
-                handle_detach_signal(client, run_id, opts.kill_on_detach).await;
+                handle_detach_signal(client, run_id, opts.kill_on_detach, printer).await;
                 finish_progress(&mut progress_ui, opts.json_output);
                 return Ok(ExitCode::from(1));
             }
@@ -195,6 +207,7 @@ async fn attach_live_run_with_client(
                 &mut progress_ui,
                 styles,
                 opts.json_output,
+                printer,
             )
             .await?
             {
@@ -211,13 +224,14 @@ async fn handle_pending_server_interview(
     progress_ui: &mut run_progress::ProgressUI,
     styles: &'static Styles,
     json_output: bool,
+    printer: fabro_util::printer::Printer,
 ) -> Result<Option<ExitCode>> {
     let Some(question) = client.list_run_questions(run_id).await?.into_iter().next() else {
         return Ok(None);
     };
 
     if json_pending_interview_requires_manual_input(json_output, auto_approve) {
-        eprintln!("{JSON_INTERVIEW_MESSAGE}");
+        fabro_util::printerr!(printer, "{JSON_INTERVIEW_MESSAGE}");
         return Ok(Some(ExitCode::from(1)));
     }
     if json_output {
@@ -231,7 +245,7 @@ async fn handle_pending_server_interview(
     show_progress(progress_ui, json_output);
 
     if answer_requires_reattach(&answer) {
-        eprintln!("{INTERVIEW_UNANSWERED_MESSAGE}");
+        fabro_util::printerr!(printer, "{INTERVIEW_UNANSWERED_MESSAGE}");
         return Ok(Some(ExitCode::from(1)));
     }
 
@@ -243,6 +257,7 @@ async fn handle_detach_signal(
     client: &server_client::ServerStoreClient,
     run_id: &RunId,
     kill_on_detach: bool,
+    printer: fabro_util::printer::Printer,
 ) {
     if kill_on_detach {
         let _ = client.cancel_run(run_id).await;
@@ -258,7 +273,10 @@ async fn handle_detach_signal(
             sleep(Duration::from_millis(100)).await;
         }
     } else {
-        eprintln!("Detached from run (engine continues in background)");
+        fabro_util::printerr!(
+            printer,
+            "Detached from run (engine continues in background)"
+        );
     }
 }
 
@@ -598,7 +616,13 @@ mod tests {
         });
         let client = server_client::ServerStoreClient::new_no_proxy(&server.base_url()).unwrap();
 
-        handle_detach_signal(&client, &run_id, true).await;
+        handle_detach_signal(
+            &client,
+            &run_id,
+            true,
+            fabro_util::printer::Printer::Default,
+        )
+        .await;
 
         cancel_mock.assert();
         state_mock.assert();

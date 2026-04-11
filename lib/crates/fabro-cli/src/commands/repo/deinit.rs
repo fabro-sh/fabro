@@ -1,8 +1,9 @@
 use anyhow::{Context, Result, bail};
+use fabro_util::printer::Printer;
 
 use crate::args::GlobalArgs;
 
-pub(crate) fn run_deinit(globals: &GlobalArgs) -> Result<Vec<String>> {
+pub(crate) fn run_deinit(globals: &GlobalArgs, printer: Printer) -> Result<Vec<String>> {
     let repo_root = super::init::git_repo_root()?;
     let mut removed = Vec::new();
 
@@ -20,7 +21,8 @@ pub(crate) fn run_deinit(globals: &GlobalArgs) -> Result<Vec<String>> {
         .with_context(|| format!("failed to remove {}", fabro_dir.display()))?;
     removed.push(".fabro/".to_string());
     if !globals.json {
-        eprintln!(
+        fabro_util::printerr!(
+            printer,
             "  {} {}",
             green.apply_to("✔"),
             dim.apply_to("removed .fabro/")
@@ -28,7 +30,8 @@ pub(crate) fn run_deinit(globals: &GlobalArgs) -> Result<Vec<String>> {
     }
 
     if !globals.json {
-        eprintln!(
+        fabro_util::printerr!(
+            printer,
             "\n{}",
             console::Style::new()
                 .bold()

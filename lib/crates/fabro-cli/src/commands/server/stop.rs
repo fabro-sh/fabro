@@ -3,12 +3,13 @@ use std::thread;
 use std::time::Duration;
 
 use fabro_server::bind::Bind;
+use fabro_util::printer::Printer;
 
 use super::record;
 
-pub(crate) fn execute(storage_dir: &Path, timeout: Duration) {
+pub(crate) fn execute(storage_dir: &Path, timeout: Duration, printer: Printer) {
     let Some(active) = record::active_server_record_details(storage_dir) else {
-        eprintln!("Server is not running");
+        fabro_util::printerr!(printer, "Server is not running");
         std::process::exit(1);
     };
     let record = active.record;
@@ -36,5 +37,5 @@ pub(crate) fn execute(storage_dir: &Path, timeout: Duration) {
         let _ = std::fs::remove_file(path);
     }
 
-    eprintln!("Server stopped");
+    fabro_util::printerr!(printer, "Server stopped");
 }

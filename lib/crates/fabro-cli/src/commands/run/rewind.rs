@@ -4,6 +4,7 @@ use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_checkpoint::git::Store;
 use fabro_types::run_event::{CheckpointCompletedProps, RunRewoundProps, RunSubmittedProps};
 use fabro_types::{EventBody, RunEvent};
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use fabro_workflow::git::MetadataStore;
 use fabro_workflow::operations::{
@@ -28,9 +29,14 @@ pub(crate) struct TimelineEntryJson {
     run_commit_sha: Option<String>,
 }
 
-pub(crate) async fn run(args: &RewindArgs, styles: &Styles, globals: &GlobalArgs) -> Result<()> {
+pub(crate) async fn run(
+    args: &RewindArgs,
+    styles: &Styles,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
     let repo = Repository::discover(".").context("not in a git repository")?;
-    let ctx = CommandContext::for_target(&args.server)?;
+    let ctx = CommandContext::for_target(&args.server, printer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run_id)?;
     let run_id = run.run_id();
@@ -48,7 +54,7 @@ pub(crate) async fn run(args: &RewindArgs, styles: &Styles, globals: &GlobalArgs
             print_json_pretty(&timeline_entries_json(&timeline))?;
             return Ok(());
         }
-        print_timeline(&timeline, styles);
+        print_timeline(&timeline, styles, printer);
         return Ok(());
     }
 
@@ -70,7 +76,8 @@ pub(crate) async fn run(args: &RewindArgs, styles: &Styles, globals: &GlobalArgs
             "target": args.target.as_deref().unwrap(),
         }))?;
     } else {
-        eprintln!(
+        fabro_util::printerr!(
+            printer,
             "\nTo resume: fabro resume {}",
             &run_id_string[..8.min(run_id_string.len())]
         );
@@ -205,9 +212,9 @@ fn run_event(run_id: fabro_types::RunId, node_id: Option<String>, body: EventBod
     }
 }
 
-pub(crate) fn print_timeline(timeline: &RunTimeline, styles: &Styles) {
+pub(crate) fn print_timeline(timeline: &RunTimeline, styles: &Styles, printer: Printer) {
     if timeline.entries.is_empty() {
-        eprintln!("No checkpoints found.");
+        fabro_util::printerr!(printer, "No checkpoints found.");
         return;
     }
 

@@ -1,5 +1,6 @@
 use anyhow::Result;
 use fabro_api::Client;
+use fabro_util::printer::Printer;
 
 use crate::args::{GlobalArgs, SecretListArgs};
 use crate::server_client;
@@ -9,6 +10,7 @@ pub(super) async fn list_command(
     client: &Client,
     args: &SecretListArgs,
     globals: &GlobalArgs,
+    printer: Printer,
 ) -> Result<()> {
     let response = client
         .list_secrets()
@@ -22,7 +24,7 @@ pub(super) async fn list_command(
     }
     let _ = args;
     for secret in secrets {
-        println!("{}\t{}", secret.name, secret.updated_at);
+        fabro_util::printout!(printer, "{}\t{}", secret.name, secret.updated_at);
     }
     Ok(())
 }

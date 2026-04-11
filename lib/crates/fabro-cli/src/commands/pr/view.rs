@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use fabro_util::printer::Printer;
 use tracing::info;
 
 use crate::args::{GlobalArgs, PrViewArgs};
@@ -8,8 +9,9 @@ pub(super) async fn view_command(
     args: PrViewArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
     globals: &GlobalArgs,
+    printer: Printer,
 ) -> Result<()> {
-    let (record, _run_id) = super::load_pr_record(&args.server, &args.run_id).await?;
+    let (record, _run_id) = super::load_pr_record(&args.server, &args.run_id, printer).await?;
 
     let creds = github_app.context(
         "GitHub App credentials required — set GITHUB_APP_PRIVATE_KEY and configure app_id",
@@ -32,23 +34,28 @@ pub(super) async fn view_command(
         return Ok(());
     }
 
-    println!("#{} {}", detail.number, detail.title);
+    fabro_util::printout!(printer, "#{} {}", detail.number, detail.title);
     let state_display = if detail.draft { "draft" } else { &detail.state };
-    println!("State:   {state_display}");
-    println!("URL:     {}", detail.html_url);
-    println!(
+    fabro_util::printout!(printer, "State:   {state_display}");
+    fabro_util::printout!(printer, "URL:     {}", detail.html_url);
+    fabro_util::printout!(
+        printer,
         "Branch:  {} -> {}",
-        detail.head.ref_name, detail.base.ref_name
+        detail.head.ref_name,
+        detail.base.ref_name
     );
-    println!("Author:  {}", detail.user.login);
-    println!(
+    fabro_util::printout!(printer, "Author:  {}", detail.user.login);
+    fabro_util::printout!(
+        printer,
         "Changes: +{} -{} ({} files)",
-        detail.additions, detail.deletions, detail.changed_files
+        detail.additions,
+        detail.deletions,
+        detail.changed_files
     );
     if let Some(body) = &detail.body {
         if !body.is_empty() {
-            println!();
-            println!("{body}");
+            fabro_util::printout!(printer, "");
+            fabro_util::printout!(printer, "{body}");
         }
     }
 

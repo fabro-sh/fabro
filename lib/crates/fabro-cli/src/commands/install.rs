@@ -17,6 +17,7 @@ use fabro_config::user::SETTINGS_CONFIG_FILENAME;
 use fabro_config::{Storage, legacy_env};
 use fabro_model::Provider;
 use fabro_server::secret_store::SecretStore;
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use rand::Rng;
 use tokio::net::TcpListener;
@@ -430,6 +431,7 @@ async fn setup_github_app(
     web_url: &str,
     owner: &GitHubAppOwner,
     username: Option<&str>,
+    printer: Printer,
 ) -> Result<Vec<(String, String)>> {
     let app_name = owner.app_name(username);
 
@@ -521,13 +523,14 @@ async fn setup_github_app(
 
     // Open browser
     let url = format!("http://127.0.0.1:{port}/");
-    eprintln!("  {}", s.dim.apply_to("Opening browser..."));
+    fabro_util::printerr!(printer, "  {}", s.dim.apply_to("Opening browser..."));
     if let Err(e) = open::that(&url) {
-        eprintln!("  Could not open browser automatically: {e}");
-        eprintln!("  Please open this URL manually: {url}");
+        fabro_util::printerr!(printer, "  Could not open browser automatically: {e}");
+        fabro_util::printerr!(printer, "  Please open this URL manually: {url}");
     }
 
-    eprintln!(
+    fabro_util::printerr!(
+        printer,
         "  {}",
         s.dim.apply_to("Waiting for GitHub... (Ctrl+C to cancel)")
     );
@@ -538,7 +541,11 @@ async fn setup_github_app(
         .context("did not receive callback from GitHub (was the browser flow completed?)")?;
 
     // Exchange code for app credentials
-    eprintln!("  {}", s.dim.apply_to("Exchanging code with GitHub..."));
+    fabro_util::printerr!(
+        printer,
+        "  {}",
+        s.dim.apply_to("Exchanging code with GitHub...")
+    );
     let client = reqwest::Client::new();
     let resp = client
         .post(format!(
@@ -601,12 +608,14 @@ async fn setup_github_app(
     git_table.insert("slug".into(), toml::Value::String(slug.clone()));
     git_table.insert("client_id".into(), toml::Value::String(client_id));
     std::fs::write(&user_toml_path, toml::to_string_pretty(&doc)?)?;
-    eprintln!(
+    fabro_util::printerr!(
+        printer,
         "  {}",
         s.dim
             .apply_to(format!("Wrote {}", user_toml_path.display()))
     );
-    eprintln!(
+    fabro_util::printerr!(
+        printer,
         "  {}",
         s.dim
             .apply_to(format!("App: https://github.com/apps/{slug}"))
@@ -657,7 +666,11 @@ async fn persist_install_secrets(
     Ok(())
 }
 
-pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Result<()> {
+pub(crate) async fn run_install(
+    args: &InstallArgs,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
     globals.require_no_json()?;
     let web_url = &args.web_url;
     let s = Styles::detect_stderr();
@@ -666,16 +679,21 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
     let storage_dir = user_config::storage_dir(&cli_settings)?;
     let server_was_running = record::active_server_record(&storage_dir).is_some();
 
-    eprintln!();
-    eprintln!("  {}{}", emoji, s.bold.apply_to("Fabro Install"));
-    eprintln!();
-    eprintln!(
+    fabro_util::printerr!(printer, "");
+    fabro_util::printerr!(printer, "  {}{}", emoji, s.bold.apply_to("Fabro Install"));
+    fabro_util::printerr!(printer, "");
+    fabro_util::printerr!(
+        printer,
         "  {}",
         s.dim
             .apply_to("Let's get Fabro set up. This will configure your")
     );
-    eprintln!("  {}", s.dim.apply_to("LLM providers and GitHub App."));
-    eprintln!();
+    fabro_util::printerr!(
+        printer,
+        "  {}",
+        s.dim.apply_to("LLM providers and GitHub App.")
+    );
+    fabro_util::printerr!(printer, "");
 
     let fabro_dir = fabro_util::Home::from_env().root().to_path_buf();
     std::fs::create_dir_all(&fabro_dir)?;
@@ -683,17 +701,19 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
     {
         let env_path = legacy_env::legacy_env_file_path();
         if env_path.exists() {
-            eprintln!(
+            fabro_util::printerr!(
+                printer,
                 "  Warning: {} is no longer read by fabro server. This install will persist credentials in the server secret store instead.",
                 env_path.display()
             );
-            eprintln!();
+            fabro_util::printerr!(printer, "");
         }
     }
 
     // Pre-flight checks
     {
-        eprintln!(
+        fabro_util::printerr!(
+            printer,
             "  {}",
             s.dim.apply_to("[Pre-flight] System dependency checks")
         );
@@ -701,9 +721,9 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
         let dep_check = doctor::check_system_deps(doctor::DEP_SPECS, &dep_outcomes);
 
         if dep_check.status == doctor::CheckStatus::Error {
-            eprintln!("  Missing required system dependencies:");
+            fabro_util::printerr!(printer, "  Missing required system dependencies:");
             for detail in &dep_check.details {
-                eprintln!("    {}", detail.text);
+                fabro_util::printerr!(printer, "    {}", detail.text);
             }
             bail!("Install missing required tools before running setup");
         }
@@ -723,22 +743,22 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
                         .status()
                         .context("failed to run brew install graphviz")?;
                     if !status.success() {
-                        eprintln!("  Warning: brew install graphviz failed");
+                        fabro_util::printerr!(printer, "  Warning: brew install graphviz failed");
                     }
                 }
             }
         }
 
         for detail in &dep_check.details {
-            eprintln!("  {}", detail.text);
+            fabro_util::printerr!(printer, "  {}", detail.text);
         }
-        eprintln!();
+        fabro_util::printerr!(printer, "");
     }
 
     // Step 1: LLM Providers
-    eprintln!("  {}", s.bold.apply_to("Step 1 · LLM Providers"));
-    eprintln!("  {}", s.dim.apply_to("──────────────────────"));
-    eprintln!();
+    fabro_util::printerr!(printer, "  {}", s.bold.apply_to("Step 1 · LLM Providers"));
+    fabro_util::printerr!(printer, "  {}", s.dim.apply_to("──────────────────────"));
+    fabro_util::printerr!(printer, "");
 
     let mut secret_pairs: Vec<(String, String)> = Vec::new();
     let mut configured_providers: Vec<Provider> = Vec::new();
@@ -757,7 +777,7 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
         .await??;
 
         if use_oauth {
-            let pairs = run_openai_oauth_or_api_key(&s).await?;
+            let pairs = run_openai_oauth_or_api_key(&s, printer).await?;
             secret_pairs.extend(pairs);
             configured_providers.push(Provider::OpenAi);
             openai_via_oauth = true;
@@ -780,14 +800,14 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
 
         let first_provider = primary_providers[primary_idx];
         {
-            let (env_var, key) = prompt_and_validate_key(first_provider, &s).await?;
+            let (env_var, key) = prompt_and_validate_key(first_provider, &s, printer).await?;
             secret_pairs.push((env_var, key));
             configured_providers.push(first_provider);
         }
     }
 
     // Additional providers
-    eprintln!();
+    fabro_util::printerr!(printer, "");
     let add_more =
         spawn_blocking(|| prompt_confirm("Set up additional LLM providers?", false)).await??;
 
@@ -814,16 +834,16 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
 
         for idx in selected_indices {
             let provider = remaining_providers[idx];
-            let (env_var, key) = prompt_and_validate_key(provider, &s).await?;
+            let (env_var, key) = prompt_and_validate_key(provider, &s, printer).await?;
             secret_pairs.push((env_var, key));
         }
     }
-    eprintln!();
+    fabro_util::printerr!(printer, "");
 
     // Step 2: GitHub App
-    eprintln!("  {}", s.bold.apply_to("Step 2 · GitHub App"));
-    eprintln!("  {}", s.dim.apply_to("───────────────────"));
-    eprintln!();
+    fabro_util::printerr!(printer, "  {}", s.bold.apply_to("Step 2 · GitHub App"));
+    fabro_util::printerr!(printer, "  {}", s.dim.apply_to("───────────────────"));
+    fabro_util::printerr!(printer, "");
 
     {
         let setup_github =
@@ -831,8 +851,15 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
 
         if setup_github {
             let (owner, username) = prompt_github_app_owner(&s).await?;
-            let github_env_pairs =
-                setup_github_app(&fabro_dir, &s, web_url, &owner, username.as_deref()).await?;
+            let github_env_pairs = setup_github_app(
+                &fabro_dir,
+                &s,
+                web_url,
+                &owner,
+                username.as_deref(),
+                printer,
+            )
+            .await?;
             let slug = {
                 let user_toml_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);
                 let toml_content = std::fs::read_to_string(&user_toml_path).unwrap_or_default();
@@ -844,23 +871,24 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
                     .unwrap_or("unknown")
                     .to_string()
             };
-            eprintln!(
+            fabro_util::printerr!(
+                printer,
                 "  {} GitHub App registered ({})",
                 s.green.apply_to("✔"),
                 slug
             );
             secret_pairs.extend(github_env_pairs);
         } else {
-            eprintln!("  Skipped");
+            fabro_util::printerr!(printer, "  Skipped");
         }
     }
-    eprintln!();
+    fabro_util::printerr!(printer, "");
 
     // Server configuration
     {
-        eprintln!("  {}", s.bold.apply_to("Server · Configuration"));
-        eprintln!("  {}", s.dim.apply_to("─────────────────────"));
-        eprintln!();
+        fabro_util::printerr!(printer, "  {}", s.bold.apply_to("Server · Configuration"));
+        fabro_util::printerr!(printer, "  {}", s.dim.apply_to("─────────────────────"));
+        fabro_util::printerr!(printer, "");
 
         let config_path = fabro_dir.join(SETTINGS_CONFIG_FILENAME);
         let write_config = if config_path.exists() {
@@ -884,32 +912,47 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
             };
             merge_server_settings(&mut doc, &username)?;
             std::fs::write(&config_path, toml::to_string_pretty(&doc)?)?;
-            eprintln!(
+            fabro_util::printerr!(
+                printer,
                 "  {}",
                 s.dim.apply_to(format!("Wrote {}", config_path.display()))
             );
         } else {
-            eprintln!("  {}", s.dim.apply_to("Keeping existing settings.toml"));
+            fabro_util::printerr!(
+                printer,
+                "  {}",
+                s.dim.apply_to("Keeping existing settings.toml")
+            );
         }
-        eprintln!();
+        fabro_util::printerr!(printer, "");
     }
 
     // Secrets and certificates
     {
-        eprintln!(
+        fabro_util::printerr!(
+            printer,
             "  {}",
             s.dim.apply_to("Generating secrets and certificates...")
         );
 
         let session_secret = generate_session_secret();
-        eprintln!("  {} Session secret generated", s.green.apply_to("✔"));
+        fabro_util::printerr!(
+            printer,
+            "  {} Session secret generated",
+            s.green.apply_to("✔")
+        );
 
         let (jwt_private_pem, jwt_public_pem) = generate_jwt_keypair()?;
-        eprintln!("  {} Ed25519 JWT keypair generated", s.green.apply_to("✔"));
+        fabro_util::printerr!(
+            printer,
+            "  {} Ed25519 JWT keypair generated",
+            s.green.apply_to("✔")
+        );
 
         let certs_dir = fabro_dir.join("certs");
         generate_mtls_certs(&certs_dir)?;
-        eprintln!(
+        fabro_util::printerr!(
+            printer,
             "  {} mTLS CA + server certificates generated",
             s.green.apply_to("✔")
         );
@@ -923,43 +966,46 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
             ("SESSION_SECRET".to_string(), session_secret),
         ];
         secret_pairs.extend(server_env_pairs);
-        eprintln!();
+        fabro_util::printerr!(printer, "");
 
-        eprintln!("  To start Fabro, run these commands:");
-        eprintln!();
-        eprintln!("    fabro server start");
-        eprintln!();
+        fabro_util::printerr!(printer, "  To start Fabro, run these commands:");
+        fabro_util::printerr!(printer, "");
+        fabro_util::printerr!(printer, "    fabro server start");
+        fabro_util::printerr!(printer, "");
     }
 
     persist_install_secrets(&storage_dir, &secret_pairs, server_was_running).await?;
-    eprintln!(
+    fabro_util::printerr!(
+        printer,
         "  {} Saved {} secrets to {}",
         s.green.apply_to("✔"),
         secret_pairs.len(),
         Storage::new(&storage_dir).secrets_path().display()
     );
     if server_was_running {
-        eprintln!(
+        fabro_util::printerr!(
+            printer,
             "  Warning: the local fabro server was already running. Restart it to pick up startup-time features that only initialize at boot."
         );
     }
-    eprintln!();
+    fabro_util::printerr!(printer, "");
 
     // Verify setup
     let run_doctor =
         spawn_blocking(|| prompt_confirm("Run fabro doctor to verify?", true)).await??;
 
     if run_doctor {
-        eprintln!();
+        fabro_util::printerr!(printer, "");
         let doctor_args = DoctorArgs {
             target:  ServerTargetArgs::default(),
             verbose: true,
         };
-        let _ = doctor::run_doctor(&doctor_args, true, globals).await?;
+        let _ = doctor::run_doctor(&doctor_args, true, globals, printer).await?;
     }
 
-    eprintln!();
-    eprintln!(
+    fabro_util::printerr!(printer, "");
+    fabro_util::printerr!(
+        printer,
         "  Setup complete! Go to your project and run {} to get started.",
         s.bold_cyan.apply_to("fabro repo init")
     );

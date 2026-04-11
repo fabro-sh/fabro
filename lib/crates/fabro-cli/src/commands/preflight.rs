@@ -2,6 +2,7 @@ use anyhow::bail;
 use fabro_config::load::load_settings_user;
 use fabro_config::user::active_settings_path;
 use fabro_types::settings::cli::OutputVerbosity;
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 
 use crate::args::{GlobalArgs, PreflightArgs};
@@ -13,9 +14,13 @@ use crate::commands::run::overrides::preflight_args_layer;
 use crate::manifest_builder::{ManifestBuildInput, build_run_manifest, preflight_manifest_args};
 use crate::shared::print_json_pretty;
 
-pub(crate) async fn execute(mut args: PreflightArgs, globals: &GlobalArgs) -> anyhow::Result<()> {
+pub(crate) async fn execute(
+    mut args: PreflightArgs,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> anyhow::Result<()> {
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
-    let ctx = CommandContext::for_target(&args.target)?;
+    let ctx = CommandContext::for_target(&args.target, printer)?;
     args.verbose = args.verbose || ctx.cli_settings().output.verbosity == OutputVerbosity::Verbose;
 
     let manifest = build_run_manifest(ManifestBuildInput {
@@ -34,7 +39,12 @@ pub(crate) async fn execute(mut args: PreflightArgs, globals: &GlobalArgs) -> an
     if globals.json {
         print_json_pretty(&response)?;
     } else {
-        print_preflight_workflow_summary(&response.workflow, Some(&manifest.target_path), styles);
+        print_preflight_workflow_summary(
+            &response.workflow,
+            Some(&manifest.target_path),
+            styles,
+            printer,
+        );
         if diagnostics
             .iter()
             .any(|diagnostic| diagnostic.severity == fabro_validate::Severity::Error)
@@ -43,7 +53,14 @@ pub(crate) async fn execute(mut args: PreflightArgs, globals: &GlobalArgs) -> an
         }
         let report = api_check_report_to_local(&response.checks);
         let term_width = console::Term::stderr().size().1;
-        print!("{}", report.render(styles, true, None, Some(term_width)));
+        {
+            use std::fmt::Write as _;
+            let _ = write!(
+                printer.stdout(),
+                "{}",
+                report.render(styles, true, None, Some(term_width))
+            );
+        }
     }
 
     if diagnostics

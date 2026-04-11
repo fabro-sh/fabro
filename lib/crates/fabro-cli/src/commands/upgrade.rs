@@ -3,6 +3,7 @@ use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use fabro_util::printer::Printer;
 use semver::Version;
 use sha2::{Digest, Sha256};
 use tokio::process::Command as TokioCommand;
@@ -223,7 +224,11 @@ impl UpgradeCheckState {
 
 // ── Main upgrade command ───────────────────────────────────────────────────
 
-pub(crate) async fn run_upgrade(args: UpgradeArgs, globals: &GlobalArgs) -> Result<()> {
+pub(crate) async fn run_upgrade(
+    args: UpgradeArgs,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
     let backend = select_backend().await;
 
     let current =
@@ -249,7 +254,7 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, globals: &GlobalArgs) -> Resu
                 );
             }
             // Explicit --version: warn + prompt
-            eprintln!("Warning: downgrading from {current} to {target}");
+            fabro_util::printerr!(printer, "Warning: downgrading from {current} to {target}");
             if std::io::stdin().is_terminal() {
                 let confirm = dialoguer::Confirm::new()
                     .with_prompt("Continue with downgrade?")
@@ -269,7 +274,7 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, globals: &GlobalArgs) -> Resu
                     "installed_version": current.to_string(),
                 }))?;
             } else {
-                eprintln!("Already on version {current}");
+                fabro_util::printerr!(printer, "Already on version {current}");
             }
             return Ok(());
         }
@@ -284,9 +289,9 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, globals: &GlobalArgs) -> Resu
                 "dry_run": true,
             }))?;
         } else {
-            eprintln!("Would upgrade fabro from {current} to {target}");
-            eprintln!("  tag: {tag}");
-            eprintln!("  target: {}", detect_target()?);
+            fabro_util::printerr!(printer, "Would upgrade fabro from {current} to {target}");
+            fabro_util::printerr!(printer, "  tag: {tag}");
+            fabro_util::printerr!(printer, "  target: {}", detect_target()?);
         }
         return Ok(());
     }
@@ -305,7 +310,7 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, globals: &GlobalArgs) -> Resu
         .context("failed to create temp directory")?;
 
     // Download tarball and checksum in parallel
-    eprintln!("Downloading fabro {target}...");
+    fabro_util::printerr!(printer, "Downloading fabro {target}...");
     let (tarball_path, checksum_path) = tokio::try_join!(
         backend.download_release(&tag, &tarball_name, tmp_dir.path()),
         backend.download_release(&tag, &checksum_name, tmp_dir.path()),
@@ -358,7 +363,7 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, globals: &GlobalArgs) -> Resu
             "installed_version": target.to_string(),
         }))?;
     } else {
-        eprintln!("Upgraded fabro to {target}");
+        fabro_util::printerr!(printer, "Upgraded fabro to {target}");
     }
     Ok(())
 }
@@ -371,18 +376,19 @@ pub(crate) async fn run_upgrade(args: UpgradeArgs, globals: &GlobalArgs) -> Resu
 pub(crate) fn spawn_upgrade_check(
     no_upgrade_check: bool,
     upgrade_check_enabled: bool,
+    printer: Printer,
 ) -> Option<JoinHandle<()>> {
     if no_upgrade_check || !upgrade_check_enabled {
         return None;
     }
-    Some(tokio::spawn(async {
-        if let Err(e) = check_and_print_notice().await {
+    Some(tokio::spawn(async move {
+        if let Err(e) = check_and_print_notice(printer).await {
             debug!(%e, "Upgrade check failed (silently swallowed)");
         }
     }))
 }
 
-async fn check_and_print_notice() -> Result<()> {
+async fn check_and_print_notice(printer: Printer) -> Result<()> {
     let state_path = fabro_util::Home::from_env().root().join(LAST_CHECK_FILE);
 
     let current = Version::parse(env!("CARGO_PKG_VERSION"))?;
@@ -392,7 +398,7 @@ async fn check_and_print_notice() -> Result<()> {
         if !state.is_stale() {
             if let Ok(latest) = Version::parse(&state.latest_version) {
                 if latest > current {
-                    print_notice(&current, &latest);
+                    print_notice(&current, &latest, printer);
                 }
             }
             return Ok(());
@@ -416,15 +422,18 @@ async fn check_and_print_notice() -> Result<()> {
     let _ = state.save(&state_path);
 
     if latest > current {
-        print_notice(&current, &latest);
+        print_notice(&current, &latest, printer);
     }
 
     Ok(())
 }
 
-fn print_notice(current: &Version, latest: &Version) {
-    eprintln!("A new version of fabro is available: {latest} (current: {current})");
-    eprintln!("Run `fabro upgrade` to update.");
+fn print_notice(current: &Version, latest: &Version, printer: Printer) {
+    fabro_util::printerr!(
+        printer,
+        "A new version of fabro is available: {latest} (current: {current})"
+    );
+    fabro_util::printerr!(printer, "Run `fabro upgrade` to update.");
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────

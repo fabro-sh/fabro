@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use fabro_util::printer::Printer;
 use tracing::info;
 
 use crate::args::{GlobalArgs, PreviewArgs};
@@ -6,8 +7,8 @@ use crate::command_context::CommandContext;
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
 
-pub(crate) async fn run(args: PreviewArgs, globals: &GlobalArgs) -> Result<()> {
-    let ctx = CommandContext::for_target(&args.server)?;
+pub(crate) async fn run(args: PreviewArgs, globals: &GlobalArgs, printer: Printer) -> Result<()> {
+    let ctx = CommandContext::for_target(&args.server, printer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();
@@ -35,9 +36,19 @@ pub(crate) async fn run(args: PreviewArgs, globals: &GlobalArgs) -> Result<()> {
             }
         }
     } else if let Some(token) = response.token.as_deref() {
-        print!("{}", format_standard_output(&response.url, token));
+        {
+            use std::fmt::Write as _;
+            let _ = write!(
+                printer.stdout(),
+                "{}",
+                format_standard_output(&response.url, token)
+            );
+        }
     } else {
-        print!("{}", format_signed_output(&response.url));
+        {
+            use std::fmt::Write as _;
+            let _ = write!(printer.stdout(), "{}", format_signed_output(&response.url));
+        }
     }
 
     if args.open && !globals.json {

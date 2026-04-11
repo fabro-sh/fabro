@@ -6,6 +6,7 @@ use fabro_config::Storage;
 use fabro_server::bind::BindRequest;
 use fabro_server::serve;
 use fabro_server::serve::ServeArgs;
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 
 use super::record;
@@ -16,7 +17,9 @@ pub(crate) async fn execute(
     bind: BindRequest,
     storage_dir: Option<PathBuf>,
     styles: &'static Styles,
+    printer: Printer,
 ) -> Result<()> {
+    let _ = printer;
     serve_args.bind = Some(bind.to_string());
 
     let _record_guard = scopeguard::guard(record_path.clone(), |path| {

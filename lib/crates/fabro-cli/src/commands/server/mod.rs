@@ -10,6 +10,7 @@ use anyhow::Result;
 use fabro_server::bind;
 use fabro_server::bind::BindRequest;
 use fabro_server::serve::ServeArgs;
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 
 use crate::args::{
@@ -17,7 +18,11 @@ use crate::args::{
 };
 use crate::user_config;
 
-pub(crate) async fn dispatch(command: ServerCommand, _globals: &GlobalArgs) -> Result<()> {
+pub(crate) async fn dispatch(
+    command: ServerCommand,
+    _globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
     match command {
         ServerCommand::Start(ServerStartArgs {
             storage_dir,
@@ -40,6 +45,7 @@ pub(crate) async fn dispatch(command: ServerCommand, _globals: &GlobalArgs) -> R
                 serve_args,
                 storage_dir,
                 styles,
+                printer,
             ))
             .await
         }
@@ -49,13 +55,13 @@ pub(crate) async fn dispatch(command: ServerCommand, _globals: &GlobalArgs) -> R
         }) => {
             let settings = user_config::load_settings_with_storage_dir(storage_dir.as_deref())?;
             let storage_dir = user_config::storage_dir(&settings)?;
-            stop::execute(&storage_dir, Duration::from_secs(timeout));
+            stop::execute(&storage_dir, Duration::from_secs(timeout), printer);
             Ok(())
         }
         ServerCommand::Status(ServerStatusArgs { storage_dir, json }) => {
             let settings = user_config::load_settings_with_storage_dir(storage_dir.as_deref())?;
             let storage_dir = user_config::storage_dir(&settings)?;
-            status::execute(&storage_dir, json)
+            status::execute(&storage_dir, json, printer)
         }
         ServerCommand::Serve(ServerServeArgs {
             storage_dir,
@@ -85,6 +91,7 @@ pub(crate) async fn dispatch(command: ServerCommand, _globals: &GlobalArgs) -> R
                 bind_addr,
                 storage_dir.clone_path(),
                 styles,
+                printer,
             ))
             .await
         }

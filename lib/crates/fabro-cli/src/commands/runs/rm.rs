@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use fabro_util::printer::Printer;
 
 use super::short_run_id;
 use crate::args::{GlobalArgs, RunsRemoveArgs};
@@ -9,10 +10,14 @@ use crate::server_runs::{
 };
 use crate::shared::print_json_pretty;
 
-pub(crate) async fn remove_command(args: &RunsRemoveArgs, globals: &GlobalArgs) -> Result<()> {
-    let ctx = CommandContext::for_target(&args.server)?;
+pub(crate) async fn remove_command(
+    args: &RunsRemoveArgs,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
+    let ctx = CommandContext::for_target(&args.server, printer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
-    remove_from(args, lookup.client(), lookup.runs(), globals).await
+    remove_from(args, lookup.client(), lookup.runs(), globals, printer).await
 }
 
 async fn remove_from(
@@ -20,6 +25,7 @@ async fn remove_from(
     client: &server_client::ServerStoreClient,
     runs: &[ServerRunSummaryInfo],
     globals: &GlobalArgs,
+    printer: Printer,
 ) -> Result<()> {
     let mut had_errors = false;
     let mut removed = Vec::new();
@@ -30,7 +36,7 @@ async fn remove_from(
             Ok(run) => run,
             Err(err) => {
                 if !globals.json {
-                    eprintln!("error: {identifier}: {err}");
+                    fabro_util::printerr!(printer, "error: {identifier}: {err}");
                 }
                 errors.push(serde_json::json!({
                     "identifier": identifier,
@@ -49,7 +55,7 @@ async fn remove_from(
                 run.status()
             );
             if !globals.json {
-                eprintln!("{error}");
+                fabro_util::printerr!(printer, "{error}");
             }
             errors.push(serde_json::json!({
                 "identifier": identifier,
@@ -62,7 +68,7 @@ async fn remove_from(
         let run_id = run.run_id().to_string();
         if let Err(err) = delete_server_run(client, &run).await {
             if !globals.json {
-                eprintln!("error: {identifier}: {err}");
+                fabro_util::printerr!(printer, "error: {identifier}: {err}");
             }
             errors.push(serde_json::json!({
                 "identifier": identifier,
@@ -73,7 +79,7 @@ async fn remove_from(
         }
         removed.push(run_id.clone());
         if !globals.json {
-            eprintln!("{}", short_run_id(&run_id));
+            fabro_util::printerr!(printer, "{}", short_run_id(&run_id));
         }
     }
 

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use fabro_util::printer::Printer;
 use fabro_workflow::run_status::RunStatus;
 use serde::Serialize;
 
@@ -18,15 +19,15 @@ pub(crate) struct InspectOutput {
     pub sandbox:      Option<serde_json::Value>,
 }
 
-pub(crate) async fn run(args: &InspectArgs, _globals: &GlobalArgs) -> Result<()> {
-    let ctx = CommandContext::for_target(&args.server)?;
+pub(crate) async fn run(args: &InspectArgs, _globals: &GlobalArgs, printer: Printer) -> Result<()> {
+    let ctx = CommandContext::for_target(&args.server, printer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();
     let state = lookup.client().get_run_state(&run_id).await?;
     let output = inspect_run_state(&run, state);
     let json = serde_json::to_string_pretty(&[output])?;
-    println!("{json}");
+    fabro_util::printout!(printer, "{json}");
     Ok(())
 }
 

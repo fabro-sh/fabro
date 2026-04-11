@@ -3,6 +3,7 @@ mod list;
 
 use anyhow::{Context, Result};
 use fabro_types::{RunId, StageId};
+use fabro_util::printer::Printer;
 
 use crate::args::{ArtifactCommand, ArtifactNamespace, GlobalArgs, ServerTargetArgs};
 use crate::command_context::CommandContext;
@@ -24,8 +25,9 @@ pub(super) async fn resolve_artifacts(
     run_selector: &str,
     node: Option<&str>,
     retry: Option<u32>,
+    printer: Printer,
 ) -> Result<(RunId, ServerStoreClient, Vec<ArtifactEntry>)> {
-    let ctx = CommandContext::for_target(server)?;
+    let ctx = CommandContext::for_target(server, printer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(run_selector)?;
     let run_id = run.run_id();
@@ -60,9 +62,13 @@ pub(super) async fn resolve_artifacts(
     Ok((run_id, client, entries))
 }
 
-pub(crate) async fn dispatch(ns: ArtifactNamespace, globals: &GlobalArgs) -> Result<()> {
+pub(crate) async fn dispatch(
+    ns: ArtifactNamespace,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
     match ns.command {
-        ArtifactCommand::List(args) => list::list_command(&args, globals).await,
-        ArtifactCommand::Cp(args) => cp::cp_command(&args, globals).await,
+        ArtifactCommand::List(args) => list::list_command(&args, globals, printer).await,
+        ArtifactCommand::Cp(args) => cp::cp_command(&args, globals, printer).await,
     }
 }

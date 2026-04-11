@@ -5,6 +5,7 @@ use fabro_api::types;
 use fabro_config::load::load_settings_user;
 use fabro_config::user::active_settings_path;
 use fabro_types::settings::SettingsLayer;
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use tracing::debug;
 
@@ -18,12 +19,13 @@ pub(crate) async fn run(
     args: &GraphArgs,
     styles: &Styles,
     globals: &GlobalArgs,
+    printer: Printer,
 ) -> anyhow::Result<()> {
     if globals.json && args.output.is_none() {
         globals.require_no_json()?;
     }
 
-    let ctx = CommandContext::for_target(&args.target)?;
+    let ctx = CommandContext::for_target(&args.target, printer)?;
     let built = build_run_manifest(ManifestBuildInput {
         workflow:           args.workflow.clone(),
         cwd:                ctx.cwd().to_path_buf(),
@@ -37,7 +39,7 @@ pub(crate) async fn run(
     let preflight = client.run_preflight(built.manifest.clone()).await?;
     let diagnostics = api_diagnostics_to_local(&preflight.workflow.diagnostics);
 
-    print_diagnostics(&diagnostics, styles);
+    print_diagnostics(&diagnostics, styles, printer);
     if diagnostics
         .iter()
         .any(|diagnostic| diagnostic.severity == fabro_validate::Severity::Error)

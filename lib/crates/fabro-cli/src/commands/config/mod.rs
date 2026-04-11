@@ -4,6 +4,7 @@ use std::path::Path;
 use fabro_config::effective_settings::{EffectiveSettingsLayers, EffectiveSettingsMode};
 use fabro_config::{effective_settings, load_settings_project, project};
 use fabro_types::settings::SettingsLayer;
+use fabro_util::printer::Printer;
 
 use crate::args::{GlobalArgs, SettingsArgs};
 use crate::command_context::CommandContext;
@@ -56,8 +57,8 @@ fn workflow_and_project_layers(
     Ok((workflow_layer, project_layer))
 }
 
-async fn merged_config(args: &SettingsArgs) -> anyhow::Result<SettingsLayer> {
-    let base_ctx = CommandContext::base()?;
+async fn merged_config(args: &SettingsArgs, printer: Printer) -> anyhow::Result<SettingsLayer> {
+    let base_ctx = CommandContext::base(printer)?;
     let layers = config_layers(&base_ctx, args.workflow.as_deref())?;
     if args.local {
         return Ok(effective_settings::resolve_settings(
@@ -67,7 +68,7 @@ async fn merged_config(args: &SettingsArgs) -> anyhow::Result<SettingsLayer> {
         )?);
     }
 
-    let ctx = CommandContext::for_target(&args.target)?;
+    let ctx = CommandContext::for_target(&args.target, printer)?;
     let target = user_config::resolve_server_target(&args.target, ctx.machine_settings())?;
     let server_settings = ctx.server().await?.retrieve_server_settings().await?;
     let mode = match target {
@@ -82,8 +83,12 @@ async fn merged_config(args: &SettingsArgs) -> anyhow::Result<SettingsLayer> {
     )?)
 }
 
-pub(crate) async fn execute(args: &SettingsArgs, globals: &GlobalArgs) -> anyhow::Result<()> {
-    let config = Box::pin(merged_config(args)).await?;
+pub(crate) async fn execute(
+    args: &SettingsArgs,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> anyhow::Result<()> {
+    let config = Box::pin(merged_config(args, printer)).await?;
     if globals.json {
         print_json_pretty(&config)?;
         return Ok(());

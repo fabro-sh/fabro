@@ -2,11 +2,16 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use fabro_config::project::{discover_project_config, resolve_fabro_root};
+use fabro_util::printer::Printer;
 
 use crate::args::{GlobalArgs, WorkflowCreateArgs};
 use crate::shared::{print_json_pretty, relative_path};
 
-pub(super) fn create_command(args: &WorkflowCreateArgs, globals: &GlobalArgs) -> Result<()> {
+pub(super) fn create_command(
+    args: &WorkflowCreateArgs,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
     let cwd = std::env::current_dir()?;
 
     let Some((config_path, config)) = discover_project_config(&cwd)? else {
@@ -35,27 +40,36 @@ pub(super) fn create_command(args: &WorkflowCreateArgs, globals: &GlobalArgs) ->
     let dim = console::Style::new().dim();
 
     let rel_dir = relative_path(&workflows_dir);
-    eprintln!(
+    fabro_util::printerr!(
+        printer,
         "  {} {}",
         green.apply_to("✔"),
         dim.apply_to(format!("{rel_dir}/workflow.fabro"))
     );
-    eprintln!(
+    fabro_util::printerr!(
+        printer,
         "  {} {}",
         green.apply_to("✔"),
         dim.apply_to(format!("{rel_dir}/workflow.toml"))
     );
 
-    eprintln!("\n{} Next steps:\n", bold.apply_to("Workflow created!"));
-    eprintln!(
+    fabro_util::printerr!(
+        printer,
+        "\n{} Next steps:\n",
+        bold.apply_to("Workflow created!")
+    );
+    fabro_util::printerr!(
+        printer,
         "  1. Edit the graph:  {}",
         cyan_bold.apply_to(format!("{rel_dir}/workflow.fabro"))
     );
-    eprintln!(
+    fabro_util::printerr!(
+        printer,
         "  2. Validate:        {}",
         cyan_bold.apply_to(format!("fabro validate {}", args.name))
     );
-    eprintln!(
+    fabro_util::printerr!(
+        printer,
         "  3. Run:             {}",
         cyan_bold.apply_to(format!("fabro run {}", args.name))
     );
