@@ -18,9 +18,7 @@ impl TemplateTransform {
     ) -> Result<(), FabroError> {
         for value in attrs.values_mut() {
             if let AttrValue::String(text) = value {
-                let rendered = render_template(text, ctx)
-                    .map_err(|error| FabroError::Validation(error.to_string()))?;
-                *text = rendered;
+                *text = render_template(text, ctx)?;
             }
         }
         Ok(())
@@ -30,8 +28,7 @@ impl TemplateTransform {
         let ctx = TemplateContext::new()
             .with_goal("{{ goal }}")
             .with_inputs(self.inputs.clone());
-        render_template(graph.goal(), &ctx)
-            .map_err(|error| FabroError::Validation(error.to_string()))
+        Ok(render_template(graph.goal(), &ctx)?)
     }
 }
 

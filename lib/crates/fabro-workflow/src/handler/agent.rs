@@ -80,7 +80,7 @@ pub(crate) fn expand_variables(
     let ctx = TemplateContext::new()
         .with_goal(graph.goal())
         .with_inputs(inputs.clone());
-    render_template(text, &ctx).map_err(|error| FabroError::Validation(error.to_string()))
+    Ok(render_template(text, &ctx)?)
 }
 
 /// Status fields that indicate a JSON object contains routing directives.

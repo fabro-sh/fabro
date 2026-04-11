@@ -337,6 +337,12 @@ impl From<GraphvizError> for FabroError {
     }
 }
 
+impl From<fabro_template::TemplateError> for FabroError {
+    fn from(err: fabro_template::TemplateError) -> Self {
+        Self::Validation(err.to_string())
+    }
+}
+
 impl From<fabro_validate::ValidationError> for FabroError {
     fn from(e: fabro_validate::ValidationError) -> Self {
         Self::Validation(e.0)

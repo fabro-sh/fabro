@@ -96,6 +96,38 @@ impl HookExecutorImpl {
         }
     }
 
+    /// Resolve env vars in the prompt and optional model strings.
+    /// Returns `None` (with a warning) on resolution failure — callers should
+    /// proceed when that happens.
+    fn resolve_prompt_and_model<E>(
+        prompt: &str,
+        model: Option<&str>,
+        env: &E,
+        hook_kind: &str,
+    ) -> Option<(String, Option<String>)>
+    where
+        E: Env + ?Sized,
+    {
+        let prompt = match resolve_interp_string(prompt, env) {
+            Ok(prompt) => prompt,
+            Err(error) => {
+                tracing::warn!(error = %error, "{hook_kind} hook prompt env resolution failed, proceeding");
+                return None;
+            }
+        };
+        let model = match model
+            .map(|model| resolve_interp_string(model, env))
+            .transpose()
+        {
+            Ok(model) => model,
+            Err(error) => {
+                tracing::warn!(error = %error, "{hook_kind} hook model env resolution failed, proceeding");
+                return None;
+            }
+        };
+        Some((prompt, model))
+    }
+
     /// Execute a command hook (sandbox or host).
     async fn execute_command<E>(
         definition: &HookDefinition,
@@ -256,22 +288,9 @@ impl HookExecutorImpl {
     where
         E: Env + Clone + Send + Sync + fmt::Debug + 'static,
     {
-        let prompt = match resolve_interp_string(prompt, env) {
-            Ok(prompt) => prompt,
-            Err(error) => {
-                tracing::warn!(error = %error, "prompt hook prompt env resolution failed, proceeding");
-                return HookDecision::Proceed;
-            }
-        };
-        let model = match model
-            .map(|model| resolve_interp_string(model, env))
-            .transpose()
-        {
-            Ok(model) => model,
-            Err(error) => {
-                tracing::warn!(error = %error, "prompt hook model env resolution failed, proceeding");
-                return HookDecision::Proceed;
-            }
+        let Some((prompt, model)) = Self::resolve_prompt_and_model(prompt, model, env, "prompt")
+        else {
+            return HookDecision::Proceed;
         };
 
         let resolved_model = Self::resolve_model(model.as_deref());
@@ -323,22 +342,9 @@ impl HookExecutorImpl {
     where
         E: Env + Clone + Send + Sync + fmt::Debug + 'static,
     {
-        let prompt = match resolve_interp_string(prompt, env) {
-            Ok(prompt) => prompt,
-            Err(error) => {
-                tracing::warn!(error = %error, "agent hook prompt env resolution failed, proceeding");
-                return HookDecision::Proceed;
-            }
-        };
-        let model = match model
-            .map(|model| resolve_interp_string(model, env))
-            .transpose()
-        {
-            Ok(model) => model,
-            Err(error) => {
-                tracing::warn!(error = %error, "agent hook model env resolution failed, proceeding");
-                return HookDecision::Proceed;
-            }
+        let Some((prompt, model)) = Self::resolve_prompt_and_model(prompt, model, env, "agent")
+        else {
+            return HookDecision::Proceed;
         };
 
         let resolved_model = Self::resolve_model(model.as_deref());

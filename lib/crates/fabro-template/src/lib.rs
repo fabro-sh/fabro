@@ -124,7 +124,16 @@ impl From<minijinja::Error> for TemplateError {
     }
 }
 
+/// Returns `true` when the string contains no MiniJinja delimiters and can
+/// be returned as-is without paying for a full template parse+render cycle.
+fn is_plain_text(template: &str) -> bool {
+    !template.contains("{{") && !template.contains("{%") && !template.contains("{#")
+}
+
 pub fn render(template: &str, ctx: &TemplateContext) -> Result<String, TemplateError> {
+    if is_plain_text(template) {
+        return Ok(template.to_owned());
+    }
     let mut env = Environment::new();
     env.set_undefined_behavior(UndefinedBehavior::Strict);
     env.set_auto_escape_callback(|_| AutoEscape::None);
