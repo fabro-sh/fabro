@@ -2219,7 +2219,7 @@ components:
         path:
           type: string
           description: Resolved path that keys into the workflows map.
-          example: fabro/workflows/smoke/workflow.fabro
+          example: .fabro/workflows/smoke/workflow.fabro
 
     ManifestConfig:
       type: object

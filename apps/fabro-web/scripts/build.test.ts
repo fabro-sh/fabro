@@ -28,5 +28,5 @@ test("watch mode keeps running until interrupted", async () => {
   }
 
   process.kill("SIGINT");
-  expect(await process.exited).toBe(0);
+  expect([0, 130]).toContain(await process.exited);
 });

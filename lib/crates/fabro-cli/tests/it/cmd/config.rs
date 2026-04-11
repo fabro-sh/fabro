@@ -200,13 +200,11 @@ shared = "cli"
     );
 
     let project = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(project.path().join(".fabro")).unwrap();
     std::fs::write(
-        project.path().join("fabro.toml"),
+        project.path().join(".fabro/project.toml"),
         r#"
 _version = 1
-
-[project]
-directory = "fabro"
 
 [run.model]
 name = "project-model"
@@ -224,7 +222,7 @@ script = "echo project"
     )
     .unwrap();
 
-    let workflow_dir = project.path().join("fabro").join("workflows").join("demo");
+    let workflow_dir = project.path().join(".fabro").join("workflows").join("demo");
     std::fs::create_dir_all(&workflow_dir).unwrap();
     std::fs::write(
         workflow_dir.join("workflow.toml"),
@@ -315,8 +313,9 @@ script = "cli-setup"
     );
 
     let project = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(project.path().join(".fabro")).unwrap();
     std::fs::write(
-        project.path().join("fabro.toml"),
+        project.path().join(".fabro/project.toml"),
         r#"
 _version = 1
 
@@ -387,7 +386,7 @@ fn settings_local_merges_cli_and_project_defaults() {
     assert_eq!(run_model_name(&cfg).as_deref(), Some("project-model"));
     assert_eq!(run_model_provider(&cfg).as_deref(), Some("openai"));
     assert_eq!(run_goal_inline(&cfg).as_deref(), None);
-    assert_eq!(resolve_project(&cfg).directory, "fabro");
+    assert_eq!(resolve_project(&cfg).directory, ".");
 
     // v2 R22: run.inputs replaces the inherited map wholesale rather than
     // merging by key, so the project layer wipes out the CLI layer's inputs.

@@ -1235,7 +1235,7 @@ pub(crate) struct RepoNamespace {
 pub(crate) enum RepoCommand {
     /// Initialize a new project
     Init(RepoInitArgs),
-    /// Remove fabro.toml and fabro/ directory
+    /// Remove .fabro/ project directory
     Deinit,
 }
 

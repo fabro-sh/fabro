@@ -268,11 +268,8 @@ pub(crate) fn setup_git_backed_noop_run(context: &TestContext) -> GitRunSetup {
 
 pub(crate) fn setup_project_fixture(context: &TestContext) -> ProjectFixture {
     let project_dir = context.temp_dir.join("project");
-    let fabro_root = project_dir.join("fabro");
-    write_text_file(
-        &project_dir.join("fabro.toml"),
-        "_version = 1\n\n[project]\ndirectory = \"fabro/\"\n",
-    );
+    let fabro_root = project_dir.join(".fabro");
+    write_text_file(&project_dir.join(".fabro/project.toml"), "_version = 1\n");
     std::fs::create_dir_all(fabro_root.join("workflows"))
         .unwrap_or_else(|err| panic!("failed to create {}: {err}", fabro_root.display()));
     ProjectFixture {

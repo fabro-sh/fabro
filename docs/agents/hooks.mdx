@@ -105,9 +105,9 @@ Each hook fires on a specific lifecycle event:
 
 Hooks are defined as `[[hooks]]` entries in any of these TOML config files:
 
-- **`fabro.toml`** — project-level hooks, apply to all workflows in the project
+- **`.fabro/project.toml`** — project-level hooks, apply to all workflows in the project
 - **`workflow.toml`** — per-workflow hooks
-- **`~/.fabro/settings.toml`** or **`~/.fabro/settings.toml`** — global defaults for all runs
+- **`~/.fabro/settings.toml`** — global defaults for all runs
 
 See [Merging hook configs](#merging-hook-configs) for how these layers combine.
 
@@ -344,11 +344,11 @@ Command hooks do **not** fail open. A non-zero exit code (other than 0 or 2) pro
 
 Hooks from multiple config files are merged in this order (later layers win on name collisions):
 
-1. **`~/.fabro/settings.toml`** or **`~/.fabro/settings.toml`** — global defaults
-2. **`fabro.toml`** — project-level overrides
+1. **`~/.fabro/settings.toml`** — global defaults
+2. **`.fabro/project.toml`** — project-level overrides
 3. **`workflow.toml`** — per-workflow overrides
 
-This lets you define global hooks at the server level, project-wide hooks in `fabro.toml`, and override or extend them per workflow.
+This lets you define global hooks at the server level, project-wide hooks in `.fabro/project.toml`, and override or extend them per workflow.
 
 ## Full example
 

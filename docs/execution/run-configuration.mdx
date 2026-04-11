@@ -37,7 +37,7 @@ Goal precedence: CLI `--goal` > `[run].goal` > Graphviz graph attribute.
 _version = 1
 
 [workflow]
-graph = "fabro/workflows/ci.fabro"
+graph = ".fabro/workflows/ci.fabro"
 
 [run]
 goal = "Run the CI pipeline"
@@ -389,7 +389,7 @@ Settings can come from multiple sources. Fabro resolves them in this order (firs
 | Node-level [stylesheet](/workflows/stylesheets) | Highest |
 | CLI flags (`--model`, `--provider`, `--sandbox`) | |
 | Run config TOML (`workflow.toml` or equivalent) | |
-| Project defaults (`fabro.toml`) | |
+| Project defaults (`.fabro/project.toml`) | |
 | Machine defaults (`~/.fabro/settings.toml`) | |
 | Graphviz graph attributes (`default_model`, `default_provider`) | |
 | Built-in defaults | Lowest |
@@ -398,15 +398,12 @@ Settings can come from multiple sources. Fabro resolves them in this order (firs
 Stylesheet rules on individual nodes always take priority over run config values.
 </Note>
 
-### Project defaults (`fabro.toml`)
+### Project defaults (`.fabro/project.toml`)
 
-The `fabro.toml` project config can set default values for any of the `[run.*]` sections described above. These defaults apply to all runs in the project unless the workflow config overrides them:
+The `.fabro/project.toml` project config can set default values for any of the `[run.*]` sections described above. These defaults apply to all runs in the project unless the workflow config overrides them:
 
-```toml title="fabro.toml"
+```toml title=".fabro/project.toml"
 _version = 1
-
-[project]
-directory = "fabro/"
 
 [run.model]
 name = "claude-sonnet-4-5"

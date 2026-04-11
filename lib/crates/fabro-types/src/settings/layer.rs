@@ -1,8 +1,9 @@
 //! The top-level sparse settings layer.
 //!
 //! This struct models a single settings file (`~/.fabro/settings.toml`,
-//! `fabro.toml`, or `workflow.toml`) after deserialization. Fields unset in
-//! the source stay `None`/empty and are layered later by `fabro-config`.
+//! `.fabro/project.toml`, or `workflow.toml`) after deserialization. Fields
+//! unset in the source stay `None`/empty and are layered later by
+//! `fabro-config`.
 
 use serde::{Deserialize, Serialize};
 

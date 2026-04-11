@@ -5,7 +5,7 @@
 //! discovery helpers and re-exports resolved project settings.
 
 use std::fmt::Write;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use fabro_types::settings::SettingsLayer;
 use serde::Serialize;
@@ -17,7 +17,7 @@ use crate::{
     run,
 };
 
-const CONFIG_FILENAME: &str = "fabro.toml";
+const CONFIG_FILENAME: &str = ".fabro/project.toml";
 #[derive(Clone, Debug)]
 pub struct WorkflowPathResolution {
     pub resolved_workflow_path: PathBuf,
@@ -45,7 +45,7 @@ pub fn load_project_config(path: &Path) -> Result<SettingsLayer> {
     Ok(config)
 }
 
-/// Walk ancestor directories from `start` looking for `fabro.toml`.
+/// Walk ancestor directories from `start` looking for `.fabro/project.toml`.
 /// Returns the config file path and parsed config, or `None` if not found.
 pub fn discover_project_config(start: &Path) -> Result<Option<(PathBuf, SettingsLayer)>> {
     for ancestor in start.ancestors() {
@@ -360,9 +360,29 @@ pub fn is_retro_enabled() -> bool {
     }
 }
 
+fn normalize_joined_path(base_dir: &Path, reference: &Path) -> PathBuf {
+    if reference.is_absolute() {
+        return reference.to_path_buf();
+    }
+
+    let mut normalized = PathBuf::new();
+    for component in base_dir.join(reference).components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => normalized.push(part),
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::RootDir => normalized.push(Path::new("/")),
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+        }
+    }
+    normalized
+}
+
 /// Resolve the fabro root directory from a config file path and its config.
-/// The returned path is the directory containing `fabro.toml` joined with the
-/// `project.directory` value (default: `fabro/`).
+/// The returned path is the config file's parent directory joined with the
+/// `project.directory` value (default: `.`).
 pub fn resolve_fabro_root(config_path: &Path, config: &SettingsLayer) -> PathBuf {
     let project_dir = config_path
         .parent()
@@ -370,7 +390,7 @@ pub fn resolve_fabro_root(config_path: &Path, config: &SettingsLayer) -> PathBuf
     let root = resolve_project_from_file(config)
         .expect("project settings should resolve")
         .directory;
-    project_dir.join(root)
+    normalize_joined_path(project_dir, Path::new(&root))
 }
 
 #[cfg(test)]
@@ -395,13 +415,13 @@ mod tests {
 _version = 1
 
 [project]
-directory = "fabro/"
+directory = "custom/"
 "#,
         )
         .unwrap();
         assert_eq!(
             resolve_project_from_file(&config).unwrap().directory,
-            "fabro/"
+            "custom/"
         );
     }
 
@@ -449,7 +469,9 @@ retros = true
     #[test]
     fn load_from_disk() {
         let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("fabro.toml");
+        let config_dir = tmp.path().join(".fabro");
+        fs::create_dir_all(&config_dir).unwrap();
+        let path = config_dir.join("project.toml");
         fs::write(&path, "_version = 1\n").unwrap();
         let config = load_project_config(&path).unwrap();
         assert_eq!(config.version, Some(1));
@@ -458,12 +480,14 @@ retros = true
     #[test]
     fn discover_walks_ancestors() {
         let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join("fabro.toml"), "_version = 1\n").unwrap();
+        let config_dir = tmp.path().join(".fabro");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(config_dir.join("project.toml"), "_version = 1\n").unwrap();
         let sub = tmp.path().join("sub").join("dir");
         fs::create_dir_all(&sub).unwrap();
 
         let (found_path, config) = discover_project_config(&sub).unwrap().unwrap();
-        assert_eq!(found_path, tmp.path().join("fabro.toml"));
+        assert_eq!(found_path, config_dir.join("project.toml"));
         assert_eq!(config.version, Some(1));
     }
 
@@ -472,7 +496,9 @@ retros = true
         use fabro_types::settings::run::RunGoalLayer;
 
         let tmp = TempDir::new().unwrap();
-        let path = tmp.path().join("fabro.toml");
+        let config_dir = tmp.path().join(".fabro");
+        fs::create_dir_all(&config_dir).unwrap();
+        let path = config_dir.join("project.toml");
         fs::write(
             &path,
             r#"_version = 1
@@ -489,7 +515,75 @@ file = "prompts/goal.md"
         else {
             panic!("expected file variant");
         };
-        let expected = tmp.path().join("prompts").join("goal.md");
+        let expected = config_dir.join("prompts").join("goal.md");
         assert_eq!(file.as_source(), expected.to_string_lossy());
+    }
+
+    #[test]
+    fn default_directory_resolves_to_config_parent() {
+        let tmp = TempDir::new().unwrap();
+        let config_dir = tmp.path().join(".fabro");
+        fs::create_dir_all(&config_dir).unwrap();
+        let config_path = config_dir.join("project.toml");
+        fs::write(&config_path, "_version = 1\n").unwrap();
+
+        let config = load_project_config(&config_path).unwrap();
+
+        assert_eq!(resolve_fabro_root(&config_path, &config), config_dir);
+    }
+
+    #[test]
+    fn custom_relative_directory_resolves_from_config_parent() {
+        let tmp = TempDir::new().unwrap();
+        let config_dir = tmp.path().join(".fabro");
+        fs::create_dir_all(&config_dir).unwrap();
+        let config_path = config_dir.join("project.toml");
+        fs::write(
+            &config_path,
+            r#"_version = 1
+
+[project]
+directory = "../custom"
+"#,
+        )
+        .unwrap();
+
+        let config = load_project_config(&config_path).unwrap();
+
+        assert_eq!(
+            resolve_fabro_root(&config_path, &config),
+            tmp.path().join("custom")
+        );
+    }
+
+    #[test]
+    fn relative_goal_file_resolves_from_config_dir() {
+        use fabro_types::settings::run::RunGoalLayer;
+
+        let tmp = TempDir::new().unwrap();
+        let config_dir = tmp.path().join(".fabro");
+        fs::create_dir_all(&config_dir).unwrap();
+        let config_path = config_dir.join("project.toml");
+        fs::write(
+            &config_path,
+            r#"_version = 1
+
+[run.goal]
+file = "prompts/goal.md"
+"#,
+        )
+        .unwrap();
+
+        let config = load_project_config(&config_path).unwrap();
+        let Some(RunGoalLayer::File { file }) =
+            config.run.as_ref().and_then(|run| run.goal.as_ref())
+        else {
+            panic!("expected file variant");
+        };
+
+        assert_eq!(
+            file.as_source(),
+            config_dir.join("prompts").join("goal.md").to_string_lossy()
+        );
     }
 }

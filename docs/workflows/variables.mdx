@@ -97,7 +97,7 @@ You can also emit literal braces with expressions such as `{{ '{{' }}` when need
 |---|---|
 | CLI flags (`-V key=value`, repeated) | Highest |
 | `workflow.toml` `[run.inputs]` | |
-| `fabro.toml` `[run.inputs]` | |
+| `.fabro/project.toml` `[run.inputs]` | |
 | `~/.fabro/settings.toml` `[run.inputs]` | Lowest |
 
 If you need per-key overrides on top of inherited defaults, set each input explicitly in the winning layer.

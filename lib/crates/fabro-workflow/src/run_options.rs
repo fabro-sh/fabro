@@ -27,7 +27,7 @@ pub struct RunOptions {
     pub run_id:           RunId,
     /// User-defined key-value labels for this run.
     pub labels:           HashMap<String, String>,
-    /// Workflow directory slug (e.g. "smoke" from `fabro/workflows/smoke/`).
+    /// Workflow directory slug (e.g. "smoke" from `.fabro/workflows/smoke/`).
     pub workflow_slug:    Option<String>,
     /// GitHub App credentials for pushing metadata branches to origin.
     pub github_app:       Option<fabro_github::GitHubAppCredentials>,

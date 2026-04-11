@@ -556,12 +556,12 @@ mod tests {
     fn build_manifest_bundles_imports_prompts_and_children() {
         let temp = tempfile::tempdir().unwrap();
         let project = temp.path();
-        let workflow_dir = project.join("fabro/workflows/demo");
-        let child_dir = project.join("fabro/workflows/child");
+        let workflow_dir = project.join(".fabro/workflows/demo");
+        let child_dir = project.join(".fabro/workflows/child");
         std::fs::create_dir_all(workflow_dir.join("prompts")).unwrap();
         std::fs::create_dir_all(workflow_dir.join("imports")).unwrap();
         std::fs::create_dir_all(&child_dir).unwrap();
-        std::fs::write(project.join("fabro.toml"), "_version = 1\n").unwrap();
+        std::fs::write(project.join(".fabro/project.toml"), "_version = 1\n").unwrap();
         std::fs::write(
             workflow_dir.join("workflow.toml"),
             "_version = 1\n\n[workflow]\ngraph = \"workflow.fabro\"\n",
@@ -600,7 +600,7 @@ mod tests {
         .unwrap();
 
         let built = build_run_manifest(ManifestBuildInput {
-            workflow:           PathBuf::from("fabro/workflows/demo/workflow.toml"),
+            workflow:           PathBuf::from(".fabro/workflows/demo/workflow.toml"),
             cwd:                project.to_path_buf(),
             args_layer:         SettingsLayer::default(),
             args:               None,
@@ -612,49 +612,49 @@ mod tests {
 
         assert_eq!(
             built.manifest.target.path,
-            "fabro/workflows/demo/workflow.fabro"
+            ".fabro/workflows/demo/workflow.fabro"
         );
         assert_eq!(built.manifest.workflows.len(), 2);
-        let root = &built.manifest.workflows["fabro/workflows/demo/workflow.fabro"];
+        let root = &built.manifest.workflows[".fabro/workflows/demo/workflow.fabro"];
         assert!(
             root.files
-                .contains_key("fabro/workflows/demo/prompts/goal.md")
+                .contains_key(".fabro/workflows/demo/prompts/goal.md")
         );
         assert!(
             root.files
-                .contains_key("fabro/workflows/demo/prompts/plan.md")
+                .contains_key(".fabro/workflows/demo/prompts/plan.md")
         );
         assert!(
             root.files
-                .contains_key("fabro/workflows/demo/imports/checks.fabro")
+                .contains_key(".fabro/workflows/demo/imports/checks.fabro")
         );
         assert!(
             root.files
-                .contains_key("fabro/workflows/demo/prompts/lint.md")
+                .contains_key(".fabro/workflows/demo/prompts/lint.md")
         );
         assert_eq!(built.manifest.goal.unwrap().text, "ship it");
         assert!(
             built
                 .manifest
                 .workflows
-                .contains_key("fabro/workflows/child/workflow.fabro")
+                .contains_key(".fabro/workflows/child/workflow.fabro")
         );
     }
 
-    /// A relative `[run.goal] file = "..."` declared in `fabro.toml` must
-    /// resolve against the directory of `fabro.toml`, not against the
-    /// invocation cwd. We exercise this by invoking from a subdirectory
+    /// A relative `[run.goal] file = "..."` declared in `.fabro/project.toml`
+    /// must resolve against the directory of `.fabro/project.toml`, not against
+    /// the invocation cwd. We exercise this by invoking from a subdirectory
     /// below the project root.
     #[test]
     fn build_manifest_resolves_relative_goal_file_in_project_config() {
         let temp = tempfile::tempdir().unwrap();
         let project = temp.path();
-        let workflow_dir = project.join("fabro/workflows/demo");
+        let workflow_dir = project.join(".fabro/workflows/demo");
         std::fs::create_dir_all(&workflow_dir).unwrap();
-        std::fs::create_dir_all(project.join("prompts")).unwrap();
+        std::fs::create_dir_all(project.join(".fabro/prompts")).unwrap();
 
         std::fs::write(
-            project.join("fabro.toml"),
+            project.join(".fabro/project.toml"),
             r#"_version = 1
 
 [run.goal]
@@ -662,7 +662,11 @@ file = "prompts/goal.md"
 "#,
         )
         .unwrap();
-        std::fs::write(project.join("prompts/goal.md"), "ship from project root").unwrap();
+        std::fs::write(
+            project.join(".fabro/prompts/goal.md"),
+            "ship from project root",
+        )
+        .unwrap();
 
         std::fs::write(
             workflow_dir.join("workflow.toml"),
@@ -676,7 +680,7 @@ file = "prompts/goal.md"
         .unwrap();
 
         let built = build_run_manifest(ManifestBuildInput {
-            workflow:           PathBuf::from("fabro/workflows/demo/workflow.toml"),
+            workflow:           PathBuf::from(".fabro/workflows/demo/workflow.toml"),
             cwd:                project.to_path_buf(),
             args_layer:         SettingsLayer::default(),
             args:               None,
@@ -690,7 +694,7 @@ file = "prompts/goal.md"
         assert_eq!(goal.text, "ship from project root");
         assert_eq!(goal.type_, types::ManifestGoalType::File);
         let resolved = goal.path.expect("file goal must carry a path");
-        let expected = project.join("prompts").join("goal.md");
+        let expected = project.join(".fabro").join("prompts").join("goal.md");
         assert_eq!(PathBuf::from(resolved), expected);
     }
 
@@ -701,10 +705,10 @@ file = "prompts/goal.md"
     fn build_manifest_resolves_relative_goal_file_in_workflow_config() {
         let temp = tempfile::tempdir().unwrap();
         let project = temp.path();
-        let workflow_dir = project.join("fabro/workflows/demo");
+        let workflow_dir = project.join(".fabro/workflows/demo");
         std::fs::create_dir_all(workflow_dir.join("prompts")).unwrap();
 
-        std::fs::write(project.join("fabro.toml"), "_version = 1\n").unwrap();
+        std::fs::write(project.join(".fabro/project.toml"), "_version = 1\n").unwrap();
         std::fs::write(
             workflow_dir.join("workflow.toml"),
             r#"_version = 1
@@ -729,7 +733,7 @@ file = "prompts/goal.md"
         .unwrap();
 
         let built = build_run_manifest(ManifestBuildInput {
-            workflow:           PathBuf::from("fabro/workflows/demo/workflow.toml"),
+            workflow:           PathBuf::from(".fabro/workflows/demo/workflow.toml"),
             cwd:                project.to_path_buf(),
             args_layer:         SettingsLayer::default(),
             args:               None,

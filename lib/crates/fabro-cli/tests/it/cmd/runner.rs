@@ -635,7 +635,7 @@ fn worker_exits_with_retro_enabled_even_when_stdin_stays_open() {
     let workflow_path = context.temp_dir.join("retro-success.fabro");
 
     context.write_temp(
-        "fabro.toml",
+        ".fabro/project.toml",
         r#"_version = 1
 
 [run.execution]

@@ -46,12 +46,12 @@ fn workflow_create_writes_scaffold_files() {
     exit_code: 0
     ----- stdout -----
     ----- stderr -----
-      ✔ fabro/workflows/hello-world/workflow.fabro
-      ✔ fabro/workflows/hello-world/workflow.toml
+      ✔ .fabro/workflows/hello-world/workflow.fabro
+      ✔ .fabro/workflows/hello-world/workflow.toml
 
     Workflow created! Next steps:
 
-      1. Edit the graph:  fabro/workflows/hello-world/workflow.fabro
+      1. Edit the graph:  .fabro/workflows/hello-world/workflow.fabro
       2. Validate:        fabro validate hello-world
       3. Run:             fabro run hello-world
     ");
@@ -136,7 +136,7 @@ fn workflow_create_rejects_existing_workflow() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-    error: Workflow 'existing' already exists at [TEMP_DIR]/project/fabro/workflows/existing
+    error: Workflow 'existing' already exists at [TEMP_DIR]/project/.fabro/workflows/existing
     ");
 }
 
@@ -151,7 +151,7 @@ fn workflow_create_errors_without_project_config() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-    error: No fabro.toml found in [TEMP_DIR] or any parent directory
+    error: No .fabro/project.toml found in [TEMP_DIR] or any parent directory
     ");
 }
 
@@ -160,8 +160,8 @@ fn workflow_create_json_uses_resolved_custom_root_paths() {
     let context = test_context!();
     let project_dir = context.temp_dir.join("project");
     context.write_temp(
-        "project/fabro.toml",
-        "_version = 1\n\n[project]\ndirectory = \"custom/fabro-data\"\n",
+        "project/.fabro/project.toml",
+        "_version = 1\n\n[project]\ndirectory = \"../custom/fabro-data\"\n",
     );
 
     let output = context

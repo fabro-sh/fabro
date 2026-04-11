@@ -32,13 +32,13 @@ export async function run(argv: string[]) {
   const { values } = parseArgs({
     args: argv,
     options: {
-      config: { type: "string", short: "c", default: "fabro.toml" },
+      config: { type: "string", short: "c", default: ".fabro/project.toml" },
       "dry-run": { type: "boolean", default: false },
     },
   });
 
   const opts: RunOptions = {
-    config: values.config ?? "fabro.toml",
+    config: values.config ?? ".fabro/project.toml",
     dryRun: values["dry-run"] ?? false,
   };
 
@@ -71,14 +71,14 @@ export async function run(argv: string[]) {
   const { values } = parseArgs({
     args: argv,
     options: {
-      config: { type: "string", short: "c", default: "fabro.toml" },
+      config: { type: "string", short: "c", default: ".fabro/project.toml" },
       "dry-run": { type: "boolean", default: false },
       verbose: { type: "boolean", short: "v", default: false },
     },
   });
 
   const opts: RunOptions = {
-    config: values.config ?? "fabro.toml",
+    config: values.config ?? ".fabro/project.toml",
     dryRun: values["dry-run"] ?? false,
     verbose: values.verbose ?? false,
   };

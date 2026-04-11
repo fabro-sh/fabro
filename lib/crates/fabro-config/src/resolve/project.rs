@@ -2,7 +2,7 @@ use fabro_types::settings::project::{ProjectLayer, ProjectSettings};
 
 use super::ResolveError;
 
-const DEFAULT_PROJECT_DIRECTORY: &str = "fabro/";
+const DEFAULT_PROJECT_DIRECTORY: &str = ".";
 
 pub fn resolve_project(layer: &ProjectLayer, _errors: &mut Vec<ResolveError>) -> ProjectSettings {
     ProjectSettings {

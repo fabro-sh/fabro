@@ -145,7 +145,7 @@ permissions = { contents = "write", pull_requests = "write" }
 
 Only the listed permissions are requested — the token is scoped to the minimum access needed. If the GitHub App isn't configured or the repository lacks an installation, the run logs a warning and continues without the token.
 
-This also works in `fabro.toml` as a project-level default, so all workflows in the project automatically get a `GITHUB_TOKEN` without repeating the config in each run TOML.
+This also works in `.fabro/project.toml` as a project-level default, so all workflows in the project automatically get a `GITHUB_TOKEN` without repeating the config in each run TOML.
 
 ### Checkpoint pushing
 

@@ -1,8 +1,5 @@
 _version = 1
 
-[project]
-directory = "fabro/"
-
 [run.pull_request]
 enabled = true
 draft = false

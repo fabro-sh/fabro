@@ -37,7 +37,7 @@ fn workflow_list_errors_without_project_config() {
     exit_code: 1
     ----- stdout -----
     ----- stderr -----
-    error: No fabro.toml found in [TEMP_DIR] or any parent directory
+    error: No .fabro/project.toml found in [TEMP_DIR] or any parent directory
     ");
 }
 
@@ -69,7 +69,7 @@ fn workflow_list_shows_project_and_user_sections() {
       NAME           DESCRIPTION
       user-beta      User beta goal
 
-    Project Workflows (fabro/workflows)
+    Project Workflows (.fabro/workflows)
 
       NAME           DESCRIPTION
       project-alpha  Project alpha goal

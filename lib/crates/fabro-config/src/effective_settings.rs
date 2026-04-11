@@ -2,10 +2,12 @@
 //! [`SettingsLayer`].
 //!
 //! Shared layered domains (`project`, `workflow`, `run`, `features`) merge
-//! across all three config files (settings.toml, fabro.toml, workflow.toml).
+//! across all three config files (settings.toml, .fabro/project.toml,
+//! workflow.toml).
 //! Owner-specific domains (`cli`, `server`) are consumed only from the local
 //! `~/.fabro/settings.toml` plus explicit process-local overrides — their
-//! stanzas in `fabro.toml` and `workflow.toml` remain schema-valid but inert.
+//! stanzas in `.fabro/project.toml` and `workflow.toml` remain schema-valid but
+//! inert.
 
 use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::run::{RunExecutionLayer, RunLayer};
@@ -67,7 +69,7 @@ pub fn resolve_settings(
         EffectiveSettingsMode::RemoteServer | EffectiveSettingsMode::LocalDaemon => {
             let server_settings = server_settings.ok_or(Error::MissingServerSettings)?;
             // Owner-specific domains (cli, server) may only come from the
-            // local ~/.fabro/settings.toml, never from fabro.toml or
+            // local ~/.fabro/settings.toml, never from .fabro/project.toml or
             // workflow.toml. The user layer keeps its cli/server fields.
             strip_owner_domains(&mut workflow);
             strip_owner_domains(&mut project);

@@ -2,7 +2,8 @@
 //!
 //! `[cli]` is owner-first: the CLI process reads its settings from
 //! `~/.fabro/settings.toml` plus process-local overrides. `cli.*` stanzas in
-//! `fabro.toml` and `workflow.toml` remain schema-valid but runtime-inert.
+//! `.fabro/project.toml` and `workflow.toml` remain schema-valid but
+//! runtime-inert.
 
 use std::collections::HashMap;
 

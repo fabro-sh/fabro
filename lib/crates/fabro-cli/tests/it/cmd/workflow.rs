@@ -35,8 +35,8 @@ fn list() {
 
     context
         .write_temp(
-            "fabro.toml",
-            "_version = 1\n\n[project]\ndirectory = \".\"\n",
+            ".fabro/project.toml",
+            "_version = 1\n\n[project]\ndirectory = \"..\"\n",
         )
         .write_temp(
             "workflows/my_test_wf/workflow.toml",

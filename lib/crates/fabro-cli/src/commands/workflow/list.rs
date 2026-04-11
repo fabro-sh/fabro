@@ -16,7 +16,7 @@ pub(super) fn list_command(_args: &WorkflowListArgs, globals: &GlobalArgs) -> Re
 
     let Some((config_path, config)) = discover_project_config(&cwd)? else {
         bail!(
-            "No fabro.toml found in {cwd} or any parent directory",
+            "No .fabro/project.toml found in {cwd} or any parent directory",
             cwd = cwd.display()
         );
     };

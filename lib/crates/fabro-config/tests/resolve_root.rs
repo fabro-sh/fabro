@@ -11,7 +11,7 @@ fn resolves_root_settings_defaults() {
     let settings =
         fabro_config::resolve(&SettingsLayer::default()).expect("empty settings should resolve");
 
-    assert_eq!(settings.project.directory, "fabro/");
+    assert_eq!(settings.project.directory, ".");
     assert_eq!(settings.workflow.graph, "workflow.fabro");
     assert!(settings.run.execution.retros);
     assert!(settings.cli.updates.check);

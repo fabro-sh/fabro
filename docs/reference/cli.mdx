@@ -62,7 +62,7 @@ fabro settings demo
 fabro settings run.toml
 ```
 
-With no argument, Fabro prints the merged ambient defaults from `~/.fabro/settings.toml` and the nearest `fabro.toml`.
+With no argument, Fabro prints the merged ambient defaults from `~/.fabro/settings.toml` and the nearest `.fabro/project.toml`.
 
 When you pass a workflow name or path:
 
@@ -86,7 +86,7 @@ fabro run run.toml
 
 | Argument / Flag | Description |
 |---|---|
-| `<WORKFLOW>` | Path to a `.fabro` workflow file, `.toml` task config, or workflow name (resolved from `fabro/workflows/` in the project, then `~/.fabro/workflows/`). |
+| `<WORKFLOW>` | Path to a `.fabro` workflow file, `.toml` task config, or workflow name (resolved from `.fabro/workflows/` in the project, then `~/.fabro/workflows/`). |
 | `--dry-run` | Execute with a simulated LLM backend |
 | `--auto-approve` | Auto-approve all human gates |
 | `--model <MODEL>` | Override default LLM model |
@@ -615,7 +615,7 @@ fabro workflow create my-workflow --goal "Run the CI pipeline"
 | `<NAME>` | Name of the workflow (required) |
 | `-g, --goal <GOAL>` | Goal description for the workflow |
 
-Requires a `fabro.toml` project config in the current directory or a parent.
+Requires a `.fabro/project.toml` project config in the current directory or a parent.
 
 ---
 
@@ -648,22 +648,22 @@ fabro parse workflow.fabro
 
 ## `fabro repo init`
 
-Initialize a new Fabro project in the current git repository. Creates a `fabro.toml` project config and a sample `hello` workflow.
+Initialize a new Fabro project in the current git repository. Creates a `.fabro/project.toml` project config and a sample `hello` workflow.
 
 ```bash
 fabro repo init
 ```
 
 The command must be run inside a git repository. It creates:
-- `fabro.toml` — project configuration with comments and a link to docs
-- `fabro/workflows/hello/workflow.fabro` — a simple greeting workflow
-- `fabro/workflows/hello/workflow.toml` — run config for the hello workflow
+- `.fabro/project.toml` — project configuration with comments and a link to docs
+- `.fabro/workflows/hello/workflow.fabro` — a simple greeting workflow
+- `.fabro/workflows/hello/workflow.toml` — run config for the hello workflow
 
 After creating files, it checks whether the GitHub App is installed for the repository. If the app is not installed and the repository owner differs from the app owner, it warns that the app may need to be [made public](/integrations/github#github-app-is-private-but-this-repo-belongs-to-a-different-owner) first.
 
 ## `fabro repo deinit`
 
-Remove Fabro from a project by deleting `fabro.toml` and the `fabro/` directory. Fails with an error if the project is not initialized.
+Remove Fabro from a project by deleting the `.fabro/` project directory. Fails with an error if the project is not initialized.
 
 ```bash
 fabro repo deinit

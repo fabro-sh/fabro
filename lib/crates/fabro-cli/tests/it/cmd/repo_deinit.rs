@@ -9,7 +9,7 @@ fn help() {
     success: true
     exit_code: 0
     ----- stdout -----
-    Remove fabro.toml and fabro/ directory
+    Remove .fabro/ project directory
 
     Usage: fabro repo deinit [OPTIONS]
 

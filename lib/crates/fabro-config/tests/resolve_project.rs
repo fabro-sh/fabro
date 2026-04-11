@@ -7,7 +7,7 @@ fn resolves_project_defaults_from_empty_settings() {
 
     let project = resolve_project_from_file(&settings).expect("empty settings should resolve");
 
-    assert_eq!(project.directory, "fabro/");
+    assert_eq!(project.directory, ".");
     assert!(project.name.is_none());
     assert!(project.description.is_none());
     assert!(project.metadata.is_empty());

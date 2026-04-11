@@ -1,7 +1,7 @@
 //! Project domain: first-class project object.
 //!
 //! `[project]` replaces the old flat `[fabro]` shape. `directory` means the
-//! Fabro-managed project directory inside the repo, defaulting to `fabro/`.
+//! Fabro-managed project directory inside the repo, defaulting to `.`.
 
 use std::collections::HashMap;
 
@@ -25,7 +25,7 @@ pub struct ProjectLayer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     /// The Fabro-managed project directory inside the repo. Defaults to
-    /// `fabro/` after layering when unspecified.
+    /// `.` after layering when unspecified.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub directory:   Option<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]

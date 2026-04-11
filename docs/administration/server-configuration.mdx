@@ -18,7 +18,7 @@ Legacy `server.toml`, `user.toml`, and `cli.toml` are ignored with a warning. Re
 | Scope | Examples |
 |---|---|
 | Server-owned (runtime-only from local `settings.toml`) | `[server.listen]`, `[server.api]`, `[server.web]`, `[server.auth]`, `[server.storage]`, `[server.artifacts]`, `[server.slatedb]`, `[server.scheduler]`, `[server.logging]`, `[server.integrations]`, `[features]` |
-| Shared run defaults (layered through `fabro.toml`/`workflow.toml`) | `[run.model]`, `[run.prepare]`, `[run.sandbox]`, `[run.checkpoint]`, `[run.inputs]`, `[run.pull_request]`, `[run.git]`, `[run.hooks]`, `[run.agent]` |
+| Shared run defaults (layered through `.fabro/project.toml`/`workflow.toml`) | `[run.model]`, `[run.prepare]`, `[run.sandbox]`, `[run.checkpoint]`, `[run.inputs]`, `[run.pull_request]`, `[run.git]`, `[run.hooks]`, `[run.agent]` |
 
 The CLI-only `[cli.*]` sections (including `[cli.target]`) belong in the client machine's `settings.toml`. They tell CLI commands how to reach a server. The server process does not read `[cli.*]` for its own binding or routing.
 
@@ -135,7 +135,7 @@ When `enabled = false`, the server still exposes the machine API and `/health`, 
 
 The `[run.*]` sections in `settings.toml` act as defaults for every run.
 
-On a same-machine setup, `settings.toml` is the shared machine-default layer under `workflow.toml` and `fabro.toml`.
+On a same-machine setup, `settings.toml` is the shared machine-default layer under `workflow.toml` and `.fabro/project.toml`.
 
 On a remote setup, the client bundles workflow, project, and user config into the run manifest. The server then layers those bundled client configs over its own local defaults for run-shaped fields. Server-owned values like `[server.storage]`, `[server.api]`, `[server.web]`, `[features]`, and `[server.scheduler]` always come from the server machine's own `settings.toml` or `fabro server start` flags.
 
@@ -194,7 +194,7 @@ Toggle experimental or opt-in features. All features default to `false`.
 |---|---|
 | `session_sandboxes` | Enable session sandboxes in the web UI |
 
-The same `[features]` section can be set in `fabro.toml` (project-level) to enable features per-project.
+The same `[features]` section can be set in `.fabro/project.toml` (project-level) to enable features per-project.
 
 ## Secrets and environment variables
 

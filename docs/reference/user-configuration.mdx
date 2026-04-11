@@ -29,7 +29,7 @@ Files that omit `_version` are treated as version `1`. The legacy top-level `ver
 
 ## Who reads what
 
-`settings.toml` uses the same schema as `fabro.toml` and `workflow.toml`, but each process only reads the fields it understands. The top-level schema is strictly namespaced — the only allowed domains are `[project]`, `[workflow]`, `[run]`, `[cli]`, `[server]`, and `[features]`.
+`settings.toml` uses the same schema as `.fabro/project.toml` and `workflow.toml`, but each process only reads the fields it understands. The top-level schema is strictly namespaced — the only allowed domains are `[project]`, `[workflow]`, `[run]`, `[cli]`, `[server]`, and `[features]`.
 
 | Scope | Examples |
 |---|---|
@@ -37,7 +37,7 @@ Files that omit `_version` are treated as version `1`. The legacy top-level `ver
 | Shared run defaults | `[run.model]`, `[run.sandbox]`, `[run.checkpoint]`, `[run.inputs]`, `[run.prepare]`, `[run.pull_request]`, `[run.hooks]`, `[run.agent.mcps]` |
 | Server-only | `[server.listen]`, `[server.api]`, `[server.web]`, `[server.auth]`, `[server.storage]`, `[server.artifacts]`, `[server.slatedb]`, `[server.scheduler]`, `[server.logging]`, `[server.integrations]` |
 
-`[cli.*]` and `[server.*]` stanzas are owner-specific: they are only consumed from `~/.fabro/settings.toml` (plus process-local flags and env overrides). The same stanzas in `fabro.toml` or `workflow.toml` remain schema-valid but runtime-inert.
+`[cli.*]` and `[server.*]` stanzas are owner-specific: they are only consumed from `~/.fabro/settings.toml` (plus process-local flags and env overrides). The same stanzas in `.fabro/project.toml` or `workflow.toml` remain schema-valid but runtime-inert.
 
 See [Server Configuration](/administration/server-configuration) for the server-owned sections.
 
@@ -48,7 +48,7 @@ Shared layered domains (`[project]`, `[workflow]`, `[run]`, `[features]`) use th
 1. **CLI flags** — always win
 2. **Environment overrides** — Fabro-defined override channels
 3. **`workflow.toml`** — per-workflow overrides
-4. **`fabro.toml`** — project defaults
+4. **`.fabro/project.toml`** — project defaults
 5. **`~/.fabro/settings.toml`** — machine defaults
 6. **Built-in defaults**
 
@@ -297,7 +297,7 @@ enabled = true
 | `auto_merge` | Enable GitHub auto-merge on the created PR (implies `draft = false`) | `false` |
 | `merge_strategy` | One of `"squash"`, `"merge"`, `"rebase"` | `"squash"` |
 
-Precedence: `workflow.toml` > `fabro.toml` > `~/.fabro/settings.toml` > built-in default (`false`).
+Precedence: `workflow.toml` > `.fabro/project.toml` > `~/.fabro/settings.toml` > built-in default (`false`).
 
 ## `[run.agent.mcps]` section
 

@@ -13,7 +13,7 @@ name = "imagegen-tools-v3"
 cpu = 4
 memory = 8
 disk = 10
-dockerfile = { path = "../../fabro/workflows/imagegen/Dockerfile.imagegen" }
+dockerfile = { path = "../../.fabro/workflows/imagegen/Dockerfile.imagegen" }
 
 [assets]
 include = ["output/**"]

@@ -113,7 +113,7 @@ Allowed setup:
 
 - checked-in workflow fixtures
 - temp `.fabro` workflow files
-- temp `workflow.toml` and `fabro.toml`
+- temp `workflow.toml` and `.fabro/project.toml`
 - temp git repositories
 - temp user config and environment variables
 - invoking commands to create runs, checkpoints, branches, and persisted state
