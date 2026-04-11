@@ -7,12 +7,12 @@
 //! `~/.fabro/settings.toml` plus explicit process-local overrides — their
 //! stanzas in `fabro.toml` and `workflow.toml` remain schema-valid but inert.
 
-use anyhow::{Result, anyhow};
 use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::run::{RunExecutionLayer, RunLayer};
 use fabro_types::settings::server::ServerLayer;
 
 use crate::merge::combine_files;
+use crate::{Error, Result};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EffectiveSettingsMode {
@@ -23,10 +23,10 @@ pub enum EffectiveSettingsMode {
 
 #[derive(Clone, Debug, Default)]
 pub struct EffectiveSettingsLayers {
-    pub args:     SettingsLayer,
+    pub args: SettingsLayer,
     pub workflow: SettingsLayer,
-    pub project:  SettingsLayer,
-    pub user:     SettingsLayer,
+    pub project: SettingsLayer,
+    pub user: SettingsLayer,
 }
 
 impl EffectiveSettingsLayers {
@@ -65,9 +65,7 @@ pub fn resolve_settings(
             args,
         )),
         EffectiveSettingsMode::RemoteServer | EffectiveSettingsMode::LocalDaemon => {
-            let server_settings = server_settings.ok_or_else(|| {
-                anyhow!("server settings are required for server-targeted settings resolution")
-            })?;
+            let server_settings = server_settings.ok_or(Error::MissingServerSettings)?;
             // Owner-specific domains (cli, server) may only come from the
             // local ~/.fabro/settings.toml, never from fabro.toml or
             // workflow.toml. The user layer keeps its cli/server fields.

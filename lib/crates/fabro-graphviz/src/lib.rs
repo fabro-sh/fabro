@@ -6,4 +6,5 @@ pub mod parser;
 pub mod render;
 pub mod stylesheet;
 
+pub use error::{Error, GraphvizError, Result};
 pub use fidelity::Fidelity;

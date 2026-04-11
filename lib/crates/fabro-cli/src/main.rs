@@ -145,7 +145,7 @@ async fn main_inner() -> (String, Result<()>) {
                         false,
                     )
                 }
-                Err(err) => return (command_name, Err(err)),
+                Err(err) => return (command_name, Err(err.into())),
             }
         } else {
             match user_config::load_settings() {

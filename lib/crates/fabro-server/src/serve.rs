@@ -84,7 +84,7 @@ pub struct ServeArgs {
 }
 
 fn load_settings(path: Option<&Path>) -> anyhow::Result<SettingsLayer> {
-    load_settings_config(path)
+    Ok(load_settings_config(path)?)
 }
 
 fn resolved_config_path(path: Option<&Path>) -> PathBuf {
@@ -707,15 +707,15 @@ mod tests {
     fn apply_runtime_settings_preserves_storage_dir() {
         let base = SettingsLayer::default();
         let args = ServeArgs {
-            bind:                None,
-            model:               None,
-            provider:            None,
-            dry_run:             false,
-            sandbox:             None,
-            web:                 false,
-            no_web:              false,
+            bind: None,
+            model: None,
+            provider: None,
+            dry_run: false,
+            sandbox: None,
+            web: false,
+            no_web: false,
             max_concurrent_runs: None,
-            config:              None,
+            config: None,
         };
 
         let resolved =
@@ -741,15 +741,15 @@ enabled = false
 ",
         );
         let args = ServeArgs {
-            bind:                None,
-            model:               None,
-            provider:            None,
-            dry_run:             false,
-            sandbox:             None,
-            web:                 true,
-            no_web:              false,
+            bind: None,
+            model: None,
+            provider: None,
+            dry_run: false,
+            sandbox: None,
+            web: true,
+            no_web: false,
             max_concurrent_runs: None,
-            config:              None,
+            config: None,
         };
 
         let resolved = apply_runtime_settings(&base, &args, false, &PathBuf::from("/srv/fabro"));
@@ -768,15 +768,15 @@ enabled = false
     fn apply_runtime_settings_disables_web_from_cli_flag() {
         let base = SettingsLayer::default();
         let args = ServeArgs {
-            bind:                None,
-            model:               None,
-            provider:            None,
-            dry_run:             false,
-            sandbox:             None,
-            web:                 false,
-            no_web:              true,
+            bind: None,
+            model: None,
+            provider: None,
+            dry_run: false,
+            sandbox: None,
+            web: false,
+            no_web: true,
             max_concurrent_runs: None,
-            config:              None,
+            config: None,
         };
 
         let resolved = apply_runtime_settings(&base, &args, false, &PathBuf::from("/srv/fabro"));

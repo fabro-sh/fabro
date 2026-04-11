@@ -1,31 +1,27 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::Context;
 use fabro_types::settings::run::RunGoalLayer;
 use fabro_types::settings::{InterpString, SettingsLayer};
 
 use crate::merge::combine_files;
 use crate::parse::parse_settings_layer;
-use crate::{project, user};
+use crate::{Error, Result, project, user};
 
-pub fn load_settings_path(path: &Path) -> anyhow::Result<SettingsLayer> {
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read {}", path.display()))?;
+pub fn load_settings_path(path: &Path) -> Result<SettingsLayer> {
+    let content = std::fs::read_to_string(path).map_err(|source| Error::read_file(path, source))?;
     let mut layer = parse_settings_layer(&content)
-        .map_err(|err| anyhow::anyhow!("{err}"))
-        .context("Failed to parse settings file")?;
+        .map_err(|err| Error::parse("Failed to parse settings file", err))?;
     let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
     resolve_goal_file_paths(&mut layer, base_dir);
     Ok(layer)
 }
 
-pub fn load_settings_for_workflow(path: &Path, cwd: &Path) -> anyhow::Result<SettingsLayer> {
+pub fn load_settings_for_workflow(path: &Path, cwd: &Path) -> Result<SettingsLayer> {
     let resolution = project::resolve_workflow_path(path, cwd)?;
     if resolution.workflow_config.is_none() && !resolution.resolved_workflow_path.is_file() {
-        anyhow::bail!(
-            "Workflow not found: {}",
-            resolution.resolved_workflow_path.display()
-        );
+        return Err(Error::WorkflowNotFound(
+            resolution.resolved_workflow_path.display().to_string(),
+        ));
     }
 
     let workflow_config = resolution.workflow_config.unwrap_or_default();
@@ -41,13 +37,13 @@ pub fn load_settings_for_workflow(path: &Path, cwd: &Path) -> anyhow::Result<Set
     Ok(combine_files(project_config, workflow_config))
 }
 
-pub fn load_settings_project(start: &Path) -> anyhow::Result<SettingsLayer> {
+pub fn load_settings_project(start: &Path) -> Result<SettingsLayer> {
     Ok(project::discover_project_config(start)?
         .map(|(_, config)| config)
         .unwrap_or_default())
 }
 
-pub fn load_settings_user() -> anyhow::Result<SettingsLayer> {
+pub fn load_settings_user() -> Result<SettingsLayer> {
     user::load_settings_config(None)
 }
 

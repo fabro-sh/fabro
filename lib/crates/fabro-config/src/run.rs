@@ -7,27 +7,25 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::Context;
 use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::run::{ResolvedGoalSource, ResolvedRunGoal, RunGoalLayer};
 
 use crate::load::{load_settings_path, resolve_goal_file_path};
 use crate::parse::parse_settings_layer;
+use crate::{Error, Result};
 
 /// Load and parse a run config from a TOML file.
-pub fn parse_run_config(contents: &str) -> anyhow::Result<SettingsLayer> {
+pub fn parse_run_config(contents: &str) -> Result<SettingsLayer> {
     parse_settings_layer(contents)
-        .map_err(|err| anyhow::anyhow!("{err}"))
-        .context("Failed to parse run config TOML")
+        .map_err(|err| Error::parse("Failed to parse run config TOML", err))
 }
 
 /// Load and parse a run config from a TOML file.
 ///
 /// Goes through [`load_settings_path`] so that relative `run.goal.file`
 /// paths are anchored at the directory of `path` at load time.
-pub fn load_run_config(path: &Path) -> anyhow::Result<SettingsLayer> {
+pub fn load_run_config(path: &Path) -> Result<SettingsLayer> {
     load_settings_path(path)
-        .with_context(|| format!("Failed to parse workflow config at {}", path.display()))
 }
 
 /// Resolve a graph path relative to a workflow.toml.
@@ -45,7 +43,7 @@ pub enum ResolveRunGoalError {
         var: String,
     },
     Io {
-        path:   PathBuf,
+        path: PathBuf,
         source: std::io::Error,
     },
 }
@@ -76,14 +74,14 @@ impl std::error::Error for ResolveRunGoalError {
 pub fn resolve_run_goal(
     settings: &SettingsLayer,
     base_dir: &Path,
-) -> Result<Option<ResolvedRunGoal>, ResolveRunGoalError> {
+) -> std::result::Result<Option<ResolvedRunGoal>, ResolveRunGoalError> {
     let Some(goal) = settings.run.as_ref().and_then(|run| run.goal.as_ref()) else {
         return Ok(None);
     };
 
     match goal {
         RunGoalLayer::Inline(text) => Ok(Some(ResolvedRunGoal {
-            text:   text.as_source(),
+            text: text.as_source(),
             source: ResolvedGoalSource::Inline,
         })),
         RunGoalLayer::File { file } => {
