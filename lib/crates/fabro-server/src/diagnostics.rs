@@ -20,7 +20,7 @@ use crate::server::AppState;
 
 #[derive(Debug, Serialize)]
 pub struct DiagnosticsReport {
-    pub version: String,
+    pub version:  String,
     pub sections: Vec<CheckSection>,
 }
 
@@ -162,18 +162,18 @@ pub async fn run_all(state: &AppState) -> DiagnosticsReport {
     let crypto = check_crypto(state);
 
     DiagnosticsReport {
-        version: FABRO_VERSION.to_string(),
+        version:  FABRO_VERSION.to_string(),
         sections: vec![
             CheckSection {
-                title: "Credentials".to_string(),
+                title:  "Credentials".to_string(),
                 checks: vec![llm, github, sandbox, brave],
             },
             CheckSection {
-                title: "System".to_string(),
+                title:  "System".to_string(),
                 checks: vec![check_dot()],
             },
             CheckSection {
-                title: "Configuration".to_string(),
+                title:  "Configuration".to_string(),
                 checks: vec![crypto],
             },
         ],
@@ -194,10 +194,10 @@ async fn check_llm_providers(state: &AppState) -> CheckResult {
 
     if configured.is_empty() {
         return CheckResult {
-            name: "LLM Providers".to_string(),
-            status: CheckStatus::Error,
-            summary: "none configured".to_string(),
-            details: Vec::new(),
+            name:        "LLM Providers".to_string(),
+            status:      CheckStatus::Error,
+            summary:     "none configured".to_string(),
+            details:     Vec::new(),
             remediation: Some("Set at least one provider API key".to_string()),
         };
     }
@@ -206,10 +206,10 @@ async fn check_llm_providers(state: &AppState) -> CheckResult {
         Ok(client) => client,
         Err(err) => {
             return CheckResult {
-                name: "LLM Providers".to_string(),
-                status: CheckStatus::Error,
-                summary: "failed to initialize".to_string(),
-                details: vec![CheckDetail::new(err)],
+                name:        "LLM Providers".to_string(),
+                status:      CheckStatus::Error,
+                summary:     "failed to initialize".to_string(),
+                details:     vec![CheckDetail::new(err)],
                 remediation: Some("Check configured provider credentials".to_string()),
             };
         }
@@ -266,19 +266,19 @@ fn probe_model(provider: Provider) -> String {
 
 async fn probe_llm_provider(client: &LlmClient, provider: Provider) -> Result<(), String> {
     let request = Request {
-        model: probe_model(provider),
-        messages: vec![Message::user("hi")],
-        provider: Some(provider.as_str().to_string()),
-        tools: None,
-        tool_choice: None,
-        response_format: None,
-        temperature: None,
-        top_p: None,
-        max_tokens: Some(16),
-        stop_sequences: None,
+        model:            probe_model(provider),
+        messages:         vec![Message::user("hi")],
+        provider:         Some(provider.as_str().to_string()),
+        tools:            None,
+        tool_choice:      None,
+        response_format:  None,
+        temperature:      None,
+        top_p:            None,
+        max_tokens:       Some(16),
+        stop_sequences:   None,
         reasoning_effort: None,
-        speed: None,
-        metadata: None,
+        speed:            None,
+        metadata:         None,
         provider_options: None,
     };
     client
@@ -314,29 +314,29 @@ async fn check_github_app(state: &AppState) -> CheckResult {
         && !webhook_secret
     {
         return CheckResult {
-            name: "GitHub App".to_string(),
-            status: CheckStatus::Warning,
-            summary: "not configured".to_string(),
-            details: Vec::new(),
+            name:        "GitHub App".to_string(),
+            status:      CheckStatus::Warning,
+            summary:     "not configured".to_string(),
+            details:     Vec::new(),
             remediation: Some("Configure GitHub App settings and secrets".to_string()),
         };
     }
 
     let Some(app_id) = app_id else {
         return CheckResult {
-            name: "GitHub App".to_string(),
-            status: CheckStatus::Error,
-            summary: "missing app_id".to_string(),
-            details: Vec::new(),
+            name:        "GitHub App".to_string(),
+            status:      CheckStatus::Error,
+            summary:     "missing app_id".to_string(),
+            details:     Vec::new(),
             remediation: Some("Set git.app_id in settings.toml".to_string()),
         };
     };
     let Some(private_key_raw) = private_key_raw else {
         return CheckResult {
-            name: "GitHub App".to_string(),
-            status: CheckStatus::Error,
-            summary: "missing private key".to_string(),
-            details: Vec::new(),
+            name:        "GitHub App".to_string(),
+            status:      CheckStatus::Error,
+            summary:     "missing private key".to_string(),
+            details:     Vec::new(),
             remediation: Some("Set GITHUB_APP_PRIVATE_KEY".to_string()),
         };
     };
@@ -345,10 +345,10 @@ async fn check_github_app(state: &AppState) -> CheckResult {
         Ok(value) => value,
         Err(err) => {
             return CheckResult {
-                name: "GitHub App".to_string(),
-                status: CheckStatus::Error,
-                summary: "private key invalid".to_string(),
-                details: vec![CheckDetail::new(err.clone())],
+                name:        "GitHub App".to_string(),
+                status:      CheckStatus::Error,
+                summary:     "private key invalid".to_string(),
+                details:     vec![CheckDetail::new(err.clone())],
                 remediation: Some(err),
             };
         }
@@ -358,10 +358,10 @@ async fn check_github_app(state: &AppState) -> CheckResult {
         Ok(jwt) => jwt,
         Err(err) => {
             return CheckResult {
-                name: "GitHub App".to_string(),
-                status: CheckStatus::Error,
-                summary: "JWT signing failed".to_string(),
-                details: vec![CheckDetail::new(err.clone())],
+                name:        "GitHub App".to_string(),
+                status:      CheckStatus::Error,
+                summary:     "JWT signing failed".to_string(),
+                details:     vec![CheckDetail::new(err.clone())],
                 remediation: Some(err),
             };
         }
@@ -375,24 +375,24 @@ async fn check_github_app(state: &AppState) -> CheckResult {
     .await;
     match auth_result {
         Ok(Ok(_app)) => CheckResult {
-            name: "GitHub App".to_string(),
-            status: CheckStatus::Pass,
-            summary: slug.unwrap_or_else(|| "configured".to_string()),
-            details: Vec::new(),
+            name:        "GitHub App".to_string(),
+            status:      CheckStatus::Pass,
+            summary:     slug.unwrap_or_else(|| "configured".to_string()),
+            details:     Vec::new(),
             remediation: None,
         },
         Ok(Err(err)) => CheckResult {
-            name: "GitHub App".to_string(),
-            status: CheckStatus::Error,
-            summary: "connectivity error".to_string(),
-            details: vec![CheckDetail::new(err.clone())],
+            name:        "GitHub App".to_string(),
+            status:      CheckStatus::Error,
+            summary:     "connectivity error".to_string(),
+            details:     vec![CheckDetail::new(err.clone())],
             remediation: Some(err),
         },
         Err(_) => CheckResult {
-            name: "GitHub App".to_string(),
-            status: CheckStatus::Error,
-            summary: "timeout".to_string(),
-            details: vec![CheckDetail::new("GitHub probe timed out".to_string())],
+            name:        "GitHub App".to_string(),
+            status:      CheckStatus::Error,
+            summary:     "timeout".to_string(),
+            details:     vec![CheckDetail::new("GitHub probe timed out".to_string())],
             remediation: Some("Check GitHub connectivity and credentials".to_string()),
         },
     }
@@ -401,18 +401,18 @@ async fn check_github_app(state: &AppState) -> CheckResult {
 fn check_sandbox(state: &AppState) -> CheckResult {
     if state.secret_or_env("DAYTONA_API_KEY").is_some() {
         CheckResult {
-            name: "Sandbox".to_string(),
-            status: CheckStatus::Pass,
-            summary: "Daytona configured".to_string(),
-            details: Vec::new(),
+            name:        "Sandbox".to_string(),
+            status:      CheckStatus::Pass,
+            summary:     "Daytona configured".to_string(),
+            details:     Vec::new(),
             remediation: None,
         }
     } else {
         CheckResult {
-            name: "Sandbox".to_string(),
-            status: CheckStatus::Warning,
-            summary: "not configured".to_string(),
-            details: Vec::new(),
+            name:        "Sandbox".to_string(),
+            status:      CheckStatus::Warning,
+            summary:     "not configured".to_string(),
+            details:     Vec::new(),
             remediation: Some("Set DAYTONA_API_KEY to enable cloud sandbox execution".to_string()),
         }
     }
@@ -421,10 +421,10 @@ fn check_sandbox(state: &AppState) -> CheckResult {
 async fn check_brave_search(state: &AppState) -> CheckResult {
     let Some(api_key) = state.secret_or_env("BRAVE_SEARCH_API_KEY") else {
         return CheckResult {
-            name: "Brave Search".to_string(),
-            status: CheckStatus::Warning,
-            summary: "not configured".to_string(),
-            details: Vec::new(),
+            name:        "Brave Search".to_string(),
+            status:      CheckStatus::Warning,
+            summary:     "not configured".to_string(),
+            details:     Vec::new(),
             remediation: Some("Set BRAVE_SEARCH_API_KEY to enable web search".to_string()),
         };
     };
@@ -441,31 +441,31 @@ async fn check_brave_search(state: &AppState) -> CheckResult {
 
     match probe {
         Ok(Ok(response)) if response.status().is_success() => CheckResult {
-            name: "Brave Search".to_string(),
-            status: CheckStatus::Pass,
-            summary: "configured and reachable".to_string(),
-            details: Vec::new(),
+            name:        "Brave Search".to_string(),
+            status:      CheckStatus::Pass,
+            summary:     "configured and reachable".to_string(),
+            details:     Vec::new(),
             remediation: None,
         },
         Ok(Ok(response)) => CheckResult {
-            name: "Brave Search".to_string(),
-            status: CheckStatus::Warning,
-            summary: format!("HTTP {}", response.status()),
-            details: Vec::new(),
+            name:        "Brave Search".to_string(),
+            status:      CheckStatus::Warning,
+            summary:     format!("HTTP {}", response.status()),
+            details:     Vec::new(),
             remediation: Some("Check BRAVE_SEARCH_API_KEY and network connectivity".to_string()),
         },
         Ok(Err(err)) => CheckResult {
-            name: "Brave Search".to_string(),
-            status: CheckStatus::Warning,
-            summary: "connectivity error".to_string(),
-            details: vec![CheckDetail::new(err.clone())],
+            name:        "Brave Search".to_string(),
+            status:      CheckStatus::Warning,
+            summary:     "connectivity error".to_string(),
+            details:     vec![CheckDetail::new(err.clone())],
             remediation: Some(err),
         },
         Err(_) => CheckResult {
-            name: "Brave Search".to_string(),
-            status: CheckStatus::Warning,
-            summary: "timeout".to_string(),
-            details: vec![CheckDetail::new("Brave Search probe timed out".to_string())],
+            name:        "Brave Search".to_string(),
+            status:      CheckStatus::Warning,
+            summary:     "timeout".to_string(),
+            details:     vec![CheckDetail::new("Brave Search probe timed out".to_string())],
             remediation: Some("Check BRAVE_SEARCH_API_KEY and network connectivity".to_string()),
         },
     }
@@ -493,10 +493,10 @@ fn check_crypto(state: &AppState) -> CheckResult {
 
     if !has_jwt && !has_mtls {
         return CheckResult {
-            name: "Crypto".to_string(),
-            status: CheckStatus::Warning,
-            summary: "no authentication configured".to_string(),
-            details: Vec::new(),
+            name:        "Crypto".to_string(),
+            status:      CheckStatus::Warning,
+            summary:     "no authentication configured".to_string(),
+            details:     Vec::new(),
             remediation: Some(
                 "Configure strategies under [server.auth.api.jwt] or [server.auth.api.mtls]"
                     .to_string(),

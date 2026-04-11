@@ -8,11 +8,11 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Context;
+use fabro_types::settings::SettingsLayer;
+use fabro_types::settings::run::{ResolvedGoalSource, ResolvedRunGoal, RunGoalLayer};
 
 use crate::load::{load_settings_path, resolve_goal_file_path};
 use crate::parse::parse_settings_layer;
-use fabro_types::settings::SettingsLayer;
-use fabro_types::settings::run::{ResolvedGoalSource, ResolvedRunGoal, RunGoalLayer};
 
 /// Load and parse a run config from a TOML file.
 pub fn parse_run_config(contents: &str) -> anyhow::Result<SettingsLayer> {
@@ -45,7 +45,7 @@ pub enum ResolveRunGoalError {
         var: String,
     },
     Io {
-        path: PathBuf,
+        path:   PathBuf,
         source: std::io::Error,
     },
 }
@@ -83,7 +83,7 @@ pub fn resolve_run_goal(
 
     match goal {
         RunGoalLayer::Inline(text) => Ok(Some(ResolvedRunGoal {
-            text: text.as_source(),
+            text:   text.as_source(),
             source: ResolvedGoalSource::Inline,
         })),
         RunGoalLayer::File { file } => {
@@ -106,8 +106,9 @@ pub fn resolve_run_goal(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use fabro_types::settings::run::RunGoalLayer;
+
+    use super::*;
 
     #[test]
     fn load_run_config_rewrites_relative_goal_file_path() {

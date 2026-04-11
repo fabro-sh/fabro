@@ -56,8 +56,9 @@ pub(crate) fn parse_run_id_from_index_key(key: &str) -> Option<RunId> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use fabro_types::RunId;
+
+    use super::*;
 
     #[test]
     fn top_level_keys_match_spec() {

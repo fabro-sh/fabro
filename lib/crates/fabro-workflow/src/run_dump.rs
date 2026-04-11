@@ -17,7 +17,7 @@ pub struct RunDump {
 
 #[derive(Debug, Clone)]
 pub struct RunDumpEntry {
-    path: String,
+    path:     String,
     contents: RunDumpContents,
 }
 
@@ -298,42 +298,42 @@ impl RunDump {
 impl RunDumpEntry {
     fn text(path: impl Into<String>, contents: String) -> Self {
         Self {
-            path: path.into(),
+            path:     path.into(),
             contents: RunDumpContents::Text(contents),
         }
     }
 
     fn text_path(path: &Path, contents: String) -> Self {
         Self {
-            path: path_to_string(path),
+            path:     path_to_string(path),
             contents: RunDumpContents::Text(contents),
         }
     }
 
     fn json(path: impl Into<String>, contents: serde_json::Value) -> Self {
         Self {
-            path: path.into(),
+            path:     path.into(),
             contents: RunDumpContents::Json(contents),
         }
     }
 
     fn json_path(path: &Path, contents: serde_json::Value) -> Self {
         Self {
-            path: path_to_string(path),
+            path:     path_to_string(path),
             contents: RunDumpContents::Json(contents),
         }
     }
 
     fn bytes(path: impl Into<String>, contents: Vec<u8>) -> Self {
         Self {
-            path: path.into(),
+            path:     path.into(),
             contents: RunDumpContents::Bytes(contents),
         }
     }
 
     fn bytes_path(path: &Path, contents: Vec<u8>) -> Self {
         Self {
-            path: path_to_string(path),
+            path:     path_to_string(path),
             contents: RunDumpContents::Bytes(contents),
         }
     }

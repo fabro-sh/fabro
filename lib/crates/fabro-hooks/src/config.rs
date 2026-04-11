@@ -94,20 +94,20 @@ pub enum HookType {
         command: String,
     },
     Http {
-        url: String,
-        headers: Option<std::collections::HashMap<String, String>>,
+        url:              String,
+        headers:          Option<std::collections::HashMap<String, String>>,
         #[serde(default)]
         allowed_env_vars: Vec<String>,
         #[serde(default)]
-        tls: TlsMode,
+        tls:              TlsMode,
     },
     Prompt {
         prompt: String,
-        model: Option<String>,
+        model:  Option<String>,
     },
     Agent {
-        prompt: String,
-        model: Option<String>,
+        prompt:          String,
+        model:           Option<String>,
         max_tool_rounds: Option<u32>,
     },
 }
@@ -115,28 +115,28 @@ pub enum HookType {
 /// A single hook definition.
 #[derive(Debug, Clone, Deserialize, PartialEq, Serialize)]
 pub struct HookDefinition {
-    pub name: Option<String>,
-    pub event: HookEvent,
+    pub name:       Option<String>,
+    pub event:      HookEvent,
     /// Inline command shorthand — if set, implies `type = "command"`.
     #[serde(default)]
-    pub command: Option<String>,
+    pub command:    Option<String>,
     /// Explicit hook type (command or http). If omitted and `command` is set,
     /// defaults to `Command`.
     #[serde(flatten)]
-    pub hook_type: Option<HookType>,
+    pub hook_type:  Option<HookType>,
     /// Regex matched against node_id, handler_type, or event-specific fields.
-    pub matcher: Option<String>,
+    pub matcher:    Option<String>,
     /// Override the event's default blocking behavior.
-    pub blocking: Option<bool>,
+    pub blocking:   Option<bool>,
     /// Timeout in milliseconds (default: 60_000).
     pub timeout_ms: Option<u64>,
     /// Run inside the sandbox (true, default) or on the host (false).
-    pub sandbox: Option<bool>,
+    pub sandbox:    Option<bool>,
 }
 
 impl HookDefinition {
-    /// Resolve the effective hook type: explicit `hook_type` wins, then `command`
-    /// shorthand, then error.
+    /// Resolve the effective hook type: explicit `hook_type` wins, then
+    /// `command` shorthand, then error.
     pub fn resolved_hook_type(&self) -> Option<Cow<'_, HookType>> {
         if let Some(ref ht) = self.hook_type {
             return Some(Cow::Borrowed(ht));
@@ -206,7 +206,8 @@ pub struct HookSettings {
 }
 
 impl HookSettings {
-    /// Merge with another config. Concatenates lists; on name collisions, `other` wins.
+    /// Merge with another config. Concatenates lists; on name collisions,
+    /// `other` wins.
     #[must_use]
     pub fn merge(self, other: Self) -> Self {
         let mut by_name: std::collections::HashMap<String, HookDefinition> =

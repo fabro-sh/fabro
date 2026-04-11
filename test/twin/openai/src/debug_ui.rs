@@ -1,10 +1,9 @@
-use axum::{
-    Json, Router,
-    extract::State,
-    response::{Html, IntoResponse},
-    routing::get,
-};
 use std::fmt::Write;
+
+use axum::extract::State;
+use axum::response::{Html, IntoResponse};
+use axum::routing::get;
+use axum::{Json, Router};
 
 use crate::logs::RequestLog;
 use crate::state::{AppState, DebugSnapshot, NamespaceSnapshot, ScenarioSnapshot};

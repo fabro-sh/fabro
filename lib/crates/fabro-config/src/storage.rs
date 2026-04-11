@@ -133,9 +133,9 @@ impl RunScratch {
 #[cfg(test)]
 mod tests {
     use chrono::Local;
+    use fabro_types::RunId;
 
     use super::{RunScratch, Storage};
-    use fabro_types::RunId;
 
     #[test]
     fn storage_accessors_are_relative_to_root() {

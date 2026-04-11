@@ -1,10 +1,10 @@
 use fabro_graphviz::graph::{AttrValue, Graph};
 
+use super::Transform;
 use crate::error::FabroError;
 
-use super::Transform;
-
-/// For nodes whose fidelity is not `Full`, prepend a context mode preamble to the prompt.
+/// For nodes whose fidelity is not `Full`, prepend a context mode preamble to
+/// the prompt.
 pub struct PreambleTransform;
 
 impl Transform for PreambleTransform {

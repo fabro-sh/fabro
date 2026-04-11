@@ -9,11 +9,11 @@ use crate::types::AdapterTimeout;
 /// configuration that every provider needs. Provider-specific fields live on
 /// the adapter struct itself.
 pub struct HttpApi {
-    pub(crate) api_key: String,
-    pub(crate) base_url: String,
-    pub(crate) default_headers: HashMap<String, String>,
-    pub(crate) client: reqwest::Client,
-    pub(crate) request_timeout: Option<Duration>,
+    pub(crate) api_key:             String,
+    pub(crate) base_url:            String,
+    pub(crate) default_headers:     HashMap<String, String>,
+    pub(crate) client:              reqwest::Client,
+    pub(crate) request_timeout:     Option<Duration>,
     pub(crate) stream_read_timeout: Option<Duration>,
 }
 

@@ -20,14 +20,14 @@ use crate::types::{
 /// features. Use the primary `OpenAiAdapter` for `OpenAI`'s own API.
 pub struct Adapter {
     pub(crate) http: super::http_api::HttpApi,
-    provider_name: String,
+    provider_name:   String,
 }
 
 impl Adapter {
     #[must_use]
     pub fn new(api_key: impl Into<String>, base_url: impl Into<String>) -> Self {
         Self {
-            http: super::http_api::HttpApi::new(api_key, base_url),
+            http:          super::http_api::HttpApi::new(api_key, base_url),
             provider_name: "openai-compatible".to_string(),
         }
     }
@@ -69,51 +69,52 @@ impl Adapter {
 
 #[derive(serde::Serialize)]
 struct ApiRequest {
-    model: String,
-    messages: Vec<ChatMessage>,
+    model:           String,
+    messages:        Vec<ChatMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    temperature: Option<f64>,
+    temperature:     Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    max_tokens: Option<i64>,
+    max_tokens:      Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    top_p: Option<f64>,
+    top_p:           Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    stop: Option<Vec<String>>,
+    stop:            Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    tools: Option<Vec<serde_json::Value>>,
+    tools:           Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    tool_choice: Option<serde_json::Value>,
+    tool_choice:     Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     response_format: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    stream: Option<bool>,
+    stream:          Option<bool>,
 }
 
 #[derive(serde::Serialize)]
 struct ChatMessage {
-    role: String,
+    role:              String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    content: Option<String>,
-    /// Reasoning/thinking content echoed back for providers that require it (Kimi).
+    content:           Option<String>,
+    /// Reasoning/thinking content echoed back for providers that require it
+    /// (Kimi).
     #[serde(skip_serializing_if = "Option::is_none")]
     reasoning_content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    tool_call_id: Option<String>,
+    tool_call_id:      Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    tool_calls: Option<Vec<ChatToolCall>>,
+    tool_calls:        Option<Vec<ChatToolCall>>,
 }
 
 #[derive(serde::Serialize)]
 struct ChatToolCall {
-    id: String,
+    id:       String,
     #[serde(rename = "type")]
-    kind: String,
+    kind:     String,
     function: ChatFunction,
 }
 
 #[derive(serde::Serialize)]
 struct ChatFunction {
-    name: String,
+    name:      String,
     arguments: String,
 }
 
@@ -121,41 +122,41 @@ struct ChatFunction {
 
 #[derive(serde::Deserialize)]
 struct ApiResponse {
-    id: String,
-    model: String,
+    id:      String,
+    model:   String,
     choices: Vec<ApiChoice>,
-    usage: Option<ApiUsage>,
+    usage:   Option<ApiUsage>,
 }
 
 #[derive(serde::Deserialize)]
 struct ApiChoice {
-    message: ApiChoiceMessage,
+    message:       ApiChoiceMessage,
     finish_reason: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
 struct ApiChoiceMessage {
-    content: Option<String>,
+    content:           Option<String>,
     reasoning_content: Option<String>,
-    tool_calls: Option<Vec<ApiToolCall>>,
+    tool_calls:        Option<Vec<ApiToolCall>>,
 }
 
 #[derive(serde::Deserialize)]
 struct ApiToolCall {
-    id: String,
+    id:       String,
     function: ApiFunction,
 }
 
 #[derive(serde::Deserialize)]
 struct ApiFunction {
-    name: String,
+    name:      String,
     arguments: String,
 }
 
 #[derive(serde::Deserialize)]
 #[allow(clippy::struct_field_names)]
 struct ApiUsage {
-    prompt_tokens: i64,
+    prompt_tokens:     i64,
     completion_tokens: i64,
 }
 
@@ -163,46 +164,46 @@ struct ApiUsage {
 
 #[derive(serde::Deserialize)]
 struct StreamChunk {
-    id: Option<String>,
-    model: Option<String>,
+    id:      Option<String>,
+    model:   Option<String>,
     choices: Option<Vec<StreamChoice>>,
-    usage: Option<ApiUsage>,
+    usage:   Option<ApiUsage>,
 }
 
 #[derive(serde::Deserialize)]
 struct StreamChoice {
-    delta: Option<StreamDelta>,
+    delta:         Option<StreamDelta>,
     finish_reason: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
 struct StreamDelta {
-    content: Option<String>,
+    content:           Option<String>,
     /// Reasoning/thinking content (used by Kimi and other reasoning models).
     reasoning_content: Option<String>,
-    tool_calls: Option<Vec<StreamToolCall>>,
+    tool_calls:        Option<Vec<StreamToolCall>>,
 }
 
 #[derive(serde::Deserialize)]
 struct StreamToolCall {
-    index: usize,
-    id: Option<String>,
+    index:    usize,
+    id:       Option<String>,
     function: Option<StreamFunction>,
 }
 
 #[derive(serde::Deserialize)]
 struct StreamFunction {
-    name: Option<String>,
+    name:      Option<String>,
     arguments: Option<String>,
 }
 
 // --- Accumulated tool call state for streaming ---
 
 struct AccumulatedToolCall {
-    id: String,
-    name: String,
+    id:        String,
+    name:      String,
     arguments: String,
-    started: bool,
+    started:   bool,
 }
 
 fn map_finish_reason(reason: Option<&str>) -> FinishReason {
@@ -258,11 +259,11 @@ fn translate_messages(messages: &[Message]) -> Vec<ChatMessage> {
                                 .as_str()
                                 .map_or_else(|| tr.content.to_string(), str::to_string);
                             Some(ChatMessage {
-                                role: "tool".to_string(),
-                                content: Some(output),
+                                role:              "tool".to_string(),
+                                content:           Some(output),
                                 reasoning_content: None,
-                                tool_call_id: Some(tr.tool_call_id.clone()),
-                                tool_calls: None,
+                                tool_call_id:      Some(tr.tool_call_id.clone()),
+                                tool_calls:        None,
                             })
                         } else {
                             None
@@ -287,8 +288,8 @@ fn translate_messages(messages: &[Message]) -> Vec<ChatMessage> {
                             .clone()
                             .unwrap_or_else(|| tc.arguments.to_string());
                         tool_calls.push(ChatToolCall {
-                            id: tc.id.clone(),
-                            kind: "function".to_string(),
+                            id:       tc.id.clone(),
+                            kind:     "function".to_string(),
                             function: ChatFunction {
                                 name: tc.name.clone(),
                                 arguments,
@@ -387,8 +388,8 @@ fn translate_response_format(format: &ResponseFormat) -> serde_json::Value {
 
 /// Build the API request body from a unified `Request`.
 ///
-/// Returns a `serde_json::Value` so that `provider_options.<provider_name>` fields
-/// can be merged into the request before sending.
+/// Returns a `serde_json::Value` so that `provider_options.<provider_name>`
+/// fields can be merged into the request before sending.
 fn build_api_request(
     request: &Request,
     stream: Option<bool>,
@@ -420,10 +421,12 @@ fn build_api_request(
     body
 }
 
-/// Merge `provider_options.<provider_name>` fields into the serialized API request body.
+/// Merge `provider_options.<provider_name>` fields into the serialized API
+/// request body.
 ///
-/// The provider name is configurable (e.g. "groq", "together", "openai-compatible"),
-/// allowing each instance to have its own namespace in `provider_options`.
+/// The provider name is configurable (e.g. "groq", "together",
+/// "openai-compatible"), allowing each instance to have its own namespace in
+/// `provider_options`.
 fn merge_provider_options(
     body: &mut serde_json::Value,
     provider_options: Option<&serde_json::Value>,
@@ -467,7 +470,7 @@ impl ProviderAdapter for Adapter {
             .map_err(|e| SdkError::network(format!("failed to parse response: {e}"), e))?;
 
         let choice = api_resp.choices.first().ok_or_else(|| SdkError::Provider {
-            kind: ProviderErrorKind::Server,
+            kind:   ProviderErrorKind::Server,
             detail: Box::new(ProviderErrorDetail::new(
                 "no choices in response",
                 &self.provider_name,
@@ -478,9 +481,9 @@ impl ProviderAdapter for Adapter {
         if let Some(reasoning) = &choice.message.reasoning_content {
             if !reasoning.is_empty() {
                 content_parts.push(ContentPart::Thinking(ThinkingData {
-                    text: reasoning.clone(),
+                    text:      reasoning.clone(),
                     signature: None,
-                    redacted: false,
+                    redacted:  false,
                 }));
             }
         }
@@ -515,9 +518,9 @@ impl ProviderAdapter for Adapter {
             model: api_resp.model,
             provider: self.provider_name.clone(),
             message: Message {
-                role: Role::Assistant,
-                content: content_parts,
-                name: None,
+                role:         Role::Assistant,
+                content:      content_parts,
+                name:         None,
                 tool_call_id: None,
             },
             finish_reason,
@@ -631,7 +634,7 @@ impl ProviderAdapter for Adapter {
         // Flatten batched events into individual stream events.
         let flat_stream = stream::unfold(
             FlattenState {
-                inner: Box::pin(stream),
+                inner:   Box::pin(stream),
                 pending: Vec::new(),
             },
             |mut flatten_state| async {
@@ -666,21 +669,22 @@ struct FlattenState {
 
 /// Accumulated state while processing the SSE stream.
 struct StreamState {
-    line_reader: super::common::LineReader,
-    provider_name: String,
-    model: String,
-    response_id: String,
-    response_model: String,
-    accumulated_text: String,
+    line_reader:           super::common::LineReader,
+    provider_name:         String,
+    model:                 String,
+    response_id:           String,
+    response_model:        String,
+    accumulated_text:      String,
     accumulated_reasoning: String,
-    tool_calls: Vec<AccumulatedToolCall>,
-    usage: TokenCounts,
-    finish_reason: FinishReason,
-    text_started: bool,
-    done: bool,
-    /// True after `finish_events()` has been called (guards against duplicates).
-    finished: bool,
-    rate_limit: Option<RateLimitInfo>,
+    tool_calls:            Vec<AccumulatedToolCall>,
+    usage:                 TokenCounts,
+    finish_reason:         FinishReason,
+    text_started:          bool,
+    done:                  bool,
+    /// True after `finish_events()` has been called (guards against
+    /// duplicates).
+    finished:              bool,
+    rate_limit:            Option<RateLimitInfo>,
 }
 
 impl StreamState {
@@ -784,10 +788,10 @@ impl StreamState {
                 // Grow the accumulated tool calls vector if needed.
                 while self.tool_calls.len() <= index {
                     self.tool_calls.push(AccumulatedToolCall {
-                        id: String::new(),
-                        name: String::new(),
+                        id:        String::new(),
+                        name:      String::new(),
                         arguments: String::new(),
-                        started: false,
+                        started:   false,
                     });
                 }
 
@@ -845,9 +849,9 @@ impl StreamState {
         // Include reasoning/thinking content if present (Kimi, etc.).
         if !self.accumulated_reasoning.is_empty() {
             content_parts.push(ContentPart::Thinking(ThinkingData {
-                text: std::mem::take(&mut self.accumulated_reasoning),
+                text:      std::mem::take(&mut self.accumulated_reasoning),
                 signature: None,
-                redacted: false,
+                redacted:  false,
             }));
         }
 
@@ -879,20 +883,20 @@ impl StreamState {
         };
 
         let response = Response {
-            id: self.response_id.clone(),
-            model: response_model,
-            provider: self.provider_name.clone(),
-            message: Message {
-                role: Role::Assistant,
-                content: content_parts,
-                name: None,
+            id:            self.response_id.clone(),
+            model:         response_model,
+            provider:      self.provider_name.clone(),
+            message:       Message {
+                role:         Role::Assistant,
+                content:      content_parts,
+                name:         None,
                 tool_call_id: None,
             },
             finish_reason: self.finish_reason.clone(),
-            usage: self.usage.clone(),
-            raw: None,
-            warnings: vec![],
-            rate_limit: self.rate_limit.clone(),
+            usage:         self.usage.clone(),
+            raw:           None,
+            warnings:      vec![],
+            rate_limit:    self.rate_limit.clone(),
         };
 
         events.push(StreamEvent::finish(
@@ -1082,10 +1086,10 @@ mod tests {
         );
         state.response_id = "resp-1".into();
         state.tool_calls.push(AccumulatedToolCall {
-            id: "call_1".into(),
-            name: "get_weather".into(),
+            id:        "call_1".into(),
+            name:      "get_weather".into(),
             arguments: r#"{"city":"SF"}"#.into(),
-            started: true,
+            started:   true,
         });
 
         let events = state.finish_events();
@@ -1138,32 +1142,32 @@ mod tests {
     #[test]
     fn api_request_stream_field_serialization() {
         let req = ApiRequest {
-            model: "test".into(),
-            messages: vec![],
-            temperature: None,
-            max_tokens: None,
-            top_p: None,
-            stop: None,
-            tools: None,
-            tool_choice: None,
+            model:           "test".into(),
+            messages:        vec![],
+            temperature:     None,
+            max_tokens:      None,
+            top_p:           None,
+            stop:            None,
+            tools:           None,
+            tool_choice:     None,
             response_format: None,
-            stream: Some(true),
+            stream:          Some(true),
         };
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["stream"], true);
 
         // When stream is None, it should be omitted.
         let req_no_stream = ApiRequest {
-            model: "test".into(),
-            messages: vec![],
-            temperature: None,
-            max_tokens: None,
-            top_p: None,
-            stop: None,
-            tools: None,
-            tool_choice: None,
+            model:           "test".into(),
+            messages:        vec![],
+            temperature:     None,
+            max_tokens:      None,
+            top_p:           None,
+            stop:            None,
+            tools:           None,
+            tool_choice:     None,
             response_format: None,
-            stream: None,
+            stream:          None,
         };
         let json_no_stream = serde_json::to_value(&req_no_stream).unwrap();
         assert!(json_no_stream.get("stream").is_none());
@@ -1172,13 +1176,13 @@ mod tests {
     #[test]
     fn translate_assistant_message_with_tool_calls_only() {
         let msg = Message {
-            role: Role::Assistant,
-            content: vec![ContentPart::ToolCall(ToolCall::new(
+            role:         Role::Assistant,
+            content:      vec![ContentPart::ToolCall(ToolCall::new(
                 "call_1",
                 "get_weather",
                 serde_json::json!({"city": "SF"}),
             ))],
-            name: None,
+            name:         None,
             tool_call_id: None,
         };
         let translated = translate_messages(&[msg]);
@@ -1196,8 +1200,8 @@ mod tests {
     #[test]
     fn translate_assistant_message_with_text_and_tool_calls() {
         let msg = Message {
-            role: Role::Assistant,
-            content: vec![
+            role:         Role::Assistant,
+            content:      vec![
                 ContentPart::text("Let me check the weather"),
                 ContentPart::ToolCall(ToolCall::new(
                     "call_2",
@@ -1205,7 +1209,7 @@ mod tests {
                     serde_json::json!({"city": "NYC"}),
                 )),
             ],
-            name: None,
+            name:         None,
             tool_call_id: None,
         };
         let translated = translate_messages(&[msg]);
@@ -1223,9 +1227,9 @@ mod tests {
         let mut tc = ToolCall::new("call_3", "search", serde_json::json!({"q": "rust"}));
         tc.raw_arguments = Some(r#"{"q": "rust"}"#.to_string());
         let msg = Message {
-            role: Role::Assistant,
-            content: vec![ContentPart::ToolCall(tc)],
-            name: None,
+            role:         Role::Assistant,
+            content:      vec![ContentPart::ToolCall(tc)],
+            name:         None,
             tool_call_id: None,
         };
         let translated = translate_messages(&[msg]);
@@ -1259,13 +1263,13 @@ mod tests {
     #[test]
     fn assistant_tool_calls_serialize_correctly() {
         let msg = Message {
-            role: Role::Assistant,
-            content: vec![ContentPart::ToolCall(ToolCall::new(
+            role:         Role::Assistant,
+            content:      vec![ContentPart::ToolCall(ToolCall::new(
                 "call_1",
                 "get_weather",
                 serde_json::json!({"city": "SF"}),
             ))],
-            name: None,
+            name:         None,
             tool_call_id: None,
         };
         let translated = translate_messages(&[msg]);
@@ -1281,19 +1285,19 @@ mod tests {
 
     fn minimal_request() -> Request {
         Request {
-            model: "llama-3.1-70b".to_string(),
-            messages: vec![Message::user("Hello")],
-            provider: None,
-            tools: None,
-            tool_choice: None,
-            response_format: None,
-            temperature: None,
-            top_p: None,
-            max_tokens: None,
-            stop_sequences: None,
+            model:            "llama-3.1-70b".to_string(),
+            messages:         vec![Message::user("Hello")],
+            provider:         None,
+            tools:            None,
+            tool_choice:      None,
+            response_format:  None,
+            temperature:      None,
+            top_p:            None,
+            max_tokens:       None,
+            stop_sequences:   None,
             reasoning_effort: None,
-            speed: None,
-            metadata: None,
+            speed:            None,
+            metadata:         None,
             provider_options: None,
         }
     }
@@ -1390,13 +1394,13 @@ mod tests {
     #[test]
     fn audio_content_produces_text_fallback() {
         let msg = Message {
-            role: Role::User,
-            content: vec![ContentPart::Audio(AudioData {
-                url: Some("https://example.com/audio.wav".to_string()),
-                data: None,
+            role:         Role::User,
+            content:      vec![ContentPart::Audio(AudioData {
+                url:        Some("https://example.com/audio.wav".to_string()),
+                data:       None,
                 media_type: None,
             })],
-            name: None,
+            name:         None,
             tool_call_id: None,
         };
         let translated = translate_messages(&[msg]);
@@ -1409,14 +1413,14 @@ mod tests {
     #[test]
     fn document_content_produces_text_fallback_with_filename() {
         let msg = Message {
-            role: Role::User,
-            content: vec![ContentPart::Document(DocumentData {
-                url: Some("https://example.com/doc.pdf".to_string()),
-                data: None,
+            role:         Role::User,
+            content:      vec![ContentPart::Document(DocumentData {
+                url:        Some("https://example.com/doc.pdf".to_string()),
+                data:       None,
                 media_type: None,
-                file_name: Some("report.pdf".to_string()),
+                file_name:  Some("report.pdf".to_string()),
             })],
-            name: None,
+            name:         None,
             tool_call_id: None,
         };
         let translated = translate_messages(&[msg]);
@@ -1429,14 +1433,14 @@ mod tests {
     #[test]
     fn document_content_produces_text_fallback_without_filename() {
         let msg = Message {
-            role: Role::User,
-            content: vec![ContentPart::Document(DocumentData {
-                url: None,
-                data: Some(vec![1, 2, 3]),
+            role:         Role::User,
+            content:      vec![ContentPart::Document(DocumentData {
+                url:        None,
+                data:       Some(vec![1, 2, 3]),
                 media_type: None,
-                file_name: None,
+                file_name:  None,
             })],
-            name: None,
+            name:         None,
             tool_call_id: None,
         };
         let translated = translate_messages(&[msg]);
@@ -1449,16 +1453,16 @@ mod tests {
     #[test]
     fn mixed_text_and_audio_content_concatenates() {
         let msg = Message {
-            role: Role::User,
-            content: vec![
+            role:         Role::User,
+            content:      vec![
                 ContentPart::text("Check this: "),
                 ContentPart::Audio(AudioData {
-                    url: None,
-                    data: Some(vec![1, 2]),
+                    url:        None,
+                    data:       Some(vec![1, 2]),
                     media_type: None,
                 }),
             ],
-            name: None,
+            name:         None,
             tool_call_id: None,
         };
         let translated = translate_messages(&[msg]);

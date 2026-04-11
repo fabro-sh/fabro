@@ -21,37 +21,38 @@ pub enum Command {
     Parallel(HashMap<String, String>),
 }
 
-/// Parsed and resolved devcontainer configuration — everything needed to create a sandbox.
+/// Parsed and resolved devcontainer configuration — everything needed to create
+/// a sandbox.
 #[derive(Debug, Clone)]
 pub struct DevcontainerSpec {
     /// Generated Dockerfile content
-    pub dockerfile: String,
+    pub dockerfile:           String,
     /// Directory for docker build context
-    pub build_context: PathBuf,
+    pub build_context:        PathBuf,
     /// Build arguments (docker build --build-arg)
-    pub build_args: HashMap<String, String>,
+    pub build_args:           HashMap<String, String>,
     /// Multi-stage build target (docker build --target)
-    pub build_target: Option<String>,
+    pub build_target:         Option<String>,
     /// Run on host before build
-    pub initialize_commands: Vec<Command>,
+    pub initialize_commands:  Vec<Command>,
     /// Run in container after first creation (before updateContentCommand)
-    pub on_create_commands: Vec<Command>,
+    pub on_create_commands:   Vec<Command>,
     /// Run in container after creation
     pub post_create_commands: Vec<Command>,
     /// Run in container on each start
-    pub post_start_commands: Vec<Command>,
+    pub post_start_commands:  Vec<Command>,
     /// remoteEnv merged
-    pub environment: HashMap<String, String>,
+    pub environment:          HashMap<String, String>,
     /// containerEnv — baked into Dockerfile as ENV directives
-    pub container_env: HashMap<String, String>,
-    pub remote_user: Option<String>,
+    pub container_env:        HashMap<String, String>,
+    pub remote_user:          Option<String>,
     /// default: /workspaces/{repo-name}
-    pub workspace_folder: String,
+    pub workspace_folder:     String,
     /// first = default preview port
-    pub forwarded_ports: Vec<u16>,
+    pub forwarded_ports:      Vec<u16>,
     /// Compose file paths (empty if not in compose mode)
-    pub compose_files: Vec<PathBuf>,
-    pub compose_service: Option<String>,
+    pub compose_files:        Vec<PathBuf>,
+    pub compose_service:      Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -64,7 +65,7 @@ pub enum DevcontainerError {
 
     #[error("reading file {path}: {source}")]
     ReadFile {
-        path: PathBuf,
+        path:   PathBuf,
         source: std::io::Error,
     },
 
@@ -91,8 +92,9 @@ pub enum DevcontainerError {
 
 pub type Result<T> = std::result::Result<T, DevcontainerError>;
 
-/// Check that a Dockerfile does not contain COPY or ADD instructions that reference
-/// build context files. Multi-stage `COPY --from=` and `ADD http(s)://` are allowed.
+/// Check that a Dockerfile does not contain COPY or ADD instructions that
+/// reference build context files. Multi-stage `COPY --from=` and `ADD
+/// http(s)://` are allowed.
 fn check_no_build_context_copies(dockerfile: &str) -> Result<()> {
     let mut offending = Vec::new();
     let mut continuation = String::new();
@@ -366,7 +368,8 @@ impl DevcontainerResolver {
 
         let forwarded_ports = Self::parse_forward_ports(&devcontainer.forward_ports);
 
-        // Collect devcontainer.json lifecycle commands, then append feature lifecycle commands
+        // Collect devcontainer.json lifecycle commands, then append feature lifecycle
+        // commands
         let mut on_create_commands =
             Self::collect_commands(devcontainer.on_create_command.as_ref(), &vars);
         let mut post_create_commands =
@@ -439,7 +442,8 @@ impl DevcontainerResolver {
             return Ok((path.to_path_buf(), parsed));
         }
 
-        // Subdirectory format: scan .devcontainer/ for subdirs containing devcontainer.json
+        // Subdirectory format: scan .devcontainer/ for subdirs containing
+        // devcontainer.json
         let devcontainer_dir = path.join(".devcontainer");
         if devcontainer_dir.is_dir() {
             let mut subdirs: Vec<PathBuf> = std::fs::read_dir(&devcontainer_dir)
@@ -474,8 +478,9 @@ impl DevcontainerResolver {
     }
 
     fn repo_root_from_json_path<'a>(json_path: &Path, original_path: &'a Path) -> &'a Path {
-        // If json_path is inside .devcontainer/<subdir>/, the repo root is two levels up
-        // If json_path is inside .devcontainer/, the repo root is one level up
+        // If json_path is inside .devcontainer/<subdir>/, the repo root is two levels
+        // up If json_path is inside .devcontainer/, the repo root is one level
+        // up
         if let Some(parent) = json_path.parent() {
             if parent.file_name().is_some_and(|n| n == ".devcontainer") {
                 if let Some(repo_root) = parent.parent() {

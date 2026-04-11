@@ -3,9 +3,15 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use anyhow::Context;
-use fabro_config::Storage;
-use fabro_config::resolve_server_from_file;
+use clap::Args;
 use fabro_config::user::{active_settings_path, load_settings_config};
+use fabro_config::{Storage, resolve_server_from_file};
+use fabro_llm::client::Client as LlmClient;
+use fabro_sandbox::SandboxProvider;
+use fabro_types::settings::{
+    InterpString, ObjectStoreSettings, ServerListenSettings,
+    ServerSettings as ResolvedServerSettings, SettingsLayer,
+};
 use fabro_util::terminal::Styles;
 use object_store::ObjectStore;
 use object_store::aws::AmazonS3Builder;
@@ -16,13 +22,6 @@ use tokio::sync::watch;
 use tokio::time::interval;
 use tracing::{error, info, warn};
 
-use clap::Args;
-
-use fabro_types::settings::{
-    InterpString, ObjectStoreSettings, ServerListenSettings,
-    ServerSettings as ResolvedServerSettings, SettingsLayer,
-};
-
 use crate::bind::{self, Bind, BindRequest};
 use crate::github_webhooks::WebhookManager;
 use crate::jwt_auth::{AuthMode, AuthStrategy, resolve_auth_mode_with_lookup};
@@ -32,8 +31,6 @@ use crate::server::{
     reconcile_incomplete_runs_on_startup, shutdown_active_workers, spawn_scheduler,
 };
 use crate::tls::{ClientAuth, build_rustls_config, serve_tls_with_shutdown};
-use fabro_llm::client::Client as LlmClient;
-use fabro_sandbox::SandboxProvider;
 
 const TEST_IN_MEMORY_STORE_ENV: &str = "FABRO_TEST_IN_MEMORY_STORE";
 pub const DEFAULT_TCP_PORT: u16 = 32276;
@@ -47,7 +44,8 @@ enum ServerTitlePhase {
 
 #[derive(Args, Clone)]
 pub struct ServeArgs {
-    /// Address to bind to (IP or IP:port for TCP, or path containing / for Unix socket)
+    /// Address to bind to (IP or IP:port for TCP, or path containing / for Unix
+    /// socket)
     #[arg(long)]
     pub bind: Option<String>,
 
@@ -55,7 +53,8 @@ pub struct ServeArgs {
     #[arg(long, conflicts_with = "no_web")]
     pub web: bool,
 
-    /// Disable the embedded web UI, browser auth routes, and web-only helper endpoints
+    /// Disable the embedded web UI, browser auth routes, and web-only helper
+    /// endpoints
     #[arg(long, conflicts_with = "web")]
     pub no_web: bool,
 
@@ -667,7 +666,8 @@ fn server_bind_title(bind: &Bind) -> String {
     }
 }
 
-/// Derive client certificate verification mode from the resolved auth strategies.
+/// Derive client certificate verification mode from the resolved auth
+/// strategies.
 fn client_auth_from_mode(auth_mode: &AuthMode) -> ClientAuth {
     let strategies = match auth_mode {
         AuthMode::Strategies(s) => s,
@@ -690,13 +690,14 @@ fn client_auth_from_mode(auth_mode: &AuthMode) -> ClientAuth {
 mod tests {
     use std::path::PathBuf;
 
+    use fabro_config::parse_settings_layer;
+    use fabro_types::settings::SettingsLayer;
+
     use super::{
         ServeArgs, ServerTitlePhase, apply_runtime_settings, bind_tcp_host_with_fallback,
         build_object_store_with_preference, server_bind_title, server_title,
     };
     use crate::bind::Bind;
-    use fabro_config::parse_settings_layer;
-    use fabro_types::settings::SettingsLayer;
 
     fn parse_settings(source: &str) -> SettingsLayer {
         parse_settings_layer(source).expect("v2 fixture should parse")
@@ -706,15 +707,15 @@ mod tests {
     fn apply_runtime_settings_preserves_storage_dir() {
         let base = SettingsLayer::default();
         let args = ServeArgs {
-            bind: None,
-            model: None,
-            provider: None,
-            dry_run: false,
-            sandbox: None,
-            web: false,
-            no_web: false,
+            bind:                None,
+            model:               None,
+            provider:            None,
+            dry_run:             false,
+            sandbox:             None,
+            web:                 false,
+            no_web:              false,
             max_concurrent_runs: None,
-            config: None,
+            config:              None,
         };
 
         let resolved =
@@ -740,15 +741,15 @@ enabled = false
 ",
         );
         let args = ServeArgs {
-            bind: None,
-            model: None,
-            provider: None,
-            dry_run: false,
-            sandbox: None,
-            web: true,
-            no_web: false,
+            bind:                None,
+            model:               None,
+            provider:            None,
+            dry_run:             false,
+            sandbox:             None,
+            web:                 true,
+            no_web:              false,
             max_concurrent_runs: None,
-            config: None,
+            config:              None,
         };
 
         let resolved = apply_runtime_settings(&base, &args, false, &PathBuf::from("/srv/fabro"));
@@ -767,15 +768,15 @@ enabled = false
     fn apply_runtime_settings_disables_web_from_cli_flag() {
         let base = SettingsLayer::default();
         let args = ServeArgs {
-            bind: None,
-            model: None,
-            provider: None,
-            dry_run: false,
-            sandbox: None,
-            web: false,
-            no_web: true,
+            bind:                None,
+            model:               None,
+            provider:            None,
+            dry_run:             false,
+            sandbox:             None,
+            web:                 false,
+            no_web:              true,
             max_concurrent_runs: None,
-            config: None,
+            config:              None,
         };
 
         let resolved = apply_runtime_settings(&base, &args, false, &PathBuf::from("/srv/fabro"));

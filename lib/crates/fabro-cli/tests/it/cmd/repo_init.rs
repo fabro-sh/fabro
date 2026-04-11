@@ -1,6 +1,5 @@
-use insta::assert_snapshot;
-
 use fabro_test::{fabro_snapshot, test_context};
+use insta::assert_snapshot;
 
 #[test]
 fn help() {

@@ -5,19 +5,19 @@ use fabro_llm::types::{FinishReason, Message, Request};
 
 fn make_request(model: &str) -> Request {
     Request {
-        model: model.to_string(),
-        messages: vec![Message::user("Say hello in exactly one word")],
-        provider: None,
-        tools: None,
-        tool_choice: None,
-        response_format: None,
-        temperature: Some(0.0),
-        top_p: None,
-        max_tokens: Some(50),
-        stop_sequences: None,
+        model:            model.to_string(),
+        messages:         vec![Message::user("Say hello in exactly one word")],
+        provider:         None,
+        tools:            None,
+        tool_choice:      None,
+        response_format:  None,
+        temperature:      Some(0.0),
+        top_p:            None,
+        max_tokens:       Some(50),
+        stop_sequences:   None,
         reasoning_effort: None,
-        speed: None,
-        metadata: None,
+        speed:            None,
+        metadata:         None,
         provider_options: None,
     }
 }
@@ -129,7 +129,8 @@ async fn run_multi_turn_cache_test(
     min_cache_ratio: f64,
 ) {
     // Claude Haiku 4.5 requires 4096 tokens minimum for prompt caching.
-    // Each repeat is ~78 tokens; 70 repeats ≈ 5460 tokens, safely above the threshold.
+    // Each repeat is ~78 tokens; 70 repeats ≈ 5460 tokens, safely above the
+    // threshold.
     let padding = "This is a detailed context paragraph that provides background information \
         about the conversation. It contains various facts and details that the model should \
         remember throughout the multi-turn interaction. The purpose of this padding is to \
@@ -156,19 +157,19 @@ async fn run_multi_turn_cache_test(
 
     for turn in 0..6 {
         let request = Request {
-            model: model.to_string(),
-            messages: messages.clone(),
-            provider: None,
-            tools: None,
-            tool_choice: None,
-            response_format: None,
-            temperature: Some(0.0),
-            top_p: None,
-            max_tokens: Some(100),
-            stop_sequences: None,
+            model:            model.to_string(),
+            messages:         messages.clone(),
+            provider:         None,
+            tools:            None,
+            tool_choice:      None,
+            response_format:  None,
+            temperature:      Some(0.0),
+            top_p:            None,
+            max_tokens:       Some(100),
+            stop_sequences:   None,
             reasoning_effort: None,
-            speed: None,
-            metadata: None,
+            speed:            None,
+            metadata:         None,
             provider_options: None,
         };
 

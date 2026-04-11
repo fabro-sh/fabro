@@ -100,8 +100,8 @@ impl SpliceArray {
 
     /// Resolve this array against an inherited lower-precedence value list.
     ///
-    /// - If the array has a splice marker, the inherited list is spliced in
-    ///   at the marker position.
+    /// - If the array has a splice marker, the inherited list is spliced in at
+    ///   the marker position.
     /// - If the array has no splice marker, it replaces the inherited list
     ///   wholesale.
     #[must_use]

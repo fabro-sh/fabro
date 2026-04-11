@@ -4,6 +4,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
 use fabro_agent::sandbox::ExecResult;
+use fabro_graphviz::graph::Node;
+use fabro_llm::types::TokenCounts;
 use fabro_model::Provider;
 use tokio::time::sleep;
 
@@ -12,8 +14,6 @@ use crate::context::Context;
 use crate::error::FabroError;
 use crate::event::{Emitter, Event, StageScope};
 use crate::outcome::billed_model_usage_from_llm;
-use fabro_graphviz::graph::Node;
-use fabro_llm::types::TokenCounts;
 
 /// Maps a provider to its corresponding CLI tool metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,7 +73,8 @@ async fn ensure_cli(
         provider: provider_str.to_string(),
     });
 
-    // Check if the CLI is already installed (include ~/.local/bin for npm-installed CLIs)
+    // Check if the CLI is already installed (include ~/.local/bin for npm-installed
+    // CLIs)
     let version_check = sandbox
         .exec_command(
             &format!("PATH=\"$HOME/.local/bin:$PATH\" {cli_name} --version"),
@@ -197,8 +198,9 @@ pub fn cli_command_for_provider(provider: Provider, model: &str, prompt_file: &s
         }
         // --yolo: auto-approve all tool calls
         Provider::Gemini => format!("cat {prompt_file} | gemini -o json --yolo{model_flag}"),
-        // --dangerously-skip-permissions: bypass all permission checks (required for non-interactive use).
-        // CLAUDECODE= unset to allow running inside a Claude Code session.
+        // --dangerously-skip-permissions: bypass all permission checks (required for
+        // non-interactive use). CLAUDECODE= unset to allow running inside a Claude Code
+        // session.
         Provider::Anthropic => format!(
             "cat {prompt_file} | CLAUDECODE= claude -p --verbose --output-format stream-json --dangerously-skip-permissions{model_flag}"
         ),
@@ -208,14 +210,15 @@ pub fn cli_command_for_provider(provider: Provider, model: &str, prompt_file: &s
 /// Parsed response from a CLI tool invocation.
 #[derive(Debug)]
 pub struct CliResponse {
-    pub text: String,
-    pub input_tokens: i64,
+    pub text:          String,
+    pub input_tokens:  i64,
     pub output_tokens: i64,
 }
 
 /// Parse NDJSON output from Claude CLI (`--output-format stream-json`).
 ///
-/// Looks for the last `{"type":"result",...}` line, extracts `result` text and `usage`.
+/// Looks for the last `{"type":"result",...}` line, extracts `result` text and
+/// `usage`.
 fn parse_claude_ndjson(output: &str) -> Option<CliResponse> {
     let mut last_result: Option<serde_json::Value> = None;
 
@@ -256,7 +259,8 @@ fn parse_claude_ndjson(output: &str) -> Option<CliResponse> {
 /// Parse NDJSON output from Codex CLI (`codex exec --json`).
 ///
 /// Codex emits NDJSON lines. Text comes from `item.completed` events where
-/// `item.type == "agent_message"`. TokenCounts comes from the `turn.completed` event.
+/// `item.type == "agent_message"`. TokenCounts comes from the `turn.completed`
+/// event.
 fn parse_codex_ndjson(output: &str) -> Option<CliResponse> {
     let mut last_message_text = String::new();
     let mut input_tokens: i64 = 0;
@@ -369,11 +373,12 @@ fn shell_escape(val: &str) -> String {
     val.replace('\'', "'\\''")
 }
 
-/// CLI backend that invokes external CLI tools (claude, codex, gemini) via `exec_command()`.
+/// CLI backend that invokes external CLI tools (claude, codex, gemini) via
+/// `exec_command()`.
 pub struct AgentCliBackend {
-    model: String,
-    provider: Provider,
-    env: HashMap<String, String>,
+    model:         String,
+    provider:      Provider,
+    env:           HashMap<String, String>,
     poll_interval: std::time::Duration,
 }
 
@@ -400,7 +405,8 @@ impl AgentCliBackend {
         self
     }
 
-    /// Detect changed files by comparing git state before and after the CLI run.
+    /// Detect changed files by comparing git state before and after the CLI
+    /// run.
     async fn detect_changed_files(&self, sandbox: &Arc<dyn Sandbox>) -> Vec<String> {
         // Get unstaged changes
         let diff_result = sandbox
@@ -494,21 +500,22 @@ impl CodergenBackend for AgentCliBackend {
         let stage_scope = StageScope::for_handler(context, &node.id);
         emitter.emit_scoped(
             &Event::AgentCliStarted {
-                node_id: node.id.clone(),
-                visit: stage_scope.visit,
-                mode: "cli".to_string(),
+                node_id:  node.id.clone(),
+                visit:    stage_scope.visit,
+                mode:     "cli".to_string(),
                 provider: provider.as_str().to_string(),
-                model: model.to_string(),
-                command: command.clone(),
+                model:    model.to_string(),
+                command:  command.clone(),
             },
             &stage_scope,
         );
 
-        // Forward provider API key and custom env vars so the CLI tool can authenticate.
-        // Build a HashMap to pass via exec_command's env_vars parameter — this
-        // prepends `export` statements directly into the base64-encoded command,
-        // avoiding filesystem-to-process race conditions that can occur when
-        // writing an env file via the fs API and sourcing it via the process API.
+        // Forward provider API key and custom env vars so the CLI tool can
+        // authenticate. Build a HashMap to pass via exec_command's env_vars
+        // parameter — this prepends `export` statements directly into the
+        // base64-encoded command, avoiding filesystem-to-process race
+        // conditions that can occur when writing an env file via the fs API and
+        // sourcing it via the process API.
         let mut launch_env: HashMap<String, String> = HashMap::new();
         for name in provider.api_key_env_vars() {
             if let Ok(val) = std::env::var(name) {
@@ -541,7 +548,8 @@ impl CodergenBackend for AgentCliBackend {
             }
         }
 
-        // Also write env file as fallback for commands that source it (e.g. ensure_cli PATH)
+        // Also write env file as fallback for commands that source it (e.g. ensure_cli
+        // PATH)
         let mut env_lines: Vec<String> = vec!["export PATH=\"$HOME/.local/bin:$PATH\"".to_string()];
         env_lines.extend(
             launch_env
@@ -621,10 +629,10 @@ impl CodergenBackend for AgentCliBackend {
         };
         emitter.emit_scoped(
             &Event::AgentCliCompleted {
-                node_id: node.id.clone(),
-                stdout: result.stdout.clone(),
-                stderr: result.stderr.clone(),
-                exit_code: result.exit_code,
+                node_id:     node.id.clone(),
+                stdout:      result.stdout.clone(),
+                stderr:      result.stderr.clone(),
+                exit_code:   result.exit_code,
                 duration_ms: result.duration_ms,
             },
             &stage_scope,
@@ -691,16 +699,12 @@ impl CodergenBackend for AgentCliBackend {
             }
         };
 
-        let stage_usage = billed_model_usage_from_llm(
-            model,
-            provider,
-            node.speed(),
-            &TokenCounts {
+        let stage_usage =
+            billed_model_usage_from_llm(model, provider, node.speed(), &TokenCounts {
                 input_tokens: parsed.input_tokens,
                 output_tokens: parsed.output_tokens,
                 ..TokenCounts::default()
-            },
-        );
+            });
 
         Ok(CodergenResult::Text {
             text: parsed.text,
@@ -785,9 +789,11 @@ impl CodergenBackend for BackendRouter {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use fabro_graphviz::graph::AttrValue;
     use std::path::Path;
+
+    use fabro_graphviz::graph::AttrValue;
+
+    use super::*;
 
     // -- AgentCli --
 
@@ -821,13 +827,14 @@ mod tests {
 
     // -- ensure_cli --
 
-    use fabro_agent::sandbox::{DirEntry, GrepOptions};
     use std::collections::VecDeque;
     use std::sync::Mutex;
 
+    use fabro_agent::sandbox::{DirEntry, GrepOptions};
+
     /// Mock sandbox that returns pre-configured ExecResults in FIFO order.
     struct CliMockSandbox {
-        results: Mutex<VecDeque<ExecResult>>,
+        results:  Mutex<VecDeque<ExecResult>>,
         commands: Arc<Mutex<Vec<String>>>,
     }
 
@@ -920,20 +927,20 @@ mod tests {
 
     fn ok_result() -> ExecResult {
         ExecResult {
-            exit_code: 0,
-            stdout: String::new(),
-            stderr: String::new(),
-            timed_out: false,
+            exit_code:   0,
+            stdout:      String::new(),
+            stderr:      String::new(),
+            timed_out:   false,
             duration_ms: 10,
         }
     }
 
     fn fail_result(code: i32) -> ExecResult {
         ExecResult {
-            exit_code: code,
-            stdout: String::new(),
-            stderr: "error".to_string(),
-            timed_out: false,
+            exit_code:   code,
+            stdout:      String::new(),
+            stderr:      "error".to_string(),
+            timed_out:   false,
             duration_ms: 10,
         }
     }
@@ -1127,7 +1134,8 @@ mod tests {
         assert!(parse_cli_response(Provider::OpenAi, "not json at all").is_none());
     }
 
-    // -- Cycle 5: Node::backend() accessor (tested here since the accessor is simple) --
+    // -- Cycle 5: Node::backend() accessor (tested here since the accessor is
+    // simple) --
 
     #[test]
     fn node_backend_returns_none_by_default() {
@@ -1196,9 +1204,9 @@ mod tests {
             _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
         ) -> Result<CodergenResult, FabroError> {
             Ok(CodergenResult::Text {
-                text: "stub".to_string(),
-                usage: None,
-                files_touched: Vec::new(),
+                text:              "stub".to_string(),
+                usage:             None,
+                files_touched:     Vec::new(),
                 last_file_touched: None,
             })
         }

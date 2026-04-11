@@ -4,10 +4,9 @@ mod info;
 mod prune;
 
 use anyhow::Result;
+pub(crate) use prune::parse_duration;
 
 use crate::args::{GlobalArgs, SystemCommand, SystemNamespace};
-
-pub(crate) use prune::parse_duration;
 
 pub(crate) async fn dispatch(ns: SystemNamespace, globals: &GlobalArgs) -> Result<()> {
     match ns.command {

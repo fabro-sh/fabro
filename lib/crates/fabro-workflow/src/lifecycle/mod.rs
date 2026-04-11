@@ -13,8 +13,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use async_trait::async_trait;
-use fabro_types::RunId;
-
 use fabro_core::error::Result as CoreResult;
 use fabro_core::graph::NodeSpec;
 use fabro_core::lifecycle::{
@@ -22,20 +20,10 @@ use fabro_core::lifecycle::{
 };
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
-
-use crate::artifact_upload::ArtifactSink;
-use crate::context;
-use crate::error::{FailureSignature, FailureSignatureExt};
-use crate::event::Emitter;
-use crate::graph::WorkflowGraph;
-use crate::graph::WorkflowNode;
-use crate::outcome::{BilledModelUsage, Outcome};
-use crate::run_control::RunControlState;
-use crate::run_options::RunOptions;
-use crate::runtime_store::RunStoreHandle;
 use fabro_graphviz::graph::types::Graph as GvGraph;
 use fabro_hooks::HookRunner;
 use fabro_sandbox::Sandbox;
+use fabro_types::RunId;
 
 use self::artifact::ArtifactLifecycle;
 use self::auto_status::AutoStatusLifecycle;
@@ -44,7 +32,15 @@ use self::event::EventLifecycle;
 use self::fidelity::FidelityLifecycle;
 use self::git::{GitCheckpointResult, GitLifecycle};
 use self::hook::HookLifecycle;
-use crate::outcome::OutcomeExt;
+use crate::artifact_upload::ArtifactSink;
+use crate::context;
+use crate::error::{FailureSignature, FailureSignatureExt};
+use crate::event::Emitter;
+use crate::graph::{WorkflowGraph, WorkflowNode};
+use crate::outcome::{BilledModelUsage, Outcome, OutcomeExt};
+use crate::run_control::RunControlState;
+use crate::run_options::RunOptions;
+use crate::runtime_store::RunStoreHandle;
 
 type WfRunState = ExecutionState<Option<BilledModelUsage>>;
 type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
@@ -53,27 +49,28 @@ type WfNodeDecision = NodeDecision<Option<BilledModelUsage>>;
 /// Orchestrates all sub-lifecycles with explicit per-callback ordering.
 /// Implements `RunLifecycle<WorkflowGraph>` by delegating to focused structs.
 pub(crate) struct WorkflowLifecycle {
-    event: EventLifecycle,
-    hook: HookLifecycle,
-    fidelity: FidelityLifecycle,
-    auto_status: AutoStatusLifecycle,
-    circuit_breaker: Arc<CircuitBreakerLifecycle>,
-    git: GitLifecycle,
-    artifact: ArtifactLifecycle,
-    on_node: crate::OnNodeCallback,
-    emitter: Arc<Emitter>,
-    run_control: Option<Arc<RunControlState>>,
-    /// Set in on_edge_selected when loop_restart approved; read+cleared by EventLifecycle::on_run_start
-    restarted_from: Arc<Mutex<Option<(String, String)>>>,
+    event:                 EventLifecycle,
+    hook:                  HookLifecycle,
+    fidelity:              FidelityLifecycle,
+    auto_status:           AutoStatusLifecycle,
+    circuit_breaker:       Arc<CircuitBreakerLifecycle>,
+    git:                   GitLifecycle,
+    artifact:              ArtifactLifecycle,
+    on_node:               crate::OnNodeCallback,
+    emitter:               Arc<Emitter>,
+    run_control:           Option<Arc<RunControlState>>,
+    /// Set in on_edge_selected when loop_restart approved; read+cleared by
+    /// EventLifecycle::on_run_start
+    restarted_from:        Arc<Mutex<Option<(String, String)>>>,
     /// Shared git checkpoint result (written by git, read by event)
     checkpoint_git_result: Arc<Mutex<Option<GitCheckpointResult>>>,
-    /// True when constructed with a checkpoint; cleared after first on_run_start.
-    /// Gates context seeding on initial resume.
-    is_initial_resume: AtomicBool,
+    /// True when constructed with a checkpoint; cleared after first
+    /// on_run_start. Gates context seeding on initial resume.
+    is_initial_resume:     AtomicBool,
     // Config needed for context seeding
-    graph: Arc<GvGraph>,
-    run_id: RunId,
-    working_directory: Option<String>,
+    graph:                 Arc<GvGraph>,
+    run_id:                RunId,
+    working_directory:     Option<String>,
 }
 
 impl WorkflowLifecycle {
@@ -114,21 +111,21 @@ impl WorkflowLifecycle {
         };
 
         let event = EventLifecycle {
-            emitter: Arc::clone(emitter),
-            graph_name: graph.name.clone(),
-            run_id: run_options.run_id,
-            run_start: Mutex::new(Instant::now()),
-            restarted_from: Arc::clone(&restarted_from),
-            base_branch: run_options.base_branch.clone(),
-            base_sha: run_options.git.as_ref().and_then(|g| g.base_sha.clone()),
-            run_branch: run_options.git.as_ref().and_then(|g| g.run_branch.clone()),
-            worktree_dir: working_directory.clone(),
-            goal: (!graph.goal().is_empty()).then(|| graph.goal().to_string()),
+            emitter:                 Arc::clone(emitter),
+            graph_name:              graph.name.clone(),
+            run_id:                  run_options.run_id,
+            run_start:               Mutex::new(Instant::now()),
+            restarted_from:          Arc::clone(&restarted_from),
+            base_branch:             run_options.base_branch.clone(),
+            base_sha:                run_options.git.as_ref().and_then(|g| g.base_sha.clone()),
+            run_branch:              run_options.git.as_ref().and_then(|g| g.run_branch.clone()),
+            worktree_dir:            working_directory.clone(),
+            goal:                    (!graph.goal().is_empty()).then(|| graph.goal().to_string()),
             captured_artifact_count: Arc::clone(&captured_artifact_count),
-            last_git_sha: Arc::clone(&last_git_sha),
-            final_patch: Arc::clone(&final_patch),
-            checkpoint_git_result: Arc::clone(&checkpoint_git_result),
-            circuit_breaker: Arc::clone(&circuit_breaker),
+            last_git_sha:            Arc::clone(&last_git_sha),
+            final_patch:             Arc::clone(&final_patch),
+            checkpoint_git_result:   Arc::clone(&checkpoint_git_result),
+            circuit_breaker:         Arc::clone(&circuit_breaker),
         };
 
         let hook = HookLifecycle {
@@ -381,7 +378,8 @@ impl RunLifecycle<WorkflowGraph> for WorkflowLifecycle {
             EdgeDecision::Continue => {
                 // Edge unchanged — check circuit breaker for loop_restart
                 let decision = self.circuit_breaker.on_edge_selected(ctx, state).await?;
-                // If loop_restart edge approved by both hook and circuit breaker, mark for LoopRestart emission
+                // If loop_restart edge approved by both hook and circuit breaker, mark for
+                // LoopRestart emission
                 if matches!(decision, EdgeDecision::Continue) {
                     if let Some(ref edge) = ctx.edge {
                         if edge.inner().loop_restart() {

@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use anyhow::Result;
 use fabro_agent::cli::{OutputFormat, run_with_args, run_with_args_and_client};
 use fabro_llm::client::Client;
@@ -6,8 +9,6 @@ use fabro_mcp::config::{McpServerSettings, McpTransport};
 use fabro_types::settings::InterpString;
 use fabro_types::settings::cli::OutputFormat as SettingsOutputFormat;
 use fabro_types::settings::run::McpEntryLayer;
-use std::collections::HashMap;
-use std::sync::Arc;
 
 use crate::args::{ExecArgs, GlobalArgs};
 use crate::user_config;
@@ -37,7 +38,7 @@ fn runtime_mcp_server(name: &str, entry: &McpEntryLayer) -> McpServerSettings {
             }
         }
         McpEntryLayer::Http { url, headers, .. } => McpTransport::Http {
-            url: url.as_source(),
+            url:     url.as_source(),
             headers: headers
                 .iter()
                 .map(|(key, value)| (key.clone(), value.as_source()))
@@ -145,10 +146,10 @@ pub(crate) async fn execute(mut args: ExecArgs, globals: &GlobalArgs) -> Result<
             .mcps
             .values()
             .map(|server| McpServerSettings {
-                name: server.name.clone(),
-                transport: server.transport.clone(),
+                name:                 server.name.clone(),
+                transport:            server.transport.clone(),
                 startup_timeout_secs: server.startup_timeout_secs,
-                tool_timeout_secs: server.tool_timeout_secs,
+                tool_timeout_secs:    server.tool_timeout_secs,
             })
             .collect()
     } else if let Some(mcps) = cli_settings
@@ -170,10 +171,10 @@ pub(crate) async fn execute(mut args: ExecArgs, globals: &GlobalArgs) -> Result<
                     .mcps
                     .values()
                     .map(|server| McpServerSettings {
-                        name: server.name.clone(),
-                        transport: server.transport.clone(),
+                        name:                 server.name.clone(),
+                        transport:            server.transport.clone(),
                         startup_timeout_secs: server.startup_timeout_secs,
-                        tool_timeout_secs: server.tool_timeout_secs,
+                        tool_timeout_secs:    server.tool_timeout_secs,
                     })
                     .collect()
             })

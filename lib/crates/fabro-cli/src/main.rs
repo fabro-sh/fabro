@@ -14,6 +14,9 @@ mod sleep_inhibitor;
 mod sse;
 mod user_config;
 
+#[cfg(test)]
+use std::ffi::OsString;
+
 use anyhow::Result;
 use args::{Commands, GlobalArgs, LONG_VERSION, RunCommands, ServerCommand, ServerNamespace};
 use clap::{CommandFactory, Parser};
@@ -23,8 +26,6 @@ use fabro_types::settings::cli::OutputVerbosity;
 use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use rustls::crypto::ring::default_provider;
-#[cfg(test)]
-use std::ffi::OsString;
 use tracing::debug;
 
 #[derive(Parser)]
@@ -305,10 +306,11 @@ async fn main_inner() -> (String, Result<()>) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use args::{
         Commands, ModelsCommand, ProviderCommand, ProviderNamespace, StoreCommand, StoreNamespace,
     };
+
+    use super::*;
 
     #[test]
     fn parse_provider_login_openai() {

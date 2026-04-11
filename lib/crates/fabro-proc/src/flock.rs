@@ -33,8 +33,9 @@ pub fn flock_unlock(file: &File) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs::File;
+
+    use super::*;
 
     #[test]
     fn acquire_exclusive_lock() {

@@ -17,17 +17,17 @@ use super::workflow::WorkflowLayer;
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SettingsLayer {
     #[serde(default, rename = "_version", skip_serializing_if = "Option::is_none")]
-    pub version: Option<u32>,
+    pub version:  Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub project: Option<ProjectLayer>,
+    pub project:  Option<ProjectLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow: Option<WorkflowLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub run: Option<RunLayer>,
+    pub run:      Option<RunLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cli: Option<CliLayer>,
+    pub cli:      Option<CliLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub server: Option<ServerLayer>,
+    pub server:   Option<ServerLayer>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub features: Option<FeaturesLayer>,
 }

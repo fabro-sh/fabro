@@ -1,7 +1,7 @@
 //! Integration tests for `DaytonaSandbox`.
 //!
-//! These tests require a `DAYTONA_API_KEY` environment variable and network access.
-//! Run with: `cargo test --package arc-workflows -- --ignored daytona`
+//! These tests require a `DAYTONA_API_KEY` environment variable and network
+//! access. Run with: `cargo test --package arc-workflows -- --ignored daytona`
 
 #![allow(
     clippy::absolute_paths,
@@ -268,11 +268,12 @@ async fn daytona_exec_command_local_timeout() {
 
     // Use a tiny timeout_ms of 100ms, our local timeout is 100 + 2000 = 2100ms.
     // If the server doesn't enforce the timeout properly or drops the connection,
-    // our local timeout should catch it. To simulate this without making a bad server,
-    // we can't easily force the local timeout to hit before the server timeout
-    // without mocking. But if we run `sleep 10` and Daytona does NOT respect the
-    // short timeout parameter, the local 2.1s timeout will definitely fire.
-    // Let's at least test that a 100ms timeout works and doesn't run for 10s.
+    // our local timeout should catch it. To simulate this without making a bad
+    // server, we can't easily force the local timeout to hit before the server
+    // timeout without mocking. But if we run `sleep 10` and Daytona does NOT
+    // respect the short timeout parameter, the local 2.1s timeout will
+    // definitely fire. Let's at least test that a 100ms timeout works and
+    // doesn't run for 10s.
     let start = std::time::Instant::now();
     let result = env
         .exec_command("sleep 10", 100, None, None, None)
@@ -350,10 +351,10 @@ async fn daytona_snapshot_sandbox() {
     let config = DaytonaConfig {
         auto_stop_interval: Some(60),
         snapshot: Some(DaytonaSnapshotConfig {
-            name: "fabro-test-snapshot".to_string(),
-            cpu: Some(2),
-            memory: Some(4),
-            disk: Some(10),
+            name:       "fabro-test-snapshot".to_string(),
+            cpu:        Some(2),
+            memory:     Some(4),
+            disk:       Some(10),
             dockerfile: Some(fabro_sandbox::daytona::DockerfileSource::Inline(
                 "FROM ubuntu:22.04\nRUN apt-get update && apt-get install -y ripgrep".to_string(),
             )),
@@ -399,7 +400,8 @@ async fn daytona_artifact_sync_uploads_and_rewrites_pointer() {
     let mut updates = HashMap::new();
     updates.insert("response.plan".to_string(), serde_json::json!(pointer));
 
-    // Sync — the local file doesn't exist in the Daytona sandbox, so it should upload
+    // Sync — the local file doesn't exist in the Daytona sandbox, so it should
+    // upload
     sync_artifacts_to_env(&mut updates, &env).await.unwrap();
 
     // Pointer should be rewritten to the Daytona working directory
@@ -431,7 +433,8 @@ async fn daytona_artifact_sync_uploads_and_rewrites_pointer() {
 // Full pipeline E2E on Daytona
 // ---------------------------------------------------------------------------
 
-/// Handler that produces a >100KB context_update to trigger artifact offloading.
+/// Handler that produces a >100KB context_update to trigger artifact
+/// offloading.
 struct LargeOutputHandler;
 
 #[async_trait::async_trait]
@@ -498,17 +501,17 @@ async fn daytona_pipeline_artifact_offload_and_sync() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), env.clone());
     let run_options = RunOptions {
-        settings: SettingsLayer::default(),
-        run_dir: dir.path().to_path_buf(),
-        cancel_token: None,
-        run_id: test_run_id("test-run"),
-        labels: std::collections::HashMap::new(),
-        workflow_slug: None,
-        github_app: None,
-        base_branch: None,
+        settings:         SettingsLayer::default(),
+        run_dir:          dir.path().to_path_buf(),
+        cancel_token:     None,
+        run_id:           test_run_id("test-run"),
+        labels:           std::collections::HashMap::new(),
+        workflow_slug:    None,
+        github_app:       None,
+        base_branch:      None,
         display_base_sha: None,
-        host_repo_path: None,
-        git: None,
+        host_repo_path:   None,
+        git:              None,
     };
     let outcome = engine
         .run(&graph, &run_options)
@@ -676,19 +679,19 @@ async fn daytona_git_checkpoint_remote_emits_events() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(emitter), env.clone());
     let run_options = RunOptions {
-        settings: SettingsLayer::default(),
-        run_dir: dir.path().to_path_buf(),
-        cancel_token: None,
-        run_id: test_run_id("git-cp-test"),
-        labels: std::collections::HashMap::new(),
-        workflow_slug: None,
-        github_app: None,
-        base_branch: None,
+        settings:         SettingsLayer::default(),
+        run_dir:          dir.path().to_path_buf(),
+        cancel_token:     None,
+        run_id:           test_run_id("git-cp-test"),
+        labels:           std::collections::HashMap::new(),
+        workflow_slug:    None,
+        github_app:       None,
+        base_branch:      None,
         display_base_sha: None,
-        host_repo_path: Some(dir.path().to_path_buf()),
-        git: Some(GitCheckpointOptions {
-            base_sha: Some(base_sha),
-            run_branch: Some(branch_name),
+        host_repo_path:   Some(dir.path().to_path_buf()),
+        git:              Some(GitCheckpointOptions {
+            base_sha:    Some(base_sha),
+            run_branch:  Some(branch_name),
             meta_branch: None,
         }),
     };
@@ -858,8 +861,8 @@ async fn daytona_parallel_git_branching_e2e() {
         display_base_sha: None,
         host_repo_path: Some(run_tmp.path().to_path_buf()),
         git: Some(GitCheckpointOptions {
-            base_sha: Some(base_sha),
-            run_branch: Some(branch_name),
+            base_sha:    Some(base_sha),
+            run_branch:  Some(branch_name),
             meta_branch: None,
         }),
     };
@@ -971,15 +974,16 @@ use fabro_workflow::handler::llm::AgentCliBackend;
 
 /// Helper: run a real CLI backend test on Daytona.
 ///
-/// Installs the CLI tool in the sandbox, then runs the AgentCliBackend against it.
+/// Installs the CLI tool in the sandbox, then runs the AgentCliBackend against
+/// it.
 async fn run_daytona_cli_test(provider: Provider, model: &str, install_command: &str) {
     let creds = load_github_app_credentials();
     let config = DaytonaConfig {
         snapshot: Some(DaytonaSnapshotConfig {
-            name: "daytona-medium".into(),
-            cpu: None,
-            memory: None,
-            disk: None,
+            name:       "daytona-medium".into(),
+            cpu:        None,
+            memory:     None,
+            disk:       None,
             dockerfile: None,
         }),
         ..DaytonaConfig::default()
@@ -1100,7 +1104,8 @@ async fn daytona_cli_gemini() {
 use fabro_workflow::git::MetadataStore;
 
 /// End-to-end test: pipeline with git checkpointing enabled + `meta_branch`
-/// writes shadow branch on the host repo and includes `Fabro-Checkpoint` trailer in sandbox commits.
+/// writes shadow branch on the host repo and includes `Fabro-Checkpoint`
+/// trailer in sandbox commits.
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_git_checkpoint_with_shadow_branch() {
     let env = create_env().await;
@@ -1205,8 +1210,8 @@ async fn daytona_git_checkpoint_with_shadow_branch() {
         display_base_sha: None,
         host_repo_path: Some(host_repo.path().to_path_buf()),
         git: Some(GitCheckpointOptions {
-            base_sha: Some(base_sha),
-            run_branch: Some(branch_name),
+            base_sha:    Some(base_sha),
+            run_branch:  Some(branch_name),
             meta_branch: Some(meta_branch),
         }),
     };
@@ -1279,8 +1284,8 @@ impl Handler for AssetCreatorHandler {
     }
 }
 
-/// Daytona sandbox: artifact collection discovers files on the remote sandbox and
-/// downloads them to the local logs directory.
+/// Daytona sandbox: artifact collection discovers files on the remote sandbox
+/// and downloads them to the local logs directory.
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_asset_collection() {
     let env = create_env().await;
@@ -1328,7 +1333,7 @@ async fn daytona_asset_collection() {
     graph.edges.push(Edge::new("create_assets", "exit"));
 
     let run_options = RunOptions {
-        settings: SettingsLayer {
+        settings:         SettingsLayer {
             run: Some(RunLayer {
                 artifacts: Some(RunArtifactsLayer {
                     include: vec!["test-results/**".to_string()],
@@ -1337,16 +1342,16 @@ async fn daytona_asset_collection() {
             }),
             ..SettingsLayer::default()
         },
-        run_dir: dir.path().to_path_buf(),
-        cancel_token: None,
-        run_id: test_run_id("artifact-test-daytona"),
-        labels: std::collections::HashMap::new(),
-        workflow_slug: None,
-        github_app: None,
-        base_branch: None,
+        run_dir:          dir.path().to_path_buf(),
+        cancel_token:     None,
+        run_id:           test_run_id("artifact-test-daytona"),
+        labels:           std::collections::HashMap::new(),
+        workflow_slug:    None,
+        github_app:       None,
+        base_branch:      None,
         display_base_sha: None,
-        host_repo_path: None,
-        git: None,
+        host_repo_path:   None,
+        git:              None,
     };
     let outcome = engine
         .run(&graph, &run_options)
@@ -1408,13 +1413,15 @@ async fn daytona_ssh_access_before_init_fails() {
 // ---------------------------------------------------------------------------
 
 /// E2E: Clone the current (private) repo using GitHub App IAT credentials.
-/// Verifies the full flow: JWT signing, installation lookup, token creation, clone.
+/// Verifies the full flow: JWT signing, installation lookup, token creation,
+/// clone.
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_clone_private_repo_with_github_app_iat() {
     let creds = load_github_app_credentials();
     let env = create_env_with_github_app(Some(creds)).await;
 
-    // initialize() clones the current repo — with IAT credentials this should succeed
+    // initialize() clones the current repo — with IAT credentials this should
+    // succeed
     env.initialize().await.unwrap();
 
     // Verify the clone worked: CLAUDE.md should exist in the workspace
@@ -1465,12 +1472,14 @@ async fn daytona_clone_private_repo_with_github_app_iat() {
     env.cleanup().await.unwrap();
 }
 
-/// E2E: Verify that repos in an installed org get credentials (needed for pushing).
+/// E2E: Verify that repos in an installed org get credentials (needed for
+/// pushing).
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_clone_public_repo_gets_credentials() {
     let creds = load_github_app_credentials();
 
-    // Directly test resolve_clone_credentials against a repo in an org where the app is installed
+    // Directly test resolve_clone_credentials against a repo in an org where the
+    // app is installed
     let (username, password) = fabro_github::resolve_clone_credentials(
         &creds,
         "fabro-sh",
@@ -1602,8 +1611,8 @@ async fn daytona_git_push_run_branch_to_origin() {
         display_base_sha: None,
         host_repo_path: Some(dir.path().to_path_buf()),
         git: Some(GitCheckpointOptions {
-            base_sha: Some(base_sha),
-            run_branch: Some(branch_name.clone()),
+            base_sha:    Some(base_sha),
+            run_branch:  Some(branch_name.clone()),
             meta_branch: None,
         }),
     };
@@ -1653,7 +1662,8 @@ async fn daytona_git_push_run_branch_to_origin() {
 /// retries. If a call fails, makes raw HTTP requests to capture the actual
 /// underlying error that the SDK normally swallows.
 ///
-/// Run: cargo test -p arc-workflows -- --ignored daytona_toolbox_idle_diagnostic --nocapture
+/// Run: cargo test -p arc-workflows -- --ignored
+/// daytona_toolbox_idle_diagnostic --nocapture
 #[fabro_macros::e2e_test(live("DAYTONA_API_KEY"), live("GITHUB_APP_PRIVATE_KEY"))]
 async fn daytona_toolbox_idle_diagnostic() {
     let creds = load_github_app_credentials();
@@ -1805,11 +1815,11 @@ async fn daytona_cp_upload_download_round_trip() {
 
     // 2. Build a SandboxRecord (same as `fabro run` would persist)
     let record = SandboxRecord {
-        provider: "daytona".to_string(),
-        working_directory: env.working_directory().to_string(),
-        identifier: Some(sandbox_name.clone()),
+        provider:               "daytona".to_string(),
+        working_directory:      env.working_directory().to_string(),
+        identifier:             Some(sandbox_name.clone()),
         host_working_directory: None,
-        container_mount_point: None,
+        container_mount_point:  None,
     };
 
     // 3. Reconnect via the real cp::reconnect path
@@ -1881,10 +1891,10 @@ async fn daytona_computer_use_browser_screenshot() {
     use base64::Engine;
     let config = DaytonaConfig {
         snapshot: Some(DaytonaSnapshotConfig {
-            name: "daytona-medium".into(),
-            cpu: None,
-            memory: None,
-            disk: None,
+            name:       "daytona-medium".into(),
+            cpu:        None,
+            memory:     None,
+            disk:       None,
             dockerfile: None,
         }),
         skip_clone: true,
@@ -2035,10 +2045,10 @@ async fn daytona_playwright_mcp_sandbox_transport() {
     // Create sandbox from daytona-medium (has Node.js + Chromium)
     let config = DaytonaConfig {
         snapshot: Some(DaytonaSnapshotConfig {
-            name: "daytona-medium".into(),
-            cpu: None,
-            memory: None,
-            disk: None,
+            name:       "daytona-medium".into(),
+            cpu:        None,
+            memory:     None,
+            disk:       None,
             dockerfile: None,
         }),
         skip_clone: true,
@@ -2080,8 +2090,8 @@ async fn daytona_playwright_mcp_sandbox_transport() {
     // 2. Start the Playwright MCP server via the sandbox transport resolution path
     let mcp_port = 3100u16;
     let mcp_config = fabro_mcp::config::McpServerSettings {
-        name: "playwright".into(),
-        transport: fabro_mcp::config::McpTransport::Sandbox {
+        name:                 "playwright".into(),
+        transport:            fabro_mcp::config::McpTransport::Sandbox {
             command: vec![
                 "npx".into(),
                 "@playwright/mcp@latest".into(),
@@ -2091,14 +2101,15 @@ async fn daytona_playwright_mcp_sandbox_transport() {
                 "--browser".into(),
                 "chromium".into(),
             ],
-            port: mcp_port,
-            env: std::collections::HashMap::new(),
+            port:    mcp_port,
+            env:     std::collections::HashMap::new(),
         },
         startup_timeout_secs: 30,
-        tool_timeout_secs: 120,
+        tool_timeout_secs:    120,
     };
 
-    // Resolve the sandbox transport: start the server, get preview URL, rewrite to HTTP
+    // Resolve the sandbox transport: start the server, get preview URL, rewrite to
+    // HTTP
     let resolved = match &mcp_config.transport {
         fabro_mcp::config::McpTransport::Sandbox { command, port, .. } => {
             let (url, headers) = {
@@ -2147,10 +2158,10 @@ async fn daytona_playwright_mcp_sandbox_transport() {
             eprintln!("Preview URL: {url}");
 
             fabro_mcp::config::McpServerSettings {
-                name: mcp_config.name.clone(),
-                transport: fabro_mcp::config::McpTransport::Http { url, headers },
+                name:                 mcp_config.name.clone(),
+                transport:            fabro_mcp::config::McpTransport::Http { url, headers },
                 startup_timeout_secs: mcp_config.startup_timeout_secs,
-                tool_timeout_secs: mcp_config.tool_timeout_secs,
+                tool_timeout_secs:    mcp_config.tool_timeout_secs,
             }
         }
         _ => unreachable!(),

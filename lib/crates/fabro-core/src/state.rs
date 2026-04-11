@@ -17,30 +17,30 @@ impl<M: OutcomeMeta> std::fmt::Debug for ExecutionState<M> {
 }
 
 pub struct ExecutionState<M: OutcomeMeta = ()> {
-    pub context: Context,
-    pub current_node_id: String,
-    pub completed_nodes: Vec<String>,
-    pub node_outcomes: HashMap<String, Outcome<M>>,
-    pub node_retries: HashMap<String, u32>,
-    pub node_visits: HashMap<String, usize>,
-    pub stage_index: usize,
+    pub context:          Context,
+    pub current_node_id:  String,
+    pub completed_nodes:  Vec<String>,
+    pub node_outcomes:    HashMap<String, Outcome<M>>,
+    pub node_retries:     HashMap<String, u32>,
+    pub node_visits:      HashMap<String, usize>,
+    pub stage_index:      usize,
     pub previous_node_id: Option<String>,
-    pub cancelled: bool,
+    pub cancelled:        bool,
 }
 
 impl<M: OutcomeMeta> ExecutionState<M> {
     pub fn new<G: Graph>(graph: &G) -> Result<Self> {
         let start = graph.find_start_node()?;
         Ok(Self {
-            context: Context::new(),
-            current_node_id: start.id().to_string(),
-            completed_nodes: Vec::new(),
-            node_outcomes: HashMap::new(),
-            node_retries: HashMap::new(),
-            node_visits: HashMap::new(),
-            stage_index: 0,
+            context:          Context::new(),
+            current_node_id:  start.id().to_string(),
+            completed_nodes:  Vec::new(),
+            node_outcomes:    HashMap::new(),
+            node_retries:     HashMap::new(),
+            node_visits:      HashMap::new(),
+            stage_index:      0,
             previous_node_id: None,
-            cancelled: false,
+            cancelled:        false,
         })
     }
 
@@ -71,7 +71,8 @@ impl<M: OutcomeMeta> ExecutionState<M> {
         if let Some(ctx) = new_context {
             self.context = ctx;
         }
-        // node_visits is NOT cleared — preserves total visit counts across restarts
+        // node_visits is NOT cleared — preserves total visit counts across
+        // restarts
     }
 
     pub fn current_node<G: Graph>(&self, graph: &G) -> Option<G::Node> {

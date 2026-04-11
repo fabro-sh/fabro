@@ -1,46 +1,46 @@
-pub use crate::config::HookEvent;
-
 use fabro_types::RunId;
 use serde::{Deserialize, Serialize};
+
+pub use crate::config::HookEvent;
 
 /// Rich JSON payload sent to hooks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HookContext {
-    pub event: HookEvent,
-    pub run_id: RunId,
-    pub workflow_name: String,
+    pub event:          HookEvent,
+    pub run_id:         RunId,
+    pub workflow_name:  String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cwd: Option<String>,
+    pub cwd:            Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub node_id: Option<String>,
+    pub node_id:        Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub node_label: Option<String>,
+    pub node_label:     Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub handler_type: Option<String>,
+    pub handler_type:   Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub status: Option<String>,
+    pub status:         Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub edge_from: Option<String>,
+    pub edge_from:      Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub edge_to: Option<String>,
+    pub edge_to:        Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub edge_label: Option<String>,
+    pub edge_label:     Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub attempt: Option<usize>,
+    pub attempt:        Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_attempts: Option<usize>,
+    pub max_attempts:   Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_name: Option<String>,
+    pub tool_name:      Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_input: Option<serde_json::Value>,
+    pub tool_input:     Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_call_id: Option<String>,
+    pub tool_call_id:   Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_output: Option<String>,
+    pub tool_output:    Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error_message: Option<String>,
+    pub error_message:  Option<String>,
 }
 
 impl HookContext {
@@ -73,7 +73,7 @@ impl HookContext {
 /// Response returned by prompt/agent hooks from the LLM.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct PromptHookResponse {
-    pub ok: bool,
+    pub ok:     bool,
     #[serde(default)]
     pub reason: Option<String>,
 }
@@ -119,38 +119,39 @@ impl HookDecision {
 /// Result from executing a single hook.
 #[derive(Debug, Clone)]
 pub struct HookResult {
-    pub hook_name: Option<String>,
-    pub decision: HookDecision,
+    pub hook_name:   Option<String>,
+    pub decision:    HookDecision,
     pub duration_ms: u64,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use fabro_types::fixtures;
+
+    use super::*;
 
     #[test]
     fn hook_context_serde_round_trip() {
         let ctx = HookContext {
-            event: HookEvent::StageStart,
-            run_id: fixtures::RUN_1,
-            workflow_name: "test-wf".into(),
-            cwd: Some("/tmp".into()),
-            node_id: Some("plan".into()),
-            node_label: Some("Plan".into()),
-            handler_type: Some("agent".into()),
-            status: None,
-            edge_from: None,
-            edge_to: None,
-            edge_label: None,
+            event:          HookEvent::StageStart,
+            run_id:         fixtures::RUN_1,
+            workflow_name:  "test-wf".into(),
+            cwd:            Some("/tmp".into()),
+            node_id:        Some("plan".into()),
+            node_label:     Some("Plan".into()),
+            handler_type:   Some("agent".into()),
+            status:         None,
+            edge_from:      None,
+            edge_to:        None,
+            edge_label:     None,
             failure_reason: None,
-            attempt: Some(1),
-            max_attempts: Some(3),
-            tool_name: None,
-            tool_input: None,
-            tool_call_id: None,
-            tool_output: None,
-            error_message: None,
+            attempt:        Some(1),
+            max_attempts:   Some(3),
+            tool_name:      None,
+            tool_input:     None,
+            tool_call_id:   None,
+            tool_output:    None,
+            error_message:  None,
         };
         let json = serde_json::to_string(&ctx).unwrap();
         let back: HookContext = serde_json::from_str(&json).unwrap();

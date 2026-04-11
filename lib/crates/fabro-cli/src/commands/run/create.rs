@@ -1,7 +1,5 @@
 use std::path::PathBuf;
 
-use crate::args::RunArgs;
-use crate::command_context::CommandContext;
 use fabro_config::Storage;
 use fabro_config::load::load_settings_user;
 use fabro_config::user::active_settings_path;
@@ -11,15 +9,18 @@ use fabro_util::terminal::Styles;
 
 use super::output::{api_diagnostics_to_local, print_preflight_workflow_summary};
 use super::overrides::run_args_layer;
+use crate::args::RunArgs;
+use crate::command_context::CommandContext;
 use crate::manifest_builder::{ManifestBuildInput, build_run_manifest, run_manifest_args};
 use crate::user_config::{self, ServerTarget};
 
 pub(crate) struct CreatedRun {
-    pub(crate) run_id: RunId,
+    pub(crate) run_id:        RunId,
     pub(crate) local_run_dir: Option<PathBuf>,
 }
 
-/// Create a workflow run: allocate run directory, persist RunRecord, return (run_id, run_dir).
+/// Create a workflow run: allocate run directory, persist RunRecord, return
+/// (run_id, run_dir).
 ///
 /// This does NOT execute the workflow — it only prepares the run directory.
 pub(crate) async fn create_run(

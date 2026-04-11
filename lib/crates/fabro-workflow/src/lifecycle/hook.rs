@@ -2,21 +2,19 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-
 use fabro_core::error::{CoreError, Result as CoreResult};
 use fabro_core::lifecycle::{
     AttemptContext, EdgeContext, EdgeDecision, NodeDecision, RunLifecycle,
 };
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
-
-use crate::graph::WorkflowGraph;
-use crate::graph::WorkflowNode;
-use crate::hook_context::set_hook_node;
-use crate::outcome::{BilledModelUsage, Outcome, OutcomeExt, StageStatus};
 use fabro_hooks::{HookContext, HookDecision, HookEvent, HookRunner};
 use fabro_sandbox::Sandbox;
 use fabro_types::RunId;
+
+use crate::graph::{WorkflowGraph, WorkflowNode};
+use crate::hook_context::set_hook_node;
+use crate::outcome::{BilledModelUsage, Outcome, OutcomeExt, StageStatus};
 
 type WfRunState = ExecutionState<Option<BilledModelUsage>>;
 type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
@@ -24,11 +22,11 @@ type WfNodeDecision = NodeDecision<Option<BilledModelUsage>>;
 
 /// Sub-lifecycle responsible for running workflow hooks.
 pub(crate) struct HookLifecycle {
-    pub hook_runner: Option<Arc<HookRunner>>,
-    pub sandbox: Arc<dyn Sandbox>,
+    pub hook_runner:   Option<Arc<HookRunner>>,
+    pub sandbox:       Arc<dyn Sandbox>,
     pub hook_work_dir: Option<PathBuf>,
-    pub run_id: RunId,
-    pub graph_name: String,
+    pub run_id:        RunId,
+    pub graph_name:    String,
 }
 
 impl HookLifecycle {

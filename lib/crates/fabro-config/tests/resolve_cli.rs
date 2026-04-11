@@ -1,5 +1,4 @@
-use fabro_config::parse_settings_layer;
-use fabro_config::resolve_cli_from_file;
+use fabro_config::{parse_settings_layer, resolve_cli_from_file};
 use fabro_types::settings::cli::{CliTargetSettings, OutputFormat, OutputVerbosity};
 use fabro_types::settings::run::AgentPermissions;
 use fabro_types::settings::{InterpString, SettingsLayer};

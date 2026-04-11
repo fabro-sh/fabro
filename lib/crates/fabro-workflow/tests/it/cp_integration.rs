@@ -2,7 +2,8 @@
 //!
 //! Local tests run without `#[ignore]` (no external dependencies).
 //! Docker tests require a Docker daemon and are marked `#[ignore]`.
-//! Run Docker tests with: `cargo test --package arc-workflows --test cp_integration -- --ignored`
+//! Run Docker tests with: `cargo test --package arc-workflows --test
+//! cp_integration -- --ignored`
 
 #![allow(clippy::ignore_without_reason)]
 
@@ -15,11 +16,11 @@ use fabro_sandbox::reconnect::reconnect;
 
 fn local_record(working_directory: &std::path::Path) -> SandboxRecord {
     SandboxRecord {
-        provider: "local".to_string(),
-        working_directory: working_directory.to_string_lossy().to_string(),
-        identifier: None,
+        provider:               "local".to_string(),
+        working_directory:      working_directory.to_string_lossy().to_string(),
+        identifier:             None,
         host_working_directory: None,
-        container_mount_point: None,
+        container_mount_point:  None,
     }
 }
 
@@ -117,11 +118,11 @@ async fn local_cp_creates_parent_dirs() {
 
 fn docker_record(host_dir: &std::path::Path, mount_point: &str) -> SandboxRecord {
     SandboxRecord {
-        provider: "docker".to_string(),
-        working_directory: mount_point.to_string(),
-        identifier: None,
+        provider:               "docker".to_string(),
+        working_directory:      mount_point.to_string(),
+        identifier:             None,
         host_working_directory: Some(host_dir.to_string_lossy().to_string()),
-        container_mount_point: Some(mount_point.to_string()),
+        container_mount_point:  Some(mount_point.to_string()),
     }
 }
 

@@ -1,5 +1,9 @@
 use std::sync::Arc;
 
+use fabro_hooks::{HookContext, HookEvent, HookRunner};
+use fabro_types::BilledTokenCounts;
+
+use super::types::{Concluded, FinalizeOptions, Retroed};
 use crate::error::FabroError;
 use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::git::MetadataStore;
@@ -10,10 +14,6 @@ use crate::run_options::RunOptions;
 use crate::run_status::{RunStatus, StatusReason};
 use crate::runtime_store::RunStoreHandle;
 use crate::sandbox_git::git_push_host;
-use fabro_hooks::{HookContext, HookEvent, HookRunner};
-use fabro_types::BilledTokenCounts;
-
-use super::types::{Concluded, FinalizeOptions, Retroed};
 
 fn emit_run_notice(
     emitter: &Emitter,
@@ -149,10 +149,11 @@ fn build_conclusion_from_parts(
     }
 }
 
-/// Write a finalize commit to the shadow branch with retro.json and final node files.
+/// Write a finalize commit to the shadow branch with retro.json and final node
+/// files.
 ///
-/// This captures the last diff.patch (written after the final checkpoint) and retro.json.
-/// Best-effort: errors are logged as warnings.
+/// This captures the last diff.patch (written after the final checkpoint) and
+/// retro.json. Best-effort: errors are logged as warnings.
 pub async fn write_finalize_commit(run_options: &RunOptions, run_store: &RunStoreHandle) {
     let (Some(meta_branch), Some(repo_path)) = (
         run_options
@@ -321,17 +322,17 @@ mod tests {
 
     fn test_run_options(run_dir: &std::path::Path) -> RunOptions {
         RunOptions {
-            settings: SettingsLayer::default(),
-            run_dir: run_dir.to_path_buf(),
-            cancel_token: None,
-            run_id: test_run_id(),
-            labels: HashMap::new(),
-            workflow_slug: None,
-            github_app: None,
-            host_repo_path: None,
-            base_branch: None,
+            settings:         SettingsLayer::default(),
+            run_dir:          run_dir.to_path_buf(),
+            cancel_token:     None,
+            run_id:           test_run_id(),
+            labels:           HashMap::new(),
+            workflow_slug:    None,
+            github_app:       None,
+            host_repo_path:   None,
+            base_branch:      None,
             display_base_sha: None,
-            git: None,
+            git:              None,
         }
     }
 
@@ -367,18 +368,15 @@ mod tests {
             retro: None,
         };
 
-        let concluded = finalize(
-            retroed,
-            &FinalizeOptions {
-                run_dir: run_dir.clone(),
-                run_id: test_run_id(),
-                run_store: run_store.clone().into(),
-                workflow_name: "test".to_string(),
-                hook_runner: None,
-                preserve_sandbox: true,
-                last_git_sha: None,
-            },
-        )
+        let concluded = finalize(retroed, &FinalizeOptions {
+            run_dir:          run_dir.clone(),
+            run_id:           test_run_id(),
+            run_store:        run_store.clone().into(),
+            workflow_name:    "test".to_string(),
+            hook_runner:      None,
+            preserve_sandbox: true,
+            last_git_sha:     None,
+        })
         .await
         .unwrap();
         store_logger.flush().await;

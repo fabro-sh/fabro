@@ -7,9 +7,10 @@ pub mod manifests;
 pub mod pulls;
 pub mod releases;
 
-use crate::server::SharedState;
 use axum::Router;
 use axum::routing::{get, patch, post, put};
+
+use crate::server::SharedState;
 
 pub fn build_router(state: SharedState) -> Router {
     Router::new()

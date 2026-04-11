@@ -1,9 +1,10 @@
 use std::time::Duration;
 
-use crate::error::CoreError;
 pub use fabro_types::outcome::{
     FailureCategory, FailureDetail, NodeResult, Outcome, OutcomeMeta, StageStatus,
 };
+
+use crate::error::CoreError;
 
 pub trait NodeResultExt<M: OutcomeMeta = ()> {
     fn from_error(error: &CoreError, duration: Duration, attempts: u32, max_attempts: u32) -> Self;

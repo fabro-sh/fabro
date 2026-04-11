@@ -1,11 +1,10 @@
 use std::path::Path;
 
+use super::start::{StartServices, Started, execute_persisted_run};
 use crate::error::FabroError;
 use crate::event::{Event, append_event_to_sink};
 use crate::outcome::StageStatus;
 use crate::run_status::RunStatus;
-
-use super::start::{StartServices, Started, execute_persisted_run};
 
 /// Resume a workflow run from its checkpoint. Errors if no checkpoint is found.
 pub async fn resume(run_dir: &Path, services: StartServices) -> Result<Started, FabroError> {

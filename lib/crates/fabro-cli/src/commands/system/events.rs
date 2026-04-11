@@ -3,8 +3,7 @@ use futures::StreamExt;
 
 use crate::args::{GlobalArgs, SystemEventsArgs};
 use crate::command_context::CommandContext;
-use crate::server_client;
-use crate::sse;
+use crate::{server_client, sse};
 
 pub(super) async fn events_command(args: &SystemEventsArgs, globals: &GlobalArgs) -> Result<()> {
     let ctx = CommandContext::for_connection(&args.connection)?;

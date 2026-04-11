@@ -1,5 +1,7 @@
-use base64::{Engine, engine::general_purpose::STANDARD as BASE64_STANDARD};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use futures::stream;
+use reqwest::header::HeaderMap;
 
 use crate::error::{
     ProviderErrorDetail, ProviderErrorKind, SdkError, error_from_grpc_status,
@@ -15,7 +17,6 @@ use crate::types::{
     ResponseFormat, ResponseFormatType, Role, StreamEvent, ThinkingData, TokenCounts, ToolCall,
     ToolChoice, ToolDefinition,
 };
-use reqwest::header::HeaderMap;
 
 const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -58,20 +59,20 @@ impl Adapter {
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ApiRequest {
-    contents: Vec<Content>,
+    contents:           Vec<Content>,
     #[serde(skip_serializing_if = "Option::is_none")]
     system_instruction: Option<SystemInstruction>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    generation_config: Option<GenerationOptions>,
+    generation_config:  Option<GenerationOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    tools: Option<Vec<GeminiToolGroup>>,
+    tools:              Option<Vec<GeminiToolGroup>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    tool_config: Option<serde_json::Value>,
+    tool_config:        Option<serde_json::Value>,
 }
 
 #[derive(serde::Serialize)]
 struct Content {
-    role: String,
+    role:  String,
     parts: Vec<serde_json::Value>,
 }
 
@@ -84,17 +85,17 @@ struct SystemInstruction {
 #[serde(rename_all = "camelCase")]
 struct GenerationOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
-    temperature: Option<f64>,
+    temperature:        Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    max_output_tokens: Option<i64>,
+    max_output_tokens:  Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    top_p: Option<f64>,
+    top_p:              Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    stop_sequences: Option<Vec<String>>,
+    stop_sequences:     Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     response_mime_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    response_schema: Option<serde_json::Value>,
+    response_schema:    Option<serde_json::Value>,
 }
 
 /// Gemini groups function declarations under a `tools` array.
@@ -106,9 +107,9 @@ struct GeminiToolGroup {
 
 #[derive(serde::Serialize)]
 struct GeminiFunctionDecl {
-    name: String,
+    name:        String,
     description: String,
-    parameters: serde_json::Value,
+    parameters:  serde_json::Value,
 }
 
 // --- Response types ---
@@ -116,14 +117,14 @@ struct GeminiFunctionDecl {
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ApiResponse {
-    candidates: Option<Vec<Candidate>>,
+    candidates:     Option<Vec<Candidate>>,
     usage_metadata: Option<UsageMetadata>,
 }
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Candidate {
-    content: Option<CandidateContent>,
+    content:       Option<CandidateContent>,
     finish_reason: Option<String>,
 }
 
@@ -136,9 +137,9 @@ struct CandidateContent {
 #[serde(rename_all = "camelCase")]
 #[allow(clippy::struct_field_names)]
 struct UsageMetadata {
-    prompt_token_count: Option<i64>,
-    candidates_token_count: Option<i64>,
-    thoughts_token_count: Option<i64>,
+    prompt_token_count:         Option<i64>,
+    candidates_token_count:     Option<i64>,
+    thoughts_token_count:       Option<i64>,
     cached_content_token_count: Option<i64>,
 }
 
@@ -163,9 +164,9 @@ fn parse_part(part: &serde_json::Value) -> Option<ContentPart> {
             .unwrap_or(false);
         if is_thought {
             return Some(ContentPart::Thinking(ThinkingData {
-                text: text.to_string(),
+                text:      text.to_string(),
                 signature: None,
-                redacted: false,
+                redacted:  false,
             }));
         }
         return Some(ContentPart::text(text));
@@ -177,7 +178,8 @@ fn parse_part(part: &serde_json::Value) -> Option<ContentPart> {
             .cloned()
             .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
         let mut tc = ToolCall::new(uuid::Uuid::new_v4().to_string(), name, args);
-        // Preserve thought_signature for Gemini 3 models (sibling of functionCall in the part)
+        // Preserve thought_signature for Gemini 3 models (sibling of functionCall in
+        // the part)
         if let Some(sig) = part.get("thoughtSignature") {
             tc.provider_metadata = Some(serde_json::json!({"thoughtSignature": sig}));
         }
@@ -191,11 +193,12 @@ fn parts_have_function_calls(parts: &[serde_json::Value]) -> bool {
     parts.iter().any(|p| p.get("functionCall").is_some())
 }
 
-/// Build a mapping from tool call ID to function name by scanning assistant messages.
+/// Build a mapping from tool call ID to function name by scanning assistant
+/// messages.
 ///
-/// Gemini uses function names (not call IDs) in `functionResponse`. Since the adapter
-/// generates synthetic UUIDs as tool call IDs, we need this mapping to recover the
-/// original function name when sending tool results back.
+/// Gemini uses function names (not call IDs) in `functionResponse`. Since the
+/// adapter generates synthetic UUIDs as tool call IDs, we need this mapping to
+/// recover the original function name when sending tool results back.
 fn build_tool_call_id_to_name(messages: &[&Message]) -> std::collections::HashMap<String, String> {
     let mut map = std::collections::HashMap::new();
     for msg in messages {
@@ -357,9 +360,9 @@ fn translate_tools(tools: &[ToolDefinition]) -> Vec<GeminiToolGroup> {
         function_declarations: tools
             .iter()
             .map(|t| GeminiFunctionDecl {
-                name: t.name.clone(),
+                name:        t.name.clone(),
                 description: t.description.clone(),
-                parameters: t.parameters.clone(),
+                parameters:  t.parameters.clone(),
             })
             .collect(),
     }]
@@ -404,8 +407,8 @@ fn translate_response_format(
 
 /// Build the Gemini API request body from a unified `Request`.
 ///
-/// Returns a `serde_json::Value` so that `provider_options.gemini` fields can be
-/// merged into the request before sending.
+/// Returns a `serde_json::Value` so that `provider_options.gemini` fields can
+/// be merged into the request before sending.
 fn build_api_request(request: &Request) -> serde_json::Value {
     let (system_text, other_messages) = extract_system_prompt(&request.messages);
 
@@ -507,7 +510,8 @@ fn parse_usage(metadata: Option<&UsageMetadata>) -> TokenCounts {
 
 /// Send an HTTP request and read the Gemini response body.
 ///
-/// Like `send_and_read_response` but uses gRPC status code mapping when available.
+/// Like `send_and_read_response` but uses gRPC status code mapping when
+/// available.
 async fn send_gemini_response(
     request: reqwest::RequestBuilder,
 ) -> Result<(String, HeaderMap), SdkError> {
@@ -535,7 +539,8 @@ async fn send_gemini_response(
     Ok((body, headers))
 }
 
-/// Map Gemini error response using gRPC status when available, falling back to HTTP status.
+/// Map Gemini error response using gRPC status when available, falling back to
+/// HTTP status.
 fn gemini_error(
     status_code: u16,
     msg: String,
@@ -589,8 +594,8 @@ async fn send_streaming_request(
     Ok(http_resp)
 }
 
-/// Process a stream of SSE chunks from the Gemini `streamGenerateContent` endpoint
-/// and yield `StreamEvent` values.
+/// Process a stream of SSE chunks from the Gemini `streamGenerateContent`
+/// endpoint and yield `StreamEvent` values.
 fn process_sse_stream(
     http_resp: reqwest::Response,
     model: String,
@@ -678,32 +683,32 @@ fn process_sse_stream(
 
 /// Internal state for the SSE stream processor.
 struct SseStreamState {
-    line_reader: super::common::LineReader,
-    model: String,
+    line_reader:            super::common::LineReader,
+    model:                  String,
     /// Events extracted from a chunk but not yet yielded.
-    pending_events: std::collections::VecDeque<StreamEvent>,
+    pending_events:         std::collections::VecDeque<StreamEvent>,
     /// Whether we have emitted a `StreamStart` event.
-    stream_started: bool,
+    stream_started:         bool,
     /// Whether we have emitted a `TextStart` event.
-    text_started: bool,
+    text_started:           bool,
     /// Whether we are currently inside a reasoning (thought) segment.
-    reasoning_started: bool,
+    reasoning_started:      bool,
     /// Accumulated thinking text across all chunks.
-    accumulated_thinking: String,
+    accumulated_thinking:   String,
     /// Accumulated text across all chunks.
-    accumulated_text: String,
+    accumulated_text:       String,
     /// Accumulated tool calls across all chunks.
     accumulated_tool_calls: Vec<ToolCall>,
     /// The `text_id` used for `TextStart`/`TextDelta`/`TextEnd`.
-    text_id: String,
+    text_id:                String,
     /// Latest usage metadata (updated per chunk; final chunk has totals).
-    usage: TokenCounts,
+    usage:                  TokenCounts,
     /// The finish reason string from the candidate, if received.
-    finish_reason_str: Option<String>,
+    finish_reason_str:      Option<String>,
     /// Whether we have emitted the `Finish` event.
-    finished: bool,
+    finished:               bool,
     /// Rate limit info parsed from HTTP response headers.
-    rate_limit: Option<RateLimitInfo>,
+    rate_limit:             Option<RateLimitInfo>,
 }
 
 impl SseStreamState {
@@ -848,9 +853,9 @@ impl SseStreamState {
         let mut content_parts: Vec<ContentPart> = Vec::new();
         if !self.accumulated_thinking.is_empty() {
             content_parts.push(ContentPart::Thinking(ThinkingData {
-                text: self.accumulated_thinking.clone(),
+                text:      self.accumulated_thinking.clone(),
                 signature: None,
-                redacted: false,
+                redacted:  false,
             }));
         }
         if !self.accumulated_text.is_empty() {
@@ -861,20 +866,20 @@ impl SseStreamState {
         }
 
         let response = Response {
-            id: uuid::Uuid::new_v4().to_string(),
-            model: self.model.clone(),
-            provider: "gemini".to_string(),
-            message: Message {
-                role: Role::Assistant,
-                content: content_parts,
-                name: None,
+            id:            uuid::Uuid::new_v4().to_string(),
+            model:         self.model.clone(),
+            provider:      "gemini".to_string(),
+            message:       Message {
+                role:         Role::Assistant,
+                content:      content_parts,
+                name:         None,
                 tool_call_id: None,
             },
             finish_reason: finish_reason.clone(),
-            usage: self.usage.clone(),
-            raw: None,
-            warnings: vec![],
-            rate_limit: self.rate_limit.clone(),
+            usage:         self.usage.clone(),
+            raw:           None,
+            warnings:      vec![],
+            rate_limit:    self.rate_limit.clone(),
         };
 
         StreamEvent::finish(finish_reason, self.usage.clone(), response)
@@ -916,7 +921,7 @@ impl ProviderAdapter for Adapter {
             .as_ref()
             .and_then(|c| c.first())
             .ok_or_else(|| SdkError::Provider {
-                kind: ProviderErrorKind::Server,
+                kind:   ProviderErrorKind::Server,
                 detail: Box::new(ProviderErrorDetail::new(
                     "no candidates in Gemini response",
                     "gemini",
@@ -940,9 +945,9 @@ impl ProviderAdapter for Adapter {
             model: request.model.clone(),
             provider: "gemini".to_string(),
             message: Message {
-                role: Role::Assistant,
-                content: content_parts,
-                name: None,
+                role:         Role::Assistant,
+                content:      content_parts,
+                name:         None,
                 tool_call_id: None,
             },
             finish_reason,
@@ -987,19 +992,19 @@ mod tests {
 
     fn minimal_request() -> Request {
         Request {
-            model: "gemini-2.0-flash".to_string(),
-            messages: vec![Message::user("Hello")],
-            provider: None,
-            tools: None,
-            tool_choice: None,
-            response_format: None,
-            temperature: None,
-            top_p: None,
-            max_tokens: None,
-            stop_sequences: None,
+            model:            "gemini-2.0-flash".to_string(),
+            messages:         vec![Message::user("Hello")],
+            provider:         None,
+            tools:            None,
+            tool_choice:      None,
+            response_format:  None,
+            temperature:      None,
+            top_p:            None,
+            max_tokens:       None,
+            stop_sequences:   None,
             reasoning_effort: None,
-            speed: None,
-            metadata: None,
+            speed:            None,
+            metadata:         None,
             provider_options: None,
         }
     }
@@ -1132,13 +1137,13 @@ mod tests {
     #[test]
     fn audio_url_translates_to_file_data() {
         let msg = Message {
-            role: Role::User,
-            content: vec![ContentPart::Audio(AudioData {
-                url: Some("https://example.com/audio.wav".to_string()),
-                data: None,
+            role:         Role::User,
+            content:      vec![ContentPart::Audio(AudioData {
+                url:        Some("https://example.com/audio.wav".to_string()),
+                data:       None,
                 media_type: Some("audio/wav".to_string()),
             })],
-            name: None,
+            name:         None,
             tool_call_id: None,
         };
         let contents = translate_messages(&[&msg]);
@@ -1151,13 +1156,13 @@ mod tests {
     #[test]
     fn audio_base64_translates_to_inline_data() {
         let msg = Message {
-            role: Role::User,
-            content: vec![ContentPart::Audio(AudioData {
-                url: None,
-                data: Some(vec![0xFF, 0xFB, 0x90]),
+            role:         Role::User,
+            content:      vec![ContentPart::Audio(AudioData {
+                url:        None,
+                data:       Some(vec![0xFF, 0xFB, 0x90]),
                 media_type: None,
             })],
-            name: None,
+            name:         None,
             tool_call_id: None,
         };
         let contents = translate_messages(&[&msg]);
@@ -1169,14 +1174,14 @@ mod tests {
     #[test]
     fn document_url_translates_to_file_data() {
         let msg = Message {
-            role: Role::User,
-            content: vec![ContentPart::Document(DocumentData {
-                url: Some("https://example.com/doc.pdf".to_string()),
-                data: None,
+            role:         Role::User,
+            content:      vec![ContentPart::Document(DocumentData {
+                url:        Some("https://example.com/doc.pdf".to_string()),
+                data:       None,
                 media_type: Some("application/pdf".to_string()),
-                file_name: Some("doc.pdf".to_string()),
+                file_name:  Some("doc.pdf".to_string()),
             })],
-            name: None,
+            name:         None,
             tool_call_id: None,
         };
         let contents = translate_messages(&[&msg]);
@@ -1188,14 +1193,14 @@ mod tests {
     #[test]
     fn document_base64_translates_to_inline_data() {
         let msg = Message {
-            role: Role::User,
-            content: vec![ContentPart::Document(DocumentData {
-                url: None,
-                data: Some(vec![0x25, 0x50, 0x44, 0x46]),
+            role:         Role::User,
+            content:      vec![ContentPart::Document(DocumentData {
+                url:        None,
+                data:       Some(vec![0x25, 0x50, 0x44, 0x46]),
                 media_type: None,
-                file_name: None,
+                file_name:  None,
             })],
-            name: None,
+            name:         None,
             tool_call_id: None,
         };
         let contents = translate_messages(&[&msg]);
@@ -1215,13 +1220,10 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(
-            err,
-            SdkError::Provider {
-                kind: ProviderErrorKind::NotFound,
-                ..
-            }
-        ));
+        assert!(matches!(err, SdkError::Provider {
+            kind: ProviderErrorKind::NotFound,
+            ..
+        }));
 
         let err = gemini_error(
             400,
@@ -1230,13 +1232,10 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(
-            err,
-            SdkError::Provider {
-                kind: ProviderErrorKind::InvalidRequest,
-                ..
-            }
-        ));
+        assert!(matches!(err, SdkError::Provider {
+            kind: ProviderErrorKind::InvalidRequest,
+            ..
+        }));
 
         let err = gemini_error(
             429,
@@ -1245,13 +1244,10 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(
-            err,
-            SdkError::Provider {
-                kind: ProviderErrorKind::RateLimit,
-                ..
-            }
-        ));
+        assert!(matches!(err, SdkError::Provider {
+            kind: ProviderErrorKind::RateLimit,
+            ..
+        }));
 
         let err = gemini_error(
             401,
@@ -1260,13 +1256,10 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(
-            err,
-            SdkError::Provider {
-                kind: ProviderErrorKind::Authentication,
-                ..
-            }
-        ));
+        assert!(matches!(err, SdkError::Provider {
+            kind: ProviderErrorKind::Authentication,
+            ..
+        }));
 
         let err = gemini_error(
             403,
@@ -1275,13 +1268,10 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(
-            err,
-            SdkError::Provider {
-                kind: ProviderErrorKind::AccessDenied,
-                ..
-            }
-        ));
+        assert!(matches!(err, SdkError::Provider {
+            kind: ProviderErrorKind::AccessDenied,
+            ..
+        }));
 
         let err = gemini_error(
             504,
@@ -1298,22 +1288,16 @@ mod tests {
         use crate::error::ProviderErrorKind;
 
         let err = gemini_error(429, "rate limited".into(), None, None, None);
-        assert!(matches!(
-            err,
-            SdkError::Provider {
-                kind: ProviderErrorKind::RateLimit,
-                ..
-            }
-        ));
+        assert!(matches!(err, SdkError::Provider {
+            kind: ProviderErrorKind::RateLimit,
+            ..
+        }));
 
         let err = gemini_error(500, "internal".into(), None, None, None);
-        assert!(matches!(
-            err,
-            SdkError::Provider {
-                kind: ProviderErrorKind::Server,
-                ..
-            }
-        ));
+        assert!(matches!(err, SdkError::Provider {
+            kind: ProviderErrorKind::Server,
+            ..
+        }));
     }
 
     #[test]
@@ -1391,9 +1375,9 @@ mod tests {
         tc.provider_metadata = Some(serde_json::json!({"thoughtSignature": "sig456"}));
 
         let msg = Message {
-            role: Role::Assistant,
-            content: vec![ContentPart::ToolCall(tc)],
-            name: None,
+            role:         Role::Assistant,
+            content:      vec![ContentPart::ToolCall(tc)],
+            name:         None,
             tool_call_id: None,
         };
         let contents = translate_messages(&[&msg]);
@@ -1413,9 +1397,9 @@ mod tests {
         );
 
         let msg = Message {
-            role: Role::Assistant,
-            content: vec![ContentPart::ToolCall(tc)],
-            name: None,
+            role:         Role::Assistant,
+            content:      vec![ContentPart::ToolCall(tc)],
+            name:         None,
             tool_call_id: None,
         };
         let contents = translate_messages(&[&msg]);

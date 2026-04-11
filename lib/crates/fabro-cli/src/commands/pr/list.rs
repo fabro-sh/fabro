@@ -12,9 +12,9 @@ use crate::shared::print_json_pretty;
 struct PrRow {
     run_id: String,
     number: u64,
-    state: String,
-    title: String,
-    url: String,
+    state:  String,
+    title:  String,
+    url:    String,
 }
 
 pub(super) async fn list_command(

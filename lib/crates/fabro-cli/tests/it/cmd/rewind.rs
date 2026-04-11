@@ -1,6 +1,5 @@
-use insta::assert_snapshot;
-
 use fabro_test::{fabro_snapshot, run_and_format, test_context};
+use insta::assert_snapshot;
 
 use super::support::{
     git_filters, git_stdout, output_stderr as support_stderr, run_branch_commits_since_base,
@@ -100,10 +99,10 @@ fn rewind_target_updates_metadata_and_resume_hint() {
     ");
     assert!(output.status.success(), "rewind should succeed");
 
-    let run_head = git_stdout(
-        &setup.repo_dir,
-        &["rev-parse", &format!("fabro/run/{}", setup.run.run_id)],
-    );
+    let run_head = git_stdout(&setup.repo_dir, &[
+        "rev-parse",
+        &format!("fabro/run/{}", setup.run.run_id),
+    ]);
     assert_eq!(run_head.trim(), expected_run_head);
 
     let mut list_cmd = context.command();

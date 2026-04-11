@@ -1,15 +1,18 @@
-//! End-to-end tests exercising full resolver pipeline with realistic devcontainer configs.
-//! These tests verify the 4 critical gaps are wired correctly through the entire stack:
+//! End-to-end tests exercising full resolver pipeline with realistic
+//! devcontainer configs. These tests verify the 4 critical gaps are wired
+//! correctly through the entire stack:
 //!   1. onCreateCommand
 //!   2. build.args
 //!   3. containerEnv
 //!   4. dockerComposeFile array
 
-use super::helpers::fixture_path;
 use fabro_devcontainer::{Command, DevcontainerResolver};
 
-/// Realistic Python project: Dockerfile + build.args + containerEnv + onCreateCommand + remoteEnv
-/// Verifies all 4 gaps work together in a single config.
+use super::helpers::fixture_path;
+
+/// Realistic Python project: Dockerfile + build.args + containerEnv +
+/// onCreateCommand + remoteEnv Verifies all 4 gaps work together in a single
+/// config.
 #[tokio::test]
 async fn realistic_python_project() {
     let config = DevcontainerResolver::resolve(&fixture_path("realistic-python"))
@@ -33,7 +36,8 @@ async fn realistic_python_project() {
         Some("1")
     );
 
-    // After fix: only containerEnv is baked into Dockerfile (remoteEnv is runtime-only)
+    // After fix: only containerEnv is baked into Dockerfile (remoteEnv is
+    // runtime-only)
     assert!(config.dockerfile.contains("ENV PYTHONUNBUFFERED=1"));
     // environment HashMap gets the remoteEnv value
     assert_eq!(
@@ -76,8 +80,9 @@ async fn realistic_python_project() {
     assert!(config.compose_files.is_empty());
 }
 
-/// Realistic compose project: multi-file compose + containerEnv + onCreateCommand + remoteEnv
-/// Verifies gaps 1, 3, 4 work together in compose mode.
+/// Realistic compose project: multi-file compose + containerEnv +
+/// onCreateCommand + remoteEnv Verifies gaps 1, 3, 4 work together in compose
+/// mode.
 #[tokio::test]
 async fn realistic_compose_project() {
     let config = DevcontainerResolver::resolve(&fixture_path("realistic-compose"))
@@ -91,7 +96,8 @@ async fn realistic_compose_project() {
     // Gap 4: image from base compose file (override doesn't change image)
     assert!(config.dockerfile.contains("FROM node:20-bookworm"));
 
-    // Ports merged from both compose files (base: 3000, 9229; override: 4000) + forwardPorts (8080)
+    // Ports merged from both compose files (base: 3000, 9229; override: 4000) +
+    // forwardPorts (8080)
     assert!(config.forwarded_ports.contains(&3000));
     assert!(config.forwarded_ports.contains(&9229));
     assert!(config.forwarded_ports.contains(&4000));
@@ -148,7 +154,8 @@ async fn realistic_compose_project() {
     assert_eq!(config.workspace_folder, "/workspace");
 }
 
-/// All lifecycle commands in different forms: string, array, object, and the new onCreateCommand.
+/// All lifecycle commands in different forms: string, array, object, and the
+/// new onCreateCommand.
 #[tokio::test]
 async fn all_lifecycle_command_forms() {
     let config = DevcontainerResolver::resolve(&fixture_path("all-lifecycle"))
@@ -174,7 +181,8 @@ async fn all_lifecycle_command_forms() {
     assert!(matches!(&config.post_start_commands[0], Command::Shell(s) if s == "echo started"));
 }
 
-/// Verify containerEnv doesn't pollute the environment HashMap (which is remoteEnv only).
+/// Verify containerEnv doesn't pollute the environment HashMap (which is
+/// remoteEnv only).
 #[tokio::test]
 async fn container_env_separate_from_environment() {
     let config = DevcontainerResolver::resolve(&fixture_path("realistic-python"))
@@ -226,11 +234,12 @@ async fn build_target_none_in_image_and_compose_modes() {
     assert!(compose_config.build_target.is_none());
 }
 
-/// Gap 1: remoteEnv values must NOT appear as ENV directives in the generated Dockerfile.
-/// Only containerEnv should be baked in.
+/// Gap 1: remoteEnv values must NOT appear as ENV directives in the generated
+/// Dockerfile. Only containerEnv should be baked in.
 #[tokio::test]
 async fn remote_env_excluded_from_dockerfile() {
-    // image-only fixture has remoteEnv: {"EDITOR": "code"} and containerEnv: {"DEBIAN_FRONTEND": "noninteractive"}
+    // image-only fixture has remoteEnv: {"EDITOR": "code"} and containerEnv:
+    // {"DEBIAN_FRONTEND": "noninteractive"}
     let config = DevcontainerResolver::resolve(&fixture_path("image-only"))
         .await
         .unwrap();
@@ -252,15 +261,18 @@ async fn remote_env_excluded_from_dockerfile() {
     );
 }
 
-/// Gap 2: forwardPorts in compose mode are merged with compose service ports, with deduplication.
+/// Gap 2: forwardPorts in compose mode are merged with compose service ports,
+/// with deduplication.
 #[tokio::test]
 async fn forward_ports_merged_and_deduped_in_compose() {
-    // compose-mode fixture has compose ports [3000, 9229] and forwardPorts [3000, 5173]
+    // compose-mode fixture has compose ports [3000, 9229] and forwardPorts [3000,
+    // 5173]
     let config = DevcontainerResolver::resolve(&fixture_path("compose-mode"))
         .await
         .unwrap();
 
-    // 3000 appears in both compose ports and forwardPorts — should NOT be duplicated
+    // 3000 appears in both compose ports and forwardPorts — should NOT be
+    // duplicated
     assert_eq!(config.forwarded_ports, vec![3000, 9229, 5173]);
 }
 
@@ -274,7 +286,8 @@ async fn build_target_in_dockerfile_mode() {
     assert_eq!(config.build_target.as_deref(), Some("dev"));
 }
 
-/// Gap 4: forwardPorts string formats ("host:container", "port") are parsed correctly.
+/// Gap 4: forwardPorts string formats ("host:container", "port") are parsed
+/// correctly.
 #[tokio::test]
 async fn forward_ports_string_formats() {
     // image-only fixture has forwardPorts: [3000, "8080:80", "9090"]
@@ -326,7 +339,8 @@ async fn container_env_empty_when_not_specified() {
     assert!(config.container_env.is_empty());
 }
 
-// === Gap e2e tests: local features exercising dependsOn, containerEnv, lifecycle hooks ===
+// === Gap e2e tests: local features exercising dependsOn, containerEnv,
+// lifecycle hooks ===
 
 /// Gap 5: Local path feature references are resolved through the full pipeline.
 #[tokio::test]
@@ -351,7 +365,8 @@ async fn local_feature_refs_resolved() {
 }
 
 /// Gap 1: dependsOn auto-injects missing features through the full pipeline.
-/// node-feature dependsOn ./base-utils which is NOT listed in devcontainer.json features.
+/// node-feature dependsOn ./base-utils which is NOT listed in devcontainer.json
+/// features.
 #[tokio::test]
 async fn depends_on_auto_injects_missing_feature() {
     let config = DevcontainerResolver::resolve(&fixture_path("local-features"))
@@ -418,7 +433,8 @@ async fn feature_container_env_merged() {
     );
 }
 
-/// Gap 3: Feature lifecycle hooks are appended after devcontainer.json lifecycle commands.
+/// Gap 3: Feature lifecycle hooks are appended after devcontainer.json
+/// lifecycle commands.
 #[tokio::test]
 async fn feature_lifecycle_hooks_appended() {
     let config = DevcontainerResolver::resolve(&fixture_path("local-features"))
@@ -459,7 +475,8 @@ async fn feature_lifecycle_hooks_appended() {
         .collect();
     assert!(feature_post_create.contains(&"echo python-post-create"));
 
-    // postStartCommand: only node-feature contributes (no devcontainer.json postStartCommand)
+    // postStartCommand: only node-feature contributes (no devcontainer.json
+    // postStartCommand)
     assert!(!config.post_start_commands.is_empty());
     let post_start: Vec<&str> = config
         .post_start_commands
@@ -487,7 +504,8 @@ async fn feature_shorthand_version_syntax() {
     );
 }
 
-/// Fix 2: Hyphenated option IDs are converted to valid env var names (node-version → NODE_VERSION).
+/// Fix 2: Hyphenated option IDs are converted to valid env var names
+/// (node-version → NODE_VERSION).
 #[tokio::test]
 async fn feature_option_id_hyphen_to_underscore() {
     let config = DevcontainerResolver::resolve(&fixture_path("feature-options"))
@@ -506,7 +524,8 @@ async fn feature_option_id_hyphen_to_underscore() {
     );
 }
 
-/// Fix 3: _REMOTE_USER and related env vars are emitted in feature install snippets.
+/// Fix 3: _REMOTE_USER and related env vars are emitted in feature install
+/// snippets.
 #[tokio::test]
 async fn feature_install_user_env_vars() {
     let config = DevcontainerResolver::resolve(&fixture_path("feature-options"))
@@ -556,8 +575,9 @@ async fn feature_install_user_env_vars_default_root() {
     );
 }
 
-/// Gap 2+3: Feature ordering affects both containerEnv and lifecycle hook collection.
-/// python-feature installsAfter node-feature, so node's env/hooks come first.
+/// Gap 2+3: Feature ordering affects both containerEnv and lifecycle hook
+/// collection. python-feature installsAfter node-feature, so node's env/hooks
+/// come first.
 #[tokio::test]
 async fn feature_ordering_preserved_in_env_and_hooks() {
     let config = DevcontainerResolver::resolve(&fixture_path("local-features"))

@@ -2,7 +2,8 @@ use fabro_graphviz::graph::Graph;
 
 use crate::error::FabroError;
 
-/// A transform that modifies the pipeline graph after parsing and before validation.
+/// A transform that modifies the pipeline graph after parsing and before
+/// validation.
 pub trait Transform {
     fn apply(&self, graph: Graph) -> Result<Graph, FabroError>;
 }

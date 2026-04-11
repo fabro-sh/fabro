@@ -5,7 +5,6 @@ mod merge;
 mod view;
 
 use anyhow::{Context, Result};
-
 use fabro_types::PullRequestRecord;
 use fabro_types::settings::InterpString;
 

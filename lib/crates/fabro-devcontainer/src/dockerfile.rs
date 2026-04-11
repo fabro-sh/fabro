@@ -43,8 +43,8 @@ mod tests {
 
     fn make_layer(id: &str, dir_name: &str, snippet: &str) -> FeatureLayer {
         FeatureLayer {
-            id: id.to_string(),
-            dir_name: dir_name.to_string(),
+            id:                 id.to_string(),
+            dir_name:           dir_name.to_string(),
             dockerfile_snippet: snippet.to_string(),
         }
     }

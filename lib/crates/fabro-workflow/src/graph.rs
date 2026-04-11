@@ -114,7 +114,7 @@ impl Graph for WorkflowGraph {
             node.inner().selection(),
         );
         selection.map(|sel| CoreEdgeSelection {
-            edge: WorkflowEdge(Arc::new(sel.edge.clone())),
+            edge:   WorkflowEdge(Arc::new(sel.edge.clone())),
             reason: sel.reason,
         })
     }

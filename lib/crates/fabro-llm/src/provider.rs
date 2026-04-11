@@ -1,9 +1,10 @@
-use crate::error::SdkError;
-use crate::types::{Request, Response, StreamEvent, ToolChoice};
-use futures::Stream;
 use std::pin::Pin;
 
 pub use fabro_model::{ModelHandle, Provider};
+use futures::Stream;
+
+use crate::error::SdkError;
+use crate::types::{Request, Response, StreamEvent, ToolChoice};
 
 // ---------------------------------------------------------------------------
 // ProviderAdapter trait

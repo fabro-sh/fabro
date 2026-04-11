@@ -6,7 +6,7 @@ pub const WORKER_CONTROL_PROTOCOL_VERSION: u8 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkerControlEnvelope {
-    pub v: u8,
+    pub v:       u8,
     #[serde(flatten)]
     pub message: WorkerControlMessage,
 }
@@ -15,9 +15,9 @@ impl WorkerControlEnvelope {
     #[must_use]
     pub fn interview_answer(qid: impl Into<String>, answer: Answer) -> Self {
         Self {
-            v: WORKER_CONTROL_PROTOCOL_VERSION,
+            v:       WORKER_CONTROL_PROTOCOL_VERSION,
             message: WorkerControlMessage::InterviewAnswer {
-                qid: qid.into(),
+                qid:    qid.into(),
                 answer: answer.into(),
             },
         }
@@ -26,7 +26,7 @@ impl WorkerControlEnvelope {
     #[must_use]
     pub fn cancel_run() -> Self {
         Self {
-            v: WORKER_CONTROL_PROTOCOL_VERSION,
+            v:       WORKER_CONTROL_PROTOCOL_VERSION,
             message: WorkerControlMessage::RunCancel,
         }
     }
@@ -37,7 +37,7 @@ impl WorkerControlEnvelope {
 pub enum WorkerControlMessage {
     #[serde(rename = "interview.answer")]
     InterviewAnswer {
-        qid: String,
+        qid:    String,
         answer: WorkerControlAnswer,
     },
     #[serde(rename = "run.cancel")]
@@ -84,9 +84,9 @@ impl From<WorkerControlAnswer> for Answer {
             WorkerControlAnswer::Skipped => Self::skipped(),
             WorkerControlAnswer::Timeout => Self::timeout(),
             WorkerControlAnswer::Selected { key } => Self {
-                value: AnswerValue::Selected(key),
+                value:           AnswerValue::Selected(key),
                 selected_option: None,
-                text: None,
+                text:            None,
             },
             WorkerControlAnswer::MultiSelected { keys } => Self::multi_selected(keys),
             WorkerControlAnswer::Text { text } => Self::text(text),

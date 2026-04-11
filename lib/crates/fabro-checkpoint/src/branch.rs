@@ -7,24 +7,26 @@ use crate::git::{FileMode, Store, TreeEntries};
 /// Metadata about a commit, returned by `log`.
 #[derive(Debug)]
 pub struct CommitInfo {
-    pub oid: Oid,
-    pub message: String,
-    pub author_name: String,
+    pub oid:          Oid,
+    pub message:      String,
+    pub author_name:  String,
     pub author_email: String,
-    pub time: git2::Time,
+    pub time:         git2::Time,
 }
 
 /// Key-value storage on a single git branch. Each write creates one commit.
-/// The branch's tree grows monotonically — each commit's tree is a superset of the previous.
+/// The branch's tree grows monotonically — each commit's tree is a superset of
+/// the previous.
 pub struct BranchStore<'a> {
     objects: &'a Store,
-    branch: String,
-    author: Signature<'static>,
+    branch:  String,
+    author:  Signature<'static>,
 }
 
 impl<'a> BranchStore<'a> {
     pub fn new(objects: &'a Store, branch: impl Into<String>, author: &Signature<'_>) -> Self {
-        // Clone to 'static by using Signature::now (author name/email are copied into owned strings)
+        // Clone to 'static by using Signature::now (author name/email are copied into
+        // owned strings)
         let author_static = Signature::now(
             author.name().unwrap_or("unknown"),
             author.email().unwrap_or(""),
@@ -51,7 +53,8 @@ impl<'a> BranchStore<'a> {
         Ok(())
     }
 
-    /// Core read-modify-write: read current tree, let caller mutate, write new commit.
+    /// Core read-modify-write: read current tree, let caller mutate, write new
+    /// commit.
     pub fn write_with(
         &self,
         message: &str,
@@ -113,7 +116,8 @@ impl<'a> BranchStore<'a> {
         })
     }
 
-    /// Read a single file from the latest tree. Returns `None` if branch or path doesn't exist.
+    /// Read a single file from the latest tree. Returns `None` if branch or
+    /// path doesn't exist.
     pub fn read_entry(&self, path: &str) -> Result<Option<Vec<u8>>> {
         let Some(commit_oid) = self.objects.resolve_ref(&self.branch)? else {
             return Ok(None);
@@ -218,9 +222,10 @@ pub fn sharded_path(id: &str, prefix_len: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    use git2::Repository;
+
     use super::*;
     use crate::git::FileMode;
-    use git2::Repository;
 
     fn temp_repo() -> (tempfile::TempDir, Store) {
         let dir = tempfile::TempDir::new().unwrap();

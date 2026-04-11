@@ -9,7 +9,6 @@ mod start;
 mod test_support;
 mod validate;
 
-pub use crate::pipeline::{DevcontainerSpec, LlmSpec, SandboxEnvSpec};
 pub use create::{CreateRunInput, CreatedRun, create, make_run_dir};
 pub use fork::{ForkRunInput, fork};
 pub use rebuild_meta::{
@@ -23,3 +22,5 @@ pub use rewind::{
 pub use source::WorkflowInput;
 pub use start::{StartServices, Started, start};
 pub use validate::{ValidateInput, validate};
+
+pub use crate::pipeline::{DevcontainerSpec, LlmSpec, SandboxEnvSpec};

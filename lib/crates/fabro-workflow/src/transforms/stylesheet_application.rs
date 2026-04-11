@@ -1,11 +1,11 @@
 use fabro_graphviz::graph::Graph;
 
-use crate::error::FabroError;
-
 use super::Transform;
 use super::stylesheet::{apply_stylesheet, parse_stylesheet};
+use crate::error::FabroError;
 
-/// Applies the `model_stylesheet` graph attribute to resolve LLM properties for each node.
+/// Applies the `model_stylesheet` graph attribute to resolve LLM properties for
+/// each node.
 pub struct StylesheetApplicationTransform;
 
 impl Transform for StylesheetApplicationTransform {

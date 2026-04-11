@@ -4,17 +4,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use crate::artifact_upload::ArtifactSink;
-use crate::condition::evaluate_condition;
-use crate::context::keys;
-use crate::context::{Context, WorkflowContext};
-use crate::error::FabroError;
-use crate::operations::{ValidateInput, WorkflowInput, validate};
-use crate::outcome::{Outcome, OutcomeExt, StageStatus};
-use crate::pipeline;
-use crate::pipeline::types::Initialized;
-use crate::run_dir::visit_from_context;
-use crate::run_options::RunOptions;
 use async_trait::async_trait;
 use fabro_graphviz::graph::{AttrValue, Graph, Node};
 use fabro_store::{ArtifactStore, Database};
@@ -23,12 +12,23 @@ use object_store::memory::InMemory;
 use tokio::time::{sleep, timeout};
 
 use super::{EngineServices, Handler};
+use crate::artifact_upload::ArtifactSink;
+use crate::condition::evaluate_condition;
+use crate::context::{Context, WorkflowContext, keys};
+use crate::error::FabroError;
+use crate::operations::{ValidateInput, WorkflowInput, validate};
+use crate::outcome::{Outcome, OutcomeExt, StageStatus};
+use crate::pipeline;
+use crate::pipeline::types::Initialized;
+use crate::run_dir::visit_from_context;
+use crate::run_options::RunOptions;
 
-/// Orchestrates a child workflow engine, polling for completion or stop conditions.
+/// Orchestrates a child workflow engine, polling for completion or stop
+/// conditions.
 pub struct SubWorkflowHandler;
 
 struct ParsedChildWorkflow {
-    graph: Graph,
+    graph:         Graph,
     workflow_path: Option<PathBuf>,
 }
 
@@ -54,10 +54,11 @@ fn parse_duration_str(s: &str) -> Duration {
     Duration::from_secs(45)
 }
 
-/// Parse a child workflow graph from node attributes: inline `stack.child_dot_source`
-/// (no file inlining), or file path `stack.child_workflow` / `stack.child_dotfile`
-/// (with file inlining). `stack.child_workflow` is preferred; `stack.child_dotfile`
-/// is kept for backward compatibility.
+/// Parse a child workflow graph from node attributes: inline
+/// `stack.child_dot_source` (no file inlining), or file path
+/// `stack.child_workflow` / `stack.child_dotfile` (with file inlining).
+/// `stack.child_workflow` is preferred; `stack.child_dotfile` is kept for
+/// backward compatibility.
 fn parse_child_graph(
     node: &Node,
     services: &EngineServices,
@@ -70,12 +71,12 @@ fn parse_child_graph(
         .and_then(|v| v.as_str())
     {
         let validated = validate(ValidateInput {
-            workflow: WorkflowInput::DotSource {
-                source: dot.to_string(),
+            workflow:          WorkflowInput::DotSource {
+                source:   dot.to_string(),
                 base_dir: None,
             },
-            settings: SettingsLayer::default(),
-            cwd: cwd.clone(),
+            settings:          SettingsLayer::default(),
+            cwd:               cwd.clone(),
             custom_transforms: Vec::new(),
         })?;
         validated.raise_on_errors()?;
@@ -130,7 +131,8 @@ fn parse_child_graph(
     Err(FabroError::handler("No child workflow source".to_string()))
 }
 
-/// Compute the context diff: keys that changed or were added relative to `before`.
+/// Compute the context diff: keys that changed or were added relative to
+/// `before`.
 fn context_diff(
     before: &HashMap<String, serde_json::Value>,
     after: &HashMap<String, serde_json::Value>,
@@ -202,18 +204,18 @@ impl Handler for SubWorkflowHandler {
         let child_cancel = Arc::clone(&cancel_token);
 
         let child_run_options = RunOptions {
-            settings: SettingsLayer::default(),
-            run_dir: child_logs,
-            cancel_token: Some(cancel_token),
+            settings:         SettingsLayer::default(),
+            run_dir:          child_logs,
+            cancel_token:     Some(cancel_token),
             // Child workflows are part of the parent run's event stream.
-            run_id: services.emitter.run_id(),
-            labels: HashMap::new(),
-            workflow_slug: None,
-            github_app: None,
-            base_branch: None,
+            run_id:           services.emitter.run_id(),
+            labels:           HashMap::new(),
+            workflow_slug:    None,
+            github_app:       None,
+            base_branch:      None,
             display_base_sha: None,
-            host_repo_path: None,
-            git: None,
+            host_repo_path:   None,
+            git:              None,
         };
 
         // Clone parent context for child; inject parent preamble
@@ -352,12 +354,13 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
+    use fabro_graphviz::graph::AttrValue;
+
     use super::*;
     use crate::handler::HandlerRegistry;
     use crate::handler::exit::ExitHandler;
     use crate::handler::start::StartHandler;
     use crate::workflow_bundle::{BundledWorkflow, WorkflowBundle};
-    use fabro_graphviz::graph::AttrValue;
 
     fn make_services() -> EngineServices {
         let mut services = EngineServices::test_default();
@@ -591,8 +594,8 @@ mod tests {
             PathBuf::from("children/review.fabro"),
             BundledWorkflow {
                 logical_path: PathBuf::from("children/review.fabro"),
-                source: child_dot_succeeds().to_string(),
-                files: HashMap::new(),
+                source:       child_dot_succeeds().to_string(),
+                files:        HashMap::new(),
             },
         )]))));
 
@@ -648,11 +651,12 @@ mod tests {
 
     #[tokio::test]
     async fn max_cycles_exceeded_cancels_child() {
-        // Use a child that takes a long time (many nodes with sleep won't work, so use a
-        // child that succeeds quickly but set max_cycles=1 and very short poll)
-        // Actually, to test max cycles exceeded we need a child that runs longer than
-        // max_cycles * poll_interval. Use a child dot that's valid but we set max_cycles=1
-        // with poll_interval=1ms so the child likely won't finish in time.
+        // Use a child that takes a long time (many nodes with sleep won't work, so use
+        // a child that succeeds quickly but set max_cycles=1 and very short
+        // poll) Actually, to test max cycles exceeded we need a child that runs
+        // longer than max_cycles * poll_interval. Use a child dot that's valid
+        // but we set max_cycles=1 with poll_interval=1ms so the child likely
+        // won't finish in time.
         //
         // But a simple start->exit child is almost instant. So we need a handler that
         // sleeps to make the child slow.

@@ -3,7 +3,9 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use fabro_util::run_log;
 use tracing_appender::rolling;
-use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{EnvFilter, fmt};
 
 const LOG_RETENTION_DAYS: u32 = 7;
 

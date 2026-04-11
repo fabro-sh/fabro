@@ -1,14 +1,15 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use fabro_types::RunId;
 use futures::StreamExt;
+use object_store::ObjectStore;
 use object_store::buffered::BufWriter;
-use object_store::{ObjectStore, path::Path as ObjectPath};
+use object_store::path::Path as ObjectPath;
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
 use tokio::io::AsyncWriteExt;
 
 use crate::{Result, StageId, StoreError};
-use fabro_types::RunId;
 
 const ARTIFACT_SEGMENT_ENCODE_SET: &AsciiSet =
     &NON_ALPHANUMERIC.remove(b'.').remove(b'_').remove(b'-');
@@ -16,15 +17,15 @@ const STREAM_BUFFER_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NodeArtifact {
-    pub node: StageId,
+    pub node:     StageId,
     pub filename: String,
-    pub size: u64,
+    pub size:     u64,
 }
 
 #[derive(Clone)]
 pub struct ArtifactStore {
     object_store: Arc<dyn ObjectStore>,
-    prefix: ObjectPath,
+    prefix:       ObjectPath,
 }
 
 impl std::fmt::Debug for ArtifactStore {
@@ -274,12 +275,11 @@ fn parse_object_path(raw: &str) -> Result<ObjectPath> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
+    use fabro_types::fixtures;
     use futures::stream;
     use object_store::memory::InMemory;
 
-    use fabro_types::fixtures;
+    use super::*;
 
     fn test_store() -> ArtifactStore {
         let object_store: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
@@ -299,18 +299,16 @@ mod tests {
             store.get(&run_id, &node, filename).await.unwrap(),
             Some(Bytes::from_static(b"hello"))
         );
-        assert_eq!(
-            store.list_for_node(&run_id, &node).await.unwrap(),
-            vec![filename.to_string()]
-        );
-        assert_eq!(
-            store.list_for_run(&run_id).await.unwrap(),
-            vec![NodeArtifact {
+        assert_eq!(store.list_for_node(&run_id, &node).await.unwrap(), vec![
+            filename.to_string()
+        ]);
+        assert_eq!(store.list_for_run(&run_id).await.unwrap(), vec![
+            NodeArtifact {
                 node,
                 filename: filename.to_string(),
                 size: 5,
-            }]
-        );
+            }
+        ]);
     }
 
     #[tokio::test]

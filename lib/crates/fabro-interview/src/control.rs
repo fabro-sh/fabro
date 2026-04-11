@@ -12,8 +12,8 @@ pub enum SubmitError {
 
 #[derive(Default)]
 struct ControlInterviewerState {
-    pending: HashMap<String, oneshot::Sender<Answer>>,
-    queued: HashMap<String, Answer>,
+    pending:         HashMap<String, oneshot::Sender<Answer>>,
+    queued:          HashMap<String, Answer>,
     terminal_answer: Option<Answer>,
 }
 
@@ -126,9 +126,8 @@ mod tests {
 
     use tokio::task;
 
-    use crate::{AnswerValue, QuestionType};
-
     use super::*;
+    use crate::{AnswerValue, QuestionType};
 
     #[tokio::test]
     async fn submit_before_ask_buffers_answer() {

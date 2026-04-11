@@ -4,11 +4,13 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use fabro_agent::{Sandbox, WorktreeOptions, WorktreeSandbox};
+use fabro_graphviz::graph::{AttrValue, Graph, Node};
+use fabro_hooks::{HookContext, HookEvent};
 use fabro_types::{ParallelBranchId, RunId, StageId};
 use tokio::sync::Semaphore;
 
-use crate::context::keys;
-use crate::context::{Context, WorkflowContext};
+use super::{EngineServices, Handler};
+use crate::context::{Context, WorkflowContext, keys};
 use crate::error::FabroError;
 use crate::event::{Event, StageScope};
 use crate::git::sanitize_ref_component;
@@ -17,10 +19,6 @@ use crate::millis_u64;
 use crate::outcome::{FailureCategory, FailureDetail, Outcome, OutcomeExt, StageStatus};
 use crate::run_dir::visit_from_context;
 use crate::sandbox_git::{GIT_REMOTE, git_checkpoint, git_merge_ff_only, git_remove_worktree};
-use fabro_graphviz::graph::{AttrValue, Graph, Node};
-use fabro_hooks::{HookContext, HookEvent};
-
-use super::{EngineServices, Handler};
 
 /// Fans out execution to multiple branches concurrently.
 /// Each branch gets an isolated context clone and runs independently.
@@ -50,9 +48,9 @@ fn parse_join_policy(raw: &str) -> JoinPolicy {
 }
 
 struct BranchResult {
-    id: String,
-    outcome: Outcome,
-    head_sha: Option<String>,
+    id:            String,
+    outcome:       Outcome,
+    head_sha:      Option<String>,
     worktree_path: Option<PathBuf>,
 }
 
@@ -130,12 +128,12 @@ impl Handler for ParallelHandler {
     ) -> Result<Outcome, FabroError> {
         // Build per-branch sandboxes (sequentially for git setup)
         struct BranchSetup {
-            target_id: String,
-            branch_index: usize,
+            target_id:          String,
+            branch_index:       usize,
             parallel_branch_id: ParallelBranchId,
-            branch_context: Context,
-            sandbox: Arc<dyn Sandbox>,
-            worktree_path: Option<PathBuf>,
+            branch_context:     Context,
+            sandbox:            Arc<dyn Sandbox>,
+            worktree_path:      Option<PathBuf>,
         }
 
         let parallel_start = Instant::now();
@@ -156,10 +154,10 @@ impl Handler for ParallelHandler {
 
         services.emitter.emit_scoped(
             &Event::ParallelStarted {
-                node_id: node.id.clone(),
-                visit: parallel_stage_scope.visit,
+                node_id:      node.id.clone(),
+                visit:        parallel_stage_scope.visit,
                 branch_count: branches.len(),
-                join_policy: join_policy.to_string(),
+                join_policy:  join_policy.to_string(),
             },
             &parallel_stage_scope,
         );
@@ -251,9 +249,9 @@ impl Handler for ParallelHandler {
 
                 // Set up worktree via WorktreeSandbox
                 let wt_config = WorktreeOptions {
-                    branch_name: branch_name.clone(),
-                    base_sha: bsha.clone(),
-                    worktree_path: wt_path_str.clone(),
+                    branch_name:          branch_name.clone(),
+                    base_sha:             bsha.clone(),
+                    worktree_path:        wt_path_str.clone(),
                     skip_branch_creation: false,
                 };
                 let mut wt_sandbox = WorktreeSandbox::new(Arc::clone(&services.sandbox), wt_config);
@@ -320,10 +318,10 @@ impl Handler for ParallelHandler {
 
                 emitter.emit_scoped(
                     &Event::ParallelBranchStarted {
-                        parallel_group_id: group_id.clone(),
+                        parallel_group_id:  group_id.clone(),
                         parallel_branch_id: setup.parallel_branch_id.clone(),
-                        branch: setup.target_id.clone(),
-                        index: setup.branch_index,
+                        branch:             setup.target_id.clone(),
+                        index:              setup.branch_index,
                     },
                     &branch_scope,
                 );
@@ -336,13 +334,13 @@ impl Handler for ParallelHandler {
                     ));
                     emitter.emit_scoped(
                         &Event::ParallelBranchCompleted {
-                            parallel_group_id: group_id.clone(),
+                            parallel_group_id:  group_id.clone(),
                             parallel_branch_id: setup.parallel_branch_id.clone(),
-                            branch: setup.target_id.clone(),
-                            index: setup.branch_index,
-                            duration_ms: millis_u64(branch_start.elapsed()),
-                            status: "fail".to_string(),
-                            head_sha: None,
+                            branch:             setup.target_id.clone(),
+                            index:              setup.branch_index,
+                            duration_ms:        millis_u64(branch_start.elapsed()),
+                            status:             "fail".to_string(),
+                            head_sha:           None,
                         },
                         &branch_scope,
                     );
@@ -415,7 +413,7 @@ impl Handler for ParallelHandler {
                             emitter.emit_scoped(
                                 &Event::GitCommit {
                                     node_id: Some(setup.target_id.clone()),
-                                    sha: sha.clone(),
+                                    sha:     sha.clone(),
                                 },
                                 &branch_scope,
                             );
@@ -429,13 +427,13 @@ impl Handler for ParallelHandler {
 
                 emitter.emit_scoped(
                     &Event::ParallelBranchCompleted {
-                        parallel_group_id: group_id.clone(),
+                        parallel_group_id:  group_id.clone(),
                         parallel_branch_id: setup.parallel_branch_id.clone(),
-                        branch: setup.target_id.clone(),
-                        index: setup.branch_index,
-                        duration_ms: millis_u64(branch_start.elapsed()),
-                        status: outcome.status.to_string(),
-                        head_sha: head_sha.clone(),
+                        branch:             setup.target_id.clone(),
+                        index:              setup.branch_index,
+                        duration_ms:        millis_u64(branch_start.elapsed()),
+                        status:             outcome.status.to_string(),
+                        head_sha:           head_sha.clone(),
                     },
                     &branch_scope,
                 );
@@ -459,17 +457,19 @@ impl Handler for ParallelHandler {
                 }
                 Ok(Err(e)) => {
                     results.push(BranchResult {
-                        id: String::new(),
-                        outcome: e.to_fail_outcome(),
-                        head_sha: None,
+                        id:            String::new(),
+                        outcome:       e.to_fail_outcome(),
+                        head_sha:      None,
                         worktree_path: None,
                     });
                 }
                 Err(join_err) => {
                     results.push(BranchResult {
-                        id: String::new(),
-                        outcome: Outcome::fail_classify(format!("task join error: {join_err}")),
-                        head_sha: None,
+                        id:            String::new(),
+                        outcome:       Outcome::fail_classify(format!(
+                            "task join error: {join_err}"
+                        )),
+                        head_sha:      None,
                         worktree_path: None,
                     });
                 }
@@ -491,7 +491,8 @@ impl Handler for ParallelHandler {
 
             // Fast-forward main branch to first successful branch (lexically sorted).
             // This must happen here — before the engine creates its own checkpoint commit
-            // on the main branch — so that subsequent commits are descendants of the winner.
+            // on the main branch — so that subsequent commits are descendants of the
+            // winner.
             let mut successful: Vec<_> = results
                 .iter()
                 .filter(|r| r.outcome.status == StageStatus::Success && r.head_sha.is_some())
@@ -601,8 +602,8 @@ impl Handler for ParallelHandler {
     }
 }
 
-/// Find the convergence (join/fan-in) node by following each branch's outgoing edges
-/// and finding the first node reachable from all branches.
+/// Find the convergence (join/fan-in) node by following each branch's outgoing
+/// edges and finding the first node reachable from all branches.
 fn find_join_node(results: &[BranchResult], graph: &Graph) -> Option<String> {
     if results.is_empty() {
         return None;
@@ -634,13 +635,15 @@ fn find_join_node(results: &[BranchResult], graph: &Graph) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::Arc;
+    use std::time::Duration;
+
     use fabro_graphviz::graph::{AttrValue, Edge};
     use fabro_store::{Database, StageId};
     use fabro_types::fixtures;
     use object_store::memory::InMemory;
-    use std::sync::Arc;
-    use std::time::Duration;
+
+    use super::*;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()

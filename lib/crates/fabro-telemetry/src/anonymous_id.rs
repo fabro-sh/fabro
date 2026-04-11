@@ -1,6 +1,7 @@
-use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
+
+use anyhow::{Context, Result};
 use uuid::Uuid;
 
 fn dot_id_path() -> std::path::PathBuf {

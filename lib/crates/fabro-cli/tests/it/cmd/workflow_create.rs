@@ -1,11 +1,9 @@
+use fabro_test::{fabro_snapshot, test_context};
 use insta::assert_snapshot;
 use serde_json::Value;
 
-use fabro_test::{fabro_snapshot, test_context};
-
-use crate::support::fabro_json_snapshot;
-
 use super::support::setup_project_fixture;
+use crate::support::fabro_json_snapshot;
 
 #[test]
 fn help() {

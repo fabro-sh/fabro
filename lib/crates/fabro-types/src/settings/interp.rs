@@ -181,7 +181,7 @@ impl From<&str> for InterpString {
 /// The outcome of a successful env interpolation resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resolved {
-    pub value: String,
+    pub value:      String,
     pub provenance: Provenance,
 }
 
@@ -300,12 +300,9 @@ mod tests {
             .resolve(lookup_from(&[("API_KEY", "secret-123")]))
             .unwrap();
         assert_eq!(resolved.value, "secret-123");
-        assert_eq!(
-            resolved.provenance,
-            Provenance::EnvSourced {
-                names: vec!["API_KEY".into()]
-            }
-        );
+        assert_eq!(resolved.provenance, Provenance::EnvSourced {
+            names: vec!["API_KEY".into()],
+        });
     }
 
     #[test]
@@ -322,12 +319,9 @@ mod tests {
             .resolve(lookup_from(&[("USER", "root"), ("HOST", "example.com")]))
             .unwrap();
         assert_eq!(resolved.value, "root@example.com");
-        assert_eq!(
-            resolved.provenance,
-            Provenance::EnvSourced {
-                names: vec!["USER".into(), "HOST".into()]
-            }
-        );
+        assert_eq!(resolved.provenance, Provenance::EnvSourced {
+            names: vec!["USER".into(), "HOST".into()],
+        });
     }
 
     #[test]

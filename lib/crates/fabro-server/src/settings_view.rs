@@ -17,8 +17,8 @@
 //!   `enabled` so clients can tell whether JWT auth is on.
 //! - `server.auth.api.mtls.ca` — filesystem path to the CA bundle. Keeps
 //!   `enabled`.
-//! - `server.auth.web.providers.github.client_secret` — explicit OAuth
-//!   secret. Keeps `enabled` and `client_id` (the latter is public in OAuth).
+//! - `server.auth.web.providers.github.client_secret` — explicit OAuth secret.
+//!   Keeps `enabled` and `client_id` (the latter is public in OAuth).
 //!
 //! ## Why that's all
 //!
@@ -72,8 +72,9 @@ pub(crate) fn redact_for_api(settings: &SettingsLayer) -> SettingsLayer {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use fabro_config::parse_settings_layer;
+
+    use super::*;
 
     fn parse(source: &str) -> SettingsLayer {
         parse_settings_layer(source).expect("fixture should parse")

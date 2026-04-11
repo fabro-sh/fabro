@@ -1,6 +1,7 @@
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
+
+use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
 // Provider enum — compile-time safe provider identity
@@ -34,8 +35,9 @@ impl Provider {
         Self::Inception,
     ];
 
-    /// Environment variable names that can provide the API key for this provider.
-    /// Gemini accepts either `GEMINI_API_KEY` or `GOOGLE_API_KEY`.
+    /// Environment variable names that can provide the API key for this
+    /// provider. Gemini accepts either `GEMINI_API_KEY` or
+    /// `GOOGLE_API_KEY`.
     #[must_use]
     pub fn api_key_env_vars(self) -> &'static [&'static str] {
         match self {
@@ -50,7 +52,8 @@ impl Provider {
         }
     }
 
-    /// Returns `true` if at least one of the provider's API key env vars is set.
+    /// Returns `true` if at least one of the provider's API key env vars is
+    /// set.
     #[must_use]
     pub fn has_api_key(self) -> bool {
         self.api_key_env_vars()
@@ -214,10 +217,9 @@ mod tests {
 
     #[test]
     fn api_key_env_vars_anthropic() {
-        assert_eq!(
-            Provider::Anthropic.api_key_env_vars(),
-            &["ANTHROPIC_API_KEY"]
-        );
+        assert_eq!(Provider::Anthropic.api_key_env_vars(), &[
+            "ANTHROPIC_API_KEY"
+        ]);
     }
 
     #[test]
@@ -249,10 +251,9 @@ mod tests {
 
     #[test]
     fn api_key_env_vars_inception() {
-        assert_eq!(
-            Provider::Inception.api_key_env_vars(),
-            &["INCEPTION_API_KEY"]
-        );
+        assert_eq!(Provider::Inception.api_key_env_vars(), &[
+            "INCEPTION_API_KEY"
+        ]);
     }
 
     #[test]

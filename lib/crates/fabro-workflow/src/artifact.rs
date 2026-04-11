@@ -1,15 +1,14 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use futures::future::BoxFuture;
-use serde_json::Value;
-
 use fabro_agent::Sandbox;
 use fabro_config::RunScratch;
 use fabro_types::{
     RunBlobId, format_blob_ref, parse_blob_ref, parse_legacy_blob_file_ref,
     parse_managed_blob_file_ref,
 };
+use futures::future::BoxFuture;
+use serde_json::Value;
 
 use crate::context::{self, Context};
 use crate::error::{FabroError, Result};
@@ -25,9 +24,9 @@ const ARTIFACT_POINTER_PREFIX: &str = "file://";
 
 /// Offload context values exceeding the blob threshold into the blob store.
 ///
-/// For each entry in `updates` whose serialized JSON exceeds `BLOB_OFFLOAD_THRESHOLD`,
-/// the value is persisted as a blob in `run_store` and replaced with a
-/// `"blob://sha256/{blob_id}"` reference.
+/// For each entry in `updates` whose serialized JSON exceeds
+/// `BLOB_OFFLOAD_THRESHOLD`, the value is persisted as a blob in `run_store`
+/// and replaced with a `"blob://sha256/{blob_id}"` reference.
 /// Small values are left untouched.
 ///
 /// # Errors
@@ -69,7 +68,8 @@ pub fn is_artifact_pointer(value: &Value) -> bool {
     artifact_path(value).is_some()
 }
 
-/// Resolve an artifact pointer to the base name displayed in preamble rendering.
+/// Resolve an artifact pointer to the base name displayed in preamble
+/// rendering.
 ///
 /// Given `"file:///tmp/logs/runtime/blobs/response.plan.json"`, returns
 /// `"See: /tmp/logs/runtime/blobs/response.plan.json"`.
@@ -152,7 +152,8 @@ pub async fn resolved_context_snapshot(
 ///
 /// # Errors
 ///
-/// Returns an error if reading a local artifact or writing to the remote env fails.
+/// Returns an error if reading a local artifact or writing to the remote env
+/// fails.
 pub async fn sync_artifacts_to_env(
     updates: &mut HashMap<String, Value>,
     env: &dyn Sandbox,
@@ -359,10 +360,11 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use super::*;
     use fabro_store::Database;
     use object_store::memory::InMemory;
     use ulid::Ulid;
+
+    use super::*;
 
     fn test_run_id(label: &str) -> fabro_types::RunId {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -473,11 +475,11 @@ mod tests {
     fn normalize_checkpoint_for_resume_converts_legacy_blob_file_refs_and_drops_preamble() {
         let blob_id = fabro_types::RunBlobId::new(b"legacy");
         let mut checkpoint = crate::records::Checkpoint {
-            timestamp: chrono::Utc::now(),
-            current_node: "work".to_string(),
-            completed_nodes: vec!["work".to_string()],
-            node_retries: HashMap::new(),
-            context_values: HashMap::from([
+            timestamp:                  chrono::Utc::now(),
+            current_node:               "work".to_string(),
+            completed_nodes:            vec!["work".to_string()],
+            node_retries:               HashMap::new(),
+            context_values:             HashMap::from([
                 (
                     crate::context::keys::CURRENT_PREAMBLE.to_string(),
                     serde_json::json!("runtime only"),
@@ -487,7 +489,7 @@ mod tests {
                     serde_json::json!(format!("file:///sandbox/.fabro/artifacts/{blob_id}.json")),
                 ),
             ]),
-            node_outcomes: HashMap::from([(
+            node_outcomes:              HashMap::from([(
                 "work".to_string(),
                 crate::outcome::Outcome {
                     context_updates: HashMap::from([(
@@ -499,11 +501,11 @@ mod tests {
                     ..crate::outcome::Outcome::success()
                 },
             )]),
-            next_node_id: Some("exit".to_string()),
-            git_commit_sha: None,
-            loop_failure_signatures: HashMap::new(),
+            next_node_id:               Some("exit".to_string()),
+            git_commit_sha:             None,
+            loop_failure_signatures:    HashMap::new(),
             restart_failure_signatures: HashMap::new(),
-            node_visits: HashMap::new(),
+            node_visits:                HashMap::new(),
         };
 
         normalize_checkpoint_for_resume(&mut checkpoint);
@@ -531,8 +533,8 @@ mod tests {
     use std::sync::Mutex;
 
     struct TestSyncEnv {
-        accessible: bool,
-        written: Mutex<Vec<(String, String)>>,
+        accessible:  bool,
+        written:     Mutex<Vec<(String, String)>>,
         working_dir: String,
     }
 

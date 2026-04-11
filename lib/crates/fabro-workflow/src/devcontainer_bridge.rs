@@ -2,16 +2,15 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
-use sha2::{Digest, Sha256};
-
+use fabro_agent::sandbox::Sandbox;
 use fabro_devcontainer::DevcontainerSpec;
+use fabro_sandbox::daytona::{DaytonaSnapshotConfig, DockerfileSource};
+use futures::future::try_join_all;
+use sha2::{Digest, Sha256};
 
 use crate::error::FabroError;
 use crate::event::{Emitter, Event};
 use crate::handler::sandbox_cancel_token;
-use fabro_agent::sandbox::Sandbox;
-use fabro_sandbox::daytona::{DaytonaSnapshotConfig, DockerfileSource};
-use futures::future::try_join_all;
 
 /// Compute a deterministic snapshot name from Dockerfile content.
 pub fn snapshot_name_for_dockerfile(dockerfile: &str) -> String {
@@ -23,11 +22,11 @@ pub fn snapshot_name_for_dockerfile(dockerfile: &str) -> String {
 /// Map a `DevcontainerSpec` to a `DaytonaSnapshotConfig`.
 pub fn devcontainer_to_snapshot_config(dc: &DevcontainerSpec) -> DaytonaSnapshotConfig {
     DaytonaSnapshotConfig {
-        name: snapshot_name_for_dockerfile(&dc.dockerfile),
+        name:       snapshot_name_for_dockerfile(&dc.dockerfile),
         dockerfile: Some(DockerfileSource::Inline(dc.dockerfile.clone())),
-        cpu: None,
-        memory: None,
-        disk: None,
+        cpu:        None,
+        memory:     None,
+        disk:       None,
     }
 }
 
@@ -47,7 +46,7 @@ pub async fn run_devcontainer_lifecycle(
     }
 
     emitter.emit(&Event::DevcontainerLifecycleStarted {
-        phase: phase.to_string(),
+        phase:         phase.to_string(),
         command_count: commands.len(),
     });
     let phase_start = Instant::now();
@@ -159,7 +158,7 @@ pub async fn run_devcontainer_lifecycle(
 
     let phase_duration = crate::millis_u64(phase_start.elapsed());
     emitter.emit(&Event::DevcontainerLifecycleCompleted {
-        phase: phase.to_string(),
+        phase:       phase.to_string(),
         duration_ms: phase_duration,
     });
     Ok(())
@@ -217,28 +216,30 @@ async fn run_single_lifecycle_command(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use async_trait::async_trait;
-    use fabro_agent::sandbox::{ExecResult, GrepOptions, Sandbox};
     use std::collections::HashMap;
     use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, Mutex};
+
+    use async_trait::async_trait;
+    use fabro_agent::sandbox::{ExecResult, GrepOptions, Sandbox};
     use tokio_util::sync::CancellationToken;
+
+    use super::*;
 
     /// Simple test sandbox that records commands and returns a fixed exit code.
     struct TestSandbox {
-        commands: Mutex<Vec<String>>,
-        cancel_tokens: Mutex<Vec<bool>>,
-        exit_code: i32,
+        commands:        Mutex<Vec<String>>,
+        cancel_tokens:   Mutex<Vec<bool>>,
+        exit_code:       i32,
         wait_for_cancel: bool,
     }
 
     impl TestSandbox {
         fn new() -> Self {
             Self {
-                commands: Mutex::new(Vec::new()),
-                cancel_tokens: Mutex::new(Vec::new()),
-                exit_code: 0,
+                commands:        Mutex::new(Vec::new()),
+                cancel_tokens:   Mutex::new(Vec::new()),
+                exit_code:       0,
                 wait_for_cancel: false,
             }
         }
@@ -254,9 +255,9 @@ mod tests {
 
         fn waiting_for_cancel() -> Self {
             Self {
-                commands: Mutex::new(Vec::new()),
-                cancel_tokens: Mutex::new(Vec::new()),
-                exit_code: 0,
+                commands:        Mutex::new(Vec::new()),
+                cancel_tokens:   Mutex::new(Vec::new()),
+                exit_code:       0,
                 wait_for_cancel: true,
             }
         }
@@ -313,22 +314,22 @@ mod tests {
                 let token = cancel_token.ok_or_else(|| "missing cancel token".to_string())?;
                 token.cancelled().await;
                 return Ok(ExecResult {
-                    stdout: String::new(),
-                    stderr: "cancelled".to_string(),
-                    exit_code: -1,
-                    timed_out: true,
+                    stdout:      String::new(),
+                    stderr:      "cancelled".to_string(),
+                    exit_code:   -1,
+                    timed_out:   true,
                     duration_ms: 10,
                 });
             }
             Ok(ExecResult {
-                stdout: String::new(),
-                stderr: if self.exit_code != 0 {
+                stdout:      String::new(),
+                stderr:      if self.exit_code != 0 {
                     "command failed".to_string()
                 } else {
                     String::new()
                 },
-                exit_code: self.exit_code,
-                timed_out: false,
+                exit_code:   self.exit_code,
+                timed_out:   false,
                 duration_ms: 10,
             })
         }
@@ -590,21 +591,21 @@ mod tests {
 
     fn test_devcontainer_config(dockerfile: &str) -> DevcontainerSpec {
         DevcontainerSpec {
-            dockerfile: dockerfile.to_string(),
-            build_context: std::path::PathBuf::from("."),
-            build_args: HashMap::new(),
-            build_target: None,
-            initialize_commands: vec![],
-            on_create_commands: vec![],
+            dockerfile:           dockerfile.to_string(),
+            build_context:        std::path::PathBuf::from("."),
+            build_args:           HashMap::new(),
+            build_target:         None,
+            initialize_commands:  vec![],
+            on_create_commands:   vec![],
             post_create_commands: vec![],
-            post_start_commands: vec![],
-            environment: HashMap::new(),
-            container_env: HashMap::new(),
-            remote_user: None,
-            workspace_folder: "/workspaces/test".to_string(),
-            forwarded_ports: vec![],
-            compose_files: vec![],
-            compose_service: None,
+            post_start_commands:  vec![],
+            environment:          HashMap::new(),
+            container_env:        HashMap::new(),
+            remote_user:          None,
+            workspace_folder:     "/workspaces/test".to_string(),
+            forwarded_ports:      vec![],
+            compose_files:        vec![],
+            compose_service:      None,
         }
     }
 }

@@ -1,3 +1,15 @@
+use std::pin::Pin;
+use std::sync::Arc;
+use std::task::{Context, Poll};
+
+use fabro_util::backoff::BackoffPolicy;
+use futures::{Stream, StreamExt, future, stream};
+use tokio::sync::{OnceCell, mpsc};
+use tokio::time;
+use tokio_stream::wrappers::ReceiverStream;
+use tokio_util::sync::CancellationToken;
+use tracing::{debug, warn};
+
 use crate::client::Client;
 use crate::error::SdkError;
 use crate::provider::StreamEventStream;
@@ -8,16 +20,6 @@ use crate::types::{
     ResponseFormat, ResponseFormatType, RetryPolicy, StepResult, StreamEvent, TimeoutOptions,
     TokenCounts, ToolCall, ToolChoice, ToolDefinition,
 };
-use fabro_util::backoff::BackoffPolicy;
-use futures::{Stream, StreamExt, future, stream};
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
-use tokio::sync::{OnceCell, mpsc};
-use tokio::time;
-use tokio_stream::wrappers::ReceiverStream;
-use tokio_util::sync::CancellationToken;
-use tracing::{debug, warn};
 
 /// Module-level default client (Section 2.5).
 static DEFAULT_CLIENT: OnceCell<Arc<Client>> = OnceCell::const_new();
@@ -46,7 +48,7 @@ fn build_initial_messages(params: &GenerateParams) -> Result<Vec<Message>, SdkEr
         if params.messages.is_some() {
             return Err(SdkError::Configuration {
                 message: "Cannot specify both 'prompt' and 'messages'".into(),
-                source: None,
+                source:  None,
             });
         }
         messages.push(Message::user(prompt));
@@ -62,19 +64,19 @@ fn build_request(
     tool_definitions: Option<&[ToolDefinition]>,
 ) -> Request {
     Request {
-        model: params.model.clone(),
-        messages: messages.to_vec(),
-        provider: params.provider.clone(),
-        tools: tool_definitions.map(<[ToolDefinition]>::to_vec),
-        tool_choice: params.tool_choice.clone(),
-        response_format: params.response_format.clone(),
-        temperature: params.temperature,
-        top_p: params.top_p,
-        max_tokens: params.max_tokens,
-        stop_sequences: params.stop_sequences.clone(),
+        model:            params.model.clone(),
+        messages:         messages.to_vec(),
+        provider:         params.provider.clone(),
+        tools:            tool_definitions.map(<[ToolDefinition]>::to_vec),
+        tool_choice:      params.tool_choice.clone(),
+        response_format:  params.response_format.clone(),
+        temperature:      params.temperature,
+        top_p:            params.top_p,
+        max_tokens:       params.max_tokens,
+        stop_sequences:   params.stop_sequences.clone(),
         reasoning_effort: params.reasoning_effort,
-        speed: params.speed.clone(),
-        metadata: params.metadata.clone(),
+        speed:            params.speed.clone(),
+        metadata:         params.metadata.clone(),
         provider_options: params.provider_options.clone(),
     }
 }
@@ -104,7 +106,8 @@ fn build_generate_result(steps: Vec<StepResult>, total_usage: TokenCounts) -> Ge
 ///
 /// # Panics
 ///
-/// Panics if a tool's `execute` handler is `None` when matched during tool execution.
+/// Panics if a tool's `execute` handler is `None` when matched during tool
+/// execution.
 pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError> {
     let client = match params.client.clone() {
         Some(c) => c,
@@ -172,7 +175,7 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError
                     warn!(timeout_secs = per_step, "Per-step timeout exceeded");
                     SdkError::RequestTimeout {
                         message: format!("Per-step timeout of {per_step}s exceeded"),
-                        source: None,
+                        source:  None,
                     }
                 })?
             } else {
@@ -271,7 +274,7 @@ pub async fn generate(params: GenerateParams) -> Result<GenerateResult, SdkError
                 warn!(timeout_secs = total, "Total generation timeout exceeded");
                 SdkError::RequestTimeout {
                     message: format!("Total timeout of {total}s exceeded"),
-                    source: None,
+                    source:  None,
                 }
             })?
     } else {
@@ -285,30 +288,30 @@ pub type StopCondition = Arc<dyn Fn(&[StepResult]) -> bool + Send + Sync>;
 /// Parameters for `generate()` (Section 4.3).
 #[derive(Clone)]
 pub struct GenerateParams {
-    pub model: String,
-    pub prompt: Option<String>,
-    pub messages: Option<Vec<Message>>,
-    pub system: Option<String>,
-    pub tools: Option<Vec<Arc<Tool>>>,
-    pub tool_choice: Option<ToolChoice>,
-    pub max_tool_rounds: u32,
-    pub response_format: Option<ResponseFormat>,
-    pub temperature: Option<f64>,
-    pub top_p: Option<f64>,
-    pub max_tokens: Option<i64>,
-    pub stop_sequences: Option<Vec<String>>,
+    pub model:            String,
+    pub prompt:           Option<String>,
+    pub messages:         Option<Vec<Message>>,
+    pub system:           Option<String>,
+    pub tools:            Option<Vec<Arc<Tool>>>,
+    pub tool_choice:      Option<ToolChoice>,
+    pub max_tool_rounds:  u32,
+    pub response_format:  Option<ResponseFormat>,
+    pub temperature:      Option<f64>,
+    pub top_p:            Option<f64>,
+    pub max_tokens:       Option<i64>,
+    pub stop_sequences:   Option<Vec<String>>,
     pub reasoning_effort: Option<ReasoningEffort>,
-    pub speed: Option<String>,
-    pub provider: Option<String>,
+    pub speed:            Option<String>,
+    pub provider:         Option<String>,
     pub provider_options: Option<serde_json::Value>,
-    pub metadata: Option<std::collections::HashMap<String, String>>,
-    pub max_retries: u32,
-    pub timeout: Option<TimeoutOptions>,
-    pub client: Option<Arc<Client>>,
+    pub metadata:         Option<std::collections::HashMap<String, String>>,
+    pub max_retries:      u32,
+    pub timeout:          Option<TimeoutOptions>,
+    pub client:           Option<Arc<Client>>,
     /// Cancellation token to interrupt generation (Section 4.8).
-    pub abort_signal: Option<CancellationToken>,
+    pub abort_signal:     Option<CancellationToken>,
     /// Custom stop condition checked after each tool round (Section 4.3).
-    pub stop_when: Option<StopCondition>,
+    pub stop_when:        Option<StopCondition>,
     /// Callback to repair invalid tool call arguments (Section 5.8).
     pub repair_tool_call: Option<RepairToolCallFn>,
 }
@@ -316,28 +319,28 @@ pub struct GenerateParams {
 impl GenerateParams {
     pub fn new(model: impl Into<String>) -> Self {
         Self {
-            model: model.into(),
-            prompt: None,
-            messages: None,
-            system: None,
-            tools: None,
-            tool_choice: None,
-            max_tool_rounds: 1,
-            response_format: None,
-            temperature: None,
-            top_p: None,
-            max_tokens: None,
-            stop_sequences: None,
+            model:            model.into(),
+            prompt:           None,
+            messages:         None,
+            system:           None,
+            tools:            None,
+            tool_choice:      None,
+            max_tool_rounds:  1,
+            response_format:  None,
+            temperature:      None,
+            top_p:            None,
+            max_tokens:       None,
+            stop_sequences:   None,
             reasoning_effort: None,
-            speed: None,
-            provider: None,
+            speed:            None,
+            provider:         None,
             provider_options: None,
-            metadata: None,
-            max_retries: 2,
-            timeout: None,
-            client: None,
-            abort_signal: None,
-            stop_when: None,
+            metadata:         None,
+            max_retries:      2,
+            timeout:          None,
+            client:           None,
+            abort_signal:     None,
+            stop_when:        None,
             repair_tool_call: None,
         }
     }
@@ -473,26 +476,27 @@ impl GenerateParams {
     }
 }
 
-/// `StreamAccumulator` collects stream events into a complete Response (Section 4.4).
+/// `StreamAccumulator` collects stream events into a complete Response (Section
+/// 4.4).
 pub struct StreamAccumulator {
-    text_parts: Vec<String>,
+    text_parts:      Vec<String>,
     reasoning_parts: Vec<String>,
-    tool_calls: Vec<ToolCall>,
-    finish_reason: Option<FinishReason>,
-    usage: Option<TokenCounts>,
-    response: Option<Response>,
+    tool_calls:      Vec<ToolCall>,
+    finish_reason:   Option<FinishReason>,
+    usage:           Option<TokenCounts>,
+    response:        Option<Response>,
 }
 
 impl StreamAccumulator {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            text_parts: Vec::new(),
+            text_parts:      Vec::new(),
             reasoning_parts: Vec::new(),
-            tool_calls: Vec::new(),
-            finish_reason: None,
-            usage: None,
-            response: None,
+            tool_calls:      Vec::new(),
+            finish_reason:   None,
+            usage:           None,
+            response:        None,
         }
     }
 
@@ -552,13 +556,14 @@ impl Default for StreamAccumulator {
     }
 }
 
-/// Wraps a streaming response with an internal `StreamAccumulator` and convenience methods.
+/// Wraps a streaming response with an internal `StreamAccumulator` and
+/// convenience methods.
 ///
 /// Implements `Stream<Item = Result<StreamEvent, SdkError>>` so it can be used
 /// as a drop-in replacement for `StreamEventStream`. Also supports multi-step
 /// tool loops when active tools are provided.
 pub struct StreamResult {
-    inner: StreamEventStream,
+    inner:       StreamEventStream,
     accumulator: StreamAccumulator,
 }
 
@@ -711,7 +716,7 @@ async fn stream_with_tool_loop(params: GenerateParams) -> Result<StreamEventStre
                             .unwrap_or_else(|_| {
                                 Err(SdkError::RequestTimeout {
                                     message: format!("Per-step timeout of {per_step}s exceeded"),
-                                    source: None,
+                                    source:  None,
                                 })
                             })
                     } else {
@@ -788,7 +793,7 @@ async fn stream_with_tool_loop(params: GenerateParams) -> Result<StreamEventStre
 
                 // Track step results for stop_when
                 steps.push(StepResult {
-                    response: response.clone(),
+                    response:     response.clone(),
                     tool_results: tool_results.clone(),
                 });
 
@@ -839,7 +844,7 @@ async fn stream_with_tool_loop(params: GenerateParams) -> Result<StreamEventStre
                 let _ = tx
                     .send(Err(SdkError::RequestTimeout {
                         message: format!("Total timeout of {total}s exceeded"),
-                        source: None,
+                        source:  None,
                     }))
                     .await;
             }
@@ -867,7 +872,7 @@ async fn stream_generate_raw(
             .await
             .map_err(|_| SdkError::RequestTimeout {
                 message: format!("Per-step timeout of {per_step}s exceeded"),
-                source: None,
+                source:  None,
             })??
     } else {
         client.stream(&request).await?
@@ -904,7 +909,7 @@ async fn stream_generate_raw(
                 Err(_) => Some((
                     Err(SdkError::RequestTimeout {
                         message: format!("Total timeout of {total_copy}s exceeded"),
-                        source: None,
+                        source:  None,
                     }),
                     (stream, true),
                 )),
@@ -951,9 +956,9 @@ pub async fn generate_object(
 ) -> Result<GenerateResult, SdkError> {
     let params = GenerateParams {
         response_format: Some(ResponseFormat {
-            kind: ResponseFormatType::JsonSchema,
+            kind:        ResponseFormatType::JsonSchema,
             json_schema: Some(schema),
-            strict: true,
+            strict:      true,
         }),
         ..params
     };
@@ -976,13 +981,14 @@ pub async fn generate_object(
 pub type ObjectStream =
     Pin<Box<dyn futures::Stream<Item = Result<ObjectStreamEvent, SdkError>> + Send>>;
 
-/// Wraps an `ObjectStream` with an `object()` accessor for the final parsed value.
+/// Wraps an `ObjectStream` with an `object()` accessor for the final parsed
+/// value.
 ///
-/// Implements `Stream<Item = Result<ObjectStreamEvent, SdkError>>` so it can be used
-/// as a drop-in replacement for `ObjectStream`. Tracks the last `Complete` event's
-/// object internally so callers can retrieve it after the stream ends.
+/// Implements `Stream<Item = Result<ObjectStreamEvent, SdkError>>` so it can be
+/// used as a drop-in replacement for `ObjectStream`. Tracks the last `Complete`
+/// event's object internally so callers can retrieve it after the stream ends.
 pub struct ObjectStreamResult {
-    inner: ObjectStream,
+    inner:  ObjectStream,
     object: Option<serde_json::Value>,
 }
 
@@ -994,7 +1000,8 @@ impl ObjectStreamResult {
         }
     }
 
-    /// Returns the final parsed object after the stream has yielded a `Complete` event.
+    /// Returns the final parsed object after the stream has yielded a
+    /// `Complete` event.
     #[must_use]
     pub const fn object(&self) -> Option<&serde_json::Value> {
         self.object.as_ref()
@@ -1020,26 +1027,27 @@ impl Stream for ObjectStreamResult {
 
 /// Streaming structured output with incremental JSON parsing (Section 4.6).
 ///
-/// Combines streaming with structured output: sets `response_format` to `json_schema`,
-/// streams the response, and attempts to parse the accumulated text as JSON on each
-/// text delta. Yields `ObjectStreamEvent::Partial` when a new valid partial parse is
-/// obtained, `ObjectStreamEvent::Delta` for every raw stream event, and
-/// `ObjectStreamEvent::Complete` when the stream finishes with the final parsed object.
+/// Combines streaming with structured output: sets `response_format` to
+/// `json_schema`, streams the response, and attempts to parse the accumulated
+/// text as JSON on each text delta. Yields `ObjectStreamEvent::Partial` when a
+/// new valid partial parse is obtained, `ObjectStreamEvent::Delta` for every
+/// raw stream event, and `ObjectStreamEvent::Complete` when the stream finishes
+/// with the final parsed object.
 ///
 /// # Errors
 ///
 /// Returns `SdkError::Configuration` if both `prompt` and `messages` are set,
-/// `SdkError::NoObjectGenerated` if the final accumulated text is not valid JSON,
-/// or any provider error encountered during streaming.
+/// `SdkError::NoObjectGenerated` if the final accumulated text is not valid
+/// JSON, or any provider error encountered during streaming.
 pub async fn stream_object(
     params: GenerateParams,
     schema: serde_json::Value,
 ) -> Result<ObjectStreamResult, SdkError> {
     let params = GenerateParams {
         response_format: Some(ResponseFormat {
-            kind: ResponseFormatType::JsonSchema,
+            kind:        ResponseFormatType::JsonSchema,
             json_schema: Some(schema),
-            strict: true,
+            strict:      true,
         }),
         ..params
     };
@@ -1073,7 +1081,7 @@ pub async fn stream_object(
                         match serde_json::from_str::<serde_json::Value>(accumulated_text) {
                             Ok(final_object) => {
                                 events.push(Ok(ObjectStreamEvent::Complete {
-                                    object: final_object,
+                                    object:   final_object,
                                     response: response.clone(),
                                 }));
                             }
@@ -1093,7 +1101,7 @@ pub async fn stream_object(
                 Err(e) => {
                     events.push(Err(SdkError::Stream {
                         message: format!("{e}"),
-                        source: None,
+                        source:  None,
                     }));
                 }
             }
@@ -1107,16 +1115,17 @@ pub async fn stream_object(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    use futures::{StreamExt, stream};
+    use tokio::time::sleep;
+
     use super::*;
     use crate::client::Client;
     use crate::error::{ProviderErrorDetail, ProviderErrorKind};
     use crate::provider::ProviderAdapter;
     use crate::types::{ContentPart, Role, ToolResult};
-    use futures::StreamExt;
-    use futures::stream;
-    use std::collections::HashMap;
-    use std::sync::atomic::{AtomicU32, Ordering};
-    use tokio::time::sleep;
 
     /// Mock provider that returns configurable responses.
     struct MockProvider {
@@ -1139,19 +1148,19 @@ mod tests {
 
         async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {
             Ok(Response {
-                id: "resp_1".into(),
-                model: "mock-model".into(),
-                provider: "mock".into(),
-                message: Message::assistant(&self.response_text),
+                id:            "resp_1".into(),
+                model:         "mock-model".into(),
+                provider:      "mock".into(),
+                message:       Message::assistant(&self.response_text),
                 finish_reason: FinishReason::Stop,
-                usage: TokenCounts {
+                usage:         TokenCounts {
                     input_tokens: 10,
                     output_tokens: 20,
                     ..Default::default()
                 },
-                raw: None,
-                warnings: vec![],
-                rate_limit: None,
+                raw:           None,
+                warnings:      vec![],
+                rate_limit:    None,
             })
         }
 
@@ -1167,19 +1176,19 @@ mod tests {
                         ..Default::default()
                     },
                     Response {
-                        id: "resp_1".into(),
-                        model: "mock-model".into(),
-                        provider: "mock".into(),
-                        message: Message::assistant(&text),
+                        id:            "resp_1".into(),
+                        model:         "mock-model".into(),
+                        provider:      "mock".into(),
+                        message:       Message::assistant(&text),
                         finish_reason: FinishReason::Stop,
-                        usage: TokenCounts {
+                        usage:         TokenCounts {
                             input_tokens: 10,
                             output_tokens: 20,
                             ..Default::default()
                         },
-                        raw: None,
-                        warnings: vec![],
-                        rate_limit: None,
+                        raw:           None,
+                        warnings:      vec![],
+                        rate_limit:    None,
                     },
                 )),
             ];
@@ -1275,45 +1284,45 @@ mod tests {
             if count == 0 {
                 // First call: return tool call
                 Ok(Response {
-                    id: "resp_1".into(),
-                    model: "mock-model".into(),
-                    provider: "mock".into(),
-                    message: Message {
-                        role: Role::Assistant,
-                        content: vec![ContentPart::ToolCall(ToolCall::new(
+                    id:            "resp_1".into(),
+                    model:         "mock-model".into(),
+                    provider:      "mock".into(),
+                    message:       Message {
+                        role:         Role::Assistant,
+                        content:      vec![ContentPart::ToolCall(ToolCall::new(
                             "call_1",
                             "get_weather",
                             serde_json::json!({"city": "SF"}),
                         ))],
-                        name: None,
+                        name:         None,
                         tool_call_id: None,
                     },
                     finish_reason: FinishReason::ToolCalls,
-                    usage: TokenCounts {
+                    usage:         TokenCounts {
                         input_tokens: 10,
                         output_tokens: 5,
                         ..Default::default()
                     },
-                    raw: None,
-                    warnings: vec![],
-                    rate_limit: None,
+                    raw:           None,
+                    warnings:      vec![],
+                    rate_limit:    None,
                 })
             } else {
                 // Second call: return text
                 Ok(Response {
-                    id: "resp_2".into(),
-                    model: "mock-model".into(),
-                    provider: "mock".into(),
-                    message: Message::assistant("The weather in SF is 72F"),
+                    id:            "resp_2".into(),
+                    model:         "mock-model".into(),
+                    provider:      "mock".into(),
+                    message:       Message::assistant("The weather in SF is 72F"),
                     finish_reason: FinishReason::Stop,
-                    usage: TokenCounts {
+                    usage:         TokenCounts {
                         input_tokens: 20,
                         output_tokens: 10,
                         ..Default::default()
                     },
-                    raw: None,
-                    warnings: vec![],
-                    rate_limit: None,
+                    raw:           None,
+                    warnings:      vec![],
+                    rate_limit:    None,
                 })
             }
         }
@@ -1371,19 +1380,19 @@ mod tests {
         acc.process(&StreamEvent::text_delta(" world", Some("t1".into())));
 
         let resp = Response {
-            id: "r1".into(),
-            model: "m".into(),
-            provider: "p".into(),
-            message: Message::assistant("Hello world"),
+            id:            "r1".into(),
+            model:         "m".into(),
+            provider:      "p".into(),
+            message:       Message::assistant("Hello world"),
             finish_reason: FinishReason::Stop,
-            usage: TokenCounts {
+            usage:         TokenCounts {
                 input_tokens: 5,
                 output_tokens: 2,
                 ..Default::default()
             },
-            raw: None,
-            warnings: vec![],
-            rate_limit: None,
+            raw:           None,
+            warnings:      vec![],
+            rate_limit:    None,
         };
 
         acc.process(&StreamEvent::finish(
@@ -1528,9 +1537,9 @@ mod tests {
             .max_retries(5)
             .tool_choice(ToolChoice::Required)
             .response_format(ResponseFormat {
-                kind: ResponseFormatType::JsonObject,
+                kind:        ResponseFormatType::JsonObject,
                 json_schema: None,
-                strict: false,
+                strict:      false,
             })
             .max_tool_rounds(3);
 
@@ -1553,7 +1562,7 @@ mod tests {
     #[test]
     fn generate_params_timeout_builder() {
         let params = GenerateParams::new("test-model").timeout(TimeoutOptions {
-            total: Some(30.0),
+            total:    Some(30.0),
             per_step: Some(10.0),
         });
         assert!(params.timeout.is_some());
@@ -1564,7 +1573,7 @@ mod tests {
 
     /// Mock provider that streams JSON tokens incrementally.
     struct StreamingJsonMockProvider {
-        deltas: Vec<String>,
+        deltas:    Vec<String>,
         full_text: String,
     }
 
@@ -1586,15 +1595,15 @@ mod tests {
 
         async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {
             Ok(Response {
-                id: "resp_1".into(),
-                model: "mock-model".into(),
-                provider: "mock".into(),
-                message: Message::assistant(&self.full_text),
+                id:            "resp_1".into(),
+                model:         "mock-model".into(),
+                provider:      "mock".into(),
+                message:       Message::assistant(&self.full_text),
                 finish_reason: FinishReason::Stop,
-                usage: TokenCounts::default(),
-                raw: None,
-                warnings: vec![],
-                rate_limit: None,
+                usage:         TokenCounts::default(),
+                raw:           None,
+                warnings:      vec![],
+                rate_limit:    None,
             })
         }
 
@@ -1613,19 +1622,19 @@ mod tests {
                     ..Default::default()
                 },
                 Response {
-                    id: "resp_1".into(),
-                    model: "mock-model".into(),
-                    provider: "mock".into(),
-                    message: Message::assistant(&self.full_text),
+                    id:            "resp_1".into(),
+                    model:         "mock-model".into(),
+                    provider:      "mock".into(),
+                    message:       Message::assistant(&self.full_text),
                     finish_reason: FinishReason::Stop,
-                    usage: TokenCounts {
+                    usage:         TokenCounts {
                         input_tokens: 10,
                         output_tokens: 20,
                         ..Default::default()
                     },
-                    raw: None,
-                    warnings: vec![],
-                    rate_limit: None,
+                    raw:           None,
+                    warnings:      vec![],
+                    rate_limit:    None,
                 },
             )));
 
@@ -1777,7 +1786,7 @@ mod tests {
     async fn generate_abort_signal_between_tool_rounds() {
         // Provider that always returns tool calls
         struct AlwaysToolCallProvider {
-            call_count: Arc<AtomicU32>,
+            call_count:   Arc<AtomicU32>,
             cancel_token: CancellationToken,
         }
 
@@ -1794,24 +1803,24 @@ mod tests {
                     self.cancel_token.cancel();
                 }
                 Ok(Response {
-                    id: format!("resp_{count}"),
-                    model: "mock-model".into(),
-                    provider: "mock".into(),
-                    message: Message {
-                        role: Role::Assistant,
-                        content: vec![ContentPart::ToolCall(ToolCall::new(
+                    id:            format!("resp_{count}"),
+                    model:         "mock-model".into(),
+                    provider:      "mock".into(),
+                    message:       Message {
+                        role:         Role::Assistant,
+                        content:      vec![ContentPart::ToolCall(ToolCall::new(
                             format!("call_{count}"),
                             "get_weather",
                             serde_json::json!({"city": "SF"}),
                         ))],
-                        name: None,
+                        name:         None,
                         tool_call_id: None,
                     },
                     finish_reason: FinishReason::ToolCalls,
-                    usage: TokenCounts::default(),
-                    raw: None,
-                    warnings: vec![],
-                    rate_limit: None,
+                    usage:         TokenCounts::default(),
+                    raw:           None,
+                    warnings:      vec![],
+                    rate_limit:    None,
                 })
             }
 
@@ -1825,7 +1834,7 @@ mod tests {
         let token_clone = token.clone();
 
         let provider: Arc<dyn ProviderAdapter> = Arc::new(AlwaysToolCallProvider {
-            call_count: call_count.clone(),
+            call_count:   call_count.clone(),
             cancel_token: token_clone,
         });
         let mut providers: HashMap<String, Arc<dyn ProviderAdapter>> = HashMap::new();
@@ -1980,15 +1989,15 @@ mod tests {
 
         async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {
             Ok(Response {
-                id: "resp_1".into(),
-                model: "mock-model".into(),
-                provider: "mock".into(),
-                message: Message::assistant("fallback"),
+                id:            "resp_1".into(),
+                model:         "mock-model".into(),
+                provider:      "mock".into(),
+                message:       Message::assistant("fallback"),
                 finish_reason: FinishReason::Stop,
-                usage: TokenCounts::default(),
-                raw: None,
-                warnings: vec![],
-                rate_limit: None,
+                usage:         TokenCounts::default(),
+                raw:           None,
+                warnings:      vec![],
+                rate_limit:    None,
             })
         }
 
@@ -2000,24 +2009,24 @@ mod tests {
                 let tool_call =
                     ToolCall::new("call_1", "get_weather", serde_json::json!({"city": "SF"}));
                 let response = Response {
-                    id: "resp_1".into(),
-                    model: "mock-model".into(),
-                    provider: "mock".into(),
-                    message: Message {
-                        role: Role::Assistant,
-                        content: vec![ContentPart::ToolCall(tool_call.clone())],
-                        name: None,
+                    id:            "resp_1".into(),
+                    model:         "mock-model".into(),
+                    provider:      "mock".into(),
+                    message:       Message {
+                        role:         Role::Assistant,
+                        content:      vec![ContentPart::ToolCall(tool_call.clone())],
+                        name:         None,
                         tool_call_id: None,
                     },
                     finish_reason: FinishReason::ToolCalls,
-                    usage: TokenCounts {
+                    usage:         TokenCounts {
                         input_tokens: 10,
                         output_tokens: 5,
                         ..Default::default()
                     },
-                    raw: None,
-                    warnings: vec![],
-                    rate_limit: None,
+                    raw:           None,
+                    warnings:      vec![],
+                    rate_limit:    None,
                 };
                 let events = vec![
                     Ok(StreamEvent::ToolCallEnd { tool_call }),
@@ -2032,19 +2041,19 @@ mod tests {
                 // Second stream: return text
                 let text = "The weather in SF is 72F";
                 let response = Response {
-                    id: "resp_2".into(),
-                    model: "mock-model".into(),
-                    provider: "mock".into(),
-                    message: Message::assistant(text),
+                    id:            "resp_2".into(),
+                    model:         "mock-model".into(),
+                    provider:      "mock".into(),
+                    message:       Message::assistant(text),
                     finish_reason: FinishReason::Stop,
-                    usage: TokenCounts {
+                    usage:         TokenCounts {
                         input_tokens: 20,
                         output_tokens: 10,
                         ..Default::default()
                     },
-                    raw: None,
-                    warnings: vec![],
-                    rate_limit: None,
+                    raw:           None,
+                    warnings:      vec![],
+                    rate_limit:    None,
                 };
                 let events = vec![
                     Ok(StreamEvent::text_delta(text, Some("t1".into()))),
@@ -2150,19 +2159,19 @@ mod tests {
         let mut acc = StreamAccumulator::new();
 
         let response = Response {
-            id: "resp_1".into(),
-            model: "mock-model".into(),
-            provider: "mock".into(),
-            message: Message::assistant("tool step"),
+            id:            "resp_1".into(),
+            model:         "mock-model".into(),
+            provider:      "mock".into(),
+            message:       Message::assistant("tool step"),
             finish_reason: FinishReason::ToolCalls,
-            usage: TokenCounts {
+            usage:         TokenCounts {
                 input_tokens: 10,
                 output_tokens: 5,
                 ..Default::default()
             },
-            raw: None,
-            warnings: vec![],
-            rate_limit: None,
+            raw:           None,
+            warnings:      vec![],
+            rate_limit:    None,
         };
 
         let tool_calls = vec![ToolCall::new(
@@ -2308,7 +2317,7 @@ mod tests {
     /// Mock provider that fails on stream N times then succeeds
     struct FailThenStreamProvider {
         call_count: Arc<AtomicU32>,
-        failures: u32,
+        failures:   u32,
     }
 
     #[async_trait::async_trait]
@@ -2319,15 +2328,15 @@ mod tests {
 
         async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {
             Ok(Response {
-                id: "resp_1".into(),
-                model: "mock-model".into(),
-                provider: "mock".into(),
-                message: Message::assistant("fallback"),
+                id:            "resp_1".into(),
+                model:         "mock-model".into(),
+                provider:      "mock".into(),
+                message:       Message::assistant("fallback"),
                 finish_reason: FinishReason::Stop,
-                usage: TokenCounts::default(),
-                raw: None,
-                warnings: vec![],
-                rate_limit: None,
+                usage:         TokenCounts::default(),
+                raw:           None,
+                warnings:      vec![],
+                rate_limit:    None,
             })
         }
 
@@ -2336,7 +2345,7 @@ mod tests {
 
             if count < self.failures {
                 return Err(SdkError::Provider {
-                    kind: ProviderErrorKind::Server,
+                    kind:   ProviderErrorKind::Server,
                     detail: Box::new(ProviderErrorDetail {
                         status_code: Some(500),
                         ..ProviderErrorDetail::new("server error", "mock")
@@ -2346,19 +2355,19 @@ mod tests {
 
             let text = "Hello after retry";
             let response = Response {
-                id: "resp_1".into(),
-                model: "mock-model".into(),
-                provider: "mock".into(),
-                message: Message::assistant(text),
+                id:            "resp_1".into(),
+                model:         "mock-model".into(),
+                provider:      "mock".into(),
+                message:       Message::assistant(text),
                 finish_reason: FinishReason::Stop,
-                usage: TokenCounts {
+                usage:         TokenCounts {
                     input_tokens: 10,
                     output_tokens: 20,
                     ..Default::default()
                 },
-                raw: None,
-                warnings: vec![],
-                rate_limit: None,
+                raw:           None,
+                warnings:      vec![],
+                rate_limit:    None,
             };
             let events = vec![
                 Ok(StreamEvent::text_delta(text, Some("t1".into()))),
@@ -2377,7 +2386,7 @@ mod tests {
         let call_count = Arc::new(AtomicU32::new(0));
         let provider: Arc<dyn ProviderAdapter> = Arc::new(FailThenStreamProvider {
             call_count: call_count.clone(),
-            failures: 2, // fail twice, succeed on third
+            failures:   2, // fail twice, succeed on third
         });
 
         let mut providers: HashMap<String, Arc<dyn ProviderAdapter>> = HashMap::new();
@@ -2433,15 +2442,15 @@ mod tests {
 
         async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {
             Ok(Response {
-                id: "resp_1".into(),
-                model: "mock-model".into(),
-                provider: "mock".into(),
-                message: Message::assistant("fallback"),
+                id:            "resp_1".into(),
+                model:         "mock-model".into(),
+                provider:      "mock".into(),
+                message:       Message::assistant("fallback"),
                 finish_reason: FinishReason::Stop,
-                usage: TokenCounts::default(),
-                raw: None,
-                warnings: vec![],
-                rate_limit: None,
+                usage:         TokenCounts::default(),
+                raw:           None,
+                warnings:      vec![],
+                rate_limit:    None,
             })
         }
 
@@ -2449,15 +2458,15 @@ mod tests {
             sleep(self.delay).await;
             let text = "Slow response";
             let response = Response {
-                id: "resp_1".into(),
-                model: "mock-model".into(),
-                provider: "mock".into(),
-                message: Message::assistant(text),
+                id:            "resp_1".into(),
+                model:         "mock-model".into(),
+                provider:      "mock".into(),
+                message:       Message::assistant(text),
                 finish_reason: FinishReason::Stop,
-                usage: TokenCounts::default(),
-                raw: None,
-                warnings: vec![],
-                rate_limit: None,
+                usage:         TokenCounts::default(),
+                raw:           None,
+                warnings:      vec![],
+                rate_limit:    None,
             };
             let events = vec![
                 Ok(StreamEvent::text_delta(text, Some("t1".into()))),
@@ -2518,7 +2527,8 @@ mod tests {
     async fn stream_total_timeout() {
         // Use a streaming tool call provider with a slow tool to trigger total timeout
         // across multiple rounds
-        /// Provider that always returns tool calls with a delay on the second stream
+        /// Provider that always returns tool calls with a delay on the second
+        /// stream
         struct SlowToolCallStreamProvider {
             call_count: Arc<AtomicU32>,
         }
@@ -2531,15 +2541,15 @@ mod tests {
 
             async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {
                 Ok(Response {
-                    id: "resp_1".into(),
-                    model: "mock-model".into(),
-                    provider: "mock".into(),
-                    message: Message::assistant("fallback"),
+                    id:            "resp_1".into(),
+                    model:         "mock-model".into(),
+                    provider:      "mock".into(),
+                    message:       Message::assistant("fallback"),
                     finish_reason: FinishReason::Stop,
-                    usage: TokenCounts::default(),
-                    raw: None,
-                    warnings: vec![],
-                    rate_limit: None,
+                    usage:         TokenCounts::default(),
+                    raw:           None,
+                    warnings:      vec![],
+                    rate_limit:    None,
                 })
             }
 
@@ -2551,20 +2561,20 @@ mod tests {
                     let tool_call =
                         ToolCall::new("call_1", "get_weather", serde_json::json!({"city": "SF"}));
                     let response = Response {
-                        id: "resp_1".into(),
-                        model: "mock-model".into(),
-                        provider: "mock".into(),
-                        message: Message {
-                            role: Role::Assistant,
-                            content: vec![ContentPart::ToolCall(tool_call.clone())],
-                            name: None,
+                        id:            "resp_1".into(),
+                        model:         "mock-model".into(),
+                        provider:      "mock".into(),
+                        message:       Message {
+                            role:         Role::Assistant,
+                            content:      vec![ContentPart::ToolCall(tool_call.clone())],
+                            name:         None,
                             tool_call_id: None,
                         },
                         finish_reason: FinishReason::ToolCalls,
-                        usage: TokenCounts::default(),
-                        raw: None,
-                        warnings: vec![],
-                        rate_limit: None,
+                        usage:         TokenCounts::default(),
+                        raw:           None,
+                        warnings:      vec![],
+                        rate_limit:    None,
                     };
                     let events = vec![
                         Ok(StreamEvent::ToolCallEnd { tool_call }),
@@ -2580,15 +2590,15 @@ mod tests {
                     sleep(std::time::Duration::from_secs(5)).await;
                     let text = "Should not arrive";
                     let response = Response {
-                        id: "resp_2".into(),
-                        model: "mock-model".into(),
-                        provider: "mock".into(),
-                        message: Message::assistant(text),
+                        id:            "resp_2".into(),
+                        model:         "mock-model".into(),
+                        provider:      "mock".into(),
+                        message:       Message::assistant(text),
                         finish_reason: FinishReason::Stop,
-                        usage: TokenCounts::default(),
-                        raw: None,
-                        warnings: vec![],
-                        rate_limit: None,
+                        usage:         TokenCounts::default(),
+                        raw:           None,
+                        warnings:      vec![],
+                        rate_limit:    None,
                     };
                     let events = vec![
                         Ok(StreamEvent::text_delta(text, Some("t1".into()))),

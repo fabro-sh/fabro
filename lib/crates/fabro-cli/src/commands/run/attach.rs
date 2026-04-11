@@ -7,13 +7,12 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use anyhow::Result;
-use fabro_types::{EventBody, RunEvent, RunId};
-
 use fabro_api::types;
 use fabro_interview::{AnswerValue, ConsoleInterviewer, Question, QuestionOption, QuestionType};
 use fabro_store::EventEnvelope;
 use fabro_types::settings::cli::OutputVerbosity;
 use fabro_types::settings::run::ApprovalMode;
+use fabro_types::{EventBody, RunEvent, RunId};
 use fabro_util::json::normalize_json_value;
 use fabro_util::terminal::Styles;
 use fabro_workflow::outcome::StageStatus;
@@ -109,10 +108,10 @@ pub(crate) async fn attach_run_with_client(
 }
 
 struct AttachOptions {
-    auto_approve: bool,
-    verbose: bool,
+    auto_approve:   bool,
+    verbose:        bool,
     kill_on_detach: bool,
-    json_output: bool,
+    json_output:    bool,
 }
 
 fn replay_run_with_client(
@@ -277,7 +276,7 @@ fn api_question_to_question(question: &types::ApiQuestion) -> Question {
         .options
         .iter()
         .map(|option| QuestionOption {
-            key: option.key.clone(),
+            key:   option.key.clone(),
             label: option.label.clone(),
         })
         .collect();
@@ -462,10 +461,11 @@ fn event_starts_interview(event: &EventEnvelope) -> bool {
 mod tests {
     #![allow(clippy::absolute_paths)]
 
-    use super::*;
     use fabro_interview::{Answer, AnswerValue};
     use fabro_util::terminal::Styles;
     use httpmock::MockServer;
+
+    use super::*;
 
     fn no_color_styles() -> &'static Styles {
         Box::leak(Box::new(Styles::new(false)))
@@ -552,14 +552,14 @@ mod tests {
     #[test]
     fn answer_requires_reattach_for_interrupted_and_skipped_answers() {
         let interrupted = Answer {
-            value: AnswerValue::Interrupted,
+            value:           AnswerValue::Interrupted,
             selected_option: None,
-            text: None,
+            text:            None,
         };
         let skipped = Answer {
-            value: AnswerValue::Skipped,
+            value:           AnswerValue::Skipped,
             selected_option: None,
-            text: None,
+            text:            None,
         };
         let answered = Answer::yes();
 

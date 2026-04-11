@@ -5,9 +5,9 @@ use fabro_llm::types::{ToolCall, ToolResult};
 
 #[derive(Debug, Clone, Copy, Default)]
 struct FileOps {
-    read: bool,
+    read:    bool,
     written: bool,
-    edited: bool,
+    edited:  bool,
 }
 
 #[derive(Debug, Default)]

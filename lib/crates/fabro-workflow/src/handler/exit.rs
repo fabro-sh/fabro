@@ -1,13 +1,12 @@
 use std::path::Path;
 
 use async_trait::async_trait;
-
-use crate::context::Context;
-use crate::error::FabroError;
-use crate::outcome::Outcome;
 use fabro_graphviz::graph::{Graph, Node};
 
 use super::{EngineServices, Handler};
+use crate::context::Context;
+use crate::error::FabroError;
+use crate::outcome::Outcome;
 
 /// No-op handler for pipeline exit point. Returns SUCCESS immediately.
 pub struct ExitHandler;

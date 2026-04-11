@@ -1,4 +1,5 @@
-//! Effective settings resolution: combine layers into one resolved [`SettingsLayer`].
+//! Effective settings resolution: combine layers into one resolved
+//! [`SettingsLayer`].
 //!
 //! Shared layered domains (`project`, `workflow`, `run`, `features`) merge
 //! across all three config files (settings.toml, fabro.toml, workflow.toml).
@@ -22,10 +23,10 @@ pub enum EffectiveSettingsMode {
 
 #[derive(Clone, Debug, Default)]
 pub struct EffectiveSettingsLayers {
-    pub args: SettingsLayer,
+    pub args:     SettingsLayer,
     pub workflow: SettingsLayer,
-    pub project: SettingsLayer,
-    pub user: SettingsLayer,
+    pub project:  SettingsLayer,
+    pub user:     SettingsLayer,
 }
 
 impl EffectiveSettingsLayers {
@@ -180,13 +181,12 @@ fn apply_local_daemon_overrides(
 
 #[cfg(test)]
 mod tests {
-    use crate::parse::parse_settings_layer;
-    use fabro_types::settings::InterpString;
-    use fabro_types::settings::SettingsLayer;
     use fabro_types::settings::run::RunGoalLayer;
     use fabro_types::settings::server::{ServerLayer, ServerSchedulerLayer, ServerStorageLayer};
+    use fabro_types::settings::{InterpString, SettingsLayer};
 
     use super::{EffectiveSettingsLayers, EffectiveSettingsMode, resolve_settings};
+    use crate::parse::parse_settings_layer;
 
     fn layer(source: &str) -> SettingsLayer {
         parse_settings_layer(source).expect("v2 fixture should parse")

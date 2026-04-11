@@ -164,8 +164,8 @@ async fn debug_html_page_reflects_loaded_scenarios_and_request_logs() {
             "stream": false
         }))
         .await;
-    // The request gets a deterministic response (no matching scenario consumed since
-    // model doesn't match). Status should be 200 (default behavior).
+    // The request gets a deterministic response (no matching scenario consumed
+    // since model doesn't match). Status should be 200 (default behavior).
     assert_eq!(response.status(), 200);
 
     // GET the debug HTML page
@@ -200,9 +200,9 @@ async fn debug_html_page_reflects_loaded_scenarios_and_request_logs() {
         "HTML should contain request log input text 'check the page'"
     );
     // Verify the server-rendered content section does not show empty state.
-    // The JS source always includes the "no active namespaces" string as a template,
-    // so we check that the server-rendered content div contains namespace sections
-    // rather than the empty-state paragraph.
+    // The JS source always includes the "no active namespaces" string as a
+    // template, so we check that the server-rendered content div contains
+    // namespace sections rather than the empty-state paragraph.
     assert!(
         body.contains("namespace-header"),
         "HTML should contain a namespace-header element (proving non-empty rendering)"
@@ -216,7 +216,7 @@ async fn debug_routes_not_accessible_when_admin_disabled() {
         .expect("bind should succeed");
     let addr = listener.local_addr().expect("should have addr");
     let app = twin_openai::build_app_with_config(Config {
-        bind_addr: "127.0.0.1:0".parse().expect("valid addr"),
+        bind_addr:    "127.0.0.1:0".parse().expect("valid addr"),
         require_auth: false,
         enable_admin: false,
     });

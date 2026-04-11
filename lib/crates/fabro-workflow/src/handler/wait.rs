@@ -1,14 +1,13 @@
 use std::path::Path;
 
 use async_trait::async_trait;
-
-use crate::context::Context;
-use crate::error::FabroError;
-use crate::outcome::Outcome;
 use fabro_graphviz::graph::{AttrValue, Graph, Node};
 use tokio::time::sleep;
 
 use super::{EngineServices, Handler};
+use crate::context::Context;
+use crate::error::FabroError;
+use crate::outcome::Outcome;
 
 /// Sleeps for a configured duration before proceeding.
 pub struct WaitHandler;

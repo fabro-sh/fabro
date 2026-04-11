@@ -11,7 +11,6 @@ pub(crate) fn visit_from_context(context: &Context) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::context::Context;
 
     #[test]

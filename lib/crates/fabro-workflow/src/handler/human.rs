@@ -4,25 +4,23 @@ use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use async_trait::async_trait;
-
-use crate::context::Context;
-use crate::context::keys;
-use crate::error::FabroError;
-use crate::event::{Emitter, Event, StageScope};
-use crate::millis_u64;
-use crate::outcome::{Outcome, OutcomeExt};
 use fabro_graphviz::graph::{Graph, Node};
 use fabro_interview::{Answer, AnswerValue, Interviewer, Question, QuestionOption, QuestionType};
 use fabro_types::run_event::InterviewOption;
 use ulid::Ulid;
 
 use super::{EngineServices, Handler};
+use crate::context::{Context, keys};
+use crate::error::FabroError;
+use crate::event::{Emitter, Event, StageScope};
+use crate::millis_u64;
+use crate::outcome::{Outcome, OutcomeExt};
 
 /// A choice derived from an outgoing edge.
 struct Choice {
-    key: String,
+    key:   String,
     label: String,
-    to: String,
+    to:    String,
 }
 
 /// Parse an accelerator key from a label.
@@ -71,7 +69,7 @@ fn parse_accelerator_key(label: &str) -> String {
 /// Blocks until a human selects an option derived from outgoing edges.
 pub struct HumanHandler {
     interviewer: Arc<dyn Interviewer>,
-    emitter: Option<Arc<Emitter>>,
+    emitter:     Option<Arc<Emitter>>,
 }
 
 impl HumanHandler {
@@ -178,7 +176,7 @@ impl Handler for HumanHandler {
         let options: Vec<QuestionOption> = choices
             .iter()
             .map(|c| QuestionOption {
-                key: c.key.clone(),
+                key:   c.key.clone(),
                 label: c.label.clone(),
             })
             .collect();
@@ -213,19 +211,19 @@ impl Handler for HumanHandler {
         self.emit(
             &services.emitter,
             &Event::InterviewStarted {
-                question_id: question_id.clone(),
-                question: question_text.clone(),
-                stage: node.id.clone(),
-                question_type: question.question_type.to_string(),
-                options: question
+                question_id:     question_id.clone(),
+                question:        question_text.clone(),
+                stage:           node.id.clone(),
+                question_type:   question.question_type.to_string(),
+                options:         question
                     .options
                     .iter()
                     .map(|option| InterviewOption {
-                        key: option.key.clone(),
+                        key:   option.key.clone(),
                         label: option.label.clone(),
                     })
                     .collect(),
-                allow_freeform: question.allow_freeform,
+                allow_freeform:  question.allow_freeform,
                 timeout_seconds: question.timeout_seconds,
                 context_display: question.context_display.clone(),
             },
@@ -240,8 +238,8 @@ impl Handler for HumanHandler {
                 &services.emitter,
                 &Event::InterviewTimeout {
                     question_id: question_id.clone(),
-                    question: question_text,
-                    stage: node.id.clone(),
+                    question:    question_text,
+                    stage:       node.id.clone(),
                     duration_ms: millis_u64(interview_start.elapsed()),
                 },
                 &stage_scope,
@@ -277,9 +275,9 @@ impl Handler for HumanHandler {
                 &services.emitter,
                 &Event::InterviewInterrupted {
                     question_id: question_id.clone(),
-                    question: question_text,
-                    stage: node.id.clone(),
-                    reason: "interrupted".to_string(),
+                    question:    question_text,
+                    stage:       node.id.clone(),
+                    reason:      "interrupted".to_string(),
                     duration_ms: millis_u64(interview_start.elapsed()),
                 },
                 &stage_scope,
@@ -402,10 +400,11 @@ fn answer_text(answer: &Answer) -> String {
 mod tests {
     use std::sync::Mutex;
 
-    use super::*;
-    use crate::event::EventBody;
     use fabro_graphviz::graph::{AttrValue, Edge};
     use fabro_interview::{AutoApproveInterviewer, CallbackInterviewer, RecordingInterviewer};
+
+    use super::*;
+    use crate::event::EventBody;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()

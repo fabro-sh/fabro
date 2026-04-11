@@ -1,12 +1,7 @@
-use crate::config::{ToolApprovalAdapter, ToolApprovalFn, ToolHookCallback};
-use crate::error::InterruptReason;
-use crate::tools::WebFetchSummarizer;
-use crate::truncation;
-use crate::{
-    AgentEvent, AgentProfile, AnthropicProfile, GeminiProfile, LocalSandbox, OpenAiProfile,
-    Sandbox, Session, SessionOptions, Turn,
-    subagent::{SessionFactory, SubAgentManager},
-};
+use std::io::{IsTerminal, Write};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
 use clap::{Args, Parser};
 use fabro_llm::client::Client;
 use fabro_llm::error::SdkError;
@@ -16,11 +11,17 @@ use fabro_llm::types::{Request, Response};
 use fabro_mcp::config::McpServerSettings;
 use fabro_model::{Catalog, ModelHandle, Provider};
 use fabro_util::terminal::Styles;
-use std::io::{IsTerminal, Write};
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 use tokio::signal;
 use tokio::sync::Mutex as AsyncMutex;
+
+use crate::config::{ToolApprovalAdapter, ToolApprovalFn, ToolHookCallback};
+use crate::error::InterruptReason;
+use crate::subagent::{SessionFactory, SubAgentManager};
+use crate::tools::WebFetchSummarizer;
+use crate::{
+    AgentEvent, AgentProfile, AnthropicProfile, GeminiProfile, LocalSandbox, OpenAiProfile,
+    Sandbox, Session, SessionOptions, Turn, truncation,
+};
 
 /// Public arguments for the agent command, usable from an external CLI.
 #[derive(Args)]
@@ -385,7 +386,8 @@ pub async fn run_with_args_and_client(
     llm_client: Option<Client>,
     mcp_servers: Vec<McpServerSettings>,
 ) -> anyhow::Result<()> {
-    // Resolve color support once, leak to get 'static lifetime for use across threads
+    // Resolve color support once, leak to get 'static lifetime for use across
+    // threads
     let styles: &'static Styles = Box::leak(Box::new(Styles::detect_stderr()));
 
     // Parse provider string to enum early for compile-time safety
@@ -671,9 +673,10 @@ pub async fn run() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use fabro_model::Provider;
     use serde_json::json;
+
+    use super::*;
 
     static NO_COLOR: std::sync::LazyLock<Styles> = std::sync::LazyLock::new(|| Styles::new(false));
 

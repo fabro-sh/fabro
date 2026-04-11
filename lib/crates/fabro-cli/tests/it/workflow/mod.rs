@@ -13,12 +13,13 @@ mod real_cli;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::cmd::support::RunProjection;
 use fabro_config::Storage;
 use fabro_server::bind::Bind;
 use fabro_store::EventEnvelope;
 use fabro_test::TestContext;
 use serde_json::Value;
+
+use crate::cmd::support::RunProjection;
 
 pub(super) fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))

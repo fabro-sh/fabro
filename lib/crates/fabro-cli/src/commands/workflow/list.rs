@@ -1,10 +1,9 @@
 use anyhow::{Result, bail};
-use fabro_util::terminal::Styles;
-
 use fabro_config::project::{
     WorkflowInfo, WorkflowSource, discover_project_config, list_workflows_detailed,
     resolve_fabro_root,
 };
+use fabro_util::terminal::Styles;
 
 use crate::args::{GlobalArgs, WorkflowListArgs};
 use crate::shared::{print_json_pretty, relative_path};

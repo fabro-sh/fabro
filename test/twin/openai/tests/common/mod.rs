@@ -7,57 +7,58 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use futures_util::StreamExt;
-use reqwest::{Client, header::AUTHORIZATION};
+use reqwest::Client;
+use reqwest::header::AUTHORIZATION;
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use twin_openai::config::Config;
 
 pub struct TestServer {
-    pub base_url: String,
-    pub client: Client,
-    pub auth_client: Client,
+    pub base_url:     String,
+    pub client:       Client,
+    pub auth_client:  Client,
     pub bearer_token: String,
 }
 
 #[derive(Clone)]
 pub struct ApiClient {
     pub base_url: String,
-    client: Client,
+    client:       Client,
     bearer_token: Option<String>,
     organization: Option<String>,
-    project: Option<String>,
+    project:      Option<String>,
 }
 
 pub struct RecordedResponse {
-    pub status: reqwest::StatusCode,
+    pub status:  reqwest::StatusCode,
     pub headers: HashMap<String, String>,
-    pub body: Vec<u8>,
+    pub body:    Vec<u8>,
 }
 
 pub struct RawStreamResponse {
-    pub status: u16,
+    pub status:  u16,
     pub headers: HashMap<String, String>,
-    pub body: Vec<u8>,
+    pub body:    Vec<u8>,
 }
 
 pub struct TimedStreamResponse {
-    pub status: reqwest::StatusCode,
+    pub status:              reqwest::StatusCode,
     pub first_event_elapsed: Duration,
-    pub chunks: Vec<String>,
+    pub chunks:              Vec<String>,
 }
 
 #[derive(Debug)]
 pub struct ParsedSseTranscript {
     pub blocks: Vec<String>,
     pub events: Vec<ParsedSseEvent>,
-    pub done: bool,
+    pub done:   bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParsedSseEvent {
     pub event: Option<String>,
-    pub data: String,
+    pub data:  String,
 }
 
 static NEXT_BEARER_TOKEN: AtomicU64 = AtomicU64::new(1);
@@ -70,7 +71,7 @@ pub async fn spawn_server() -> Result<TestServer> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let addr: SocketAddr = listener.local_addr()?;
     let app = twin_openai::build_app_with_config(Config {
-        bind_addr: "127.0.0.1:0".parse().expect("valid addr"),
+        bind_addr:    "127.0.0.1:0".parse().expect("valid addr"),
         require_auth: true,
         enable_admin: true,
     });

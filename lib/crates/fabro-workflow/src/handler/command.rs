@@ -1,15 +1,13 @@
 use std::path::Path;
 
-use crate::context::Context;
-use crate::context::keys;
-use crate::error::FabroError;
-use crate::event::Event;
-use crate::event::StageScope;
-use crate::outcome::{Outcome, OutcomeExt};
 use async_trait::async_trait;
 use fabro_graphviz::graph::{Graph, Node};
 
 use super::{EngineServices, Handler};
+use crate::context::{Context, keys};
+use crate::error::FabroError;
+use crate::event::{Event, StageScope};
+use crate::outcome::{Outcome, OutcomeExt};
 
 fn timeout_ms(node: &Node) -> Option<u64> {
     node.timeout()
@@ -94,10 +92,10 @@ impl Handler for CommandHandler {
         let stage_scope = StageScope::for_handler(context, &node.id);
         services.emitter.emit_scoped(
             &Event::CommandStarted {
-                node_id: node.id.clone(),
-                script: script.to_string(),
-                command: command.clone(),
-                language: language.to_string(),
+                node_id:    node.id.clone(),
+                script:     script.to_string(),
+                command:    command.clone(),
+                language:   language.to_string(),
                 timeout_ms: timeout_ms(node),
             },
             &stage_scope,
@@ -125,12 +123,12 @@ impl Handler for CommandHandler {
 
         services.emitter.emit_scoped(
             &Event::CommandCompleted {
-                node_id: node.id.clone(),
-                stdout: result.stdout.clone(),
-                stderr: result.stderr.clone(),
-                exit_code: (!result.timed_out).then_some(result.exit_code),
+                node_id:     node.id.clone(),
+                stdout:      result.stdout.clone(),
+                stderr:      result.stderr.clone(),
+                exit_code:   (!result.timed_out).then_some(result.exit_code),
                 duration_ms: result.duration_ms,
-                timed_out: result.timed_out,
+                timed_out:   result.timed_out,
             },
             &stage_scope,
         );
@@ -179,15 +177,17 @@ impl Handler for CommandHandler {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::outcome::StageStatus;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use std::time::Duration;
+
     use fabro_graphviz::graph::AttrValue;
     use fabro_store::{Database, RunDatabase, StageId};
     use fabro_types::fixtures;
     use object_store::memory::InMemory;
-    use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
-    use std::time::Duration;
+
+    use super::*;
+    use crate::outcome::StageStatus;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
@@ -713,9 +713,9 @@ mod tests {
     /// proving that `CommandHandler` delegates to the sandbox rather than
     /// spawning a host process.
     struct SpySandbox {
-        exec_result: fabro_agent::sandbox::ExecResult,
-        captured_command: std::sync::Mutex<Option<String>>,
-        captured_env_vars: std::sync::Mutex<Option<std::collections::HashMap<String, String>>>,
+        exec_result:           fabro_agent::sandbox::ExecResult,
+        captured_command:      std::sync::Mutex<Option<String>>,
+        captured_env_vars:     std::sync::Mutex<Option<std::collections::HashMap<String, String>>>,
         captured_cancel_token: std::sync::Mutex<Option<bool>>,
     }
 
@@ -816,10 +816,10 @@ mod tests {
     #[tokio::test]
     async fn executes_script_via_sandbox() {
         let spy = std::sync::Arc::new(SpySandbox::new(fabro_agent::sandbox::ExecResult {
-            stdout: "SANDBOX_MARKER\n".into(),
-            stderr: String::new(),
-            exit_code: 0,
-            timed_out: false,
+            stdout:      "SANDBOX_MARKER\n".into(),
+            stderr:      String::new(),
+            exit_code:   0,
+            timed_out:   false,
             duration_ms: 5,
         }));
 
@@ -861,10 +861,10 @@ mod tests {
     #[tokio::test]
     async fn executes_python_script_via_sandbox() {
         let spy = std::sync::Arc::new(SpySandbox::new(fabro_agent::sandbox::ExecResult {
-            stdout: "PYTHON_SANDBOX\n".into(),
-            stderr: String::new(),
-            exit_code: 0,
-            timed_out: false,
+            stdout:      "PYTHON_SANDBOX\n".into(),
+            stderr:      String::new(),
+            exit_code:   0,
+            timed_out:   false,
             duration_ms: 5,
         }));
 
@@ -904,10 +904,10 @@ mod tests {
     #[tokio::test]
     async fn passes_env_vars_to_sandbox() {
         let spy = std::sync::Arc::new(SpySandbox::new(fabro_agent::sandbox::ExecResult {
-            stdout: String::new(),
-            stderr: String::new(),
-            exit_code: 0,
-            timed_out: false,
+            stdout:      String::new(),
+            stderr:      String::new(),
+            exit_code:   0,
+            timed_out:   false,
             duration_ms: 5,
         }));
 
@@ -939,10 +939,10 @@ mod tests {
     #[tokio::test]
     async fn passes_run_cancellation_to_sandbox() {
         let spy = std::sync::Arc::new(SpySandbox::new(fabro_agent::sandbox::ExecResult {
-            stdout: String::new(),
-            stderr: String::new(),
-            exit_code: 0,
-            timed_out: false,
+            stdout:      String::new(),
+            stderr:      String::new(),
+            exit_code:   0,
+            timed_out:   false,
             duration_ms: 5,
         }));
 

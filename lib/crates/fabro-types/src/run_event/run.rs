@@ -2,52 +2,51 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use super::{BilledTokenCounts, RunNoticeLevel};
 use crate::settings::SettingsLayer;
 use crate::{Graph, RunBlobId, RunControlAction, RunProvenance, StatusReason};
 
-use super::{BilledTokenCounts, RunNoticeLevel};
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunCreatedProps {
-    pub settings: SettingsLayer,
-    pub graph: Graph,
+    pub settings:          SettingsLayer,
+    pub graph:             Graph,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workflow_source: Option<String>,
+    pub workflow_source:   Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workflow_config: Option<String>,
+    pub workflow_config:   Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub labels: BTreeMap<String, String>,
-    pub run_dir: String,
+    pub labels:            BTreeMap<String, String>,
+    pub run_dir:           String,
     pub working_directory: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub host_repo_path: Option<String>,
+    pub host_repo_path:    Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub repo_origin_url: Option<String>,
+    pub repo_origin_url:   Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_branch: Option<String>,
+    pub base_branch:       Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workflow_slug: Option<String>,
+    pub workflow_slug:     Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub db_prefix: Option<String>,
+    pub db_prefix:         Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provenance: Option<RunProvenance>,
+    pub provenance:        Option<RunProvenance>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub manifest_blob: Option<RunBlobId>,
+    pub manifest_blob:     Option<RunBlobId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunStartedProps {
-    pub name: String,
+    pub name:         String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_branch: Option<String>,
+    pub base_branch:  Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_sha: Option<String>,
+    pub base_sha:     Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub run_branch: Option<String>,
+    pub run_branch:   Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub worktree_dir: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub goal: Option<String>,
+    pub goal:         Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -59,7 +58,7 @@ pub struct RunStatusTransitionProps {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunSubmittedProps {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<StatusReason>,
+    pub reason:          Option<StatusReason>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub definition_blob: Option<RunBlobId>,
 }
@@ -76,44 +75,44 @@ pub struct RunControlEffectProps {}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunRewoundProps {
     pub target_checkpoint_ordinal: usize,
-    pub target_node_id: String,
-    pub target_visit: usize,
+    pub target_node_id:            String,
+    pub target_visit:              usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub previous_status: Option<String>,
+    pub previous_status:           Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub run_commit_sha: Option<String>,
+    pub run_commit_sha:            Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunCompletedProps {
-    pub duration_ms: u64,
-    pub artifact_count: usize,
-    pub status: String,
+    pub duration_ms:          u64,
+    pub artifact_count:       usize,
+    pub status:               String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<StatusReason>,
+    pub reason:               Option<StatusReason>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub total_usd_micros: Option<i64>,
+    pub total_usd_micros:     Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub final_git_commit_sha: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub final_patch: Option<String>,
+    pub final_patch:          Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub billing: Option<BilledTokenCounts>,
+    pub billing:              Option<BilledTokenCounts>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunFailedProps {
-    pub error: String,
-    pub duration_ms: u64,
+    pub error:          String,
+    pub duration_ms:    u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<StatusReason>,
+    pub reason:         Option<StatusReason>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_commit_sha: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunNoticeProps {
-    pub level: RunNoticeLevel,
-    pub code: String,
+    pub level:   RunNoticeLevel,
+    pub code:    String,
     pub message: String,
 }

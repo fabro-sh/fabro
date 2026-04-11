@@ -1,6 +1,5 @@
-use insta::assert_snapshot;
-
 use fabro_test::{fabro_snapshot, test_context};
+use insta::assert_snapshot;
 
 use super::support::{
     compact_git_inspect, compact_inspect, run_success, setup_completed_fast_dry_run,

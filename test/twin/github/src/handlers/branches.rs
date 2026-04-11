@@ -134,12 +134,12 @@ mod tests {
         let pem = test_rsa_private_key();
         let mut state = AppState::new();
         state.register_app(AppOptions {
-            app_id: "100".to_string(),
-            slug: "test-app".to_string(),
-            owner_login: "owner".to_string(),
-            public: true,
+            app_id:          "100".to_string(),
+            slug:            "test-app".to_string(),
+            owner_login:     "owner".to_string(),
+            public:          true,
             private_key_pem: pem.to_string(),
-            webhook_secret: None,
+            webhook_secret:  None,
         });
         state.add_installation("100", "owner", vec!["repo".to_string()], false);
         state.add_repository(
@@ -177,12 +177,12 @@ mod tests {
         let pem = test_rsa_private_key();
         let mut state = AppState::new();
         state.register_app(AppOptions {
-            app_id: "100".to_string(),
-            slug: "test-app".to_string(),
-            owner_login: "owner".to_string(),
-            public: true,
+            app_id:          "100".to_string(),
+            slug:            "test-app".to_string(),
+            owner_login:     "owner".to_string(),
+            public:          true,
             private_key_pem: pem.to_string(),
-            webhook_secret: None,
+            webhook_secret:  None,
         });
         state.add_installation("100", "owner", vec!["repo".to_string()], false);
         state.add_repository("owner", "repo", vec!["main".to_string()], false);

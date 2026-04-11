@@ -1,16 +1,17 @@
+use futures::stream;
+use tracing::{debug, error};
+
 use crate::error::{SdkError, error_from_status_code};
 use crate::provider::{ProviderAdapter, StreamEventStream};
 use crate::providers::common::LineReader;
 use crate::types::{FinishReason, Message, Request, Response, StreamEvent, TokenCounts};
-use futures::stream;
-use tracing::{debug, error};
 
 /// Provider adapter that routes LLM requests through an fabro server's
 /// `/completions` endpoint, delegating to whatever real provider the server
 /// is configured with.
 pub struct Adapter {
-    client: reqwest::Client,
-    base_url: String,
+    client:        reqwest::Client,
+    base_url:      String,
     provider_name: String,
 }
 
@@ -34,16 +35,16 @@ impl Adapter {
 
 #[derive(serde::Deserialize)]
 struct ServerCompletionResponse {
-    id: String,
-    model: String,
-    message: Message,
+    id:          String,
+    model:       String,
+    message:     Message,
     stop_reason: String,
-    usage: ServerUsage,
+    usage:       ServerUsage,
 }
 
 #[derive(serde::Deserialize)]
 struct ServerUsage {
-    input_tokens: i64,
+    input_tokens:  i64,
     output_tokens: i64,
 }
 
@@ -194,7 +195,8 @@ impl ProviderAdapter for Adapter {
 
 /// Parse a single SSE event block into `(event_type, data)`.
 ///
-/// Returns `None` if the block doesn't contain both an `event:` and `data:` line.
+/// Returns `None` if the block doesn't contain both an `event:` and `data:`
+/// line.
 fn parse_sse_block(block: &str) -> Option<(String, String)> {
     let mut event_type = None;
     let mut data_lines: Vec<&str> = Vec::new();
@@ -220,11 +222,12 @@ fn parse_sse_block(block: &str) -> Option<(String, String)> {
 
 #[cfg(test)]
 mod tests {
+    use futures::StreamExt;
+    use httpmock::prelude::*;
+
     use super::*;
     use crate::error::ProviderErrorKind;
     use crate::types::Message;
-    use futures::StreamExt;
-    use httpmock::prelude::*;
 
     fn test_http_client() -> reqwest::Client {
         reqwest::Client::builder().no_proxy().build().unwrap()
@@ -232,19 +235,19 @@ mod tests {
 
     fn make_request() -> Request {
         Request {
-            model: "test-model".to_string(),
-            messages: vec![Message::user("Hello")],
-            provider: None,
-            tools: None,
-            tool_choice: None,
-            response_format: None,
-            temperature: None,
-            top_p: None,
-            max_tokens: None,
-            stop_sequences: None,
+            model:            "test-model".to_string(),
+            messages:         vec![Message::user("Hello")],
+            provider:         None,
+            tools:            None,
+            tool_choice:      None,
+            response_format:  None,
+            temperature:      None,
+            top_p:            None,
+            max_tokens:       None,
+            stop_sequences:   None,
             reasoning_effort: None,
-            speed: None,
-            metadata: None,
+            speed:            None,
+            metadata:         None,
             provider_options: None,
         }
     }

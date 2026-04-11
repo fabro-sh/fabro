@@ -6,7 +6,7 @@ use serde::Serialize;
 #[derive(Serialize)]
 struct ErrorEntry {
     status: String,
-    title: String,
+    title:  String,
     detail: String,
 }
 
@@ -17,7 +17,8 @@ struct ErrorBody {
 
 /// Uniform API error response.
 ///
-/// Serializes to `{"errors": [{"status": "4xx", "title": "...", "detail": "..."}]}`.
+/// Serializes to `{"errors": [{"status": "4xx", "title": "...", "detail":
+/// "..."}]}`.
 pub struct ApiError {
     status: StatusCode,
     detail: String,

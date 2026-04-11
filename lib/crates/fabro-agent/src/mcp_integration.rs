@@ -5,7 +5,8 @@ use fabro_mcp::connection_manager::{McpConnectionManager, call_result_to_string}
 
 use crate::tool_registry::RegisteredTool;
 
-/// Create `RegisteredTool` instances for every tool exposed by connected MCP servers.
+/// Create `RegisteredTool` instances for every tool exposed by connected MCP
+/// servers.
 pub fn make_mcp_tools(manager: &Arc<McpConnectionManager>) -> Vec<RegisteredTool> {
     manager
         .all_tools()
@@ -17,11 +18,11 @@ pub fn make_mcp_tools(manager: &Arc<McpConnectionManager>) -> Vec<RegisteredTool
 
             RegisteredTool {
                 definition: ToolDefinition {
-                    name: qualified_name.clone(),
+                    name:        qualified_name.clone(),
                     description: info.description.clone(),
-                    parameters: info.input_schema.clone(),
+                    parameters:  info.input_schema.clone(),
                 },
-                executor: Arc::new(move |args, _ctx| {
+                executor:   Arc::new(move |args, _ctx| {
                     let mgr = Arc::clone(&mgr);
                     let name = name.clone();
                     let timeout = tool_timeout;
@@ -40,14 +41,15 @@ pub fn make_mcp_tools(manager: &Arc<McpConnectionManager>) -> Vec<RegisteredTool
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::sandbox::Sandbox;
-    use crate::test_support::MockSandbox;
-    use crate::tool_registry::ToolContext;
     use std::collections::HashMap;
 
     use fabro_mcp::config::{McpServerSettings, McpTransport};
     use tokio_util::sync::CancellationToken;
+
+    use super::*;
+    use crate::sandbox::Sandbox;
+    use crate::test_support::MockSandbox;
+    use crate::tool_registry::ToolContext;
 
     fn test_server_config() -> McpServerSettings {
         let test_server = format!(
@@ -55,13 +57,13 @@ mod tests {
             env!("CARGO_MANIFEST_DIR")
         );
         McpServerSettings {
-            name: "test-echo".into(),
-            transport: McpTransport::Stdio {
+            name:                 "test-echo".into(),
+            transport:            McpTransport::Stdio {
                 command: vec!["python3".into(), test_server],
-                env: HashMap::new(),
+                env:     HashMap::new(),
             },
             startup_timeout_secs: 10,
-            tool_timeout_secs: 30,
+            tool_timeout_secs:    30,
         }
     }
 

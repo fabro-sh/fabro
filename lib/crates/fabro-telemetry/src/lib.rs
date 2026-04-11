@@ -8,15 +8,13 @@ pub mod sanitize;
 pub mod sender;
 pub mod spawn;
 
-use std::sync::mpsc;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock, mpsc};
 use std::thread::JoinHandle;
 
 use chrono::Utc;
+use event::{Track, User};
 use serde_json::Value;
 use uuid::Uuid;
-
-use event::{Track, User};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TelemetryLevel {
@@ -26,17 +24,17 @@ pub enum TelemetryLevel {
 }
 
 struct Global {
-    sender: Mutex<Option<mpsc::Sender<Track>>>,
+    sender:       Mutex<Option<mpsc::Sender<Track>>>,
     anonymous_id: String,
-    context: Value,
-    level: TelemetryLevel,
-    thread: Mutex<Option<JoinHandle<()>>>,
+    context:      Value,
+    level:        TelemetryLevel,
+    thread:       Mutex<Option<JoinHandle<()>>>,
 }
 
 static GLOBAL: OnceLock<Global> = OnceLock::new();
 
-/// Initialize telemetry for the CLI. Spawns a background thread for buffered delivery.
-/// No-op if telemetry level is `Off`.
+/// Initialize telemetry for the CLI. Spawns a background thread for buffered
+/// delivery. No-op if telemetry level is `Off`.
 pub fn init_cli() {
     let level = telemetry_level();
     if level == TelemetryLevel::Off {
@@ -54,8 +52,8 @@ pub fn init_cli() {
     init_inner(level, anonymous_id);
 }
 
-/// Initialize telemetry for the server. Spawns a background thread for buffered delivery.
-/// No-op if telemetry level is `Off`.
+/// Initialize telemetry for the server. Spawns a background thread for buffered
+/// delivery. No-op if telemetry level is `Off`.
 pub fn init_server() {
     let level = telemetry_level();
     if level == TelemetryLevel::Off {
@@ -104,8 +102,9 @@ fn init_inner(level: TelemetryLevel, anonymous_id: String) {
     });
 }
 
-/// Shut down telemetry: close the channel and wait for the background thread to finish.
-/// The final flush uses the detached-subprocess pattern so events survive process exit.
+/// Shut down telemetry: close the channel and wait for the background thread to
+/// finish. The final flush uses the detached-subprocess pattern so events
+/// survive process exit.
 pub fn shutdown() {
     let Some(global) = GLOBAL.get() else {
         return;

@@ -1,14 +1,16 @@
-use crate::sandbox::Sandbox;
-use fabro_llm::types::ToolDefinition;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+
+use fabro_llm::types::ToolDefinition;
 use tokio_util::sync::CancellationToken;
 
+use crate::sandbox::Sandbox;
+
 pub struct ToolContext {
-    pub env: Arc<dyn Sandbox>,
-    pub cancel: CancellationToken,
+    pub env:      Arc<dyn Sandbox>,
+    pub cancel:   CancellationToken,
     pub tool_env: Option<HashMap<String, String>>,
 }
 
@@ -24,7 +26,7 @@ pub type ToolExecutor = Arc<
 #[derive(Clone)]
 pub struct RegisteredTool {
     pub definition: ToolDefinition,
-    pub executor: ToolExecutor,
+    pub executor:   ToolExecutor,
 }
 
 pub struct ToolRegistry {
@@ -78,11 +80,11 @@ mod tests {
     fn make_tool(name: &str) -> RegisteredTool {
         RegisteredTool {
             definition: ToolDefinition {
-                name: name.into(),
+                name:        name.into(),
                 description: format!("Tool {name}"),
-                parameters: serde_json::json!({"type": "object"}),
+                parameters:  serde_json::json!({"type": "object"}),
             },
-            executor: Arc::new(|_args, _ctx| Box::pin(async { Ok("ok".into()) })),
+            executor:   Arc::new(|_args, _ctx| Box::pin(async { Ok("ok".into()) })),
         }
     }
 
@@ -122,19 +124,19 @@ mod tests {
         let mut registry = ToolRegistry::new();
         registry.register(RegisteredTool {
             definition: ToolDefinition {
-                name: "tool_a".into(),
+                name:        "tool_a".into(),
                 description: "version 1".into(),
-                parameters: serde_json::json!({}),
+                parameters:  serde_json::json!({}),
             },
-            executor: Arc::new(|_args, _ctx| Box::pin(async { Ok("v1".into()) })),
+            executor:   Arc::new(|_args, _ctx| Box::pin(async { Ok("v1".into()) })),
         });
         registry.register(RegisteredTool {
             definition: ToolDefinition {
-                name: "tool_a".into(),
+                name:        "tool_a".into(),
                 description: "version 2".into(),
-                parameters: serde_json::json!({}),
+                parameters:  serde_json::json!({}),
             },
-            executor: Arc::new(|_args, _ctx| Box::pin(async { Ok("v2".into()) })),
+            executor:   Arc::new(|_args, _ctx| Box::pin(async { Ok("v2".into()) })),
         });
 
         let tool = registry.get("tool_a").unwrap();

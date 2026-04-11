@@ -1,13 +1,12 @@
 use std::path::Path;
 
 use async_trait::async_trait;
-
-use crate::context::Context;
-use crate::error::FabroError;
-use crate::outcome::Outcome;
 use fabro_graphviz::graph::{Graph, Node};
 
 use super::{EngineServices, Handler};
+use crate::context::Context;
+use crate::error::FabroError;
+use crate::outcome::Outcome;
 
 /// Conditional routing handler. Returns SUCCESS with a note; actual routing
 /// is handled by the engine's edge selection algorithm.

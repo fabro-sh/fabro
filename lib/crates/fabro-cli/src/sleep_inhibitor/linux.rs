@@ -1,4 +1,5 @@
 use std::process::{Child, Command};
+
 use tracing::{debug, warn};
 
 pub(crate) struct LinuxSleepInhibitor {

@@ -8,7 +8,8 @@ const MULTI_SELECT_ACTION_ID: &str = "interview.select";
 const ANSWER_ACTION_ID: &str = "interview.answer";
 const MULTI_SELECT_SUBMIT_ACTION_ID: &str = "interview.submit";
 
-/// Parses a Slack interaction payload and returns a server-routable answer submission.
+/// Parses a Slack interaction payload and returns a server-routable answer
+/// submission.
 pub fn parse_interaction(payload: &Value) -> Option<SlackAnswerSubmission> {
     if payload["type"].as_str()? != "block_actions" {
         return None;
@@ -27,9 +28,9 @@ pub fn parse_interaction(payload: &Value) -> Option<SlackAnswerSubmission> {
             SlackActionPayload::Yes { .. } => Answer::yes(),
             SlackActionPayload::No { .. } => Answer::no(),
             SlackActionPayload::Selected { key, .. } => Answer {
-                value: fabro_interview::AnswerValue::Selected(key),
+                value:           fabro_interview::AnswerValue::Selected(key),
                 selected_option: None,
-                text: None,
+                text:            None,
             },
             SlackActionPayload::SubmitMulti { .. } => return None,
         },
@@ -70,8 +71,9 @@ fn extract_checkbox_selections(payload: &Value) -> Answer {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use fabro_interview::AnswerValue;
+
+    use super::*;
 
     #[test]
     fn parse_yes_button_click() {

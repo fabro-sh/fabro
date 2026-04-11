@@ -5,18 +5,18 @@ use rand::Rng;
 #[derive(Debug, Clone)]
 pub struct BackoffPolicy {
     pub initial_delay: Duration,
-    pub factor: f64,
-    pub max_delay: Duration,
-    pub jitter: bool,
+    pub factor:        f64,
+    pub max_delay:     Duration,
+    pub jitter:        bool,
 }
 
 impl Default for BackoffPolicy {
     fn default() -> Self {
         Self {
             initial_delay: Duration::from_secs(1),
-            factor: 2.0,
-            max_delay: Duration::from_secs(60),
-            jitter: false,
+            factor:        2.0,
+            max_delay:     Duration::from_secs(60),
+            jitter:        false,
         }
     }
 }
@@ -50,9 +50,9 @@ mod tests {
     fn delay_first_attempt() {
         let b = BackoffPolicy {
             initial_delay: Duration::from_millis(100),
-            factor: 2.0,
-            max_delay: Duration::from_secs(10),
-            jitter: false,
+            factor:        2.0,
+            max_delay:     Duration::from_secs(10),
+            jitter:        false,
         };
         assert_eq!(b.delay_for_attempt(1), Duration::from_millis(100));
     }
@@ -61,9 +61,9 @@ mod tests {
     fn delay_exponential() {
         let b = BackoffPolicy {
             initial_delay: Duration::from_millis(100),
-            factor: 2.0,
-            max_delay: Duration::from_secs(10),
-            jitter: false,
+            factor:        2.0,
+            max_delay:     Duration::from_secs(10),
+            jitter:        false,
         };
         assert_eq!(b.delay_for_attempt(2), Duration::from_millis(200));
         assert_eq!(b.delay_for_attempt(3), Duration::from_millis(400));
@@ -74,9 +74,9 @@ mod tests {
     fn delay_capped_at_max() {
         let b = BackoffPolicy {
             initial_delay: Duration::from_millis(100),
-            factor: 2.0,
-            max_delay: Duration::from_millis(300),
-            jitter: false,
+            factor:        2.0,
+            max_delay:     Duration::from_millis(300),
+            jitter:        false,
         };
         assert_eq!(b.delay_for_attempt(1), Duration::from_millis(100));
         assert_eq!(b.delay_for_attempt(2), Duration::from_millis(200));
@@ -88,9 +88,9 @@ mod tests {
     fn delay_with_jitter_within_range() {
         let b = BackoffPolicy {
             initial_delay: Duration::from_millis(1000),
-            factor: 1.0,
-            max_delay: Duration::from_secs(10),
-            jitter: true,
+            factor:        1.0,
+            max_delay:     Duration::from_secs(10),
+            jitter:        true,
         };
         let base = Duration::from_millis(1000);
         let min = base.mul_f64(0.5);
@@ -109,9 +109,9 @@ mod tests {
     fn delay_linear_factor() {
         let b = BackoffPolicy {
             initial_delay: Duration::from_millis(500),
-            factor: 1.0,
-            max_delay: Duration::from_secs(60),
-            jitter: false,
+            factor:        1.0,
+            max_delay:     Duration::from_secs(60),
+            jitter:        false,
         };
         assert_eq!(b.delay_for_attempt(1), Duration::from_millis(500));
         assert_eq!(b.delay_for_attempt(2), Duration::from_millis(500));

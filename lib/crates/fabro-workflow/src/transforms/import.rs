@@ -6,28 +6,27 @@ use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
 use fabro_graphviz::parser;
 use fabro_template::{TemplateContext, render as render_template};
 
+use super::{FileInliningTransform, Transform};
 use crate::error::FabroError;
 use crate::file_resolver::{FileResolver, ResolvedFile};
 
-use super::{FileInliningTransform, Transform};
-
 pub struct ImportTransform {
     current_dir: PathBuf,
-    resolver: Arc<dyn FileResolver>,
-    inputs: HashMap<String, toml::Value>,
+    resolver:    Arc<dyn FileResolver>,
+    inputs:      HashMap<String, toml::Value>,
 }
 
 struct PlaceholderOptions {
-    default_attrs: HashMap<String, AttrValue>,
-    class_names: Vec<String>,
+    default_attrs:    HashMap<String, AttrValue>,
+    class_names:      Vec<String>,
     normalized_class: String,
 }
 
 struct PreparedImport {
-    graph: Graph,
-    start_id: String,
-    exit_id: String,
-    entry_id: String,
+    graph:               Graph,
+    start_id:            String,
+    exit_id:             String,
+    entry_id:            String,
     exit_predecessor_id: String,
 }
 

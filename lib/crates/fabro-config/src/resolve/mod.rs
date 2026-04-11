@@ -6,13 +6,12 @@ mod run;
 mod server;
 mod workflow;
 
+pub use cli::resolve_cli;
+pub use error::ResolveError;
 use fabro_types::settings::{
     CliSettings, FeaturesSettings, InterpString, ProjectSettings, RunSettings, ServerSettings,
     Settings, SettingsLayer, WorkflowSettings,
 };
-
-pub use cli::resolve_cli;
-pub use error::ResolveError;
 pub use features::resolve_features;
 pub use project::resolve_project;
 pub use run::resolve_run;
@@ -29,11 +28,11 @@ pub fn resolve(file: &SettingsLayer) -> Result<Settings, Vec<ResolveError>> {
     let features_layer = file.features.clone().unwrap_or_default();
 
     let settings = Settings {
-        project: resolve_project(&project_layer, &mut errors),
+        project:  resolve_project(&project_layer, &mut errors),
         workflow: resolve_workflow(&workflow_layer, &mut errors),
-        run: resolve_run(&run_layer, &mut errors),
-        cli: resolve_cli(&cli_layer, &mut errors),
-        server: resolve_server(&server_layer, &mut errors),
+        run:      resolve_run(&run_layer, &mut errors),
+        cli:      resolve_cli(&cli_layer, &mut errors),
+        server:   resolve_server(&server_layer, &mut errors),
         features: resolve_features(&features_layer, &mut errors),
     };
 
@@ -97,7 +96,7 @@ pub(crate) fn parse_socket_addr(
         Ok(address) => address,
         Err(err) => {
             errors.push(ResolveError::ParseFailure {
-                path: path.to_string(),
+                path:   path.to_string(),
                 reason: err.to_string(),
             });
             std::net::SocketAddr::from(([127, 0, 0, 1], 0))

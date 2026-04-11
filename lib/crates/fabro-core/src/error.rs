@@ -18,12 +18,13 @@ impl fmt::Display for VisitLimitSource {
 }
 
 /// Structured failure data on handler errors. Maps to FabroError's
-/// is_retryable(), failure_class(), failure_signature_hint(), to_fail_outcome().
+/// is_retryable(), failure_class(), failure_signature_hint(),
+/// to_fail_outcome().
 #[derive(Debug, Clone)]
 pub struct HandlerErrorDetail {
-    pub message: String,
+    pub message:   String,
     pub retryable: bool,
-    pub category: Option<FailureCategory>,
+    pub category:  Option<FailureCategory>,
     pub signature: Option<String>,
 }
 
@@ -47,9 +48,9 @@ pub enum CoreError {
         "node \"{node_id}\" visited {visits} times ({limit_source} limit {limit}); run is stuck in a cycle"
     )]
     VisitLimitExceeded {
-        node_id: String,
-        visits: usize,
-        limit: usize,
+        node_id:      String,
+        visits:       usize,
+        limit:        usize,
         limit_source: VisitLimitSource,
     },
     #[error("stall timeout on node \"{node_id}\"")]
@@ -80,8 +81,8 @@ impl CoreError {
             Self::Handler { detail } => Outcome {
                 status: StageStatus::Fail,
                 failure: Some(FailureDetail {
-                    message: detail.message.clone(),
-                    category: detail.category.unwrap_or(FailureCategory::Deterministic),
+                    message:   detail.message.clone(),
+                    category:  detail.category.unwrap_or(FailureCategory::Deterministic),
                     signature: detail.signature.clone(),
                 }),
                 ..Outcome::default()
@@ -110,16 +111,16 @@ mod tests {
         assert_eq!(CoreError::Cancelled.to_string(), "run cancelled");
         assert_eq!(
             CoreError::Blocked {
-                message: "hook denied".into()
+                message: "hook denied".into(),
             }
             .to_string(),
             "blocked: hook denied"
         );
         assert_eq!(
             CoreError::VisitLimitExceeded {
-                node_id: "n1".into(),
-                visits: 5,
-                limit: 3,
+                node_id:      "n1".into(),
+                visits:       5,
+                limit:        3,
                 limit_source: VisitLimitSource::Node,
             }
             .to_string(),
@@ -127,7 +128,7 @@ mod tests {
         );
         assert_eq!(
             CoreError::StallTimeout {
-                node_id: "work".into()
+                node_id: "work".into(),
             }
             .to_string(),
             "stall timeout on node \"work\""
@@ -141,17 +142,17 @@ mod tests {
     #[test]
     fn core_error_handler_is_retryable() {
         let retryable = CoreError::handler(HandlerErrorDetail {
-            message: "timeout".into(),
+            message:   "timeout".into(),
             retryable: true,
-            category: None,
+            category:  None,
             signature: None,
         });
         assert!(retryable.is_retryable());
 
         let not_retryable = CoreError::handler(HandlerErrorDetail {
-            message: "bad input".into(),
+            message:   "bad input".into(),
             retryable: false,
-            category: None,
+            category:  None,
             signature: None,
         });
         assert!(!not_retryable.is_retryable());
@@ -161,9 +162,9 @@ mod tests {
     fn core_error_handler_to_fail_outcome() {
         use crate::outcome::FailureCategory;
         let err = CoreError::handler(HandlerErrorDetail {
-            message: "api down".into(),
+            message:   "api down".into(),
             retryable: true,
-            category: Some(FailureCategory::TransientInfra),
+            category:  Some(FailureCategory::TransientInfra),
             signature: Some("sig123".into()),
         });
         let outcome: Outcome = err.to_fail_outcome();
@@ -181,7 +182,7 @@ mod tests {
         assert!(!CoreError::NoStartNode.is_retryable());
         assert!(
             !CoreError::Blocked {
-                message: "no".into()
+                message: "no".into(),
             }
             .is_retryable()
         );

@@ -3,21 +3,21 @@ use std::path::Path;
 use fabro_agent::Sandbox;
 use fabro_checkpoint::trailer as trailerlink;
 use fabro_checkpoint::trailer::Trailer;
+use fabro_sandbox::daytona::detect_repo_info;
 use fabro_types::RunId;
 
 use crate::artifact_snapshot;
 use crate::git::{GitAuthor, blocking_push_with_timeout, push_ref};
-use fabro_sandbox::daytona::detect_repo_info;
 
 /// Captured git state for a workflow run, shared with handlers.
 #[derive(Debug, Clone)]
 pub struct GitState {
-    pub run_id: RunId,
-    pub base_sha: String,
-    pub run_branch: Option<String>,
-    pub meta_branch: Option<String>,
+    pub run_id:                   RunId,
+    pub base_sha:                 String,
+    pub run_branch:               Option<String>,
+    pub meta_branch:              Option<String>,
     pub checkpoint_exclude_globs: Vec<String>,
-    pub git_author: GitAuthor,
+    pub git_author:               GitAuthor,
 }
 
 pub const GIT_REMOTE: &str = "git -c maintenance.auto=0 -c gc.auto=0";
@@ -71,18 +71,18 @@ pub async fn git_checkpoint(
     let completed_str = completed_count.to_string();
     let mut trailers = vec![
         Trailer {
-            key: "Fabro-Run",
+            key:   "Fabro-Run",
             value: run_id,
         },
         Trailer {
-            key: "Fabro-Completed",
+            key:   "Fabro-Completed",
             value: &completed_str,
         },
     ];
     let shadow_sha_ref = shadow_sha.as_deref().unwrap_or("");
     if shadow_sha.is_some() {
         trailers.push(Trailer {
-            key: "Fabro-Checkpoint",
+            key:   "Fabro-Checkpoint",
             value: shadow_sha_ref,
         });
     }
@@ -275,7 +275,8 @@ mod tests {
         let sandbox = fabro_agent::LocalSandbox::new(repo.to_path_buf());
         let author = crate::git::GitAuthor::default();
 
-        // Call git_checkpoint with empty user excludes — built-in excludes should still apply
+        // Call git_checkpoint with empty user excludes — built-in excludes should still
+        // apply
         let result =
             git_checkpoint(&sandbox, "run1", "work", "success", 1, None, &[], &author).await;
         assert!(result.is_ok(), "git_checkpoint failed: {:?}", result.err());

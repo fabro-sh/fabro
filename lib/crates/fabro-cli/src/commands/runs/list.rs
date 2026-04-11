@@ -5,16 +5,14 @@ use chrono::Utc;
 use cli_table::format::{Border, Separator};
 use cli_table::{Cell, CellStruct, Color, Style, Table};
 use fabro_util::terminal::Styles;
-
 use fabro_util::text::strip_goal_decoration;
 use fabro_workflow::run_status::RunStatus;
 
+use super::short_run_id;
 use crate::args::{GlobalArgs, RunsListArgs};
 use crate::command_context::CommandContext;
 use crate::server_runs::{ServerSummaryLookup, filter_server_runs};
 use crate::shared::{color_if, format_duration_ms, tilde_path};
-
-use super::short_run_id;
 
 #[allow(clippy::print_stdout)]
 pub(crate) async fn list_command(

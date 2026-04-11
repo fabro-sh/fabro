@@ -1,10 +1,11 @@
-use super::support::setup_completed_dry_run;
-use insta::assert_snapshot;
 use std::fs;
 use std::time::Duration;
 
-use crate::support::unique_run_id;
 use fabro_test::{fabro_snapshot, test_context};
+use insta::assert_snapshot;
+
+use super::support::setup_completed_dry_run;
+use crate::support::unique_run_id;
 
 #[test]
 fn help() {

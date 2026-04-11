@@ -1,6 +1,8 @@
-use super::Region;
-use regex::Regex;
 use std::sync::LazyLock;
+
+use regex::Regex;
+
+use super::Region;
 
 /// Matches high-entropy alphanumeric strings (10+ chars).
 /// Excludes `/` to avoid matching file paths as single tokens.

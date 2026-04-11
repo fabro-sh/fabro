@@ -1,12 +1,11 @@
 use async_stream::stream;
-use axum::{
-    body::Body,
-    http::{HeaderValue, Response, StatusCode, header},
-};
+use axum::body::Body;
+use axum::http::{HeaderValue, Response, StatusCode, header};
 use serde_json::{Value, json};
 use tokio::time::{Duration, sleep};
 
-use crate::engine::{failures::TransportOptions, plan::ResponsePlan};
+use crate::engine::failures::TransportOptions;
+use crate::engine::plan::ResponsePlan;
 
 pub fn responses_sse_response(plan: &ResponsePlan, transport: TransportOptions) -> Response<Body> {
     let mut events = Vec::new();

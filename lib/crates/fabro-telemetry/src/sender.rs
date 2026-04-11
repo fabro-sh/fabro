@@ -2,11 +2,11 @@ use std::path::Path;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use reqwest::blocking::Client as BlockingClient;
 use uuid::Uuid;
 
 use crate::event::Track;
 use crate::spawn::spawn_fabro_subcommand;
-use reqwest::blocking::Client as BlockingClient;
 
 const SEGMENT_BASE_URL: &str = match option_env!("SEGMENT_BASE_URL") {
     Some(url) => url,
@@ -18,7 +18,8 @@ const SEGMENT_WRITE_KEY: Option<&str> = option_env!("SEGMENT_WRITE_KEY");
 /// subprocess (`fabro __send_analytics <path>`) to deliver them. This ensures
 /// the events are sent even if the parent CLI process exits immediately.
 ///
-/// No-ops if the SEGMENT_WRITE_KEY was not set at compile time or `tracks` is empty.
+/// No-ops if the SEGMENT_WRITE_KEY was not set at compile time or `tracks` is
+/// empty.
 pub fn emit(tracks: &[Track]) {
     if SEGMENT_WRITE_KEY.is_none() {
         tracing::debug!("telemetry: no SEGMENT_WRITE_KEY, skipping emit");
@@ -79,7 +80,8 @@ fn build_segment_batch(content: &str) -> Option<serde_json::Value> {
 
 /// Sends track events to Segment synchronously. Used for mid-run flushes
 /// on the background telemetry thread.
-/// No-ops if `SEGMENT_WRITE_KEY` was not set at compile time or `tracks` is empty.
+/// No-ops if `SEGMENT_WRITE_KEY` was not set at compile time or `tracks` is
+/// empty.
 pub fn upload_blocking(tracks: &[Track]) -> anyhow::Result<()> {
     if tracks.is_empty() {
         return Ok(());
@@ -144,10 +146,11 @@ pub async fn upload(path: &Path) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::event::User;
     use serde_json::json;
     use tokio::runtime::Runtime;
+
+    use super::*;
+    use crate::event::User;
 
     // -- Step 1: build_segment_batch tests --
 
@@ -226,13 +229,13 @@ mod tests {
         // SEGMENT_WRITE_KEY is not set at compile time in tests,
         // so emit() should return immediately without spawning.
         let track = Track {
-            user: User::AnonymousId {
+            user:       User::AnonymousId {
                 anonymous_id: "test".to_string(),
             },
-            event: "test".to_string(),
+            event:      "test".to_string(),
             properties: json!({}),
-            context: None,
-            timestamp: None,
+            context:    None,
+            timestamp:  None,
             message_id: "msg-test".to_string(),
         };
 
@@ -251,13 +254,13 @@ mod tests {
     #[test]
     fn upload_blocking_noops_without_write_key() {
         let track = Track {
-            user: User::AnonymousId {
+            user:       User::AnonymousId {
                 anonymous_id: "test".to_string(),
             },
-            event: "test".to_string(),
+            event:      "test".to_string(),
             properties: json!({}),
-            context: None,
-            timestamp: None,
+            context:    None,
+            timestamp:  None,
             message_id: "msg-test".to_string(),
         };
 

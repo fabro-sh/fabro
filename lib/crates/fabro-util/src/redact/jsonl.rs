@@ -22,7 +22,8 @@ fn should_skip_field(key: &str) -> bool {
     )
 }
 
-/// Returns true if the object has "type":"image", "type":"image_url", or "type":"base64".
+/// Returns true if the object has "type":"image", "type":"image_url", or
+/// "type":"base64".
 fn should_skip_object(obj: &serde_json::Map<String, Value>) -> bool {
     match obj.get("type").and_then(Value::as_str) {
         Some(t) => t.starts_with("image") || t == "base64",

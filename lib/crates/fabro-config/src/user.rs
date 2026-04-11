@@ -8,9 +8,10 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
+use fabro_types::settings::SettingsLayer;
+
 use crate::home::Home;
 use crate::load::load_settings_path;
-use fabro_types::settings::SettingsLayer;
 
 pub const SETTINGS_CONFIG_FILENAME: &str = "settings.toml";
 pub const LEGACY_USER_CONFIG_FILENAME: &str = "cli.toml";

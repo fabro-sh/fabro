@@ -6,8 +6,7 @@ use fabro_types::settings::{InterpString, SettingsLayer};
 
 use crate::merge::combine_files;
 use crate::parse::parse_settings_layer;
-use crate::project;
-use crate::user;
+use crate::{project, user};
 
 pub fn load_settings_path(path: &Path) -> anyhow::Result<SettingsLayer> {
     let content = std::fs::read_to_string(path)

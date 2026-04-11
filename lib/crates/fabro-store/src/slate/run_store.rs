@@ -4,20 +4,19 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use bytes::Bytes;
 use chrono::Utc;
+use fabro_types::{RunBlobId, RunId};
 use futures::Stream;
 use slatedb::{Db, DbRead};
 use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use crate::keys;
 use crate::run_state::EventProjectionCache;
-use crate::{EventEnvelope, EventPayload, Result, RunProjection, RunSummary, StoreError};
-use fabro_types::{RunBlobId, RunId};
+use crate::{EventEnvelope, EventPayload, Result, RunProjection, RunSummary, StoreError, keys};
 
 const DEFAULT_EVENT_TAIL_LIMIT: usize = 1024;
 #[derive(Clone)]
 pub struct RunDatabase {
-    inner: Arc<RunDatabaseInner>,
+    inner:     Arc<RunDatabaseInner>,
     read_only: bool,
 }
 
@@ -31,15 +30,15 @@ impl std::fmt::Debug for RunDatabase {
 }
 
 pub(crate) struct RunDatabaseInner {
-    run_id: RunId,
-    db: Db,
-    event_seq: AtomicU32,
-    close_lock: Mutex<()>,
-    state_lock: Mutex<()>,
-    projection_cache: Mutex<EventProjectionCache>,
-    recent_events: Mutex<VecDeque<EventEnvelope>>,
+    run_id:             RunId,
+    db:                 Db,
+    event_seq:          AtomicU32,
+    close_lock:         Mutex<()>,
+    state_lock:         Mutex<()>,
+    projection_cache:   Mutex<EventProjectionCache>,
+    recent_events:      Mutex<VecDeque<EventEnvelope>>,
     recent_event_limit: usize,
-    event_tx: broadcast::Sender<EventEnvelope>,
+    event_tx:           broadcast::Sender<EventEnvelope>,
 }
 
 impl RunDatabase {
@@ -52,7 +51,7 @@ impl RunDatabase {
         .await?;
         let (event_tx, _) = broadcast::channel(DEFAULT_EVENT_TAIL_LIMIT.max(16));
         Ok(Self {
-            inner: Arc::new(RunDatabaseInner {
+            inner:     Arc::new(RunDatabaseInner {
                 run_id,
                 db,
                 event_seq: AtomicU32::new(event_seq),
@@ -76,7 +75,7 @@ impl RunDatabase {
         .await?;
         let (event_tx, _) = broadcast::channel(DEFAULT_EVENT_TAIL_LIMIT.max(16));
         Ok(Self {
-            inner: Arc::new(RunDatabaseInner {
+            inner:     Arc::new(RunDatabaseInner {
                 run_id,
                 db,
                 event_seq: AtomicU32::new(event_seq),
@@ -100,7 +99,7 @@ impl RunDatabase {
 
     pub(crate) fn read_only_clone(&self) -> Self {
         Self {
-            inner: Arc::clone(&self.inner),
+            inner:     Arc::clone(&self.inner),
             read_only: true,
         }
     }

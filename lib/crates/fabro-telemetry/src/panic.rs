@@ -1,15 +1,16 @@
 use std::panic::PanicHookInfo;
 use std::path::Path;
 
-use crate::spawn::spawn_fabro_subcommand;
 use sentry::integrations::backtrace;
 use sentry::protocol::{Context, Event, Exception, Mechanism, OsContext, Values};
 
 use crate::TelemetryLevel;
+use crate::spawn::spawn_fabro_subcommand;
 
 const SENTRY_DSN: Option<&str> = option_env!("SENTRY_DSN");
 
-/// Install a panic hook that reports panics to Sentry via a detached subprocess.
+/// Install a panic hook that reports panics to Sentry via a detached
+/// subprocess.
 ///
 /// Must be called early in `main()`, before any other code that might panic.
 /// Chains onto the default panic hook so the user still sees the normal output.
@@ -96,7 +97,8 @@ fn report_panic(info: &PanicHookInfo<'_>) {
     spawn_panic_sender(&event);
 }
 
-/// Serialize the Sentry event to a temp file and spawn `fabro __send_panic <path>`.
+/// Serialize the Sentry event to a temp file and spawn `fabro __send_panic
+/// <path>`.
 fn spawn_panic_sender(event: &Event<'static>) {
     let Ok(json) = serde_json::to_vec(&event) else {
         return;
@@ -106,7 +108,8 @@ fn spawn_panic_sender(event: &Event<'static>) {
     spawn_fabro_subcommand("__send_panic", &filename, &json);
 }
 
-/// Send a serialized Sentry panic event. Called by the `__send_panic` subcommand.
+/// Send a serialized Sentry panic event. Called by the `__send_panic`
+/// subcommand.
 ///
 /// Reads the JSON event from `path` and sends it to Sentry.
 /// No-ops if `SENTRY_DSN` was not set at compile time.

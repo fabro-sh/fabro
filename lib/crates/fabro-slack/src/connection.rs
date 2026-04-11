@@ -148,7 +148,8 @@ pub async fn run_event_loop(
     Ok(())
 }
 
-/// Top-level runner: connects, runs the event loop, and reconnects on disconnect.
+/// Top-level runner: connects, runs the event loop, and reconnects on
+/// disconnect.
 pub async fn run(
     slack_client: &SlackClient,
     app_token: &str,
@@ -190,8 +191,9 @@ pub async fn run(
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use super::*;
     use fabro_interview::AnswerValue;
+
+    use super::*;
 
     fn registry() -> ThreadRegistry {
         ThreadRegistry::new()

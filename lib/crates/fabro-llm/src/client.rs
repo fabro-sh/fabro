@@ -1,18 +1,20 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use tracing::debug;
+
 use crate::error::SdkError;
 use crate::middleware::{Middleware, NextFn, NextStreamFn};
 use crate::provider::{ProviderAdapter, StreamEventStream};
 use crate::providers;
 use crate::types::{Request, Response};
-use std::collections::HashMap;
-use std::sync::Arc;
-use tracing::debug;
 
 /// The core client that routes requests to provider adapters (Section 2.2, 3).
 #[derive(Clone)]
 pub struct Client {
-    providers: HashMap<String, Arc<dyn ProviderAdapter>>,
+    providers:        HashMap<String, Arc<dyn ProviderAdapter>>,
     default_provider: Option<String>,
-    middleware: Vec<Arc<dyn Middleware>>,
+    middleware:       Vec<Arc<dyn Middleware>>,
 }
 
 impl Client {
@@ -51,9 +53,9 @@ impl Client {
         F: Fn(&str) -> Option<String>,
     {
         let mut client = Self {
-            providers: HashMap::new(),
+            providers:        HashMap::new(),
             default_provider: None,
-            middleware: Vec::new(),
+            middleware:       Vec::new(),
         };
 
         // Register providers whose API keys are present in the environment.
@@ -127,7 +129,8 @@ impl Client {
         Ok(client)
     }
 
-    /// Register a provider adapter. Calls `initialize()` on the adapter (Section 2.4).
+    /// Register a provider adapter. Calls `initialize()` on the adapter
+    /// (Section 2.4).
     ///
     /// # Errors
     ///
@@ -164,7 +167,7 @@ impl Client {
             .or(self.default_provider.as_deref())
             .ok_or_else(|| SdkError::Configuration {
                 message: "No provider specified and no default provider set".into(),
-                source: None,
+                source:  None,
             })?;
 
         self.providers
@@ -172,7 +175,7 @@ impl Client {
             .cloned()
             .ok_or_else(|| SdkError::Configuration {
                 message: format!("Provider '{provider_name}' not registered"),
-                source: None,
+                source:  None,
             })
     }
 
@@ -180,8 +183,9 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// Returns `SdkError::Configuration` if no provider is specified or registered,
-    /// or any provider/middleware error encountered during the request.
+    /// Returns `SdkError::Configuration` if no provider is specified or
+    /// registered, or any provider/middleware error encountered during the
+    /// request.
     pub async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
         let provider = self.resolve_provider(request)?;
 
@@ -212,8 +216,9 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// Returns `SdkError::Configuration` if no provider is specified or registered,
-    /// or any provider/middleware error encountered during the request.
+    /// Returns `SdkError::Configuration` if no provider is specified or
+    /// registered, or any provider/middleware error encountered during the
+    /// request.
     pub async fn stream(&self, request: &Request) -> Result<StreamEventStream, SdkError> {
         let provider = self.resolve_provider(request)?;
 
@@ -270,9 +275,10 @@ impl Client {
 
 #[cfg(test)]
 mod tests {
+    use futures::stream;
+
     use super::*;
     use crate::types::*;
-    use futures::stream;
 
     /// A mock provider for testing.
     struct MockProvider {
@@ -297,19 +303,19 @@ mod tests {
 
         async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {
             Ok(Response {
-                id: "resp_mock".into(),
-                model: "mock-model".into(),
-                provider: self.provider_name.clone(),
-                message: Message::assistant(&self.response_text),
+                id:            "resp_mock".into(),
+                model:         "mock-model".into(),
+                provider:      self.provider_name.clone(),
+                message:       Message::assistant(&self.response_text),
                 finish_reason: FinishReason::Stop,
-                usage: TokenCounts {
+                usage:         TokenCounts {
                     input_tokens: 10,
                     output_tokens: 20,
                     ..Default::default()
                 },
-                raw: None,
-                warnings: vec![],
-                rate_limit: None,
+                raw:           None,
+                warnings:      vec![],
+                rate_limit:    None,
             })
         }
 
@@ -340,19 +346,19 @@ mod tests {
 
     fn test_request() -> Request {
         Request {
-            model: "mock-model".into(),
-            messages: vec![Message::user("Hello")],
-            provider: None,
-            tools: None,
-            tool_choice: None,
-            response_format: None,
-            temperature: None,
-            top_p: None,
-            max_tokens: None,
-            stop_sequences: None,
+            model:            "mock-model".into(),
+            messages:         vec![Message::user("Hello")],
+            provider:         None,
+            tools:            None,
+            tool_choice:      None,
+            response_format:  None,
+            temperature:      None,
+            top_p:            None,
+            max_tokens:       None,
+            stop_sequences:   None,
             reasoning_effort: None,
-            speed: None,
-            metadata: None,
+            speed:            None,
+            metadata:         None,
             provider_options: None,
         }
     }

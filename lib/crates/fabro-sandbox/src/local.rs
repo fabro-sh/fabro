@@ -1,20 +1,21 @@
+use std::path::{Path, PathBuf};
+use std::time::Instant;
+
+use async_trait::async_trait;
+use tokio::io::AsyncReadExt;
+use tokio::process::{Child, Command};
+use tokio::{fs, time};
+use tokio_util::sync::CancellationToken;
+
 use crate::{
     DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent, SandboxEventCallback,
     format_lines_numbered,
 };
-use async_trait::async_trait;
-use std::path::{Path, PathBuf};
-use std::time::Instant;
-use tokio::fs;
-use tokio::io::AsyncReadExt;
-use tokio::process::{Child, Command};
-use tokio::time;
-use tokio_util::sync::CancellationToken;
 
 pub struct LocalSandbox {
     working_directory: PathBuf,
-    event_callback: Option<SandboxEventCallback>,
-    rg_available: std::sync::OnceLock<bool>,
+    event_callback:    Option<SandboxEventCallback>,
+    rg_available:      std::sync::OnceLock<bool>,
 }
 
 impl LocalSandbox {
@@ -472,7 +473,8 @@ impl Sandbox for LocalSandbox {
     }
 }
 
-/// Send SIGTERM to the process group, wait 2s for graceful shutdown, then SIGKILL.
+/// Send SIGTERM to the process group, wait 2s for graceful shutdown, then
+/// SIGKILL.
 async fn sigterm_then_kill(child: &mut Child) {
     #[cfg(unix)]
     if let Some(pid) = child.id() {
@@ -497,8 +499,9 @@ async fn sigterm_then_kill(child: &mut Child) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::path::PathBuf;
+
+    use super::*;
 
     fn temp_dir() -> PathBuf {
         let dir = std::env::temp_dir().join(format!("local_env_test_{}", uuid::Uuid::new_v4()));
@@ -709,8 +712,9 @@ mod tests {
 
     #[tokio::test]
     async fn initialize_emits_events() {
-        use crate::SandboxEvent;
         use std::sync::{Arc, Mutex};
+
+        use crate::SandboxEvent;
 
         let dir = std::env::temp_dir().join(format!("init_event_test_{}", uuid::Uuid::new_v4()));
         let events: Arc<Mutex<Vec<SandboxEvent>>> = Arc::new(Mutex::new(Vec::new()));
@@ -737,8 +741,9 @@ mod tests {
 
     #[tokio::test]
     async fn cleanup_emits_events() {
-        use crate::SandboxEvent;
         use std::sync::{Arc, Mutex};
+
+        use crate::SandboxEvent;
 
         let dir = temp_dir();
         let events: Arc<Mutex<Vec<SandboxEvent>>> = Arc::new(Mutex::new(Vec::new()));
@@ -790,14 +795,10 @@ mod tests {
 
         let env = LocalSandbox::new(dir.clone());
         let results = env
-            .grep(
-                "hello",
-                "test.txt",
-                &GrepOptions {
-                    case_insensitive: true,
-                    ..Default::default()
-                },
-            )
+            .grep("hello", "test.txt", &GrepOptions {
+                case_insensitive: true,
+                ..Default::default()
+            })
             .await
             .unwrap();
 
@@ -812,14 +813,10 @@ mod tests {
 
         let env = LocalSandbox::new(dir.clone());
         let results = env
-            .grep(
-                "match",
-                "test.txt",
-                &GrepOptions {
-                    max_results: Some(2),
-                    ..Default::default()
-                },
-            )
+            .grep("match", "test.txt", &GrepOptions {
+                max_results: Some(2),
+                ..Default::default()
+            })
             .await
             .unwrap();
 

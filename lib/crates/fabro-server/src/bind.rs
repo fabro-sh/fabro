@@ -80,8 +80,9 @@ fn validate_unix_path_length(path: &std::path::Path) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::net::{IpAddr, Ipv4Addr};
+
+    use super::*;
 
     #[test]
     fn parse_tcp_address() {

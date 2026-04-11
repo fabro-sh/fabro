@@ -1,6 +1,6 @@
-use std::path::Path;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
-use std::{io::Write, path::PathBuf};
 
 use cli_table::Color;
 use fabro_util::terminal::Styles;

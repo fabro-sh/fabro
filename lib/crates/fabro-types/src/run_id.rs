@@ -88,8 +88,9 @@ impl<'de> Deserialize<'de> for RunId {
 }
 
 pub mod fixtures {
-    use super::RunId;
     use ulid::Ulid;
+
+    use super::RunId;
 
     macro_rules! define_run_ids {
         ($($name:ident = $value:expr),+ $(,)?) => {

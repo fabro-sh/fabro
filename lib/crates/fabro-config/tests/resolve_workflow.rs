@@ -1,5 +1,4 @@
-use fabro_config::parse_settings_layer;
-use fabro_config::resolve_workflow_from_file;
+use fabro_config::{parse_settings_layer, resolve_workflow_from_file};
 use fabro_types::settings::SettingsLayer;
 
 #[test]

@@ -54,13 +54,15 @@ impl From<Duration> for StdDuration {
 pub enum ParseDurationError {
     /// The input was empty or whitespace only.
     Empty,
-    /// The input had a numeric portion that could not be parsed as a non-negative integer.
+    /// The input had a numeric portion that could not be parsed as a
+    /// non-negative integer.
     InvalidNumber { input: String },
     /// The input had no unit suffix.
     MissingUnit { input: String },
     /// The input had an unrecognized unit suffix.
     InvalidUnit { input: String, unit: String },
-    /// The input contained more than one unit (e.g. `1h30m`), which is not supported.
+    /// The input contained more than one unit (e.g. `1h30m`), which is not
+    /// supported.
     Composed { input: String },
 }
 
@@ -139,7 +141,7 @@ impl FromStr for Duration {
             other => {
                 return Err(ParseDurationError::InvalidUnit {
                     input: input.to_owned(),
-                    unit: other.to_owned(),
+                    unit:  other.to_owned(),
                 });
             }
         };
@@ -160,9 +162,9 @@ fn split_number_and_suffix(input: &str) -> Option<(&str, &str)> {
 }
 
 impl fmt::Display for Duration {
-    /// Canonical rendering picks the largest unit that represents the value as an
-    /// integer multiple, preferring `d`, `h`, `m`, `s`, `ms` in that order.
-    /// Zero renders as `0s`.
+    /// Canonical rendering picks the largest unit that represents the value as
+    /// an integer multiple, preferring `d`, `h`, `m`, `s`, `ms` in that
+    /// order. Zero renders as `0s`.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         const MS_PER_S: u128 = 1_000;
         const MS_PER_M: u128 = 60 * MS_PER_S;

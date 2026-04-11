@@ -1,10 +1,5 @@
 use std::path::Path;
 
-use crate::context::keys;
-use crate::context::{Context, WorkflowContext};
-use crate::error::FabroError;
-use crate::event::{Event, StageScope};
-use crate::outcome::Outcome;
 use async_trait::async_trait;
 use fabro_graphviz::graph::{Graph, Node};
 use fabro_model::Provider;
@@ -13,6 +8,10 @@ use super::agent::{
     CodergenBackend, CodergenResult, expand_variables, extract_status_fields, truncate,
 };
 use super::{EngineServices, Handler};
+use crate::context::{Context, WorkflowContext, keys};
+use crate::error::FabroError;
+use crate::event::{Event, StageScope};
+use crate::outcome::Outcome;
 
 /// Handler for single-shot LLM calls (no tools, no agent loop).
 pub struct PromptHandler {
@@ -92,12 +91,12 @@ impl Handler for PromptHandler {
         let stage_scope = StageScope::for_handler(context, &node.id);
         services.emitter.emit_scoped(
             &Event::Prompt {
-                stage: node.id.clone(),
-                visit: stage_scope.visit,
-                text: prompt.clone(),
-                mode: Some("prompt".to_string()),
+                stage:    node.id.clone(),
+                visit:    stage_scope.visit,
+                text:     prompt.clone(),
+                mode:     Some("prompt".to_string()),
                 provider: prompt_provider.clone(),
-                model: prompt_model.clone(),
+                model:    prompt_model.clone(),
             },
             &stage_scope,
         );
@@ -144,11 +143,11 @@ impl Handler for PromptHandler {
 
         services.emitter.emit_scoped(
             &Event::PromptCompleted {
-                node_id: node.id.clone(),
+                node_id:  node.id.clone(),
                 response: response_text.clone(),
-                model: response_model,
+                model:    response_model,
                 provider: response_provider,
-                billing: stage_usage.clone(),
+                billing:  stage_usage.clone(),
             },
             &stage_scope,
         );
@@ -178,14 +177,16 @@ impl Handler for PromptHandler {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::Arc;
+    use std::time::Duration;
+
     use fabro_graphviz::graph::AttrValue;
     use fabro_store::{Database, RunDatabase, StageId};
     use fabro_types::fixtures;
     use object_store::memory::InMemory;
-    use std::sync::Arc;
-    use std::time::Duration;
     use tempfile::TempDir;
+
+    use super::*;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
@@ -279,9 +280,9 @@ mod tests {
                 _system_prompt: Option<&str>,
             ) -> Result<CodergenResult, FabroError> {
                 Ok(CodergenResult::Text {
-                    text: "one-shot response".to_string(),
-                    usage: None,
-                    files_touched: Vec::new(),
+                    text:              "one-shot response".to_string(),
+                    usage:             None,
+                    files_touched:     Vec::new(),
                     last_file_touched: None,
                 })
             }
@@ -339,9 +340,9 @@ mod tests {
                 _system_prompt: Option<&str>,
             ) -> Result<CodergenResult, FabroError> {
                 Ok(CodergenResult::Text {
-                    text: "one-shot response".to_string(),
-                    usage: None,
-                    files_touched: Vec::new(),
+                    text:              "one-shot response".to_string(),
+                    usage:             None,
+                    files_touched:     Vec::new(),
                     last_file_touched: None,
                 })
             }
@@ -370,7 +371,7 @@ mod tests {
     }
 
     struct OneShotCapturingBackend {
-        captured_prompt: Arc<std::sync::Mutex<Option<String>>>,
+        captured_prompt:        Arc<std::sync::Mutex<Option<String>>>,
         captured_system_prompt: Arc<std::sync::Mutex<Option<Option<String>>>>,
     }
 
@@ -398,9 +399,9 @@ mod tests {
             *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());
             *self.captured_system_prompt.lock().unwrap() = Some(system_prompt.map(String::from));
             Ok(CodergenResult::Text {
-                text: "classified".to_string(),
-                usage: None,
-                files_touched: Vec::new(),
+                text:              "classified".to_string(),
+                usage:             None,
+                files_touched:     Vec::new(),
                 last_file_touched: None,
             })
         }
@@ -412,7 +413,7 @@ mod tests {
 
         let captured = Arc::new(Mutex::new(None));
         let backend = OneShotCapturingBackend {
-            captured_prompt: captured.clone(),
+            captured_prompt:        captured.clone(),
             captured_system_prompt: Arc::new(Mutex::new(None)),
         };
         let handler = PromptHandler::new(Some(Box::new(backend)));
@@ -449,7 +450,7 @@ mod tests {
 
         let captured_sys = Arc::new(Mutex::new(None));
         let backend = OneShotCapturingBackend {
-            captured_prompt: Arc::new(Mutex::new(None)),
+            captured_prompt:        Arc::new(Mutex::new(None)),
             captured_system_prompt: captured_sys.clone(),
         };
         let handler = PromptHandler::new(Some(Box::new(backend)));
@@ -470,7 +471,8 @@ mod tests {
             .await
             .unwrap();
 
-        // With project_memory=true (default), one_shot is called (system_prompt captured)
+        // With project_memory=true (default), one_shot is called (system_prompt
+        // captured)
         let sys = captured_sys.lock().unwrap().clone();
         assert!(sys.is_some(), "one_shot should have been called");
     }
@@ -481,7 +483,7 @@ mod tests {
 
         let captured_sys = Arc::new(Mutex::new(None));
         let backend = OneShotCapturingBackend {
-            captured_prompt: Arc::new(Mutex::new(None)),
+            captured_prompt:        Arc::new(Mutex::new(None)),
             captured_system_prompt: captured_sys.clone(),
         };
         let handler = PromptHandler::new(Some(Box::new(backend)));

@@ -5,23 +5,22 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use fabro_types::RunId;
 use object_store::ObjectStore;
+pub use run_store::RunDatabase;
+use run_store::RunDatabaseInner;
 use slatedb::config::Settings;
 use tokio::sync::{Mutex, OnceCell};
 
-use crate::keys;
-use crate::{ListRunsQuery, Result, RunSummary, StoreError};
-use fabro_types::RunId;
-pub use run_store::RunDatabase;
-use run_store::RunDatabaseInner;
+use crate::{ListRunsQuery, Result, RunSummary, StoreError, keys};
 
 #[derive(Clone)]
 pub struct Database {
-    object_store: Arc<dyn ObjectStore>,
-    base_prefix: String,
+    object_store:   Arc<dyn ObjectStore>,
+    base_prefix:    String,
     flush_interval: Duration,
-    db: Arc<OnceCell<slatedb::Db>>,
-    active_runs: Arc<Mutex<HashMap<RunId, Arc<RunDatabaseInner>>>>,
+    db:             Arc<OnceCell<slatedb::Db>>,
+    active_runs:    Arc<Mutex<HashMap<RunId, Arc<RunDatabaseInner>>>>,
 }
 
 impl std::fmt::Debug for Database {
@@ -230,7 +229,7 @@ pub(crate) fn normalize_base_prefix(prefix: String) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::path::PathBuf;
 
     use chrono::{DateTime, Utc};
     use fabro_types::settings::SettingsLayer;
@@ -238,8 +237,8 @@ mod tests {
     use futures::TryStreamExt;
     use object_store::memory::InMemory;
     use object_store::path::Path;
-    use std::path::PathBuf;
 
+    use super::*;
     use crate::EventPayload;
 
     fn dt(value: &str) -> DateTime<Utc> {

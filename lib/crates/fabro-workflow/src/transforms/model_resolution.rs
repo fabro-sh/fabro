@@ -1,10 +1,10 @@
 use fabro_graphviz::graph::{AttrValue, Graph};
 
+use super::Transform;
 use crate::error::FabroError;
 
-use super::Transform;
-
-/// Resolves model aliases to canonical IDs and infers the provider from the model catalog.
+/// Resolves model aliases to canonical IDs and infers the provider from the
+/// model catalog.
 pub struct ModelResolutionTransform;
 
 impl Transform for ModelResolutionTransform {

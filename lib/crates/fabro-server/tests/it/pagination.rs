@@ -2,12 +2,13 @@
 
 #![allow(clippy::absolute_paths)]
 
-use super::helpers::test_app_state;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use fabro_server::jwt_auth::AuthMode;
 use fabro_server::server::build_router;
 use tower::ServiceExt;
+
+use super::helpers::test_app_state;
 
 async fn get_json(app: axum::Router, uri: &str) -> serde_json::Value {
     let req = Request::builder()
@@ -24,7 +25,8 @@ async fn get_json(app: axum::Router, uri: &str) -> serde_json::Value {
     serde_json::from_slice(&body).unwrap()
 }
 
-/// Assert that a value has the paginated shape: `{ data: [...], meta: { has_more: bool } }`
+/// Assert that a value has the paginated shape: `{ data: [...], meta: {
+/// has_more: bool } }`
 fn assert_paginated_shape(json: &serde_json::Value, context: &str) {
     assert!(json.get("data").is_some(), "{context}: missing 'data' key");
     assert!(json["data"].is_array(), "{context}: 'data' is not an array");
@@ -77,7 +79,8 @@ async fn paginated_endpoints_return_correct_shape() {
     let app = build_router(state, AuthMode::Disabled);
 
     for ep in ENDPOINTS {
-        // Default request: paginated shape, has_more = false (fixtures fit in default page)
+        // Default request: paginated shape, has_more = false (fixtures fit in default
+        // page)
         let json = get_json(app.clone(), ep.path).await;
         assert_paginated_shape(&json, ep.name);
         assert_eq!(

@@ -4,12 +4,11 @@ use std::path::PathBuf;
 use fabro_types::fixtures;
 use fabro_types::graph::Graph;
 use fabro_types::run::RunRecord;
-use fabro_types::settings::InterpString;
-use fabro_types::settings::SettingsLayer;
 use fabro_types::settings::run::{RunGoalLayer, RunLayer};
 use fabro_types::settings::server::{
     GithubIntegrationLayer, ServerIntegrationsLayer, ServerLayer, ServerStorageLayer,
 };
+use fabro_types::settings::{InterpString, SettingsLayer};
 
 fn templated_settings() -> SettingsLayer {
     SettingsLayer {
@@ -40,18 +39,18 @@ fn templated_settings() -> SettingsLayer {
 #[test]
 fn run_record_round_trips_templated_settings() {
     let record = RunRecord {
-        run_id: fixtures::RUN_1,
-        settings: templated_settings(),
-        graph: Graph::new("ship"),
-        workflow_slug: Some("demo".to_string()),
+        run_id:            fixtures::RUN_1,
+        settings:          templated_settings(),
+        graph:             Graph::new("ship"),
+        workflow_slug:     Some("demo".to_string()),
         working_directory: PathBuf::from("/tmp/project"),
-        host_repo_path: Some("/tmp/project".to_string()),
-        repo_origin_url: Some("https://github.com/fabro-sh/fabro.git".to_string()),
-        base_branch: Some("main".to_string()),
-        labels: HashMap::from([("team".to_string(), "platform".to_string())]),
-        provenance: None,
-        manifest_blob: None,
-        definition_blob: None,
+        host_repo_path:    Some("/tmp/project".to_string()),
+        repo_origin_url:   Some("https://github.com/fabro-sh/fabro.git".to_string()),
+        base_branch:       Some("main".to_string()),
+        labels:            HashMap::from([("team".to_string(), "platform".to_string())]),
+        provenance:        None,
+        manifest_blob:     None,
+        definition_blob:   None,
     };
 
     let json = serde_json::to_value(&record).expect("record should serialize");

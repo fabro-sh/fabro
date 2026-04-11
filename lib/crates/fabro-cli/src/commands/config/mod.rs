@@ -1,15 +1,14 @@
 use std::io::Write;
 use std::path::Path;
 
+use fabro_config::effective_settings::{EffectiveSettingsLayers, EffectiveSettingsMode};
+use fabro_config::{effective_settings, load_settings_project, project};
+use fabro_types::settings::SettingsLayer;
+
 use crate::args::{GlobalArgs, SettingsArgs};
 use crate::command_context::CommandContext;
 use crate::shared::print_json_pretty;
 use crate::user_config;
-use fabro_config::effective_settings;
-use fabro_config::effective_settings::{EffectiveSettingsLayers, EffectiveSettingsMode};
-use fabro_config::load_settings_project;
-use fabro_config::project;
-use fabro_types::settings::SettingsLayer;
 
 fn config_layers(
     ctx: &CommandContext,

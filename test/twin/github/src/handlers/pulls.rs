@@ -344,12 +344,12 @@ mod tests {
         pem: &str,
     ) -> (TestServer, reqwest::Client, String) {
         state.register_app(AppOptions {
-            app_id: "100".to_string(),
-            slug: "test-app".to_string(),
-            owner_login: "owner".to_string(),
-            public: true,
+            app_id:          "100".to_string(),
+            slug:            "test-app".to_string(),
+            owner_login:     "owner".to_string(),
+            public:          true,
             private_key_pem: pem.to_string(),
-            webhook_secret: None,
+            webhook_secret:  None,
         });
         state.add_installation("100", "owner", vec!["repo".to_string()], false);
         state.add_repository(

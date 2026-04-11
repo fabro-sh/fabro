@@ -75,8 +75,8 @@ pub mod keys {
         format!("{INTERNAL_RETRY_COUNT_PREFIX}{node_id}")
     }
 
-    /// Returns `true` for engine-internal keys that should not propagate from child
-    /// to parent workflow contexts.
+    /// Returns `true` for engine-internal keys that should not propagate from
+    /// child to parent workflow contexts.
     #[must_use]
     pub fn is_engine_internal_key(key: &str) -> bool {
         key.starts_with(INTERNAL_PREFIX)
@@ -134,10 +134,10 @@ pub mod keys {
 }
 
 pub use fabro_core::Context;
-
-use crate::event::StageScope;
 use fabro_graphviz::Fidelity;
 use fabro_types::{ParallelBranchId, StageId};
+
+use crate::event::StageScope;
 
 /// Domain-specific typed accessors for workflow context values.
 pub trait WorkflowContext {
@@ -147,9 +147,9 @@ pub trait WorkflowContext {
     fn run_id(&self) -> String;
     fn parallel_group_id(&self) -> Option<StageId>;
     fn parallel_branch_id(&self) -> Option<ParallelBranchId>;
-    /// Build the stage-level emit scope from the currently-executing node and its
-    /// accumulated visit count. Returns `None` for run-level emissions where no
-    /// stage is active (i.e., `CURRENT_NODE` is unset).
+    /// Build the stage-level emit scope from the currently-executing node and
+    /// its accumulated visit count. Returns `None` for run-level emissions
+    /// where no stage is active (i.e., `CURRENT_NODE` is unset).
     fn current_stage_scope(&self) -> Option<StageScope>;
 }
 
@@ -193,8 +193,9 @@ impl WorkflowContext for Context {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::HashMap;
+
+    use super::*;
 
     #[test]
     fn new_context_is_empty() {

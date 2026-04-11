@@ -1,12 +1,12 @@
 pub use fabro_core::outcome::{FailureCategory, FailureDetail, OutcomeMeta, StageStatus};
-pub use fabro_types::BilledModelUsage;
-
-use crate::error::classify_failure_reason;
 use fabro_llm::types::TokenCounts as LlmTokenCounts;
 use fabro_model::{
     AnthropicBillingFacts, Catalog, ModelBillingFacts, ModelBillingInput, ModelRef, ModelUsage,
     Provider, Speed, TokenCounts,
 };
+pub use fabro_types::BilledModelUsage;
+
+use crate::error::classify_failure_reason;
 
 pub type Outcome = fabro_core::Outcome<Option<BilledModelUsage>>;
 
@@ -146,9 +146,10 @@ fn billing_facts_for_stage_usage(provider: Provider, tokens: &TokenCounts) -> Mo
 
 #[cfg(test)]
 mod tests {
-    use super::billed_model_usage_from_llm;
     use fabro_llm::types::TokenCounts;
     use fabro_model::Provider;
+
+    use super::billed_model_usage_from_llm;
 
     #[test]
     fn billed_model_usage_from_llm_bills_openai_cached_input_and_reasoning_output() {
@@ -169,10 +170,10 @@ mod tests {
     #[test]
     fn billed_model_usage_from_llm_bills_anthropic_fast_mode_cache_write_pricing() {
         let usage = TokenCounts {
-            input_tokens: 100_000,
-            output_tokens: 10_000,
-            reasoning_tokens: 5_000,
-            cache_read_tokens: 20_000,
+            input_tokens:       100_000,
+            output_tokens:      10_000,
+            reasoning_tokens:   5_000,
+            cache_read_tokens:  20_000,
             cache_write_tokens: 30_000,
         };
         let billed = billed_model_usage_from_llm(
@@ -188,10 +189,10 @@ mod tests {
     #[test]
     fn billed_model_usage_round_trips_dense_token_counts() {
         let usage = TokenCounts {
-            input_tokens: 100,
-            output_tokens: 40,
-            reasoning_tokens: 5,
-            cache_read_tokens: 20,
+            input_tokens:       100,
+            output_tokens:      40,
+            reasoning_tokens:   5,
+            cache_read_tokens:  20,
             cache_write_tokens: 10,
         };
         let billed =

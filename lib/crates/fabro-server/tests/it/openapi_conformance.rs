@@ -7,13 +7,13 @@
     clippy::manual_let_else
 )]
 
-use super::helpers::test_app_state;
-
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
 use fabro_server::jwt_auth::AuthMode;
 use fabro_server::server::build_router;
 use tower::ServiceExt;
+
+use super::helpers::test_app_state;
 
 fn load_spec() -> openapiv3::OpenAPI {
     let spec_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

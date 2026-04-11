@@ -3,10 +3,9 @@ pub mod grammar;
 pub mod lexer;
 pub mod semantic;
 
+use self::ast::DotGraph;
 use crate::error::GraphvizError;
 use crate::graph::types::Graph;
-
-use self::ast::DotGraph;
 
 /// Parse a DOT source string into a raw `DotGraph` AST.
 ///

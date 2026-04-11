@@ -1,7 +1,9 @@
+use fabro_model::Provider;
+
+use super::EnvContext;
 use crate::agent_profile::AgentProfile;
 use crate::config::SessionOptions;
-use crate::profiles::BaseProfile;
-use crate::profiles::assemble_system_prompt;
+use crate::profiles::{BaseProfile, assemble_system_prompt};
 use crate::sandbox::Sandbox;
 use crate::skills::Skill;
 use crate::tool_registry::ToolRegistry;
@@ -9,9 +11,6 @@ use crate::tools::{
     WebFetchSummarizer, make_edit_file_tool, make_list_dir_tool, make_read_many_files_tool,
     register_core_tools,
 };
-use fabro_model::Provider;
-
-use super::EnvContext;
 
 pub struct GeminiProfile {
     base: BaseProfile,
@@ -201,11 +200,13 @@ in the project.";
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use tokio::sync::Mutex as AsyncMutex;
+
     use super::*;
     use crate::subagent::{SessionFactory, SubAgentManager};
     use crate::test_support::MockSandbox;
-    use std::sync::Arc;
-    use tokio::sync::Mutex as AsyncMutex;
 
     #[test]
     fn gemini_profile_identity() {

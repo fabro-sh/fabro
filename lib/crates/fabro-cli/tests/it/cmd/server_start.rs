@@ -1,8 +1,9 @@
-use fabro_server::jwt_auth::FABRO_LOCAL_NO_AUTH_ENV;
-use fabro_test::{fabro_snapshot, test_context};
 use std::process::Stdio;
 use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
+
+use fabro_server::jwt_auth::FABRO_LOCAL_NO_AUTH_ENV;
+use fabro_test::{fabro_snapshot, test_context};
 
 fn isolated_storage_dir() -> tempfile::TempDir {
     let root = tempfile::tempdir_in("/tmp").unwrap();

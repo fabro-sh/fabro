@@ -8,8 +8,7 @@ use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use fabro_interview::{ControlInterviewer, WorkerControlEnvelope, WorkerControlMessage};
 use fabro_store::{EventEnvelope, EventPayload, RunProjection};
-use fabro_types::settings::InterpString;
-use fabro_types::settings::SettingsLayer;
+use fabro_types::settings::{InterpString, SettingsLayer};
 use fabro_types::{EventBody, RunBlobId, RunEvent, RunId, StatusReason};
 use fabro_workflow::artifact_snapshot::CapturedArtifactInfo;
 use fabro_workflow::artifact_upload::{ArtifactSink, StageArtifactUploader};
@@ -217,8 +216,8 @@ fn build_artifact_uploader(
 }
 
 struct HttpArtifactUploader {
-    run_id: RunId,
-    client: server_client::ServerStoreClient,
+    run_id:       RunId,
+    client:       server_client::ServerStoreClient,
     bearer_token: String,
 }
 
@@ -283,7 +282,7 @@ impl StageArtifactUploader for MissingArtifactUploadTokenUploader {
 struct HttpRunStore {
     run_id: RunId,
     client: server_client::ServerStoreClient,
-    state: Arc<Mutex<RunProjection>>,
+    state:  Arc<Mutex<RunProjection>>,
     events: Arc<Mutex<Option<Vec<EventEnvelope>>>>,
 }
 
@@ -540,20 +539,20 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
+    use fabro_interview::{AnswerValue, ControlInterviewer, Interviewer, Question, QuestionType};
+    use fabro_types::run_event::{
+        InterviewCompletedProps, InterviewStartedProps, RunCompletedProps, RunControlEffectProps,
+        RunFailedProps, RunStatusTransitionProps,
+    };
+    use fabro_types::{EventBody, StatusReason, fixtures};
+    use fabro_workflow::artifact_upload::StageArtifactUploader;
+
     use super::{
         MissingArtifactUploadTokenUploader, WorkerControlStreamEvent, WorkerTitlePhase,
         apply_worker_control_line, handle_worker_control_stream_events, initial_worker_title_phase,
         read_worker_control_stream_blocking, worker_title, worker_title_phase_for_event,
     };
     use crate::args::RunWorkerMode;
-    use fabro_interview::{AnswerValue, ControlInterviewer, Interviewer, Question, QuestionType};
-    use fabro_types::fixtures;
-    use fabro_types::run_event::{
-        InterviewCompletedProps, InterviewStartedProps, RunCompletedProps, RunControlEffectProps,
-        RunFailedProps, RunStatusTransitionProps,
-    };
-    use fabro_types::{EventBody, StatusReason};
-    use fabro_workflow::artifact_upload::StageArtifactUploader;
 
     #[test]
     fn worker_title_uses_short_run_id_and_phase() {
@@ -594,12 +593,12 @@ mod tests {
         );
         assert_eq!(
             worker_title_phase_for_event(&EventBody::InterviewStarted(InterviewStartedProps {
-                question_id: "q-1".to_string(),
-                question: "Approve?".to_string(),
-                stage: "gate".to_string(),
-                question_type: "yes_no".to_string(),
-                options: Vec::new(),
-                allow_freeform: false,
+                question_id:     "q-1".to_string(),
+                question:        "Approve?".to_string(),
+                stage:           "gate".to_string(),
+                question_type:   "yes_no".to_string(),
+                options:         Vec::new(),
+                allow_freeform:  false,
                 timeout_seconds: None,
                 context_display: None,
             })),
@@ -608,39 +607,39 @@ mod tests {
         assert_eq!(
             worker_title_phase_for_event(&EventBody::InterviewCompleted(InterviewCompletedProps {
                 question_id: "q-1".to_string(),
-                question: "Approve?".to_string(),
-                answer: "yes".to_string(),
+                question:    "Approve?".to_string(),
+                answer:      "yes".to_string(),
                 duration_ms: 10,
             })),
             Some(WorkerTitlePhase::Running)
         );
         assert_eq!(
             worker_title_phase_for_event(&EventBody::RunCompleted(RunCompletedProps {
-                duration_ms: 10,
-                artifact_count: 0,
-                status: "success".to_string(),
-                reason: None,
-                total_usd_micros: None,
+                duration_ms:          10,
+                artifact_count:       0,
+                status:               "success".to_string(),
+                reason:               None,
+                total_usd_micros:     None,
                 final_git_commit_sha: None,
-                final_patch: None,
-                billing: None,
+                final_patch:          None,
+                billing:              None,
             })),
             Some(WorkerTitlePhase::Succeeded)
         );
         assert_eq!(
             worker_title_phase_for_event(&EventBody::RunFailed(RunFailedProps {
-                error: "cancelled".to_string(),
-                duration_ms: 10,
-                reason: Some(StatusReason::Cancelled),
+                error:          "cancelled".to_string(),
+                duration_ms:    10,
+                reason:         Some(StatusReason::Cancelled),
                 git_commit_sha: None,
             })),
             Some(WorkerTitlePhase::Cancelled)
         );
         assert_eq!(
             worker_title_phase_for_event(&EventBody::RunFailed(RunFailedProps {
-                error: "boom".to_string(),
-                duration_ms: 10,
-                reason: Some(StatusReason::Terminated),
+                error:          "boom".to_string(),
+                duration_ms:    10,
+                reason:         Some(StatusReason::Terminated),
                 git_commit_sha: None,
             })),
             Some(WorkerTitlePhase::Failed)

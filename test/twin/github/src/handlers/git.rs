@@ -1,9 +1,10 @@
+use std::path::PathBuf;
+use std::process::Stdio;
+
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use std::path::PathBuf;
-use std::process::Stdio;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
@@ -285,7 +286,8 @@ pub struct ServiceQuery {
     service: Option<String>,
 }
 
-/// Handler for GET /{owner}/{repo}/info/refs (works with and without .git suffix)
+/// Handler for GET /{owner}/{repo}/info/refs (works with and without .git
+/// suffix)
 pub async fn git_info_refs(
     State(state): State<SharedState>,
     Path((owner, repo_with_suffix)): Path<(String, String)>,
@@ -314,7 +316,8 @@ pub async fn git_info_refs(
     .await
 }
 
-/// Handler for POST /{owner}/{repo}/git-upload-pack (works with and without .git suffix)
+/// Handler for POST /{owner}/{repo}/git-upload-pack (works with and without
+/// .git suffix)
 pub async fn git_upload_pack(
     State(state): State<SharedState>,
     Path((owner, repo_with_suffix)): Path<(String, String)>,
@@ -343,7 +346,8 @@ pub async fn git_upload_pack(
     .await
 }
 
-/// Handler for POST /{owner}/{repo}/git-receive-pack (works with and without .git suffix)
+/// Handler for POST /{owner}/{repo}/git-receive-pack (works with and without
+/// .git suffix)
 pub async fn git_receive_pack(
     State(state): State<SharedState>,
     Path((owner, repo_with_suffix)): Path<(String, String)>,

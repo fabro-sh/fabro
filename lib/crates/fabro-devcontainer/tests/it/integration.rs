@@ -1,5 +1,6 @@
-use super::helpers::fixture_path;
 use fabro_devcontainer::{Command, DevcontainerResolver};
+
+use super::helpers::fixture_path;
 
 #[tokio::test]
 async fn resolve_image_only() {
@@ -179,7 +180,8 @@ async fn resolve_subdirectory_standard_wins_over_subdirs() {
         .await
         .unwrap();
 
-    // Standard .devcontainer/devcontainer.json takes priority over subdirectory format
+    // Standard .devcontainer/devcontainer.json takes priority over subdirectory
+    // format
     assert!(
         config
             .dockerfile

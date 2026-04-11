@@ -9,7 +9,6 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::time::{Duration, Instant};
 
-use crate::support::unique_run_id;
 use fabro_config::Storage;
 use fabro_server::bind::Bind;
 use fabro_store::EventEnvelope;
@@ -17,6 +16,8 @@ use fabro_test::TestContext;
 use fabro_types::RunId;
 use serde_json::Value;
 use shlex::try_quote;
+
+use crate::support::unique_run_id;
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -30,23 +31,23 @@ struct RunSummaryRecord {
 }
 
 pub(crate) struct RunSetup {
-    pub(crate) run_id: String,
+    pub(crate) run_id:  String,
     pub(crate) run_dir: PathBuf,
 }
 
 pub(crate) struct GitRunSetup {
-    pub(crate) run: RunSetup,
+    pub(crate) run:      RunSetup,
     pub(crate) repo_dir: PathBuf,
     pub(crate) base_sha: String,
 }
 
 pub(crate) struct ProjectFixture {
     pub(crate) project_dir: PathBuf,
-    pub(crate) fabro_root: PathBuf,
+    pub(crate) fabro_root:  PathBuf,
 }
 
 pub(crate) struct WorkspaceRunSetup {
-    pub(crate) run: RunSetup,
+    pub(crate) run:           RunSetup,
     pub(crate) workspace_dir: PathBuf,
 }
 
@@ -147,10 +148,10 @@ fn run_completed_dry_run(context: &TestContext, workflow: &Path) -> RunSetup {
         run_dir: context.find_run_dir(&run_id),
         run_id,
     };
-    wait_for_event_names(
-        &run_setup.run_dir,
-        &["run.completed", "sandbox.cleanup.completed"],
-    );
+    wait_for_event_names(&run_setup.run_dir, &[
+        "run.completed",
+        "sandbox.cleanup.completed",
+    ]);
     run_setup
 }
 
@@ -721,10 +722,11 @@ pub(crate) fn metadata_run_ids(repo_dir: &Path) -> BTreeSet<String> {
 }
 
 pub(crate) fn run_branch_commits(repo_dir: &Path, run_id: &str) -> Vec<String> {
-    git_stdout(
-        repo_dir,
-        &["rev-list", "--reverse", &format!("fabro/run/{run_id}")],
-    )
+    git_stdout(repo_dir, &[
+        "rev-list",
+        "--reverse",
+        &format!("fabro/run/{run_id}"),
+    ])
     .lines()
     .map(str::trim)
     .filter(|line| !line.is_empty())
@@ -737,14 +739,11 @@ pub(crate) fn run_branch_commits_since_base(
     run_id: &str,
     base_sha: &str,
 ) -> Vec<String> {
-    git_stdout(
-        repo_dir,
-        &[
-            "rev-list",
-            "--reverse",
-            &format!("{base_sha}..fabro/run/{run_id}"),
-        ],
-    )
+    git_stdout(repo_dir, &[
+        "rev-list",
+        "--reverse",
+        &format!("{base_sha}..fabro/run/{run_id}"),
+    ])
     .lines()
     .map(str::trim)
     .filter(|line| !line.is_empty())
@@ -932,11 +931,9 @@ fn setup_git_backed_run(context: &TestContext, workflow: GitWorkflowKind) -> Git
     git_success(&repo_dir, &["config", "user.email", "test@example.com"]);
 
     write_text_file(&repo_dir.join("story.txt"), "line 1\n");
-    write_text_file(
-        &repo_dir.join("flow.fabro"),
-        match workflow {
-            GitWorkflowKind::Changed => {
-                r#"digraph Flow {
+    write_text_file(&repo_dir.join("flow.fabro"), match workflow {
+        GitWorkflowKind::Changed => {
+            r#"digraph Flow {
   graph [goal="Edit a tracked file"];
   start [shape=Mdiamond];
   exit [shape=Msquare];
@@ -945,9 +942,9 @@ fn setup_git_backed_run(context: &TestContext, workflow: GitWorkflowKind) -> Git
   start -> step_one -> step_two -> exit;
 }
 "#
-            }
-            GitWorkflowKind::Noop => {
-                r#"digraph Flow {
+        }
+        GitWorkflowKind::Noop => {
+            r#"digraph Flow {
   graph [goal="Leave tracked files unchanged"];
   start [shape=Mdiamond];
   exit [shape=Msquare];
@@ -955,9 +952,8 @@ fn setup_git_backed_run(context: &TestContext, workflow: GitWorkflowKind) -> Git
   start -> check -> exit;
 }
 "#
-            }
-        },
-    );
+        }
+    });
 
     git_success(&repo_dir, &["add", "story.txt", "flow.fabro"]);
     git_success(&repo_dir, &["commit", "-qm", "init"]);

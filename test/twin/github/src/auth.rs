@@ -4,8 +4,9 @@ use crate::state::{AppState, PermissionLevel, TokenInfo, TokenPermission};
 
 /// Verify a GitHub App JWT (RS256) and return the `iss` claim (app_id).
 ///
-/// Accepts a **public** key PEM. The caller obtains this from `RegisteredApp::public_key_pem`,
-/// which is derived from the private key during `AppState::register_app`.
+/// Accepts a **public** key PEM. The caller obtains this from
+/// `RegisteredApp::public_key_pem`, which is derived from the private key
+/// during `AppState::register_app`.
 pub fn verify_app_jwt(jwt: &str, public_key_pem: &str) -> Result<String, String> {
     use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
     use serde::Deserialize;

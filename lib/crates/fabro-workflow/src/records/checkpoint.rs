@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
+pub use fabro_types::checkpoint::Checkpoint;
+use fabro_types::failure_signature::FailureSignature;
+
 use crate::artifact;
 use crate::context::Context;
 use crate::outcome::Outcome;
-pub use fabro_types::checkpoint::Checkpoint;
-use fabro_types::failure_signature::FailureSignature;
 
 pub trait CheckpointExt {
     fn from_context(

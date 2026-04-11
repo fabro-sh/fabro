@@ -8,13 +8,13 @@ use super::{ResolveError, require_interp};
 
 pub fn resolve_cli(layer: &CliLayer, errors: &mut Vec<ResolveError>) -> CliSettings {
     CliSettings {
-        target: resolve_target(layer.target.as_ref(), errors),
-        auth: CliAuthSettings {
+        target:  resolve_target(layer.target.as_ref(), errors),
+        auth:    CliAuthSettings {
             strategy: layer.auth.as_ref().and_then(|auth| auth.strategy),
         },
-        exec: resolve_exec(layer.exec.as_ref()),
-        output: CliOutputSettings {
-            format: layer
+        exec:    resolve_exec(layer.exec.as_ref()),
+        output:  CliOutputSettings {
+            format:    layer
                 .output
                 .as_ref()
                 .and_then(|output| output.format)
@@ -50,8 +50,8 @@ fn resolve_target(
             url: require_interp(url.as_ref(), "cli.target.url", errors),
             tls: tls.as_ref().map(|tls| CliTargetTlsSettings {
                 cert: require_interp(tls.cert.as_ref(), "cli.target.tls.cert", errors),
-                key: require_interp(tls.key.as_ref(), "cli.target.tls.key", errors),
-                ca: require_interp(tls.ca.as_ref(), "cli.target.tls.ca", errors),
+                key:  require_interp(tls.key.as_ref(), "cli.target.tls.key", errors),
+                ca:   require_interp(tls.ca.as_ref(), "cli.target.tls.ca", errors),
             }),
         }),
         Some(CliTargetLayer::Unix { path }) => Some(CliTargetSettings::Unix {
@@ -68,13 +68,13 @@ fn resolve_exec(exec: Option<&CliExecLayer>) -> CliExecSettings {
 
     CliExecSettings {
         prevent_idle_sleep: exec.prevent_idle_sleep.unwrap_or(false),
-        model: CliExecModelSettings {
+        model:              CliExecModelSettings {
             provider: exec.model.as_ref().and_then(|model| model.provider.clone()),
-            name: exec.model.as_ref().and_then(|model| model.name.clone()),
+            name:     exec.model.as_ref().and_then(|model| model.name.clone()),
         },
-        agent: CliExecAgentSettings {
+        agent:              CliExecAgentSettings {
             permissions: exec.agent.as_ref().and_then(|agent| agent.permissions),
-            mcps: exec
+            mcps:        exec
                 .agent
                 .as_ref()
                 .map(|agent| {

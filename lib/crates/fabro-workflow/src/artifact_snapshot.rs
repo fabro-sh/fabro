@@ -1,36 +1,37 @@
+use std::path::Path;
+
 use fabro_agent::Sandbox;
 use fabro_sandbox::shell_quote;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::path::Path;
 use tracing::{debug, warn};
 
 /// A file discovered by the find command.
 #[derive(Debug, Clone)]
 pub struct DiscoveredFile {
-    pub relative_path: String,
-    pub size: u64,
+    pub relative_path:    String,
+    pub size:             u64,
     pub mtime_epoch_secs: f64,
 }
 
 /// Metadata for a single captured artifact file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CapturedArtifactInfo {
-    pub path: String,
-    pub mime: String,
-    pub content_md5: String,
+    pub path:           String,
+    pub mime:           String,
+    pub content_md5:    String,
     pub content_sha256: String,
-    pub bytes: u64,
+    pub bytes:          u64,
 }
 
 /// Summary of an artifact collection run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArtifactCollectionSummary {
-    pub files_copied: usize,
-    pub total_bytes: u64,
-    pub files_skipped: usize,
+    pub files_copied:    usize,
+    pub total_bytes:     u64,
+    pub files_skipped:   usize,
     pub download_errors: usize,
-    pub hash_errors: usize,
+    pub hash_errors:     usize,
     pub captured_assets: Vec<CapturedArtifactInfo>,
 }
 
@@ -61,11 +62,12 @@ const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
 /// Maximum total size for all collected files (50 MB).
 const MAX_TOTAL_SIZE: u64 = 50 * 1024 * 1024;
 
-/// Build a platform-aware find command to discover artifact files matching the given globs.
+/// Build a platform-aware find command to discover artifact files matching the
+/// given globs.
 ///
 /// Globs without `/` are treated as filename patterns (`-name`).
-/// Globs with `/` are treated as directory patterns: the trailing `/**` (if any) is stripped
-/// and the remainder is matched via `-path '*/{dir}/*'`.
+/// Globs with `/` are treated as directory patterns: the trailing `/**` (if
+/// any) is stripped and the remainder is matched via `-path '*/{dir}/*'`.
 pub fn build_find_command(root: &str, platform: &str, globs: &[String]) -> String {
     let mut cmd = format!("find {}", shell_quote(root));
 
@@ -229,8 +231,9 @@ pub fn select_files_to_collect(
 const FIND_TIMEOUT_MS: u64 = 30_000;
 
 /// Normalize discovered file paths to be relative to the working directory.
-/// On darwin, find outputs absolute paths; on linux, `-printf '%P'` gives relative paths.
-/// This strips the working directory prefix and leading `./` to ensure consistent relative paths.
+/// On darwin, find outputs absolute paths; on linux, `-printf '%P'` gives
+/// relative paths. This strips the working directory prefix and leading `./` to
+/// ensure consistent relative paths.
 fn normalize_paths(discovered: Vec<DiscoveredFile>, root: &str) -> Vec<DiscoveredFile> {
     let root_with_slash = if root.ends_with('/') {
         root.to_string()
@@ -275,7 +278,8 @@ fn compute_artifact_info(
     })
 }
 
-/// Collect artifact files matching the configured globs that were created during this stage.
+/// Collect artifact files matching the configured globs that were created
+/// during this stage.
 pub async fn collect_artifacts(
     sandbox: &dyn Sandbox,
     artifact_capture_dir: &Path,
@@ -349,15 +353,17 @@ pub async fn collect_artifacts(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use fabro_agent::sandbox::ExecResult;
     use std::collections::HashMap;
+
+    use fabro_agent::sandbox::ExecResult;
+
+    use super::*;
 
     /// Minimal mock sandbox for artifact_snapshot tests.
     struct AssetMockSandbox {
-        files: HashMap<String, String>,
-        exec_result: ExecResult,
-        working_dir: &'static str,
+        files:        HashMap<String, String>,
+        exec_result:  ExecResult,
+        working_dir:  &'static str,
         platform_str: &'static str,
     }
 
@@ -366,10 +372,10 @@ mod tests {
             Self {
                 files,
                 exec_result: ExecResult {
-                    stdout: exec_stdout.to_string(),
-                    stderr: String::new(),
-                    exit_code: 0,
-                    timed_out: false,
+                    stdout:      exec_stdout.to_string(),
+                    stderr:      String::new(),
+                    exit_code:   0,
+                    timed_out:   false,
                     duration_ms: 10,
                 },
                 working_dir: "/home/test",
@@ -501,8 +507,8 @@ mod tests {
     #[test]
     fn select_files_skips_old_mtime() {
         let discovered = vec![DiscoveredFile {
-            relative_path: "test-results/old.xml".to_string(),
-            size: 1024,
+            relative_path:    "test-results/old.xml".to_string(),
+            size:             1024,
             mtime_epoch_secs: 500.0,
         }];
         let selected = select_files_to_collect(&discovered, 1000.0);
@@ -512,8 +518,8 @@ mod tests {
     #[test]
     fn select_files_skips_oversized() {
         let discovered = vec![DiscoveredFile {
-            relative_path: "test-results/huge.xml".to_string(),
-            size: MAX_FILE_SIZE + 1,
+            relative_path:    "test-results/huge.xml".to_string(),
+            size:             MAX_FILE_SIZE + 1,
             mtime_epoch_secs: 2000.0,
         }];
         let selected = select_files_to_collect(&discovered, 1000.0);
@@ -524,18 +530,18 @@ mod tests {
     fn select_files_sorts_smallest_first() {
         let discovered = vec![
             DiscoveredFile {
-                relative_path: "a.xml".to_string(),
-                size: 3000,
+                relative_path:    "a.xml".to_string(),
+                size:             3000,
                 mtime_epoch_secs: 2000.0,
             },
             DiscoveredFile {
-                relative_path: "b.xml".to_string(),
-                size: 1000,
+                relative_path:    "b.xml".to_string(),
+                size:             1000,
                 mtime_epoch_secs: 2000.0,
             },
             DiscoveredFile {
-                relative_path: "c.xml".to_string(),
-                size: 2000,
+                relative_path:    "c.xml".to_string(),
+                size:             2000,
                 mtime_epoch_secs: 2000.0,
             },
         ];
@@ -550,8 +556,8 @@ mod tests {
     fn select_files_enforces_total_budget() {
         let discovered: Vec<DiscoveredFile> = (0..6)
             .map(|i| DiscoveredFile {
-                relative_path: format!("file{i}.xml"),
-                size: 9 * 1024 * 1024, // 9 MB each
+                relative_path:    format!("file{i}.xml"),
+                size:             9 * 1024 * 1024, // 9 MB each
                 mtime_epoch_secs: 2000.0,
             })
             .collect();
@@ -611,18 +617,18 @@ mod tests {
     fn normalize_paths_strips_root_prefix() {
         let files = vec![
             DiscoveredFile {
-                relative_path: "/workspace/test-results/r.xml".to_string(),
-                size: 100,
+                relative_path:    "/workspace/test-results/r.xml".to_string(),
+                size:             100,
                 mtime_epoch_secs: 1000.0,
             },
             DiscoveredFile {
-                relative_path: "./test-results/s.xml".to_string(),
-                size: 200,
+                relative_path:    "./test-results/s.xml".to_string(),
+                size:             200,
                 mtime_epoch_secs: 1000.0,
             },
             DiscoveredFile {
-                relative_path: "test-results/t.xml".to_string(),
-                size: 300,
+                relative_path:    "test-results/t.xml".to_string(),
+                size:             300,
                 mtime_epoch_secs: 1000.0,
             },
         ];
@@ -716,8 +722,8 @@ mod tests {
         // Create 150 small, recent files — should be capped at MAX_FILE_COUNT (100)
         let discovered: Vec<DiscoveredFile> = (0..150)
             .map(|i| DiscoveredFile {
-                relative_path: format!("file{i}.txt"),
-                size: 100, // tiny files, well within total budget
+                relative_path:    format!("file{i}.txt"),
+                size:             100, // tiny files, well within total budget
                 mtime_epoch_secs: 2000.0,
             })
             .collect();

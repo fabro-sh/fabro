@@ -3,24 +3,21 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::FutureExt;
-
 use fabro_core::error::{CoreError, HandlerErrorDetail, Result as CoreResult};
 use fabro_core::handler::NodeHandler;
 use fabro_core::outcome::FailureCategory;
 use fabro_core::retry::RetryPolicy as CoreRetryPolicy;
+use fabro_graphviz::graph::types::Graph as GvGraph;
+use futures::FutureExt;
+use tokio::time::timeout;
 
 use crate::artifact;
 use crate::context::Context;
 use crate::error::FabroError;
-
-use crate::graph::WorkflowGraph;
-use crate::graph::WorkflowNode;
+use crate::graph::{WorkflowGraph, WorkflowNode};
 use crate::handler::{EngineServices, dispatch_handler, format_panic_message};
 use crate::outcome::{Outcome, StageStatus};
 use crate::retry::build_retry_policy;
-use fabro_graphviz::graph::types::Graph as GvGraph;
-use tokio::time::timeout;
 
 /// Production node handler that bridges fabro-core's NodeHandler to the
 /// existing fabro-workflow Handler trait via EngineServices.
@@ -29,8 +26,8 @@ use tokio::time::timeout;
 /// then diffs and applies changes back.
 pub(crate) struct WorkflowNodeHandler {
     pub services: Arc<EngineServices>,
-    pub run_dir: PathBuf,
-    pub graph: Arc<GvGraph>,
+    pub run_dir:  PathBuf,
+    pub graph:    Arc<GvGraph>,
 }
 
 #[async_trait]
@@ -53,9 +50,9 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
         .await
         .map_err(|err| {
             CoreError::handler(HandlerErrorDetail {
-                message: err.to_string(),
+                message:   err.to_string(),
                 retryable: true,
-                category: Some(FailureCategory::TransientInfra),
+                category:  Some(FailureCategory::TransientInfra),
                 signature: None,
             })
         })?;
@@ -81,9 +78,9 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
                 Ok(inner) => inner,
                 Err(_elapsed) => {
                     return Err(CoreError::handler(HandlerErrorDetail {
-                        message: format!("handler timed out after {}ms", duration.as_millis()),
+                        message:   format!("handler timed out after {}ms", duration.as_millis()),
                         retryable: true,
-                        category: Some(FailureCategory::TransientInfra),
+                        category:  Some(FailureCategory::TransientInfra),
                         signature: None,
                     }));
                 }
@@ -92,8 +89,8 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
             panic_safe.await
         };
 
-        // 2. After handler returns, diff the forked context against the snapshot
-        //    and apply changes back to the original context
+        // 2. After handler returns, diff the forked context against the snapshot and
+        //    apply changes back to the original context
         let mut new_values = wf_context.snapshot();
         artifact::normalize_durable_updates(&mut new_values);
         for (k, v) in &new_values {
@@ -117,9 +114,9 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
             Err(panic_payload) => {
                 let msg = format_panic_message(&panic_payload);
                 Err(CoreError::handler(HandlerErrorDetail {
-                    message: msg,
+                    message:   msg,
                     retryable: false,
-                    category: Some(FailureCategory::Deterministic),
+                    category:  Some(FailureCategory::Deterministic),
                     signature: None,
                 }))
             }

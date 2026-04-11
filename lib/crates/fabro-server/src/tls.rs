@@ -1,10 +1,10 @@
+use std::future::Future;
 use std::path::Path;
+use std::pin::Pin;
 use std::sync::Arc;
-use std::{future::Future, pin::Pin};
 
 use anyhow::Context;
-use fabro_types::settings::InterpString;
-use fabro_types::settings::TlsConfig;
+use fabro_types::settings::{InterpString, TlsConfig};
 use rustls::ServerConfig;
 use rustls::server::WebPkiClientVerifier;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
@@ -20,7 +20,8 @@ pub enum ClientAuth {
     None,
     /// Client certificates required; reject connections without one.
     Required,
-    /// Client certificates requested but not required (multi-strategy fallback).
+    /// Client certificates requested but not required (multi-strategy
+    /// fallback).
     Optional,
 }
 
@@ -69,7 +70,8 @@ pub fn build_rustls_config(
     Ok(Arc::new(config))
 }
 
-/// Serve requests over TLS, extracting peer certificates into request extensions.
+/// Serve requests over TLS, extracting peer certificates into request
+/// extensions.
 pub async fn serve_tls(
     listener: TcpListener,
     tls_acceptor: tokio_rustls::TlsAcceptor,

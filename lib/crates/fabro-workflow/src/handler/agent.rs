@@ -4,27 +4,25 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
+use fabro_graphviz::graph::{Graph, Node};
 use fabro_model::Provider;
 use fabro_template::{TemplateContext, render as render_template};
 use fabro_types::RunId;
 
-use crate::context::keys;
-use crate::context::{Context, WorkflowContext};
+use super::{EngineServices, Handler};
+use crate::context::{Context, WorkflowContext, keys};
 use crate::error::FabroError;
 use crate::event::{Emitter, Event, StageScope};
 use crate::outcome::{
     BilledModelUsage, FailureCategory, FailureDetail, Outcome, OutcomeExt, StageStatus,
 };
-use fabro_graphviz::graph::{Graph, Node};
-
-use super::{EngineServices, Handler};
 
 /// Result from a `CodergenBackend` invocation.
 pub enum CodergenResult {
     Text {
-        text: String,
-        usage: Option<BilledModelUsage>,
-        files_touched: Vec<String>,
+        text:              String,
+        usage:             Option<BilledModelUsage>,
+        files_touched:     Vec<String>,
         last_file_touched: Option<String>,
     },
     Full(Outcome),
@@ -259,12 +257,12 @@ impl Handler for AgentHandler {
         let stage_scope = StageScope::for_handler(context, &node.id);
         services.emitter.emit_scoped(
             &Event::Prompt {
-                stage: node.id.clone(),
-                visit: stage_scope.visit,
-                text: prompt.clone(),
-                mode: Some("agent".to_string()),
+                stage:    node.id.clone(),
+                visit:    stage_scope.visit,
+                text:     prompt.clone(),
+                mode:     Some("agent".to_string()),
                 provider: prompt_provider,
-                model: prompt_model,
+                model:    prompt_model,
             },
             &stage_scope,
         );
@@ -335,11 +333,11 @@ impl Handler for AgentHandler {
             .unwrap_or_default();
         services.emitter.emit_scoped(
             &Event::PromptCompleted {
-                node_id: node.id.clone(),
+                node_id:  node.id.clone(),
                 response: response_text.clone(),
-                model: response_model,
+                model:    response_model,
                 provider: response_provider,
-                billing: stage_usage.clone(),
+                billing:  stage_usage.clone(),
             },
             &stage_scope,
         );
@@ -399,15 +397,17 @@ impl Handler for AgentHandler {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::event::Emitter;
+    use std::sync::Arc;
+    use std::time::Duration;
+
     use fabro_graphviz::graph::AttrValue;
     use fabro_store::{Database, RunDatabase, StageId};
     use fabro_types::fixtures;
     use object_store::memory::InMemory;
-    use std::sync::Arc;
-    use std::time::Duration;
     use tempfile::TempDir;
+
+    use super::*;
+    use crate::event::Emitter;
 
     fn make_services() -> EngineServices {
         EngineServices::test_default()
@@ -603,10 +603,11 @@ mod tests {
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
                 Ok(CodergenResult::Text {
-                    text: r#"Done. {"outcome": "success", "preferred_next_label": "approve"}"#
-                        .to_string(),
-                    usage: None,
-                    files_touched: Vec::new(),
+                    text:
+                        r#"Done. {"outcome": "success", "preferred_next_label": "approve"}"#
+                            .to_string(),
+                    usage:             None,
+                    files_touched:     Vec::new(),
                     last_file_touched: None,
                 })
             }
@@ -659,9 +660,9 @@ mod tests {
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
             ) -> Result<CodergenResult, FabroError> {
                 Ok(CodergenResult::Text {
-                    text: "Done writing results.".to_string(),
-                    usage: None,
-                    files_touched: vec!["results.md".to_string()],
+                    text:              "Done writing results.".to_string(),
+                    usage:             None,
+                    files_touched:     vec!["results.md".to_string()],
                     last_file_touched: Some("results.md".to_string()),
                 })
             }
@@ -719,21 +720,21 @@ mod tests {
                 let scope = StageScope::for_handler(context, &node.id);
                 emitter.emit_scoped(
                     &crate::event::Event::Agent {
-                        stage: node.id.clone(),
-                        visit: scope.visit,
-                        event: fabro_agent::AgentEvent::SessionStarted {
+                        stage:             node.id.clone(),
+                        visit:             scope.visit,
+                        event:             fabro_agent::AgentEvent::SessionStarted {
                             provider: Some("openai".to_string()),
-                            model: Some("gpt-5.4".to_string()),
+                            model:    Some("gpt-5.4".to_string()),
                         },
-                        session_id: Some("session_123".to_string()),
+                        session_id:        Some("session_123".to_string()),
                         parent_session_id: None,
                     },
                     &scope,
                 );
                 Ok(CodergenResult::Text {
-                    text: "done".to_string(),
-                    usage: None,
-                    files_touched: Vec::new(),
+                    text:              "done".to_string(),
+                    usage:             None,
+                    files_touched:     Vec::new(),
                     last_file_touched: None,
                 })
             }
@@ -829,9 +830,9 @@ mod tests {
             ) -> Result<CodergenResult, FabroError> {
                 *self.captured_thread_id.lock().unwrap() = Some(thread_id.map(String::from));
                 Ok(CodergenResult::Text {
-                    text: "ok".to_string(),
-                    usage: None,
-                    files_touched: Vec::new(),
+                    text:              "ok".to_string(),
+                    usage:             None,
+                    files_touched:     Vec::new(),
                     last_file_touched: None,
                 })
             }
@@ -881,9 +882,9 @@ mod tests {
             ) -> Result<CodergenResult, FabroError> {
                 *self.captured_thread_id.lock().unwrap() = Some(thread_id.map(String::from));
                 Ok(CodergenResult::Text {
-                    text: "ok".to_string(),
-                    usage: None,
-                    files_touched: Vec::new(),
+                    text:              "ok".to_string(),
+                    usage:             None,
+                    files_touched:     Vec::new(),
                     last_file_touched: None,
                 })
             }
@@ -1109,9 +1110,9 @@ Some text in between.
             ) -> Result<CodergenResult, FabroError> {
                 *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());
                 Ok(CodergenResult::Text {
-                    text: "ok".to_string(),
-                    usage: None,
-                    files_touched: Vec::new(),
+                    text:              "ok".to_string(),
+                    usage:             None,
+                    files_touched:     Vec::new(),
                     last_file_touched: None,
                 })
             }
@@ -1178,9 +1179,9 @@ Some text in between.
             ) -> Result<CodergenResult, FabroError> {
                 *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());
                 Ok(CodergenResult::Text {
-                    text: "ok".to_string(),
-                    usage: None,
-                    files_touched: Vec::new(),
+                    text:              "ok".to_string(),
+                    usage:             None,
+                    files_touched:     Vec::new(),
                     last_file_touched: None,
                 })
             }

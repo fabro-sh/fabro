@@ -9,8 +9,8 @@ use crate::file_resolver::{BundleFileResolver, FileResolver, normalize_logical_p
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct BundledWorkflow {
     pub logical_path: PathBuf,
-    pub source: String,
-    pub files: HashMap<PathBuf, String>,
+    pub source:       String,
+    pub files:        HashMap<PathBuf, String>,
 }
 
 impl BundledWorkflow {
@@ -63,7 +63,7 @@ impl WorkflowBundle {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RunDefinition {
     pub workflow_path: PathBuf,
-    pub workflows: HashMap<PathBuf, BundledWorkflow>,
+    pub workflows:     HashMap<PathBuf, BundledWorkflow>,
 }
 
 impl RunDefinition {

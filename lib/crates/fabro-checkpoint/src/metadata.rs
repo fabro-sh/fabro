@@ -15,14 +15,14 @@ use crate::git::Store;
 /// (`fabro/meta/{run_id}`) so that runs can be resumed from git alone.
 pub struct MetadataStore {
     repo_path: PathBuf,
-    author: GitAuthor,
+    author:    GitAuthor,
 }
 
 impl MetadataStore {
     pub fn new(repo_path: impl Into<PathBuf>, author: &GitAuthor) -> Self {
         Self {
             repo_path: repo_path.into(),
-            author: author.clone(),
+            author:    author.clone(),
         }
     }
 
@@ -59,7 +59,8 @@ impl MetadataStore {
         Ok(())
     }
 
-    /// Write arbitrary files to the metadata branch without overwriting checkpoint.json.
+    /// Write arbitrary files to the metadata branch without overwriting
+    /// checkpoint.json.
     pub fn write_files(
         &self,
         run_id: &str,
@@ -92,7 +93,8 @@ impl MetadataStore {
         Ok(oid.to_string())
     }
 
-    /// Read a single file from the metadata branch. Returns `None` if branch or path doesn't exist.
+    /// Read a single file from the metadata branch. Returns `None` if branch or
+    /// path doesn't exist.
     fn read_file(
         repo_path: &Path,
         run_id: &str,
@@ -108,7 +110,8 @@ impl MetadataStore {
         Ok(branch_store.read_entry(path)?)
     }
 
-    /// Read a checkpoint from the metadata branch. Returns `None` if branch or file doesn't exist.
+    /// Read a checkpoint from the metadata branch. Returns `None` if branch or
+    /// file doesn't exist.
     pub fn read_checkpoint(
         repo_path: &Path,
         run_id: &str,
@@ -126,7 +129,8 @@ impl MetadataStore {
         }
     }
 
-    /// Read the run record from the metadata branch. Returns `None` if not found.
+    /// Read the run record from the metadata branch. Returns `None` if not
+    /// found.
     pub fn read_run_record(
         repo_path: &Path,
         run_id: &str,
@@ -144,7 +148,8 @@ impl MetadataStore {
         }
     }
 
-    /// Read the start record from the metadata branch. Returns `None` if not found.
+    /// Read the start record from the metadata branch. Returns `None` if not
+    /// found.
     pub fn read_start_record(
         repo_path: &Path,
         run_id: &str,
@@ -176,10 +181,11 @@ impl MetadataStore {
 mod tests {
     use std::collections::HashMap;
 
-    use super::*;
     use chrono::{TimeZone, Utc};
     use fabro_types::settings::SettingsLayer;
     use fabro_types::{Graph, fixtures};
+
+    use super::*;
 
     /// Create a temporary git repo with an initial commit.
     fn init_repo(dir: &Path) {
@@ -358,11 +364,10 @@ mod tests {
         let checkpoint_json =
             serde_json::to_vec_pretty(&test_checkpoint("node_a", Vec::new(), None)).unwrap();
         store
-            .write_checkpoint(
-                &run_id,
-                &checkpoint_json,
-                &[("artifacts/response.plan.json", artifact_data.as_slice())],
-            )
+            .write_checkpoint(&run_id, &checkpoint_json, &[(
+                "artifacts/response.plan.json",
+                artifact_data.as_slice(),
+            )])
             .unwrap();
 
         let read_back = MetadataStore::read_artifact(dir.path(), &run_id, "response.plan")
@@ -423,10 +428,10 @@ mod tests {
         let run_id = fixtures::RUN_6.to_string();
         let store = MetadataStore::new(dir.path(), &GitAuthor::default());
         let start_record = StartRecord {
-            run_id: fixtures::RUN_6,
+            run_id:     fixtures::RUN_6,
             start_time: Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).single().unwrap(),
             run_branch: Some("fabro/run/test".to_string()),
-            base_sha: None,
+            base_sha:   None,
         };
         let bytes = serde_json::to_vec_pretty(&start_record).unwrap();
         store.init_run(&run_id, &[("start.json", &bytes)]).unwrap();

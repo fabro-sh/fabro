@@ -1,18 +1,22 @@
+use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
 use fabro_config::Storage;
 use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_model::Catalog;
 use fabro_sandbox::SandboxProvider;
+use fabro_sandbox::daytona::detect_repo_info;
 use fabro_store::Database;
 use fabro_template::{TemplateContext, render as render_template};
 use fabro_types::settings::run::RunMode;
 use fabro_types::settings::{Settings, SettingsLayer};
 use fabro_types::{RunId, RunProvenance};
-use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use fabro_util::json::normalize_json_value;
 
+use super::source::{ResolveWorkflowInput, WorkflowInput, resolve_workflow};
 use crate::error::FabroError;
+use crate::event::{Event, append_event, to_run_event_at};
 use crate::file_resolver::FileResolver;
 use crate::pipeline::types::PersistOptions;
 use crate::pipeline::{self, Persisted, TransformOptions, Validated};
@@ -21,11 +25,6 @@ use crate::run_lookup::default_scratch_base;
 use crate::run_materialization::materialize_run;
 use crate::transforms::Transform;
 use crate::workflow_bundle::{RunDefinition, WorkflowBundle};
-use fabro_sandbox::daytona::detect_repo_info;
-use fabro_util::json::normalize_json_value;
-
-use super::source::{ResolveWorkflowInput, WorkflowInput, resolve_workflow};
-use crate::event::{Event, append_event, to_run_event_at};
 
 #[derive(Clone, Debug)]
 pub struct CreateRunInput {
@@ -46,22 +45,22 @@ pub struct CreateRunInput {
 #[derive(Debug)]
 pub struct CreatedRun {
     pub persisted: Persisted,
-    pub run_id: RunId,
-    pub run_dir: PathBuf,
-    pub dot_path: Option<PathBuf>,
+    pub run_id:    RunId,
+    pub run_dir:   PathBuf,
+    pub dot_path:  Option<PathBuf>,
 }
 
 struct PersistCreateOptions {
-    settings: SettingsLayer,
-    run_id: Option<RunId>,
-    run_dir: Option<PathBuf>,
-    workflow_slug: Option<String>,
-    labels: HashMap<String, String>,
-    base_branch: Option<String>,
+    settings:          SettingsLayer,
+    run_id:            Option<RunId>,
+    run_dir:           Option<PathBuf>,
+    workflow_slug:     Option<String>,
+    labels:            HashMap<String, String>,
+    base_branch:       Option<String>,
     working_directory: PathBuf,
-    host_repo_path: Option<String>,
-    repo_origin_url: Option<String>,
-    provenance: Option<RunProvenance>,
+    host_repo_path:    Option<String>,
+    repo_origin_url:   Option<String>,
+    provenance:        Option<RunProvenance>,
 }
 
 /// Resolve workflow inputs, normalize settings, and persist a run directory.
@@ -69,7 +68,7 @@ pub async fn create(store: &Database, request: CreateRunInput) -> Result<Created
     let resolved = resolve_workflow(ResolveWorkflowInput {
         workflow: request.workflow,
         settings: request.settings,
-        cwd: request.cwd,
+        cwd:      request.cwd,
     })
     .map_err(|err| FabroError::Parse(err.to_string()))?;
 
@@ -250,14 +249,10 @@ async fn persist_created_run(
         .await
         .map(|_| ())
         .map_err(store_error)?;
-    append_event(
-        &run_store,
-        &record.run_id,
-        &Event::RunSubmitted {
-            reason: None,
-            definition_blob,
-        },
-    )
+    append_event(&run_store, &record.run_id, &Event::RunSubmitted {
+        reason: None,
+        definition_blob,
+    })
     .await
     .map_err(store_error)
 }
@@ -343,15 +338,12 @@ pub(super) fn preprocess_and_validate(
     let mut parsed = pipeline::parse(&source)?;
     apply_goal_override(&mut parsed.graph, goal_override);
 
-    let transformed = pipeline::transform(
-        parsed,
-        &TransformOptions {
-            current_dir,
-            file_resolver,
-            inputs,
-            custom_transforms,
-        },
-    )?;
+    let transformed = pipeline::transform(parsed, &TransformOptions {
+        current_dir,
+        file_resolver,
+        inputs,
+        custom_transforms,
+    })?;
     Ok(pipeline::validate(transformed, &[]))
 }
 
@@ -409,13 +401,10 @@ fn persist_validated(
         definition_blob: None,
     };
 
-    pipeline::persist(
-        validated,
-        PersistOptions {
-            run_dir,
-            run_record,
-        },
-    )
+    pipeline::persist(validated, PersistOptions {
+        run_dir,
+        run_record,
+    })
 }
 
 pub(crate) fn default_run_dir(run_id: &RunId) -> PathBuf {
@@ -430,7 +419,9 @@ pub fn make_run_dir(scratch_base: &Path, run_id: &RunId) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::sync::Arc;
+    use std::time::Duration;
+
     use chrono::{Local, TimeZone, Utc};
     use fabro_graphviz::graph::AttrValue;
     use fabro_store::Database;
@@ -438,9 +429,8 @@ mod tests {
     use fabro_types::settings::InterpString;
     use object_store::local::LocalFileSystem;
     use object_store::memory::InMemory;
-    use std::sync::Arc;
-    use std::time::Duration;
 
+    use super::*;
     use crate::operations::{ValidateInput, validate};
     use crate::workflow_bundle::BundledWorkflow;
     fn memory_store() -> Arc<Database> {
@@ -454,7 +444,7 @@ mod tests {
     fn validate_dot(dot_source: &str, settings: SettingsLayer) -> Validated {
         validate(ValidateInput {
             workflow: WorkflowInput::DotSource {
-                source: dot_source.to_string(),
+                source:   dot_source.to_string(),
                 base_dir: None,
             },
             settings,
@@ -573,12 +563,12 @@ mod tests {
     #[test]
     fn validate_returns_error_on_invalid_dot() {
         let result = validate(ValidateInput {
-            workflow: WorkflowInput::DotSource {
-                source: "not a graph".to_string(),
+            workflow:          WorkflowInput::DotSource {
+                source:   "not a graph".to_string(),
                 base_dir: None,
             },
-            settings: SettingsLayer::default(),
-            cwd: PathBuf::from("."),
+            settings:          SettingsLayer::default(),
+            cwd:               PathBuf::from("."),
             custom_transforms: Vec::new(),
         });
         assert!(result.is_err());
@@ -616,12 +606,12 @@ mod tests {
         }
 
         let validated = validate(ValidateInput {
-            workflow: WorkflowInput::DotSource {
-                source: MINIMAL_DOT.to_string(),
+            workflow:          WorkflowInput::DotSource {
+                source:   MINIMAL_DOT.to_string(),
                 base_dir: None,
             },
-            settings: SettingsLayer::default(),
-            cwd: PathBuf::from("."),
+            settings:          SettingsLayer::default(),
+            cwd:               PathBuf::from("."),
             custom_transforms: vec![Box::new(TagTransform)],
         })
         .unwrap();
@@ -652,9 +642,9 @@ mod tests {
         .unwrap();
 
         let validated = validate(ValidateInput {
-            workflow: WorkflowInput::Path(dot_path),
-            settings: SettingsLayer::default(),
-            cwd: dir.path().to_path_buf(),
+            workflow:          WorkflowInput::Path(dot_path),
+            settings:          SettingsLayer::default(),
+            cwd:               dir.path().to_path_buf(),
             custom_transforms: Vec::new(),
         })
         .unwrap();
@@ -665,9 +655,9 @@ mod tests {
     #[test]
     fn validate_from_bundle_resolves_nested_import_files_relative_to_imported_graph() {
         let validated = validate(ValidateInput {
-            workflow: WorkflowInput::Bundled(BundledWorkflow {
+            workflow:          WorkflowInput::Bundled(BundledWorkflow {
                 logical_path: PathBuf::from("workflow.fabro"),
-                source: r#"digraph Test {
+                source:       r#"digraph Test {
                     graph [goal="Ship"]
                     start [shape=Mdiamond]
                     validate [import="./child/validate.fabro"]
@@ -675,7 +665,7 @@ mod tests {
                     start -> validate -> exit
                 }"#
                 .to_string(),
-                files: HashMap::from([
+                files:        HashMap::from([
                     (
                         PathBuf::from("child/validate.fabro"),
                         r#"digraph Validate {
@@ -692,8 +682,8 @@ mod tests {
                     ),
                 ]),
             }),
-            settings: SettingsLayer::default(),
-            cwd: PathBuf::from("."),
+            settings:          SettingsLayer::default(),
+            cwd:               PathBuf::from("."),
             custom_transforms: Vec::new(),
         })
         .unwrap();
@@ -716,26 +706,23 @@ mod tests {
         }"#;
         let dir = tempfile::tempdir().unwrap();
         let store = memory_store();
-        let err = create(
-            &store,
-            CreateRunInput {
-                workflow: WorkflowInput::DotSource {
-                    source: dot.to_string(),
-                    base_dir: None,
-                },
-                settings: SettingsLayer::default(),
-                cwd: dir.path().to_path_buf(),
-                workflow_slug: None,
-                workflow_path: None,
-                workflow_bundle: None,
-                submitted_manifest_bytes: None,
-                run_id: None,
-                host_repo_path: None,
-                repo_origin_url: None,
-                base_branch: None,
-                provenance: None,
+        let err = create(&store, CreateRunInput {
+            workflow: WorkflowInput::DotSource {
+                source:   dot.to_string(),
+                base_dir: None,
             },
-        )
+            settings: SettingsLayer::default(),
+            cwd: dir.path().to_path_buf(),
+            workflow_slug: None,
+            workflow_path: None,
+            workflow_bundle: None,
+            submitted_manifest_bytes: None,
+            run_id: None,
+            host_repo_path: None,
+            repo_origin_url: None,
+            base_branch: None,
+            provenance: None,
+        })
         .await
         .unwrap_err();
 
@@ -751,53 +738,50 @@ mod tests {
     async fn create_persists_normalized_config_and_initial_state() {
         let dir = tempfile::tempdir().unwrap();
         let store = memory_store();
-        let created = create(
-            &store,
-            CreateRunInput {
-                workflow: WorkflowInput::DotSource {
-                    source: MINIMAL_DOT.to_string(),
-                    base_dir: None,
-                },
-                settings: {
-                    use fabro_types::settings::run::{
-                        RunExecutionLayer, RunGoalLayer, RunLayer, RunMode, RunModelLayer,
-                        RunPullRequestLayer,
-                    };
-                    let mut metadata = HashMap::new();
-                    metadata.insert("env".to_string(), "test".to_string());
-                    SettingsLayer {
-                        run: Some(RunLayer {
-                            goal: Some(RunGoalLayer::Inline(InterpString::parse("override goal"))),
-                            metadata,
-                            model: Some(RunModelLayer {
-                                name: Some(InterpString::parse("sonnet")),
-                                ..RunModelLayer::default()
-                            }),
-                            pull_request: Some(RunPullRequestLayer {
-                                enabled: Some(false),
-                                ..RunPullRequestLayer::default()
-                            }),
-                            execution: Some(RunExecutionLayer {
-                                mode: Some(RunMode::DryRun),
-                                ..RunExecutionLayer::default()
-                            }),
-                            ..RunLayer::default()
-                        }),
-                        ..SettingsLayer::default()
-                    }
-                },
-                cwd: dir.path().to_path_buf(),
-                workflow_slug: Some("slug".to_string()),
-                workflow_path: None,
-                workflow_bundle: None,
-                submitted_manifest_bytes: None,
-                run_id: Some(fixtures::RUN_1),
-                host_repo_path: Some(dir.path().display().to_string()),
-                repo_origin_url: None,
-                base_branch: Some("main".to_string()),
-                provenance: None,
+        let created = create(&store, CreateRunInput {
+            workflow: WorkflowInput::DotSource {
+                source:   MINIMAL_DOT.to_string(),
+                base_dir: None,
             },
-        )
+            settings: {
+                use fabro_types::settings::run::{
+                    RunExecutionLayer, RunGoalLayer, RunLayer, RunMode, RunModelLayer,
+                    RunPullRequestLayer,
+                };
+                let mut metadata = HashMap::new();
+                metadata.insert("env".to_string(), "test".to_string());
+                SettingsLayer {
+                    run: Some(RunLayer {
+                        goal: Some(RunGoalLayer::Inline(InterpString::parse("override goal"))),
+                        metadata,
+                        model: Some(RunModelLayer {
+                            name: Some(InterpString::parse("sonnet")),
+                            ..RunModelLayer::default()
+                        }),
+                        pull_request: Some(RunPullRequestLayer {
+                            enabled: Some(false),
+                            ..RunPullRequestLayer::default()
+                        }),
+                        execution: Some(RunExecutionLayer {
+                            mode: Some(RunMode::DryRun),
+                            ..RunExecutionLayer::default()
+                        }),
+                        ..RunLayer::default()
+                    }),
+                    ..SettingsLayer::default()
+                }
+            },
+            cwd: dir.path().to_path_buf(),
+            workflow_slug: Some("slug".to_string()),
+            workflow_path: None,
+            workflow_bundle: None,
+            submitted_manifest_bytes: None,
+            run_id: Some(fixtures::RUN_1),
+            host_repo_path: Some(dir.path().display().to_string()),
+            repo_origin_url: None,
+            base_branch: Some("main".to_string()),
+            provenance: None,
+        })
         .await
         .unwrap();
 
@@ -862,39 +846,36 @@ mod tests {
         std::fs::create_dir_all(&workspace).unwrap();
 
         let store = memory_store();
-        let created = create(
-            &store,
-            CreateRunInput {
-                workflow: WorkflowInput::DotSource {
-                    source: MINIMAL_DOT.to_string(),
-                    base_dir: None,
-                },
-                settings: {
-                    use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
-                    SettingsLayer {
-                        run: Some(RunLayer {
-                            working_dir: Some(InterpString::parse("workspace")),
-                            execution: Some(RunExecutionLayer {
-                                mode: Some(RunMode::DryRun),
-                                ..RunExecutionLayer::default()
-                            }),
-                            ..RunLayer::default()
-                        }),
-                        ..SettingsLayer::default()
-                    }
-                },
-                cwd: dir.path().to_path_buf(),
-                workflow_slug: None,
-                workflow_path: None,
-                workflow_bundle: None,
-                submitted_manifest_bytes: None,
-                run_id: Some(fixtures::RUN_2),
-                host_repo_path: None,
-                repo_origin_url: None,
-                base_branch: None,
-                provenance: None,
+        let created = create(&store, CreateRunInput {
+            workflow: WorkflowInput::DotSource {
+                source:   MINIMAL_DOT.to_string(),
+                base_dir: None,
             },
-        )
+            settings: {
+                use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
+                SettingsLayer {
+                    run: Some(RunLayer {
+                        working_dir: Some(InterpString::parse("workspace")),
+                        execution: Some(RunExecutionLayer {
+                            mode: Some(RunMode::DryRun),
+                            ..RunExecutionLayer::default()
+                        }),
+                        ..RunLayer::default()
+                    }),
+                    ..SettingsLayer::default()
+                }
+            },
+            cwd: dir.path().to_path_buf(),
+            workflow_slug: None,
+            workflow_path: None,
+            workflow_bundle: None,
+            submitted_manifest_bytes: None,
+            run_id: Some(fixtures::RUN_2),
+            host_repo_path: None,
+            repo_origin_url: None,
+            base_branch: None,
+            provenance: None,
+        })
         .await
         .unwrap();
 
@@ -916,26 +897,23 @@ mod tests {
     async fn create_persists_repo_origin_url_from_request() {
         let dir = tempfile::tempdir().unwrap();
         let store = memory_store();
-        let created = create(
-            &store,
-            CreateRunInput {
-                workflow: WorkflowInput::DotSource {
-                    source: MINIMAL_DOT.to_string(),
-                    base_dir: None,
-                },
-                settings: dry_run_only_settings(),
-                cwd: dir.path().to_path_buf(),
-                workflow_slug: None,
-                workflow_path: None,
-                workflow_bundle: None,
-                submitted_manifest_bytes: None,
-                run_id: Some(fixtures::RUN_2),
-                host_repo_path: None,
-                repo_origin_url: Some("https://github.com/acme/widgets".to_string()),
-                base_branch: None,
-                provenance: None,
+        let created = create(&store, CreateRunInput {
+            workflow: WorkflowInput::DotSource {
+                source:   MINIMAL_DOT.to_string(),
+                base_dir: None,
             },
-        )
+            settings: dry_run_only_settings(),
+            cwd: dir.path().to_path_buf(),
+            workflow_slug: None,
+            workflow_path: None,
+            workflow_bundle: None,
+            submitted_manifest_bytes: None,
+            run_id: Some(fixtures::RUN_2),
+            host_repo_path: None,
+            repo_origin_url: Some("https://github.com/acme/widgets".to_string()),
+            base_branch: None,
+            provenance: None,
+        })
         .await
         .unwrap();
 
@@ -988,26 +966,23 @@ mod tests {
         let object_store =
             Arc::new(LocalFileSystem::new_with_prefix(storage_dir.join("store")).unwrap());
         let store = Arc::new(Database::new(object_store, "", Duration::from_millis(1)));
-        let created = create(
-            store.as_ref(),
-            CreateRunInput {
-                workflow: WorkflowInput::DotSource {
-                    source: MINIMAL_DOT.to_string(),
-                    base_dir: None,
-                },
-                settings: dry_run_with_storage(&storage_dir),
-                cwd: dir.path().to_path_buf(),
-                workflow_slug: Some("slug".to_string()),
-                workflow_path: None,
-                workflow_bundle: None,
-                submitted_manifest_bytes: None,
-                run_id: Some(fixtures::RUN_3),
-                host_repo_path: None,
-                repo_origin_url: None,
-                base_branch: None,
-                provenance: None,
+        let created = create(store.as_ref(), CreateRunInput {
+            workflow: WorkflowInput::DotSource {
+                source:   MINIMAL_DOT.to_string(),
+                base_dir: None,
             },
-        )
+            settings: dry_run_with_storage(&storage_dir),
+            cwd: dir.path().to_path_buf(),
+            workflow_slug: Some("slug".to_string()),
+            workflow_path: None,
+            workflow_bundle: None,
+            submitted_manifest_bytes: None,
+            run_id: Some(fixtures::RUN_3),
+            host_repo_path: None,
+            repo_origin_url: None,
+            base_branch: None,
+            provenance: None,
+        })
         .await
         .unwrap();
         let run_store = store.open_run_reader(&created.run_id).await.unwrap();
@@ -1027,39 +1002,36 @@ mod tests {
         let object_store =
             Arc::new(LocalFileSystem::new_with_prefix(storage_dir.join("store")).unwrap());
         let store = Arc::new(Database::new(object_store, "", Duration::from_millis(1)));
-        let created = create(
-            store.as_ref(),
-            CreateRunInput {
-                workflow: WorkflowInput::DotSource {
-                    source: MINIMAL_DOT.to_string(),
-                    base_dir: None,
-                },
-                settings: dry_run_with_storage(&storage_dir),
-                cwd: dir.path().to_path_buf(),
-                workflow_slug: Some("slug".to_string()),
-                workflow_path: None,
-                workflow_bundle: None,
-                submitted_manifest_bytes: None,
-                run_id: Some(fixtures::RUN_64),
-                host_repo_path: None,
-                repo_origin_url: None,
-                base_branch: None,
-                provenance: Some(fabro_types::RunProvenance {
-                    server: Some(fabro_types::RunServerProvenance {
-                        version: "0.9.0".to_string(),
-                    }),
-                    client: Some(fabro_types::RunClientProvenance {
-                        user_agent: Some("fabro-cli/0.9.0".to_string()),
-                        name: Some("fabro-cli".to_string()),
-                        version: Some("0.9.0".to_string()),
-                    }),
-                    subject: Some(fabro_types::RunSubjectProvenance {
-                        login: None,
-                        auth_method: fabro_types::RunAuthMethod::Disabled,
-                    }),
-                }),
+        let created = create(store.as_ref(), CreateRunInput {
+            workflow: WorkflowInput::DotSource {
+                source:   MINIMAL_DOT.to_string(),
+                base_dir: None,
             },
-        )
+            settings: dry_run_with_storage(&storage_dir),
+            cwd: dir.path().to_path_buf(),
+            workflow_slug: Some("slug".to_string()),
+            workflow_path: None,
+            workflow_bundle: None,
+            submitted_manifest_bytes: None,
+            run_id: Some(fixtures::RUN_64),
+            host_repo_path: None,
+            repo_origin_url: None,
+            base_branch: None,
+            provenance: Some(fabro_types::RunProvenance {
+                server:  Some(fabro_types::RunServerProvenance {
+                    version: "0.9.0".to_string(),
+                }),
+                client:  Some(fabro_types::RunClientProvenance {
+                    user_agent: Some("fabro-cli/0.9.0".to_string()),
+                    name:       Some("fabro-cli".to_string()),
+                    version:    Some("0.9.0".to_string()),
+                }),
+                subject: Some(fabro_types::RunSubjectProvenance {
+                    login:       None,
+                    auth_method: fabro_types::RunAuthMethod::Disabled,
+                }),
+            }),
+        })
         .await
         .unwrap();
 

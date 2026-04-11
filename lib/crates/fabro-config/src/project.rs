@@ -8,22 +8,21 @@ use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
+use fabro_types::settings::SettingsLayer;
 use serde::Serialize;
 
 use crate::load::load_settings_path;
 use crate::parse::parse_settings_layer;
-use crate::run;
-use crate::{resolve_project_from_file, resolve_run_from_file, resolve_workflow_from_file};
-use fabro_types::settings::SettingsLayer;
+use crate::{resolve_project_from_file, resolve_run_from_file, resolve_workflow_from_file, run};
 
 const CONFIG_FILENAME: &str = "fabro.toml";
 #[derive(Clone, Debug)]
 pub struct WorkflowPathResolution {
     pub resolved_workflow_path: PathBuf,
-    pub dot_path: PathBuf,
-    pub workflow_config: Option<SettingsLayer>,
-    pub workflow_toml_path: Option<PathBuf>,
-    pub workflow_slug: Option<String>,
+    pub dot_path:               PathBuf,
+    pub workflow_config:        Option<SettingsLayer>,
+    pub workflow_toml_path:     Option<PathBuf>,
+    pub workflow_slug:          Option<String>,
 }
 
 /// Parse a project config from a TOML string.
@@ -226,8 +225,8 @@ fn user_workflows_dir() -> PathBuf {
 /// Metadata about a discovered workflow.
 #[derive(Clone, Debug, Serialize)]
 pub struct WorkflowInfo {
-    pub name: String,
-    pub goal: Option<String>,
+    pub name:   String,
+    pub goal:   Option<String>,
     pub source: WorkflowSource,
 }
 
@@ -239,7 +238,8 @@ pub enum WorkflowSource {
     User,
 }
 
-/// List workflow names in a single directory by scanning for subdirs containing `workflow.toml`.
+/// List workflow names in a single directory by scanning for subdirs containing
+/// `workflow.toml`.
 fn list_workflows_in(workflows_dir: &Path) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(workflows_dir) else {
         return Vec::new();
@@ -257,7 +257,8 @@ fn list_workflows_in(workflows_dir: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Read the `run.goal` field from a `workflow.toml` without full config validation.
+/// Read the `run.goal` field from a `workflow.toml` without full config
+/// validation.
 fn read_workflow_goal(workflow_toml: &Path) -> Option<String> {
     let content = std::fs::read_to_string(workflow_toml).ok()?;
     let table: toml::Table = content.parse().ok()?;
@@ -269,7 +270,8 @@ fn read_workflow_goal(workflow_toml: &Path) -> Option<String> {
         .map(String::from)
 }
 
-/// List workflows with metadata by scanning project and user workflow directories.
+/// List workflows with metadata by scanning project and user workflow
+/// directories.
 pub fn list_workflows_detailed(
     project_workflows_dir: Option<&Path>,
     user_workflows_dir: Option<&Path>,
@@ -328,7 +330,8 @@ pub fn list_available_workflows(
     names
 }
 
-/// Find the closest match using normalized Levenshtein distance (threshold: 0.5).
+/// Find the closest match using normalized Levenshtein distance (threshold:
+/// 0.5).
 fn find_closest_match(input: &str, candidates: &[String]) -> Option<String> {
     candidates
         .iter()
@@ -375,9 +378,11 @@ pub fn resolve_fabro_root(config_path: &Path, config: &SettingsLayer) -> PathBuf
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs;
+
     use tempfile::TempDir;
+
+    use super::*;
 
     #[test]
     fn parse_minimal_config() {

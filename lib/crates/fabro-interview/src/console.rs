@@ -15,7 +15,8 @@ enum PromptRead {
     Error,
 }
 
-/// Reads from stdin to collect answers. Displays formatted prompts per spec 6.4.
+/// Reads from stdin to collect answers. Displays formatted prompts per spec
+/// 6.4.
 pub struct ConsoleInterviewer {
     styles: &'static Styles,
 }
@@ -33,9 +34,9 @@ fn find_matching_option(response: &str, options: &[QuestionOption]) -> Option<An
     for opt in options {
         if opt.key.eq_ignore_ascii_case(trimmed) {
             return Some(Answer {
-                value: AnswerValue::Selected(opt.key.clone()),
+                value:           AnswerValue::Selected(opt.key.clone()),
                 selected_option: Some(opt.clone()),
-                text: None,
+                text:            None,
             });
         }
     }
@@ -44,9 +45,9 @@ fn find_matching_option(response: &str, options: &[QuestionOption]) -> Option<An
         if idx >= 1 && idx <= options.len() {
             let opt = &options[idx - 1];
             return Some(Answer {
-                value: AnswerValue::Selected(opt.key.clone()),
+                value:           AnswerValue::Selected(opt.key.clone()),
                 selected_option: Some(opt.clone()),
-                text: None,
+                text:            None,
             });
         }
     }
@@ -145,9 +146,9 @@ fn ask_select_interactive(question: &Question) -> Answer {
         Ok(Some(idx)) if idx < question.options.len() => {
             let opt = &question.options[idx];
             Answer {
-                value: AnswerValue::Selected(opt.key.clone()),
+                value:           AnswerValue::Selected(opt.key.clone()),
                 selected_option: Some(opt.clone()),
-                text: None,
+                text:            None,
             }
         }
         _ => Answer::interrupted(),
@@ -179,7 +180,8 @@ fn ask_multi_select_interactive(question: &Question) -> Answer {
     }
 }
 
-/// Ask a yes/no or confirmation question using dialoguer's `Confirm` widget on a TTY.
+/// Ask a yes/no or confirmation question using dialoguer's `Confirm` widget on
+/// a TTY.
 fn ask_confirm_interactive(question: &Question) -> Answer {
     let confirmed = dialoguer::Confirm::with_theme(&ColorfulTheme::default())
         .with_prompt(&question.text)
@@ -275,11 +277,11 @@ mod tests {
     fn find_matching_option_by_key() {
         let options = vec![
             crate::QuestionOption {
-                key: "A".to_string(),
+                key:   "A".to_string(),
                 label: "Approve".to_string(),
             },
             crate::QuestionOption {
-                key: "R".to_string(),
+                key:   "R".to_string(),
                 label: "Reject".to_string(),
             },
         ];
@@ -292,7 +294,7 @@ mod tests {
     #[test]
     fn find_matching_option_by_key_case_insensitive() {
         let options = vec![crate::QuestionOption {
-            key: "Y".to_string(),
+            key:   "Y".to_string(),
             label: "Yes".to_string(),
         }];
         let result = find_matching_option("y", &options);
@@ -303,11 +305,11 @@ mod tests {
     fn find_matching_option_by_index() {
         let options = vec![
             crate::QuestionOption {
-                key: "A".to_string(),
+                key:   "A".to_string(),
                 label: "Alpha".to_string(),
             },
             crate::QuestionOption {
-                key: "B".to_string(),
+                key:   "B".to_string(),
                 label: "Beta".to_string(),
             },
         ];
@@ -320,7 +322,7 @@ mod tests {
     #[test]
     fn find_matching_option_no_match() {
         let options = vec![crate::QuestionOption {
-            key: "A".to_string(),
+            key:   "A".to_string(),
             label: "Alpha".to_string(),
         }];
         let result = find_matching_option("zzz", &options);
@@ -330,7 +332,7 @@ mod tests {
     #[test]
     fn find_matching_option_index_out_of_range() {
         let options = vec![crate::QuestionOption {
-            key: "A".to_string(),
+            key:   "A".to_string(),
             label: "Alpha".to_string(),
         }];
         let result = find_matching_option("5", &options);
@@ -341,7 +343,7 @@ mod tests {
     fn non_tty_multiple_choice_eof_returns_interrupted() {
         let mut question = Question::new("Approve?", QuestionType::MultipleChoice);
         question.options = vec![crate::QuestionOption {
-            key: "A".to_string(),
+            key:   "A".to_string(),
             label: "Approve".to_string(),
         }];
 

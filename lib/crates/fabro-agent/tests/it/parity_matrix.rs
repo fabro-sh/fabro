@@ -18,7 +18,7 @@ use tokio::sync::Mutex as AsyncMutex;
 #[derive(Clone)]
 struct OpenAiTwinOptions {
     base_url: String,
-    api_key: String,
+    api_key:  String,
 }
 
 fn summarizer_model_id(provider: Provider) -> ModelHandle {
@@ -30,22 +30,22 @@ fn summarizer_model_id(provider: Provider) -> ModelHandle {
         | Provider::Inception
         | Provider::OpenAiCompatible => ModelHandle::ByName {
             provider: Provider::OpenAi,
-            model: "gpt-5.4-mini".to_string(),
+            model:    "gpt-5.4-mini".to_string(),
         },
         Provider::Gemini => ModelHandle::ByName {
             provider: Provider::Gemini,
-            model: "gemini-3-flash-preview".to_string(),
+            model:    "gemini-3-flash-preview".to_string(),
         },
         Provider::Anthropic => ModelHandle::ByName {
             provider: Provider::Anthropic,
-            model: "claude-haiku-4-5".to_string(),
+            model:    "claude-haiku-4-5".to_string(),
         },
     }
 }
 
 fn build_summarizer(provider: Provider, client: &Client) -> WebFetchSummarizer {
     WebFetchSummarizer {
-        client: client.clone(),
+        client:   client.clone(),
         model_id: summarizer_model_id(provider),
     }
 }
@@ -76,7 +76,8 @@ async fn make_session(
     let mut profile = build_profile(provider, model, &client);
     let env = Arc::new(LocalSandbox::new(cwd.to_path_buf()));
 
-    // Register subagent tools so spawn_agent / wait / send_input / close_agent are available
+    // Register subagent tools so spawn_agent / wait / send_input / close_agent are
+    // available
     let manager = Arc::new(AsyncMutex::new(SubAgentManager::new(3)));
     let factory_client = client.clone();
     let factory_model: String = model.to_string();
@@ -369,15 +370,18 @@ provider_test!(
 );
 
 // Scenarios below are only generated for providers where they are supported.
-// - multi_step_read_analyze_edit / provider_specific_editing: gpt-4o-mini is too
-//   weak to reliably apply precise file edits (uses apply_patch, not edit_file).
-// - reasoning_effort: gpt-4o-mini doesn't support the reasoning.effort parameter.
+// - multi_step_read_analyze_edit / provider_specific_editing: gpt-4o-mini is
+//   too weak to reliably apply precise file edits (uses apply_patch, not
+//   edit_file).
+// - reasoning_effort: gpt-4o-mini doesn't support the reasoning.effort
+//   parameter.
 // - loop_detection: needs custom config, tested separately below.
 
 provider_tests!(error_recovery);
 openai_twin_provider_test!(error_recovery);
 
-// gpt-5-mini is too weak to reliably apply precise file edits (uses apply_patch, not edit_file).
+// gpt-5-mini is too weak to reliably apply precise file edits (uses
+// apply_patch, not edit_file).
 macro_rules! non_openai_provider_tests {
     ($scenario:ident) => {
         provider_test!(
@@ -672,7 +676,8 @@ reasoning_effort_tests!(
     anthropic_reasoning_effort,
     keys = ["ANTHROPIC_API_KEY"]
 );
-// gpt-5-mini does not support the reasoning.effort parameter, so no OpenAI test.
+// gpt-5-mini does not support the reasoning.effort parameter, so no OpenAI
+// test.
 reasoning_effort_tests!(
     Provider::Gemini,
     "gemini-3-flash-preview",

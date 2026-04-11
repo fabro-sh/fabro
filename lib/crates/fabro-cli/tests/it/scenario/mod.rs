@@ -10,9 +10,10 @@ mod smoke;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::cmd::support::RunProjection;
 use fabro_config::Storage;
 use fabro_server::bind::Bind;
+
+use crate::cmd::support::RunProjection;
 pub(super) fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/it/workflow/fixtures")

@@ -1,6 +1,5 @@
-use insta::assert_snapshot;
-
 use fabro_test::{fabro_snapshot, run_and_format, test_context};
+use insta::assert_snapshot;
 
 use super::support::{
     git_filters, git_show_json, git_stdout, metadata_run_ids, run_branch_commits,
@@ -85,10 +84,10 @@ fn fork_latest_prints_new_run_and_resume_hint() {
     );
     let new_run_id = &new_run_ids[0];
 
-    let new_head = git_stdout(
-        &setup.repo_dir,
-        &["rev-parse", &format!("fabro/run/{new_run_id}")],
-    );
+    let new_head = git_stdout(&setup.repo_dir, &[
+        "rev-parse",
+        &format!("fabro/run/{new_run_id}"),
+    ]);
     let expected_head = run_branch_commits(&setup.repo_dir, &setup.run.run_id)
         .into_iter()
         .last()
@@ -129,10 +128,10 @@ fn fork_from_earlier_checkpoint_uses_expected_sha() {
     );
     let new_run_id = &new_run_ids[0];
 
-    let new_head = git_stdout(
-        &setup.repo_dir,
-        &["rev-parse", &format!("fabro/run/{new_run_id}")],
-    );
+    let new_head = git_stdout(&setup.repo_dir, &[
+        "rev-parse",
+        &format!("fabro/run/{new_run_id}"),
+    ]);
     assert_eq!(new_head.trim(), expected_head);
 
     let checkpoint = git_show_json(

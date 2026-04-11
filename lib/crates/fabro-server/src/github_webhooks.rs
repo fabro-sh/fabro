@@ -103,7 +103,7 @@ fn parse_event_metadata(body: &[u8]) -> (String, String) {
 
 /// A running webhook listener that can be shut down.
 pub struct WebhookListener {
-    port: u16,
+    port:        u16,
     shutdown_tx: oneshot::Sender<()>,
 }
 
@@ -281,10 +281,11 @@ async fn update_github_app_webhook(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use axum::body::Body;
     use axum::http::Request;
     use tower::ServiceExt;
+
+    use super::*;
 
     fn test_http_client() -> reqwest::Client {
         reqwest::Client::builder().no_proxy().build().unwrap()

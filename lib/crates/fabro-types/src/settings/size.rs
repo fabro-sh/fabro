@@ -38,9 +38,11 @@ impl Size {
 pub enum ParseSizeError {
     /// The input was empty or whitespace only.
     Empty,
-    /// The input had a numeric portion that could not be parsed as a non-negative integer.
+    /// The input had a numeric portion that could not be parsed as a
+    /// non-negative integer.
     InvalidNumber { input: String },
-    /// The input contained a fractional value, which is not supported in the first pass.
+    /// The input contained a fractional value, which is not supported in the
+    /// first pass.
     Fractional { input: String },
     /// The input had an unrecognized unit suffix.
     InvalidUnit { input: String, unit: String },
@@ -123,7 +125,7 @@ impl FromStr for Size {
             other => {
                 return Err(ParseSizeError::InvalidUnit {
                     input: input.to_owned(),
-                    unit: other.to_owned(),
+                    unit:  other.to_owned(),
                 });
             }
         };

@@ -1,14 +1,16 @@
+use std::sync::Arc;
+
+use fabro_llm::types::ToolDefinition;
+
 use crate::sandbox::Sandbox;
 use crate::tool_registry::RegisteredTool;
 use crate::tools::required_str;
-use fabro_llm::types::ToolDefinition;
-use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct Skill {
-    pub name: String,
+    pub name:        String,
     pub description: String,
-    pub template: String,
+    pub template:    String,
 }
 
 pub fn parse_skill(content: &str) -> Result<Skill, String> {
@@ -46,21 +48,23 @@ pub fn parse_skill(content: &str) -> Result<Skill, String> {
     })
 }
 
-/// A detected skill reference in user input: the name and byte range of the `/name` token.
+/// A detected skill reference in user input: the name and byte range of the
+/// `/name` token.
 struct SkillMatch {
-    name: String,
+    name:  String,
     /// Byte offset of the `/` character
     start: usize,
     /// Byte offset just past the skill name
-    end: usize,
+    end:   usize,
 }
 
 fn is_skill_name_char(c: char) -> bool {
     c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-'
 }
 
-/// Find all `/skill-name` tokens in input where the `/` is preceded by whitespace (or
-/// start-of-string) and the name is followed by whitespace (or end-of-string).
+/// Find all `/skill-name` tokens in input where the `/` is preceded by
+/// whitespace (or start-of-string) and the name is followed by whitespace (or
+/// end-of-string).
 fn find_skill_references(input: &str) -> Vec<SkillMatch> {
     let mut results = Vec::new();
     let bytes = input.as_bytes();
@@ -93,9 +97,9 @@ fn find_skill_references(input: &str) -> Vec<SkillMatch> {
             let followed_by_boundary = j >= len || bytes[j].is_ascii_whitespace();
             if followed_by_boundary {
                 results.push(SkillMatch {
-                    name: input[name_start..j].to_string(),
+                    name:  input[name_start..j].to_string(),
                     start: i,
-                    end: j,
+                    end:   j,
                 });
             }
 
@@ -110,7 +114,7 @@ fn find_skill_references(input: &str) -> Vec<SkillMatch> {
 
 #[derive(Debug)]
 pub struct ExpandedInput {
-    pub text: String,
+    pub text:       String,
     pub skill_name: Option<String>,
 }
 
@@ -119,7 +123,7 @@ pub fn expand_skill(skills: &[Skill], input: &str) -> Result<ExpandedInput, Stri
 
     if refs.is_empty() {
         return Ok(ExpandedInput {
-            text: input.to_string(),
+            text:       input.to_string(),
             skill_name: None,
         });
     }
@@ -155,11 +159,11 @@ pub fn expand_skill(skills: &[Skill], input: &str) -> Result<ExpandedInput, Stri
 pub fn make_use_skill_tool(skills: Arc<Vec<Skill>>) -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
-            name: "use_skill".into(),
+            name:        "use_skill".into(),
             description: "Load a skill's instructions by name. Call this when the user's \
                           request matches an available skill."
                 .into(),
-            parameters: serde_json::json!({
+            parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
                     "skill_name": {
@@ -170,7 +174,7 @@ pub fn make_use_skill_tool(skills: Arc<Vec<Skill>>) -> RegisteredTool {
                 "required": ["skill_name"]
             }),
         },
-        executor: Arc::new(move |args, _ctx| {
+        executor:   Arc::new(move |args, _ctx| {
             let skills = skills.clone();
             Box::pin(async move {
                 let name = required_str(&args, "skill_name")?;
@@ -247,12 +251,14 @@ pub async fn discover_skills(env: &dyn Sandbox, dirs: &[String]) -> Vec<Skill> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
+    use tokio_util::sync::CancellationToken;
+
     use super::*;
     use crate::sandbox::Sandbox;
     use crate::test_support::MockSandbox;
     use crate::tool_registry::ToolContext;
-    use std::collections::HashMap;
-    use tokio_util::sync::CancellationToken;
 
     // --- parse_skill tests ---
 
@@ -337,14 +343,14 @@ name: trimmed
     fn test_skills() -> Vec<Skill> {
         vec![
             Skill {
-                name: "commit".into(),
+                name:        "commit".into(),
                 description: "Create a commit".into(),
-                template: "Review changes and commit.\n\n{{user_input}}".into(),
+                template:    "Review changes and commit.\n\n{{user_input}}".into(),
             },
             Skill {
-                name: "test".into(),
+                name:        "test".into(),
                 description: "Run tests".into(),
-                template: "Run the test suite.".into(),
+                template:    "Run the test suite.".into(),
             },
         ]
     }
@@ -518,14 +524,11 @@ name: trimmed
     #[test]
     fn default_dirs_with_git_root() {
         let dirs = default_skill_dirs(Some("/home/user/.fabro/skills"), Some("/repo"));
-        assert_eq!(
-            dirs,
-            vec![
-                "/home/user/.fabro/skills",
-                "/repo/.fabro/skills",
-                "/repo/skills",
-            ]
-        );
+        assert_eq!(dirs, vec![
+            "/home/user/.fabro/skills",
+            "/repo/.fabro/skills",
+            "/repo/skills",
+        ]);
     }
 
     #[test]

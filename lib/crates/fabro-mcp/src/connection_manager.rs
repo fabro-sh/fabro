@@ -12,7 +12,8 @@ use crate::config::McpServerSettings;
 const MCP_TOOL_NAME_DELIMITER: &str = "__";
 
 /// Produce a qualified tool name: `mcp__{server}__{tool}`.
-/// Non-alphanumeric characters in `server` and `tool` (except `_`) are replaced with `_`.
+/// Non-alphanumeric characters in `server` and `tool` (except `_`) are replaced
+/// with `_`.
 #[must_use]
 pub fn qualified_tool_name(server: &str, tool: &str) -> String {
     format!(
@@ -77,16 +78,16 @@ pub fn call_result_to_string(result: &CallToolResult) -> Result<String, String> 
 /// Tool info stored per-tool in the connection manager.
 #[derive(Debug, Clone)]
 pub struct ToolInfo {
-    pub server_name: String,
+    pub server_name:        String,
     pub original_tool_name: String,
-    pub description: String,
-    pub input_schema: serde_json::Value,
+    pub description:        String,
+    pub input_schema:       serde_json::Value,
 }
 
 /// Manages connections to multiple MCP servers and their tools.
 pub struct McpConnectionManager {
     clients: HashMap<String, Arc<McpClient>>,
-    tools: HashMap<String, ToolInfo>,
+    tools:   HashMap<String, ToolInfo>,
 }
 
 impl McpConnectionManager {
@@ -94,12 +95,13 @@ impl McpConnectionManager {
     pub fn new() -> Self {
         Self {
             clients: HashMap::new(),
-            tools: HashMap::new(),
+            tools:   HashMap::new(),
         }
     }
 
-    /// Start all configured MCP servers. Failed servers are logged but don't block others.
-    /// Returns a list of `(server_name, result)` for each server.
+    /// Start all configured MCP servers. Failed servers are logged but don't
+    /// block others. Returns a list of `(server_name, result)` for each
+    /// server.
     pub async fn start_servers(
         &mut self,
         configs: &[McpServerSettings],
@@ -130,15 +132,12 @@ impl McpConnectionManager {
 
         for (name, description, input_schema) in tools {
             let qualified = qualified_tool_name(&config.name, &name);
-            self.tools.insert(
-                qualified,
-                ToolInfo {
-                    server_name: config.name.clone(),
-                    original_tool_name: name,
-                    description,
-                    input_schema,
-                },
-            );
+            self.tools.insert(qualified, ToolInfo {
+                server_name: config.name.clone(),
+                original_tool_name: name,
+                description,
+                input_schema,
+            });
         }
 
         self.clients.insert(config.name.clone(), Arc::new(client));
@@ -183,8 +182,9 @@ impl Default for McpConnectionManager {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use rmcp::model::Content;
+
+    use super::*;
 
     #[test]
     fn qualified_tool_name_basic() {

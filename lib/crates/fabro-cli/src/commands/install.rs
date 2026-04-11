@@ -13,9 +13,8 @@ use dialoguer::console::Term;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{MultiSelect, Select};
 use fabro_api::types::SetSecretRequest;
-use fabro_config::Storage;
-use fabro_config::legacy_env;
 use fabro_config::user::SETTINGS_CONFIG_FILENAME;
+use fabro_config::{Storage, legacy_env};
 use fabro_model::Provider;
 use fabro_server::secret_store::SecretStore;
 use fabro_util::terminal::Styles;
@@ -28,11 +27,10 @@ use super::doctor;
 use crate::args::{DoctorArgs, GlobalArgs, InstallArgs, ServerTargetArgs};
 use crate::commands::server::record;
 use crate::gh::GhCli;
-use crate::server_client;
 use crate::shared::provider_auth::{
     prompt_and_validate_key, prompt_confirm, provider_display_name, run_openai_oauth_or_api_key,
 };
-use crate::user_config;
+use crate::{server_client, user_config};
 
 // ---------------------------------------------------------------------------
 // OpenSSL helpers
@@ -954,7 +952,7 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
     if run_doctor {
         eprintln!();
         let doctor_args = DoctorArgs {
-            target: ServerTargetArgs::default(),
+            target:  ServerTargetArgs::default(),
             verbose: true,
         };
         let _ = doctor::run_doctor(&doctor_args, true, globals).await?;

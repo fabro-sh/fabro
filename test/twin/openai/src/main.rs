@@ -1,7 +1,11 @@
 use anyhow::Result;
 use tokio::net::TcpListener;
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
-use twin_openai::{app, config::Config, state::AppState};
+use tracing_subscriber::fmt;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use twin_openai::app;
+use twin_openai::config::Config;
+use twin_openai::state::AppState;
 
 #[tokio::main]
 async fn main() -> Result<()> {

@@ -3,26 +3,24 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use fabro_store::ArtifactStore;
-use fabro_types::{RunId, StageId};
-
 use fabro_core::error::{CoreError, Result as CoreResult};
 use fabro_core::graph::NodeSpec;
-use fabro_core::lifecycle::{AttemptContext, AttemptResultContext, RunLifecycle};
+use fabro_core::lifecycle::{AttemptContext, AttemptResultContext, NodeDecision, RunLifecycle};
 use fabro_core::outcome::NodeResult;
 use fabro_core::state::ExecutionState;
-use tokio::{fs, time::sleep};
+use fabro_store::ArtifactStore;
+use fabro_types::{RunId, StageId};
+use tokio::fs;
+use tokio::time::sleep;
 
 use crate::artifact::{normalize_durable_updates, offload_large_values, sync_artifacts_to_env};
 use crate::artifact_snapshot::{CapturedArtifactInfo, collect_artifacts};
 use crate::artifact_upload::ArtifactSink;
 use crate::event::{Emitter, Event, RunNoticeLevel};
-use crate::graph::WorkflowGraph;
-use crate::graph::WorkflowNode;
+use crate::graph::{WorkflowGraph, WorkflowNode};
 use crate::lifecycle::event::stage_scope_for;
 use crate::outcome::BilledModelUsage;
 use crate::runtime_store::RunStoreHandle;
-use fabro_core::lifecycle::NodeDecision;
 
 type WfRunState = ExecutionState<Option<BilledModelUsage>>;
 type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
@@ -36,15 +34,15 @@ const ARTIFACT_UPLOAD_RETRY_DELAYS: [Duration; 3] = [
 
 /// Sub-lifecycle responsible for artifact collection, offloading, and syncing.
 pub(crate) struct ArtifactLifecycle {
-    pub sandbox: Arc<dyn fabro_sandbox::Sandbox>,
-    pub run_store: RunStoreHandle,
-    pub emitter: Arc<Emitter>,
-    pub run_id: RunId,
-    pub artifact_globs: Vec<String>,
-    pub artifact_sink: Option<ArtifactSink>,
+    pub sandbox:                 Arc<dyn fabro_sandbox::Sandbox>,
+    pub run_store:               RunStoreHandle,
+    pub emitter:                 Arc<Emitter>,
+    pub run_id:                  RunId,
+    pub artifact_globs:          Vec<String>,
+    pub artifact_sink:           Option<ArtifactSink>,
     pub captured_artifact_count: Arc<AtomicUsize>,
     /// Per-attempt state: epoch seconds when the attempt started.
-    attempt_start_epoch: std::sync::Mutex<Option<f64>>,
+    attempt_start_epoch:         std::sync::Mutex<Option<f64>>,
 }
 
 impl ArtifactLifecycle {
@@ -131,8 +129,8 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
                     .await
                 {
                     self.emitter.emit(&Event::RunNotice {
-                        level: RunNoticeLevel::Warn,
-                        code: "artifact_upload_failed".to_string(),
+                        level:   RunNoticeLevel::Warn,
+                        code:    "artifact_upload_failed".to_string(),
                         message: format!("[node: {node_id}] artifact upload failed: {err}"),
                     });
                     return Ok(());
@@ -142,14 +140,14 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
                     self.captured_artifact_count.fetch_add(1, Ordering::Relaxed);
                     self.emitter.emit_scoped(
                         &Event::ArtifactCaptured {
-                            node_id: node_id.to_string(),
-                            attempt: ctx.attempt,
-                            node_slug: node_slug.clone(),
-                            path: asset.path.clone(),
-                            mime: asset.mime.clone(),
-                            content_md5: asset.content_md5.clone(),
+                            node_id:        node_id.to_string(),
+                            attempt:        ctx.attempt,
+                            node_slug:      node_slug.clone(),
+                            path:           asset.path.clone(),
+                            mime:           asset.mime.clone(),
+                            content_md5:    asset.content_md5.clone(),
                             content_sha256: asset.content_sha256.clone(),
-                            bytes: asset.bytes,
+                            bytes:          asset.bytes,
                         },
                         &scope,
                     );
@@ -158,8 +156,8 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
             Ok(_) => {} // no files collected
             Err(e) => {
                 self.emitter.emit(&Event::RunNotice {
-                    level: RunNoticeLevel::Warn,
-                    code: "artifact_collection_failed".to_string(),
+                    level:   RunNoticeLevel::Warn,
+                    code:    "artifact_collection_failed".to_string(),
                     message: format!("[node: {node_id}] artifact collection failed: {e}"),
                 });
             }
@@ -181,8 +179,8 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
             offload_large_values(&mut result.outcome.context_updates, &self.run_store).await
         {
             self.emitter.emit(&Event::RunNotice {
-                level: RunNoticeLevel::Warn,
-                code: "artifact_offload_failed".to_string(),
+                level:   RunNoticeLevel::Warn,
+                code:    "artifact_offload_failed".to_string(),
                 message: format!("[node: {node_id}] artifact offload failed: {e}"),
             });
         }
@@ -194,8 +192,8 @@ impl RunLifecycle<WorkflowGraph> for ArtifactLifecycle {
             sync_artifacts_to_env(&mut result.outcome.context_updates, &*self.sandbox).await
         {
             self.emitter.emit(&Event::RunNotice {
-                level: RunNoticeLevel::Warn,
-                code: "artifact_sync_failed".to_string(),
+                level:   RunNoticeLevel::Warn,
+                code:    "artifact_sync_failed".to_string(),
                 message: format!("[node: {node_id}] artifact sync failed: {e}"),
             });
         }

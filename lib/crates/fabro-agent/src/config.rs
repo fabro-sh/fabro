@@ -81,7 +81,8 @@ pub struct SessionOptions {
     pub enable_context_compaction: bool,
     pub compaction_threshold_percent: usize,
     pub compaction_preserve_turns: usize,
-    /// Skill directories. `None` = use convention defaults, `Some(dirs)` = use these instead.
+    /// Skill directories. `None` = use convention defaults, `Some(dirs)` = use
+    /// these instead.
     pub skill_dirs: Option<Vec<String>>,
     /// MCP server configurations to connect to on session startup.
     pub mcp_servers: Vec<McpServerSettings>,
@@ -215,12 +216,9 @@ mod tests {
         let approval: ToolApprovalFn = Arc::new(|_name, _args| Err("denied".to_string()));
         let adapter = ToolApprovalAdapter(approval);
         let decision = adapter.pre_tool_use("shell", &serde_json::json!({})).await;
-        assert_eq!(
-            decision,
-            ToolHookDecision::Block {
-                reason: "denied".to_string()
-            }
-        );
+        assert_eq!(decision, ToolHookDecision::Block {
+            reason: "denied".to_string(),
+        });
     }
 
     #[tokio::test]

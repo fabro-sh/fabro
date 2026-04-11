@@ -31,12 +31,12 @@ use fabro_types::settings::workflow::WorkflowLayer;
 #[must_use]
 pub fn combine_files(lower: SettingsLayer, higher: SettingsLayer) -> SettingsLayer {
     SettingsLayer {
-        version: higher.version.or(lower.version),
-        project: merge_option(lower.project, higher.project, combine_project),
+        version:  higher.version.or(lower.version),
+        project:  merge_option(lower.project, higher.project, combine_project),
         workflow: merge_option(lower.workflow, higher.workflow, combine_workflow),
-        run: merge_option(lower.run, higher.run, combine_run),
-        cli: merge_option(lower.cli, higher.cli, combine_cli),
-        server: merge_option(lower.server, higher.server, combine_server),
+        run:      merge_option(lower.run, higher.run, combine_run),
+        cli:      merge_option(lower.cli, higher.cli, combine_cli),
+        server:   merge_option(lower.server, higher.server, combine_server),
         features: replace_if_some(lower.features, higher.features),
     }
 }
@@ -75,10 +75,10 @@ fn merge_string_map_sticky<T>(
 
 fn combine_project(lower: ProjectLayer, higher: ProjectLayer) -> ProjectLayer {
     ProjectLayer {
-        name: higher.name.or(lower.name),
+        name:        higher.name.or(lower.name),
         description: higher.description.or(lower.description),
-        directory: higher.directory.or(lower.directory),
-        metadata: merge_string_map_replace(lower.metadata, higher.metadata),
+        directory:   higher.directory.or(lower.directory),
+        metadata:    merge_string_map_replace(lower.metadata, higher.metadata),
     }
 }
 
@@ -86,10 +86,10 @@ fn combine_project(lower: ProjectLayer, higher: ProjectLayer) -> ProjectLayer {
 
 fn combine_workflow(lower: WorkflowLayer, higher: WorkflowLayer) -> WorkflowLayer {
     WorkflowLayer {
-        name: higher.name.or(lower.name),
+        name:        higher.name.or(lower.name),
         description: higher.description.or(lower.description),
-        graph: higher.graph.or(lower.graph),
-        metadata: merge_string_map_replace(lower.metadata, higher.metadata),
+        graph:       higher.graph.or(lower.graph),
+        metadata:    merge_string_map_replace(lower.metadata, higher.metadata),
     }
 }
 
@@ -97,30 +97,30 @@ fn combine_workflow(lower: WorkflowLayer, higher: WorkflowLayer) -> WorkflowLaye
 
 fn combine_run(lower: RunLayer, higher: RunLayer) -> RunLayer {
     RunLayer {
-        goal: higher.goal.or(lower.goal),
-        working_dir: higher.working_dir.or(lower.working_dir),
-        metadata: merge_string_map_replace(lower.metadata, higher.metadata),
-        inputs: higher.inputs.or(lower.inputs),
-        model: merge_option(lower.model, higher.model, combine_run_model),
-        git: merge_option(lower.git, higher.git, combine_run_git),
-        prepare: merge_option(lower.prepare, higher.prepare, combine_run_prepare),
-        execution: merge_option(lower.execution, higher.execution, combine_run_execution),
-        checkpoint: merge_option(lower.checkpoint, higher.checkpoint, combine_run_checkpoint),
-        sandbox: merge_option(lower.sandbox, higher.sandbox, combine_run_sandbox),
+        goal:          higher.goal.or(lower.goal),
+        working_dir:   higher.working_dir.or(lower.working_dir),
+        metadata:      merge_string_map_replace(lower.metadata, higher.metadata),
+        inputs:        higher.inputs.or(lower.inputs),
+        model:         merge_option(lower.model, higher.model, combine_run_model),
+        git:           merge_option(lower.git, higher.git, combine_run_git),
+        prepare:       merge_option(lower.prepare, higher.prepare, combine_run_prepare),
+        execution:     merge_option(lower.execution, higher.execution, combine_run_execution),
+        checkpoint:    merge_option(lower.checkpoint, higher.checkpoint, combine_run_checkpoint),
+        sandbox:       merge_option(lower.sandbox, higher.sandbox, combine_run_sandbox),
         notifications: combine_notifications(lower.notifications, higher.notifications),
-        interviews: merge_option(lower.interviews, higher.interviews, combine_interviews),
-        agent: merge_option(lower.agent, higher.agent, combine_run_agent),
-        hooks: combine_hooks(lower.hooks, higher.hooks),
-        scm: merge_option(lower.scm, higher.scm, combine_run_scm),
-        pull_request: merge_option(lower.pull_request, higher.pull_request, combine_run_pr),
-        artifacts: replace_if_some(lower.artifacts, higher.artifacts),
+        interviews:    merge_option(lower.interviews, higher.interviews, combine_interviews),
+        agent:         merge_option(lower.agent, higher.agent, combine_run_agent),
+        hooks:         combine_hooks(lower.hooks, higher.hooks),
+        scm:           merge_option(lower.scm, higher.scm, combine_run_scm),
+        pull_request:  merge_option(lower.pull_request, higher.pull_request, combine_run_pr),
+        artifacts:     replace_if_some(lower.artifacts, higher.artifacts),
     }
 }
 
 fn combine_run_model(lower: RunModelLayer, higher: RunModelLayer) -> RunModelLayer {
     RunModelLayer {
-        provider: higher.provider.or(lower.provider),
-        name: higher.name.or(lower.name),
+        provider:  higher.provider.or(lower.provider),
+        name:      higher.name.or(lower.name),
         fallbacks: splice_model_fallbacks(lower.fallbacks, higher.fallbacks),
     }
 }
@@ -162,7 +162,7 @@ fn combine_run_git(lower: RunGitLayer, higher: RunGitLayer) -> RunGitLayer {
 
 fn combine_git_author(lower: GitAuthorLayer, higher: GitAuthorLayer) -> GitAuthorLayer {
     GitAuthorLayer {
-        name: higher.name.or(lower.name),
+        name:  higher.name.or(lower.name),
         email: higher.email.or(lower.email),
     }
 }
@@ -174,9 +174,9 @@ fn combine_run_prepare(_lower: RunPrepareLayer, higher: RunPrepareLayer) -> RunP
 
 fn combine_run_execution(lower: RunExecutionLayer, higher: RunExecutionLayer) -> RunExecutionLayer {
     RunExecutionLayer {
-        mode: higher.mode.or(lower.mode),
+        mode:     higher.mode.or(lower.mode),
         approval: higher.approval.or(lower.approval),
-        retros: higher.retros.or(lower.retros),
+        retros:   higher.retros.or(lower.retros),
     }
 }
 
@@ -194,13 +194,13 @@ fn combine_run_checkpoint(
 
 fn combine_run_sandbox(lower: RunSandboxLayer, higher: RunSandboxLayer) -> RunSandboxLayer {
     RunSandboxLayer {
-        provider: higher.provider.or(lower.provider),
-        preserve: higher.preserve.or(lower.preserve),
+        provider:     higher.provider.or(lower.provider),
+        preserve:     higher.preserve.or(lower.preserve),
         devcontainer: higher.devcontainer.or(lower.devcontainer),
         // Sticky merge-by-key for run.sandbox.env per R71.
-        env: merge_string_map_sticky(lower.env, higher.env),
-        local: higher.local.or(lower.local),
-        daytona: merge_option(lower.daytona, higher.daytona, combine_daytona),
+        env:          merge_string_map_sticky(lower.env, higher.env),
+        local:        higher.local.or(lower.local),
+        daytona:      merge_option(lower.daytona, higher.daytona, combine_daytona),
     }
 }
 
@@ -208,10 +208,10 @@ fn combine_daytona(lower: DaytonaSandboxLayer, higher: DaytonaSandboxLayer) -> D
     DaytonaSandboxLayer {
         auto_stop_interval: higher.auto_stop_interval.or(lower.auto_stop_interval),
         // Sticky merge-by-key for provider-native labels per R71.
-        labels: merge_string_map_sticky(lower.labels, higher.labels),
-        snapshot: higher.snapshot.or(lower.snapshot),
-        network: higher.network.or(lower.network),
-        skip_clone: higher.skip_clone.or(lower.skip_clone),
+        labels:             merge_string_map_sticky(lower.labels, higher.labels),
+        snapshot:           higher.snapshot.or(lower.snapshot),
+        network:            higher.network.or(lower.network),
+        skip_clone:         higher.skip_clone.or(lower.skip_clone),
     }
 }
 
@@ -237,12 +237,12 @@ fn combine_notification_route(
     higher: NotificationRouteLayer,
 ) -> NotificationRouteLayer {
     NotificationRouteLayer {
-        enabled: higher.enabled.or(lower.enabled),
+        enabled:  higher.enabled.or(lower.enabled),
         provider: higher.provider.or(lower.provider),
-        events: splice_events(lower.events, higher.events),
-        slack: higher.slack.or(lower.slack),
-        discord: higher.discord.or(lower.discord),
-        teams: higher.teams.or(lower.teams),
+        events:   splice_events(lower.events, higher.events),
+        slack:    higher.slack.or(lower.slack),
+        discord:  higher.discord.or(lower.discord),
+        teams:    higher.teams.or(lower.teams),
     }
 }
 
@@ -275,9 +275,9 @@ fn splice_events(lower: Vec<StringOrSplice>, higher: Vec<StringOrSplice>) -> Vec
 fn combine_interviews(lower: InterviewsLayer, higher: InterviewsLayer) -> InterviewsLayer {
     InterviewsLayer {
         provider: higher.provider.or(lower.provider),
-        slack: higher.slack.or(lower.slack),
-        discord: higher.discord.or(lower.discord),
-        teams: higher.teams.or(lower.teams),
+        slack:    higher.slack.or(lower.slack),
+        discord:  higher.discord.or(lower.discord),
+        teams:    higher.teams.or(lower.teams),
     }
 }
 
@@ -285,7 +285,7 @@ fn combine_run_agent(lower: RunAgentLayer, higher: RunAgentLayer) -> RunAgentLay
     RunAgentLayer {
         permissions: higher.permissions.or(lower.permissions),
         // MCP entries: field-merge per key. Higher replaces lower for same keys.
-        mcps: merge_string_map_sticky(lower.mcps, higher.mcps),
+        mcps:        merge_string_map_sticky(lower.mcps, higher.mcps),
     }
 }
 
@@ -320,18 +320,18 @@ fn combine_hooks(lower: Vec<HookEntry>, higher: Vec<HookEntry>) -> Vec<HookEntry
 
 fn combine_run_scm(lower: RunScmLayer, higher: RunScmLayer) -> RunScmLayer {
     RunScmLayer {
-        provider: higher.provider.or(lower.provider),
-        owner: higher.owner.or(lower.owner),
+        provider:   higher.provider.or(lower.provider),
+        owner:      higher.owner.or(lower.owner),
         repository: higher.repository.or(lower.repository),
-        github: higher.github.or(lower.github),
+        github:     higher.github.or(lower.github),
     }
 }
 
 fn combine_run_pr(lower: RunPullRequestLayer, higher: RunPullRequestLayer) -> RunPullRequestLayer {
     RunPullRequestLayer {
-        enabled: higher.enabled.or(lower.enabled),
-        draft: higher.draft.or(lower.draft),
-        auto_merge: higher.auto_merge.or(lower.auto_merge),
+        enabled:        higher.enabled.or(lower.enabled),
+        draft:          higher.draft.or(lower.draft),
+        auto_merge:     higher.auto_merge.or(lower.auto_merge),
         merge_strategy: higher.merge_strategy.or(lower.merge_strategy),
     }
 }
@@ -340,10 +340,10 @@ fn combine_run_pr(lower: RunPullRequestLayer, higher: RunPullRequestLayer) -> Ru
 
 fn combine_cli(lower: CliLayer, higher: CliLayer) -> CliLayer {
     CliLayer {
-        target: merge_option(lower.target, higher.target, combine_cli_target),
-        auth: higher.auth.or(lower.auth),
-        exec: merge_option(lower.exec, higher.exec, combine_cli_exec),
-        output: higher.output.or(lower.output),
+        target:  merge_option(lower.target, higher.target, combine_cli_target),
+        auth:    higher.auth.or(lower.auth),
+        exec:    merge_option(lower.exec, higher.exec, combine_cli_exec),
+        output:  higher.output.or(lower.output),
         updates: higher.updates.or(lower.updates),
         logging: higher.logging.or(lower.logging),
     }
@@ -357,8 +357,8 @@ fn combine_cli_target(_lower: CliTargetLayer, higher: CliTargetLayer) -> CliTarg
 fn combine_cli_exec(lower: CliExecLayer, higher: CliExecLayer) -> CliExecLayer {
     CliExecLayer {
         prevent_idle_sleep: higher.prevent_idle_sleep.or(lower.prevent_idle_sleep),
-        model: merge_option(lower.model, higher.model, combine_cli_exec_model),
-        agent: merge_option(lower.agent, higher.agent, combine_cli_exec_agent),
+        model:              merge_option(lower.model, higher.model, combine_cli_exec_model),
+        agent:              merge_option(lower.agent, higher.agent, combine_cli_exec_agent),
     }
 }
 
@@ -368,7 +368,7 @@ fn combine_cli_exec_model(
 ) -> CliExecModelLayer {
     CliExecModelLayer {
         provider: higher.provider.or(lower.provider),
-        name: higher.name.or(lower.name),
+        name:     higher.name.or(lower.name),
     }
 }
 
@@ -378,7 +378,7 @@ fn combine_cli_exec_agent(
 ) -> CliExecAgentLayer {
     CliExecAgentLayer {
         permissions: higher.permissions.or(lower.permissions),
-        mcps: merge_string_map_sticky(lower.mcps, higher.mcps),
+        mcps:        merge_string_map_sticky(lower.mcps, higher.mcps),
     }
 }
 
@@ -386,15 +386,15 @@ fn combine_cli_exec_agent(
 
 fn combine_server(lower: ServerLayer, higher: ServerLayer) -> ServerLayer {
     ServerLayer {
-        listen: merge_option(lower.listen, higher.listen, combine_listen),
-        api: higher.api.or(lower.api),
-        web: merge_option(lower.web, higher.web, combine_server_web),
-        auth: merge_option(lower.auth, higher.auth, combine_server_auth),
-        storage: merge_option(lower.storage, higher.storage, combine_server_storage),
-        artifacts: merge_option(lower.artifacts, higher.artifacts, combine_server_artifacts),
-        slatedb: merge_option(lower.slatedb, higher.slatedb, combine_server_slatedb),
-        scheduler: merge_option(lower.scheduler, higher.scheduler, combine_server_scheduler),
-        logging: higher.logging.or(lower.logging),
+        listen:       merge_option(lower.listen, higher.listen, combine_listen),
+        api:          higher.api.or(lower.api),
+        web:          merge_option(lower.web, higher.web, combine_server_web),
+        auth:         merge_option(lower.auth, higher.auth, combine_server_auth),
+        storage:      merge_option(lower.storage, higher.storage, combine_server_storage),
+        artifacts:    merge_option(lower.artifacts, higher.artifacts, combine_server_artifacts),
+        slatedb:      merge_option(lower.slatedb, higher.slatedb, combine_server_slatedb),
+        scheduler:    merge_option(lower.scheduler, higher.scheduler, combine_server_scheduler),
+        logging:      higher.logging.or(lower.logging),
         integrations: merge_option(
             lower.integrations,
             higher.integrations,
@@ -411,7 +411,7 @@ fn combine_listen(_lower: ServerListenLayer, higher: ServerListenLayer) -> Serve
 fn combine_server_web(lower: ServerWebLayer, higher: ServerWebLayer) -> ServerWebLayer {
     ServerWebLayer {
         enabled: higher.enabled.or(lower.enabled),
-        url: higher.url.or(lower.url),
+        url:     higher.url.or(lower.url),
     }
 }
 
@@ -437,9 +437,9 @@ fn combine_server_artifacts(
 ) -> ServerArtifactsLayer {
     ServerArtifactsLayer {
         provider: higher.provider.or(lower.provider),
-        prefix: higher.prefix.or(lower.prefix),
-        local: higher.local.or(lower.local),
-        s3: higher.s3.or(lower.s3),
+        prefix:   higher.prefix.or(lower.prefix),
+        local:    higher.local.or(lower.local),
+        s3:       higher.s3.or(lower.s3),
     }
 }
 
@@ -448,11 +448,11 @@ fn combine_server_slatedb(
     higher: ServerSlateDbLayer,
 ) -> ServerSlateDbLayer {
     ServerSlateDbLayer {
-        provider: higher.provider.or(lower.provider),
-        prefix: higher.prefix.or(lower.prefix),
+        provider:       higher.provider.or(lower.provider),
+        prefix:         higher.prefix.or(lower.prefix),
         flush_interval: higher.flush_interval.or(lower.flush_interval),
-        local: higher.local.or(lower.local),
-        s3: higher.s3.or(lower.s3),
+        local:          higher.local.or(lower.local),
+        s3:             higher.s3.or(lower.s3),
     }
 }
 
@@ -470,19 +470,19 @@ fn combine_server_integrations(
     higher: ServerIntegrationsLayer,
 ) -> ServerIntegrationsLayer {
     ServerIntegrationsLayer {
-        github: higher.github.or(lower.github),
-        slack: higher.slack.or(lower.slack),
+        github:  higher.github.or(lower.github),
+        slack:   higher.slack.or(lower.slack),
         discord: higher.discord.or(lower.discord),
-        teams: higher.teams.or(lower.teams),
+        teams:   higher.teams.or(lower.teams),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::parse::parse_settings_layer;
     use fabro_types::settings::InterpString;
 
     use super::*;
+    use crate::parse::parse_settings_layer;
 
     fn parse(input: &str) -> SettingsLayer {
         parse_settings_layer(input).expect("fixture should parse")

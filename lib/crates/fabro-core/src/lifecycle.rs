@@ -22,26 +22,26 @@ pub enum EdgeDecision {
 }
 
 pub struct AttemptContext<'a, G: Graph> {
-    pub node: &'a G::Node,
-    pub attempt: u32,
+    pub node:         &'a G::Node,
+    pub attempt:      u32,
     pub max_attempts: u32,
 }
 
 pub struct AttemptResultContext<'a, G: Graph> {
-    pub node: &'a G::Node,
-    pub result: &'a NodeResult<G::Meta>,
-    pub attempt: u32,
-    pub will_retry: bool,
+    pub node:          &'a G::Node,
+    pub result:        &'a NodeResult<G::Meta>,
+    pub attempt:       u32,
+    pub will_retry:    bool,
     pub backoff_delay: Option<Duration>,
 }
 
 pub struct EdgeContext<'a, G: Graph> {
-    pub from: &'a str,
-    pub to: &'a str,
-    pub edge: Option<G::Edge>,
+    pub from:    &'a str,
+    pub to:      &'a str,
+    pub edge:    Option<G::Edge>,
     pub is_jump: bool,
     pub outcome: &'a Outcome<G::Meta>,
-    pub reason: &'a str,
+    pub reason:  &'a str,
 }
 
 #[async_trait]
@@ -272,11 +272,11 @@ mod tests {
 
     /// A lifecycle that records which callbacks were called.
     struct RecordingLifecycle {
-        name: String,
-        log: Arc<Mutex<Vec<String>>>,
-        before_node_decision: Mutex<Option<NodeDecision>>,
+        name:                    String,
+        log:                     Arc<Mutex<Vec<String>>>,
+        before_node_decision:    Mutex<Option<NodeDecision>>,
         before_attempt_decision: Mutex<Option<NodeDecision>>,
-        edge_decision: Mutex<Option<EdgeDecision>>,
+        edge_decision:           Mutex<Option<EdgeDecision>>,
     }
 
     impl RecordingLifecycle {
@@ -525,8 +525,8 @@ mod tests {
         let state = ExecutionState::new(&g).unwrap();
         let node = g.get_node("start").unwrap();
         let ctx = AttemptContext {
-            node: &node,
-            attempt: 1,
+            node:         &node,
+            attempt:      1,
             max_attempts: 1,
         };
         let decision = lc.before_attempt(&ctx, &state).await.unwrap();
@@ -549,8 +549,8 @@ mod tests {
         let state = ExecutionState::new(&g).unwrap();
         let node = g.get_node("start").unwrap();
         let ctx = AttemptContext {
-            node: &node,
-            attempt: 1,
+            node:         &node,
+            attempt:      1,
             max_attempts: 1,
         };
         let decision = lc.before_attempt(&ctx, &state).await.unwrap();
@@ -569,10 +569,10 @@ mod tests {
         let node = g.get_node("start").unwrap();
         let result = NodeResult::new(Outcome::success(), Duration::ZERO, 1, 1);
         let ctx = AttemptResultContext {
-            node: &node,
-            result: &result,
-            attempt: 1,
-            will_retry: false,
+            node:          &node,
+            result:        &result,
+            attempt:       1,
+            will_retry:    false,
             backoff_delay: None,
         };
         lc.after_attempt(&ctx, &state).await.unwrap();
@@ -595,12 +595,12 @@ mod tests {
         let outcome = Outcome::success();
         let edge = g.outgoing_edges("start").into_iter().next().unwrap();
         let ctx = EdgeContext {
-            from: "start",
-            to: "end",
-            edge: Some(edge),
+            from:    "start",
+            to:      "end",
+            edge:    Some(edge),
             is_jump: false,
             outcome: &outcome,
-            reason: "unconditional",
+            reason:  "unconditional",
         };
         let decision = lc.on_edge_selected(&ctx, &state).await.unwrap();
         assert!(matches!(decision, EdgeDecision::Override(ref t) if t == "other"));
@@ -622,12 +622,12 @@ mod tests {
         let state = ExecutionState::new(&g).unwrap();
         let outcome = Outcome::success();
         let ctx = EdgeContext {
-            from: "start",
-            to: "end",
-            edge: None,
+            from:    "start",
+            to:      "end",
+            edge:    None,
             is_jump: false,
             outcome: &outcome,
-            reason: "unconditional",
+            reason:  "unconditional",
         };
         let decision = lc.on_edge_selected(&ctx, &state).await.unwrap();
         assert!(matches!(decision, EdgeDecision::Block(_)));
@@ -641,12 +641,12 @@ mod tests {
         let state = ExecutionState::new(&g).unwrap();
         let outcome = Outcome::success();
         let ctx = EdgeContext::<TestGraph> {
-            from: "start",
-            to: "target",
-            edge: None,
+            from:    "start",
+            to:      "target",
+            edge:    None,
             is_jump: true,
             outcome: &outcome,
-            reason: "jump",
+            reason:  "jump",
         };
         let decision = lc.on_edge_selected(&ctx, &state).await.unwrap();
         assert!(matches!(decision, EdgeDecision::Continue));
@@ -692,8 +692,8 @@ mod tests {
         let counter = Arc::new(AtomicU32::new(0));
 
         struct OrderedLifecycle {
-            name: String,
-            log: Arc<Mutex<Vec<String>>>,
+            name:    String,
+            log:     Arc<Mutex<Vec<String>>>,
             counter: Arc<AtomicU32>,
         }
 
@@ -711,18 +711,18 @@ mod tests {
 
         let lc = CompositeLifecycle::new(vec![
             Box::new(OrderedLifecycle {
-                name: "first".into(),
-                log: log.clone(),
+                name:    "first".into(),
+                log:     log.clone(),
                 counter: counter.clone(),
             }),
             Box::new(OrderedLifecycle {
-                name: "second".into(),
-                log: log.clone(),
+                name:    "second".into(),
+                log:     log.clone(),
                 counter: counter.clone(),
             }),
             Box::new(OrderedLifecycle {
-                name: "third".into(),
-                log: log.clone(),
+                name:    "third".into(),
+                log:     log.clone(),
                 counter: counter.clone(),
             }),
         ]);

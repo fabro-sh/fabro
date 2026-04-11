@@ -2,11 +2,11 @@ use std::sync::{Mutex, OnceLock};
 
 struct Buffer {
     start: *mut u8,
-    len: usize,
+    len:   usize,
 }
 
-// Safety: after init() we treat the captured argv region as exclusively writable
-// by this crate, and serialize writes with the mutex below.
+// Safety: after init() we treat the captured argv region as exclusively
+// writable by this crate, and serialize writes with the mutex below.
 unsafe impl Send for Buffer {}
 // Safety: the raw pointer metadata is immutable after capture.
 unsafe impl Sync for Buffer {}
@@ -74,7 +74,8 @@ fn write_title(dst: &mut [u8], title: &[u8]) {
 
 #[cfg(target_os = "linux")]
 fn platform_init() -> Option<Buffer> {
-    // SAFETY: these symbols are provided by the Linux-only C object compiled in build.rs.
+    // SAFETY: these symbols are provided by the Linux-only C object compiled in
+    // build.rs.
     let start = unsafe { fabro_proctitle_argv_start() };
     // SAFETY: paired with the symbol above.
     let len = unsafe { fabro_proctitle_argv_len() };
@@ -107,7 +108,8 @@ fn platform_init() -> Option<Buffer> {
         return None;
     }
 
-    // SAFETY: argc > 0 and argv is non-null, so argv[0] and argv[argc - 1] are valid to read.
+    // SAFETY: argc > 0 and argv is non-null, so argv[0] and argv[argc - 1] are
+    // valid to read.
     let start = unsafe { *argv };
     // SAFETY: same bound check as above.
     let last = unsafe { *argv.add(usize::try_from(argc).ok()?.saturating_sub(1)) };
@@ -117,7 +119,8 @@ fn platform_init() -> Option<Buffer> {
 
     // SAFETY: last points to a C string owned by the process image.
     let last_len = unsafe { libc::strlen(last) };
-    // SAFETY: advancing by the string length plus trailing NUL stays within the captured argv span.
+    // SAFETY: advancing by the string length plus trailing NUL stays within the
+    // captured argv span.
     let end = unsafe { last.add(last_len + 1) };
     let len = (end as usize).checked_sub(start as usize)?;
     if len == 0 {

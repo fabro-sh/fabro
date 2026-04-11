@@ -4,6 +4,8 @@ use anyhow::{Result, anyhow};
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use fabro_types::RunAuthMethod;
+use fabro_types::settings::{ServerListenSettings, ServerSettings as ResolvedServerSettings};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
 use rustls_pki_types::CertificateDer;
 use serde::Deserialize;
@@ -11,8 +13,6 @@ use tracing::warn;
 
 use crate::error::ApiError;
 use crate::web_auth::SessionCookie;
-use fabro_types::RunAuthMethod;
-use fabro_types::settings::{ServerListenSettings, ServerSettings as ResolvedServerSettings};
 
 /// Env var that explicitly opts the server into unauthenticated startup.
 ///
@@ -39,8 +39,8 @@ struct Claims {
 #[derive(Clone, Debug)]
 pub enum AuthStrategy {
     Jwt {
-        key: Arc<DecodingKey>,
-        validation: Arc<Validation>,
+        key:               Arc<DecodingKey>,
+        validation:        Arc<Validation>,
         allowed_usernames: Vec<String>,
     },
     Cookie,
@@ -59,11 +59,13 @@ pub fn jwt_validation() -> Validation {
 pub enum AuthMode {
     /// One or more strategies to try in order.
     Strategies(Vec<AuthStrategy>),
-    /// Authentication is explicitly disabled (used for demo requests via `X-Fabro-Demo: 1` header).
+    /// Authentication is explicitly disabled (used for demo requests via
+    /// `X-Fabro-Demo: 1` header).
     Disabled,
 }
 
-/// Peer certificates extracted from the TLS connection, inserted as a request extension.
+/// Peer certificates extracted from the TLS connection, inserted as a request
+/// extension.
 #[derive(Clone)]
 pub struct PeerCertificates(pub Option<Vec<CertificateDer<'static>>>);
 
@@ -97,9 +99,9 @@ pub fn resolve_auth_mode(settings: &ResolvedServerSettings) -> Result<AuthMode> 
 
 /// Describes which API auth strategies are enabled in resolved server settings.
 struct ResolvedAuthStrategies {
-    jwt_enabled: bool,
-    mtls_enabled: bool,
-    tls_present: bool,
+    jwt_enabled:       bool,
+    mtls_enabled:      bool,
+    tls_present:       bool,
     allowed_usernames: Vec<String>,
 }
 
@@ -175,8 +177,8 @@ where
             )
         })?;
         strategies.push(AuthStrategy::Jwt {
-            key: Arc::new(key),
-            validation: Arc::new(jwt_validation()),
+            key:               Arc::new(key),
+            validation:        Arc::new(jwt_validation()),
             allowed_usernames: allowed_usernames.clone(),
         });
     }
@@ -370,7 +372,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedService {
 
 /// Axum extractor that authenticates and extracts the request subject.
 pub struct AuthenticatedSubject {
-    pub login: Option<String>,
+    pub login:       Option<String>,
     pub auth_method: RunAuthMethod,
 }
 
@@ -386,7 +388,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedSubject {
         let strategies = match auth_mode {
             AuthMode::Disabled => {
                 return Ok(Self {
-                    login: None,
+                    login:       None,
                     auth_method: RunAuthMethod::Disabled,
                 });
             }
@@ -404,7 +406,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedSubject {
                 AuthStrategy::Cookie => {
                     if let Some(session) = parts.extensions.get::<SessionCookie>() {
                         return Ok(Self {
-                            login: Some(session.login.clone()),
+                            login:       Some(session.login.clone()),
                             auth_method: RunAuthMethod::Cookie,
                         });
                     }
@@ -418,7 +420,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedSubject {
                     if try_jwt(parts, key, validation, allowed_usernames).is_ok() {
                         if let Some(login) = extract_jwt_login(parts, key, validation) {
                             return Ok(Self {
-                                login: Some(login),
+                                login:       Some(login),
                                 auth_method: RunAuthMethod::Jwt,
                             });
                         }
@@ -429,7 +431,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedSubject {
                     if try_mtls(parts).is_ok() {
                         if let Some(login) = extract_mtls_cn(parts) {
                             return Ok(Self {
-                                login: Some(login),
+                                login:       Some(login),
                                 auth_method: RunAuthMethod::Mtls,
                             });
                         }
@@ -445,17 +447,15 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedSubject {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use axum::Json;
-    use axum::Router;
     use axum::body::{Body, to_bytes};
     use axum::http::{Request, StatusCode};
     use axum::response::IntoResponse;
     use axum::routing::get;
-    use fabro_config::parse_settings_layer;
-    use fabro_config::resolve_server_from_file;
+    use axum::{Json, Router};
+    use fabro_config::{parse_settings_layer, resolve_server_from_file};
     use tower::ServiceExt;
 
+    use super::*;
     use crate::web_auth::SessionCookie;
 
     // --- Fail-closed resolver tests (R52/R53) -----------------------------------
@@ -670,8 +670,8 @@ enabled = true
 
     fn jwt_mode(decoding: DecodingKey, allowed_usernames: Vec<&str>) -> AuthMode {
         AuthMode::Strategies(vec![AuthStrategy::Jwt {
-            key: Arc::new(decoding),
-            validation: Arc::new(jwt_validation()),
+            key:               Arc::new(decoding),
+            validation:        Arc::new(jwt_validation()),
             allowed_usernames: allowed_usernames.into_iter().map(String::from).collect(),
         }])
     }
@@ -687,7 +687,8 @@ enabled = true
     }
 
     /// Generate a self-signed CA + client cert for mTLS testing.
-    /// Returns (ca_cert_der, client_cert_der) where client_cert_der has the given CN.
+    /// Returns (ca_cert_der, client_cert_der) where client_cert_der has the
+    /// given CN.
     fn generate_test_client_cert(cn: &str) -> CertificateDer<'static> {
         use std::process::{Command, Stdio};
 
@@ -1002,13 +1003,13 @@ enabled = true
             .body(Body::empty())
             .unwrap();
         req.extensions_mut().insert(SessionCookie {
-            login: "brynary".to_string(),
-            name: "Brynary".to_string(),
-            email: "b@example.com".to_string(),
+            login:      "brynary".to_string(),
+            name:       "Brynary".to_string(),
+            email:      "b@example.com".to_string(),
             avatar_url: "https://example.com/avatar.png".to_string(),
-            user_url: "https://github.com/brynary".to_string(),
-            github_id: 1,
-            exp: 9_999_999_999,
+            user_url:   "https://github.com/brynary".to_string(),
+            github_id:  1,
+            exp:        9_999_999_999,
         });
 
         let response = app.oneshot(req).await.unwrap();
@@ -1093,8 +1094,8 @@ enabled = true
         let (_, decoding) = generate_test_keypair();
         let mode = AuthMode::Strategies(vec![
             AuthStrategy::Jwt {
-                key: Arc::new(decoding),
-                validation: Arc::new(jwt_validation()),
+                key:               Arc::new(decoding),
+                validation:        Arc::new(jwt_validation()),
                 allowed_usernames: vec!["brynary".to_string()],
             },
             AuthStrategy::Mtls,
@@ -1111,14 +1112,11 @@ enabled = true
     #[tokio::test]
     async fn mtls_and_jwt_falls_back_to_jwt() {
         let (encoding, decoding) = generate_test_keypair();
-        let mode = AuthMode::Strategies(vec![
-            AuthStrategy::Mtls,
-            AuthStrategy::Jwt {
-                key: Arc::new(decoding),
-                validation: Arc::new(jwt_validation()),
-                allowed_usernames: vec!["brynary".to_string()],
-            },
-        ]);
+        let mode = AuthMode::Strategies(vec![AuthStrategy::Mtls, AuthStrategy::Jwt {
+            key:               Arc::new(decoding),
+            validation:        Arc::new(jwt_validation()),
+            allowed_usernames: vec!["brynary".to_string()],
+        }]);
         let app = test_router(mode);
 
         let token = sign_token(

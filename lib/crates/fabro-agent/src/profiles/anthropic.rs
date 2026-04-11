@@ -1,14 +1,13 @@
+use fabro_model::Provider;
+
+use super::EnvContext;
 use crate::agent_profile::AgentProfile;
 use crate::config::SessionOptions;
-use crate::profiles::BaseProfile;
-use crate::profiles::assemble_system_prompt;
+use crate::profiles::{BaseProfile, assemble_system_prompt};
 use crate::sandbox::Sandbox;
 use crate::skills::Skill;
 use crate::tool_registry::ToolRegistry;
 use crate::tools::{WebFetchSummarizer, make_edit_file_tool, register_core_tools};
-use fabro_model::Provider;
-
-use super::EnvContext;
 
 pub struct AnthropicProfile {
     base: BaseProfile,
@@ -166,11 +165,13 @@ in the project. Keep changes minimal and focused on the task.";
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use tokio::sync::Mutex as AsyncMutex;
+
     use super::*;
     use crate::subagent::{SessionFactory, SubAgentManager};
     use crate::test_support::MockSandbox;
-    use std::sync::Arc;
-    use tokio::sync::Mutex as AsyncMutex;
 
     #[test]
     fn anthropic_profile_identity() {
@@ -250,12 +251,12 @@ mod tests {
         let profile = AnthropicProfile::new("claude-opus-4-6");
         let env = MockSandbox::linux();
         let ctx = EnvContext {
-            git_branch: Some("feature-branch".into()),
-            is_git_repo: true,
-            current_date: "2026-02-20".into(),
-            model: "claude-opus-4-6".into(),
-            knowledge_cutoff: "May 2025".into(),
-            git_status_short: None,
+            git_branch:         Some("feature-branch".into()),
+            is_git_repo:        true,
+            current_date:       "2026-02-20".into(),
+            model:              "claude-opus-4-6".into(),
+            knowledge_cutoff:   "May 2025".into(),
+            git_status_short:   None,
             git_recent_commits: None,
         };
         let prompt = profile.build_system_prompt(&env, &ctx, &[], None, &[]);

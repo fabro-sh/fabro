@@ -1,7 +1,6 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-
 use fabro_config::project::{discover_project_config, resolve_fabro_root};
 
 use crate::args::{GlobalArgs, WorkflowCreateArgs};

@@ -1,20 +1,18 @@
-use axum::{
-    Json,
-    extract::{State, rejection::JsonRejection},
-    http::{HeaderMap, header::RETRY_AFTER},
-    response::IntoResponse,
-};
+use axum::Json;
+use axum::extract::State;
+use axum::extract::rejection::JsonRejection;
+use axum::http::HeaderMap;
+use axum::http::header::RETRY_AFTER;
+use axum::response::IntoResponse;
 use futures_util::future;
 use tokio::time::{Duration, sleep};
 
-use crate::{
-    engine::{execute_chat_request, failures::ExecutionOutcome},
-    openai::auth,
-    sse::chat_sse_response,
-    state::AppState,
-};
-
 use super::models::ChatCompletionsRequest;
+use crate::engine::execute_chat_request;
+use crate::engine::failures::ExecutionOutcome;
+use crate::openai::auth;
+use crate::sse::chat_sse_response;
+use crate::state::AppState;
 
 pub async fn create_chat_completion(
     State(state): State<AppState>,

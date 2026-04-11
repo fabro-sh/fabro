@@ -1,5 +1,4 @@
-use anyhow::Context;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use fabro_checkpoint::git::Store;
 use fabro_util::terminal::Styles;
 use fabro_workflow::operations::{ForkRunInput, RewindTarget, build_timeline_or_rebuild, fork};
@@ -41,14 +40,11 @@ pub(crate) async fn run(args: &ForkArgs, styles: &Styles, globals: &GlobalArgs) 
         .as_deref()
         .map(str::parse::<RewindTarget>)
         .transpose()?;
-    let new_run_id = fork(
-        &store,
-        &ForkRunInput {
-            source_run_id: run_id,
-            target,
-            push: !args.no_push,
-        },
-    )?;
+    let new_run_id = fork(&store, &ForkRunInput {
+        source_run_id: run_id,
+        target,
+        push: !args.no_push,
+    })?;
 
     let run_id_string = run_id.to_string();
     let new_run_id_string = new_run_id.to_string();

@@ -11,8 +11,8 @@ pub struct ReplayInterviewer {
 }
 
 impl ReplayInterviewer {
-    /// Creates a new `ReplayInterviewer` from a list of recorded question-answer pairs.
-    /// Only the answers are retained for replay.
+    /// Creates a new `ReplayInterviewer` from a list of recorded
+    /// question-answer pairs. Only the answers are retained for replay.
     #[must_use]
     pub fn new(recordings: Vec<(Question, Answer)>) -> Self {
         let answers: Vec<Answer> = recordings.into_iter().map(|(_, a)| a).collect();

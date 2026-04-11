@@ -1,14 +1,14 @@
-use std::{
-    env, fs,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
+use std::{env, fs};
 
 use progenitor::{GenerationSettings, Generator, InterfaceStyle};
 
-/// Recursively convert OpenAPI 3.1 `type: "null"` patterns to 3.0 `nullable: true`.
+/// Recursively convert OpenAPI 3.1 `type: "null"` patterns to 3.0 `nullable:
+/// true`.
 ///
 /// Handles two patterns:
-/// - `oneOf: [{...}, {type: "null"}]` → the non-null schema with `nullable: true`
+/// - `oneOf: [{...}, {type: "null"}]` → the non-null schema with `nullable:
+///   true`
 /// - `type: [T1, ..., "null"]` → the remaining types with `nullable: true`
 fn patch_nullable(value: &mut serde_json::Value) {
     match value {
@@ -67,10 +67,12 @@ fn patch_nullable(value: &mut serde_json::Value) {
     }
 }
 
-/// Progenitor currently panics when an operation advertises more than one request-body media type.
+/// Progenitor currently panics when an operation advertises more than one
+/// request-body media type.
 ///
-/// Keep the source OpenAPI spec accurate for docs, but collapse the generated-client view down to
-/// a single preferred media type so code generation can proceed.
+/// Keep the source OpenAPI spec accurate for docs, but collapse the
+/// generated-client view down to a single preferred media type so code
+/// generation can proceed.
 fn patch_codegen_request_body_media_types(value: &mut serde_json::Value) {
     let Some(paths) = value
         .get_mut("paths")

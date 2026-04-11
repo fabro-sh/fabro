@@ -1,8 +1,7 @@
 use serde_json::{Value, json};
 
-use crate::openai::models::{ResponseFormat, ResponsesRequest, normalize_whitespace};
-
 use super::plan::ResponsePlan;
+use crate::openai::models::{ResponseFormat, ResponsesRequest, normalize_whitespace};
 
 pub fn build_default_response_plan(
     response_number: u64,

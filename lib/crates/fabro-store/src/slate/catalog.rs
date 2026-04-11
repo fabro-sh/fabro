@@ -1,9 +1,8 @@
 use chrono::{Datelike, Timelike};
+use fabro_types::RunId;
 use slatedb::Db;
 
-use crate::keys;
-use crate::{ListRunsQuery, Result};
-use fabro_types::RunId;
+use crate::{ListRunsQuery, Result, keys};
 
 pub(crate) async fn write_index(db: &Db, run_id: &RunId) -> Result<()> {
     db.put(keys::runs_index_by_start_key(run_id), []).await?;

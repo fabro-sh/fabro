@@ -1,9 +1,10 @@
-use crate::error::SdkError;
-use crate::provider::StreamEventStream;
-use crate::types::{Request, Response};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+
+use crate::error::SdkError;
+use crate::provider::StreamEventStream;
+use crate::types::{Request, Response};
 
 /// The next handler in the middleware chain.
 pub type NextFn = Arc<

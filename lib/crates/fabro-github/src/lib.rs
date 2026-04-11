@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 
 pub const GITHUB_API_BASE_URL: &str = "https://api.github.com";
 
-/// Returns the GitHub API base URL, allowing override via `GITHUB_BASE_URL` env var.
+/// Returns the GitHub API base URL, allowing override via `GITHUB_BASE_URL` env
+/// var.
 pub fn github_api_base_url() -> String {
     std::env::var("GITHUB_BASE_URL").unwrap_or_else(|_| GITHUB_API_BASE_URL.to_string())
 }
@@ -12,21 +13,21 @@ pub fn github_api_base_url() -> String {
 /// Detailed information about a pull request from the GitHub API.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PullRequestDetail {
-    pub number: u64,
-    pub title: String,
-    pub body: Option<String>,
-    pub state: String,
-    pub draft: bool,
-    pub mergeable: Option<bool>,
-    pub additions: u64,
-    pub deletions: u64,
+    pub number:        u64,
+    pub title:         String,
+    pub body:          Option<String>,
+    pub state:         String,
+    pub draft:         bool,
+    pub mergeable:     Option<bool>,
+    pub additions:     u64,
+    pub deletions:     u64,
     pub changed_files: u64,
-    pub html_url: String,
-    pub user: PullRequestUser,
-    pub head: PullRequestRef,
-    pub base: PullRequestRef,
-    pub created_at: String,
-    pub updated_at: String,
+    pub html_url:      String,
+    pub user:          PullRequestUser,
+    pub head:          PullRequestRef,
+    pub base:          PullRequestRef,
+    pub created_at:    String,
+    pub updated_at:    String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -49,14 +50,14 @@ pub struct AppOwner {
 /// Information about a GitHub App from the authenticated `/app` endpoint.
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppInfo {
-    pub slug: String,
+    pub slug:  String,
     pub owner: AppOwner,
 }
 
 /// Credentials for authenticating as a GitHub App.
 #[derive(Clone, Debug)]
 pub struct GitHubAppCredentials {
-    pub app_id: String,
+    pub app_id:          String,
     pub private_key_pem: String,
 }
 
@@ -105,7 +106,7 @@ pub enum HttpMethod {
 /// A minimal HTTP response for testability.
 pub struct HttpResponse {
     pub status: u16,
-    body: String,
+    body:       String,
 }
 
 impl HttpResponse {
@@ -385,8 +386,8 @@ pub async fn create_installation_access_token_for_pr(
 /// Result of a successful pull request creation.
 pub struct CreatedPullRequest {
     pub html_url: String,
-    pub number: u64,
-    pub node_id: String,
+    pub number:   u64,
+    pub node_id:  String,
 }
 
 /// Create a pull request on GitHub.
@@ -408,8 +409,8 @@ pub async fn create_pull_request(
     #[derive(Deserialize)]
     struct PullRequestResponse {
         html_url: String,
-        number: u64,
-        node_id: String,
+        number:   u64,
+        node_id:  String,
     }
 
     let jwt = sign_app_jwt(&creds.app_id, &creds.private_key_pem)?;
@@ -469,8 +470,8 @@ pub async fn create_pull_request(
 
     Ok(CreatedPullRequest {
         html_url: pr.html_url,
-        number: pr.number,
-        node_id: pr.node_id,
+        number:   pr.number,
+        node_id:  pr.node_id,
     })
 }
 
@@ -1015,8 +1016,9 @@ pub async fn create_installation_access_token_for_projects(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    use super::*;
 
     #[test]
     fn decode_pem_env_accepts_raw_pem() {
@@ -1217,11 +1219,11 @@ mod tests {
     // -----------------------------------------------------------------------
 
     struct MockRoute {
-        method: HttpMethod,
-        path: String,
-        status: u16,
-        response_body: String,
-        assert_header: Option<(String, MockHeaderCheck)>,
+        method:           HttpMethod,
+        path:             String,
+        status:           u16,
+        response_body:    String,
+        assert_header:    Option<(String, MockHeaderCheck)>,
         assert_body_json: Option<serde_json::Value>,
     }
 
@@ -1468,7 +1470,7 @@ mod tests {
 
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
-            app_id: "test".to_string(),
+            app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
         };
         let result =
@@ -1500,7 +1502,7 @@ mod tests {
 
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
-            app_id: "test".to_string(),
+            app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
         };
         let result =
@@ -1532,7 +1534,7 @@ mod tests {
 
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
-            app_id: "test".to_string(),
+            app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
         };
         let result = branch_exists_with_client(&mock, &creds, "owner", "repo", "broken", "").await;
@@ -1700,7 +1702,7 @@ mod tests {
 
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
-            app_id: "test".to_string(),
+            app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
         };
         let detail = get_pull_request_with_client(&mock, &creds, "owner", "repo", 42, "")
@@ -1737,7 +1739,7 @@ mod tests {
 
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
-            app_id: "test".to_string(),
+            app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
         };
         let err = get_pull_request_with_client(&mock, &creds, "owner", "repo", 999, "")
@@ -1775,7 +1777,7 @@ mod tests {
 
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
-            app_id: "test".to_string(),
+            app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
         };
         merge_pull_request_with_client(&mock, &creds, "owner", "repo", 42, "squash", "")
@@ -1802,7 +1804,7 @@ mod tests {
 
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
-            app_id: "test".to_string(),
+            app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
         };
         let err = merge_pull_request_with_client(&mock, &creds, "owner", "repo", 42, "squash", "")
@@ -1830,7 +1832,7 @@ mod tests {
 
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
-            app_id: "test".to_string(),
+            app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
         };
         let err = merge_pull_request_with_client(&mock, &creds, "owner", "repo", 42, "squash", "")
@@ -1867,7 +1869,7 @@ mod tests {
 
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
-            app_id: "test".to_string(),
+            app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
         };
         close_pull_request_with_client(&mock, &creds, "owner", "repo", 42, "")
@@ -1894,7 +1896,7 @@ mod tests {
 
         let pem = test_rsa_key();
         let creds = GitHubAppCredentials {
-            app_id: "test".to_string(),
+            app_id:          "test".to_string(),
             private_key_pem: pem.to_string(),
         };
         let err = close_pull_request_with_client(&mock, &creds, "owner", "repo", 999, "")

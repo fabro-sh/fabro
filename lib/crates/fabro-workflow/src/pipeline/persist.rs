@@ -1,11 +1,11 @@
 use std::path::Path;
 
+use super::types::{PersistOptions, Persisted, Validated};
 use crate::error::FabroError;
 use crate::runtime_store::RunStoreHandle;
 
-use super::types::{PersistOptions, Persisted, Validated};
-
-/// PERSIST phase: create the run directory and return durable metadata for store persistence.
+/// PERSIST phase: create the run directory and return durable metadata for
+/// store persistence.
 pub(crate) fn persist(
     validated: Validated,
     mut options: PersistOptions,
@@ -51,6 +51,8 @@ pub(crate) async fn load_from_store(
 mod tests {
     use std::collections::HashMap;
     use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::time::Duration;
 
     use fabro_graphviz::graph::{AttrValue, Edge, Graph, Node};
     use fabro_store::{Database, RunDatabase};
@@ -59,8 +61,6 @@ mod tests {
     use fabro_types::settings::cli::{CliLayer, CliOutputLayer, OutputVerbosity};
     use fabro_types::settings::run::{RunExecutionLayer, RunLayer, RunMode};
     use object_store::memory::InMemory;
-    use std::sync::Arc;
-    use std::time::Duration;
 
     use super::*;
     use crate::event::{Event, append_event};
@@ -157,27 +157,23 @@ mod tests {
     async fn seeded_store(run_dir: &Path, record: &RunRecord, source: Option<&str>) -> RunDatabase {
         let store = memory_store();
         let run_store = store.create_run(&record.run_id).await.unwrap();
-        append_event(
-            &run_store,
-            &record.run_id,
-            &Event::RunCreated {
-                run_id: record.run_id,
-                settings: serde_json::to_value(&record.settings).unwrap(),
-                graph: serde_json::to_value(&record.graph).unwrap(),
-                workflow_source: source.map(ToOwned::to_owned),
-                workflow_config: None,
-                labels: record.labels.clone().into_iter().collect(),
-                run_dir: run_dir.to_string_lossy().to_string(),
-                working_directory: record.working_directory.display().to_string(),
-                host_repo_path: record.host_repo_path.clone(),
-                repo_origin_url: record.repo_origin_url.clone(),
-                base_branch: record.base_branch.clone(),
-                workflow_slug: record.workflow_slug.clone(),
-                db_prefix: None,
-                provenance: record.provenance.clone(),
-                manifest_blob: None,
-            },
-        )
+        append_event(&run_store, &record.run_id, &Event::RunCreated {
+            run_id:            record.run_id,
+            settings:          serde_json::to_value(&record.settings).unwrap(),
+            graph:             serde_json::to_value(&record.graph).unwrap(),
+            workflow_source:   source.map(ToOwned::to_owned),
+            workflow_config:   None,
+            labels:            record.labels.clone().into_iter().collect(),
+            run_dir:           run_dir.to_string_lossy().to_string(),
+            working_directory: record.working_directory.display().to_string(),
+            host_repo_path:    record.host_repo_path.clone(),
+            repo_origin_url:   record.repo_origin_url.clone(),
+            base_branch:       record.base_branch.clone(),
+            workflow_slug:     record.workflow_slug.clone(),
+            db_prefix:         None,
+            provenance:        record.provenance.clone(),
+            manifest_blob:     None,
+        })
         .await
         .unwrap();
         run_store
@@ -191,7 +187,7 @@ mod tests {
         let persisted = persist(
             Validated::new(graph.clone(), source, vec![]),
             PersistOptions {
-                run_dir: run_dir.clone(),
+                run_dir:    run_dir.clone(),
                 run_record: sample_record(different_graph()),
             },
         )
@@ -218,7 +214,7 @@ mod tests {
         let persisted = persist(
             Validated::new(graph.clone(), source, vec![]),
             PersistOptions {
-                run_dir: run_dir.clone(),
+                run_dir:    run_dir.clone(),
                 run_record: sample_record(different_graph()),
             },
         )
@@ -243,7 +239,7 @@ mod tests {
         persist(
             Validated::new(graph, source.clone(), vec![]),
             PersistOptions {
-                run_dir: run_dir.clone(),
+                run_dir:    run_dir.clone(),
                 run_record: expected.clone(),
             },
         )
@@ -283,13 +279,10 @@ mod tests {
         std::fs::write(&run_dir, "not a directory").unwrap();
         let (graph, source) = graph_and_source();
 
-        let err = persist(
-            Validated::new(graph, source, vec![]),
-            PersistOptions {
-                run_dir,
-                run_record: sample_record(different_graph()),
-            },
-        )
+        let err = persist(Validated::new(graph, source, vec![]), PersistOptions {
+            run_dir,
+            run_record: sample_record(different_graph()),
+        })
         .unwrap_err();
 
         assert!(matches!(err, FabroError::Io(_)));

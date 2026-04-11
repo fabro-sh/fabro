@@ -9,5 +9,4 @@
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/codegen.rs"));
 }
-pub use generated::Client;
-pub use generated::types;
+pub use generated::{Client, types};

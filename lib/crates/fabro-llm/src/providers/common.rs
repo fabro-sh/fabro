@@ -1,14 +1,16 @@
-use base64::{Engine, engine::general_purpose::STANDARD as BASE64_STANDARD};
-
-use crate::error::{SdkError, error_from_status_code};
-use crate::types::{Message, RateLimitInfo, Role};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use reqwest::header::HeaderMap;
 use tokio::time;
 use tracing::warn;
 
+use crate::error::{SdkError, error_from_status_code};
+use crate::types::{Message, RateLimitInfo, Role};
+
 /// Parse an error response body, extracting the message and error code.
 ///
-/// `error_code_field` is the JSON field name for the error code (e.g. "type" or "status").
+/// `error_code_field` is the JSON field name for the error code (e.g. "type" or
+/// "status").
 #[must_use]
 pub fn parse_error_body(
     body: &str,
@@ -157,13 +159,15 @@ pub fn parse_rate_limit_headers(headers: &HeaderMap) -> Option<RateLimitInfo> {
     })
 }
 
-/// Send an HTTP request, read the response body, and return it along with the response headers.
+/// Send an HTTP request, read the response body, and return it along with the
+/// response headers.
 ///
 /// Returns an error on non-success status.
 ///
 /// # Errors
 ///
-/// Returns `SdkError::Network` on connection failure or `SdkError::Provider` on non-success status.
+/// Returns `SdkError::Network` on connection failure or `SdkError::Provider` on
+/// non-success status.
 pub async fn send_and_read_response(
     request: reqwest::RequestBuilder,
     provider: &str,
@@ -209,8 +213,8 @@ pub async fn send_and_read_response(
 /// delimiter (e.g. `"\n"` for Gemini/OpenAI-compatible, `"\n\n"` for
 /// Anthropic/OpenAI SSE event blocks).
 pub struct LineReader {
-    response: reqwest::Response,
-    buffer: String,
+    response:            reqwest::Response,
+    buffer:              String,
     stream_read_timeout: Option<std::time::Duration>,
 }
 
@@ -263,7 +267,7 @@ impl LineReader {
                     warn!("Stream read timed out waiting for next event");
                     return Err(SdkError::Stream {
                         message: "stream read timed out waiting for next event".to_string(),
-                        source: None,
+                        source:  None,
                     });
                 }
             }
@@ -463,9 +467,9 @@ mod tests {
     #[test]
     fn extract_system_prompt_developer_role() {
         let dev = Message {
-            role: Role::Developer,
-            content: vec![ContentPart::text("dev instructions")],
-            name: None,
+            role:         Role::Developer,
+            content:      vec![ContentPart::text("dev instructions")],
+            name:         None,
             tool_call_id: None,
         };
         let msgs = vec![dev, Message::user("hi")];
@@ -477,9 +481,9 @@ mod tests {
     #[test]
     fn extract_system_prompt_ignores_whitespace_system_and_developer() {
         let dev = Message {
-            role: Role::Developer,
-            content: vec![ContentPart::text(" \n\t ")],
-            name: None,
+            role:         Role::Developer,
+            content:      vec![ContentPart::text(" \n\t ")],
+            name:         None,
             tool_call_id: None,
         };
         let msgs = vec![Message::system("   "), dev, Message::user("hi")];

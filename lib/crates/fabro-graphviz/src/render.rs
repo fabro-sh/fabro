@@ -1,7 +1,6 @@
 use std::fmt;
 use std::io::Write;
 use std::process::Command;
-
 use std::sync::LazyLock;
 
 use anyhow::bail;
@@ -25,7 +24,8 @@ impl fmt::Display for GraphFormat {
     }
 }
 
-/// Dark mode CSS injected into SVG output (leading newline included for insertion).
+/// Dark mode CSS injected into SVG output (leading newline included for
+/// insertion).
 const DARK_MODE_STYLE: &str = r##"
 <style>
   @media (prefers-color-scheme: dark) {

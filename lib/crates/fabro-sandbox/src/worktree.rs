@@ -1,7 +1,8 @@
-use async_trait::async_trait;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+
+use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
 use crate::{DirEntry, ExecResult, GrepOptions, Sandbox, shell_quote};
@@ -25,27 +26,30 @@ pub type WorktreeEventCallback = Arc<dyn Fn(WorktreeEvent) + Send + Sync>;
 
 /// Configuration for a `WorktreeSandbox`.
 pub struct WorktreeOptions {
-    pub branch_name: String,
-    pub base_sha: String,
-    pub worktree_path: String,
-    /// Skip branch creation and hard reset (for resume, where branch already exists).
+    pub branch_name:          String,
+    pub base_sha:             String,
+    pub worktree_path:        String,
+    /// Skip branch creation and hard reset (for resume, where branch already
+    /// exists).
     pub skip_branch_creation: bool,
 }
 
-/// Wraps any `Sandbox`, manages a git worktree lifecycle in `initialize()`/`cleanup()`,
-/// and overrides `working_directory()` and `exec_command()` to use the worktree path.
+/// Wraps any `Sandbox`, manages a git worktree lifecycle in
+/// `initialize()`/`cleanup()`, and overrides `working_directory()` and
+/// `exec_command()` to use the worktree path.
 ///
-/// `initialize()` and `cleanup()` do NOT call the inner sandbox's lifecycle methods.
-/// The inner sandbox's lifecycle is managed separately by the caller.
+/// `initialize()` and `cleanup()` do NOT call the inner sandbox's lifecycle
+/// methods. The inner sandbox's lifecycle is managed separately by the caller.
 pub struct WorktreeSandbox {
-    inner: Arc<dyn Sandbox>,
-    config: WorktreeOptions,
+    inner:          Arc<dyn Sandbox>,
+    config:         WorktreeOptions,
     event_callback: Option<WorktreeEventCallback>,
-    initialized: std::sync::atomic::AtomicBool,
+    initialized:    std::sync::atomic::AtomicBool,
 }
 
 impl WorktreeSandbox {
-    /// Create a new `WorktreeSandbox` wrapping `inner` with the given configuration.
+    /// Create a new `WorktreeSandbox` wrapping `inner` with the given
+    /// configuration.
     pub fn new(inner: Arc<dyn Sandbox>, config: WorktreeOptions) -> Self {
         Self {
             inner,
@@ -99,8 +103,10 @@ impl Sandbox for WorktreeSandbox {
     // --- Lifecycle ---
 
     /// Set up the git worktree:
-    /// 1. Best-effort remove any stale worktree at `path` (so the branch is free to be updated).
-    /// 2. Unless `skip_branch_creation`: force-create the branch at `base_sha`, emit `BranchCreated`.
+    /// 1. Best-effort remove any stale worktree at `path` (so the branch is
+    ///    free to be updated).
+    /// 2. Unless `skip_branch_creation`: force-create the branch at `base_sha`,
+    ///    emit `BranchCreated`.
     /// 3. Add the worktree, emit `WorktreeAdded`.
     ///
     /// Does NOT call `inner.initialize()`.
@@ -147,7 +153,7 @@ impl Sandbox for WorktreeSandbox {
             }
             self.emit(WorktreeEvent::BranchCreated {
                 branch: self.config.branch_name.clone(),
-                sha: self.config.base_sha.clone(),
+                sha:    self.config.base_sha.clone(),
             });
         }
 
@@ -172,7 +178,7 @@ impl Sandbox for WorktreeSandbox {
             ));
         }
         self.emit(WorktreeEvent::WorktreeAdded {
-            path: self.config.worktree_path.clone(),
+            path:   self.config.worktree_path.clone(),
             branch: self.config.branch_name.clone(),
         });
 
@@ -189,7 +195,8 @@ impl Sandbox for WorktreeSandbox {
         &self.config.worktree_path
     }
 
-    /// Execute a command, defaulting `working_dir` to the worktree path when `None`.
+    /// Execute a command, defaulting `working_dir` to the worktree path when
+    /// `None`.
     async fn exec_command(
         &self,
         command: &str,
@@ -352,31 +359,33 @@ impl Sandbox for WorktreeSandbox {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use super::*;
     use crate::local::LocalSandbox;
     use crate::test_support::MockSandbox;
-    use std::sync::Mutex;
 
     fn make_config(wt_path: &str) -> WorktreeOptions {
         WorktreeOptions {
-            branch_name: "fabro/run/test-branch".to_string(),
-            base_sha: "abc123def456".to_string(),
-            worktree_path: wt_path.to_string(),
+            branch_name:          "fabro/run/test-branch".to_string(),
+            base_sha:             "abc123def456".to_string(),
+            worktree_path:        wt_path.to_string(),
             skip_branch_creation: false,
         }
     }
 
     fn make_config_skip(wt_path: &str) -> WorktreeOptions {
         WorktreeOptions {
-            branch_name: "fabro/run/test-branch".to_string(),
-            base_sha: "abc123def456".to_string(),
-            worktree_path: wt_path.to_string(),
+            branch_name:          "fabro/run/test-branch".to_string(),
+            base_sha:             "abc123def456".to_string(),
+            worktree_path:        wt_path.to_string(),
             skip_branch_creation: true,
         }
     }
 
-    /// Create a shared mock and return both the `Arc<dyn Sandbox>` (passed to WorktreeSandbox)
-    /// and the `Arc<MockSandbox>` (used to assert captured state).
+    /// Create a shared mock and return both the `Arc<dyn Sandbox>` (passed to
+    /// WorktreeSandbox) and the `Arc<MockSandbox>` (used to assert captured
+    /// state).
     fn make_mock() -> (Arc<dyn Sandbox>, Arc<MockSandbox>) {
         let mock = Arc::new(MockSandbox::linux());
         let as_sandbox: Arc<dyn Sandbox> = mock.clone();
@@ -433,9 +442,9 @@ mod tests {
     async fn initialize_uses_shell_quoted_values_in_commands() {
         let (inner, mock) = make_mock();
         let config = WorktreeOptions {
-            branch_name: "fabro/run/my-branch".to_string(),
-            base_sha: "deadbeef".to_string(),
-            worktree_path: "/tmp/my worktree".to_string(), // path with space
+            branch_name:          "fabro/run/my-branch".to_string(),
+            base_sha:             "deadbeef".to_string(),
+            worktree_path:        "/tmp/my worktree".to_string(), // path with space
             skip_branch_creation: false,
         };
         let wt = WorktreeSandbox::new(inner, config);
@@ -443,7 +452,8 @@ mod tests {
         wt.initialize().await.unwrap();
 
         let cmds = mock.captured_commands.lock().unwrap().clone();
-        // The path "/tmp/my worktree" should be quoted in the worktree remove command (cmd[0])
+        // The path "/tmp/my worktree" should be quoted in the worktree remove command
+        // (cmd[0])
         assert!(
             cmds[0].contains("'/tmp/my worktree'") || cmds[0].contains("\"/tmp/my worktree\""),
             "worktree path should be shell-quoted: {}",
@@ -504,10 +514,10 @@ mod tests {
     async fn initialize_propagates_error_on_nonzero_exit() {
         let inner: Arc<dyn Sandbox> = Arc::new(MockSandbox {
             exec_result: ExecResult {
-                stdout: String::new(),
-                stderr: "fatal: not a git repo".to_string(),
-                exit_code: 128,
-                timed_out: false,
+                stdout:      String::new(),
+                stderr:      "fatal: not a git repo".to_string(),
+                exit_code:   128,
+                timed_out:   false,
                 duration_ms: 5,
             },
             ..MockSandbox::linux()
@@ -652,9 +662,9 @@ mod tests {
 
         let inner: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(original.clone()));
         let config = WorktreeOptions {
-            branch_name: "test-branch".into(),
-            base_sha: "abc123".into(),
-            worktree_path: worktree.to_string_lossy().to_string(),
+            branch_name:          "test-branch".into(),
+            base_sha:             "abc123".into(),
+            worktree_path:        worktree.to_string_lossy().to_string(),
             skip_branch_creation: false,
         };
         let wt = WorktreeSandbox::new(inner, config);
@@ -693,9 +703,9 @@ mod tests {
 
         let inner: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(original.clone()));
         let config = WorktreeOptions {
-            branch_name: "test-branch".into(),
-            base_sha: "abc123".into(),
-            worktree_path: worktree.to_string_lossy().to_string(),
+            branch_name:          "test-branch".into(),
+            base_sha:             "abc123".into(),
+            worktree_path:        worktree.to_string_lossy().to_string(),
             skip_branch_creation: false,
         };
         let wt = WorktreeSandbox::new(inner, config);
@@ -727,9 +737,9 @@ mod tests {
 
         let inner: Arc<dyn Sandbox> = Arc::new(LocalSandbox::new(original.clone()));
         let config = WorktreeOptions {
-            branch_name: "test-branch".into(),
-            base_sha: "abc123".into(),
-            worktree_path: worktree.to_string_lossy().to_string(),
+            branch_name:          "test-branch".into(),
+            base_sha:             "abc123".into(),
+            worktree_path:        worktree.to_string_lossy().to_string(),
             skip_branch_creation: false,
         };
         let wt = WorktreeSandbox::new(inner, config);
@@ -753,9 +763,9 @@ mod tests {
     fn accessors_return_config_values() {
         let (inner, _mock) = make_mock();
         let config = WorktreeOptions {
-            branch_name: "my-branch".to_string(),
-            base_sha: "sha123".to_string(),
-            worktree_path: "/path/to/wt".to_string(),
+            branch_name:          "my-branch".to_string(),
+            base_sha:             "sha123".to_string(),
+            worktree_path:        "/path/to/wt".to_string(),
             skip_branch_creation: false,
         };
         let wt = WorktreeSandbox::new(inner, config);

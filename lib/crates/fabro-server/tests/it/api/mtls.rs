@@ -1,6 +1,5 @@
 #![allow(clippy::absolute_paths)]
 
-use crate::helpers::api;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -10,6 +9,8 @@ use fabro_server::tls::{ClientAuth, build_rustls_config};
 use fabro_server::tls_config::TlsSettings;
 use tokio::net::TcpListener;
 
+use crate::helpers::api;
+
 fn fixture_path(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/mtls")
@@ -18,20 +19,20 @@ fn fixture_path(name: &str) -> PathBuf {
 
 fn fixture_pki() -> PkiPaths {
     PkiPaths {
-        ca_cert: fixture_path("ca.crt"),
+        ca_cert:     fixture_path("ca.crt"),
         server_cert: fixture_path("server.crt"),
-        server_key: fixture_path("server.key"),
+        server_key:  fixture_path("server.key"),
         client_cert: fixture_path("client.crt"),
-        client_key: fixture_path("client.key"),
+        client_key:  fixture_path("client.key"),
     }
 }
 
 struct PkiPaths {
-    ca_cert: PathBuf,
+    ca_cert:     PathBuf,
     server_cert: PathBuf,
-    server_key: PathBuf,
+    server_key:  PathBuf,
     client_cert: PathBuf,
-    client_key: PathBuf,
+    client_key:  PathBuf,
 }
 
 /// Start a TLS server on a random port, returning the bound address.
@@ -93,8 +94,8 @@ async fn mtls_accepts_valid_client_cert() {
 
     let tls_settings = TlsSettings {
         cert: pki.server_cert.clone(),
-        key: pki.server_key.clone(),
-        ca: pki.ca_cert.clone(),
+        key:  pki.server_key.clone(),
+        ca:   pki.ca_cert.clone(),
     };
 
     let auth_mode = AuthMode::Strategies(vec![AuthStrategy::Mtls]);
@@ -118,8 +119,8 @@ async fn mtls_only_rejects_wrong_ca_client_cert() {
 
     let tls_settings = TlsSettings {
         cert: pki.server_cert.clone(),
-        key: pki.server_key.clone(),
-        ca: pki.ca_cert.clone(),
+        key:  pki.server_key.clone(),
+        ca:   pki.ca_cert.clone(),
     };
 
     let auth_mode = AuthMode::Strategies(vec![AuthStrategy::Mtls]);
@@ -156,8 +157,8 @@ async fn mtls_only_rejects_no_client_cert() {
 
     let tls_settings = TlsSettings {
         cert: pki.server_cert.clone(),
-        key: pki.server_key.clone(),
-        ca: pki.ca_cert.clone(),
+        key:  pki.server_key.clone(),
+        ca:   pki.ca_cert.clone(),
     };
 
     // mTLS is the ONLY strategy -> client cert is required at TLS level
@@ -212,21 +213,18 @@ async fn mtls_and_jwt_accepts_valid_jwt_without_client_cert() {
 
     let tls_settings = TlsSettings {
         cert: pki.server_cert.clone(),
-        key: pki.server_key.clone(),
-        ca: pki.ca_cert.clone(),
+        key:  pki.server_key.clone(),
+        ca:   pki.ca_cert.clone(),
     };
 
     let (encoding_key, decoding_key) = fixture_jwt_keypair();
 
     // Both mTLS and JWT strategies; mTLS is optional since JWT is also present
-    let auth_mode = AuthMode::Strategies(vec![
-        AuthStrategy::Mtls,
-        AuthStrategy::Jwt {
-            key: Arc::new(decoding_key),
-            validation: Arc::new(fabro_server::jwt_auth::jwt_validation()),
-            allowed_usernames: vec!["brynary".to_string()],
-        },
-    ]);
+    let auth_mode = AuthMode::Strategies(vec![AuthStrategy::Mtls, AuthStrategy::Jwt {
+        key:               Arc::new(decoding_key),
+        validation:        Arc::new(fabro_server::jwt_auth::jwt_validation()),
+        allowed_usernames: vec!["brynary".to_string()],
+    }]);
     let addr = start_tls_server(&tls_settings, ClientAuth::Optional, auth_mode).await;
 
     // Client trusts the server CA but presents NO client cert

@@ -4,21 +4,19 @@ use fabro_checkpoint::git::Store;
 use fabro_types::RunId;
 use git2::{Oid, Signature};
 
-use crate::git::{MetadataStore, RUN_BRANCH_PREFIX, push_run_branches};
-use crate::records::Checkpoint;
-use crate::records::RunRecord;
-use crate::records::StartRecord;
-
 use super::rewind::{RewindTarget, TimelineEntry, build_timeline};
+use crate::git::{MetadataStore, RUN_BRANCH_PREFIX, push_run_branches};
+use crate::records::{Checkpoint, RunRecord, StartRecord};
 
 #[derive(Debug, Clone)]
 pub struct ForkRunInput {
     pub source_run_id: RunId,
-    pub target: Option<RewindTarget>,
-    pub push: bool,
+    pub target:        Option<RewindTarget>,
+    pub push:          bool,
 }
 
-/// Create a new run that branches from an existing run at a specific checkpoint.
+/// Create a new run that branches from an existing run at a specific
+/// checkpoint.
 ///
 /// Returns the new run ID.
 pub fn fork(store: &Store, input: &ForkRunInput) -> Result<RunId> {
@@ -91,10 +89,10 @@ fn fork_from_entry(
 
     let now = new_run_id.created_at();
     let start_record = StartRecord {
-        run_id: new_run_id,
+        run_id:     new_run_id,
         start_time: now,
         run_branch: Some(new_run_branch.clone()),
-        base_sha: None,
+        base_sha:   None,
     };
     let new_start_record_bytes =
         serde_json::to_vec_pretty(&start_record).context("failed to serialize new start.json")?;
@@ -149,11 +147,11 @@ fn fork_from_entry(
 mod tests {
     use std::str::FromStr;
 
-    use super::super::test_support::*;
-    use super::*;
     use fabro_types::RunId;
     use git2::Oid;
 
+    use super::super::test_support::*;
+    use super::*;
     use crate::operations::find_run_id_by_prefix;
 
     fn parse_run_id(value: &str) -> RunId {
@@ -245,14 +243,11 @@ mod tests {
         let source_run_id = parse_run_id("01ARZ3NDEKTSV4RRFFQ69G5FAV");
         let run_oids = setup_source_run(&store, &source_run_id, &["start", "build", "test"]);
 
-        let new_run_id = fork(
-            &store,
-            &ForkRunInput {
-                source_run_id,
-                target: Some(RewindTarget::from_str("@2").unwrap()),
-                push: false,
-            },
-        )
+        let new_run_id = fork(&store, &ForkRunInput {
+            source_run_id,
+            target: Some(RewindTarget::from_str("@2").unwrap()),
+            push: false,
+        })
         .unwrap();
 
         let new_run_branch = format!("{RUN_BRANCH_PREFIX}{new_run_id}");
@@ -292,11 +287,11 @@ mod tests {
             .write_entry("checkpoint.json", &cp, "checkpoint")
             .unwrap();
         let entry = TimelineEntry {
-            ordinal: 1,
-            node_name: "start".to_string(),
-            visit: 1,
+            ordinal:             1,
+            node_name:           "start".to_string(),
+            visit:               1,
             metadata_commit_oid: oid,
-            run_commit_sha: None,
+            run_commit_sha:      None,
         };
 
         let err = fork_from_entry(&store, &run_id, &entry, false)

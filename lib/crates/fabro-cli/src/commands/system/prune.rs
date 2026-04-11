@@ -1,9 +1,8 @@
 use std::collections::HashMap;
 
 use anyhow::{Context, Result, bail};
-use tracing::{debug, info};
-
 use fabro_api::types;
+use tracing::{debug, info};
 
 use crate::args::{GlobalArgs, RunsPruneArgs};
 use crate::command_context::CommandContext;
@@ -17,12 +16,12 @@ pub(super) async fn prune_command(args: &RunsPruneArgs, globals: &GlobalArgs) ->
         .api()
         .prune_runs()
         .body(types::PruneRunsRequest {
-            before: args.filter.before.clone(),
-            dry_run: !args.yes,
-            labels: parse_label_filters(&args.filter.label),
+            before:     args.filter.before.clone(),
+            dry_run:    !args.yes,
+            labels:     parse_label_filters(&args.filter.label),
             older_than: args.older_than.map(format_duration),
-            orphans: args.filter.orphans,
-            workflow: args.filter.workflow.clone(),
+            orphans:    args.filter.orphans,
+            workflow:   args.filter.workflow.clone(),
         })
         .send()
         .await

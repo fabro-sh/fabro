@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
-use crate::artifact::{artifact_path, format_artifact_reference};
-use crate::context::keys;
-use crate::context::{Context, WorkflowContext};
-use crate::outcome::{Outcome, OutcomeExt};
 use fabro_graphviz::graph::{Graph, Node, is_llm_handler_type};
+
+use crate::artifact::{artifact_path, format_artifact_reference};
+use crate::context::{Context, WorkflowContext, keys};
+use crate::outcome::{Outcome, OutcomeExt};
 
 const COMPACT_OUTPUT_MAX_LINES: usize = 25;
 const SUMMARY_HIGH_OUTPUT_MAX_LINES: usize = 50;
@@ -146,7 +146,8 @@ fn tail_lines(text: &str, max_lines: usize, indent: &str) -> String {
 }
 
 /// Returns the set of context keys that are rendered inline under a stage's
-/// handler-specific details, so they can be skipped in the trailing context section.
+/// handler-specific details, so they can be skipped in the trailing context
+/// section.
 fn stage_rendered_keys(node_id: &str, outcome: &Outcome) -> HashSet<String> {
     let candidates = [
         keys::COMMAND_OUTPUT.to_string(),
@@ -615,23 +616,19 @@ fn build_summary_preamble(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::outcome::{BilledModelUsage, billed_model_usage_from_llm};
     use fabro_graphviz::graph::AttrValue;
     use fabro_llm::types::TokenCounts;
     use fabro_model::Provider;
 
+    use super::*;
+    use crate::outcome::{BilledModelUsage, billed_model_usage_from_llm};
+
     fn stage_usage(model: &str, input_tokens: i64, output_tokens: i64) -> BilledModelUsage {
-        billed_model_usage_from_llm(
-            model,
-            Provider::Anthropic,
-            None,
-            &TokenCounts {
-                input_tokens,
-                output_tokens,
-                ..TokenCounts::default()
-            },
-        )
+        billed_model_usage_from_llm(model, Provider::Anthropic, None, &TokenCounts {
+            input_tokens,
+            output_tokens,
+            ..TokenCounts::default()
+        })
     }
 
     // --- truncate mode ---
@@ -1025,7 +1022,8 @@ mod tests {
         graph.nodes.insert("step".to_string(), step);
 
         let context = Context::new();
-        // command.output is set in context (the engine copies context_updates to context)
+        // command.output is set in context (the engine copies context_updates to
+        // context)
         context.set(keys::COMMAND_OUTPUT, serde_json::json!("hi\n"));
         context.set(keys::COMMAND_STDERR, serde_json::json!(""));
         let completed_nodes = vec!["step".to_string()];

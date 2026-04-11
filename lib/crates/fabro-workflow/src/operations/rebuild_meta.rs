@@ -166,7 +166,7 @@ pub async fn build_timeline_or_rebuild(
     }
 
     Ok(RunTimeline {
-        entries: Vec::new(),
+        entries:      Vec::new(),
         parallel_map: HashMap::new(),
     })
 }
@@ -332,16 +332,17 @@ fn resolve_prefix_matches(prefix: &str, matches: Vec<RunId>) -> Result<RunId> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::time::Duration;
+
     use chrono::{TimeZone, Utc};
     use fabro_graphviz::graph::Graph;
     use fabro_store::{Database, StageId};
     use fabro_types::settings::SettingsLayer;
     use fabro_types::{RunId, RunRecord, SandboxRecord, StartRecord, fixtures};
     use object_store::memory::InMemory;
-    use std::collections::HashMap;
-    use std::path::PathBuf;
-    use std::sync::Arc;
-    use std::time::Duration;
 
     use super::*;
     use crate::event::{Event, append_event};
@@ -396,11 +397,11 @@ mod tests {
 
     fn sample_sandbox_record() -> SandboxRecord {
         SandboxRecord {
-            provider: "local".to_string(),
-            working_directory: "/tmp/project".to_string(),
-            identifier: None,
+            provider:               "local".to_string(),
+            working_directory:      "/tmp/project".to_string(),
+            identifier:             None,
             host_working_directory: None,
-            container_mount_point: None,
+            container_mount_point:  None,
         }
     }
 
@@ -411,20 +412,20 @@ mod tests {
         git_commit_sha: Option<&str>,
     ) -> Checkpoint {
         Checkpoint {
-            timestamp: created_at(),
-            current_node: current_node.to_string(),
-            completed_nodes: completed_nodes
+            timestamp:                  created_at(),
+            current_node:               current_node.to_string(),
+            completed_nodes:            completed_nodes
                 .iter()
                 .map(|node| (*node).to_string())
                 .collect(),
-            node_retries: HashMap::new(),
-            context_values: HashMap::new(),
-            node_outcomes: HashMap::new(),
-            next_node_id: None,
-            git_commit_sha: git_commit_sha.map(ToOwned::to_owned),
-            loop_failure_signatures: HashMap::new(),
+            node_retries:               HashMap::new(),
+            context_values:             HashMap::new(),
+            node_outcomes:              HashMap::new(),
+            next_node_id:               None,
+            git_commit_sha:             git_commit_sha.map(ToOwned::to_owned),
+            loop_failure_signatures:    HashMap::new(),
             restart_failure_signatures: HashMap::new(),
-            node_visits: node_visits
+            node_visits:                node_visits
                 .iter()
                 .map(|(node, visit)| ((*node).to_string(), *visit))
                 .collect(),
@@ -438,27 +439,23 @@ mod tests {
     ) -> DurableRunStore {
         let run_store = store.create_run(&run_id).await.unwrap();
         let run_record = sample_run_record(run_id, host_repo_path);
-        append_event(
-            &run_store,
-            &run_id,
-            &Event::RunCreated {
-                run_id,
-                settings: serde_json::to_value(&run_record.settings).unwrap(),
-                graph: serde_json::to_value(&run_record.graph).unwrap(),
-                workflow_source: None,
-                workflow_config: None,
-                labels: run_record.labels.clone().into_iter().collect(),
-                run_dir: String::new(),
-                working_directory: run_record.working_directory.display().to_string(),
-                host_repo_path: run_record.host_repo_path.clone(),
-                repo_origin_url: run_record.repo_origin_url.clone(),
-                base_branch: run_record.base_branch.clone(),
-                workflow_slug: run_record.workflow_slug.clone(),
-                db_prefix: None,
-                provenance: run_record.provenance.clone(),
-                manifest_blob: None,
-            },
-        )
+        append_event(&run_store, &run_id, &Event::RunCreated {
+            run_id,
+            settings: serde_json::to_value(&run_record.settings).unwrap(),
+            graph: serde_json::to_value(&run_record.graph).unwrap(),
+            workflow_source: None,
+            workflow_config: None,
+            labels: run_record.labels.clone().into_iter().collect(),
+            run_dir: String::new(),
+            working_directory: run_record.working_directory.display().to_string(),
+            host_repo_path: run_record.host_repo_path.clone(),
+            repo_origin_url: run_record.repo_origin_url.clone(),
+            base_branch: run_record.base_branch.clone(),
+            workflow_slug: run_record.workflow_slug.clone(),
+            db_prefix: None,
+            provenance: run_record.provenance.clone(),
+            manifest_blob: None,
+        })
         .await
         .unwrap();
         run_store
@@ -466,36 +463,28 @@ mod tests {
 
     async fn append_start_event(run_store: &DurableRunStore, run_id: RunId) {
         let start = sample_start_record(run_id);
-        append_event(
-            run_store,
-            &run_id,
-            &Event::WorkflowRunStarted {
-                name: "test".to_string(),
-                run_id,
-                base_branch: None,
-                base_sha: start.base_sha,
-                run_branch: start.run_branch,
-                worktree_dir: None,
-                goal: None,
-            },
-        )
+        append_event(run_store, &run_id, &Event::WorkflowRunStarted {
+            name: "test".to_string(),
+            run_id,
+            base_branch: None,
+            base_sha: start.base_sha,
+            run_branch: start.run_branch,
+            worktree_dir: None,
+            goal: None,
+        })
         .await
         .unwrap();
     }
 
     async fn append_sandbox_event(run_store: &DurableRunStore, run_id: RunId) {
         let sandbox = sample_sandbox_record();
-        append_event(
-            run_store,
-            &run_id,
-            &Event::SandboxInitialized {
-                provider: sandbox.provider,
-                working_directory: sandbox.working_directory,
-                identifier: sandbox.identifier,
-                host_working_directory: sandbox.host_working_directory,
-                container_mount_point: sandbox.container_mount_point,
-            },
-        )
+        append_event(run_store, &run_id, &Event::SandboxInitialized {
+            provider:               sandbox.provider,
+            working_directory:      sandbox.working_directory,
+            identifier:             sandbox.identifier,
+            host_working_directory: sandbox.host_working_directory,
+            container_mount_point:  sandbox.container_mount_point,
+        })
         .await
         .unwrap();
     }
@@ -505,35 +494,31 @@ mod tests {
         run_id: RunId,
         checkpoint: Checkpoint,
     ) {
-        append_event(
-            run_store,
-            &run_id,
-            &Event::CheckpointCompleted {
-                node_id: checkpoint.current_node.clone(),
-                status: "success".to_string(),
-                current_node: checkpoint.current_node.clone(),
-                completed_nodes: checkpoint.completed_nodes.clone(),
-                node_retries: checkpoint.node_retries.clone().into_iter().collect(),
-                context_values: checkpoint.context_values.clone().into_iter().collect(),
-                node_outcomes: checkpoint.node_outcomes.clone().into_iter().collect(),
-                next_node_id: checkpoint.next_node_id.clone(),
-                git_commit_sha: checkpoint.git_commit_sha.clone(),
-                loop_failure_signatures: checkpoint
-                    .loop_failure_signatures
-                    .clone()
-                    .into_iter()
-                    .map(|(signature, count)| (signature.to_string(), count))
-                    .collect(),
-                restart_failure_signatures: checkpoint
-                    .restart_failure_signatures
-                    .clone()
-                    .into_iter()
-                    .map(|(signature, count)| (signature.to_string(), count))
-                    .collect(),
-                node_visits: checkpoint.node_visits.clone().into_iter().collect(),
-                diff: None,
-            },
-        )
+        append_event(run_store, &run_id, &Event::CheckpointCompleted {
+            node_id: checkpoint.current_node.clone(),
+            status: "success".to_string(),
+            current_node: checkpoint.current_node.clone(),
+            completed_nodes: checkpoint.completed_nodes.clone(),
+            node_retries: checkpoint.node_retries.clone().into_iter().collect(),
+            context_values: checkpoint.context_values.clone().into_iter().collect(),
+            node_outcomes: checkpoint.node_outcomes.clone().into_iter().collect(),
+            next_node_id: checkpoint.next_node_id.clone(),
+            git_commit_sha: checkpoint.git_commit_sha.clone(),
+            loop_failure_signatures: checkpoint
+                .loop_failure_signatures
+                .clone()
+                .into_iter()
+                .map(|(signature, count)| (signature.to_string(), count))
+                .collect(),
+            restart_failure_signatures: checkpoint
+                .restart_failure_signatures
+                .clone()
+                .into_iter()
+                .map(|(signature, count)| (signature.to_string(), count))
+                .collect(),
+            node_visits: checkpoint.node_visits.clone().into_iter().collect(),
+            diff: None,
+        })
         .await
         .unwrap();
     }
@@ -544,18 +529,14 @@ mod tests {
         node: &StageId,
         text: &str,
     ) {
-        append_event(
-            run_store,
-            &run_id,
-            &Event::Prompt {
-                stage: node.node_id().to_string(),
-                visit: node.visit(),
-                text: text.to_string(),
-                mode: None,
-                provider: None,
-                model: None,
-            },
-        )
+        append_event(run_store, &run_id, &Event::Prompt {
+            stage:    node.node_id().to_string(),
+            visit:    node.visit(),
+            text:     text.to_string(),
+            mode:     None,
+            provider: None,
+            model:    None,
+        })
         .await
         .unwrap();
     }

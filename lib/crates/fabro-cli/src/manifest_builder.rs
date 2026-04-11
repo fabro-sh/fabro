@@ -19,14 +19,14 @@ use crate::args::{PreflightArgs, RunArgs};
 
 #[derive(Debug)]
 pub(crate) struct ManifestBuildInput {
-    pub workflow: PathBuf,
-    pub cwd: PathBuf,
-    pub args_layer: SettingsLayer,
-    pub args: Option<types::ManifestArgs>,
-    pub run_id: Option<RunId>,
+    pub workflow:           PathBuf,
+    pub cwd:                PathBuf,
+    pub args_layer:         SettingsLayer,
+    pub args:               Option<types::ManifestArgs>,
+    pub run_id:             Option<RunId>,
     /// User-level settings layer. Production callers load via
     /// `load_settings_user()`; tests pass `SettingsLayer::default()`.
-    pub user_layer: SettingsLayer,
+    pub user_layer:         SettingsLayer,
     /// Path to the user settings file (for inclusion in
     /// `RunManifest.configs`). `None` skips the user config entry.
     pub user_settings_path: Option<PathBuf>,
@@ -34,21 +34,21 @@ pub(crate) struct ManifestBuildInput {
 
 #[derive(Debug)]
 pub(crate) struct BuiltManifest {
-    pub manifest: types::RunManifest,
+    pub manifest:    types::RunManifest,
     pub target_path: PathBuf,
 }
 
 struct CollectContext<'a> {
-    cwd: &'a Path,
-    workflows: HashMap<String, types::ManifestWorkflow>,
+    cwd:               &'a Path,
+    workflows:         HashMap<String, types::ManifestWorkflow>,
     visited_workflows: HashSet<String>,
 }
 
 #[derive(Clone)]
 struct WorkflowScanInput {
     absolute_dot_path: PathBuf,
-    logical_dot_path: PathBuf,
-    source: String,
+    logical_dot_path:  PathBuf,
+    source:            String,
 }
 
 pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManifest> {
@@ -64,8 +64,8 @@ pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManif
     let target_logical_path_string = logical_path_string(&target_logical_path);
 
     let mut context = CollectContext {
-        cwd: &input.cwd,
-        workflows: HashMap::new(),
+        cwd:               &input.cwd,
+        workflows:         HashMap::new(),
         visited_workflows: HashSet::new(),
     };
     collect_workflow_entry(&mut context, &input.workflow, &input.cwd)?;
@@ -86,18 +86,18 @@ pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManif
         let source = std::fs::read_to_string(&path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
         configs.push(types::ManifestConfig {
-            path: Some(path.display().to_string()),
+            path:   Some(path.display().to_string()),
             source: Some(source),
-            type_: types::ManifestConfigType::Project,
+            type_:  types::ManifestConfigType::Project,
         });
     }
     if let Some(path) = input.user_settings_path.filter(|p| p.is_file()) {
         let source = std::fs::read_to_string(&path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
         configs.push(types::ManifestConfig {
-            path: Some(path.display().to_string()),
+            path:   Some(path.display().to_string()),
             source: Some(source),
-            type_: types::ManifestConfigType::User,
+            type_:  types::ManifestConfigType::User,
         });
     }
 
@@ -122,7 +122,7 @@ pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManif
             run_id: input.run_id.map(|run_id| run_id.to_string()),
             target: types::ManifestTarget {
                 identifier: input.workflow.display().to_string(),
-                path: target_logical_path_string,
+                path:       target_logical_path_string,
             },
             version: 1,
             workflows: context.workflows,
@@ -133,34 +133,34 @@ pub(crate) fn build_run_manifest(input: ManifestBuildInput) -> Result<BuiltManif
 
 pub(crate) fn run_manifest_args(args: &RunArgs) -> Option<types::ManifestArgs> {
     let payload = types::ManifestArgs {
-        auto_approve: args.auto_approve.then_some(true),
-        dry_run: args.dry_run.then_some(true),
-        label: args.label.clone(),
-        model: args.model.clone(),
-        no_retro: args.no_retro.then_some(true),
+        auto_approve:     args.auto_approve.then_some(true),
+        dry_run:          args.dry_run.then_some(true),
+        label:            args.label.clone(),
+        model:            args.model.clone(),
+        no_retro:         args.no_retro.then_some(true),
         preserve_sandbox: args.preserve_sandbox.then_some(true),
-        provider: args.provider.clone(),
-        sandbox: args
+        provider:         args.provider.clone(),
+        sandbox:          args
             .sandbox
             .map(|provider| fabro_sandbox::SandboxProvider::from(provider).to_string()),
-        verbose: args.verbose.then_some(true),
+        verbose:          args.verbose.then_some(true),
     };
     (!manifest_args_is_empty(&payload)).then_some(payload)
 }
 
 pub(crate) fn preflight_manifest_args(args: &PreflightArgs) -> Option<types::ManifestArgs> {
     let payload = types::ManifestArgs {
-        auto_approve: None,
-        dry_run: None,
-        label: Vec::new(),
-        model: args.model.clone(),
-        no_retro: None,
+        auto_approve:     None,
+        dry_run:          None,
+        label:            Vec::new(),
+        model:            args.model.clone(),
+        no_retro:         None,
         preserve_sandbox: None,
-        provider: args.provider.clone(),
-        sandbox: args
+        provider:         args.provider.clone(),
+        sandbox:          args
             .sandbox
             .map(|provider| fabro_sandbox::SandboxProvider::from(provider).to_string()),
-        verbose: args.verbose.then_some(true),
+        verbose:          args.verbose.then_some(true),
     };
     (!manifest_args_is_empty(&payload)).then_some(payload)
 }
@@ -191,7 +191,7 @@ fn collect_workflow_entry(
         .with_context(|| format!("Failed to read {}", resolution.dot_path.display()))?;
     let config = if let Some(workflow_toml_path) = resolution.workflow_toml_path.as_ref() {
         Some(types::ManifestWorkflowConfig {
-            path: logical_path_string(&to_logical_path(workflow_toml_path, context.cwd)?),
+            path:   logical_path_string(&to_logical_path(workflow_toml_path, context.cwd)?),
             source: std::fs::read_to_string(workflow_toml_path)
                 .with_context(|| format!("Failed to read {}", workflow_toml_path.display()))?,
         })
@@ -211,14 +211,13 @@ fn collect_workflow_entry(
     }
     collect_workflow_files(context, &scan, &mut files, &mut visited_imports)?;
 
-    context.workflows.insert(
-        logical_dot_key,
-        types::ManifestWorkflow {
+    context
+        .workflows
+        .insert(logical_dot_key, types::ManifestWorkflow {
             config,
             files,
             source,
-        },
-    );
+        });
 
     Ok(())
 }
@@ -289,8 +288,8 @@ fn collect_workflow_files(
                     })?;
                 let imported_scan = WorkflowScanInput {
                     absolute_dot_path: imported.absolute_path,
-                    logical_dot_path: imported.logical_path,
-                    source: imported_source,
+                    logical_dot_path:  imported.logical_path,
+                    source:            imported_source,
                 };
                 collect_workflow_files(context, &imported_scan, files, visited_imports)?;
             }
@@ -348,7 +347,7 @@ fn collect_workflow_config_files(
 
 struct BundledFile {
     absolute_path: PathBuf,
-    logical_path: PathBuf,
+    logical_path:  PathBuf,
 }
 
 fn collect_bundled_file(
@@ -366,17 +365,14 @@ fn collect_bundled_file(
     if !files.contains_key(&key) {
         let content = std::fs::read_to_string(&absolute_path)
             .with_context(|| format!("Failed to read {}", absolute_path.display()))?;
-        files.insert(
-            key.clone(),
-            types::ManifestFileEntry {
-                content,
-                ref_: types::ManifestFileRef {
-                    from: from.map(|value| logical_path_string(&value)),
-                    original: reference.to_string(),
-                    type_: ref_type,
-                },
+        files.insert(key.clone(), types::ManifestFileEntry {
+            content,
+            ref_: types::ManifestFileRef {
+                from:     from.map(|value| logical_path_string(&value)),
+                original: reference.to_string(),
+                type_:    ref_type,
             },
-        );
+        });
     }
 
     Ok(BundledFile {
@@ -425,16 +421,16 @@ fn resolve_manifest_goal(
         )
         .ok_or_else(|| anyhow!("unsupported manifest goal reference: {reference}"))?;
         return Ok(Some(types::ManifestGoal {
-            path: Some(reference.to_string()),
-            text: std::fs::read_to_string(&goal_path)
+            path:  Some(reference.to_string()),
+            text:  std::fs::read_to_string(&goal_path)
                 .with_context(|| format!("Failed to read {}", goal_path.display()))?,
             type_: types::ManifestGoalType::Graph,
         }));
     }
 
     Ok(Some(types::ManifestGoal {
-        path: None,
-        text: goal.to_string(),
+        path:  None,
+        text:  goal.to_string(),
         type_: types::ManifestGoalType::Graph,
     }))
 }
@@ -445,13 +441,13 @@ fn resolve_manifest_goal(
 fn resolved_goal_to_manifest(resolved: ResolvedRunGoal) -> types::ManifestGoal {
     match resolved.source {
         ResolvedGoalSource::Inline => types::ManifestGoal {
-            path: None,
-            text: resolved.text,
+            path:  None,
+            text:  resolved.text,
             type_: types::ManifestGoalType::Value,
         },
         ResolvedGoalSource::File { path } => types::ManifestGoal {
-            path: Some(path.to_string_lossy().into_owned()),
-            text: resolved.text,
+            path:  Some(path.to_string_lossy().into_owned()),
+            text:  resolved.text,
             type_: types::ManifestGoalType::File,
         },
     }
@@ -604,12 +600,12 @@ mod tests {
         .unwrap();
 
         let built = build_run_manifest(ManifestBuildInput {
-            workflow: PathBuf::from("fabro/workflows/demo/workflow.toml"),
-            cwd: project.to_path_buf(),
-            args_layer: SettingsLayer::default(),
-            args: None,
-            run_id: None,
-            user_layer: SettingsLayer::default(),
+            workflow:           PathBuf::from("fabro/workflows/demo/workflow.toml"),
+            cwd:                project.to_path_buf(),
+            args_layer:         SettingsLayer::default(),
+            args:               None,
+            run_id:             None,
+            user_layer:         SettingsLayer::default(),
             user_settings_path: None,
         })
         .unwrap();
@@ -680,12 +676,12 @@ file = "prompts/goal.md"
         .unwrap();
 
         let built = build_run_manifest(ManifestBuildInput {
-            workflow: PathBuf::from("fabro/workflows/demo/workflow.toml"),
-            cwd: project.to_path_buf(),
-            args_layer: SettingsLayer::default(),
-            args: None,
-            run_id: None,
-            user_layer: SettingsLayer::default(),
+            workflow:           PathBuf::from("fabro/workflows/demo/workflow.toml"),
+            cwd:                project.to_path_buf(),
+            args_layer:         SettingsLayer::default(),
+            args:               None,
+            run_id:             None,
+            user_layer:         SettingsLayer::default(),
             user_settings_path: None,
         })
         .unwrap();
@@ -733,12 +729,12 @@ file = "prompts/goal.md"
         .unwrap();
 
         let built = build_run_manifest(ManifestBuildInput {
-            workflow: PathBuf::from("fabro/workflows/demo/workflow.toml"),
-            cwd: project.to_path_buf(),
-            args_layer: SettingsLayer::default(),
-            args: None,
-            run_id: None,
-            user_layer: SettingsLayer::default(),
+            workflow:           PathBuf::from("fabro/workflows/demo/workflow.toml"),
+            cwd:                project.to_path_buf(),
+            args_layer:         SettingsLayer::default(),
+            args:               None,
+            run_id:             None,
+            user_layer:         SettingsLayer::default(),
             user_settings_path: None,
         })
         .unwrap();

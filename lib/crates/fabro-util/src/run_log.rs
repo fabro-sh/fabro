@@ -10,18 +10,19 @@ static RUN_LOG: OnceLock<RunLogWriter> = OnceLock::new();
 /// A switchable `MakeWriter` that can be activated/deactivated at runtime.
 ///
 /// When inactive, writes are silently discarded with no allocation.
-/// When active, each event is buffered per-guard and flushed atomically on drop.
+/// When active, each event is buffered per-guard and flushed atomically on
+/// drop.
 #[derive(Clone, Debug)]
 pub struct RunLogWriter {
     active: Arc<AtomicBool>,
-    file: Arc<Mutex<Option<BufWriter<std::fs::File>>>>,
+    file:   Arc<Mutex<Option<BufWriter<std::fs::File>>>>,
 }
 
 impl RunLogWriter {
     fn new() -> Self {
         Self {
             active: Arc::new(AtomicBool::new(false)),
-            file: Arc::new(Mutex::new(None)),
+            file:   Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -32,7 +33,7 @@ impl<'a> MakeWriter<'a> for RunLogWriter {
     fn make_writer(&'a self) -> Self::Writer {
         if self.active.load(Ordering::Relaxed) {
             RunLogGuard::Active {
-                buf: Vec::new(),
+                buf:  Vec::new(),
                 file: self.file.clone(),
             }
         } else {
@@ -45,7 +46,7 @@ impl<'a> MakeWriter<'a> for RunLogWriter {
 pub enum RunLogGuard {
     Inactive,
     Active {
-        buf: Vec<u8>,
+        buf:  Vec<u8>,
         file: Arc<Mutex<Option<BufWriter<std::fs::File>>>>,
     },
 }
@@ -79,9 +80,11 @@ impl Drop for RunLogGuard {
     }
 }
 
-/// Initialize the global run log writer. Returns a clone for use as a tracing layer writer.
+/// Initialize the global run log writer. Returns a clone for use as a tracing
+/// layer writer.
 ///
-/// Must be called exactly once (typically from logging init). Panics on second call.
+/// Must be called exactly once (typically from logging init). Panics on second
+/// call.
 pub fn init() -> RunLogWriter {
     let writer = RunLogWriter::new();
     let clone = writer.clone();
@@ -117,10 +120,12 @@ pub fn deactivate() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::io::Write;
 
-    /// Helper: create a standalone `RunLogWriter` (not the global singleton) for isolated tests.
+    use super::*;
+
+    /// Helper: create a standalone `RunLogWriter` (not the global singleton)
+    /// for isolated tests.
     fn test_writer() -> RunLogWriter {
         RunLogWriter::new()
     }

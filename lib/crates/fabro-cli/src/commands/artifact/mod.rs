@@ -12,11 +12,11 @@ use crate::server_runs::ServerSummaryLookup;
 #[derive(Clone, Debug, serde::Serialize)]
 pub(super) struct ArtifactEntry {
     #[serde(skip_serializing)]
-    pub(super) stage_id: StageId,
-    pub(super) node_slug: String,
-    pub(super) retry: u32,
+    pub(super) stage_id:      StageId,
+    pub(super) node_slug:     String,
+    pub(super) retry:         u32,
     pub(super) relative_path: String,
-    pub(super) size: u64,
+    pub(super) size:          u64,
 }
 
 pub(super) async fn resolve_artifacts(

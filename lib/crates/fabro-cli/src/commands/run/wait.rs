@@ -143,12 +143,12 @@ fn print_human_output(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use fabro_types::BilledTokenCounts;
-    use fabro_types::fixtures;
+    use fabro_types::{BilledTokenCounts, fixtures};
     use fabro_workflow::outcome::StageStatus;
     use fabro_workflow::records::Conclusion;
     use fabro_workflow::run_status::RunStatusRecord;
+
+    use super::*;
 
     fn no_color_styles() -> Styles {
         Styles::new(false)
@@ -158,22 +158,22 @@ mod tests {
     fn json_output_succeeded_with_conclusion() {
         let run_id = fixtures::RUN_1;
         let conclusion = Conclusion {
-            timestamp: chrono::Utc::now(),
-            status: StageStatus::Success,
-            duration_ms: 12345,
-            failure_reason: None,
+            timestamp:            chrono::Utc::now(),
+            status:               StageStatus::Success,
+            duration_ms:          12345,
+            failure_reason:       None,
             final_git_commit_sha: None,
-            stages: vec![],
-            billing: Some(BilledTokenCounts {
-                input_tokens: 0,
-                output_tokens: 0,
-                total_tokens: 0,
-                reasoning_tokens: 0,
-                cache_read_tokens: 0,
+            stages:               vec![],
+            billing:              Some(BilledTokenCounts {
+                input_tokens:       0,
+                output_tokens:      0,
+                total_tokens:       0,
+                reasoning_tokens:   0,
+                cache_read_tokens:  0,
                 cache_write_tokens: 0,
-                total_usd_micros: Some(420_000),
+                total_usd_micros:   Some(420_000),
             }),
-            total_retries: 0,
+            total_retries:        0,
         };
         let json = build_json_output(RunStatus::Succeeded, &run_id, Some(&conclusion));
         assert_eq!(json["run_id"], run_id.to_string());
@@ -202,14 +202,14 @@ mod tests {
     fn json_output_no_cost_when_none() {
         let run_id = fixtures::RUN_4;
         let conclusion = Conclusion {
-            timestamp: chrono::Utc::now(),
-            status: StageStatus::Fail,
-            duration_ms: 500,
-            failure_reason: Some("error".into()),
+            timestamp:            chrono::Utc::now(),
+            status:               StageStatus::Fail,
+            duration_ms:          500,
+            failure_reason:       Some("error".into()),
             final_git_commit_sha: None,
-            stages: vec![],
-            billing: None,
-            total_retries: 0,
+            stages:               vec![],
+            billing:              None,
+            total_retries:        0,
         };
         let json = build_json_output(RunStatus::Failed, &run_id, Some(&conclusion));
         assert!(json.get("total_usd_micros").is_none());
@@ -221,22 +221,22 @@ mod tests {
         let styles = no_color_styles();
         let run_id = fixtures::RUN_5;
         let conclusion = Conclusion {
-            timestamp: chrono::Utc::now(),
-            status: StageStatus::Success,
-            duration_ms: 8000,
-            failure_reason: None,
+            timestamp:            chrono::Utc::now(),
+            status:               StageStatus::Success,
+            duration_ms:          8000,
+            failure_reason:       None,
             final_git_commit_sha: None,
-            stages: vec![],
-            billing: Some(BilledTokenCounts {
-                input_tokens: 0,
-                output_tokens: 0,
-                total_tokens: 0,
-                reasoning_tokens: 0,
-                cache_read_tokens: 0,
+            stages:               vec![],
+            billing:              Some(BilledTokenCounts {
+                input_tokens:       0,
+                output_tokens:      0,
+                total_tokens:       0,
+                reasoning_tokens:   0,
+                cache_read_tokens:  0,
                 cache_write_tokens: 0,
-                total_usd_micros: Some(150_000),
+                total_usd_micros:   Some(150_000),
             }),
-            total_retries: 0,
+            total_retries:        0,
         };
         // Just verify no panic; actual stderr output is hard to capture
         print_human_output(RunStatus::Succeeded, &run_id, Some(&conclusion), &styles);
