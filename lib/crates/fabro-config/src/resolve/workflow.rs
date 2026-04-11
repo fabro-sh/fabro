@@ -9,12 +9,12 @@ pub fn resolve_workflow(
     _errors: &mut Vec<ResolveError>,
 ) -> WorkflowSettings {
     WorkflowSettings {
-        name: layer.name.clone(),
+        name:        layer.name.clone(),
         description: layer.description.clone(),
-        graph: layer
+        graph:       layer
             .graph
             .clone()
             .unwrap_or_else(|| DEFAULT_WORKFLOW_GRAPH.to_string()),
-        metadata: layer.metadata.clone(),
+        metadata:    layer.metadata.clone(),
     }
 }

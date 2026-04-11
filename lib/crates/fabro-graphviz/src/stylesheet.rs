@@ -29,13 +29,13 @@ impl Selector {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Declaration {
     pub property: String,
-    pub value: String,
+    pub value:    String,
 }
 
 /// A stylesheet rule: selector + declarations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rule {
-    pub selector: Selector,
+    pub selector:     Selector,
     pub declarations: Vec<Declaration>,
 }
 
@@ -93,9 +93,7 @@ fn parse_selector(remaining: &mut &str) -> Result<Selector, Error> {
             .find(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '-')
             .unwrap_or(remaining.len());
         if end == 0 {
-            return Err(Error::Stylesheet(
-                "expected identifier after '#'".into(),
-            ));
+            return Err(Error::Stylesheet("expected identifier after '#'".into()));
         }
         let id = remaining[..end].to_string();
         *remaining = remaining[end..].trim();
@@ -106,9 +104,7 @@ fn parse_selector(remaining: &mut &str) -> Result<Selector, Error> {
             .find(|c: char| !c.is_ascii_lowercase() && !c.is_ascii_digit() && c != '-')
             .unwrap_or(remaining.len());
         if end == 0 {
-            return Err(Error::Stylesheet(
-                "expected class name after '.'".into(),
-            ));
+            return Err(Error::Stylesheet("expected class name after '.'".into()));
         }
         let class = remaining[..end].to_string();
         *remaining = remaining[end..].trim();

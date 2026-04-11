@@ -43,17 +43,17 @@ impl fmt::Display for InterviewQuestionType {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct InterviewQuestionRecord {
     #[serde(default)]
-    pub id: String,
+    pub id:              String,
     #[serde(default)]
-    pub text: String,
+    pub text:            String,
     #[serde(default)]
-    pub stage: String,
+    pub stage:           String,
     #[serde(default)]
-    pub question_type: InterviewQuestionType,
+    pub question_type:   InterviewQuestionType,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub options: Vec<InterviewOption>,
+    pub options:         Vec<InterviewOption>,
     #[serde(default)]
-    pub allow_freeform: bool,
+    pub allow_freeform:  bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

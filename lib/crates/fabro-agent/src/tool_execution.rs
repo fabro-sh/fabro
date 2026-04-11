@@ -180,14 +180,11 @@ async fn execute_and_emit_one_tool_with_lookup(
     session_id: &str,
     tool_env: Option<&HashMap<String, String>>,
 ) -> ToolResult {
-    emitter.emit(
-        session_id.to_owned(),
-        AgentEvent::ToolCallStarted {
-            tool_name: tc.name.clone(),
-            tool_call_id: tc.id.clone(),
-            arguments: tc.arguments.clone(),
-        },
-    );
+    emitter.emit(session_id.to_owned(), AgentEvent::ToolCallStarted {
+        tool_name:    tc.name.clone(),
+        tool_call_id: tc.id.clone(),
+        arguments:    tc.arguments.clone(),
+    });
 
     // Pre-tool-use hook
     if let Some(hooks) = tool_hooks {
@@ -200,21 +197,15 @@ async fn execute_and_emit_one_tool_with_lookup(
         if let ToolHookDecision::Block { reason } = decision {
             let result = ToolResult::error(&tc.id, &reason);
 
-            emitter.emit(
-                session_id.to_owned(),
-                AgentEvent::ToolCallOutputDelta {
-                    delta: result.content.to_string(),
-                },
-            );
-            emitter.emit(
-                session_id.to_owned(),
-                AgentEvent::ToolCallCompleted {
-                    tool_name: tc.name.clone(),
-                    tool_call_id: tc.id.clone(),
-                    output: result.content.clone(),
-                    is_error: true,
-                },
-            );
+            emitter.emit(session_id.to_owned(), AgentEvent::ToolCallOutputDelta {
+                delta: result.content.to_string(),
+            });
+            emitter.emit(session_id.to_owned(), AgentEvent::ToolCallCompleted {
+                tool_name:    tc.name.clone(),
+                tool_call_id: tc.id.clone(),
+                output:       result.content.clone(),
+                is_error:     true,
+            });
 
             return truncate_tool_result(&result, &tc.name, config);
         }
@@ -222,22 +213,16 @@ async fn execute_and_emit_one_tool_with_lookup(
 
     let result = execute_one_tool(tc, registered_tool, env, cancel_token, tool_env).await;
 
-    emitter.emit(
-        session_id.to_owned(),
-        AgentEvent::ToolCallOutputDelta {
-            delta: result.content.to_string(),
-        },
-    );
+    emitter.emit(session_id.to_owned(), AgentEvent::ToolCallOutputDelta {
+        delta: result.content.to_string(),
+    });
 
-    emitter.emit(
-        session_id.to_owned(),
-        AgentEvent::ToolCallCompleted {
-            tool_name: tc.name.clone(),
-            tool_call_id: tc.id.clone(),
-            output: result.content.clone(),
-            is_error: result.is_error,
-        },
-    );
+    emitter.emit(session_id.to_owned(), AgentEvent::ToolCallCompleted {
+        tool_name:    tc.name.clone(),
+        tool_call_id: tc.id.clone(),
+        output:       result.content.clone(),
+        is_error:     result.is_error,
+    });
 
     // Post-tool-use hooks
     if let Some(hooks) = tool_hooks {
@@ -308,10 +293,10 @@ fn truncate_tool_result(
     };
 
     ToolResult {
-        tool_call_id: result.tool_call_id.clone(),
-        content: truncated_content,
-        is_error: result.is_error,
-        image_data: result.image_data.clone(),
+        tool_call_id:     result.tool_call_id.clone(),
+        content:          truncated_content,
+        is_error:         result.is_error,
+        image_data:       result.image_data.clone(),
         image_media_type: result.image_media_type.clone(),
     }
 }
@@ -365,9 +350,9 @@ mod tests {
     fn make_echo_tool() -> RegisteredTool {
         RegisteredTool {
             definition: ToolDefinition {
-                name: "echo".to_string(),
+                name:        "echo".to_string(),
                 description: "Echo input".to_string(),
-                parameters: serde_json::json!({
+                parameters:  serde_json::json!({
                     "type": "object",
                     "properties": {
                         "text": {"type": "string"}
@@ -375,7 +360,7 @@ mod tests {
                     "required": ["text"]
                 }),
             },
-            executor: Arc::new(|args: serde_json::Value, _ctx: ToolContext| {
+            executor:   Arc::new(|args: serde_json::Value, _ctx: ToolContext| {
                 Box::pin(async move {
                     let text = args["text"].as_str().unwrap_or("").to_string();
                     Ok(format!("echo: {text}"))
@@ -387,11 +372,11 @@ mod tests {
     fn make_fail_tool() -> RegisteredTool {
         RegisteredTool {
             definition: ToolDefinition {
-                name: "fail_tool".to_string(),
+                name:        "fail_tool".to_string(),
                 description: "Always fails".to_string(),
-                parameters: serde_json::json!({}),
+                parameters:  serde_json::json!({}),
             },
-            executor: Arc::new(|_args: serde_json::Value, _ctx: ToolContext| {
+            executor:   Arc::new(|_args: serde_json::Value, _ctx: ToolContext| {
                 Box::pin(async move { Err("tool failed".to_string()) })
             }),
         }
@@ -399,26 +384,26 @@ mod tests {
 
     fn make_tool_call(name: &str, id: &str, args: serde_json::Value) -> ToolCall {
         ToolCall {
-            id: id.to_string(),
-            name: name.to_string(),
-            tool_type: "function".to_string(),
-            arguments: args,
-            raw_arguments: None,
+            id:                id.to_string(),
+            name:              name.to_string(),
+            tool_type:         "function".to_string(),
+            arguments:         args,
+            raw_arguments:     None,
             provider_metadata: None,
         }
     }
 
     struct MockHookCallback {
-        pre_decision: ToolHookDecision,
-        post_calls: Arc<Mutex<Vec<(String, String, String)>>>,
+        pre_decision:       ToolHookDecision,
+        post_calls:         Arc<Mutex<Vec<(String, String, String)>>>,
         post_failure_calls: Arc<Mutex<Vec<(String, String, String)>>>,
     }
 
     impl MockHookCallback {
         fn new(decision: ToolHookDecision) -> Self {
             Self {
-                pre_decision: decision,
-                post_calls: Arc::new(Mutex::new(Vec::new())),
+                pre_decision:       decision,
+                post_calls:         Arc::new(Mutex::new(Vec::new())),
                 post_failure_calls: Arc::new(Mutex::new(Vec::new())),
             }
         }

@@ -35,7 +35,7 @@ pub fn dispatch(envelope: &SocketEnvelope, thread_registry: &ThreadRegistry) -> 
             };
             DispatchAction::SubmitAnswer(SlackAnswerSubmission {
                 run_id: question_ref.run_id,
-                qid: question_ref.qid,
+                qid:    question_ref.qid,
                 answer: fabro_interview::Answer::text(text),
             })
         }
@@ -55,8 +55,8 @@ mod tests {
         let registry = ThreadRegistry::new();
         let envelope = SocketEnvelope {
             envelope_type: "hello".to_string(),
-            envelope_id: None,
-            payload: None,
+            envelope_id:   None,
+            payload:       None,
         };
         let action = dispatch(&envelope, &registry);
         assert!(matches!(action, DispatchAction::Connected));
@@ -67,8 +67,8 @@ mod tests {
         let registry = ThreadRegistry::new();
         let envelope = SocketEnvelope {
             envelope_type: "interactive".to_string(),
-            envelope_id: Some("env-1".to_string()),
-            payload: Some(serde_json::json!({
+            envelope_id:   Some("env-1".to_string()),
+            payload:       Some(serde_json::json!({
                 "type": "block_actions",
                 "actions": [{
                     "action_id": "interview.answer",
@@ -93,8 +93,8 @@ mod tests {
         let registry = ThreadRegistry::new();
         let envelope = SocketEnvelope {
             envelope_type: "interactive".to_string(),
-            envelope_id: Some("env-2".to_string()),
-            payload: Some(serde_json::json!({
+            envelope_id:   Some("env-2".to_string()),
+            payload:       Some(serde_json::json!({
                 "type": "view_submission"
             })),
         };
@@ -107,8 +107,8 @@ mod tests {
         let registry = ThreadRegistry::new();
         let envelope = SocketEnvelope {
             envelope_type: "interactive".to_string(),
-            envelope_id: Some("env-3".to_string()),
-            payload: None,
+            envelope_id:   Some("env-3".to_string()),
+            payload:       None,
         };
         let action = dispatch(&envelope, &registry);
         assert!(matches!(action, DispatchAction::Ignored));
@@ -119,8 +119,8 @@ mod tests {
         let registry = ThreadRegistry::new();
         let envelope = SocketEnvelope {
             envelope_type: "disconnect".to_string(),
-            envelope_id: None,
-            payload: None,
+            envelope_id:   None,
+            payload:       None,
         };
         let action = dispatch(&envelope, &registry);
         assert!(matches!(action, DispatchAction::Reconnect));
@@ -131,8 +131,8 @@ mod tests {
         let registry = ThreadRegistry::new();
         let envelope = SocketEnvelope {
             envelope_type: "events_api".to_string(),
-            envelope_id: Some("env-4".to_string()),
-            payload: Some(serde_json::json!({
+            envelope_id:   Some("env-4".to_string()),
+            payload:       Some(serde_json::json!({
                 "event": { "type": "app_mention", "text": "hello" }
             })),
         };
@@ -146,8 +146,8 @@ mod tests {
         registry.register("1234.5678", "run-10", "q-10");
         let envelope = SocketEnvelope {
             envelope_type: "events_api".to_string(),
-            envelope_id: Some("env-5".to_string()),
-            payload: Some(serde_json::json!({
+            envelope_id:   Some("env-5".to_string()),
+            payload:       Some(serde_json::json!({
                 "event": {
                     "type": "message",
                     "text": "https://github.com/org/repo",
@@ -175,8 +175,8 @@ mod tests {
         let registry = ThreadRegistry::new();
         let envelope = SocketEnvelope {
             envelope_type: "events_api".to_string(),
-            envelope_id: Some("env-6".to_string()),
-            payload: Some(serde_json::json!({
+            envelope_id:   Some("env-6".to_string()),
+            payload:       Some(serde_json::json!({
                 "event": {
                     "type": "message",
                     "text": "some reply",
@@ -194,8 +194,8 @@ mod tests {
         let registry = ThreadRegistry::new();
         let envelope = SocketEnvelope {
             envelope_type: "weird_type".to_string(),
-            envelope_id: None,
-            payload: None,
+            envelope_id:   None,
+            payload:       None,
         };
         let action = dispatch(&envelope, &registry);
         assert!(matches!(action, DispatchAction::Ignored));

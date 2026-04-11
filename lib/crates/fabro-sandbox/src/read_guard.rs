@@ -13,7 +13,7 @@ use crate::Sandbox;
 /// `write_file` or `delete_file` targets an existing file that hasn't been
 /// read. Writing to new (non-existent) files is always allowed.
 pub struct ReadBeforeWriteSandbox {
-    inner: Arc<dyn Sandbox>,
+    inner:    Arc<dyn Sandbox>,
     read_set: Mutex<HashSet<String>>,
 }
 

@@ -7,11 +7,11 @@ use crate::git::{FileMode, Store, TreeEntries};
 /// Metadata about a commit, returned by `log`.
 #[derive(Debug)]
 pub struct CommitInfo {
-    pub oid: Oid,
-    pub message: String,
-    pub author_name: String,
+    pub oid:          Oid,
+    pub message:      String,
+    pub author_name:  String,
     pub author_email: String,
-    pub time: git2::Time,
+    pub time:         git2::Time,
 }
 
 /// Key-value storage on a single git branch. Each write creates one commit.
@@ -19,8 +19,8 @@ pub struct CommitInfo {
 /// the previous.
 pub struct BranchStore<'a> {
     objects: &'a Store,
-    branch: String,
-    author: Signature<'static>,
+    branch:  String,
+    author:  Signature<'static>,
 }
 
 impl<'a> BranchStore<'a> {

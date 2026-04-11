@@ -229,13 +229,13 @@ mod tests {
         // SEGMENT_WRITE_KEY is not set at compile time in tests,
         // so emit() should return immediately without spawning.
         let track = Track {
-            user: User::AnonymousId {
+            user:       User::AnonymousId {
                 anonymous_id: "test".to_string(),
             },
-            event: "test".to_string(),
+            event:      "test".to_string(),
             properties: json!({}),
-            context: None,
-            timestamp: None,
+            context:    None,
+            timestamp:  None,
             message_id: "msg-test".to_string(),
         };
 
@@ -254,13 +254,13 @@ mod tests {
     #[test]
     fn upload_blocking_noops_without_write_key() {
         let track = Track {
-            user: User::AnonymousId {
+            user:       User::AnonymousId {
                 anonymous_id: "test".to_string(),
             },
-            event: "test".to_string(),
+            event:      "test".to_string(),
             properties: json!({}),
-            context: None,
-            timestamp: None,
+            context:    None,
+            timestamp:  None,
             message_id: "msg-test".to_string(),
         };
 

@@ -16,18 +16,18 @@ pub trait ActivityMonitor: Send + Sync {
 /// Watches for inactivity and fires a stall timeout if no activity is
 /// reported within the configured duration.
 pub struct StallWatchdog {
-    timeout: Duration,
+    timeout:      Duration,
     cancel_token: Arc<AtomicBool>,
-    activity: Arc<Notify>,
-    shutdown: Arc<AtomicBool>,
-    monitor: Arc<dyn ActivityMonitor>,
+    activity:     Arc<Notify>,
+    shutdown:     Arc<AtomicBool>,
+    monitor:      Arc<dyn ActivityMonitor>,
 }
 
 /// Guard that resets the stall timer on activity. Drop to stop watching.
 pub struct StallGuard {
     activity: Arc<Notify>,
     shutdown: Arc<AtomicBool>,
-    handle: Option<JoinHandle<()>>,
+    handle:   Option<JoinHandle<()>>,
 }
 
 impl StallWatchdog {
@@ -82,7 +82,7 @@ impl StallWatchdog {
         StallGuard {
             activity: self.activity,
             shutdown: self.shutdown,
-            handle: Some(handle),
+            handle:   Some(handle),
         }
     }
 }

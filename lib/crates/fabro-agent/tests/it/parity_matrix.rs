@@ -18,7 +18,7 @@ use tokio::sync::Mutex as AsyncMutex;
 #[derive(Clone)]
 struct OpenAiTwinOptions {
     base_url: String,
-    api_key: String,
+    api_key:  String,
 }
 
 fn summarizer_model_id(provider: Provider) -> ModelHandle {
@@ -30,22 +30,22 @@ fn summarizer_model_id(provider: Provider) -> ModelHandle {
         | Provider::Inception
         | Provider::OpenAiCompatible => ModelHandle::ByName {
             provider: Provider::OpenAi,
-            model: "gpt-5.4-mini".to_string(),
+            model:    "gpt-5.4-mini".to_string(),
         },
         Provider::Gemini => ModelHandle::ByName {
             provider: Provider::Gemini,
-            model: "gemini-3-flash-preview".to_string(),
+            model:    "gemini-3-flash-preview".to_string(),
         },
         Provider::Anthropic => ModelHandle::ByName {
             provider: Provider::Anthropic,
-            model: "claude-haiku-4-5".to_string(),
+            model:    "claude-haiku-4-5".to_string(),
         },
     }
 }
 
 fn build_summarizer(provider: Provider, client: &Client) -> WebFetchSummarizer {
     WebFetchSummarizer {
-        client: client.clone(),
+        client:   client.clone(),
         model_id: summarizer_model_id(provider),
     }
 }

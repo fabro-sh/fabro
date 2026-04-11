@@ -34,7 +34,7 @@ impl FileMode {
 /// A single entry in a flat tree map.
 #[derive(Debug, Clone)]
 pub struct TreeEntry {
-    pub oid: Oid,
+    pub oid:      Oid,
     pub filemode: FileMode,
 }
 
@@ -125,7 +125,7 @@ impl Store {
     /// unix.
     pub fn write_blob_from_file(&self, path: &Path) -> Result<(Oid, FileMode)> {
         let content = std::fs::read(path).map_err(|e| Error::ReadFile {
-            path: path.to_path_buf(),
+            path:   path.to_path_buf(),
             source: e,
         })?;
         let mode = detect_filemode(path);
@@ -250,14 +250,14 @@ fn read_tree_recursive(
 /// Intermediate structure for building nested git trees from flat paths.
 struct DirNode {
     files: BTreeMap<String, TreeEntry>,
-    dirs: BTreeMap<String, Self>,
+    dirs:  BTreeMap<String, Self>,
 }
 
 impl DirNode {
     fn new() -> Self {
         Self {
             files: BTreeMap::new(),
-            dirs: BTreeMap::new(),
+            dirs:  BTreeMap::new(),
         }
     }
 }

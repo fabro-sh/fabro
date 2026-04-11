@@ -7,14 +7,14 @@ const SLACK_API_BASE: &str = "https://slack.com/api";
 #[derive(Debug, Clone)]
 pub struct PostedMessage {
     pub channel_id: String,
-    pub ts: String,
+    pub ts:         String,
 }
 
 #[derive(Clone)]
 pub struct SlackClient {
     bot_token: String,
-    api_base: String,
-    http: Client,
+    api_base:  String,
+    http:      Client,
 }
 
 impl SlackClient {
@@ -110,7 +110,7 @@ pub fn parse_post_message_response(response: &Value) -> Result<PostedMessage, Sl
         .ok_or_else(|| SlackApiError::Api("missing ts in response".to_string()))?;
     Ok(PostedMessage {
         channel_id: channel_id.to_string(),
-        ts: ts.to_string(),
+        ts:         ts.to_string(),
     })
 }
 
@@ -166,11 +166,9 @@ mod tests {
 
     #[test]
     fn update_message_request_body_format() {
-        let body = build_update_message_body(
-            "#general",
-            "1234.5678",
-            &[serde_json::json!({"type": "section"})],
-        );
+        let body = build_update_message_body("#general", "1234.5678", &[
+            serde_json::json!({"type": "section"}),
+        ]);
         assert_eq!(body["channel"], "#general");
         assert_eq!(body["ts"], "1234.5678");
         assert_eq!(body["blocks"][0]["type"], "section");

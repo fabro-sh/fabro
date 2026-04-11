@@ -17,12 +17,12 @@ pub(crate) async fn run(
 ) -> anyhow::Result<()> {
     let ctx = CommandContext::for_target(&args.target)?;
     let built = build_run_manifest(ManifestBuildInput {
-        workflow: args.workflow.clone(),
-        cwd: ctx.cwd().to_path_buf(),
-        args_layer: SettingsLayer::default(),
-        args: None,
-        run_id: None,
-        user_layer: load_settings_user()?,
+        workflow:           args.workflow.clone(),
+        cwd:                ctx.cwd().to_path_buf(),
+        args_layer:         SettingsLayer::default(),
+        args:               None,
+        run_id:             None,
+        user_layer:         load_settings_user()?,
         user_settings_path: Some(active_settings_path(None)),
     })?;
     let client = ctx.server().await?;

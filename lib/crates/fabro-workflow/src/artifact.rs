@@ -473,11 +473,11 @@ mod tests {
     fn normalize_checkpoint_for_resume_converts_legacy_blob_file_refs_and_drops_preamble() {
         let blob_id = fabro_types::RunBlobId::new(b"legacy");
         let mut checkpoint = crate::records::Checkpoint {
-            timestamp: chrono::Utc::now(),
-            current_node: "work".to_string(),
-            completed_nodes: vec!["work".to_string()],
-            node_retries: HashMap::new(),
-            context_values: HashMap::from([
+            timestamp:                  chrono::Utc::now(),
+            current_node:               "work".to_string(),
+            completed_nodes:            vec!["work".to_string()],
+            node_retries:               HashMap::new(),
+            context_values:             HashMap::from([
                 (
                     crate::context::keys::CURRENT_PREAMBLE.to_string(),
                     serde_json::json!("runtime only"),
@@ -487,7 +487,7 @@ mod tests {
                     serde_json::json!(format!("file:///sandbox/.fabro/artifacts/{blob_id}.json")),
                 ),
             ]),
-            node_outcomes: HashMap::from([(
+            node_outcomes:              HashMap::from([(
                 "work".to_string(),
                 crate::outcome::Outcome {
                     context_updates: HashMap::from([(
@@ -499,11 +499,11 @@ mod tests {
                     ..crate::outcome::Outcome::success()
                 },
             )]),
-            next_node_id: Some("exit".to_string()),
-            git_commit_sha: None,
-            loop_failure_signatures: HashMap::new(),
+            next_node_id:               Some("exit".to_string()),
+            git_commit_sha:             None,
+            loop_failure_signatures:    HashMap::new(),
             restart_failure_signatures: HashMap::new(),
-            node_visits: HashMap::new(),
+            node_visits:                HashMap::new(),
         };
 
         normalize_checkpoint_for_resume(&mut checkpoint);
@@ -531,8 +531,8 @@ mod tests {
     use std::sync::Mutex;
 
     struct TestSyncEnv {
-        accessible: bool,
-        written: Mutex<Vec<(String, String)>>,
+        accessible:  bool,
+        written:     Mutex<Vec<(String, String)>>,
         working_dir: String,
     }
 

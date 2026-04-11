@@ -116,7 +116,7 @@ pub const RETRO_DATA_DIR: &str = "/tmp/retro_data";
 
 pub struct RetroAgentResult {
     pub narrative: RetroNarrative,
-    pub response: String,
+    pub response:  String,
 }
 
 #[must_use]
@@ -256,12 +256,12 @@ pub async fn run_retro_agent(
 /// derive → apply_narrative → save path without making LLM calls.
 pub fn dry_run_narrative() -> RetroNarrative {
     RetroNarrative {
-        smoothness: SmoothnessRating::Smooth,
-        intent: "[dry-run] No LLM analysis performed".to_string(),
-        outcome: "[dry-run] Run completed in simulated mode".to_string(),
-        learnings: vec![],
+        smoothness:      SmoothnessRating::Smooth,
+        intent:          "[dry-run] No LLM analysis performed".to_string(),
+        outcome:         "[dry-run] Run completed in simulated mode".to_string(),
+        learnings:       vec![],
         friction_points: vec![],
-        open_items: vec![],
+        open_items:      vec![],
     }
 }
 

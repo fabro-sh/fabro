@@ -65,7 +65,7 @@ impl ModelTestStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelTestOutcome {
-    pub status: ModelTestStatus,
+    pub status:        ModelTestStatus,
     pub error_message: Option<String>,
 }
 
@@ -73,7 +73,7 @@ impl ModelTestOutcome {
     #[must_use]
     pub fn ok() -> Self {
         Self {
-            status: ModelTestStatus::Ok,
+            status:        ModelTestStatus::Ok,
             error_message: None,
         }
     }
@@ -81,7 +81,7 @@ impl ModelTestOutcome {
     #[must_use]
     pub fn error(message: impl Into<String>) -> Self {
         Self {
-            status: ModelTestStatus::Error,
+            status:        ModelTestStatus::Error,
             error_message: Some(message.into()),
         }
     }
@@ -234,14 +234,14 @@ mod tests {
             display_name: "Test Model".to_string(),
             limits: ModelLimits {
                 context_window: 200_000,
-                max_output: Some(8_000),
+                max_output:     Some(8_000),
             },
             training: None,
             knowledge_cutoff: None,
             features,
             costs: ModelCosts {
-                input_cost_per_mtok: None,
-                output_cost_per_mtok: None,
+                input_cost_per_mtok:       None,
+                output_cost_per_mtok:      None,
                 cache_input_cost_per_mtok: None,
             },
             estimated_output_tps: None,
@@ -252,25 +252,25 @@ mod tests {
 
     fn response_with_text(text: &str) -> Response {
         Response {
-            id: "resp_1".to_string(),
-            model: "test-model".to_string(),
-            provider: "anthropic".to_string(),
-            message: Message::assistant(text),
+            id:            "resp_1".to_string(),
+            model:         "test-model".to_string(),
+            provider:      "anthropic".to_string(),
+            message:       Message::assistant(text),
             finish_reason: FinishReason::Stop,
-            usage: TokenCounts::default(),
-            raw: None,
-            warnings: vec![],
-            rate_limit: None,
+            usage:         TokenCounts::default(),
+            raw:           None,
+            warnings:      vec![],
+            rate_limit:    None,
         }
     }
 
     #[tokio::test]
     async fn run_model_test_deep_errors_when_model_lacks_tools() {
         let info = test_model_with(ModelFeatures {
-            tools: false,
-            vision: false,
+            tools:     false,
+            vision:    false,
             reasoning: true,
-            effort: true,
+            effort:    true,
         });
 
         let outcome = run_model_test(&info, ModelTestMode::Deep).await;
@@ -286,11 +286,11 @@ mod tests {
     fn validate_deep_result_does_not_fail_only_for_missing_reasoning() {
         let tool_results = vec![ToolResult::success("call_1", serde_json::json!(42))];
         let first_step = StepResult {
-            response: response_with_text("tool step"),
+            response:     response_with_text("tool step"),
             tool_results: tool_results.clone(),
         };
         let second_step = StepResult {
-            response: response_with_text("84 is even"),
+            response:     response_with_text("84 is even"),
             tool_results: vec![],
         };
         let result = GenerateResult {

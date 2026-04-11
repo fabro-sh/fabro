@@ -624,16 +624,11 @@ mod tests {
     use crate::outcome::{BilledModelUsage, billed_model_usage_from_llm};
 
     fn stage_usage(model: &str, input_tokens: i64, output_tokens: i64) -> BilledModelUsage {
-        billed_model_usage_from_llm(
-            model,
-            Provider::Anthropic,
-            None,
-            &TokenCounts {
-                input_tokens,
-                output_tokens,
-                ..TokenCounts::default()
-            },
-        )
+        billed_model_usage_from_llm(model, Provider::Anthropic, None, &TokenCounts {
+            input_tokens,
+            output_tokens,
+            ..TokenCounts::default()
+        })
     }
 
     // --- truncate mode ---

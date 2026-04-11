@@ -8,7 +8,7 @@ use crate::event::{Emitter, Event};
 #[derive(Default)]
 pub struct RunControlState {
     pause_requested: AtomicBool,
-    notify: Notify,
+    notify:          Notify,
 }
 
 impl RunControlState {

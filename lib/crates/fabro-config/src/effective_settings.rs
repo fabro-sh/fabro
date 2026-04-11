@@ -25,10 +25,10 @@ pub enum EffectiveSettingsMode {
 
 #[derive(Clone, Debug, Default)]
 pub struct EffectiveSettingsLayers {
-    pub args: SettingsLayer,
+    pub args:     SettingsLayer,
     pub workflow: SettingsLayer,
-    pub project: SettingsLayer,
-    pub user: SettingsLayer,
+    pub project:  SettingsLayer,
+    pub user:     SettingsLayer,
 }
 
 impl EffectiveSettingsLayers {

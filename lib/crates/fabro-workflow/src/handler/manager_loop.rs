@@ -28,7 +28,7 @@ use crate::run_options::RunOptions;
 pub struct SubWorkflowHandler;
 
 struct ParsedChildWorkflow {
-    graph: Graph,
+    graph:         Graph,
     workflow_path: Option<PathBuf>,
 }
 
@@ -68,12 +68,12 @@ fn parse_child_graph(node: &Node, services: &EngineServices) -> Result<ParsedChi
         .and_then(|v| v.as_str())
     {
         let validated = validate(ValidateInput {
-            workflow: WorkflowInput::DotSource {
-                source: dot.to_string(),
+            workflow:          WorkflowInput::DotSource {
+                source:   dot.to_string(),
                 base_dir: None,
             },
-            settings: SettingsLayer::default(),
-            cwd: cwd.clone(),
+            settings:          SettingsLayer::default(),
+            cwd:               cwd.clone(),
             custom_transforms: Vec::new(),
         })?;
         validated.raise_on_errors()?;
@@ -201,18 +201,18 @@ impl Handler for SubWorkflowHandler {
         let child_cancel = Arc::clone(&cancel_token);
 
         let child_run_options = RunOptions {
-            settings: SettingsLayer::default(),
-            run_dir: child_logs,
-            cancel_token: Some(cancel_token),
+            settings:         SettingsLayer::default(),
+            run_dir:          child_logs,
+            cancel_token:     Some(cancel_token),
             // Child workflows are part of the parent run's event stream.
-            run_id: services.emitter.run_id(),
-            labels: HashMap::new(),
-            workflow_slug: None,
-            github_app: None,
-            base_branch: None,
+            run_id:           services.emitter.run_id(),
+            labels:           HashMap::new(),
+            workflow_slug:    None,
+            github_app:       None,
+            base_branch:      None,
             display_base_sha: None,
-            host_repo_path: None,
-            git: None,
+            host_repo_path:   None,
+            git:              None,
         };
 
         // Clone parent context for child; inject parent preamble
@@ -591,8 +591,8 @@ mod tests {
             PathBuf::from("children/review.fabro"),
             BundledWorkflow {
                 logical_path: PathBuf::from("children/review.fabro"),
-                source: child_dot_succeeds().to_string(),
-                files: HashMap::new(),
+                source:       child_dot_succeeds().to_string(),
+                files:        HashMap::new(),
             },
         )]))));
 

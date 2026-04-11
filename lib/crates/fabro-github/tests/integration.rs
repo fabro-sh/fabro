@@ -9,7 +9,7 @@ const TEST_RSA_KEY: &str = include_str!("../src/testdata/rsa_private.pem");
 
 fn github_credentials() -> GitHubAppCredentials {
     GitHubAppCredentials {
-        app_id: "42".to_string(),
+        app_id:          "42".to_string(),
         private_key_pem: TEST_RSA_KEY.to_string(),
     }
 }
@@ -17,12 +17,12 @@ fn github_credentials() -> GitHubAppCredentials {
 fn standard_app_state() -> GitHubAppState {
     let mut state = GitHubAppState::new();
     state.register_app(GitHubAppOptions {
-        app_id: "42".into(),
-        slug: "test-app".into(),
-        owner_login: "acme".into(),
-        public: true,
+        app_id:          "42".into(),
+        slug:            "test-app".into(),
+        owner_login:     "acme".into(),
+        public:          true,
         private_key_pem: TEST_RSA_KEY.into(),
-        webhook_secret: None,
+        webhook_secret:  None,
     });
     state.add_installation("42", "acme", vec!["widgets".into()], false);
     state.add_repository(

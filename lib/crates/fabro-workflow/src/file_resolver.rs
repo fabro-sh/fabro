@@ -8,7 +8,7 @@ pub trait FileResolver: Send + Sync {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvedFile {
     pub logical_path: PathBuf,
-    pub content: String,
+    pub content:      String,
 }
 
 #[derive(Clone, Debug, Default)]

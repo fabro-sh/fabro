@@ -30,12 +30,12 @@ pub fn test_store_dir(run_dir: &std::path::Path) -> PathBuf {
 
 struct InitializedOptions {
     hook_runner: Option<Arc<fabro_hooks::HookRunner>>,
-    env: HashMap<String, String>,
-    checkpoint: Option<Checkpoint>,
+    env:         HashMap<String, String>,
+    checkpoint:  Option<Checkpoint>,
 }
 
 struct InitializedState {
-    initialized: Initialized,
+    initialized:  Initialized,
     store_logger: StoreProgressLogger,
 }
 
@@ -71,37 +71,33 @@ async fn initialized(
         .await
         .expect("failed to create slate-backed test run store");
     let run_store = inner_store;
-    append_event(
-        &run_store,
-        &run_options.run_id,
-        &Event::RunCreated {
-            run_id: run_options.run_id,
-            settings: serde_json::to_value(&run_options.settings)
-                .expect("failed to serialize settings"),
-            graph: serde_json::to_value(graph).expect("failed to serialize graph"),
-            workflow_source: None,
-            workflow_config: None,
-            labels: run_options
-                .labels
-                .clone()
-                .into_iter()
-                .collect::<BTreeMap<_, _>>(),
-            run_dir: run_options.run_dir.display().to_string(),
-            working_directory: PathBuf::from(sandbox.working_directory())
-                .display()
-                .to_string(),
-            host_repo_path: run_options
-                .host_repo_path
-                .as_ref()
-                .map(|path| path.display().to_string()),
-            repo_origin_url: None,
-            base_branch: run_options.base_branch.clone(),
-            workflow_slug: run_options.workflow_slug.clone(),
-            db_prefix: None,
-            provenance: None,
-            manifest_blob: None,
-        },
-    )
+    append_event(&run_store, &run_options.run_id, &Event::RunCreated {
+        run_id:            run_options.run_id,
+        settings:          serde_json::to_value(&run_options.settings)
+            .expect("failed to serialize settings"),
+        graph:             serde_json::to_value(graph).expect("failed to serialize graph"),
+        workflow_source:   None,
+        workflow_config:   None,
+        labels:            run_options
+            .labels
+            .clone()
+            .into_iter()
+            .collect::<BTreeMap<_, _>>(),
+        run_dir:           run_options.run_dir.display().to_string(),
+        working_directory: PathBuf::from(sandbox.working_directory())
+            .display()
+            .to_string(),
+        host_repo_path:    run_options
+            .host_repo_path
+            .as_ref()
+            .map(|path| path.display().to_string()),
+        repo_origin_url:   None,
+        base_branch:       run_options.base_branch.clone(),
+        workflow_slug:     run_options.workflow_slug.clone(),
+        db_prefix:         None,
+        provenance:        None,
+        manifest_blob:     None,
+    })
     .await
     .expect("failed to seed run.created event in run store");
     let emitter = bound_emitter(run_options.run_id, &emitter);
@@ -162,8 +158,8 @@ pub async fn run_graph(
         run_options,
         InitializedOptions {
             hook_runner: None,
-            env: HashMap::new(),
-            checkpoint: None,
+            env:         HashMap::new(),
+            checkpoint:  None,
         },
     )
     .await;
@@ -186,8 +182,8 @@ pub async fn run_graph_with_state(
         run_options,
         InitializedOptions {
             hook_runner: None,
-            env: HashMap::new(),
-            checkpoint: None,
+            env:         HashMap::new(),
+            checkpoint:  None,
         },
     )
     .await;
@@ -219,8 +215,8 @@ pub async fn run_graph_with_hooks(
         run_options,
         InitializedOptions {
             hook_runner: Some(hook_runner),
-            env: env.unwrap_or_default(),
-            checkpoint: None,
+            env:         env.unwrap_or_default(),
+            checkpoint:  None,
         },
     )
     .await;
@@ -245,8 +241,8 @@ pub async fn run_graph_with_hooks_and_state(
         run_options,
         InitializedOptions {
             hook_runner: Some(hook_runner),
-            env: env.unwrap_or_default(),
-            checkpoint: None,
+            env:         env.unwrap_or_default(),
+            checkpoint:  None,
         },
     )
     .await;
@@ -277,8 +273,8 @@ pub async fn run_graph_from_checkpoint(
         run_options,
         InitializedOptions {
             hook_runner: None,
-            env: HashMap::new(),
-            checkpoint: Some(checkpoint.clone()),
+            env:         HashMap::new(),
+            checkpoint:  Some(checkpoint.clone()),
         },
     )
     .await;
@@ -302,8 +298,8 @@ pub async fn run_graph_from_checkpoint_with_state(
         run_options,
         InitializedOptions {
             hook_runner: None,
-            env: HashMap::new(),
-            checkpoint: Some(checkpoint.clone()),
+            env:         HashMap::new(),
+            checkpoint:  Some(checkpoint.clone()),
         },
     )
     .await;
@@ -320,8 +316,8 @@ pub async fn run_graph_from_checkpoint_with_state(
 
 pub struct WorkflowRunner {
     registry: std::sync::Mutex<Option<HandlerRegistry>>,
-    emitter: Arc<Emitter>,
-    sandbox: Arc<dyn Sandbox>,
+    emitter:  Arc<Emitter>,
+    sandbox:  Arc<dyn Sandbox>,
 }
 
 impl WorkflowRunner {

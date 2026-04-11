@@ -51,16 +51,16 @@ impl FromStr for RewindTarget {
 
 #[derive(Debug, Clone)]
 pub struct TimelineEntry {
-    pub ordinal: usize,
-    pub node_name: String,
-    pub visit: usize,
+    pub ordinal:             usize,
+    pub node_name:           String,
+    pub visit:               usize,
     pub metadata_commit_oid: Oid,
-    pub run_commit_sha: Option<String>,
+    pub run_commit_sha:      Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct RunTimeline {
-    pub entries: Vec<TimelineEntry>,
+    pub entries:      Vec<TimelineEntry>,
     pub parallel_map: HashMap<String, String>,
 }
 
@@ -116,7 +116,7 @@ impl RunTimeline {
 pub struct RewindInput {
     pub run_id: RunId,
     pub target: RewindTarget,
-    pub push: bool,
+    pub push:   bool,
 }
 
 pub fn build_timeline(store: &Store, run_id: &str) -> Result<RunTimeline> {
@@ -157,7 +157,7 @@ pub fn build_timeline(store: &Store, run_id: &str) -> Result<RunTimeline> {
 
     backfill_run_shas(store, run_id, &mut timeline);
     Ok(RunTimeline {
-        entries: timeline,
+        entries:      timeline,
         parallel_map: load_parallel_map(store, run_id),
     })
 }
@@ -419,27 +419,27 @@ mod tests {
     #[test]
     fn resolve_latest_visit() {
         let timeline = RunTimeline {
-            entries: vec![
+            entries:      vec![
                 TimelineEntry {
-                    ordinal: 1,
-                    node_name: "start".to_string(),
-                    visit: 1,
+                    ordinal:             1,
+                    node_name:           "start".to_string(),
+                    visit:               1,
                     metadata_commit_oid: Oid::zero(),
-                    run_commit_sha: Some("aaa".to_string()),
+                    run_commit_sha:      Some("aaa".to_string()),
                 },
                 TimelineEntry {
-                    ordinal: 2,
-                    node_name: "build".to_string(),
-                    visit: 1,
+                    ordinal:             2,
+                    node_name:           "build".to_string(),
+                    visit:               1,
                     metadata_commit_oid: Oid::zero(),
-                    run_commit_sha: Some("bbb".to_string()),
+                    run_commit_sha:      Some("bbb".to_string()),
                 },
                 TimelineEntry {
-                    ordinal: 3,
-                    node_name: "build".to_string(),
-                    visit: 2,
+                    ordinal:             3,
+                    node_name:           "build".to_string(),
+                    visit:               2,
                     metadata_commit_oid: Oid::zero(),
-                    run_commit_sha: Some("ccc".to_string()),
+                    run_commit_sha:      Some("ccc".to_string()),
                 },
             ],
             parallel_map: HashMap::new(),
@@ -476,13 +476,13 @@ mod tests {
         graph.nodes.insert("a".to_string(), a);
 
         graph.edges.push(fabro_graphviz::graph::Edge {
-            from: "parallel1".to_string(),
-            to: "a".to_string(),
+            from:  "parallel1".to_string(),
+            to:    "a".to_string(),
             attrs: HashMap::new(),
         });
         graph.edges.push(fabro_graphviz::graph::Edge {
-            from: "a".to_string(),
-            to: "fan_in1".to_string(),
+            from:  "a".to_string(),
+            to:    "fan_in1".to_string(),
             attrs: HashMap::new(),
         });
 
@@ -508,14 +508,11 @@ mod tests {
         bs.write_entry("checkpoint.json", &cp2, "checkpoint")
             .unwrap();
 
-        rewind(
-            &store,
-            &RewindInput {
-                run_id: fixtures::RUN_1,
-                target: RewindTarget::Ordinal(1),
-                push: false,
-            },
-        )
+        rewind(&store, &RewindInput {
+            run_id: fixtures::RUN_1,
+            target: RewindTarget::Ordinal(1),
+            push:   false,
+        })
         .unwrap();
 
         let resolved = store.resolve_ref(&branch).unwrap().unwrap();

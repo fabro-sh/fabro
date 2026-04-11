@@ -215,7 +215,7 @@ impl GitleaksEngine {
 
                 regions.push(Region {
                     start: secret_match.start(),
-                    end: secret_match.end(),
+                    end:   secret_match.end(),
                 });
             }
         }

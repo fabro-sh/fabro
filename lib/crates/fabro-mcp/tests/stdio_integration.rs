@@ -8,13 +8,13 @@ use fabro_mcp::connection_manager::{McpConnectionManager, call_result_to_string}
 fn test_server_config() -> McpServerSettings {
     let test_server = format!("{}/tests/test_mcp_server.py", env!("CARGO_MANIFEST_DIR"));
     McpServerSettings {
-        name: "test-echo".into(),
-        transport: McpTransport::Stdio {
+        name:                 "test-echo".into(),
+        transport:            McpTransport::Stdio {
             command: vec!["python3".into(), test_server],
-            env: HashMap::new(),
+            env:     HashMap::new(),
         },
         startup_timeout_secs: 10,
-        tool_timeout_secs: 30,
+        tool_timeout_secs:    30,
     }
 }
 

@@ -49,28 +49,28 @@ type WfNodeDecision = NodeDecision<Option<BilledModelUsage>>;
 /// Orchestrates all sub-lifecycles with explicit per-callback ordering.
 /// Implements `RunLifecycle<WorkflowGraph>` by delegating to focused structs.
 pub(crate) struct WorkflowLifecycle {
-    event: EventLifecycle,
-    hook: HookLifecycle,
-    fidelity: FidelityLifecycle,
-    auto_status: AutoStatusLifecycle,
-    circuit_breaker: Arc<CircuitBreakerLifecycle>,
-    git: GitLifecycle,
-    artifact: ArtifactLifecycle,
-    on_node: crate::OnNodeCallback,
-    emitter: Arc<Emitter>,
-    run_control: Option<Arc<RunControlState>>,
+    event:                 EventLifecycle,
+    hook:                  HookLifecycle,
+    fidelity:              FidelityLifecycle,
+    auto_status:           AutoStatusLifecycle,
+    circuit_breaker:       Arc<CircuitBreakerLifecycle>,
+    git:                   GitLifecycle,
+    artifact:              ArtifactLifecycle,
+    on_node:               crate::OnNodeCallback,
+    emitter:               Arc<Emitter>,
+    run_control:           Option<Arc<RunControlState>>,
     /// Set in on_edge_selected when loop_restart approved; read+cleared by
     /// EventLifecycle::on_run_start
-    restarted_from: Arc<Mutex<Option<(String, String)>>>,
+    restarted_from:        Arc<Mutex<Option<(String, String)>>>,
     /// Shared git checkpoint result (written by git, read by event)
     checkpoint_git_result: Arc<Mutex<Option<GitCheckpointResult>>>,
     /// True when constructed with a checkpoint; cleared after first
     /// on_run_start. Gates context seeding on initial resume.
-    is_initial_resume: AtomicBool,
+    is_initial_resume:     AtomicBool,
     // Config needed for context seeding
-    graph: Arc<GvGraph>,
-    run_id: RunId,
-    working_directory: Option<String>,
+    graph:                 Arc<GvGraph>,
+    run_id:                RunId,
+    working_directory:     Option<String>,
 }
 
 impl WorkflowLifecycle {
@@ -111,21 +111,21 @@ impl WorkflowLifecycle {
         };
 
         let event = EventLifecycle {
-            emitter: Arc::clone(emitter),
-            graph_name: graph.name.clone(),
-            run_id: run_options.run_id,
-            run_start: Mutex::new(Instant::now()),
-            restarted_from: Arc::clone(&restarted_from),
-            base_branch: run_options.base_branch.clone(),
-            base_sha: run_options.git.as_ref().and_then(|g| g.base_sha.clone()),
-            run_branch: run_options.git.as_ref().and_then(|g| g.run_branch.clone()),
-            worktree_dir: working_directory.clone(),
-            goal: (!graph.goal().is_empty()).then(|| graph.goal().to_string()),
+            emitter:                 Arc::clone(emitter),
+            graph_name:              graph.name.clone(),
+            run_id:                  run_options.run_id,
+            run_start:               Mutex::new(Instant::now()),
+            restarted_from:          Arc::clone(&restarted_from),
+            base_branch:             run_options.base_branch.clone(),
+            base_sha:                run_options.git.as_ref().and_then(|g| g.base_sha.clone()),
+            run_branch:              run_options.git.as_ref().and_then(|g| g.run_branch.clone()),
+            worktree_dir:            working_directory.clone(),
+            goal:                    (!graph.goal().is_empty()).then(|| graph.goal().to_string()),
             captured_artifact_count: Arc::clone(&captured_artifact_count),
-            last_git_sha: Arc::clone(&last_git_sha),
-            final_patch: Arc::clone(&final_patch),
-            checkpoint_git_result: Arc::clone(&checkpoint_git_result),
-            circuit_breaker: Arc::clone(&circuit_breaker),
+            last_git_sha:            Arc::clone(&last_git_sha),
+            final_patch:             Arc::clone(&final_patch),
+            checkpoint_git_result:   Arc::clone(&checkpoint_git_result),
+            circuit_breaker:         Arc::clone(&circuit_breaker),
         };
 
         let hook = HookLifecycle {

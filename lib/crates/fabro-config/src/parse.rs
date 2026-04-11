@@ -66,7 +66,7 @@ pub fn parse_settings_layer(input: &str) -> Result<SettingsLayer, ParseError> {
         for key in table.keys() {
             if !ALLOWED_TOP_LEVEL_KEYS.contains(&key.as_str()) {
                 return Err(ParseError::UnknownTopLevelKey {
-                    key: key.clone(),
+                    key:  key.clone(),
                     hint: rename_hint(key),
                 });
             }

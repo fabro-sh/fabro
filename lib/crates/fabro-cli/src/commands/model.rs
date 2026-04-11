@@ -21,19 +21,19 @@ enum ModelTestResultKind {
 
 #[derive(Serialize)]
 struct ModelTestRow {
-    model: String,
+    model:    String,
     provider: Provider,
-    result: ModelTestResultKind,
+    result:   ModelTestResultKind,
     #[serde(skip_serializing_if = "Option::is_none")]
-    detail: Option<String>,
+    detail:   Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<String>,
+    error:    Option<String>,
 }
 
 #[derive(Serialize)]
 struct ModelTestOutput {
-    results: Vec<ModelTestRow>,
-    total: usize,
+    results:  Vec<ModelTestRow>,
+    total:    usize,
     failures: u32,
 }
 
@@ -145,25 +145,25 @@ fn model_test_row_from_status(model: &Model, status: &str, result_color: Color) 
     let trimmed = status.trim();
     match result_color {
         Color::Green => ModelTestRow {
-            model: model.id.clone(),
+            model:    model.id.clone(),
             provider: model.provider,
-            result: ModelTestResultKind::Pass,
-            detail: None,
-            error: None,
+            result:   ModelTestResultKind::Pass,
+            detail:   None,
+            error:    None,
         },
         Color::Yellow => ModelTestRow {
-            model: model.id.clone(),
+            model:    model.id.clone(),
             provider: model.provider,
-            result: ModelTestResultKind::Skip,
-            detail: Some(trimmed.to_string()),
-            error: None,
+            result:   ModelTestResultKind::Skip,
+            detail:   Some(trimmed.to_string()),
+            error:    None,
         },
         _ => ModelTestRow {
-            model: model.id.clone(),
+            model:    model.id.clone(),
             provider: model.provider,
-            result: ModelTestResultKind::Fail,
-            detail: None,
-            error: Some(
+            result:   ModelTestResultKind::Fail,
+            detail:   None,
+            error:    Some(
                 trimmed
                     .strip_prefix("error: ")
                     .unwrap_or(trimmed)
@@ -435,19 +435,19 @@ mod tests {
             display_name: format!("{id} display"),
             limits: ModelLimits {
                 context_window: 128_000,
-                max_output: Some(4096),
+                max_output:     Some(4096),
             },
             training: None,
             knowledge_cutoff: None,
             features: ModelFeatures {
-                tools: true,
-                vision: false,
+                tools:     true,
+                vision:    false,
                 reasoning: false,
-                effort: false,
+                effort:    false,
             },
             costs: ModelCosts {
-                input_cost_per_mtok: Some(1.0),
-                output_cost_per_mtok: Some(2.0),
+                input_cost_per_mtok:       Some(1.0),
+                output_cost_per_mtok:      Some(2.0),
                 cache_input_cost_per_mtok: None,
             },
             estimated_output_tps: Some(100.0),

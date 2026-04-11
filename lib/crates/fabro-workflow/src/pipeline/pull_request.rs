@@ -540,14 +540,14 @@ pub async fn pull_request(concluded: Concluded, options: &PullRequestOptions) ->
                     {
                         Ok(Some(record)) => {
                             emitter.emit(&Event::PullRequestCreated {
-                                pr_url: record.html_url.clone(),
-                                pr_number: record.number,
-                                owner: record.owner.clone(),
-                                repo: record.repo.clone(),
+                                pr_url:      record.html_url.clone(),
+                                pr_number:   record.number,
+                                owner:       record.owner.clone(),
+                                repo:        record.repo.clone(),
                                 base_branch: record.base_branch.clone(),
                                 head_branch: record.head_branch.clone(),
-                                title: record.title.clone(),
-                                draft: pr_cfg.draft,
+                                title:       record.title.clone(),
+                                draft:       pr_cfg.draft,
                             });
                             pr_url = Some(record.html_url.clone());
                         }
@@ -622,19 +622,19 @@ mod tests {
 
         async fn complete(&self, _request: &Request) -> Result<Response, LlmError> {
             Ok(Response {
-                id: "resp_1".into(),
-                model: "mock-model".into(),
-                provider: "mock".into(),
-                message: Message::assistant(&self.response_text),
+                id:            "resp_1".into(),
+                model:         "mock-model".into(),
+                provider:      "mock".into(),
+                message:       Message::assistant(&self.response_text),
                 finish_reason: FinishReason::Stop,
-                usage: TokenCounts {
+                usage:         TokenCounts {
                     input_tokens: 10,
                     output_tokens: 20,
                     ..Default::default()
                 },
-                raw: None,
-                warnings: vec![],
-                rate_limit: None,
+                raw:           None,
+                warnings:      vec![],
+                rate_limit:    None,
             })
         }
 
@@ -650,19 +650,19 @@ mod tests {
                         ..Default::default()
                     },
                     Response {
-                        id: "resp_1".into(),
-                        model: "mock-model".into(),
-                        provider: "mock".into(),
-                        message: Message::assistant(&text),
+                        id:            "resp_1".into(),
+                        model:         "mock-model".into(),
+                        provider:      "mock".into(),
+                        message:       Message::assistant(&text),
                         finish_reason: FinishReason::Stop,
-                        usage: TokenCounts {
+                        usage:         TokenCounts {
                             input_tokens: 10,
                             output_tokens: 20,
                             ..Default::default()
                         },
-                        raw: None,
-                        warnings: vec![],
-                        rate_limit: None,
+                        raw:           None,
+                        warnings:      vec![],
+                        rate_limit:    None,
                     },
                 )),
             ];
@@ -693,109 +693,109 @@ mod tests {
 
     fn make_test_conclusion() -> Conclusion {
         Conclusion {
-            timestamp: Utc::now(),
-            status: crate::outcome::StageStatus::Success,
-            duration_ms: 150_000,
-            failure_reason: None,
+            timestamp:            Utc::now(),
+            status:               crate::outcome::StageStatus::Success,
+            duration_ms:          150_000,
+            failure_reason:       None,
             final_git_commit_sha: None,
-            stages: vec![
+            stages:               vec![
                 StageSummary {
-                    stage_id: "plan".to_string(),
-                    stage_label: "plan".to_string(),
-                    duration_ms: 45_000,
+                    stage_id:           "plan".to_string(),
+                    stage_label:        "plan".to_string(),
+                    duration_ms:        45_000,
                     billing_usd_micros: Some(120_000),
-                    retries: 0,
+                    retries:            0,
                 },
                 StageSummary {
-                    stage_id: "implement".to_string(),
-                    stage_label: "implement".to_string(),
-                    duration_ms: 90_000,
+                    stage_id:           "implement".to_string(),
+                    stage_label:        "implement".to_string(),
+                    duration_ms:        90_000,
                     billing_usd_micros: Some(250_000),
-                    retries: 0,
+                    retries:            0,
                 },
                 StageSummary {
-                    stage_id: "simplify".to_string(),
-                    stage_label: "simplify".to_string(),
-                    duration_ms: 15_000,
+                    stage_id:           "simplify".to_string(),
+                    stage_label:        "simplify".to_string(),
+                    duration_ms:        15_000,
                     billing_usd_micros: Some(50_000),
-                    retries: 0,
+                    retries:            0,
                 },
             ],
-            billing: Some(BilledTokenCounts {
+            billing:              Some(BilledTokenCounts {
                 total_usd_micros: Some(420_000),
                 ..BilledTokenCounts::default()
             }),
-            total_retries: 0,
+            total_retries:        0,
         }
     }
 
     fn make_test_retro() -> Retro {
         Retro {
-            run_id: fixtures::RUN_1,
-            workflow_name: "implement".to_string(),
-            goal: "Fix the bug".to_string(),
-            timestamp: Utc::now(),
-            smoothness: None,
-            stages: vec![
+            run_id:          fixtures::RUN_1,
+            workflow_name:   "implement".to_string(),
+            goal:            "Fix the bug".to_string(),
+            timestamp:       Utc::now(),
+            smoothness:      None,
+            stages:          vec![
                 StageRetro {
-                    stage_id: "plan".to_string(),
-                    stage_label: "plan".to_string(),
-                    status: "success".to_string(),
-                    duration_ms: 45_000,
-                    retries: 0,
+                    stage_id:           "plan".to_string(),
+                    stage_label:        "plan".to_string(),
+                    status:             "success".to_string(),
+                    duration_ms:        45_000,
+                    retries:            0,
                     billing_usd_micros: Some(120_000),
-                    notes: None,
-                    failure_reason: None,
-                    files_touched: vec![],
+                    notes:              None,
+                    failure_reason:     None,
+                    files_touched:      vec![],
                 },
                 StageRetro {
-                    stage_id: "implement".to_string(),
-                    stage_label: "implement".to_string(),
-                    status: "success".to_string(),
-                    duration_ms: 90_000,
-                    retries: 0,
+                    stage_id:           "implement".to_string(),
+                    stage_label:        "implement".to_string(),
+                    status:             "success".to_string(),
+                    duration_ms:        90_000,
+                    retries:            0,
                     billing_usd_micros: Some(250_000),
-                    notes: None,
-                    failure_reason: None,
-                    files_touched: vec!["src/main.rs".to_string(), "src/lib.rs".to_string()],
+                    notes:              None,
+                    failure_reason:     None,
+                    files_touched:      vec!["src/main.rs".to_string(), "src/lib.rs".to_string()],
                 },
                 StageRetro {
-                    stage_id: "simplify".to_string(),
-                    stage_label: "simplify".to_string(),
-                    status: "success".to_string(),
-                    duration_ms: 15_000,
-                    retries: 0,
+                    stage_id:           "simplify".to_string(),
+                    stage_label:        "simplify".to_string(),
+                    status:             "success".to_string(),
+                    duration_ms:        15_000,
+                    retries:            0,
                     billing_usd_micros: Some(50_000),
-                    notes: None,
-                    failure_reason: None,
-                    files_touched: vec![],
+                    notes:              None,
+                    failure_reason:     None,
+                    files_touched:      vec![],
                 },
             ],
-            stats: AggregateStats {
-                total_duration_ms: 150_000,
+            stats:           AggregateStats {
+                total_duration_ms:        150_000,
                 total_billing_usd_micros: Some(420_000),
-                total_retries: 0,
-                files_touched: vec!["src/lib.rs".to_string(), "src/main.rs".to_string()],
-                stages_completed: 3,
-                stages_failed: 0,
+                total_retries:            0,
+                files_touched:            vec!["src/lib.rs".to_string(), "src/main.rs".to_string()],
+                stages_completed:         3,
+                stages_failed:            0,
             },
-            intent: None,
-            outcome: None,
-            learnings: None,
+            intent:          None,
+            outcome:         None,
+            learnings:       None,
             friction_points: Some(vec![
                 FrictionPoint {
-                    kind: FrictionKind::ToolFailure,
+                    kind:        FrictionKind::ToolFailure,
                     description: "Daytona sandbox didn't have cargo on PATH".to_string(),
-                    stage_id: None,
+                    stage_id:    None,
                 },
                 FrictionPoint {
-                    kind: FrictionKind::Timeout,
+                    kind:        FrictionKind::Timeout,
                     description: "Proxy timeouts during cold compilations".to_string(),
-                    stage_id: None,
+                    stage_id:    None,
                 },
             ]),
-            open_items: Some(vec![OpenItem {
-                kind: OpenItemKind::TechDebt,
+            open_items:      Some(vec![OpenItem {
+                kind:        OpenItemKind::TechDebt,
                 description: "`ToolApprovalFn` type alias still exists".to_string(),
             }]),
         }
@@ -834,25 +834,25 @@ mod tests {
     #[test]
     fn format_retro_section_empty_stats() {
         let retro = Retro {
-            run_id: fixtures::RUN_2,
-            workflow_name: "test".to_string(),
-            goal: "test".to_string(),
-            timestamp: Utc::now(),
-            smoothness: None,
-            stages: vec![],
-            stats: AggregateStats {
-                total_duration_ms: 0,
+            run_id:          fixtures::RUN_2,
+            workflow_name:   "test".to_string(),
+            goal:            "test".to_string(),
+            timestamp:       Utc::now(),
+            smoothness:      None,
+            stages:          vec![],
+            stats:           AggregateStats {
+                total_duration_ms:        0,
                 total_billing_usd_micros: None,
-                total_retries: 0,
-                files_touched: vec![],
-                stages_completed: 0,
-                stages_failed: 0,
+                total_retries:            0,
+                files_touched:            vec![],
+                stages_completed:         0,
+                stages_failed:            0,
             },
-            intent: None,
-            outcome: None,
-            learnings: None,
+            intent:          None,
+            outcome:         None,
+            learnings:       None,
             friction_points: None,
-            open_items: None,
+            open_items:      None,
         };
         let section = format_retro_section(&retro);
 
@@ -1083,51 +1083,43 @@ mod tests {
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
 
         let run_record = RunRecord {
-            run_id: fixtures::RUN_1,
-            settings: SettingsLayer::default(),
-            graph: Graph::new("test"),
-            workflow_slug: Some("test".to_string()),
+            run_id:            fixtures::RUN_1,
+            settings:          SettingsLayer::default(),
+            graph:             Graph::new("test"),
+            workflow_slug:     Some("test".to_string()),
             working_directory: PathBuf::from("/tmp/project"),
-            host_repo_path: Some("/tmp/project".to_string()),
-            repo_origin_url: None,
-            base_branch: Some("main".to_string()),
-            labels: HashMap::new(),
-            provenance: None,
-            manifest_blob: None,
-            definition_blob: None,
+            host_repo_path:    Some("/tmp/project".to_string()),
+            repo_origin_url:   None,
+            base_branch:       Some("main".to_string()),
+            labels:            HashMap::new(),
+            provenance:        None,
+            manifest_blob:     None,
+            definition_blob:   None,
         };
-        append_event(
-            &run_store,
-            &fixtures::RUN_1,
-            &Event::RunCreated {
-                run_id: fixtures::RUN_1,
-                settings: serde_json::to_value(&run_record.settings).unwrap(),
-                graph: serde_json::to_value(&run_record.graph).unwrap(),
-                workflow_source: Some("digraph test { plan -> code }".to_string()),
-                workflow_config: None,
-                labels: run_record.labels.clone().into_iter().collect(),
-                run_dir: run_record.working_directory.display().to_string(),
-                working_directory: run_record.working_directory.display().to_string(),
-                host_repo_path: run_record.host_repo_path.clone(),
-                repo_origin_url: run_record.repo_origin_url.clone(),
-                base_branch: run_record.base_branch.clone(),
-                workflow_slug: run_record.workflow_slug.clone(),
-                db_prefix: None,
-                provenance: run_record.provenance.clone(),
-                manifest_blob: None,
-            },
-        )
+        append_event(&run_store, &fixtures::RUN_1, &Event::RunCreated {
+            run_id:            fixtures::RUN_1,
+            settings:          serde_json::to_value(&run_record.settings).unwrap(),
+            graph:             serde_json::to_value(&run_record.graph).unwrap(),
+            workflow_source:   Some("digraph test { plan -> code }".to_string()),
+            workflow_config:   None,
+            labels:            run_record.labels.clone().into_iter().collect(),
+            run_dir:           run_record.working_directory.display().to_string(),
+            working_directory: run_record.working_directory.display().to_string(),
+            host_repo_path:    run_record.host_repo_path.clone(),
+            repo_origin_url:   run_record.repo_origin_url.clone(),
+            base_branch:       run_record.base_branch.clone(),
+            workflow_slug:     run_record.workflow_slug.clone(),
+            db_prefix:         None,
+            provenance:        run_record.provenance.clone(),
+            manifest_blob:     None,
+        })
         .await
         .unwrap();
-        append_event(
-            &run_store,
-            &fixtures::RUN_1,
-            &Event::RetroCompleted {
-                duration_ms: 1,
-                response: Some(String::new()),
-                retro: Some(serde_json::to_value(make_test_retro()).unwrap()),
-            },
-        )
+        append_event(&run_store, &fixtures::RUN_1, &Event::RetroCompleted {
+            duration_ms: 1,
+            response:    Some(String::new()),
+            retro:       Some(serde_json::to_value(make_test_retro()).unwrap()),
+        })
         .await
         .unwrap();
 
@@ -1156,68 +1148,60 @@ mod tests {
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
 
         let run_record = RunRecord {
-            run_id: fixtures::RUN_1,
-            settings: SettingsLayer::default(),
-            graph: Graph::new("test"),
-            workflow_slug: Some("test".to_string()),
+            run_id:            fixtures::RUN_1,
+            settings:          SettingsLayer::default(),
+            graph:             Graph::new("test"),
+            workflow_slug:     Some("test".to_string()),
             working_directory: PathBuf::from("/tmp/project"),
-            host_repo_path: Some("/tmp/project".to_string()),
-            repo_origin_url: None,
-            base_branch: Some("main".to_string()),
-            labels: HashMap::new(),
-            provenance: None,
-            manifest_blob: None,
-            definition_blob: None,
+            host_repo_path:    Some("/tmp/project".to_string()),
+            repo_origin_url:   None,
+            base_branch:       Some("main".to_string()),
+            labels:            HashMap::new(),
+            provenance:        None,
+            manifest_blob:     None,
+            definition_blob:   None,
         };
-        append_event(
-            &run_store,
-            &fixtures::RUN_1,
-            &Event::RunCreated {
-                run_id: fixtures::RUN_1,
-                settings: serde_json::to_value(&run_record.settings).unwrap(),
-                graph: serde_json::to_value(&run_record.graph).unwrap(),
-                workflow_source: Some("digraph test { plan -> code }".to_string()),
-                workflow_config: None,
-                labels: run_record.labels.clone().into_iter().collect(),
-                run_dir: run_record.working_directory.display().to_string(),
-                working_directory: run_record.working_directory.display().to_string(),
-                host_repo_path: run_record.host_repo_path.clone(),
-                repo_origin_url: run_record.repo_origin_url.clone(),
-                base_branch: run_record.base_branch.clone(),
-                workflow_slug: run_record.workflow_slug.clone(),
-                db_prefix: None,
-                provenance: run_record.provenance.clone(),
-                manifest_blob: None,
-            },
-        )
+        append_event(&run_store, &fixtures::RUN_1, &Event::RunCreated {
+            run_id:            fixtures::RUN_1,
+            settings:          serde_json::to_value(&run_record.settings).unwrap(),
+            graph:             serde_json::to_value(&run_record.graph).unwrap(),
+            workflow_source:   Some("digraph test { plan -> code }".to_string()),
+            workflow_config:   None,
+            labels:            run_record.labels.clone().into_iter().collect(),
+            run_dir:           run_record.working_directory.display().to_string(),
+            working_directory: run_record.working_directory.display().to_string(),
+            host_repo_path:    run_record.host_repo_path.clone(),
+            repo_origin_url:   run_record.repo_origin_url.clone(),
+            base_branch:       run_record.base_branch.clone(),
+            workflow_slug:     run_record.workflow_slug.clone(),
+            db_prefix:         None,
+            provenance:        run_record.provenance.clone(),
+            manifest_blob:     None,
+        })
         .await
         .unwrap();
-        append_event(
-            &run_store,
-            &fixtures::RUN_1,
-            &Event::StageCompleted {
-                node_id: "plan".to_string(),
-                name: "plan".to_string(),
-                index: 0,
-                duration_ms: 1,
-                status: "success".to_string(),
-                preferred_label: None,
-                suggested_next_ids: vec![],
-                billing: None,
-                failure: None,
-                notes: None,
-                files_touched: vec![],
-                context_updates: None,
-                jump_to_node: None,
-                context_values: None,
-                node_visits: None,
-                loop_failure_signatures: None,
-                restart_failure_signatures: None,
-                response: Some("Plan from store".to_string()),
-                attempt: 1,
-                max_attempts: 1,
-            },
-        )
+        append_event(&run_store, &fixtures::RUN_1, &Event::StageCompleted {
+            node_id: "plan".to_string(),
+            name: "plan".to_string(),
+            index: 0,
+            duration_ms: 1,
+            status: "success".to_string(),
+            preferred_label: None,
+            suggested_next_ids: vec![],
+            billing: None,
+            failure: None,
+            notes: None,
+            files_touched: vec![],
+            context_updates: None,
+            jump_to_node: None,
+            context_values: None,
+            node_visits: None,
+            loop_failure_signatures: None,
+            restart_failure_signatures: None,
+            response: Some("Plan from store".to_string()),
+            attempt: 1,
+            max_attempts: 1,
+        })
         .await
         .unwrap();
 
@@ -1355,7 +1339,7 @@ mod tests {
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         let creds = GitHubAppCredentials {
-            app_id: "123".to_string(),
+            app_id:          "123".to_string(),
             private_key_pem: "unused".to_string(),
         };
         let result = maybe_open_pull_request(
@@ -1382,58 +1366,50 @@ mod tests {
         let store = test_store();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
         let run_record = RunRecord {
-            run_id: fixtures::RUN_1,
-            settings: SettingsLayer::default(),
-            graph: Graph::new("test"),
-            workflow_slug: None,
+            run_id:            fixtures::RUN_1,
+            settings:          SettingsLayer::default(),
+            graph:             Graph::new("test"),
+            workflow_slug:     None,
             working_directory: tmp.path().to_path_buf(),
-            host_repo_path: None,
-            repo_origin_url: None,
-            base_branch: None,
-            labels: std::collections::HashMap::new(),
-            provenance: None,
-            manifest_blob: None,
-            definition_blob: None,
+            host_repo_path:    None,
+            repo_origin_url:   None,
+            base_branch:       None,
+            labels:            std::collections::HashMap::new(),
+            provenance:        None,
+            manifest_blob:     None,
+            definition_blob:   None,
         };
-        append_event(
-            &run_store,
-            &fixtures::RUN_1,
-            &Event::RunCreated {
-                run_id: fixtures::RUN_1,
-                settings: serde_json::to_value(&run_record.settings).unwrap(),
-                graph: serde_json::to_value(&run_record.graph).unwrap(),
-                workflow_source: None,
-                workflow_config: None,
-                labels: run_record.labels.clone().into_iter().collect(),
-                run_dir: run_record.working_directory.display().to_string(),
-                working_directory: tmp.path().display().to_string(),
-                host_repo_path: None,
-                repo_origin_url: run_record.repo_origin_url.clone(),
-                base_branch: None,
-                workflow_slug: None,
-                db_prefix: None,
-                provenance: run_record.provenance.clone(),
-                manifest_blob: None,
-            },
-        )
+        append_event(&run_store, &fixtures::RUN_1, &Event::RunCreated {
+            run_id:            fixtures::RUN_1,
+            settings:          serde_json::to_value(&run_record.settings).unwrap(),
+            graph:             serde_json::to_value(&run_record.graph).unwrap(),
+            workflow_source:   None,
+            workflow_config:   None,
+            labels:            run_record.labels.clone().into_iter().collect(),
+            run_dir:           run_record.working_directory.display().to_string(),
+            working_directory: tmp.path().display().to_string(),
+            host_repo_path:    None,
+            repo_origin_url:   run_record.repo_origin_url.clone(),
+            base_branch:       None,
+            workflow_slug:     None,
+            db_prefix:         None,
+            provenance:        run_record.provenance.clone(),
+            manifest_blob:     None,
+        })
         .await
         .unwrap();
-        append_event(
-            &run_store,
-            &fixtures::RUN_1,
-            &Event::WorkflowRunCompleted {
-                duration_ms: 1,
-                artifact_count: 0,
-                status: "success".to_string(),
-                reason: None,
-                total_usd_micros: None,
-                final_git_commit_sha: None,
-                final_patch: Some(
-                    "diff --git a/src/lib.rs b/src/lib.rs\n+fn from_store() {}\n".to_string(),
-                ),
-                billing: None,
-            },
-        )
+        append_event(&run_store, &fixtures::RUN_1, &Event::WorkflowRunCompleted {
+            duration_ms:          1,
+            artifact_count:       0,
+            status:               "success".to_string(),
+            reason:               None,
+            total_usd_micros:     None,
+            final_git_commit_sha: None,
+            final_patch:          Some(
+                "diff --git a/src/lib.rs b/src/lib.rs\n+fn from_store() {}\n".to_string(),
+            ),
+            billing:              None,
+        })
         .await
         .unwrap();
 

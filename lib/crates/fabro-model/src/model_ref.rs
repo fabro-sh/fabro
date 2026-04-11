@@ -11,7 +11,10 @@ pub enum ModelHandle {
     /// A model whose metadata has been resolved from the catalog.
     Resolved(Arc<Model>),
     /// An unresolved provider:model pair (e.g. from CLI input or config).
-    ByName { provider: Provider, model: String },
+    ByName {
+        provider: Provider,
+        model:    String,
+    },
 }
 
 impl ModelHandle {
@@ -62,7 +65,7 @@ mod tests {
     fn by_name_display() {
         let r = ModelHandle::ByName {
             provider: Provider::Anthropic,
-            model: "claude-opus-4-6".to_string(),
+            model:    "claude-opus-4-6".to_string(),
         };
         assert_eq!(r.to_string(), "anthropic:claude-opus-4-6");
     }
@@ -71,7 +74,7 @@ mod tests {
     fn by_name_accessors() {
         let r = ModelHandle::ByName {
             provider: Provider::OpenAi,
-            model: "gpt-5.4".to_string(),
+            model:    "gpt-5.4".to_string(),
         };
         assert_eq!(r.model_id(), "gpt-5.4");
         assert_eq!(r.provider(), Provider::OpenAi);
@@ -96,7 +99,7 @@ mod tests {
     fn debug_format() {
         let r = ModelHandle::ByName {
             provider: Provider::Gemini,
-            model: "gemini-3.1-pro-preview".to_string(),
+            model:    "gemini-3.1-pro-preview".to_string(),
         };
         let debug = format!("{r:?}");
         assert!(debug.contains("ByName"));

@@ -41,7 +41,7 @@ struct FileTracking {
     /// Set of all file paths successfully written/edited.
     touched: HashSet<String>,
     /// Most recently modified file path.
-    last: Option<String>,
+    last:    Option<String>,
 }
 
 fn track_file_event(event: &AgentEvent, state: &mut FileTracking) {
@@ -98,10 +98,10 @@ fn spawn_event_forwarder(
             {
                 emitter.emit_scoped(
                     &Event::Agent {
-                        stage: node_id.clone(),
-                        visit: scope.visit,
-                        event: event.event.clone(),
-                        session_id: Some(event.session_id.clone()),
+                        stage:             node_id.clone(),
+                        visit:             scope.visit,
+                        event:             event.event.clone(),
+                        session_id:        Some(event.session_id.clone()),
                         parent_session_id: event.parent_session_id.clone(),
                     },
                     &scope,
@@ -116,12 +116,12 @@ fn spawn_event_forwarder(
 /// For `full` fidelity nodes sharing a thread key, sessions are cached
 /// and reused so the LLM sees the full conversation history.
 pub struct AgentApiBackend {
-    model: String,
-    provider: Provider,
+    model:          String,
+    provider:       Provider,
     fallback_chain: Vec<FallbackTarget>,
-    sessions: Mutex<HashMap<String, Session>>,
-    env: HashMap<String, String>,
-    mcp_servers: Vec<McpServerSettings>,
+    sessions:       Mutex<HashMap<String, Session>>,
+    env:            HashMap<String, String>,
+    mcp_servers:    Vec<McpServerSettings>,
 }
 
 impl AgentApiBackend {
@@ -388,9 +388,9 @@ impl CodergenBackend for AgentApiBackend {
         );
 
         Ok(CodergenResult::Text {
-            text: response.text(),
-            usage: Some(stage_usage),
-            files_touched: Vec::new(),
+            text:              response.text(),
+            usage:             Some(stage_usage),
+            files_touched:     Vec::new(),
             last_file_touched: None,
         })
     }
@@ -449,7 +449,7 @@ impl CodergenBackend for AgentApiBackend {
         let file_tracking = Arc::new(Mutex::new(FileTracking {
             pending: HashMap::new(),
             touched: HashSet::new(),
-            last: None,
+            last:    None,
         }));
         let stage_scope = StageScope::for_handler(context, &node.id);
 
@@ -487,12 +487,12 @@ impl CodergenBackend for AgentApiBackend {
                 for target in &self.fallback_chain {
                     emitter.emit_scoped(
                         &Event::Failover {
-                            stage: node.id.clone(),
+                            stage:         node.id.clone(),
                             from_provider: from_provider.clone(),
-                            from_model: from_model.clone(),
-                            to_provider: target.provider.clone(),
-                            to_model: target.model.clone(),
-                            error: error_msg.clone(),
+                            from_model:    from_model.clone(),
+                            to_provider:   target.provider.clone(),
+                            to_model:      target.model.clone(),
+                            error:         error_msg.clone(),
                         },
                         &stage_scope,
                     );
@@ -641,7 +641,7 @@ mod tests {
         FileTracking {
             pending: HashMap::new(),
             touched: HashSet::new(),
-            last: None,
+            last:    None,
         }
     }
 
@@ -657,9 +657,9 @@ mod tests {
 
         track_file_event(
             &AgentEvent::ToolCallStarted {
-                tool_name: "write_file".to_string(),
+                tool_name:    "write_file".to_string(),
                 tool_call_id: "tc1".to_string(),
-                arguments: serde_json::Value::Object(args),
+                arguments:    serde_json::Value::Object(args),
             },
             &mut state,
         );
@@ -668,9 +668,9 @@ mod tests {
         track_file_event(
             &AgentEvent::ToolCallCompleted {
                 tool_call_id: "tc1".to_string(),
-                tool_name: "write_file".to_string(),
-                is_error: false,
-                output: serde_json::Value::String("ok".to_string()),
+                tool_name:    "write_file".to_string(),
+                is_error:     false,
+                output:       serde_json::Value::String("ok".to_string()),
             },
             &mut state,
         );
@@ -690,9 +690,9 @@ mod tests {
 
         track_file_event(
             &AgentEvent::ToolCallStarted {
-                tool_name: "edit_file".to_string(),
+                tool_name:    "edit_file".to_string(),
                 tool_call_id: "tc-sub".to_string(),
-                arguments: serde_json::Value::Object(args),
+                arguments:    serde_json::Value::Object(args),
             },
             &mut state,
         );
@@ -701,9 +701,9 @@ mod tests {
         track_file_event(
             &AgentEvent::ToolCallCompleted {
                 tool_call_id: "tc-sub".to_string(),
-                tool_name: "edit_file".to_string(),
-                is_error: false,
-                output: serde_json::Value::String("ok".to_string()),
+                tool_name:    "edit_file".to_string(),
+                is_error:     false,
+                output:       serde_json::Value::String("ok".to_string()),
             },
             &mut state,
         );
@@ -723,9 +723,9 @@ mod tests {
 
         track_file_event(
             &AgentEvent::ToolCallStarted {
-                tool_name: "edit_file".to_string(),
+                tool_name:    "edit_file".to_string(),
                 tool_call_id: "tc-err".to_string(),
-                arguments: serde_json::Value::Object(args),
+                arguments:    serde_json::Value::Object(args),
             },
             &mut state,
         );
@@ -733,9 +733,9 @@ mod tests {
         track_file_event(
             &AgentEvent::ToolCallCompleted {
                 tool_call_id: "tc-err".to_string(),
-                tool_name: "edit_file".to_string(),
-                is_error: true,
-                output: serde_json::Value::String("failed".to_string()),
+                tool_name:    "edit_file".to_string(),
+                is_error:     true,
+                output:       serde_json::Value::String("failed".to_string()),
             },
             &mut state,
         );

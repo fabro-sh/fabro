@@ -67,19 +67,19 @@ pub(crate) fn print_preflight_workflow_summary(
 
 fn api_diagnostic_to_local(diagnostic: &types::WorkflowDiagnostic) -> fabro_validate::Diagnostic {
     fabro_validate::Diagnostic {
-        rule: diagnostic.rule.clone(),
+        rule:     diagnostic.rule.clone(),
         severity: match diagnostic.severity {
             types::WorkflowDiagnosticSeverity::Error => fabro_validate::Severity::Error,
             types::WorkflowDiagnosticSeverity::Warning => fabro_validate::Severity::Warning,
             types::WorkflowDiagnosticSeverity::Info => fabro_validate::Severity::Info,
         },
-        message: diagnostic.message.clone(),
-        node_id: diagnostic.node_id.clone(),
-        edge: diagnostic
+        message:  diagnostic.message.clone(),
+        node_id:  diagnostic.node_id.clone(),
+        edge:     diagnostic
             .edge
             .as_ref()
             .map(|edge| (edge[0].clone(), edge[1].clone())),
-        fix: diagnostic.fix.clone(),
+        fix:      diagnostic.fix.clone(),
     }
 }
 
@@ -91,24 +91,24 @@ pub(crate) fn api_diagnostics_to_local(
 
 pub(crate) fn api_check_report_to_local(report: &types::PreflightCheckReport) -> CheckReport {
     CheckReport {
-        title: report.title.clone(),
+        title:    report.title.clone(),
         sections: report
             .sections
             .iter()
             .map(|section| CheckSection {
-                title: section.title.clone(),
+                title:  section.title.clone(),
                 checks: section
                     .checks
                     .iter()
                     .map(|check| CheckResult {
-                        name: check.name.clone(),
-                        status: match check.status {
+                        name:        check.name.clone(),
+                        status:      match check.status {
                             types::PreflightCheckResultStatus::Pass => CheckStatus::Pass,
                             types::PreflightCheckResultStatus::Warning => CheckStatus::Warning,
                             types::PreflightCheckResultStatus::Error => CheckStatus::Error,
                         },
-                        summary: check.summary.clone(),
-                        details: check
+                        summary:     check.summary.clone(),
+                        details:     check
                             .details
                             .iter()
                             .map(|detail| CheckDetail {

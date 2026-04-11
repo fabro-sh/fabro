@@ -125,7 +125,7 @@ impl FromStr for Size {
             other => {
                 return Err(ParseSizeError::InvalidUnit {
                     input: input.to_owned(),
-                    unit: other.to_owned(),
+                    unit:  other.to_owned(),
                 });
             }
         };

@@ -216,12 +216,9 @@ mod tests {
         let approval: ToolApprovalFn = Arc::new(|_name, _args| Err("denied".to_string()));
         let adapter = ToolApprovalAdapter(approval);
         let decision = adapter.pre_tool_use("shell", &serde_json::json!({})).await;
-        assert_eq!(
-            decision,
-            ToolHookDecision::Block {
-                reason: "denied".to_string(),
-            }
-        );
+        assert_eq!(decision, ToolHookDecision::Block {
+            reason: "denied".to_string(),
+        });
     }
 
     #[tokio::test]

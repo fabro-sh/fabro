@@ -109,7 +109,7 @@ fn resolve_tls(
 fn resolve_web(_api: Option<&ServerApiLayer>, layer: Option<&ServerWebLayer>) -> ServerWebSettings {
     ServerWebSettings {
         enabled: layer.and_then(|web| web.enabled).unwrap_or(true),
-        url: layer
+        url:     layer
             .and_then(|web| web.url.clone())
             .unwrap_or_else(|| InterpString::parse("http://localhost:3000")),
     }
@@ -125,20 +125,20 @@ fn resolve_auth(
 
     let jwt = api.and_then(|api| {
         api.jwt.as_ref().map(|jwt| ServerAuthApiJwtSettings {
-            enabled: jwt.enabled.unwrap_or(true),
-            issuer: jwt.issuer.clone(),
+            enabled:  jwt.enabled.unwrap_or(true),
+            issuer:   jwt.issuer.clone(),
             audience: jwt.audience.clone(),
         })
     });
     let mtls = api.and_then(|api| {
         api.mtls.as_ref().map(|mtls| ServerAuthApiMtlsSettings {
             enabled: mtls.enabled.unwrap_or(true),
-            ca: mtls.ca.clone(),
+            ca:      mtls.ca.clone(),
         })
     });
     if mtls.as_ref().is_some_and(|mtls| mtls.enabled) && !valid_tls {
         errors.push(ResolveError::Invalid {
-            path: "server.auth.api.mtls".to_string(),
+            path:   "server.auth.api.mtls".to_string(),
             reason: "requires tcp listen with tls cert, key, and ca configured".to_string(),
         });
     }
@@ -149,7 +149,7 @@ fn resolve_auth(
             allowed_usernames: web
                 .map(|web| web.allowed_usernames.clone())
                 .unwrap_or_default(),
-            providers: ServerAuthWebProvidersSettings {
+            providers:         ServerAuthWebProvidersSettings {
                 github: web
                     .and_then(|web| web.providers.as_ref())
                     .and_then(|providers| providers.github.as_ref())
@@ -161,8 +161,8 @@ fn resolve_auth(
 
 fn resolve_web_github(layer: &ServerAuthWebGithubLayer) -> GithubOauthSettings {
     GithubOauthSettings {
-        enabled: layer.enabled.unwrap_or(true),
-        client_id: layer.client_id.clone(),
+        enabled:       layer.enabled.unwrap_or(true),
+        client_id:     layer.client_id.clone(),
         client_secret: layer.client_secret.clone(),
     }
 }
@@ -180,7 +180,7 @@ fn resolve_artifacts(
         prefix: layer
             .and_then(|artifacts| artifacts.prefix.clone())
             .unwrap_or_else(|| InterpString::parse("artifacts")),
-        store: resolve_object_store(
+        store:  resolve_object_store(
             provider,
             layer.and_then(|artifacts| artifacts.local.as_ref()),
             layer.and_then(|artifacts| artifacts.s3.as_ref()),
@@ -201,10 +201,10 @@ fn resolve_slatedb(
         .unwrap_or(ObjectStoreProvider::Local);
 
     ServerSlateDbSettings {
-        prefix: layer
+        prefix:         layer
             .and_then(|slatedb| slatedb.prefix.clone())
             .unwrap_or_else(|| InterpString::parse("")),
-        store: resolve_object_store(
+        store:          resolve_object_store(
             provider,
             layer.and_then(|slatedb| slatedb.local.as_ref()),
             layer.and_then(|slatedb| slatedb.s3.as_ref()),
@@ -255,15 +255,15 @@ fn resolve_object_store(
 
 fn resolve_integrations(layer: Option<&ServerIntegrationsLayer>) -> ServerIntegrationsSettings {
     ServerIntegrationsSettings {
-        github: layer
+        github:  layer
             .and_then(|integrations| integrations.github.as_ref())
             .map(|github| GithubIntegrationSettings {
-                enabled: github.enabled.unwrap_or(true),
-                app_id: github.app_id.clone(),
-                client_id: github.client_id.clone(),
-                slug: github.slug.clone(),
+                enabled:     github.enabled.unwrap_or(true),
+                app_id:      github.app_id.clone(),
+                client_id:   github.client_id.clone(),
+                slug:        github.slug.clone(),
                 permissions: github.permissions.clone(),
-                webhooks: github
+                webhooks:    github
                     .webhooks
                     .as_ref()
                     .map(|webhooks| IntegrationWebhooksSettings {
@@ -271,10 +271,10 @@ fn resolve_integrations(layer: Option<&ServerIntegrationsLayer>) -> ServerIntegr
                     }),
             })
             .unwrap_or_default(),
-        slack: layer
+        slack:   layer
             .and_then(|integrations| integrations.slack.as_ref())
             .map(|slack| SlackIntegrationSettings {
-                enabled: slack.enabled.unwrap_or(true),
+                enabled:         slack.enabled.unwrap_or(true),
                 default_channel: slack.default_channel.clone(),
             })
             .unwrap_or_default(),
@@ -284,7 +284,7 @@ fn resolve_integrations(layer: Option<&ServerIntegrationsLayer>) -> ServerIntegr
                 enabled: discord.enabled.unwrap_or(true),
             })
             .unwrap_or_default(),
-        teams: layer
+        teams:   layer
             .and_then(|integrations| integrations.teams.as_ref())
             .map(|teams| TeamsIntegrationSettings {
                 enabled: teams.enabled.unwrap_or(true),

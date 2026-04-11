@@ -81,7 +81,7 @@ impl FromStr for ModelRef {
                 } else {
                     Ok(Self::Qualified {
                         provider: (*provider).to_owned(),
-                        model: (*model).to_owned(),
+                        model:    (*model).to_owned(),
                     })
                 }
             }
@@ -104,9 +104,9 @@ impl fmt::Display for ModelRef {
 /// An error returned when resolving an ambiguous bare model reference.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AmbiguousModelRef {
-    pub input: String,
+    pub input:     String,
     pub providers: Vec<String>,
-    pub models: Vec<String>,
+    pub models:    Vec<String>,
 }
 
 impl fmt::Display for AmbiguousModelRef {
@@ -130,7 +130,7 @@ pub enum ResolvedModelRef {
     /// The reference named a model (qualified or unambiguously bare).
     Model {
         provider: Option<String>,
-        model: String,
+        model:    String,
     },
 }
 
@@ -162,7 +162,7 @@ impl ModelRef {
         match self {
             Self::Qualified { provider, model } => Ok(ResolvedModelRef::Model {
                 provider: Some(provider.clone()),
-                model: model.clone(),
+                model:    model.clone(),
             }),
             Self::Bare(token) => {
                 let is_provider = registry.is_provider(token);
@@ -171,17 +171,17 @@ impl ModelRef {
                     (true, false) => Ok(ResolvedModelRef::Provider(token.clone())),
                     (false, true) => Ok(ResolvedModelRef::Model {
                         provider: registry.provider_of(token),
-                        model: token.clone(),
+                        model:    token.clone(),
                     }),
                     (true, true) => Err(AmbiguousModelRef {
-                        input: token.clone(),
+                        input:     token.clone(),
                         providers: vec![token.clone()],
-                        models: vec![token.clone()],
+                        models:    vec![token.clone()],
                     }),
                     // Unknown tokens flow through as bare models — provider TBD at runtime.
                     (false, false) => Ok(ResolvedModelRef::Model {
                         provider: None,
-                        model: token.clone(),
+                        model:    token.clone(),
                     }),
                 }
             }
@@ -227,7 +227,7 @@ mod tests {
 
     struct TestRegistry {
         providers: &'static [&'static str],
-        models: &'static [&'static str],
+        models:    &'static [&'static str],
     }
 
     impl ModelRegistry for TestRegistry {
@@ -260,7 +260,7 @@ mod tests {
             "gemini/gemini-flash".parse::<ModelRef>().unwrap(),
             ModelRef::Qualified {
                 provider: "gemini".into(),
-                model: "gemini-flash".into(),
+                model:    "gemini-flash".into(),
             }
         );
     }
@@ -295,7 +295,7 @@ mod tests {
     fn resolves_unique_provider_token() {
         let reg = TestRegistry {
             providers: &["openai"],
-            models: &[],
+            models:    &[],
         };
         let resolved = ModelRef::Bare("openai".into()).resolve(&reg).unwrap();
         assert_eq!(resolved, ResolvedModelRef::Provider("openai".into()));
@@ -305,23 +305,20 @@ mod tests {
     fn resolves_unique_model_token() {
         let reg = TestRegistry {
             providers: &[],
-            models: &["gpt-5.4"],
+            models:    &["gpt-5.4"],
         };
         let resolved = ModelRef::Bare("gpt-5.4".into()).resolve(&reg).unwrap();
-        assert_eq!(
-            resolved,
-            ResolvedModelRef::Model {
-                provider: Some("test".into()),
-                model: "gpt-5.4".into(),
-            }
-        );
+        assert_eq!(resolved, ResolvedModelRef::Model {
+            provider: Some("test".into()),
+            model:    "gpt-5.4".into(),
+        });
     }
 
     #[test]
     fn ambiguous_bare_token_errors() {
         let reg = TestRegistry {
             providers: &["ambiguous"],
-            models: &["ambiguous"],
+            models:    &["ambiguous"],
         };
         let err = ModelRef::Bare("ambiguous".into())
             .resolve(&reg)
@@ -333,21 +330,18 @@ mod tests {
     fn qualified_never_ambiguous() {
         let reg = TestRegistry {
             providers: &["ambiguous"],
-            models: &["ambiguous"],
+            models:    &["ambiguous"],
         };
         let resolved = ModelRef::Qualified {
             provider: "a".into(),
-            model: "b".into(),
+            model:    "b".into(),
         }
         .resolve(&reg)
         .unwrap();
-        assert_eq!(
-            resolved,
-            ResolvedModelRef::Model {
-                provider: Some("a".into()),
-                model: "b".into(),
-            }
-        );
+        assert_eq!(resolved, ResolvedModelRef::Model {
+            provider: Some("a".into()),
+            model:    "b".into(),
+        });
     }
 
     #[test]

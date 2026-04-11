@@ -10,21 +10,21 @@ use crate::outcome::Outcome;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Checkpoint {
-    pub timestamp: DateTime<Utc>,
-    pub current_node: String,
-    pub completed_nodes: Vec<String>,
-    pub node_retries: HashMap<String, u32>,
-    pub context_values: HashMap<String, Value>,
+    pub timestamp:                  DateTime<Utc>,
+    pub current_node:               String,
+    pub completed_nodes:            Vec<String>,
+    pub node_retries:               HashMap<String, u32>,
+    pub context_values:             HashMap<String, Value>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub node_outcomes: HashMap<String, Outcome<Option<BilledModelUsage>>>,
+    pub node_outcomes:              HashMap<String, Outcome<Option<BilledModelUsage>>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub next_node_id: Option<String>,
+    pub next_node_id:               Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub git_commit_sha: Option<String>,
+    pub git_commit_sha:             Option<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub loop_failure_signatures: HashMap<FailureSignature, usize>,
+    pub loop_failure_signatures:    HashMap<FailureSignature, usize>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub restart_failure_signatures: HashMap<FailureSignature, usize>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub node_visits: HashMap<String, usize>,
+    pub node_visits:                HashMap<String, usize>,
 }

@@ -24,8 +24,8 @@ pub type SubAgentEventCallback = Arc<dyn Fn(SubAgentCallbackEvent) + Send + Sync
 
 #[derive(Debug, Clone)]
 pub struct SubAgentResult {
-    pub output: String,
-    pub success: bool,
+    pub output:     String,
+    pub success:    bool,
     pub turns_used: usize,
 }
 
@@ -37,16 +37,16 @@ pub enum SubAgentStatus {
 }
 
 pub struct SubAgent {
-    task: Option<JoinHandle<Result<SubAgentResult, Error>>>,
+    task:           Option<JoinHandle<Result<SubAgentResult, Error>>>,
     followup_queue: Arc<Mutex<VecDeque<String>>>,
-    cancel_token: CancellationToken,
-    depth: usize,
-    status: SubAgentStatus,
+    cancel_token:   CancellationToken,
+    depth:          usize,
+    status:         SubAgentStatus,
 }
 
 pub struct SubAgentManager {
-    agents: HashMap<String, SubAgent>,
-    max_depth: usize,
+    agents:         HashMap<String, SubAgent>,
+    max_depth:      usize,
     event_callback: Option<SubAgentEventCallback>,
 }
 
@@ -119,27 +119,24 @@ impl SubAgentManager {
                 _ => None,
             });
             Ok(SubAgentResult {
-                output: last_text.unwrap_or_default(),
-                success: true,
+                output:     last_text.unwrap_or_default(),
+                success:    true,
                 turns_used: turns.len(),
             })
         });
 
-        self.agents.insert(
-            agent_id.clone(),
-            SubAgent {
-                task: Some(task),
-                followup_queue,
-                cancel_token,
-                depth: depth + 1,
-                status: SubAgentStatus::Running,
-            },
-        );
+        self.agents.insert(agent_id.clone(), SubAgent {
+            task: Some(task),
+            followup_queue,
+            cancel_token,
+            depth: depth + 1,
+            status: SubAgentStatus::Running,
+        });
 
         self.emit_event(AgentEvent::SubAgentSpawned {
             agent_id: agent_id.clone(),
-            depth: depth + 1,
-            task: task_prompt,
+            depth:    depth + 1,
+            task:     task_prompt,
         });
 
         Ok(agent_id)
@@ -306,9 +303,9 @@ pub fn make_spawn_agent_tool(
 ) -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
-            name: "spawn_agent".into(),
+            name:        "spawn_agent".into(),
             description: "Spawn a subagent to work on a delegated task".into(),
-            parameters: serde_json::json!({
+            parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
                     "task": {
@@ -331,7 +328,7 @@ pub fn make_spawn_agent_tool(
                 "required": ["task"]
             }),
         },
-        executor: Arc::new(move |args, _ctx| {
+        executor:   Arc::new(move |args, _ctx| {
             let manager = manager.clone();
             let session_factory = session_factory.clone();
             Box::pin(async move {
@@ -359,9 +356,9 @@ pub fn make_spawn_agent_tool(
 pub fn make_send_input_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
-            name: "send_input".into(),
+            name:        "send_input".into(),
             description: "Send a follow-up message to a running subagent".into(),
-            parameters: serde_json::json!({
+            parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
                     "agent_id": {
@@ -376,7 +373,7 @@ pub fn make_send_input_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> Regist
                 "required": ["agent_id", "message"]
             }),
         },
-        executor: Arc::new(move |args, _ctx| {
+        executor:   Arc::new(move |args, _ctx| {
             let manager = manager.clone();
             Box::pin(async move {
                 let agent_id = required_str(&args, "agent_id")?;
@@ -394,9 +391,9 @@ pub fn make_send_input_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> Regist
 pub fn make_wait_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
-            name: "wait".into(),
+            name:        "wait".into(),
             description: "Wait for a subagent to complete and return its result".into(),
-            parameters: serde_json::json!({
+            parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
                     "agent_id": {
@@ -407,7 +404,7 @@ pub fn make_wait_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> RegisteredTo
                 "required": ["agent_id"]
             }),
         },
-        executor: Arc::new(move |args, _ctx| {
+        executor:   Arc::new(move |args, _ctx| {
             let manager = manager.clone();
             Box::pin(async move {
                 let agent_id = required_str(&args, "agent_id")?;
@@ -426,9 +423,9 @@ pub fn make_wait_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> RegisteredTo
 pub fn make_close_agent_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> RegisteredTool {
     RegisteredTool {
         definition: ToolDefinition {
-            name: "close_agent".into(),
+            name:        "close_agent".into(),
             description: "Close a running subagent".into(),
-            parameters: serde_json::json!({
+            parameters:  serde_json::json!({
                 "type": "object",
                 "properties": {
                     "agent_id": {
@@ -439,7 +436,7 @@ pub fn make_close_agent_tool(manager: Arc<AsyncMutex<SubAgentManager>>) -> Regis
                 "required": ["agent_id"]
             }),
         },
-        executor: Arc::new(move |args, _ctx| {
+        executor:   Arc::new(move |args, _ctx| {
             let manager = manager.clone();
             Box::pin(async move {
                 let agent_id = required_str(&args, "agent_id")?;
@@ -718,21 +715,21 @@ mod tests {
         let mut rx = parent.subscribe();
 
         callback(SubAgentCallbackEvent::Forwarded(SessionEvent {
-            event: AgentEvent::SessionStarted {
+            event:             AgentEvent::SessionStarted {
                 provider: Some("anthropic".into()),
-                model: Some("claude-opus".into()),
+                model:    Some("claude-opus".into()),
             },
-            timestamp: std::time::SystemTime::now(),
-            session_id: "child".into(),
+            timestamp:         std::time::SystemTime::now(),
+            session_id:        "child".into(),
             parent_session_id: None,
         }));
         callback(SubAgentCallbackEvent::Forwarded(SessionEvent {
-            event: AgentEvent::SessionStarted {
+            event:             AgentEvent::SessionStarted {
                 provider: Some("anthropic".into()),
-                model: Some("claude-opus".into()),
+                model:    Some("claude-opus".into()),
             },
-            timestamp: std::time::SystemTime::now(),
-            session_id: "grandchild".into(),
+            timestamp:         std::time::SystemTime::now(),
+            session_id:        "grandchild".into(),
             parent_session_id: Some("child".into()),
         }));
 
@@ -750,7 +747,7 @@ mod tests {
         let manager = SubAgentManager::new(3);
         manager.emit_event(AgentEvent::SubAgentClosed {
             agent_id: "x".into(),
-            depth: 0,
+            depth:    0,
         });
     }
 
