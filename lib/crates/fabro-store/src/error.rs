@@ -1,7 +1,8 @@
-pub type Result<T, E = StoreError> = std::result::Result<T, E>;
+pub type Result<T> = std::result::Result<T, Error>;
+pub type StoreError = Error;
 
 #[derive(Debug, thiserror::Error)]
-pub enum StoreError {
+pub enum Error {
     #[error("SlateDB error: {0}")]
     Slate(#[from] slatedb::Error),
     #[error("Object store error: {0}")]

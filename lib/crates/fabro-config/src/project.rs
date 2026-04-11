@@ -7,39 +7,39 @@
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, bail};
 use fabro_types::settings::SettingsLayer;
 use serde::Serialize;
 
 use crate::load::load_settings_path;
 use crate::parse::parse_settings_layer;
-use crate::{resolve_project_from_file, resolve_run_from_file, resolve_workflow_from_file, run};
+use crate::{
+    Error, Result, resolve_project_from_file, resolve_run_from_file, resolve_workflow_from_file,
+    run,
+};
 
 const CONFIG_FILENAME: &str = "fabro.toml";
 #[derive(Clone, Debug)]
 pub struct WorkflowPathResolution {
     pub resolved_workflow_path: PathBuf,
-    pub dot_path:               PathBuf,
-    pub workflow_config:        Option<SettingsLayer>,
-    pub workflow_toml_path:     Option<PathBuf>,
-    pub workflow_slug:          Option<String>,
+    pub dot_path: PathBuf,
+    pub workflow_config: Option<SettingsLayer>,
+    pub workflow_toml_path: Option<PathBuf>,
+    pub workflow_slug: Option<String>,
 }
 
 /// Parse a project config from a TOML string.
-pub fn parse_project_config(content: &str) -> anyhow::Result<SettingsLayer> {
-    parse_settings_layer(content)
-        .map_err(|err| anyhow::anyhow!("{err}"))
-        .context("Failed to parse project config")
+pub fn parse_project_config(content: &str) -> Result<SettingsLayer> {
+    parse_settings_layer(content).map_err(|err| Error::parse("Failed to parse project config", err))
 }
 
 /// Load a project config from a file path.
 ///
 /// Goes through [`load_settings_path`] so that relative `run.goal.file`
 /// paths are anchored at the directory of `path` at load time.
-pub fn load_project_config(path: &Path) -> anyhow::Result<SettingsLayer> {
-    let config = load_settings_path(path).context("Failed to parse project config")?;
+pub fn load_project_config(path: &Path) -> Result<SettingsLayer> {
+    let config = load_settings_path(path)?;
     let root = resolve_project_from_file(&config)
-        .map_err(|errors| anyhow::anyhow!("Failed to resolve project settings: {errors:?}"))?
+        .map_err(|errors| Error::resolve("Failed to resolve project settings", errors))?
         .directory;
     tracing::debug!(path = %path.display(), root = %root, "Loaded project config");
     Ok(config)
@@ -47,7 +47,7 @@ pub fn load_project_config(path: &Path) -> anyhow::Result<SettingsLayer> {
 
 /// Walk ancestor directories from `start` looking for `fabro.toml`.
 /// Returns the config file path and parsed config, or `None` if not found.
-pub fn discover_project_config(start: &Path) -> anyhow::Result<Option<(PathBuf, SettingsLayer)>> {
+pub fn discover_project_config(start: &Path) -> Result<Option<(PathBuf, SettingsLayer)>> {
     for ancestor in start.ancestors() {
         let candidate = ancestor.join(CONFIG_FILENAME);
         if candidate.is_file() {
@@ -78,22 +78,19 @@ fn workflow_slug_from_path(workflow_path: &Path) -> Option<String> {
 }
 
 /// Resolve a workflow argument to a path.
-pub fn resolve_workflow_arg(arg: &Path) -> anyhow::Result<PathBuf> {
+pub fn resolve_workflow_arg(arg: &Path) -> Result<PathBuf> {
     let start = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     resolve_workflow_arg_from(arg, &start)
 }
 
-pub fn resolve_workflow_path(
-    workflow_path: &Path,
-    cwd: &Path,
-) -> anyhow::Result<WorkflowPathResolution> {
+pub fn resolve_workflow_path(workflow_path: &Path, cwd: &Path) -> Result<WorkflowPathResolution> {
     let path = resolve_workflow_arg_from(workflow_path, cwd)?;
     let workflow_slug = workflow_slug_from_path(&path);
     if path.extension().is_some_and(|ext| ext == "toml") {
         match run::load_run_config(&path) {
             Ok(cfg) => {
                 let workflow = resolve_workflow_from_file(&cfg).map_err(|errors| {
-                    anyhow::anyhow!("Failed to resolve workflow settings: {errors:?}")
+                    Error::resolve("Failed to resolve workflow settings", errors)
                 })?;
                 let dot_path = run::resolve_graph_path(&path, &workflow.graph);
                 Ok(WorkflowPathResolution {
@@ -104,7 +101,7 @@ pub fn resolve_workflow_path(
                     workflow_slug,
                 })
             }
-            Err(_) if !path.exists() => anyhow::bail!("Workflow not found: {}", path.display()),
+            Err(_) if !path.exists() => Err(Error::WorkflowNotFound(path.display().to_string())),
             Err(err) => Err(err),
         }
     } else {
@@ -134,7 +131,7 @@ pub fn resolve_working_directory(settings: &SettingsLayer, caller_cwd: &Path) ->
     }
 }
 
-fn resolve_workflow_arg_from(arg: &Path, start_dir: &Path) -> anyhow::Result<PathBuf> {
+fn resolve_workflow_arg_from(arg: &Path, start_dir: &Path) -> Result<PathBuf> {
     resolve_workflow_arg_impl(arg, start_dir, Some(&user_workflows_dir()))
 }
 
@@ -142,7 +139,7 @@ fn resolve_workflow_arg_impl(
     arg: &Path,
     start_dir: &Path,
     user_workflows: Option<&Path>,
-) -> anyhow::Result<PathBuf> {
+) -> Result<PathBuf> {
     if arg.extension().is_some() {
         let resolved = if arg.is_absolute() {
             arg.to_path_buf()
@@ -177,10 +174,10 @@ fn resolve_workflow_arg_impl(
             let project_wf_dir = fabro_root.join("workflows");
             let available = list_available_workflows(Some(&project_wf_dir), user_workflows);
             if available.is_empty() {
-                bail!(
+                return Err(Error::other(format!(
                     "Unknown workflow '{name}'\n\nNo workflows found in {}",
                     project_wf_dir.display()
-                );
+                )));
             }
             let mut msg = format!(
                 "Unknown workflow '{name}'\n\nAvailable workflows: {}",
@@ -189,7 +186,7 @@ fn resolve_workflow_arg_impl(
             if let Some(suggestion) = find_closest_match(&name, &available) {
                 let _ = write!(msg, "\n\nDid you mean '{suggestion}'?");
             }
-            bail!("{msg}");
+            Err(Error::other(msg))
         }
         Ok(None) => {
             if let Some(resolved) = resolve_user_workflow(user_workflows, &name, arg) {
@@ -225,8 +222,8 @@ fn user_workflows_dir() -> PathBuf {
 /// Metadata about a discovered workflow.
 #[derive(Clone, Debug, Serialize)]
 pub struct WorkflowInfo {
-    pub name:   String,
-    pub goal:   Option<String>,
+    pub name: String,
+    pub goal: Option<String>,
     pub source: WorkflowSource,
 }
 
@@ -342,7 +339,7 @@ fn find_closest_match(input: &str, candidates: &[String]) -> Option<String> {
 }
 
 /// Resolve a workflow argument to a DOT path and optional run config.
-pub fn resolve_workflow(arg: &Path) -> anyhow::Result<(PathBuf, Option<SettingsLayer>)> {
+pub fn resolve_workflow(arg: &Path) -> Result<(PathBuf, Option<SettingsLayer>)> {
     let start = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let resolution = resolve_workflow_path(arg, &start)?;
     Ok((resolution.dot_path, resolution.workflow_config))
@@ -442,11 +439,7 @@ retros = true
     #[test]
     fn parse_higher_version_errors() {
         let err = parse_project_config("_version = 2\n").unwrap_err();
-        let chain: String = err
-            .chain()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("; ");
+        let chain = format!("{err:#}");
         assert!(
             chain.contains("Upgrade") || chain.to_lowercase().contains("version"),
             "Expected version hint in chain: {chain}"

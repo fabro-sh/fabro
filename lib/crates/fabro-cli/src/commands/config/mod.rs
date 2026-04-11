@@ -60,11 +60,11 @@ async fn merged_config(args: &SettingsArgs) -> anyhow::Result<SettingsLayer> {
     let base_ctx = CommandContext::base()?;
     let layers = config_layers(&base_ctx, args.workflow.as_deref())?;
     if args.local {
-        return effective_settings::resolve_settings(
+        return Ok(effective_settings::resolve_settings(
             layers,
             None,
             EffectiveSettingsMode::LocalOnly,
-        );
+        )?);
     }
 
     let ctx = CommandContext::for_target(&args.target)?;
@@ -75,7 +75,11 @@ async fn merged_config(args: &SettingsArgs) -> anyhow::Result<SettingsLayer> {
         user_config::ServerTarget::UnixSocket(_) => EffectiveSettingsMode::LocalDaemon,
     };
 
-    effective_settings::resolve_settings(layers, Some(&server_settings), mode)
+    Ok(effective_settings::resolve_settings(
+        layers,
+        Some(&server_settings),
+        mode,
+    )?)
 }
 
 pub(crate) async fn execute(args: &SettingsArgs, globals: &GlobalArgs) -> anyhow::Result<()> {

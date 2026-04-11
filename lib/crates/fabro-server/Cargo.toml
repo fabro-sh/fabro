@@ -75,6 +75,7 @@ regex.workspace = true
 semver.workspace = true
 walkdir.workspace = true
 multer = "3"
+thiserror.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }
