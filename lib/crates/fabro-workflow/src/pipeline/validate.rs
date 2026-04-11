@@ -21,15 +21,12 @@ mod tests {
 
     fn run_pipeline(dot: &str) -> Validated {
         let parsed = parse(dot).unwrap();
-        let transformed = transform::transform(
-            parsed,
-            &TransformOptions {
-                current_dir: None,
-                file_resolver: None,
-                inputs: std::collections::HashMap::new(),
-                custom_transforms: vec![],
-            },
-        )
+        let transformed = transform::transform(parsed, &TransformOptions {
+            current_dir:       None,
+            file_resolver:     None,
+            inputs:            std::collections::HashMap::new(),
+            custom_transforms: vec![],
+        })
         .unwrap();
         validate(transformed, &[])
     }

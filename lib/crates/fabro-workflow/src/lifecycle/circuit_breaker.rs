@@ -17,8 +17,8 @@ type WfNodeResult = NodeResult<Option<BilledModelUsage>>;
 /// Sub-lifecycle responsible for tracking failure signatures and tripping the
 /// circuit breaker when deterministic failure cycles are detected.
 pub(crate) struct CircuitBreakerLifecycle {
-    loop_failure_signatures: Mutex<HashMap<FailureSignature, usize>>,
-    restart_failure_signatures: Mutex<HashMap<FailureSignature, usize>>,
+    loop_failure_signatures:      Mutex<HashMap<FailureSignature, usize>>,
+    restart_failure_signatures:   Mutex<HashMap<FailureSignature, usize>>,
     loop_restart_signature_limit: usize,
 }
 

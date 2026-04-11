@@ -20,48 +20,48 @@ use crate::{Error, EventEnvelope, Result, RunSummary, StageId};
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct RunProjection {
-    pub run: Option<RunRecord>,
-    pub graph_source: Option<String>,
-    pub start: Option<StartRecord>,
-    pub status: Option<RunStatusRecord>,
-    pub pending_control: Option<RunControlAction>,
-    pub checkpoint: Option<Checkpoint>,
-    pub checkpoints: Vec<(u32, Checkpoint)>,
-    pub conclusion: Option<Conclusion>,
-    pub retro: Option<Retro>,
-    pub retro_prompt: Option<String>,
-    pub retro_response: Option<String>,
-    pub sandbox: Option<SandboxRecord>,
-    pub final_patch: Option<String>,
-    pub pull_request: Option<PullRequestRecord>,
+    pub run:                Option<RunRecord>,
+    pub graph_source:       Option<String>,
+    pub start:              Option<StartRecord>,
+    pub status:             Option<RunStatusRecord>,
+    pub pending_control:    Option<RunControlAction>,
+    pub checkpoint:         Option<Checkpoint>,
+    pub checkpoints:        Vec<(u32, Checkpoint)>,
+    pub conclusion:         Option<Conclusion>,
+    pub retro:              Option<Retro>,
+    pub retro_prompt:       Option<String>,
+    pub retro_response:     Option<String>,
+    pub sandbox:            Option<SandboxRecord>,
+    pub final_patch:        Option<String>,
+    pub pull_request:       Option<PullRequestRecord>,
     pub pending_interviews: BTreeMap<String, PendingInterviewRecord>,
-    nodes: HashMap<StageId, NodeState>,
+    nodes:                  HashMap<StageId, NodeState>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct PendingInterviewRecord {
-    pub question: InterviewQuestionRecord,
+    pub question:   InterviewQuestionRecord,
     pub started_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct NodeState {
-    pub prompt: Option<String>,
-    pub response: Option<String>,
-    pub status: Option<NodeStatusRecord>,
-    pub provider_used: Option<serde_json::Value>,
-    pub diff: Option<String>,
+    pub prompt:            Option<String>,
+    pub response:          Option<String>,
+    pub status:            Option<NodeStatusRecord>,
+    pub provider_used:     Option<serde_json::Value>,
+    pub diff:              Option<String>,
     pub script_invocation: Option<serde_json::Value>,
-    pub script_timing: Option<serde_json::Value>,
-    pub parallel_results: Option<serde_json::Value>,
-    pub stdout: Option<String>,
-    pub stderr: Option<String>,
+    pub script_timing:     Option<serde_json::Value>,
+    pub parallel_results:  Option<serde_json::Value>,
+    pub stdout:            Option<String>,
+    pub stderr:            Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct EventProjectionCache {
     pub last_seq: u32,
-    pub state: RunProjection,
+    pub state:    RunProjection,
 }
 
 impl RunProjection {
@@ -172,11 +172,11 @@ impl RunProjection {
             }
             EventBody::SandboxInitialized(props) => {
                 self.sandbox = Some(SandboxRecord {
-                    provider: props.provider.clone(),
-                    working_directory: props.working_directory.clone(),
-                    identifier: props.identifier.clone(),
+                    provider:               props.provider.clone(),
+                    working_directory:      props.working_directory.clone(),
+                    identifier:             props.identifier.clone(),
                     host_working_directory: props.host_working_directory.clone(),
-                    container_mount_point: props.container_mount_point.clone(),
+                    container_mount_point:  props.container_mount_point.clone(),
                 });
             }
             EventBody::RetroStarted(props) => {
@@ -193,37 +193,35 @@ impl RunProjection {
             }
             EventBody::PullRequestCreated(props) => {
                 self.pull_request = Some(PullRequestRecord {
-                    html_url: props.pr_url.clone(),
-                    number: props.pr_number,
-                    owner: props.owner.clone(),
-                    repo: props.repo.clone(),
+                    html_url:    props.pr_url.clone(),
+                    number:      props.pr_number,
+                    owner:       props.owner.clone(),
+                    repo:        props.repo.clone(),
                     base_branch: props.base_branch.clone(),
                     head_branch: props.head_branch.clone(),
-                    title: props.title.clone(),
+                    title:       props.title.clone(),
                 });
             }
             EventBody::InterviewStarted(props) => {
                 if props.question_id.is_empty() {
                     return Ok(());
                 }
-                self.pending_interviews.insert(
-                    props.question_id.clone(),
-                    PendingInterviewRecord {
-                        question: InterviewQuestionRecord {
-                            id: props.question_id.clone(),
-                            text: props.question.clone(),
-                            stage: props.stage.clone(),
-                            question_type: InterviewQuestionType::from_wire_name(
+                self.pending_interviews
+                    .insert(props.question_id.clone(), PendingInterviewRecord {
+                        question:   InterviewQuestionRecord {
+                            id:              props.question_id.clone(),
+                            text:            props.question.clone(),
+                            stage:           props.stage.clone(),
+                            question_type:   InterviewQuestionType::from_wire_name(
                                 &props.question_type,
                             ),
-                            options: props.options.clone(),
-                            allow_freeform: props.allow_freeform,
+                            options:         props.options.clone(),
+                            allow_freeform:  props.allow_freeform,
                             timeout_seconds: props.timeout_seconds,
                             context_display: props.context_display.clone(),
                         },
                         started_at: Some(ts),
-                    },
-                );
+                    });
             }
             EventBody::InterviewCompleted(props) => {
                 if !props.question_id.is_empty() {
@@ -513,21 +511,21 @@ fn stage_visit(
 
 fn stage_outcome_from_props(props: &StageCompletedProps) -> Outcome<Option<BilledModelUsage>> {
     Outcome {
-        status: props.status.clone(),
-        preferred_label: props.preferred_label.clone(),
+        status:             props.status.clone(),
+        preferred_label:    props.preferred_label.clone(),
         suggested_next_ids: props.suggested_next_ids.clone(),
-        context_updates: props
+        context_updates:    props
             .context_updates
             .clone()
             .unwrap_or_default()
             .into_iter()
             .collect(),
-        jump_to_node: props.jump_to_node.clone(),
-        notes: props.notes.clone(),
-        failure: props.failure.clone(),
-        usage: props.billing.clone(),
-        files_touched: props.files_touched.clone(),
-        duration_ms: Some(props.duration_ms),
+        jump_to_node:       props.jump_to_node.clone(),
+        notes:              props.notes.clone(),
+        failure:            props.failure.clone(),
+        usage:              props.billing.clone(),
+        files_touched:      props.files_touched.clone(),
+        duration_ms:        Some(props.duration_ms),
     }
 }
 
@@ -684,31 +682,25 @@ mod tests {
     fn set_node_round_trips_through_json() {
         let mut state = RunProjection {
             pending_control: Some(RunControlAction::Unpause),
-            checkpoints: vec![(
-                7,
-                Checkpoint {
-                    timestamp: "2026-04-07T12:00:00Z".parse().unwrap(),
-                    current_node: "build".to_string(),
-                    completed_nodes: vec!["build".to_string()],
-                    node_retries: HashMap::new(),
-                    context_values: HashMap::new(),
-                    node_outcomes: HashMap::new(),
-                    next_node_id: None,
-                    git_commit_sha: None,
-                    loop_failure_signatures: HashMap::new(),
-                    restart_failure_signatures: HashMap::new(),
-                    node_visits: HashMap::from([("build".to_string(), 2usize)]),
-                },
-            )],
+            checkpoints: vec![(7, Checkpoint {
+                timestamp:                  "2026-04-07T12:00:00Z".parse().unwrap(),
+                current_node:               "build".to_string(),
+                completed_nodes:            vec!["build".to_string()],
+                node_retries:               HashMap::new(),
+                context_values:             HashMap::new(),
+                node_outcomes:              HashMap::new(),
+                next_node_id:               None,
+                git_commit_sha:             None,
+                loop_failure_signatures:    HashMap::new(),
+                restart_failure_signatures: HashMap::new(),
+                node_visits:                HashMap::from([("build".to_string(), 2usize)]),
+            })],
             ..RunProjection::default()
         };
-        state.set_node(
-            StageId::new("build", 2),
-            NodeState {
-                stdout: Some("done".to_string()),
-                ..NodeState::default()
-            },
-        );
+        state.set_node(StageId::new("build", 2), NodeState {
+            stdout: Some("done".to_string()),
+            ..NodeState::default()
+        });
 
         let round_tripped: RunProjection =
             serde_json::from_value(serde_json::to_value(&state).unwrap()).unwrap();
@@ -735,21 +727,21 @@ mod tests {
             .apply_event(&test_event(
                 1,
                 EventBody::InterviewStarted(InterviewStartedProps {
-                    question_id: "q-1".to_string(),
-                    question: "Approve deploy?".to_string(),
-                    stage: "gate".to_string(),
-                    question_type: "multiple_choice".to_string(),
-                    options: vec![
+                    question_id:     "q-1".to_string(),
+                    question:        "Approve deploy?".to_string(),
+                    stage:           "gate".to_string(),
+                    question_type:   "multiple_choice".to_string(),
+                    options:         vec![
                         InterviewOption {
-                            key: "approve".to_string(),
+                            key:   "approve".to_string(),
                             label: "Approve".to_string(),
                         },
                         InterviewOption {
-                            key: "revise".to_string(),
+                            key:   "revise".to_string(),
                             label: "Revise".to_string(),
                         },
                     ],
-                    allow_freeform: true,
+                    allow_freeform:  true,
                     timeout_seconds: Some(30.0),
                     context_display: Some("Latest draft".to_string()),
                 }),
@@ -780,8 +772,8 @@ mod tests {
                 2,
                 EventBody::InterviewCompleted(InterviewCompletedProps {
                     question_id: "q-1".to_string(),
-                    question: "Approve deploy?".to_string(),
-                    answer: "approve".to_string(),
+                    question:    "Approve deploy?".to_string(),
+                    answer:      "approve".to_string(),
                     duration_ms: 42,
                 }),
                 Some("gate"),
@@ -801,7 +793,7 @@ mod tests {
             RunBlobId::new(br#"{"version":1,"workflow_path":"workflow.fabro"}"#).to_string();
         let events = vec![
             EventEnvelope {
-                seq: 1,
+                seq:     1,
                 payload: EventPayload::new(
                     json!({
                         "id": "evt-run-created",
@@ -827,7 +819,7 @@ mod tests {
                 .unwrap(),
             },
             EventEnvelope {
-                seq: 2,
+                seq:     2,
                 payload: EventPayload::new(
                     json!({
                         "id": "evt-run-submitted",

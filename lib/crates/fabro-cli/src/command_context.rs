@@ -16,18 +16,18 @@ pub(crate) enum ServerMode {
         target_override: Option<String>,
     },
     ByStorageDir {
-        target_override: Option<String>,
+        target_override:      Option<String>,
         storage_dir_override: Option<PathBuf>,
     },
 }
 
 pub(crate) struct CommandContext {
-    cwd: PathBuf,
+    cwd:              PathBuf,
     base_config_path: PathBuf,
     machine_settings: SettingsLayer,
-    cli_settings: CliSettings,
-    server_mode: ServerMode,
-    server: OnceCell<Arc<ServerStoreClient>>,
+    cli_settings:     CliSettings,
+    server_mode:      ServerMode,
+    server:           OnceCell<Arc<ServerStoreClient>>,
 }
 
 impl CommandContext {
@@ -43,7 +43,7 @@ impl CommandContext {
 
     pub(crate) fn for_connection(args: &ServerConnectionArgs) -> Result<Self> {
         Self::new(ServerMode::ByStorageDir {
-            target_override: args.target.server.clone(),
+            target_override:      args.target.server.clone(),
             storage_dir_override: args.storage_dir.clone_path(),
         })
     }

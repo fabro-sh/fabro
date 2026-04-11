@@ -12,9 +12,9 @@ use crate::types::{Request, Response};
 /// The core client that routes requests to provider adapters (Section 2.2, 3).
 #[derive(Clone)]
 pub struct Client {
-    providers: HashMap<String, Arc<dyn ProviderAdapter>>,
+    providers:        HashMap<String, Arc<dyn ProviderAdapter>>,
     default_provider: Option<String>,
-    middleware: Vec<Arc<dyn Middleware>>,
+    middleware:       Vec<Arc<dyn Middleware>>,
 }
 
 impl Client {
@@ -53,9 +53,9 @@ impl Client {
         F: Fn(&str) -> Option<String>,
     {
         let mut client = Self {
-            providers: HashMap::new(),
+            providers:        HashMap::new(),
             default_provider: None,
-            middleware: Vec::new(),
+            middleware:       Vec::new(),
         };
 
         // Register providers whose API keys are present in the environment.
@@ -167,7 +167,7 @@ impl Client {
             .or(self.default_provider.as_deref())
             .ok_or_else(|| Error::Configuration {
                 message: "No provider specified and no default provider set".into(),
-                source: None,
+                source:  None,
             })?;
 
         self.providers
@@ -175,7 +175,7 @@ impl Client {
             .cloned()
             .ok_or_else(|| Error::Configuration {
                 message: format!("Provider '{provider_name}' not registered"),
-                source: None,
+                source:  None,
             })
     }
 
@@ -303,19 +303,19 @@ mod tests {
 
         async fn complete(&self, _request: &Request) -> Result<Response, Error> {
             Ok(Response {
-                id: "resp_mock".into(),
-                model: "mock-model".into(),
-                provider: self.provider_name.clone(),
-                message: Message::assistant(&self.response_text),
+                id:            "resp_mock".into(),
+                model:         "mock-model".into(),
+                provider:      self.provider_name.clone(),
+                message:       Message::assistant(&self.response_text),
                 finish_reason: FinishReason::Stop,
-                usage: TokenCounts {
+                usage:         TokenCounts {
                     input_tokens: 10,
                     output_tokens: 20,
                     ..Default::default()
                 },
-                raw: None,
-                warnings: vec![],
-                rate_limit: None,
+                raw:           None,
+                warnings:      vec![],
+                rate_limit:    None,
             })
         }
 
@@ -346,19 +346,19 @@ mod tests {
 
     fn test_request() -> Request {
         Request {
-            model: "mock-model".into(),
-            messages: vec![Message::user("Hello")],
-            provider: None,
-            tools: None,
-            tool_choice: None,
-            response_format: None,
-            temperature: None,
-            top_p: None,
-            max_tokens: None,
-            stop_sequences: None,
+            model:            "mock-model".into(),
+            messages:         vec![Message::user("Hello")],
+            provider:         None,
+            tools:            None,
+            tool_choice:      None,
+            response_format:  None,
+            temperature:      None,
+            top_p:            None,
+            max_tokens:       None,
+            stop_sequences:   None,
             reasoning_effort: None,
-            speed: None,
-            metadata: None,
+            speed:            None,
+            metadata:         None,
             provider_options: None,
         }
     }

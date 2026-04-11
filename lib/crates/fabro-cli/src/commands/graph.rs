@@ -25,12 +25,12 @@ pub(crate) async fn run(
 
     let ctx = CommandContext::for_target(&args.target)?;
     let built = build_run_manifest(ManifestBuildInput {
-        workflow: args.workflow.clone(),
-        cwd: ctx.cwd().to_path_buf(),
-        args_layer: SettingsLayer::default(),
-        args: None,
-        run_id: None,
-        user_layer: load_settings_user()?,
+        workflow:           args.workflow.clone(),
+        cwd:                ctx.cwd().to_path_buf(),
+        args_layer:         SettingsLayer::default(),
+        args:               None,
+        run_id:             None,
+        user_layer:         load_settings_user()?,
         user_settings_path: Some(active_settings_path(None)),
     })?;
     let client = ctx.server().await?;
@@ -47,8 +47,8 @@ pub(crate) async fn run(
 
     let rendered = client
         .render_workflow_graph(types::RenderWorkflowGraphRequest {
-            manifest: built.manifest,
-            format: Some(match args.format {
+            manifest:  built.manifest,
+            format:    Some(match args.format {
                 GraphOutputFormat::Svg => types::RenderWorkflowGraphFormat::Svg,
                 GraphOutputFormat::Png => types::RenderWorkflowGraphFormat::Png,
             }),

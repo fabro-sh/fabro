@@ -2,7 +2,7 @@ use std::fmt::Write;
 
 /// A git commit message trailer (key-value pair).
 pub struct Trailer<'a> {
-    pub key: &'a str,
+    pub key:   &'a str,
     pub value: &'a str,
 }
 
@@ -92,26 +92,20 @@ mod tests {
 
     #[test]
     fn append_to_simple_message() {
-        let result = append(
-            "Initial commit",
-            &Trailer {
-                key: "My-Checkpoint",
-                value: "abc123",
-            },
-        );
+        let result = append("Initial commit", &Trailer {
+            key:   "My-Checkpoint",
+            value: "abc123",
+        });
         assert_eq!(result, "Initial commit\n\nMy-Checkpoint: abc123\n");
     }
 
     #[test]
     fn append_to_message_with_existing_trailer() {
         let msg = "Initial commit\n\nSigned-off-by: Alice <alice@example.com>\n";
-        let result = append(
-            msg,
-            &Trailer {
-                key: "My-Checkpoint",
-                value: "abc123",
-            },
-        );
+        let result = append(msg, &Trailer {
+            key:   "My-Checkpoint",
+            value: "abc123",
+        });
         assert_eq!(
             result,
             "Initial commit\n\nSigned-off-by: Alice <alice@example.com>\nMy-Checkpoint: abc123\n"
@@ -121,13 +115,10 @@ mod tests {
     #[test]
     fn append_to_message_with_body_no_trailer() {
         let msg = "Initial commit\n\nThis is a longer description of the change.\n";
-        let result = append(
-            msg,
-            &Trailer {
-                key: "My-Checkpoint",
-                value: "abc123",
-            },
-        );
+        let result = append(msg, &Trailer {
+            key:   "My-Checkpoint",
+            value: "abc123",
+        });
         assert_eq!(
             result,
             "Initial commit\n\nThis is a longer description of the change.\n\nMy-Checkpoint: abc123\n"
@@ -176,20 +167,16 @@ mod tests {
 
     #[test]
     fn format_message_with_trailers() {
-        let result = format_message(
-            "Initial commit",
-            "",
-            &[
-                Trailer {
-                    key: "Signed-off-by",
-                    value: "Alice",
-                },
-                Trailer {
-                    key: "My-Checkpoint",
-                    value: "abc123",
-                },
-            ],
-        );
+        let result = format_message("Initial commit", "", &[
+            Trailer {
+                key:   "Signed-off-by",
+                value: "Alice",
+            },
+            Trailer {
+                key:   "My-Checkpoint",
+                value: "abc123",
+            },
+        ]);
         assert_eq!(
             result,
             "Initial commit\n\nSigned-off-by: Alice\nMy-Checkpoint: abc123\n"
@@ -198,14 +185,10 @@ mod tests {
 
     #[test]
     fn format_message_with_body_and_trailers() {
-        let result = format_message(
-            "Initial commit",
-            "Description here",
-            &[Trailer {
-                key: "My-Checkpoint",
-                value: "abc123",
-            }],
-        );
+        let result = format_message("Initial commit", "Description here", &[Trailer {
+            key:   "My-Checkpoint",
+            value: "abc123",
+        }]);
         assert_eq!(
             result,
             "Initial commit\n\nDescription here\n\nMy-Checkpoint: abc123\n"

@@ -11,7 +11,7 @@ use crate::types::{Message, ToolCall, ToolDefinition, ToolResult};
 #[derive(Clone)]
 pub struct ToolContext {
     pub tool_call_id: String,
-    pub messages: Vec<Message>,
+    pub messages:     Vec<Message>,
     pub abort_signal: Option<CancellationToken>,
 }
 
@@ -30,7 +30,7 @@ pub type ExecuteHandler = Arc<
 /// "Passive" tools have no handler and are returned to the caller.
 pub struct Tool {
     pub definition: ToolDefinition,
-    pub execute: Option<ExecuteHandler>,
+    pub execute:    Option<ExecuteHandler>,
 }
 
 impl Tool {
@@ -50,7 +50,7 @@ impl Tool {
                 description: description.to_string(),
                 parameters,
             },
-            execute: None,
+            execute:    None,
         }
     }
 
@@ -78,7 +78,7 @@ impl Tool {
                 description: description.to_string(),
                 parameters,
             },
-            execute: Some(Arc::new(move |args, ctx| Box::pin(handler(args, ctx)))),
+            execute:    Some(Arc::new(move |args, ctx| Box::pin(handler(args, ctx)))),
         }
     }
 

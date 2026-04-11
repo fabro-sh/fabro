@@ -17,15 +17,15 @@ const STREAM_BUFFER_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NodeArtifact {
-    pub node: StageId,
+    pub node:     StageId,
     pub filename: String,
-    pub size: u64,
+    pub size:     u64,
 }
 
 #[derive(Clone)]
 pub struct ArtifactStore {
     object_store: Arc<dyn ObjectStore>,
-    prefix: ObjectPath,
+    prefix:       ObjectPath,
 }
 
 impl std::fmt::Debug for ArtifactStore {
@@ -299,18 +299,16 @@ mod tests {
             store.get(&run_id, &node, filename).await.unwrap(),
             Some(Bytes::from_static(b"hello"))
         );
-        assert_eq!(
-            store.list_for_node(&run_id, &node).await.unwrap(),
-            vec![filename.to_string()]
-        );
-        assert_eq!(
-            store.list_for_run(&run_id).await.unwrap(),
-            vec![NodeArtifact {
+        assert_eq!(store.list_for_node(&run_id, &node).await.unwrap(), vec![
+            filename.to_string()
+        ]);
+        assert_eq!(store.list_for_run(&run_id).await.unwrap(), vec![
+            NodeArtifact {
                 node,
                 filename: filename.to_string(),
                 size: 5,
-            }]
-        );
+            }
+        ]);
     }
 
     #[tokio::test]

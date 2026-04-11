@@ -28,20 +28,20 @@ pub use crate::config::{
 
 /// Sandbox that runs all operations inside a Daytona cloud sandbox.
 pub struct DaytonaSandbox {
-    config: DaytonaConfig,
-    client: daytona_sdk::Client,
-    github_app: Option<GitHubAppCredentials>,
-    sandbox: OnceCell<daytona_sdk::Sandbox>,
-    rg_available: OnceCell<bool>,
+    config:         DaytonaConfig,
+    client:         daytona_sdk::Client,
+    github_app:     Option<GitHubAppCredentials>,
+    sandbox:        OnceCell<daytona_sdk::Sandbox>,
+    rg_available:   OnceCell<bool>,
     event_callback: Option<SandboxEventCallback>,
     /// HTTPS origin URL stored after clone so we can refresh push credentials
     /// later.
-    origin_url: OnceCell<String>,
-    run_id: Option<RunId>,
+    origin_url:     OnceCell<String>,
+    run_id:         Option<RunId>,
     /// Explicit branch to clone. When set, overrides the branch detected by
     /// `detect_repo_info` — avoids cloning a local-only worktree branch
     /// (e.g. `fabro/run/...`) that was never pushed to origin.
-    clone_branch: Option<String>,
+    clone_branch:   Option<String>,
 }
 
 impl DaytonaSandbox {
@@ -231,11 +231,11 @@ impl DaytonaSandbox {
                 };
 
                 let params = daytona_sdk::CreateSnapshotParams {
-                    name: snap_cfg.name.clone(),
-                    image: daytona_sdk::ImageSource::Custom(
+                    name:       snap_cfg.name.clone(),
+                    image:      daytona_sdk::ImageSource::Custom(
                         daytona_sdk::DockerImage::from_dockerfile(dockerfile),
                     ),
-                    resources: Some(daytona_sdk::Resources {
+                    resources:  Some(daytona_sdk::Resources {
                         cpu: snap_cfg.cpu,
                         memory: snap_cfg.memory,
                         disk: snap_cfg.disk,
@@ -302,7 +302,7 @@ use fabro_github::ssh_url_to_https;
 #[derive(Clone, Debug)]
 pub struct GitCloneParams {
     /// Clean HTTPS URL (no embedded credentials).
-    pub url: String,
+    pub url:    String,
     /// Branch to clone. If None, uses the remote's default.
     pub branch: Option<String>,
 }
@@ -426,7 +426,7 @@ impl Sandbox for DaytonaSandbox {
             let snap_start = Instant::now();
             if let Err(e) = self.ensure_snapshot(snap_cfg).await {
                 self.emit(SandboxEvent::SnapshotFailed {
-                    name: snap_cfg.name.clone(),
+                    name:  snap_cfg.name.clone(),
                     error: e.clone(),
                 });
                 let duration_ms =
@@ -440,17 +440,17 @@ impl Sandbox for DaytonaSandbox {
             }
             let snap_duration = u64::try_from(snap_start.elapsed().as_millis()).unwrap_or(u64::MAX);
             self.emit(SandboxEvent::SnapshotReady {
-                name: snap_cfg.name.clone(),
+                name:        snap_cfg.name.clone(),
                 duration_ms: snap_duration,
             });
 
             daytona_sdk::CreateParams::Snapshot(daytona_sdk::SnapshotParams {
-                base: self.base_params(),
+                base:     self.base_params(),
                 snapshot: snap_cfg.name.clone(),
             })
         } else {
             daytona_sdk::CreateParams::Snapshot(daytona_sdk::SnapshotParams {
-                base: self.base_params(),
+                base:     self.base_params(),
                 snapshot: DEFAULT_SNAPSHOT.to_string(),
             })
         };
@@ -492,7 +492,7 @@ impl Sandbox for DaytonaSandbox {
                     // Daytona clones over HTTPS with token auth, so rewrite SSH URLs.
                     let url = ssh_url_to_https(&detected_url);
                     self.emit(SandboxEvent::GitCloneStarted {
-                        url: url.clone(),
+                        url:    url.clone(),
                         branch: branch.clone(),
                     });
                     let clone_start = Instant::now();
@@ -504,7 +504,7 @@ impl Sandbox for DaytonaSandbox {
                                 .map_err(|e| {
                                     let err = format!("Failed to parse GitHub URL for clone: {e}");
                                     self.emit(SandboxEvent::GitCloneFailed {
-                                        url: url.clone(),
+                                        url:   url.clone(),
                                         error: err.clone(),
                                     });
                                     err
@@ -520,7 +520,7 @@ impl Sandbox for DaytonaSandbox {
                                 let err =
                                     format!("Failed to get GitHub App credentials for clone: {e}");
                                 self.emit(SandboxEvent::GitCloneFailed {
-                                    url: url.clone(),
+                                    url:   url.clone(),
                                     error: err.clone(),
                                 });
                                 let duration_ms = u64::try_from(init_start.elapsed().as_millis())
@@ -544,7 +544,7 @@ impl Sandbox for DaytonaSandbox {
                         Ok(g) => g,
                         Err(e) => {
                             self.emit(SandboxEvent::GitCloneFailed {
-                                url: url.clone(),
+                                url:   url.clone(),
                                 error: e.clone(),
                             });
                             let duration_ms =
@@ -560,16 +560,12 @@ impl Sandbox for DaytonaSandbox {
 
                     let clone_token = password.clone();
                     let clone_result = git_svc
-                        .clone(
-                            &url,
-                            WORKING_DIRECTORY,
-                            daytona_sdk::GitCloneOptions {
-                                branch,
-                                username,
-                                password,
-                                ..Default::default()
-                            },
-                        )
+                        .clone(&url, WORKING_DIRECTORY, daytona_sdk::GitCloneOptions {
+                            branch,
+                            username,
+                            password,
+                            ..Default::default()
+                        })
                         .await;
 
                     match clone_result {
@@ -577,7 +573,7 @@ impl Sandbox for DaytonaSandbox {
                             let clone_duration = u64::try_from(clone_start.elapsed().as_millis())
                                 .unwrap_or(u64::MAX);
                             self.emit(SandboxEvent::GitCloneCompleted {
-                                url: url.clone(),
+                                url:         url.clone(),
                                 duration_ms: clone_duration,
                             });
 
@@ -673,12 +669,12 @@ impl Sandbox for DaytonaSandbox {
 
         let init_duration = u64::try_from(init_start.elapsed().as_millis()).unwrap_or(u64::MAX);
         self.emit(SandboxEvent::Ready {
-            provider: "daytona".into(),
+            provider:    "daytona".into(),
             duration_ms: init_duration,
-            name: Some(sandbox_name),
-            cpu: Some(sandbox_cpu),
-            memory: Some(sandbox_memory),
-            url: Some("https://app.daytona.io/dashboard/sandboxes".into()),
+            name:        Some(sandbox_name),
+            cpu:         Some(sandbox_cpu),
+            memory:      Some(sandbox_memory),
+            url:         Some("https://app.daytona.io/dashboard/sandboxes".into()),
         });
 
         Ok(())
@@ -695,7 +691,7 @@ impl Sandbox for DaytonaSandbox {
                 let err = format!("Failed to delete Daytona sandbox: {e}");
                 self.emit(SandboxEvent::CleanupFailed {
                     provider: "daytona".into(),
-                    error: err.clone(),
+                    error:    err.clone(),
                 });
                 return Err(err);
             }
@@ -933,9 +929,9 @@ impl Sandbox for DaytonaSandbox {
         Ok(files
             .into_iter()
             .map(|f| DirEntry {
-                name: f.name,
+                name:   f.name,
                 is_dir: f.is_dir,
-                size: if f.size > 0 {
+                size:   if f.size > 0 {
                     Some(u64::try_from(f.size).unwrap())
                 } else {
                     None
@@ -971,8 +967,8 @@ impl Sandbox for DaytonaSandbox {
         );
 
         let options = daytona_sdk::ExecuteCommandOptions {
-            cwd: Some(cwd),
-            env: env_vars.cloned(),
+            cwd:     Some(cwd),
+            env:     env_vars.cloned(),
             timeout: Some(std::time::Duration::from_millis(timeout_ms)),
         };
 

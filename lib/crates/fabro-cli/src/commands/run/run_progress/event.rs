@@ -7,18 +7,18 @@ use serde_json::Value;
 
 #[derive(Debug, Clone)]
 pub(super) struct ProgressUsage {
-    pub(super) input_tokens: u64,
+    pub(super) input_tokens:  u64,
     pub(super) output_tokens: u64,
-    pub(super) cost: Option<f64>,
+    pub(super) cost:          Option<f64>,
 }
 
 impl ProgressUsage {
     pub(super) fn from_stage_usage(usage: &BilledModelUsage) -> Option<Self> {
         let tokens = usage.tokens();
         Some(Self {
-            input_tokens: u64::try_from(tokens.input_tokens).ok()?,
+            input_tokens:  u64::try_from(tokens.input_tokens).ok()?,
             output_tokens: u64::try_from(tokens.billable_output_tokens()).ok()?,
-            cost: usage.total_usd_micros.map(|cost| cost as f64 / 1_000_000.0),
+            cost:          usage.total_usd_micros.map(|cost| cost as f64 / 1_000_000.0),
         })
     }
 
@@ -35,8 +35,8 @@ impl ProgressUsage {
 pub(super) enum ProgressEvent {
     WorkflowStarted {
         worktree_dir: Option<String>,
-        base_branch: Option<String>,
-        base_sha: Option<String>,
+        base_branch:  Option<String>,
+        base_sha:     Option<String>,
     },
     WorkingDirectorySet {
         working_directory: String,
@@ -45,12 +45,12 @@ pub(super) enum ProgressEvent {
         provider: String,
     },
     SandboxReady {
-        provider: String,
+        provider:    String,
         duration_ms: u64,
-        name: Option<String>,
-        cpu: Option<f64>,
-        memory: Option<f64>,
-        url: Option<String>,
+        name:        Option<String>,
+        cpu:         Option<f64>,
+        memory:      Option<f64>,
+        url:         Option<String>,
     },
     SshAccessReady {
         ssh_command: String,
@@ -62,98 +62,98 @@ pub(super) enum ProgressEvent {
         duration_ms: u64,
     },
     SetupCommandCompleted {
-        command: String,
+        command:       String,
         command_index: u64,
-        exit_code: i64,
-        duration_ms: u64,
+        exit_code:     i64,
+        duration_ms:   u64,
     },
     CliEnsureStarted {
         cli_name: String,
     },
     CliEnsureCompleted {
-        cli_name: String,
+        cli_name:          String,
         already_installed: bool,
-        duration_ms: u64,
+        duration_ms:       u64,
     },
     CliEnsureFailed {
         cli_name: String,
     },
     DevcontainerResolved {
-        dockerfile_lines: u64,
-        environment_count: u64,
+        dockerfile_lines:        u64,
+        environment_count:       u64,
         lifecycle_command_count: u64,
-        workspace_folder: String,
+        workspace_folder:        String,
     },
     DevcontainerLifecycleStarted {
-        phase: String,
+        phase:         String,
         command_count: u64,
     },
     DevcontainerLifecycleCompleted {
-        phase: String,
+        phase:       String,
         duration_ms: u64,
     },
     DevcontainerLifecycleFailed {
-        phase: String,
-        command: String,
+        phase:     String,
+        command:   String,
         exit_code: i64,
-        stderr: String,
+        stderr:    String,
     },
     DevcontainerLifecycleCommandCompleted {
-        command: String,
+        command:       String,
         command_index: u64,
-        exit_code: i64,
-        duration_ms: u64,
+        exit_code:     i64,
+        duration_ms:   u64,
     },
     StageStarted {
         node_id: String,
-        name: String,
-        script: Option<String>,
+        name:    String,
+        script:  Option<String>,
     },
     StageCompleted {
-        node_id: String,
-        name: String,
+        node_id:     String,
+        name:        String,
         duration_ms: u64,
-        status: String,
-        usage: Option<ProgressUsage>,
+        status:      String,
+        usage:       Option<ProgressUsage>,
     },
     StageFailed {
         node_id: String,
-        name: String,
-        error: String,
+        name:    String,
+        error:   String,
     },
     StageRetrying {
-        name: String,
-        attempt: u64,
+        name:         String,
+        attempt:      u64,
         max_attempts: u64,
-        delay_ms: u64,
+        delay_ms:     u64,
     },
     ParallelStarted,
     ParallelBranchStarted {
         branch: String,
     },
     ParallelBranchCompleted {
-        branch: String,
+        branch:      String,
         duration_ms: u64,
-        status: String,
+        status:      String,
     },
     ParallelCompleted,
     AssistantMessage {
         stage_node_id: String,
-        model: String,
+        model:         String,
     },
     ToolCallStarted {
         stage_node_id: String,
-        tool_name: String,
-        tool_call_id: String,
-        arguments: Value,
-        timestamp: Option<DateTime<Utc>>,
+        tool_name:     String,
+        tool_call_id:  String,
+        arguments:     Value,
+        timestamp:     Option<DateTime<Utc>>,
     },
     ToolCallCompleted {
         stage_node_id: String,
-        tool_call_id: String,
-        is_error: bool,
-        duration_ms: Option<u64>,
-        timestamp: Option<DateTime<Utc>>,
+        tool_call_id:  String,
+        is_error:      bool,
+        duration_ms:   Option<u64>,
+        timestamp:     Option<DateTime<Utc>>,
     },
     ContextWindowWarning {
         stage_node_id: String,
@@ -163,38 +163,38 @@ pub(super) enum ProgressEvent {
         stage_node_id: String,
     },
     CompactionCompleted {
-        stage_node_id: String,
-        original_turn_count: u64,
+        stage_node_id:        String,
+        original_turn_count:  u64,
         preserved_turn_count: u64,
-        tracked_file_count: u64,
+        tracked_file_count:   u64,
     },
     LlmRetry {
         stage_node_id: String,
-        model: String,
-        attempt: u64,
-        delay_ms: u64,
-        error: String,
+        model:         String,
+        attempt:       u64,
+        delay_ms:      u64,
+        error:         String,
     },
     SubagentSpawned {
         stage_node_id: String,
-        agent_id: String,
-        task: String,
+        agent_id:      String,
+        task:          String,
     },
     SubagentCompleted {
         stage_node_id: String,
-        agent_id: String,
-        success: bool,
-        turns_used: u64,
+        agent_id:      String,
+        success:       bool,
+        turns_used:    u64,
     },
     EdgeSelected {
         from_node: String,
-        to_node: String,
-        label: Option<String>,
+        to_node:   String,
+        label:     Option<String>,
         condition: Option<String>,
     },
     LoopRestart {
         from_node: String,
-        to_node: String,
+        to_node:   String,
     },
     RetroStarted,
     RetroCompleted {
@@ -204,13 +204,13 @@ pub(super) enum ProgressEvent {
         duration_ms: u64,
     },
     RunNotice {
-        level: RunNoticeLevel,
-        code: String,
+        level:   RunNoticeLevel,
+        code:    String,
         message: String,
     },
     PullRequestCreated {
         pr_url: String,
-        draft: bool,
+        draft:  bool,
     },
     PullRequestFailed {
         error: String,
@@ -224,8 +224,8 @@ pub(super) fn from_run_event(stored: &RunEvent) -> Option<ProgressEvent> {
     match &stored.body {
         EventBody::RunStarted(props) => Some(ProgressEvent::WorkflowStarted {
             worktree_dir: props.worktree_dir.clone(),
-            base_branch: props.base_branch.clone(),
-            base_sha: props.base_sha.clone(),
+            base_branch:  props.base_branch.clone(),
+            base_sha:     props.base_sha.clone(),
         }),
         EventBody::SandboxInitialized(props) => Some(ProgressEvent::WorkingDirectorySet {
             working_directory: props.working_directory.clone(),
@@ -234,12 +234,12 @@ pub(super) fn from_run_event(stored: &RunEvent) -> Option<ProgressEvent> {
             provider: props.provider.clone(),
         }),
         EventBody::SandboxReady(props) => Some(ProgressEvent::SandboxReady {
-            provider: props.provider.clone(),
+            provider:    props.provider.clone(),
             duration_ms: props.duration_ms,
-            name: props.name.clone(),
-            cpu: props.cpu,
-            memory: props.memory,
-            url: props.url.clone(),
+            name:        props.name.clone(),
+            cpu:         props.cpu,
+            memory:      props.memory,
+            url:         props.url.clone(),
         }),
         EventBody::SshAccessReady(props) => Some(ProgressEvent::SshAccessReady {
             ssh_command: props.ssh_command.clone(),
@@ -251,54 +251,54 @@ pub(super) fn from_run_event(stored: &RunEvent) -> Option<ProgressEvent> {
             duration_ms: props.duration_ms,
         }),
         EventBody::SetupCommandCompleted(props) => Some(ProgressEvent::SetupCommandCompleted {
-            command: props.command.clone(),
+            command:       props.command.clone(),
             command_index: props.index as u64,
-            exit_code: i64::from(props.exit_code),
-            duration_ms: props.duration_ms,
+            exit_code:     i64::from(props.exit_code),
+            duration_ms:   props.duration_ms,
         }),
         EventBody::CliEnsureStarted(props) => Some(ProgressEvent::CliEnsureStarted {
             cli_name: props.cli_name.clone(),
         }),
         EventBody::CliEnsureCompleted(props) => Some(ProgressEvent::CliEnsureCompleted {
-            cli_name: props.cli_name.clone(),
+            cli_name:          props.cli_name.clone(),
             already_installed: props.already_installed,
-            duration_ms: props.duration_ms,
+            duration_ms:       props.duration_ms,
         }),
         EventBody::CliEnsureFailed(props) => Some(ProgressEvent::CliEnsureFailed {
             cli_name: props.cli_name.clone(),
         }),
         EventBody::DevcontainerResolved(props) => Some(ProgressEvent::DevcontainerResolved {
-            dockerfile_lines: props.dockerfile_lines as u64,
-            environment_count: props.environment_count as u64,
+            dockerfile_lines:        props.dockerfile_lines as u64,
+            environment_count:       props.environment_count as u64,
             lifecycle_command_count: props.lifecycle_command_count as u64,
-            workspace_folder: props.workspace_folder.clone(),
+            workspace_folder:        props.workspace_folder.clone(),
         }),
         EventBody::DevcontainerLifecycleStarted(props) => {
             Some(ProgressEvent::DevcontainerLifecycleStarted {
-                phase: props.phase.clone(),
+                phase:         props.phase.clone(),
                 command_count: props.command_count as u64,
             })
         }
         EventBody::DevcontainerLifecycleCompleted(props) => {
             Some(ProgressEvent::DevcontainerLifecycleCompleted {
-                phase: props.phase.clone(),
+                phase:       props.phase.clone(),
                 duration_ms: props.duration_ms,
             })
         }
         EventBody::DevcontainerLifecycleFailed(props) => {
             Some(ProgressEvent::DevcontainerLifecycleFailed {
-                phase: props.phase.clone(),
-                command: props.command.clone(),
+                phase:     props.phase.clone(),
+                command:   props.command.clone(),
                 exit_code: i64::from(props.exit_code),
-                stderr: props.stderr.clone(),
+                stderr:    props.stderr.clone(),
             })
         }
         EventBody::DevcontainerLifecycleCommandCompleted(props) => {
             Some(ProgressEvent::DevcontainerLifecycleCommandCompleted {
-                command: props.command.clone(),
+                command:       props.command.clone(),
                 command_index: props.index as u64,
-                exit_code: i64::from(props.exit_code),
-                duration_ms: props.duration_ms,
+                exit_code:     i64::from(props.exit_code),
+                duration_ms:   props.duration_ms,
             })
         }
         EventBody::StageStarted(_) => Some(ProgressEvent::StageStarted {
@@ -325,38 +325,38 @@ pub(super) fn from_run_event(stored: &RunEvent) -> Option<ProgressEvent> {
             ),
         }),
         EventBody::StageRetrying(props) => Some(ProgressEvent::StageRetrying {
-            name: node_label,
-            attempt: props.attempt as u64,
+            name:         node_label,
+            attempt:      props.attempt as u64,
             max_attempts: props.max_attempts as u64,
-            delay_ms: props.delay_ms,
+            delay_ms:     props.delay_ms,
         }),
         EventBody::ParallelStarted(_) => Some(ProgressEvent::ParallelStarted),
         EventBody::ParallelBranchStarted(_) => {
             Some(ProgressEvent::ParallelBranchStarted { branch: node_id })
         }
         EventBody::ParallelBranchCompleted(props) => Some(ProgressEvent::ParallelBranchCompleted {
-            branch: node_id,
+            branch:      node_id,
             duration_ms: props.duration_ms,
-            status: props.status.clone(),
+            status:      props.status.clone(),
         }),
         EventBody::ParallelCompleted(_) => Some(ProgressEvent::ParallelCompleted),
         EventBody::AgentMessage(props) => Some(ProgressEvent::AssistantMessage {
             stage_node_id: node_id,
-            model: props.model.clone(),
+            model:         props.model.clone(),
         }),
         EventBody::AgentToolStarted(props) => Some(ProgressEvent::ToolCallStarted {
             stage_node_id: node_id,
-            tool_name: props.tool_name.clone(),
-            tool_call_id: props.tool_call_id.clone(),
-            arguments: props.arguments.clone(),
-            timestamp: Some(stored.ts),
+            tool_name:     props.tool_name.clone(),
+            tool_call_id:  props.tool_call_id.clone(),
+            arguments:     props.arguments.clone(),
+            timestamp:     Some(stored.ts),
         }),
         EventBody::AgentToolCompleted(props) => Some(ProgressEvent::ToolCallCompleted {
             stage_node_id: node_id,
-            tool_call_id: props.tool_call_id.clone(),
-            is_error: props.is_error,
-            duration_ms: None,
-            timestamp: Some(stored.ts),
+            tool_call_id:  props.tool_call_id.clone(),
+            is_error:      props.is_error,
+            duration_ms:   None,
+            timestamp:     Some(stored.ts),
         }),
         EventBody::AgentWarning(props) if props.kind == "context_window" => {
             let usage_percent = props
@@ -374,10 +374,10 @@ pub(super) fn from_run_event(stored: &RunEvent) -> Option<ProgressEvent> {
             stage_node_id: node_id,
         }),
         EventBody::AgentCompactionCompleted(props) => Some(ProgressEvent::CompactionCompleted {
-            stage_node_id: node_id,
-            original_turn_count: props.original_turn_count as u64,
+            stage_node_id:        node_id,
+            original_turn_count:  props.original_turn_count as u64,
             preserved_turn_count: props.preserved_turn_count as u64,
-            tracked_file_count: props.tracked_file_count as u64,
+            tracked_file_count:   props.tracked_file_count as u64,
         }),
         EventBody::AgentLlmRetry(props) => {
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -392,24 +392,24 @@ pub(super) fn from_run_event(stored: &RunEvent) -> Option<ProgressEvent> {
         }
         EventBody::AgentSubSpawned(props) => Some(ProgressEvent::SubagentSpawned {
             stage_node_id: node_id,
-            agent_id: props.agent_id.clone(),
-            task: props.task.clone(),
+            agent_id:      props.agent_id.clone(),
+            task:          props.task.clone(),
         }),
         EventBody::AgentSubCompleted(props) => Some(ProgressEvent::SubagentCompleted {
             stage_node_id: node_id,
-            agent_id: props.agent_id.clone(),
-            success: props.success,
-            turns_used: props.turns_used as u64,
+            agent_id:      props.agent_id.clone(),
+            success:       props.success,
+            turns_used:    props.turns_used as u64,
         }),
         EventBody::EdgeSelected(props) => Some(ProgressEvent::EdgeSelected {
             from_node: props.from_node.clone(),
-            to_node: props.to_node.clone(),
-            label: props.label.clone(),
+            to_node:   props.to_node.clone(),
+            label:     props.label.clone(),
             condition: props.condition.clone(),
         }),
         EventBody::LoopRestart(props) => Some(ProgressEvent::LoopRestart {
             from_node: props.from_node.clone(),
-            to_node: props.to_node.clone(),
+            to_node:   props.to_node.clone(),
         }),
         EventBody::RetroStarted(_) => Some(ProgressEvent::RetroStarted),
         EventBody::RetroCompleted(props) => Some(ProgressEvent::RetroCompleted {
@@ -419,13 +419,13 @@ pub(super) fn from_run_event(stored: &RunEvent) -> Option<ProgressEvent> {
             duration_ms: props.duration_ms,
         }),
         EventBody::RunNotice(props) => Some(ProgressEvent::RunNotice {
-            level: props.level,
-            code: props.code.clone(),
+            level:   props.level,
+            code:    props.code.clone(),
             message: props.message.clone(),
         }),
         EventBody::PullRequestCreated(props) => Some(ProgressEvent::PullRequestCreated {
             pr_url: props.pr_url.clone(),
-            draft: props.draft,
+            draft:  props.draft,
         }),
         EventBody::PullRequestFailed(props) => Some(ProgressEvent::PullRequestFailed {
             error: props.error.clone(),
@@ -477,20 +477,17 @@ mod tests {
 
     #[test]
     fn parse_edge_selected() {
-        let stored = to_run_event(
-            &fixtures::RUN_1,
-            &Event::EdgeSelected {
-                from_node: "a".into(),
-                to_node: "b".into(),
-                label: Some("yes".into()),
-                condition: None,
-                reason: "condition".into(),
-                preferred_label: None,
-                suggested_next_ids: Vec::new(),
-                stage_status: "success".into(),
-                is_jump: false,
-            },
-        );
+        let stored = to_run_event(&fixtures::RUN_1, &Event::EdgeSelected {
+            from_node:          "a".into(),
+            to_node:            "b".into(),
+            label:              Some("yes".into()),
+            condition:          None,
+            reason:             "condition".into(),
+            preferred_label:    None,
+            suggested_next_ids: Vec::new(),
+            stage_status:       "success".into(),
+            is_jump:            false,
+        });
 
         let event = from_run_event(&stored).unwrap();
         assert!(matches!(
@@ -545,14 +542,14 @@ mod tests {
     #[test]
     fn round_trip_agent_tool_call() {
         let event = Event::Agent {
-            stage: "code".into(),
-            visit: 1,
-            event: AgentEvent::ToolCallStarted {
-                tool_name: "read_file".into(),
+            stage:             "code".into(),
+            visit:             1,
+            event:             AgentEvent::ToolCallStarted {
+                tool_name:    "read_file".into(),
                 tool_call_id: "tc1".into(),
-                arguments: serde_json::json!({"path": "src/main.rs"}),
+                arguments:    serde_json::json!({"path": "src/main.rs"}),
             },
-            session_id: None,
+            session_id:        None,
             parent_session_id: None,
         };
 
@@ -634,12 +631,12 @@ mod tests {
     fn round_trip_sandbox_ready() {
         let event = Event::Sandbox {
             event: fabro_agent::SandboxEvent::Ready {
-                provider: "daytona".into(),
+                provider:    "daytona".into(),
                 duration_ms: 2500,
-                name: Some("sandbox-1".into()),
-                cpu: Some(4.0),
-                memory: Some(8.0),
-                url: Some("https://example.test".into()),
+                name:        Some("sandbox-1".into()),
+                cpu:         Some(4.0),
+                memory:      Some(8.0),
+                url:         Some("https://example.test".into()),
             },
         };
 
@@ -659,8 +656,8 @@ mod tests {
     #[test]
     fn round_trip_run_notice() {
         let event = Event::RunNotice {
-            level: RunNoticeLevel::Warn,
-            code: "sandbox_cleanup_failed".into(),
+            level:   RunNoticeLevel::Warn,
+            code:    "sandbox_cleanup_failed".into(),
             message: "sandbox cleanup failed".into(),
         };
 

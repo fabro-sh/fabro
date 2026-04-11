@@ -40,29 +40,29 @@ use crate::workflow_bundle::WorkflowBundle;
 
 /// Shared services available to all handlers during execution.
 pub struct EngineServices {
-    pub registry: Arc<HandlerRegistry>,
-    pub emitter: Arc<Emitter>,
-    pub sandbox: Arc<dyn Sandbox>,
-    pub run_store: RunStoreHandle,
+    pub registry:         Arc<HandlerRegistry>,
+    pub emitter:          Arc<Emitter>,
+    pub sandbox:          Arc<dyn Sandbox>,
+    pub run_store:        RunStoreHandle,
     /// Git state for the current run. Set via `set_git_state` at the start of
     /// `run_via_core` and read by parallel/fan-in handlers.
     pub(crate) git_state: std::sync::RwLock<Option<Arc<GitState>>>,
     /// Hook runner for user-defined lifecycle hooks.
-    pub hook_runner: Option<Arc<HookRunner>>,
+    pub hook_runner:      Option<Arc<HookRunner>>,
     /// Environment variables from `[sandbox.env]` config, injected into command
     /// nodes.
-    pub env: HashMap<String, String>,
+    pub env:              HashMap<String, String>,
     /// Typed values from `[run.inputs]`, available to prompt templates.
-    pub inputs: HashMap<String, toml::Value>,
+    pub inputs:           HashMap<String, toml::Value>,
     /// When true, handlers should skip real execution and return simulated
     /// results.
-    pub dry_run: bool,
+    pub dry_run:          bool,
     /// Optional run-scoped cancellation flag from the core executor.
     pub cancel_requested: Option<Arc<AtomicBool>>,
     /// Logical path of the current workflow when running from a bundle.
-    pub workflow_path: Option<PathBuf>,
+    pub workflow_path:    Option<PathBuf>,
     /// Bundled workflows available for child-workflow resolution.
-    pub workflow_bundle: Option<Arc<WorkflowBundle>>,
+    pub workflow_bundle:  Option<Arc<WorkflowBundle>>,
 }
 
 impl EngineServices {
@@ -100,14 +100,14 @@ impl EngineServices {
             Duration::from_millis(1),
         ));
         Self {
-            registry: Arc::new(HandlerRegistry::new(Box::new(start::StartHandler))),
-            emitter: Arc::new(Emitter::default()),
-            sandbox: Arc::new(fabro_agent::LocalSandbox::new(
+            registry:         Arc::new(HandlerRegistry::new(Box::new(start::StartHandler))),
+            emitter:          Arc::new(Emitter::default()),
+            sandbox:          Arc::new(fabro_agent::LocalSandbox::new(
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             )),
             // Build the test run store on a dedicated runtime so this helper
             // remains safe to call from both sync tests and #[tokio::test].
-            run_store: std::thread::spawn(move || {
+            run_store:        std::thread::spawn(move || {
                 tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
@@ -122,14 +122,14 @@ impl EngineServices {
             .join()
             .expect("test run store thread should join")
             .into(),
-            git_state: std::sync::RwLock::new(None),
-            hook_runner: None,
-            env: HashMap::new(),
-            inputs: HashMap::new(),
-            dry_run: false,
+            git_state:        std::sync::RwLock::new(None),
+            hook_runner:      None,
+            env:              HashMap::new(),
+            inputs:           HashMap::new(),
+            dry_run:          false,
             cancel_requested: None,
-            workflow_path: None,
-            workflow_bundle: None,
+            workflow_path:    None,
+            workflow_bundle:  None,
         }
     }
 }
@@ -228,7 +228,7 @@ pub async fn dispatch_handler(
 
 /// Maps handler type strings to handler implementations.
 pub struct HandlerRegistry {
-    handlers: HashMap<String, Box<dyn Handler>>,
+    handlers:        HashMap<String, Box<dyn Handler>>,
     default_handler: Box<dyn Handler>,
 }
 

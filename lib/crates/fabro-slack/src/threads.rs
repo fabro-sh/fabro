@@ -19,13 +19,10 @@ impl ThreadRegistry {
         self.ts_to_question
             .lock()
             .expect("thread registry lock poisoned")
-            .insert(
-                message_ts.to_string(),
-                SlackQuestionRef {
-                    run_id: run_id.to_string(),
-                    qid: question_id.to_string(),
-                },
-            );
+            .insert(message_ts.to_string(), SlackQuestionRef {
+                run_id: run_id.to_string(),
+                qid:    question_id.to_string(),
+            });
     }
 
     pub fn resolve(&self, thread_ts: &str) -> Option<SlackQuestionRef> {
@@ -87,7 +84,7 @@ mod tests {
             registry.resolve("1234.5678"),
             Some(SlackQuestionRef {
                 run_id: "run-1".to_string(),
-                qid: "q-1".to_string(),
+                qid:    "q-1".to_string(),
             })
         );
     }

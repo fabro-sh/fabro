@@ -10,28 +10,28 @@ use crate::{DirEntry, ExecResult, GrepOptions, Sandbox, SandboxEvent, SandboxEve
 // --- MockSandbox ---
 
 pub struct MockSandbox {
-    pub files: HashMap<String, String>,
-    pub exec_result: ExecResult,
-    pub grep_results: Vec<String>,
-    pub glob_results: Vec<String>,
-    pub working_dir: &'static str,
-    pub platform_str: &'static str,
-    pub os_version_str: String,
+    pub files:                   HashMap<String, String>,
+    pub exec_result:             ExecResult,
+    pub grep_results:            Vec<String>,
+    pub glob_results:            Vec<String>,
+    pub working_dir:             &'static str,
+    pub platform_str:            &'static str,
+    pub os_version_str:          String,
     /// When true, `read_file` applies offset/limit by splitting on lines.
     pub apply_read_offset_limit: bool,
     /// Captures (path, content) pairs from `write_file` calls.
-    pub written_files: Mutex<Vec<(String, String)>>,
+    pub written_files:           Mutex<Vec<(String, String)>>,
     /// Captures the `timeout_ms` argument from `exec_command` calls.
-    pub captured_timeout: Mutex<Option<u64>>,
+    pub captured_timeout:        Mutex<Option<u64>>,
     /// Captures the `command` argument from `exec_command` calls (last only).
-    pub captured_command: Mutex<Option<String>>,
+    pub captured_command:        Mutex<Option<String>>,
     /// Captures all `command` arguments from `exec_command` calls in order.
-    pub captured_commands: Mutex<Vec<String>>,
+    pub captured_commands:       Mutex<Vec<String>>,
     /// Captures all `working_dir` arguments from `exec_command` calls in order.
-    pub captured_working_dirs: Mutex<Vec<Option<String>>>,
+    pub captured_working_dirs:   Mutex<Vec<Option<String>>>,
     /// Captures the `env_vars` argument from `exec_command` calls.
-    pub captured_env_vars: Mutex<Option<HashMap<String, String>>>,
-    pub event_callback: Option<SandboxEventCallback>,
+    pub captured_env_vars:       Mutex<Option<HashMap<String, String>>>,
+    pub event_callback:          Option<SandboxEventCallback>,
 }
 
 impl MockSandbox {
@@ -57,27 +57,27 @@ impl MockSandbox {
 impl Default for MockSandbox {
     fn default() -> Self {
         Self {
-            files: HashMap::new(),
-            exec_result: ExecResult {
-                stdout: "mock output".into(),
-                stderr: String::new(),
-                exit_code: 0,
-                timed_out: false,
+            files:                   HashMap::new(),
+            exec_result:             ExecResult {
+                stdout:      "mock output".into(),
+                stderr:      String::new(),
+                exit_code:   0,
+                timed_out:   false,
                 duration_ms: 10,
             },
-            grep_results: vec![],
-            glob_results: vec![],
-            working_dir: "/work",
-            platform_str: "darwin",
-            os_version_str: "Darwin 24.0.0".into(),
+            grep_results:            vec![],
+            glob_results:            vec![],
+            working_dir:             "/work",
+            platform_str:            "darwin",
+            os_version_str:          "Darwin 24.0.0".into(),
             apply_read_offset_limit: false,
-            written_files: Mutex::new(Vec::new()),
-            captured_timeout: Mutex::new(None),
-            captured_command: Mutex::new(None),
-            captured_commands: Mutex::new(Vec::new()),
-            captured_working_dirs: Mutex::new(Vec::new()),
-            captured_env_vars: Mutex::new(None),
-            event_callback: None,
+            written_files:           Mutex::new(Vec::new()),
+            captured_timeout:        Mutex::new(None),
+            captured_command:        Mutex::new(None),
+            captured_commands:       Mutex::new(Vec::new()),
+            captured_working_dirs:   Mutex::new(Vec::new()),
+            captured_env_vars:       Mutex::new(None),
+            event_callback:          None,
         }
     }
 }
@@ -211,12 +211,12 @@ impl Sandbox for MockSandbox {
             provider: "mock".into(),
         });
         self.emit(SandboxEvent::Ready {
-            provider: "mock".into(),
+            provider:    "mock".into(),
             duration_ms: 0,
-            name: None,
-            cpu: None,
-            memory: None,
-            url: None,
+            name:        None,
+            cpu:         None,
+            memory:      None,
+            url:         None,
         });
         Ok(())
     }
@@ -226,7 +226,7 @@ impl Sandbox for MockSandbox {
             provider: "mock".into(),
         });
         self.emit(SandboxEvent::CleanupCompleted {
-            provider: "mock".into(),
+            provider:    "mock".into(),
             duration_ms: 0,
         });
         Ok(())
@@ -316,10 +316,10 @@ impl Sandbox for MutableMockSandbox {
         _cancel_token: Option<CancellationToken>,
     ) -> Result<ExecResult, String> {
         Ok(ExecResult {
-            stdout: String::new(),
-            stderr: String::new(),
-            exit_code: 0,
-            timed_out: false,
+            stdout:      String::new(),
+            stderr:      String::new(),
+            exit_code:   0,
+            timed_out:   false,
             duration_ms: 0,
         })
     }

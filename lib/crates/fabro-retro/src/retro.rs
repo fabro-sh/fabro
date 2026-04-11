@@ -8,15 +8,15 @@ pub use fabro_types::retro::{
 
 #[derive(Debug, Clone)]
 pub struct CompletedStage {
-    pub node_id: String,
-    pub status: String,
-    pub succeeded: bool,
-    pub failed: bool,
-    pub retries: u32,
+    pub node_id:            String,
+    pub status:             String,
+    pub succeeded:          bool,
+    pub failed:             bool,
+    pub retries:            u32,
     pub billing_usd_micros: Option<i64>,
-    pub notes: Option<String>,
-    pub failure_reason: Option<String>,
-    pub files_touched: Vec<String>,
+    pub notes:              Option<String>,
+    pub failure_reason:     Option<String>,
+    pub files_touched:      Vec<String>,
 }
 
 pub fn derive_retro(
@@ -51,15 +51,15 @@ pub fn derive_retro(
         let dur = stage_durations.get(&cs.node_id).copied().unwrap_or(0);
 
         stages.push(StageRetro {
-            stage_label: cs.node_id.clone(),
-            duration_ms: dur,
-            retries: cs.retries,
+            stage_label:        cs.node_id.clone(),
+            duration_ms:        dur,
+            retries:            cs.retries,
             billing_usd_micros: cs.billing_usd_micros,
-            stage_id: cs.node_id,
-            status: cs.status,
-            notes: cs.notes,
-            failure_reason: cs.failure_reason,
-            files_touched: cs.files_touched,
+            stage_id:           cs.node_id,
+            status:             cs.status,
+            notes:              cs.notes,
+            failure_reason:     cs.failure_reason,
+            files_touched:      cs.files_touched,
         });
 
         all_files.extend(

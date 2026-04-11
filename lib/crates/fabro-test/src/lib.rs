@@ -104,23 +104,23 @@ pub fn require_env(name: &str) -> Option<String> {
 /// shared per nextest run when `NEXTEST_RUN_ID` is present, otherwise shared
 /// per test process.
 pub struct TestContext {
-    pub temp_dir: PathBuf,
-    pub home_dir: PathBuf,
-    pub storage_dir: PathBuf,
-    test_case_id: String,
-    test_run_id: String,
-    session_root: PathBuf,
-    fabro_bin: PathBuf,
-    filters: Vec<(String, String)>,
-    active_socket_path: PathBuf,
-    isolated_server: Option<ServerPaths>,
+    pub temp_dir:         PathBuf,
+    pub home_dir:         PathBuf,
+    pub storage_dir:      PathBuf,
+    test_case_id:         String,
+    test_run_id:          String,
+    session_root:         PathBuf,
+    fabro_bin:            PathBuf,
+    filters:              Vec<(String, String)>,
+    active_socket_path:   PathBuf,
+    isolated_server:      Option<ServerPaths>,
     managed_storage_dirs: Vec<PathBuf>,
-    _context_root: tempfile::TempDir,
+    _context_root:        tempfile::TempDir,
 }
 
 #[derive(Debug, Clone)]
 struct ServerPaths {
-    root: PathBuf,
+    root:        PathBuf,
     storage_dir: PathBuf,
     socket_path: PathBuf,
     config_path: PathBuf,
@@ -128,7 +128,7 @@ struct ServerPaths {
 
 #[derive(Debug, Clone)]
 struct SessionPaths {
-    root: PathBuf,
+    root:   PathBuf,
     server: ServerPaths,
 }
 
@@ -140,7 +140,7 @@ enum SessionMode {
 
 #[derive(Debug, Serialize)]
 struct ClientMarker {
-    pid: u32,
+    pid:           u32,
     touched_at_ms: u128,
 }
 
@@ -186,37 +186,29 @@ fn session_paths() -> (SessionMode, String, SessionPaths) {
         if !run_id.trim().is_empty() {
             let short_id = shorten_session_id(&run_id);
             let root = base_dir.join(format!("n-{short_id}"));
-            return (
-                SessionMode::Nextest,
-                run_id,
-                SessionPaths {
-                    server: ServerPaths {
-                        root: root.clone(),
-                        storage_dir: root.join("storage"),
-                        socket_path: root.join("fabro.sock"),
-                        config_path: root.join("settings.toml"),
-                    },
-                    root,
+            return (SessionMode::Nextest, run_id, SessionPaths {
+                server: ServerPaths {
+                    root:        root.clone(),
+                    storage_dir: root.join("storage"),
+                    socket_path: root.join("fabro.sock"),
+                    config_path: root.join("settings.toml"),
                 },
-            );
+                root,
+            });
         }
     }
 
     let process_id = format!("process-{}", current_pid());
     let root = base_dir.join(format!("p-{}", current_pid()));
-    (
-        SessionMode::Process,
-        process_id,
-        SessionPaths {
-            server: ServerPaths {
-                root: root.clone(),
-                storage_dir: root.join("storage"),
-                socket_path: root.join("fabro.sock"),
-                config_path: root.join("settings.toml"),
-            },
-            root,
+    (SessionMode::Process, process_id, SessionPaths {
+        server: ServerPaths {
+            root:        root.clone(),
+            storage_dir: root.join("storage"),
+            socket_path: root.join("fabro.sock"),
+            config_path: root.join("settings.toml"),
         },
-    )
+        root,
+    })
 }
 
 fn short_session_base_dir() -> PathBuf {
@@ -324,7 +316,7 @@ fn live_marker_count(root: &Path) -> usize {
 
 fn write_marker(root: &Path) {
     let marker = ClientMarker {
-        pid: current_pid(),
+        pid:           current_pid(),
         touched_at_ms: current_timestamp_ms(),
     };
     let marker_path = session_marker_path(root, marker.pid);
@@ -672,7 +664,7 @@ fn test_server_stop_timeout() -> std::time::Duration {
 
 fn shared_server_paths(root: &Path) -> ServerPaths {
     ServerPaths {
-        root: root.to_path_buf(),
+        root:        root.to_path_buf(),
         storage_dir: root.join("storage"),
         socket_path: root.join("fabro.sock"),
         config_path: root.join("settings.toml"),
@@ -686,7 +678,7 @@ fn isolated_server_paths(
 ) -> ServerPaths {
     let server_root = root.join("isolated").join(test_case_id);
     ServerPaths {
-        root: server_root.clone(),
+        root:        server_root.clone(),
         storage_dir: storage_dir.unwrap_or_else(|| server_root.join("storage")),
         socket_path: server_root.join("fabro.sock"),
         config_path: server_root.join("settings.toml"),
@@ -705,7 +697,7 @@ fn reap_isolated_servers(root: &Path) {
             continue;
         }
         stop_test_server(&ServerPaths {
-            root: server_root.clone(),
+            root:        server_root.clone(),
             storage_dir: server_root.join("storage"),
             socket_path: server_root.join("fabro.sock"),
             config_path: server_root.join("settings.toml"),
@@ -1244,7 +1236,7 @@ impl Drop for TestContext {
     fn drop(&mut self) {
         for storage_dir in &self.managed_storage_dirs {
             stop_test_server(&ServerPaths {
-                root: storage_dir.clone(),
+                root:        storage_dir.clone(),
                 storage_dir: storage_dir.clone(),
                 socket_path: PathBuf::new(),
                 config_path: PathBuf::new(),
@@ -1390,7 +1382,7 @@ pub struct TwinOpenAi {
 
 pub struct TwinGitHub {
     pub base_url: String,
-    server: twin_github::TestServer,
+    server:       twin_github::TestServer,
 }
 
 pub fn test_http_client() -> reqwest::Client {
@@ -1479,7 +1471,7 @@ impl TwinScenarios {
 #[derive(Debug, Clone)]
 pub struct TwinScenario {
     matcher: Map<String, Value>,
-    script: Value,
+    script:  Value,
 }
 
 impl TwinScenario {
@@ -1493,7 +1485,7 @@ impl TwinScenario {
                 ),
                 ("model".to_string(), Value::String(model.into())),
             ]),
-            script: json!({ "kind": "success" }),
+            script:  json!({ "kind": "success" }),
         }
     }
 
@@ -1587,7 +1579,7 @@ impl TwinScenario {
 
 #[derive(Debug, Clone)]
 pub struct TwinToolCall {
-    name: String,
+    name:      String,
     arguments: Value,
 }
 
@@ -1669,7 +1661,7 @@ pub async fn twin_openai() -> &'static TwinOpenAi {
             let base_url = format!("http://127.0.0.1:{}/v1", addr.port());
 
             let config = TwinConfig {
-                bind_addr: addr,
+                bind_addr:    addr,
                 require_auth: true,
                 enable_admin: true,
             };
@@ -1818,18 +1810,18 @@ mod tests {
     fn run_and_create_commands_include_test_labels() {
         let context_root = tempfile::tempdir().expect("failed to create temp dir");
         let context = TestContext {
-            temp_dir: context_root.path().join("temp"),
-            home_dir: context_root.path().join("home"),
-            storage_dir: context_root.path().join("storage"),
-            test_case_id: "case-123".to_string(),
-            test_run_id: "run-cmd-labels".to_string(),
-            session_root: context_root.path().join("session"),
-            fabro_bin: context_root.path().join("fabro"),
-            filters: Vec::new(),
-            active_socket_path: context_root.path().join("fabro.sock"),
-            isolated_server: None,
+            temp_dir:             context_root.path().join("temp"),
+            home_dir:             context_root.path().join("home"),
+            storage_dir:          context_root.path().join("storage"),
+            test_case_id:         "case-123".to_string(),
+            test_run_id:          "run-cmd-labels".to_string(),
+            session_root:         context_root.path().join("session"),
+            fabro_bin:            context_root.path().join("fabro"),
+            filters:              Vec::new(),
+            active_socket_path:   context_root.path().join("fabro.sock"),
+            isolated_server:      None,
             managed_storage_dirs: Vec::new(),
-            _context_root: context_root,
+            _context_root:        context_root,
         };
 
         let run_args = context
@@ -1861,7 +1853,7 @@ mod tests {
     }
 
     struct EnvGuard {
-        key: &'static str,
+        key:      &'static str,
         original: Option<String>,
     }
 

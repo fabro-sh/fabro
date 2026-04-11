@@ -20,18 +20,18 @@ const OAUTH_STATE_COOKIE_NAME: &str = "fabro_oauth_state";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionCookie {
-    pub login: String,
-    pub name: String,
-    pub email: String,
+    pub login:      String,
+    pub name:       String,
+    pub email:      String,
     pub avatar_url: String,
-    pub user_url: String,
-    pub github_id: i64,
-    pub exp: i64,
+    pub user_url:   String,
+    pub github_id:  i64,
+    pub exp:        i64,
 }
 
 #[derive(Deserialize)]
 struct OAuthCallbackParams {
-    code: String,
+    code:  String,
     state: String,
 }
 
@@ -52,22 +52,22 @@ struct SetupStatusResponse {
 
 #[derive(Serialize)]
 struct AuthMeResponse {
-    user: SessionUser,
-    provider: &'static str,
+    user:      SessionUser,
+    provider:  &'static str,
     #[serde(rename = "demoMode")]
     demo_mode: bool,
-    features: serde_json::Value,
+    features:  serde_json::Value,
 }
 
 #[derive(Serialize)]
 struct SessionUser {
-    login: String,
-    name: String,
-    email: String,
+    login:      String,
+    name:       String,
+    email:      String,
     #[serde(rename = "avatarUrl")]
     avatar_url: String,
     #[serde(rename = "userUrl")]
-    user_url: String,
+    user_url:   String,
 }
 
 #[derive(Deserialize)]
@@ -77,27 +77,27 @@ struct GitHubTokenResponse {
 
 #[derive(Deserialize)]
 struct GitHubUser {
-    id: i64,
-    login: String,
-    name: Option<String>,
+    id:         i64,
+    login:      String,
+    name:       Option<String>,
     avatar_url: String,
 }
 
 #[derive(Deserialize)]
 struct GitHubEmail {
-    email: String,
-    primary: bool,
+    email:    String,
+    primary:  bool,
     verified: bool,
 }
 
 #[derive(Deserialize)]
 struct GitHubManifestConversion {
-    id: i64,
-    slug: String,
-    client_id: String,
-    client_secret: String,
+    id:             i64,
+    slug:           String,
+    client_id:      String,
+    client_secret:  String,
     webhook_secret: Option<String>,
-    pem: String,
+    pem:            String,
 }
 
 pub fn routes() -> Router<Arc<AppState>> {
@@ -206,16 +206,14 @@ async fn login_github(State(state): State<Arc<AppState>>) -> Response {
     }
 
     let state_token = format!("fabro-{}", ulid::Ulid::new());
-    let authorize_url = reqwest::Url::parse_with_params(
-        "https://github.com/login/oauth/authorize",
-        &[
+    let authorize_url =
+        reqwest::Url::parse_with_params("https://github.com/login/oauth/authorize", &[
             ("client_id", client_id.as_str()),
             ("redirect_uri", &format!("{web_url}/auth/callback/github")),
             ("scope", "read:user user:email"),
             ("state", state_token.as_str()),
-        ],
-    )
-    .expect("GitHub authorize URL should be valid");
+        ])
+        .expect("GitHub authorize URL should be valid");
 
     debug!(redirect_uri = %format!("{web_url}/auth/callback/github"), "OAuth login redirecting to GitHub");
 
@@ -398,13 +396,13 @@ async fn callback_github(
         .unwrap_or_default();
     let now = chrono::Utc::now();
     let session = SessionCookie {
-        login: profile.login.clone(),
-        name: profile.name.unwrap_or_else(|| profile.login.clone()),
-        email: primary_email,
+        login:      profile.login.clone(),
+        name:       profile.name.unwrap_or_else(|| profile.login.clone()),
+        email:      primary_email,
         avatar_url: profile.avatar_url,
-        user_url: format!("https://github.com/{}", profile.login),
-        github_id: profile.id,
-        exp: (now + chrono::Duration::days(30)).timestamp(),
+        user_url:   format!("https://github.com/{}", profile.login),
+        github_id:  profile.id,
+        exp:        (now + chrono::Duration::days(30)).timestamp(),
     };
 
     info!(login = %session.login, "OAuth login succeeded");
@@ -478,11 +476,11 @@ async fn auth_me(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Resp
         .is_some_and(|cookie| cookie.value() == "1");
     Json(AuthMeResponse {
         user: SessionUser {
-            login: session.login,
-            name: session.name,
-            email: session.email,
+            login:      session.login,
+            name:       session.name,
+            email:      session.email,
             avatar_url: session.avatar_url,
-            user_url: session.user_url,
+            user_url:   session.user_url,
         },
         provider: "github",
         demo_mode,
@@ -747,11 +745,11 @@ mod tests {
 
     fn sample_conversion() -> GitHubManifestConversion {
         GitHubManifestConversion {
-            id: 123,
-            slug: "fabro".to_string(),
-            client_id: "abc".to_string(),
-            client_secret: "shh".to_string(),
-            pem: String::new(),
+            id:             123,
+            slug:           "fabro".to_string(),
+            client_id:      "abc".to_string(),
+            client_secret:  "shh".to_string(),
+            pem:            String::new(),
             webhook_secret: None,
         }
     }

@@ -103,7 +103,7 @@ fn parse_event_metadata(body: &[u8]) -> (String, String) {
 
 /// A running webhook listener that can be shut down.
 pub struct WebhookListener {
-    port: u16,
+    port:        u16,
     shutdown_tx: oneshot::Sender<()>,
 }
 

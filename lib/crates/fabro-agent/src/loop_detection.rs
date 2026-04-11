@@ -103,12 +103,12 @@ mod tests {
 
     fn assistant_with_tool(name: &str, args: serde_json::Value) -> Turn {
         Turn::Assistant {
-            content: String::new(),
-            tool_calls: vec![ToolCall::new("call_1", name, args)],
+            content:        String::new(),
+            tool_calls:     vec![ToolCall::new("call_1", name, args)],
             provider_parts: vec![],
-            usage: Box::new(TokenCounts::default()),
-            response_id: "resp".into(),
-            timestamp: SystemTime::now(),
+            usage:          Box::new(TokenCounts::default()),
+            response_id:    "resp".into(),
+            timestamp:      SystemTime::now(),
         }
     }
 
@@ -266,15 +266,15 @@ mod tests {
     fn user_turns_are_ignored() {
         let mut history = History::default();
         history.push(Turn::User {
-            content: "hello".into(),
+            content:   "hello".into(),
             timestamp: SystemTime::now(),
         });
         history.push(Turn::User {
-            content: "hello".into(),
+            content:   "hello".into(),
             timestamp: SystemTime::now(),
         });
         history.push(Turn::User {
-            content: "hello".into(),
+            content:   "hello".into(),
             timestamp: SystemTime::now(),
         });
         assert!(!detect_loop(&history, 10));

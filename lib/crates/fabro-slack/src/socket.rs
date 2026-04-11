@@ -5,8 +5,8 @@ use serde_json::Value;
 pub struct SocketEnvelope {
     #[serde(rename = "type")]
     pub envelope_type: String,
-    pub envelope_id: Option<String>,
-    pub payload: Option<Value>,
+    pub envelope_id:   Option<String>,
+    pub payload:       Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -104,8 +104,8 @@ mod tests {
     fn classify_hello() {
         let envelope = SocketEnvelope {
             envelope_type: "hello".to_string(),
-            envelope_id: None,
-            payload: None,
+            envelope_id:   None,
+            payload:       None,
         };
         assert_eq!(classify_envelope(&envelope), SocketEventKind::Hello);
     }
@@ -114,8 +114,8 @@ mod tests {
     fn classify_interactive() {
         let envelope = SocketEnvelope {
             envelope_type: "interactive".to_string(),
-            envelope_id: Some("e1".to_string()),
-            payload: Some(serde_json::json!({"type": "block_actions"})),
+            envelope_id:   Some("e1".to_string()),
+            payload:       Some(serde_json::json!({"type": "block_actions"})),
         };
         assert_eq!(classify_envelope(&envelope), SocketEventKind::Interactive);
     }
@@ -124,8 +124,8 @@ mod tests {
     fn classify_events_api() {
         let envelope = SocketEnvelope {
             envelope_type: "events_api".to_string(),
-            envelope_id: Some("e2".to_string()),
-            payload: Some(serde_json::json!({"event": {}})),
+            envelope_id:   Some("e2".to_string()),
+            payload:       Some(serde_json::json!({"event": {}})),
         };
         assert_eq!(classify_envelope(&envelope), SocketEventKind::EventsApi);
     }
@@ -134,8 +134,8 @@ mod tests {
     fn classify_disconnect() {
         let envelope = SocketEnvelope {
             envelope_type: "disconnect".to_string(),
-            envelope_id: None,
-            payload: None,
+            envelope_id:   None,
+            payload:       None,
         };
         assert_eq!(classify_envelope(&envelope), SocketEventKind::Disconnect);
     }
@@ -144,8 +144,8 @@ mod tests {
     fn classify_unknown() {
         let envelope = SocketEnvelope {
             envelope_type: "something_else".to_string(),
-            envelope_id: None,
-            payload: None,
+            envelope_id:   None,
+            payload:       None,
         };
         assert_eq!(classify_envelope(&envelope), SocketEventKind::Unknown);
     }

@@ -9,9 +9,9 @@ use crate::pipeline::Validated;
 use crate::transforms::Transform;
 
 pub struct ValidateInput {
-    pub workflow: WorkflowInput,
-    pub settings: SettingsLayer,
-    pub cwd: PathBuf,
+    pub workflow:          WorkflowInput,
+    pub settings:          SettingsLayer,
+    pub cwd:               PathBuf,
     pub custom_transforms: Vec<Box<dyn Transform>>,
 }
 
@@ -23,7 +23,7 @@ pub fn validate(input: ValidateInput) -> Result<Validated, Error> {
     let resolved = resolve_workflow(ResolveWorkflowInput {
         workflow: input.workflow,
         settings: input.settings,
-        cwd: input.cwd,
+        cwd:      input.cwd,
     })
     .map_err(|err| Error::Parse(err.to_string()))?;
 

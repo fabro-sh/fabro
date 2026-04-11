@@ -24,7 +24,7 @@ pub fn resolve_file_ref(value: &str, current_dir: &Path, resolver: &dyn FileReso
 /// Inlines `@file` references in node prompts and the graph-level goal.
 pub struct FileInliningTransform {
     current_dir: PathBuf,
-    resolver: Arc<dyn FileResolver>,
+    resolver:    Arc<dyn FileResolver>,
 }
 
 impl FileInliningTransform {

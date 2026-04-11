@@ -14,12 +14,12 @@ pub enum Severity {
 /// A validation diagnostic produced by a lint rule.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Diagnostic {
-    pub rule: String,
+    pub rule:     String,
     pub severity: Severity,
-    pub message: String,
-    pub node_id: Option<String>,
-    pub edge: Option<(String, String)>,
-    pub fix: Option<String>,
+    pub message:  String,
+    pub node_id:  Option<String>,
+    pub edge:     Option<(String, String)>,
+    pub fix:      Option<String>,
 }
 
 /// A lint rule that validates a graph.
@@ -159,12 +159,12 @@ mod tests {
             }
             fn apply(&self, _graph: &Graph) -> Vec<Diagnostic> {
                 vec![Diagnostic {
-                    rule: "always_warn".to_string(),
+                    rule:     "always_warn".to_string(),
                     severity: Severity::Warning,
-                    message: "custom warning".to_string(),
-                    node_id: None,
-                    edge: None,
-                    fix: None,
+                    message:  "custom warning".to_string(),
+                    node_id:  None,
+                    edge:     None,
+                    fix:      None,
                 }]
             }
         }

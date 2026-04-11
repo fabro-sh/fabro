@@ -81,15 +81,12 @@ mod tests {
             start -> work -> exit
         }"#;
         let parsed = parse(dot).unwrap();
-        let transformed = transform(
-            parsed,
-            &TransformOptions {
-                current_dir: None,
-                file_resolver: None,
-                inputs: HashMap::new(),
-                custom_transforms: vec![],
-            },
-        )
+        let transformed = transform(parsed, &TransformOptions {
+            current_dir:       None,
+            file_resolver:     None,
+            inputs:            HashMap::new(),
+            custom_transforms: vec![],
+        })
         .unwrap();
         let prompt = transformed.graph.nodes["work"]
             .attrs
@@ -109,15 +106,12 @@ mod tests {
             start -> work -> exit
         }"#;
         let parsed = parse(dot).unwrap();
-        let transformed = transform(
-            parsed,
-            &TransformOptions {
-                current_dir: None,
-                file_resolver: None,
-                inputs: HashMap::new(),
-                custom_transforms: vec![],
-            },
-        )
+        let transformed = transform(parsed, &TransformOptions {
+            current_dir:       None,
+            file_resolver:     None,
+            inputs:            HashMap::new(),
+            custom_transforms: vec![],
+        })
         .unwrap();
         assert_eq!(
             transformed.graph.nodes["work"].attrs.get("model"),
@@ -140,15 +134,12 @@ mod tests {
             }"#,
         )
         .unwrap();
-        let transformed = transform(
-            parsed,
-            &TransformOptions {
-                current_dir: Some(dir.path().to_path_buf()),
-                file_resolver: Some(Arc::new(FilesystemFileResolver::new(None))),
-                inputs: HashMap::new(),
-                custom_transforms: vec![],
-            },
-        )
+        let transformed = transform(parsed, &TransformOptions {
+            current_dir:       Some(dir.path().to_path_buf()),
+            file_resolver:     Some(Arc::new(FilesystemFileResolver::new(None))),
+            inputs:            HashMap::new(),
+            custom_transforms: vec![],
+        })
         .unwrap();
 
         assert_eq!(
@@ -187,18 +178,15 @@ mod tests {
             }"#,
         )
         .unwrap();
-        let transformed = transform(
-            parsed,
-            &TransformOptions {
-                current_dir: Some(dir.path().to_path_buf()),
-                file_resolver: Some(Arc::new(FilesystemFileResolver::new(None))),
-                inputs: HashMap::from([(
-                    "task".to_string(),
-                    toml::Value::String("Launch".to_string()),
-                )]),
-                custom_transforms: vec![],
-            },
-        )
+        let transformed = transform(parsed, &TransformOptions {
+            current_dir:       Some(dir.path().to_path_buf()),
+            file_resolver:     Some(Arc::new(FilesystemFileResolver::new(None))),
+            inputs:            HashMap::from([(
+                "task".to_string(),
+                toml::Value::String("Launch".to_string()),
+            )]),
+            custom_transforms: vec![],
+        })
         .unwrap();
 
         let lint = &transformed.graph.nodes["validate.lint"];

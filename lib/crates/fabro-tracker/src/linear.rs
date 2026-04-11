@@ -11,7 +11,7 @@ const BLOCKS_RELATION_TYPE: &str = "blocks";
 
 #[derive(Clone, Debug)]
 pub struct LinearOptions {
-    pub api_key: String,
+    pub api_key:  String,
     pub endpoint: String,
 }
 
@@ -93,9 +93,9 @@ fn normalize_issue(node: &Value) -> Result<Issue, String> {
                 .filter_map(|rel| {
                     let issue = &rel["issue"];
                     Some(BlockerRef {
-                        id: issue["id"].as_str()?.to_string(),
+                        id:         issue["id"].as_str()?.to_string(),
                         identifier: issue["identifier"].as_str()?.to_string(),
-                        state: issue["state"]["name"].as_str()?.to_string(),
+                        state:      issue["state"]["name"].as_str()?.to_string(),
                     })
                 })
                 .collect()
@@ -154,8 +154,8 @@ fn extract_issues(response: &Value) -> Result<Vec<Issue>, String> {
 
 /// A `Tracker` implementation backed by Linear.
 pub struct LinearTracker {
-    config: LinearOptions,
-    client: reqwest::Client,
+    config:       LinearOptions,
+    client:       reqwest::Client,
     project_slug: String,
 }
 
@@ -361,27 +361,27 @@ mod tests {
 
     fn mock_config(server_url: &str) -> LinearOptions {
         LinearOptions {
-            api_key: "lin_api_test123".to_string(),
+            api_key:  "lin_api_test123".to_string(),
             endpoint: format!("{server_url}/graphql"),
         }
     }
 
     fn make_test_issue() -> Issue {
         Issue {
-            id: "issue-1".to_string(),
+            id:              "issue-1".to_string(),
             project_item_id: None,
-            identifier: "T-1".to_string(),
-            title: "Test".to_string(),
-            description: None,
-            priority: None,
-            state: "Todo".to_string(),
-            branch_name: None,
-            url: "https://linear.app/t".to_string(),
-            assignee_id: None,
-            labels: vec![],
-            blocked_by: vec![],
-            created_at: None,
-            updated_at: None,
+            identifier:      "T-1".to_string(),
+            title:           "Test".to_string(),
+            description:     None,
+            priority:        None,
+            state:           "Todo".to_string(),
+            branch_name:     None,
+            url:             "https://linear.app/t".to_string(),
+            assignee_id:     None,
+            labels:          vec![],
+            blocked_by:      vec![],
+            created_at:      None,
+            updated_at:      None,
         }
     }
 

@@ -15,13 +15,13 @@ use crate::user_config;
 
 #[derive(Debug, Serialize)]
 struct Inventory {
-    home_root: PathBuf,
-    storage_dir: PathBuf,
-    home_exists: bool,
-    home_size: u64,
-    server_running: bool,
-    shell_configs: Vec<PathBuf>,
-    binary_path: Option<PathBuf>,
+    home_root:         PathBuf,
+    storage_dir:       PathBuf,
+    home_exists:       bool,
+    home_size:         u64,
+    server_running:    bool,
+    shell_configs:     Vec<PathBuf>,
+    binary_path:       Option<PathBuf>,
     binary_is_managed: bool,
 }
 
@@ -203,12 +203,12 @@ fn print_preview(inventory: &Inventory) {
 
 #[derive(Debug, Serialize)]
 struct UninstallResult {
-    status: &'static str,
-    home_removed: bool,
-    server_stopped: bool,
+    status:                &'static str,
+    home_removed:          bool,
+    server_stopped:        bool,
     shell_configs_cleaned: Vec<PathBuf>,
-    binary_removed: bool,
-    binary_hint: Option<String>,
+    binary_removed:        bool,
+    binary_hint:           Option<String>,
 }
 
 fn execute_uninstall(inventory: &Inventory, json: bool) -> Result<()> {
@@ -217,12 +217,12 @@ fn execute_uninstall(inventory: &Inventory, json: bool) -> Result<()> {
     let bold = console::Style::new().bold();
     let mut critical_failure = false;
     let mut result = UninstallResult {
-        status: "completed",
-        home_removed: false,
-        server_stopped: false,
+        status:                "completed",
+        home_removed:          false,
+        server_stopped:        false,
         shell_configs_cleaned: Vec::new(),
-        binary_removed: false,
-        binary_hint: None,
+        binary_removed:        false,
+        binary_hint:           None,
     };
 
     // Unit 3a: Server stop

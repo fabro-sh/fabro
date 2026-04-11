@@ -28,9 +28,9 @@ pub fn parse_interaction(payload: &Value) -> Option<SlackAnswerSubmission> {
             SlackActionPayload::Yes { .. } => Answer::yes(),
             SlackActionPayload::No { .. } => Answer::no(),
             SlackActionPayload::Selected { key, .. } => Answer {
-                value: fabro_interview::AnswerValue::Selected(key),
+                value:           fabro_interview::AnswerValue::Selected(key),
                 selected_option: None,
-                text: None,
+                text:            None,
             },
             SlackActionPayload::SubmitMulti { .. } => return None,
         },

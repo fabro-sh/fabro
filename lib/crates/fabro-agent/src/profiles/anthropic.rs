@@ -251,12 +251,12 @@ mod tests {
         let profile = AnthropicProfile::new("claude-opus-4-6");
         let env = MockSandbox::linux();
         let ctx = EnvContext {
-            git_branch: Some("feature-branch".into()),
-            is_git_repo: true,
-            current_date: "2026-02-20".into(),
-            model: "claude-opus-4-6".into(),
-            knowledge_cutoff: "May 2025".into(),
-            git_status_short: None,
+            git_branch:         Some("feature-branch".into()),
+            is_git_repo:        true,
+            current_date:       "2026-02-20".into(),
+            model:              "claude-opus-4-6".into(),
+            knowledge_cutoff:   "May 2025".into(),
+            git_status_short:   None,
             git_recent_commits: None,
         };
         let prompt = profile.build_system_prompt(&env, &ctx, &[], None, &[]);

@@ -7,25 +7,25 @@ use serde::Deserialize;
 #[derive(Deserialize)]
 struct Config {
     allowlist: Option<GlobalAllowlist>,
-    rules: Vec<Rule>,
+    rules:     Vec<Rule>,
 }
 
 #[derive(Deserialize)]
 struct GlobalAllowlist {
-    regexes: Option<Vec<String>>,
+    regexes:   Option<Vec<String>>,
     stopwords: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Rule {
-    id: String,
-    regex: String,
+    id:          String,
+    regex:       String,
     #[serde(default)]
-    keywords: Vec<String>,
-    entropy: Option<f64>,
+    keywords:    Vec<String>,
+    entropy:     Option<f64>,
     #[serde(default)]
-    allowlist: Option<RuleAllowlist>,
+    allowlist:   Option<RuleAllowlist>,
     #[allow(dead_code)]
     description: Option<String>,
 }
@@ -33,8 +33,8 @@ struct Rule {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RuleAllowlist {
-    regexes: Option<Vec<String>>,
-    stopwords: Option<Vec<String>>,
+    regexes:      Option<Vec<String>>,
+    stopwords:    Option<Vec<String>>,
     regex_target: Option<String>,
 }
 

@@ -26,33 +26,33 @@ pub enum Command {
 #[derive(Debug, Clone)]
 pub struct DevcontainerSpec {
     /// Generated Dockerfile content
-    pub dockerfile: String,
+    pub dockerfile:           String,
     /// Directory for docker build context
-    pub build_context: PathBuf,
+    pub build_context:        PathBuf,
     /// Build arguments (docker build --build-arg)
-    pub build_args: HashMap<String, String>,
+    pub build_args:           HashMap<String, String>,
     /// Multi-stage build target (docker build --target)
-    pub build_target: Option<String>,
+    pub build_target:         Option<String>,
     /// Run on host before build
-    pub initialize_commands: Vec<Command>,
+    pub initialize_commands:  Vec<Command>,
     /// Run in container after first creation (before updateContentCommand)
-    pub on_create_commands: Vec<Command>,
+    pub on_create_commands:   Vec<Command>,
     /// Run in container after creation
     pub post_create_commands: Vec<Command>,
     /// Run in container on each start
-    pub post_start_commands: Vec<Command>,
+    pub post_start_commands:  Vec<Command>,
     /// remoteEnv merged
-    pub environment: HashMap<String, String>,
+    pub environment:          HashMap<String, String>,
     /// containerEnv — baked into Dockerfile as ENV directives
-    pub container_env: HashMap<String, String>,
-    pub remote_user: Option<String>,
+    pub container_env:        HashMap<String, String>,
+    pub remote_user:          Option<String>,
     /// default: /workspaces/{repo-name}
-    pub workspace_folder: String,
+    pub workspace_folder:     String,
     /// first = default preview port
-    pub forwarded_ports: Vec<u16>,
+    pub forwarded_ports:      Vec<u16>,
     /// Compose file paths (empty if not in compose mode)
-    pub compose_files: Vec<PathBuf>,
-    pub compose_service: Option<String>,
+    pub compose_files:        Vec<PathBuf>,
+    pub compose_service:      Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -65,7 +65,7 @@ pub enum DevcontainerError {
 
     #[error("reading file {path}: {source}")]
     ReadFile {
-        path: PathBuf,
+        path:   PathBuf,
         source: std::io::Error,
     },
 

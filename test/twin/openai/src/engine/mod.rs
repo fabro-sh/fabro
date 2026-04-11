@@ -19,10 +19,10 @@ pub fn execute_responses_request(
 ) -> Result<ExecutionOutcome, OpenAiError> {
     request.validate()?;
     let context = RequestContext {
-        endpoint: "responses".to_owned(),
-        model: request.model.clone(),
-        stream: request.stream,
-        metadata: request.metadata.clone(),
+        endpoint:   "responses".to_owned(),
+        model:      request.model.clone(),
+        stream:     request.stream,
+        metadata:   request.metadata.clone(),
         input_text: request.extract_user_text(),
     };
     state.log_request(namespace, context.clone());
@@ -39,7 +39,7 @@ pub fn execute_responses_request(
     Ok(ExecutionOutcome::Success(enforce_tool_choice(
         request.tool_choice_mode(),
         SuccessOutcome {
-            plan: build_default_response_plan(state.next_response_id(namespace), request),
+            plan:      build_default_response_plan(state.next_response_id(namespace), request),
             transport: TransportOptions::default(),
         },
     )?))
@@ -52,10 +52,10 @@ pub fn execute_chat_request(
 ) -> Result<ExecutionOutcome, OpenAiError> {
     request.validate()?;
     let context = RequestContext {
-        endpoint: "chat.completions".to_owned(),
-        model: request.model.clone(),
-        stream: request.stream,
-        metadata: serde_json::Map::new(),
+        endpoint:   "chat.completions".to_owned(),
+        model:      request.model.clone(),
+        stream:     request.stream,
+        metadata:   serde_json::Map::new(),
         input_text: request.extract_user_text(),
     };
     state.log_request(namespace, context.clone());
@@ -72,7 +72,7 @@ pub fn execute_chat_request(
     Ok(ExecutionOutcome::Success(enforce_tool_choice(
         request.tool_choice_mode(),
         SuccessOutcome {
-            plan: build_default_chat_plan(
+            plan:      build_default_chat_plan(
                 state.next_response_id(namespace),
                 request.model.clone(),
                 &request.extract_user_text(),

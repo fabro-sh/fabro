@@ -15,14 +15,14 @@ static RUN_LOG: OnceLock<RunLogWriter> = OnceLock::new();
 #[derive(Clone, Debug)]
 pub struct RunLogWriter {
     active: Arc<AtomicBool>,
-    file: Arc<Mutex<Option<BufWriter<std::fs::File>>>>,
+    file:   Arc<Mutex<Option<BufWriter<std::fs::File>>>>,
 }
 
 impl RunLogWriter {
     fn new() -> Self {
         Self {
             active: Arc::new(AtomicBool::new(false)),
-            file: Arc::new(Mutex::new(None)),
+            file:   Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -33,7 +33,7 @@ impl<'a> MakeWriter<'a> for RunLogWriter {
     fn make_writer(&'a self) -> Self::Writer {
         if self.active.load(Ordering::Relaxed) {
             RunLogGuard::Active {
-                buf: Vec::new(),
+                buf:  Vec::new(),
                 file: self.file.clone(),
             }
         } else {
@@ -46,7 +46,7 @@ impl<'a> MakeWriter<'a> for RunLogWriter {
 pub enum RunLogGuard {
     Inactive,
     Active {
-        buf: Vec<u8>,
+        buf:  Vec<u8>,
         file: Arc<Mutex<Option<BufWriter<std::fs::File>>>>,
     },
 }
