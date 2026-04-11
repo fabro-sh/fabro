@@ -64,9 +64,12 @@ pub(crate) async fn list_command(
 
     if filtered.is_empty() {
         if args.all {
-            eprintln!("No runs found.");
+            fabro_util::printerr!(printer, "No runs found.");
         } else {
-            eprintln!("No running processes found. Use -a to show all runs.");
+            fabro_util::printerr!(
+                printer,
+                "No running processes found. Use -a to show all runs."
+            );
         }
         return Ok(());
     }
