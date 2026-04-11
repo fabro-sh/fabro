@@ -11,16 +11,16 @@ use ulid::Ulid;
 
 use super::{EngineServices, Handler};
 use crate::context::{Context, keys};
-use crate::error::FabroError;
+use crate::error::Error;
 use crate::event::{Emitter, Event, StageScope};
 use crate::millis_u64;
 use crate::outcome::{Outcome, OutcomeExt};
 
 /// A choice derived from an outgoing edge.
 struct Choice {
-    key:   String,
+    key: String,
     label: String,
-    to:    String,
+    to: String,
 }
 
 /// Parse an accelerator key from a label.
@@ -69,7 +69,7 @@ fn parse_accelerator_key(label: &str) -> String {
 /// Blocks until a human selects an option derived from outgoing edges.
 pub struct HumanHandler {
     interviewer: Arc<dyn Interviewer>,
-    emitter:     Option<Arc<Emitter>>,
+    emitter: Option<Arc<Emitter>>,
 }
 
 impl HumanHandler {
@@ -103,7 +103,7 @@ impl Handler for HumanHandler {
         graph: &Graph,
         _run_dir: &Path,
         _services: &EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         let edges = graph.outgoing_edges(&node.id);
         let first_choice = edges.iter().find(|e| !e.freeform());
 
@@ -146,7 +146,7 @@ impl Handler for HumanHandler {
         graph: &Graph,
         _run_dir: &Path,
         services: &EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         // 1. Derive choices from outgoing edges
         let edges = graph.outgoing_edges(&node.id);
         let mut freeform_target: Option<String> = None;
@@ -176,7 +176,7 @@ impl Handler for HumanHandler {
         let options: Vec<QuestionOption> = choices
             .iter()
             .map(|c| QuestionOption {
-                key:   c.key.clone(),
+                key: c.key.clone(),
                 label: c.label.clone(),
             })
             .collect();
@@ -211,19 +211,19 @@ impl Handler for HumanHandler {
         self.emit(
             &services.emitter,
             &Event::InterviewStarted {
-                question_id:     question_id.clone(),
-                question:        question_text.clone(),
-                stage:           node.id.clone(),
-                question_type:   question.question_type.to_string(),
-                options:         question
+                question_id: question_id.clone(),
+                question: question_text.clone(),
+                stage: node.id.clone(),
+                question_type: question.question_type.to_string(),
+                options: question
                     .options
                     .iter()
                     .map(|option| InterviewOption {
-                        key:   option.key.clone(),
+                        key: option.key.clone(),
                         label: option.label.clone(),
                     })
                     .collect(),
-                allow_freeform:  question.allow_freeform,
+                allow_freeform: question.allow_freeform,
                 timeout_seconds: question.timeout_seconds,
                 context_display: question.context_display.clone(),
             },
@@ -238,8 +238,8 @@ impl Handler for HumanHandler {
                 &services.emitter,
                 &Event::InterviewTimeout {
                     question_id: question_id.clone(),
-                    question:    question_text,
-                    stage:       node.id.clone(),
+                    question: question_text,
+                    stage: node.id.clone(),
                     duration_ms: millis_u64(interview_start.elapsed()),
                 },
                 &stage_scope,
@@ -259,7 +259,7 @@ impl Handler for HumanHandler {
         }
 
         if answer.value == AnswerValue::Cancelled {
-            return Err(FabroError::Cancelled);
+            return Err(Error::Cancelled);
         }
 
         // 5. Handle unanswered / interrupted interview sessions.
@@ -269,15 +269,15 @@ impl Handler for HumanHandler {
                 .as_ref()
                 .is_some_and(|flag| flag.load(Ordering::SeqCst))
             {
-                return Err(FabroError::Cancelled);
+                return Err(Error::Cancelled);
             }
             self.emit(
                 &services.emitter,
                 &Event::InterviewInterrupted {
                     question_id: question_id.clone(),
-                    question:    question_text,
-                    stage:       node.id.clone(),
-                    reason:      "interrupted".to_string(),
+                    question: question_text,
+                    stage: node.id.clone(),
+                    reason: "interrupted".to_string(),
                     duration_ms: millis_u64(interview_start.elapsed()),
                 },
                 &stage_scope,
@@ -560,7 +560,7 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(matches!(error, FabroError::Cancelled));
+        assert!(matches!(error, Error::Cancelled));
     }
 
     #[tokio::test]

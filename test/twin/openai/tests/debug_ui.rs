@@ -216,7 +216,7 @@ async fn debug_routes_not_accessible_when_admin_disabled() {
         .expect("bind should succeed");
     let addr = listener.local_addr().expect("should have addr");
     let app = twin_openai::build_app_with_config(Config {
-        bind_addr:    "127.0.0.1:0".parse().expect("valid addr"),
+        bind_addr: "127.0.0.1:0".parse().expect("valid addr"),
         require_auth: false,
         enable_admin: false,
     });

@@ -17,7 +17,7 @@ pub trait EdgeSpec: Send + Sync + Clone {
 }
 
 pub struct EdgeSelection<G: Graph + ?Sized> {
-    pub edge:   G::Edge,
+    pub edge: G::Edge,
     pub reason: &'static str,
 }
 

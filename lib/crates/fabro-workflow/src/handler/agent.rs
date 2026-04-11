@@ -11,7 +11,7 @@ use fabro_types::RunId;
 
 use super::{EngineServices, Handler};
 use crate::context::{Context, WorkflowContext, keys};
-use crate::error::FabroError;
+use crate::error::Error;
 use crate::event::{Emitter, Event, StageScope};
 use crate::outcome::{
     BilledModelUsage, FailureCategory, FailureDetail, Outcome, OutcomeExt, StageStatus,
@@ -20,9 +20,9 @@ use crate::outcome::{
 /// Result from a `CodergenBackend` invocation.
 pub enum CodergenResult {
     Text {
-        text:              String,
-        usage:             Option<BilledModelUsage>,
-        files_touched:     Vec<String>,
+        text: String,
+        usage: Option<BilledModelUsage>,
+        files_touched: Vec<String>,
         last_file_touched: Option<String>,
     },
     Full(Outcome),
@@ -42,7 +42,7 @@ pub trait CodergenBackend: Send + Sync {
         emitter: &Arc<Emitter>,
         sandbox: &Arc<dyn Sandbox>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-    ) -> Result<CodergenResult, FabroError>;
+    ) -> Result<CodergenResult, Error>;
 
     /// Run a single LLM call with no tools (one_shot mode).
     async fn one_shot(
@@ -50,8 +50,8 @@ pub trait CodergenBackend: Send + Sync {
         _node: &Node,
         _prompt: &str,
         _system_prompt: Option<&str>,
-    ) -> Result<CodergenResult, FabroError> {
-        Err(FabroError::Validation(
+    ) -> Result<CodergenResult, Error> {
+        Err(Error::Validation(
             "one_shot mode not supported by this backend".into(),
         ))
     }
@@ -74,7 +74,7 @@ pub(crate) fn expand_variables(
     text: &str,
     graph: &Graph,
     inputs: &HashMap<String, toml::Value>,
-) -> Result<String, FabroError> {
+) -> Result<String, Error> {
     let ctx = TemplateContext::new()
         .with_goal(graph.goal())
         .with_inputs(inputs.clone());
@@ -224,7 +224,7 @@ impl Handler for AgentHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         Ok(simulate_llm_handler(node))
     }
 
@@ -235,7 +235,7 @@ impl Handler for AgentHandler {
         graph: &Graph,
         _run_dir: &Path,
         services: &EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         // 1. Build prompt (prepend fidelity preamble if present)
         let raw_prompt = node
             .prompt()
@@ -257,12 +257,12 @@ impl Handler for AgentHandler {
         let stage_scope = StageScope::for_handler(context, &node.id);
         services.emitter.emit_scoped(
             &Event::Prompt {
-                stage:    node.id.clone(),
-                visit:    stage_scope.visit,
-                text:     prompt.clone(),
-                mode:     Some("agent".to_string()),
+                stage: node.id.clone(),
+                visit: stage_scope.visit,
+                text: prompt.clone(),
+                mode: Some("agent".to_string()),
                 provider: prompt_provider,
-                model:    prompt_model,
+                model: prompt_model,
             },
             &stage_scope,
         );
@@ -272,7 +272,7 @@ impl Handler for AgentHandler {
         let run_id = context
             .run_id()
             .parse::<RunId>()
-            .map_err(|err| FabroError::handler(format!("invalid internal run_id: {err}")))?;
+            .map_err(|err| Error::handler(format!("invalid internal run_id: {err}")))?;
         let tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>> =
             services.hook_runner.as_ref().map(|hr| {
                 Arc::new(fabro_hooks::WorkflowToolHookCallback {
@@ -333,11 +333,11 @@ impl Handler for AgentHandler {
             .unwrap_or_default();
         services.emitter.emit_scoped(
             &Event::PromptCompleted {
-                node_id:  node.id.clone(),
+                node_id: node.id.clone(),
                 response: response_text.clone(),
-                model:    response_model,
+                model: response_model,
                 provider: response_provider,
-                billing:  stage_usage.clone(),
+                billing: stage_usage.clone(),
             },
             &stage_scope,
         );
@@ -601,13 +601,12 @@ mod tests {
                 _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn fabro_agent::Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            ) -> Result<CodergenResult, FabroError> {
+            ) -> Result<CodergenResult, Error> {
                 Ok(CodergenResult::Text {
-                    text:
-                        r#"Done. {"outcome": "success", "preferred_next_label": "approve"}"#
-                            .to_string(),
-                    usage:             None,
-                    files_touched:     Vec::new(),
+                    text: r#"Done. {"outcome": "success", "preferred_next_label": "approve"}"#
+                        .to_string(),
+                    usage: None,
+                    files_touched: Vec::new(),
                     last_file_touched: None,
                 })
             }
@@ -658,11 +657,11 @@ mod tests {
                 _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn fabro_agent::Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            ) -> Result<CodergenResult, FabroError> {
+            ) -> Result<CodergenResult, Error> {
                 Ok(CodergenResult::Text {
-                    text:              "Done writing results.".to_string(),
-                    usage:             None,
-                    files_touched:     vec!["results.md".to_string()],
+                    text: "Done writing results.".to_string(),
+                    usage: None,
+                    files_touched: vec!["results.md".to_string()],
                     last_file_touched: Some("results.md".to_string()),
                 })
             }
@@ -716,25 +715,25 @@ mod tests {
                 emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn fabro_agent::Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            ) -> Result<CodergenResult, FabroError> {
+            ) -> Result<CodergenResult, Error> {
                 let scope = StageScope::for_handler(context, &node.id);
                 emitter.emit_scoped(
                     &crate::event::Event::Agent {
-                        stage:             node.id.clone(),
-                        visit:             scope.visit,
-                        event:             fabro_agent::AgentEvent::SessionStarted {
+                        stage: node.id.clone(),
+                        visit: scope.visit,
+                        event: fabro_agent::AgentEvent::SessionStarted {
                             provider: Some("openai".to_string()),
-                            model:    Some("gpt-5.4".to_string()),
+                            model: Some("gpt-5.4".to_string()),
                         },
-                        session_id:        Some("session_123".to_string()),
+                        session_id: Some("session_123".to_string()),
                         parent_session_id: None,
                     },
                     &scope,
                 );
                 Ok(CodergenResult::Text {
-                    text:              "done".to_string(),
-                    usage:             None,
-                    files_touched:     Vec::new(),
+                    text: "done".to_string(),
+                    usage: None,
+                    files_touched: Vec::new(),
                     last_file_touched: None,
                 })
             }
@@ -827,12 +826,12 @@ mod tests {
                 _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            ) -> Result<CodergenResult, FabroError> {
+            ) -> Result<CodergenResult, Error> {
                 *self.captured_thread_id.lock().unwrap() = Some(thread_id.map(String::from));
                 Ok(CodergenResult::Text {
-                    text:              "ok".to_string(),
-                    usage:             None,
-                    files_touched:     Vec::new(),
+                    text: "ok".to_string(),
+                    usage: None,
+                    files_touched: Vec::new(),
                     last_file_touched: None,
                 })
             }
@@ -879,12 +878,12 @@ mod tests {
                 _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            ) -> Result<CodergenResult, FabroError> {
+            ) -> Result<CodergenResult, Error> {
                 *self.captured_thread_id.lock().unwrap() = Some(thread_id.map(String::from));
                 Ok(CodergenResult::Text {
-                    text:              "ok".to_string(),
-                    usage:             None,
-                    files_touched:     Vec::new(),
+                    text: "ok".to_string(),
+                    usage: None,
+                    files_touched: Vec::new(),
                     last_file_touched: None,
                 })
             }
@@ -926,8 +925,8 @@ mod tests {
                 _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            ) -> Result<CodergenResult, FabroError> {
-                Err(FabroError::handler("Request timed out".to_string()))
+            ) -> Result<CodergenResult, Error> {
+                Err(Error::handler("Request timed out".to_string()))
             }
         }
 
@@ -1069,8 +1068,8 @@ Some text in between.
                 _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            ) -> Result<CodergenResult, FabroError> {
-                Err(FabroError::Validation("bad config".to_string()))
+            ) -> Result<CodergenResult, Error> {
+                Err(Error::Validation("bad config".to_string()))
             }
         }
 
@@ -1107,12 +1106,12 @@ Some text in between.
                 _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            ) -> Result<CodergenResult, FabroError> {
+            ) -> Result<CodergenResult, Error> {
                 *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());
                 Ok(CodergenResult::Text {
-                    text:              "ok".to_string(),
-                    usage:             None,
-                    files_touched:     Vec::new(),
+                    text: "ok".to_string(),
+                    usage: None,
+                    files_touched: Vec::new(),
                     last_file_touched: None,
                 })
             }
@@ -1176,12 +1175,12 @@ Some text in between.
                 _emitter: &Arc<Emitter>,
                 _sandbox: &Arc<dyn Sandbox>,
                 _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-            ) -> Result<CodergenResult, FabroError> {
+            ) -> Result<CodergenResult, Error> {
                 *self.captured_prompt.lock().unwrap() = Some(prompt.to_string());
                 Ok(CodergenResult::Text {
-                    text:              "ok".to_string(),
-                    usage:             None,
-                    files_touched:     Vec::new(),
+                    text: "ok".to_string(),
+                    usage: None,
+                    files_touched: Vec::new(),
                     last_file_touched: None,
                 })
             }

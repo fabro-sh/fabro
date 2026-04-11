@@ -4,7 +4,7 @@ use fabro_graphviz::graph::{AttrValue, Graph};
 use fabro_template::{TemplateContext, render as render_template};
 
 use super::Transform;
-use crate::error::FabroError;
+use crate::error::Error;
 
 /// Expands `{{ goal }}` / `{{ inputs.* }}` across all string attributes.
 pub struct TemplateTransform {
@@ -15,7 +15,7 @@ impl TemplateTransform {
     fn render_attrs(
         attrs: &mut HashMap<String, AttrValue>,
         ctx: &TemplateContext,
-    ) -> Result<(), FabroError> {
+    ) -> Result<(), Error> {
         for value in attrs.values_mut() {
             if let AttrValue::String(text) = value {
                 *text = render_template(text, ctx)?;
@@ -24,7 +24,7 @@ impl TemplateTransform {
         Ok(())
     }
 
-    fn resolved_goal(&self, graph: &Graph) -> Result<String, FabroError> {
+    fn resolved_goal(&self, graph: &Graph) -> Result<String, Error> {
         let ctx = TemplateContext::new()
             .with_goal("{{ goal }}")
             .with_inputs(self.inputs.clone());
@@ -33,7 +33,7 @@ impl TemplateTransform {
 }
 
 impl Transform for TemplateTransform {
-    fn apply(&self, graph: Graph) -> Result<Graph, FabroError> {
+    fn apply(&self, graph: Graph) -> Result<Graph, Error> {
         let mut graph = graph;
         let resolved_goal = self.resolved_goal(&graph)?;
         let ctx = TemplateContext::new()
@@ -84,8 +84,8 @@ mod tests {
         graph.nodes.insert("plan".to_string(), node);
 
         graph.edges.push(Edge {
-            from:  "start".to_string(),
-            to:    "plan".to_string(),
+            from: "start".to_string(),
+            to: "plan".to_string(),
             attrs: HashMap::from([(
                 "label".to_string(),
                 AttrValue::String("{{ inputs.greeting }}".to_string()),

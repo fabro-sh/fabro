@@ -952,7 +952,7 @@ pub(crate) async fn run_install(args: &InstallArgs, globals: &GlobalArgs) -> Res
     if run_doctor {
         eprintln!();
         let doctor_args = DoctorArgs {
-            target:  ServerTargetArgs::default(),
+            target: ServerTargetArgs::default(),
             verbose: true,
         };
         let _ = doctor::run_doctor(&doctor_args, true, globals).await?;

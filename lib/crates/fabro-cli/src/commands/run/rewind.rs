@@ -22,9 +22,9 @@ use crate::shared::{color_if, print_json_pretty};
 
 #[derive(Serialize)]
 pub(crate) struct TimelineEntryJson {
-    ordinal:        usize,
-    node_name:      String,
-    visit:          usize,
+    ordinal: usize,
+    node_name: String,
+    visit: usize,
     run_commit_sha: Option<String>,
 }
 
@@ -54,11 +54,14 @@ pub(crate) async fn run(args: &RewindArgs, styles: &Styles, globals: &GlobalArgs
 
     let target = args.target.as_deref().unwrap().parse::<RewindTarget>()?;
 
-    rewind(&store, &RewindInput {
-        run_id,
-        target: target.clone(),
-        push: !args.no_push,
-    })?;
+    rewind(
+        &store,
+        &RewindInput {
+            run_id,
+            target: target.clone(),
+            push: !args.no_push,
+        },
+    )?;
     let entry = timeline.resolve(&target)?;
     reset_rewound_run_state(lookup.client(), &store, &run_id, entry).await?;
 
@@ -84,9 +87,9 @@ pub(crate) fn timeline_entries_json(timeline: &RunTimeline) -> Vec<TimelineEntry
         .entries
         .iter()
         .map(|entry| TimelineEntryJson {
-            ordinal:        entry.ordinal,
-            node_name:      entry.node_name.clone(),
-            visit:          entry.visit,
+            ordinal: entry.ordinal,
+            node_name: entry.node_name.clone(),
+            visit: entry.visit,
             run_commit_sha: entry.run_commit_sha.clone(),
         })
         .collect()

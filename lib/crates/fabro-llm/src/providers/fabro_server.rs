@@ -1,7 +1,7 @@
 use futures::stream;
 use tracing::{debug, error};
 
-use crate::error::{SdkError, error_from_status_code};
+use crate::error::{Error, error_from_status_code};
 use crate::provider::{ProviderAdapter, StreamEventStream};
 use crate::providers::common::LineReader;
 use crate::types::{FinishReason, Message, Request, Response, StreamEvent, TokenCounts};
@@ -10,8 +10,8 @@ use crate::types::{FinishReason, Message, Request, Response, StreamEvent, TokenC
 /// `/completions` endpoint, delegating to whatever real provider the server
 /// is configured with.
 pub struct Adapter {
-    client:        reqwest::Client,
-    base_url:      String,
+    client: reqwest::Client,
+    base_url: String,
     provider_name: String,
 }
 
@@ -35,16 +35,16 @@ impl Adapter {
 
 #[derive(serde::Deserialize)]
 struct ServerCompletionResponse {
-    id:          String,
-    model:       String,
-    message:     Message,
+    id: String,
+    model: String,
+    message: Message,
     stop_reason: String,
-    usage:       ServerUsage,
+    usage: ServerUsage,
 }
 
 #[derive(serde::Deserialize)]
 struct ServerUsage {
-    input_tokens:  i64,
+    input_tokens: i64,
     output_tokens: i64,
 }
 
@@ -63,10 +63,9 @@ fn map_stop_reason(reason: &str) -> FinishReason {
 
 /// Build the JSON request body by serializing the `Request` and injecting
 /// the `stream` flag.
-fn build_body(request: &Request, stream: bool) -> Result<serde_json::Value, SdkError> {
-    let mut body = serde_json::to_value(request).map_err(|e| {
-        SdkError::configuration_error(format!("failed to serialize request: {e}"), e)
-    })?;
+fn build_body(request: &Request, stream: bool) -> Result<serde_json::Value, Error> {
+    let mut body = serde_json::to_value(request)
+        .map_err(|e| Error::configuration_error(format!("failed to serialize request: {e}"), e))?;
     body["stream"] = serde_json::Value::Bool(stream);
     Ok(body)
 }
@@ -79,12 +78,12 @@ async fn send_request(
     url: &str,
     body: &serde_json::Value,
     provider: &str,
-) -> Result<reqwest::Response, SdkError> {
+) -> Result<reqwest::Response, Error> {
     let http_resp = client.post(url).json(body).send().await.map_err(|e| {
         if e.is_timeout() {
-            SdkError::request_timeout(e.to_string(), e)
+            Error::request_timeout(e.to_string(), e)
         } else {
-            SdkError::network(e.to_string(), e)
+            Error::network(e.to_string(), e)
         }
     })?;
 
@@ -118,7 +117,7 @@ impl ProviderAdapter for Adapter {
         &self.provider_name
     }
 
-    async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
+    async fn complete(&self, request: &Request) -> Result<Response, Error> {
         let url = format!("{}/completions", self.base_url);
         debug!(base_url = %url, provider = %self.provider_name, "Sending completion to fabro server");
 
@@ -128,11 +127,11 @@ impl ProviderAdapter for Adapter {
         let resp_body = http_resp
             .text()
             .await
-            .map_err(|e| SdkError::network(e.to_string(), e))?;
+            .map_err(|e| Error::network(e.to_string(), e))?;
 
         let server_resp: ServerCompletionResponse =
             serde_json::from_str(&resp_body).map_err(|e| {
-                SdkError::stream_error(format!("failed to parse completion response: {e}"), e)
+                Error::stream_error(format!("failed to parse completion response: {e}"), e)
             })?;
 
         let finish_reason = map_stop_reason(&server_resp.stop_reason);
@@ -153,7 +152,7 @@ impl ProviderAdapter for Adapter {
         })
     }
 
-    async fn stream(&self, request: &Request) -> Result<StreamEventStream, SdkError> {
+    async fn stream(&self, request: &Request) -> Result<StreamEventStream, Error> {
         let url = format!("{}/completions", self.base_url);
         debug!(base_url = %url, provider = %self.provider_name, "Sending completion to fabro server");
 
@@ -170,7 +169,7 @@ impl ProviderAdapter for Adapter {
                                     Ok(event) => return Some((Ok(event), reader)),
                                     Err(e) => {
                                         return Some((
-                                            Err(SdkError::stream_error(
+                                            Err(Error::stream_error(
                                                 format!("failed to parse stream event: {e}"),
                                                 e,
                                             )),
@@ -235,19 +234,19 @@ mod tests {
 
     fn make_request() -> Request {
         Request {
-            model:            "test-model".to_string(),
-            messages:         vec![Message::user("Hello")],
-            provider:         None,
-            tools:            None,
-            tool_choice:      None,
-            response_format:  None,
-            temperature:      None,
-            top_p:            None,
-            max_tokens:       None,
-            stop_sequences:   None,
+            model: "test-model".to_string(),
+            messages: vec![Message::user("Hello")],
+            provider: None,
+            tools: None,
+            tool_choice: None,
+            response_format: None,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            stop_sequences: None,
             reasoning_effort: None,
-            speed:            None,
-            metadata:         None,
+            speed: None,
+            metadata: None,
             provider_options: None,
         }
     }
@@ -354,7 +353,7 @@ data: {\"type\":\"text_delta\",\"delta\":\" world\",\"text_id\":null}\n\
 
         let err = adapter.complete(&make_request()).await.unwrap_err();
         match &err {
-            SdkError::Provider { kind, detail } => {
+            Error::Provider { kind, detail } => {
                 assert_eq!(*kind, ProviderErrorKind::Server);
                 assert_eq!(detail.status_code, Some(502));
             }
@@ -378,7 +377,7 @@ data: {\"type\":\"text_delta\",\"delta\":\" world\",\"text_id\":null}\n\
             panic!("expected error");
         };
         match &err {
-            SdkError::Provider { kind, detail } => {
+            Error::Provider { kind, detail } => {
                 assert_eq!(*kind, ProviderErrorKind::Server);
                 assert_eq!(detail.status_code, Some(502));
             }

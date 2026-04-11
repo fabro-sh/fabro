@@ -14,16 +14,16 @@ pub struct ScenarioEnvelope {
 #[derive(Clone, Debug, Deserialize)]
 pub struct Scenario {
     pub matcher: ScenarioMatcher,
-    pub script:  ScenarioScript,
+    pub script: ScenarioScript,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ScenarioMatcher {
-    pub endpoint:       String,
-    pub model:          Option<String>,
-    pub stream:         Option<bool>,
+    pub endpoint: String,
+    pub model: Option<String>,
+    pub stream: Option<bool>,
     #[serde(default)]
-    pub metadata:       Map<String, Value>,
+    pub metadata: Map<String, Value>,
     pub input_contains: Option<String>,
 }
 
@@ -31,21 +31,21 @@ pub struct ScenarioMatcher {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ScenarioScript {
     Success {
-        response_text:           Option<String>,
-        reasoning:               Option<Vec<String>>,
-        structured_output:       Option<Value>,
-        tool_calls:              Option<Vec<ToolCallTemplate>>,
+        response_text: Option<String>,
+        reasoning: Option<Vec<String>>,
+        structured_output: Option<Value>,
+        tool_calls: Option<Vec<ToolCallTemplate>>,
         delay_before_headers_ms: Option<u64>,
-        inter_event_delay_ms:    Option<u64>,
-        close_after_chunks:      Option<usize>,
-        malformed_sse:           Option<bool>,
+        inter_event_delay_ms: Option<u64>,
+        close_after_chunks: Option<usize>,
+        malformed_sse: Option<bool>,
     },
     Error {
-        status:                  u16,
-        message:                 String,
-        error_type:              String,
-        code:                    String,
-        retry_after:             Option<String>,
+        status: u16,
+        message: String,
+        error_type: String,
+        code: String,
+        retry_after: Option<String>,
         delay_before_headers_ms: Option<u64>,
     },
     Hang {
@@ -55,17 +55,17 @@ pub enum ScenarioScript {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ToolCallTemplate {
-    pub id:        Option<String>,
-    pub name:      String,
+    pub id: Option<String>,
+    pub name: String,
     pub arguments: Value,
 }
 
 #[derive(Clone, Debug)]
 pub struct RequestContext {
-    pub endpoint:   String,
-    pub model:      String,
-    pub stream:     bool,
-    pub metadata:   Map<String, Value>,
+    pub endpoint: String,
+    pub model: String,
+    pub stream: bool,
+    pub metadata: Map<String, Value>,
     pub input_text: String,
 }
 
@@ -127,7 +127,7 @@ impl Scenario {
                 close_after_chunks,
                 malformed_sse,
             } => ExecutionOutcome::Success(SuccessOutcome {
-                plan:      build_plan_from_script(
+                plan: build_plan_from_script(
                     response_number,
                     request.model.clone(),
                     &request.extract_user_text(),
@@ -138,9 +138,9 @@ impl Scenario {
                 ),
                 transport: TransportOptions {
                     delay_before_headers_ms: delay_before_headers_ms.unwrap_or_default(),
-                    inter_event_delay_ms:    inter_event_delay_ms.unwrap_or_default(),
-                    close_after_chunks:      *close_after_chunks,
-                    malformed_sse:           malformed_sse.unwrap_or(false),
+                    inter_event_delay_ms: inter_event_delay_ms.unwrap_or_default(),
+                    close_after_chunks: *close_after_chunks,
+                    malformed_sse: malformed_sse.unwrap_or(false),
                 },
             }),
             ScenarioScript::Error {
@@ -182,7 +182,7 @@ impl Scenario {
                 close_after_chunks,
                 malformed_sse,
             } => ExecutionOutcome::Success(SuccessOutcome {
-                plan:      build_plan_from_script(
+                plan: build_plan_from_script(
                     response_number,
                     request.model.clone(),
                     &request.extract_user_text(),
@@ -193,9 +193,9 @@ impl Scenario {
                 ),
                 transport: TransportOptions {
                     delay_before_headers_ms: delay_before_headers_ms.unwrap_or_default(),
-                    inter_event_delay_ms:    inter_event_delay_ms.unwrap_or_default(),
-                    close_after_chunks:      *close_after_chunks,
-                    malformed_sse:           malformed_sse.unwrap_or(false),
+                    inter_event_delay_ms: inter_event_delay_ms.unwrap_or_default(),
+                    close_after_chunks: *close_after_chunks,
+                    malformed_sse: malformed_sse.unwrap_or(false),
                 },
             }),
             ScenarioScript::Error {
@@ -249,10 +249,10 @@ fn build_plan_from_script(
             .into_iter()
             .enumerate()
             .map(|(index, tool_call)| ToolCallPlan {
-                id:        tool_call
+                id: tool_call
                     .id
                     .unwrap_or_else(|| format!("call_{response_number}_{index}")),
-                name:      tool_call.name,
+                name: tool_call.name,
                 arguments: tool_call.arguments,
             })
             .collect(),

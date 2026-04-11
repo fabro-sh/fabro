@@ -4,7 +4,7 @@ use std::sync::Arc;
 use fabro_graphviz::graph::{AttrValue, Graph};
 
 use super::Transform;
-use crate::error::FabroError;
+use crate::error::Error;
 use crate::file_resolver::FileResolver;
 
 /// Resolve a potential `@path` file reference.
@@ -24,7 +24,7 @@ pub fn resolve_file_ref(value: &str, current_dir: &Path, resolver: &dyn FileReso
 /// Inlines `@file` references in node prompts and the graph-level goal.
 pub struct FileInliningTransform {
     current_dir: PathBuf,
-    resolver:    Arc<dyn FileResolver>,
+    resolver: Arc<dyn FileResolver>,
 }
 
 impl FileInliningTransform {
@@ -38,7 +38,7 @@ impl FileInliningTransform {
 }
 
 impl Transform for FileInliningTransform {
-    fn apply(&self, graph: Graph) -> Result<Graph, FabroError> {
+    fn apply(&self, graph: Graph) -> Result<Graph, Error> {
         let mut graph = graph;
 
         // Inline @file refs in node prompts

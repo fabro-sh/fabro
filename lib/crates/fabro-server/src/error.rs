@@ -3,6 +3,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 
+use crate::secret_store::SecretStoreError;
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
@@ -21,7 +23,7 @@ pub enum Error {
     Config(#[from] fabro_config::Error),
 
     #[error(transparent)]
-    SecretStore(#[from] crate::secret_store::SecretStoreError),
+    SecretStore(#[from] SecretStoreError),
 
     #[error("bad request: {0}")]
     BadRequest(String),
@@ -53,7 +55,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Serialize)]
 struct ErrorEntry {
     status: String,
-    title:  String,
+    title: String,
     detail: String,
 }
 

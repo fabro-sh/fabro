@@ -11,12 +11,12 @@ use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::run_state::EventProjectionCache;
-use crate::{EventEnvelope, EventPayload, Result, RunProjection, RunSummary, StoreError, keys};
+use crate::{Error, EventEnvelope, EventPayload, Result, RunProjection, RunSummary, keys};
 
 const DEFAULT_EVENT_TAIL_LIMIT: usize = 1024;
 #[derive(Clone)]
 pub struct RunDatabase {
-    inner:     Arc<RunDatabaseInner>,
+    inner: Arc<RunDatabaseInner>,
     read_only: bool,
 }
 
@@ -30,15 +30,15 @@ impl std::fmt::Debug for RunDatabase {
 }
 
 pub(crate) struct RunDatabaseInner {
-    run_id:             RunId,
-    db:                 Db,
-    event_seq:          AtomicU32,
-    close_lock:         Mutex<()>,
-    state_lock:         Mutex<()>,
-    projection_cache:   Mutex<EventProjectionCache>,
-    recent_events:      Mutex<VecDeque<EventEnvelope>>,
+    run_id: RunId,
+    db: Db,
+    event_seq: AtomicU32,
+    close_lock: Mutex<()>,
+    state_lock: Mutex<()>,
+    projection_cache: Mutex<EventProjectionCache>,
+    recent_events: Mutex<VecDeque<EventEnvelope>>,
     recent_event_limit: usize,
-    event_tx:           broadcast::Sender<EventEnvelope>,
+    event_tx: broadcast::Sender<EventEnvelope>,
 }
 
 impl RunDatabase {
@@ -51,7 +51,7 @@ impl RunDatabase {
         .await?;
         let (event_tx, _) = broadcast::channel(DEFAULT_EVENT_TAIL_LIMIT.max(16));
         Ok(Self {
-            inner:     Arc::new(RunDatabaseInner {
+            inner: Arc::new(RunDatabaseInner {
                 run_id,
                 db,
                 event_seq: AtomicU32::new(event_seq),
@@ -75,7 +75,7 @@ impl RunDatabase {
         .await?;
         let (event_tx, _) = broadcast::channel(DEFAULT_EVENT_TAIL_LIMIT.max(16));
         Ok(Self {
-            inner:     Arc::new(RunDatabaseInner {
+            inner: Arc::new(RunDatabaseInner {
                 run_id,
                 db,
                 event_seq: AtomicU32::new(event_seq),
@@ -99,7 +99,7 @@ impl RunDatabase {
 
     pub(crate) fn read_only_clone(&self) -> Self {
         Self {
-            inner:     Arc::clone(&self.inner),
+            inner: Arc::clone(&self.inner),
             read_only: true,
         }
     }
@@ -196,7 +196,7 @@ impl RunDatabase {
 impl RunDatabase {
     pub async fn append_event(&self, payload: &EventPayload) -> Result<u32> {
         if self.read_only {
-            return Err(StoreError::ReadOnly);
+            return Err(Error::ReadOnly);
         }
         payload.validate(&self.inner.run_id)?;
         let _state_guard = self.inner.state_lock.lock().await;
@@ -292,7 +292,7 @@ impl RunDatabase {
 
     pub async fn write_blob(&self, data: &[u8]) -> Result<RunBlobId> {
         if self.read_only {
-            return Err(StoreError::ReadOnly);
+            return Err(Error::ReadOnly);
         }
         let id = RunBlobId::new(data);
         self.inner.db.put(keys::blob_key(&id), data).await?;
@@ -389,7 +389,7 @@ where
 
 fn key_to_string(key: &Bytes) -> Result<String> {
     String::from_utf8(key.to_vec())
-        .map_err(|err| StoreError::Other(format!("stored key is not valid UTF-8: {err}")))
+        .map_err(|err| Error::Other(format!("stored key is not valid UTF-8: {err}")))
 }
 
 #[cfg(test)]

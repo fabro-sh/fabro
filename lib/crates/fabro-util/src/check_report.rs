@@ -30,22 +30,22 @@ impl CheckDetail {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CheckResult {
-    pub name:        String,
-    pub status:      CheckStatus,
-    pub summary:     String,
-    pub details:     Vec<CheckDetail>,
+    pub name: String,
+    pub status: CheckStatus,
+    pub summary: String,
+    pub details: Vec<CheckDetail>,
     pub remediation: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CheckSection {
-    pub title:  String,
+    pub title: String,
     pub checks: Vec<CheckResult>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CheckReport {
-    pub title:    String,
+    pub title: String,
     pub sections: Vec<CheckSection>,
 }
 
@@ -195,37 +195,37 @@ mod tests {
 
     fn pass_check(name: &str) -> CheckResult {
         CheckResult {
-            name:        name.to_string(),
-            status:      CheckStatus::Pass,
-            summary:     "all good".to_string(),
-            details:     vec![CheckDetail::new("everything is fine".to_string())],
+            name: name.to_string(),
+            status: CheckStatus::Pass,
+            summary: "all good".to_string(),
+            details: vec![CheckDetail::new("everything is fine".to_string())],
             remediation: None,
         }
     }
 
     fn warning_check(name: &str) -> CheckResult {
         CheckResult {
-            name:        name.to_string(),
-            status:      CheckStatus::Warning,
-            summary:     "not configured".to_string(),
-            details:     vec![CheckDetail::new("missing something".to_string())],
+            name: name.to_string(),
+            status: CheckStatus::Warning,
+            summary: "not configured".to_string(),
+            details: vec![CheckDetail::new("missing something".to_string())],
             remediation: Some("fix it".to_string()),
         }
     }
 
     fn error_check(name: &str) -> CheckResult {
         CheckResult {
-            name:        name.to_string(),
-            status:      CheckStatus::Error,
-            summary:     "broken".to_string(),
-            details:     vec![CheckDetail::new("something is wrong".to_string())],
+            name: name.to_string(),
+            status: CheckStatus::Error,
+            summary: "broken".to_string(),
+            details: vec![CheckDetail::new("something is wrong".to_string())],
             remediation: Some("repair it".to_string()),
         }
     }
 
     fn report(checks: Vec<CheckResult>) -> CheckReport {
         CheckReport {
-            title:    "Test Report".into(),
+            title: "Test Report".into(),
             sections: vec![CheckSection {
                 title: String::new(),
                 checks,
@@ -410,9 +410,9 @@ mod tests {
     #[test]
     fn render_uses_custom_title() {
         let r = CheckReport {
-            title:    "My Custom Title".into(),
+            title: "My Custom Title".into(),
             sections: vec![CheckSection {
-                title:  String::new(),
+                title: String::new(),
                 checks: vec![pass_check("Test")],
             }],
         };
@@ -431,10 +431,10 @@ mod tests {
     #[test]
     fn render_truncates_long_detail_lines() {
         let r = report(vec![CheckResult {
-            name:        "Test".into(),
-            status:      CheckStatus::Pass,
-            summary:     "ok".into(),
-            details:     vec![CheckDetail::new(
+            name: "Test".into(),
+            status: CheckStatus::Pass,
+            summary: "ok".into(),
+            details: vec![CheckDetail::new(
                 "This is a very long detail line for test".into(),
             )],
             remediation: None,
@@ -454,10 +454,10 @@ mod tests {
     #[test]
     fn render_no_truncation_when_fits() {
         let r = report(vec![CheckResult {
-            name:        "Test".into(),
-            status:      CheckStatus::Pass,
-            summary:     "ok".into(),
-            details:     vec![CheckDetail::new("short".into())],
+            name: "Test".into(),
+            status: CheckStatus::Pass,
+            summary: "ok".into(),
+            details: vec![CheckDetail::new("short".into())],
             remediation: None,
         }]);
         let out = r.render(&Styles::new(false), true, None, Some(80));
@@ -470,10 +470,10 @@ mod tests {
     #[test]
     fn render_warn_detail_uses_red() {
         let r = report(vec![CheckResult {
-            name:        "Repo".into(),
-            status:      CheckStatus::Pass,
-            summary:     "ok".into(),
-            details:     vec![CheckDetail {
+            name: "Repo".into(),
+            status: CheckStatus::Pass,
+            summary: "ok".into(),
+            details: vec![CheckDetail {
                 text: "Git clean: false".into(),
                 warn: true,
             }],

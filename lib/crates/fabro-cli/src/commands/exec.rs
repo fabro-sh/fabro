@@ -38,7 +38,7 @@ fn runtime_mcp_server(name: &str, entry: &McpEntryLayer) -> McpServerSettings {
             }
         }
         McpEntryLayer::Http { url, headers, .. } => McpTransport::Http {
-            url:     url.as_source(),
+            url: url.as_source(),
             headers: headers
                 .iter()
                 .map(|(key, value)| (key.clone(), value.as_source()))
@@ -146,10 +146,10 @@ pub(crate) async fn execute(mut args: ExecArgs, globals: &GlobalArgs) -> Result<
             .mcps
             .values()
             .map(|server| McpServerSettings {
-                name:                 server.name.clone(),
-                transport:            server.transport.clone(),
+                name: server.name.clone(),
+                transport: server.transport.clone(),
                 startup_timeout_secs: server.startup_timeout_secs,
-                tool_timeout_secs:    server.tool_timeout_secs,
+                tool_timeout_secs: server.tool_timeout_secs,
             })
             .collect()
     } else if let Some(mcps) = cli_settings
@@ -171,10 +171,10 @@ pub(crate) async fn execute(mut args: ExecArgs, globals: &GlobalArgs) -> Result<
                     .mcps
                     .values()
                     .map(|server| McpServerSettings {
-                        name:                 server.name.clone(),
-                        transport:            server.transport.clone(),
+                        name: server.name.clone(),
+                        transport: server.transport.clone(),
                         startup_timeout_secs: server.startup_timeout_secs,
-                        tool_timeout_secs:    server.tool_timeout_secs,
+                        tool_timeout_secs: server.tool_timeout_secs,
                     })
                     .collect()
             })

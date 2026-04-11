@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use fabro_agent::Sandbox;
-use fabro_core::error::{CoreError, Result as CoreResult};
+use fabro_core::error::{Error as CoreError, Result as CoreResult};
 use fabro_core::graph::NodeSpec;
 use fabro_core::lifecycle::{EdgeContext, EdgeDecision, NodeDecision, RunLifecycle};
 use fabro_core::state::ExecutionState;
@@ -29,11 +29,11 @@ struct IncomingEdgeData {
 /// Sub-lifecycle responsible for fidelity/thread resolution and context key
 /// setup.
 pub(crate) struct FidelityLifecycle {
-    pub graph:                  Arc<GvGraph>,
-    pub sandbox:                Arc<dyn Sandbox>,
-    pub run_store:              RunStoreHandle,
-    pub run_dir:                PathBuf,
-    incoming_edge_data:         Mutex<Option<IncomingEdgeData>>,
+    pub graph: Arc<GvGraph>,
+    pub sandbox: Arc<dyn Sandbox>,
+    pub run_store: RunStoreHandle,
+    pub run_dir: PathBuf,
+    incoming_edge_data: Mutex<Option<IncomingEdgeData>>,
     /// True on the first node after checkpoint resume when prior fidelity was
     /// Full.
     degrade_fidelity_on_resume: Mutex<bool>,

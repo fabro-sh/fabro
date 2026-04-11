@@ -16,7 +16,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
             tracing::warn!(error = %e, "Could not load run state, skipping retro");
             if let Some(ref emitter) = options.emitter {
                 emitter.emit(&Event::RetroFailed {
-                    error:       e.to_string(),
+                    error: e.to_string(),
                     duration_ms: 0,
                 });
             }
@@ -27,7 +27,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
         tracing::warn!("Could not load checkpoint, skipping retro");
         if let Some(ref emitter) = options.emitter {
             emitter.emit(&Event::RetroFailed {
-                error:       "checkpoint not found".to_string(),
+                error: "checkpoint not found".to_string(),
                 duration_ms: 0,
             });
         }
@@ -55,9 +55,9 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
     let retro_prompt = build_retro_prompt(RETRO_DATA_DIR);
     if let Some(ref emitter) = options.emitter {
         emitter.emit(&Event::RetroStarted {
-            prompt:   Some(retro_prompt),
+            prompt: Some(retro_prompt),
             provider: Some(options.provider.as_str().to_string()),
-            model:    Some(options.model.clone()),
+            model: Some(options.model.clone()),
         });
     }
 
@@ -71,10 +71,10 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
                     emitter.touch();
                     if !event.event.is_streaming_noise() {
                         emitter.emit(&Event::Agent {
-                            stage:             "retro".to_string(),
-                            visit:             1,
-                            event:             event.event.clone(),
-                            session_id:        Some(event.session_id.clone()),
+                            stage: "retro".to_string(),
+                            visit: 1,
+                            event: event.event.clone(),
+                            session_id: Some(event.session_id.clone()),
                             parent_session_id: event.parent_session_id.clone(),
                         });
                     }
@@ -86,7 +86,7 @@ pub async fn run_retro(options: &RetroOptions, dry_run: bool) -> Option<Retro> {
                 tracing::warn!(error = %err, "Could not load events from store, skipping retro");
                 if let Some(ref emitter) = options.emitter {
                     emitter.emit(&Event::RetroFailed {
-                        error:       err.to_string(),
+                        error: err.to_string(),
                         duration_ms: 0,
                     });
                 }
@@ -232,63 +232,71 @@ mod tests {
         let inner = test_store().create_run(&test_run_id()).await.unwrap();
         let run_store = inner;
         let run_record = RunRecord {
-            run_id:            test_run_id(),
-            settings:          SettingsLayer::default(),
-            graph:             Graph::new("test"),
-            workflow_slug:     None,
+            run_id: test_run_id(),
+            settings: SettingsLayer::default(),
+            graph: Graph::new("test"),
+            workflow_slug: None,
             working_directory: run_dir.to_path_buf(),
-            host_repo_path:    None,
-            repo_origin_url:   None,
-            base_branch:       None,
-            labels:            std::collections::HashMap::new(),
-            provenance:        None,
-            manifest_blob:     None,
-            definition_blob:   None,
+            host_repo_path: None,
+            repo_origin_url: None,
+            base_branch: None,
+            labels: std::collections::HashMap::new(),
+            provenance: None,
+            manifest_blob: None,
+            definition_blob: None,
         };
-        append_event(&run_store, &test_run_id(), &Event::RunCreated {
-            run_id:            test_run_id(),
-            settings:          serde_json::to_value(&run_record.settings).unwrap(),
-            graph:             serde_json::to_value(&run_record.graph).unwrap(),
-            workflow_source:   None,
-            workflow_config:   None,
-            labels:            run_record.labels.clone().into_iter().collect(),
-            run_dir:           run_dir.to_string_lossy().to_string(),
-            working_directory: run_dir.to_string_lossy().to_string(),
-            host_repo_path:    None,
-            repo_origin_url:   run_record.repo_origin_url.clone(),
-            base_branch:       None,
-            workflow_slug:     None,
-            db_prefix:         None,
-            provenance:        run_record.provenance.clone(),
-            manifest_blob:     None,
-        })
+        append_event(
+            &run_store,
+            &test_run_id(),
+            &Event::RunCreated {
+                run_id: test_run_id(),
+                settings: serde_json::to_value(&run_record.settings).unwrap(),
+                graph: serde_json::to_value(&run_record.graph).unwrap(),
+                workflow_source: None,
+                workflow_config: None,
+                labels: run_record.labels.clone().into_iter().collect(),
+                run_dir: run_dir.to_string_lossy().to_string(),
+                working_directory: run_dir.to_string_lossy().to_string(),
+                host_repo_path: None,
+                repo_origin_url: run_record.repo_origin_url.clone(),
+                base_branch: None,
+                workflow_slug: None,
+                db_prefix: None,
+                provenance: run_record.provenance.clone(),
+                manifest_blob: None,
+            },
+        )
         .await
         .unwrap();
-        append_event(&run_store, &test_run_id(), &Event::CheckpointCompleted {
-            node_id: checkpoint.current_node.clone(),
-            status: "success".to_string(),
-            current_node: checkpoint.current_node.clone(),
-            completed_nodes: checkpoint.completed_nodes.clone(),
-            node_retries: checkpoint.node_retries.clone().into_iter().collect(),
-            context_values: checkpoint.context_values.clone().into_iter().collect(),
-            node_outcomes: checkpoint.node_outcomes.clone().into_iter().collect(),
-            next_node_id: checkpoint.next_node_id.clone(),
-            git_commit_sha: checkpoint.git_commit_sha.clone(),
-            loop_failure_signatures: checkpoint
-                .loop_failure_signatures
-                .clone()
-                .into_iter()
-                .map(|(signature, count)| (signature.to_string(), count))
-                .collect(),
-            restart_failure_signatures: checkpoint
-                .restart_failure_signatures
-                .clone()
-                .into_iter()
-                .map(|(signature, count)| (signature.to_string(), count))
-                .collect(),
-            node_visits: checkpoint.node_visits.clone().into_iter().collect(),
-            diff: None,
-        })
+        append_event(
+            &run_store,
+            &test_run_id(),
+            &Event::CheckpointCompleted {
+                node_id: checkpoint.current_node.clone(),
+                status: "success".to_string(),
+                current_node: checkpoint.current_node.clone(),
+                completed_nodes: checkpoint.completed_nodes.clone(),
+                node_retries: checkpoint.node_retries.clone().into_iter().collect(),
+                context_values: checkpoint.context_values.clone().into_iter().collect(),
+                node_outcomes: checkpoint.node_outcomes.clone().into_iter().collect(),
+                next_node_id: checkpoint.next_node_id.clone(),
+                git_commit_sha: checkpoint.git_commit_sha.clone(),
+                loop_failure_signatures: checkpoint
+                    .loop_failure_signatures
+                    .clone()
+                    .into_iter()
+                    .map(|(signature, count)| (signature.to_string(), count))
+                    .collect(),
+                restart_failure_signatures: checkpoint
+                    .restart_failure_signatures
+                    .clone()
+                    .into_iter()
+                    .map(|(signature, count)| (signature.to_string(), count))
+                    .collect(),
+                node_visits: checkpoint.node_visits.clone().into_iter().collect(),
+                diff: None,
+            },
+        )
         .await
         .unwrap();
         run_store
@@ -296,17 +304,17 @@ mod tests {
 
     fn test_run_options(run_dir: &std::path::Path) -> RunOptions {
         RunOptions {
-            settings:         SettingsLayer::default(),
-            run_dir:          run_dir.to_path_buf(),
-            cancel_token:     None,
-            run_id:           test_run_id(),
-            labels:           HashMap::new(),
-            workflow_slug:    None,
-            github_app:       None,
-            host_repo_path:   None,
-            base_branch:      None,
+            settings: SettingsLayer::default(),
+            run_dir: run_dir.to_path_buf(),
+            cancel_token: None,
+            run_id: test_run_id(),
+            labels: HashMap::new(),
+            workflow_slug: None,
+            github_app: None,
+            host_repo_path: None,
+            base_branch: None,
             display_base_sha: None,
-            git:              None,
+            git: None,
         }
     }
 
@@ -325,35 +333,38 @@ mod tests {
             std::env::current_dir().unwrap(),
         ));
         let executed = Executed {
-            graph:         Graph::new("test"),
-            outcome:       Ok(crate::outcome::Outcome::success()),
-            run_options:   test_run_options(&run_dir),
-            run_store:     run_store.clone().into(),
-            hook_runner:   None,
-            emitter:       Arc::clone(&emitter),
-            sandbox:       Arc::clone(&sandbox),
-            duration_ms:   1,
+            graph: Graph::new("test"),
+            outcome: Ok(crate::outcome::Outcome::success()),
+            run_options: test_run_options(&run_dir),
+            run_store: run_store.clone().into(),
+            hook_runner: None,
+            emitter: Arc::clone(&emitter),
+            sandbox: Arc::clone(&sandbox),
+            duration_ms: 1,
             final_context: Context::new(),
-            llm_client:    None,
-            model:         "test-model".to_string(),
-            provider:      fabro_llm::Provider::Anthropic,
+            llm_client: None,
+            model: "test-model".to_string(),
+            provider: fabro_llm::Provider::Anthropic,
         };
 
-        let retroed = retro(executed, &RetroOptions {
-            run_id: test_run_id(),
-            run_store: run_store.into(),
-            workflow_name: "test".to_string(),
-            goal: "Ship it".to_string(),
-            run_dir: run_dir.clone(),
-            sandbox,
-            emitter: Some(emitter),
-            failed: false,
-            run_duration_ms: 1,
-            enabled: true,
-            llm_client: None,
-            provider: fabro_llm::Provider::Anthropic,
-            model: "test-model".to_string(),
-        })
+        let retroed = retro(
+            executed,
+            &RetroOptions {
+                run_id: test_run_id(),
+                run_store: run_store.into(),
+                workflow_name: "test".to_string(),
+                goal: "Ship it".to_string(),
+                run_dir: run_dir.clone(),
+                sandbox,
+                emitter: Some(emitter),
+                failed: false,
+                run_duration_ms: 1,
+                enabled: true,
+                llm_client: None,
+                provider: fabro_llm::Provider::Anthropic,
+                model: "test-model".to_string(),
+            },
+        )
         .await;
         store_logger.flush().await;
 
@@ -376,21 +387,21 @@ mod tests {
 
         let retro = run_retro(
             &RetroOptions {
-                run_id:          test_run_id(),
-                run_store:       test_run_store(&run_dir, &checkpoint).await.into(),
-                workflow_name:   "test".to_string(),
-                goal:            "Ship it".to_string(),
-                run_dir:         run_dir.clone(),
-                sandbox:         Arc::new(fabro_agent::LocalSandbox::new(
+                run_id: test_run_id(),
+                run_store: test_run_store(&run_dir, &checkpoint).await.into(),
+                workflow_name: "test".to_string(),
+                goal: "Ship it".to_string(),
+                run_dir: run_dir.clone(),
+                sandbox: Arc::new(fabro_agent::LocalSandbox::new(
                     std::env::current_dir().unwrap(),
                 )),
-                emitter:         Some(Arc::clone(&emitter)),
-                failed:          false,
+                emitter: Some(Arc::clone(&emitter)),
+                failed: false,
                 run_duration_ms: 1,
-                enabled:         true,
-                llm_client:      None,
-                provider:        fabro_llm::Provider::Anthropic,
-                model:           "test-model".to_string(),
+                enabled: true,
+                llm_client: None,
+                provider: fabro_llm::Provider::Anthropic,
+                model: "test-model".to_string(),
             },
             true,
         )

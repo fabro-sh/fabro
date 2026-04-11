@@ -217,9 +217,10 @@ mod tests {
 
     #[test]
     fn api_key_env_vars_anthropic() {
-        assert_eq!(Provider::Anthropic.api_key_env_vars(), &[
-            "ANTHROPIC_API_KEY"
-        ]);
+        assert_eq!(
+            Provider::Anthropic.api_key_env_vars(),
+            &["ANTHROPIC_API_KEY"]
+        );
     }
 
     #[test]
@@ -251,9 +252,10 @@ mod tests {
 
     #[test]
     fn api_key_env_vars_inception() {
-        assert_eq!(Provider::Inception.api_key_env_vars(), &[
-            "INCEPTION_API_KEY"
-        ]);
+        assert_eq!(
+            Provider::Inception.api_key_env_vars(),
+            &["INCEPTION_API_KEY"]
+        );
     }
 
     #[test]

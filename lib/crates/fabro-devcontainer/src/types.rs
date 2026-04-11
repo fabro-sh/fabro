@@ -110,8 +110,8 @@ pub enum LifecycleCommand {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FeatureMetadata {
-    pub id:      Option<String>,
-    pub name:    Option<String>,
+    pub id: Option<String>,
+    pub name: Option<String>,
     pub version: Option<String>,
 
     #[serde(default)]
@@ -131,9 +131,9 @@ pub(crate) struct FeatureMetadata {
     pub container_env: HashMap<String, String>,
 
     /// Lifecycle hooks contributed by this feature
-    pub on_create_command:   Option<LifecycleCommand>,
+    pub on_create_command: Option<LifecycleCommand>,
     pub post_create_command: Option<LifecycleCommand>,
-    pub post_start_command:  Option<LifecycleCommand>,
+    pub post_start_command: Option<LifecycleCommand>,
 }
 
 /// A single option for a devcontainer feature.
@@ -141,7 +141,7 @@ pub(crate) struct FeatureMetadata {
 pub(crate) struct FeatureOption {
     #[serde(rename = "type")]
     pub option_type: Option<String>,
-    pub default:     Option<serde_json::Value>,
+    pub default: Option<serde_json::Value>,
     pub description: Option<String>,
 }
 
@@ -228,9 +228,10 @@ mod tests {
             "workspaceFolder": "/workspace"
         }"#;
         let config: DevcontainerJson = serde_json::from_str(json).unwrap();
-        assert_eq!(config.docker_compose_file.as_ref().unwrap().paths(), vec![
-            "docker-compose.yml"
-        ]);
+        assert_eq!(
+            config.docker_compose_file.as_ref().unwrap().paths(),
+            vec!["docker-compose.yml"]
+        );
         assert_eq!(config.service.as_deref(), Some("app"));
         assert_eq!(config.workspace_folder.as_deref(), Some("/workspace"));
     }
@@ -242,10 +243,10 @@ mod tests {
             "service": "app"
         }"#;
         let config: DevcontainerJson = serde_json::from_str(json).unwrap();
-        assert_eq!(config.docker_compose_file.as_ref().unwrap().paths(), vec![
-            "docker-compose.yml",
-            "docker-compose.override.yml"
-        ]);
+        assert_eq!(
+            config.docker_compose_file.as_ref().unwrap().paths(),
+            vec!["docker-compose.yml", "docker-compose.override.yml"]
+        );
     }
 
     #[test]

@@ -37,7 +37,6 @@ pub enum Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
-pub type AgentError = Error;
 
 #[cfg(test)]
 mod tests {
@@ -49,7 +48,7 @@ mod tests {
     fn agent_error_from_sdk_error() {
         let sdk_err = LlmError::Network {
             message: "connection refused".into(),
-            source:  None,
+            source: None,
         };
         let agent_err = Error::from(sdk_err);
         assert!(matches!(agent_err, Error::Llm(_)));
@@ -92,7 +91,7 @@ mod tests {
     fn serde_roundtrip_llm_network() {
         let err = Error::Llm(LlmError::Network {
             message: "connection refused".into(),
-            source:  None,
+            source: None,
         });
         let json = serde_json::to_string(&err).unwrap();
         let deserialized: Error = serde_json::from_str(&json).unwrap();
@@ -102,14 +101,14 @@ mod tests {
     #[test]
     fn serde_roundtrip_llm_provider() {
         let err = Error::Llm(LlmError::Provider {
-            kind:   ProviderErrorKind::RateLimit,
+            kind: ProviderErrorKind::RateLimit,
             detail: Box::new(ProviderErrorDetail {
-                message:     "too fast".into(),
-                provider:    "openai".into(),
+                message: "too fast".into(),
+                provider: "openai".into(),
                 status_code: Some(429),
-                error_code:  None,
+                error_code: None,
                 retry_after: Some(2.0),
-                raw:         None,
+                raw: None,
             }),
         });
         let json = serde_json::to_string(&err).unwrap();
@@ -156,7 +155,7 @@ mod tests {
         let errors: Vec<Error> = vec![
             Error::Llm(LlmError::Network {
                 message: "refused".into(),
-                source:  None,
+                source: None,
             }),
             Error::SessionClosed,
             Error::InvalidState("reason".into()),
@@ -174,7 +173,7 @@ mod tests {
     fn serde_tag_format_llm() {
         let err = Error::Llm(LlmError::Network {
             message: "refused".into(),
-            source:  None,
+            source: None,
         });
         let json = serde_json::to_string(&err).unwrap();
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();

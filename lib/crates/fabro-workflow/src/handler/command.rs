@@ -5,7 +5,7 @@ use fabro_graphviz::graph::{Graph, Node};
 
 use super::{EngineServices, Handler};
 use crate::context::{Context, keys};
-use crate::error::FabroError;
+use crate::error::Error;
 use crate::event::{Event, StageScope};
 use crate::outcome::{Outcome, OutcomeExt};
 
@@ -34,7 +34,7 @@ impl Handler for CommandHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         let script = node
             .attrs
             .get("script")
@@ -60,7 +60,7 @@ impl Handler for CommandHandler {
         _graph: &Graph,
         _run_dir: &Path,
         services: &EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         let script = node
             .attrs
             .get("script")
@@ -92,10 +92,10 @@ impl Handler for CommandHandler {
         let stage_scope = StageScope::for_handler(context, &node.id);
         services.emitter.emit_scoped(
             &Event::CommandStarted {
-                node_id:    node.id.clone(),
-                script:     script.to_string(),
-                command:    command.clone(),
-                language:   language.to_string(),
+                node_id: node.id.clone(),
+                script: script.to_string(),
+                command: command.clone(),
+                language: language.to_string(),
                 timeout_ms: timeout_ms(node),
             },
             &stage_scope,
@@ -118,23 +118,22 @@ impl Handler for CommandHandler {
         if let Some(token) = cancel_token {
             token.cancel();
         }
-        let result =
-            result.map_err(|e| FabroError::handler(format!("Failed to spawn script: {e}")))?;
+        let result = result.map_err(|e| Error::handler(format!("Failed to spawn script: {e}")))?;
 
         services.emitter.emit_scoped(
             &Event::CommandCompleted {
-                node_id:     node.id.clone(),
-                stdout:      result.stdout.clone(),
-                stderr:      result.stderr.clone(),
-                exit_code:   (!result.timed_out).then_some(result.exit_code),
+                node_id: node.id.clone(),
+                stdout: result.stdout.clone(),
+                stderr: result.stderr.clone(),
+                exit_code: (!result.timed_out).then_some(result.exit_code),
                 duration_ms: result.duration_ms,
-                timed_out:   result.timed_out,
+                timed_out: result.timed_out,
             },
             &stage_scope,
         );
 
         if result.timed_out {
-            return Err(FabroError::handler(format!(
+            return Err(Error::handler(format!(
                 "Script timed out after {timeout_ms}ms: {script}",
             )));
         }
@@ -713,9 +712,9 @@ mod tests {
     /// proving that `CommandHandler` delegates to the sandbox rather than
     /// spawning a host process.
     struct SpySandbox {
-        exec_result:           fabro_agent::sandbox::ExecResult,
-        captured_command:      std::sync::Mutex<Option<String>>,
-        captured_env_vars:     std::sync::Mutex<Option<std::collections::HashMap<String, String>>>,
+        exec_result: fabro_agent::sandbox::ExecResult,
+        captured_command: std::sync::Mutex<Option<String>>,
+        captured_env_vars: std::sync::Mutex<Option<std::collections::HashMap<String, String>>>,
         captured_cancel_token: std::sync::Mutex<Option<bool>>,
     }
 
@@ -816,10 +815,10 @@ mod tests {
     #[tokio::test]
     async fn executes_script_via_sandbox() {
         let spy = std::sync::Arc::new(SpySandbox::new(fabro_agent::sandbox::ExecResult {
-            stdout:      "SANDBOX_MARKER\n".into(),
-            stderr:      String::new(),
-            exit_code:   0,
-            timed_out:   false,
+            stdout: "SANDBOX_MARKER\n".into(),
+            stderr: String::new(),
+            exit_code: 0,
+            timed_out: false,
             duration_ms: 5,
         }));
 
@@ -861,10 +860,10 @@ mod tests {
     #[tokio::test]
     async fn executes_python_script_via_sandbox() {
         let spy = std::sync::Arc::new(SpySandbox::new(fabro_agent::sandbox::ExecResult {
-            stdout:      "PYTHON_SANDBOX\n".into(),
-            stderr:      String::new(),
-            exit_code:   0,
-            timed_out:   false,
+            stdout: "PYTHON_SANDBOX\n".into(),
+            stderr: String::new(),
+            exit_code: 0,
+            timed_out: false,
             duration_ms: 5,
         }));
 
@@ -904,10 +903,10 @@ mod tests {
     #[tokio::test]
     async fn passes_env_vars_to_sandbox() {
         let spy = std::sync::Arc::new(SpySandbox::new(fabro_agent::sandbox::ExecResult {
-            stdout:      String::new(),
-            stderr:      String::new(),
-            exit_code:   0,
-            timed_out:   false,
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 0,
+            timed_out: false,
             duration_ms: 5,
         }));
 
@@ -939,10 +938,10 @@ mod tests {
     #[tokio::test]
     async fn passes_run_cancellation_to_sandbox() {
         let spy = std::sync::Arc::new(SpySandbox::new(fabro_agent::sandbox::ExecResult {
-            stdout:      String::new(),
-            stderr:      String::new(),
-            exit_code:   0,
-            timed_out:   false,
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 0,
+            timed_out: false,
             duration_ms: 5,
         }));
 
@@ -1032,7 +1031,7 @@ mod tests {
         //
         // Pragmatic approach: verify the error construction matches what the
         // handler produces. The timeout test covers the other Err path.
-        let err = FabroError::handler(format!("Failed to spawn script: {}", "No such file"));
+        let err = Error::handler(format!("Failed to spawn script: {}", "No such file"));
         assert!(err.to_string().contains("Failed to spawn script"));
     }
 

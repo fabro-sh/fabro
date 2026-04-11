@@ -30,23 +30,23 @@ impl std::fmt::Display for ProviderErrorKind {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ProviderErrorDetail {
-    pub message:     String,
-    pub provider:    String,
+    pub message: String,
+    pub provider: String,
     pub status_code: Option<u16>,
-    pub error_code:  Option<String>,
+    pub error_code: Option<String>,
     pub retry_after: Option<f64>,
-    pub raw:         Option<serde_json::Value>,
+    pub raw: Option<serde_json::Value>,
 }
 
 impl ProviderErrorDetail {
     pub fn new(message: impl Into<String>, provider: impl Into<String>) -> Self {
         Self {
-            message:     message.into(),
-            provider:    provider.into(),
+            message: message.into(),
+            provider: provider.into(),
             status_code: None,
-            error_code:  None,
+            error_code: None,
             retry_after: None,
-            raw:         None,
+            raw: None,
         }
     }
 }
@@ -58,7 +58,7 @@ use std::sync::Arc;
 pub enum Error {
     #[error("{kind} {}: {}", .detail.provider, .detail.message)]
     Provider {
-        kind:   ProviderErrorKind,
+        kind: ProviderErrorKind,
         detail: Box<ProviderErrorDetail>,
     },
 
@@ -67,7 +67,7 @@ pub enum Error {
         message: String,
         #[source]
         #[serde(skip)]
-        source:  Option<Arc<dyn std::error::Error + Send + Sync>>,
+        source: Option<Arc<dyn std::error::Error + Send + Sync>>,
     },
 
     #[error("Request interrupted: {message}")]
@@ -78,7 +78,7 @@ pub enum Error {
         message: String,
         #[source]
         #[serde(skip)]
-        source:  Option<Arc<dyn std::error::Error + Send + Sync>>,
+        source: Option<Arc<dyn std::error::Error + Send + Sync>>,
     },
 
     #[error("Stream error: {message}")]
@@ -86,7 +86,7 @@ pub enum Error {
         message: String,
         #[source]
         #[serde(skip)]
-        source:  Option<Arc<dyn std::error::Error + Send + Sync>>,
+        source: Option<Arc<dyn std::error::Error + Send + Sync>>,
     },
 
     #[error("Invalid tool call: {message}")]
@@ -100,7 +100,7 @@ pub enum Error {
         message: String,
         #[source]
         #[serde(skip)]
-        source:  Option<Arc<dyn std::error::Error + Send + Sync>>,
+        source: Option<Arc<dyn std::error::Error + Send + Sync>>,
     },
 
     #[error("Unsupported tool choice: {message}")]
@@ -114,7 +114,7 @@ impl Error {
     ) -> Self {
         Self::Network {
             message: message.into(),
-            source:  Some(Arc::new(source)),
+            source: Some(Arc::new(source)),
         }
     }
 
@@ -124,7 +124,7 @@ impl Error {
     ) -> Self {
         Self::RequestTimeout {
             message: message.into(),
-            source:  Some(Arc::new(source)),
+            source: Some(Arc::new(source)),
         }
     }
 
@@ -134,7 +134,7 @@ impl Error {
     ) -> Self {
         Self::Stream {
             message: message.into(),
-            source:  Some(Arc::new(source)),
+            source: Some(Arc::new(source)),
         }
     }
 
@@ -144,7 +144,7 @@ impl Error {
     ) -> Self {
         Self::Configuration {
             message: message.into(),
-            source:  Some(Arc::new(source)),
+            source: Some(Arc::new(source)),
         }
     }
 
@@ -272,7 +272,7 @@ pub fn error_from_status_code(
     error_code: Option<String>,
     raw: Option<serde_json::Value>,
     retry_after: Option<f64>,
-) -> SdkError {
+) -> Error {
     let detail = ProviderErrorDetail {
         message,
         provider,
@@ -291,7 +291,7 @@ pub fn error_from_status_code(
         408 => {
             return Error::RequestTimeout {
                 message: detail.message,
-                source:  None,
+                source: None,
             };
         }
         413 => ProviderErrorKind::ContextLength,
@@ -330,7 +330,7 @@ pub fn error_from_grpc_status(
     error_code: Option<String>,
     raw: Option<serde_json::Value>,
     retry_after: Option<f64>,
-) -> SdkError {
+) -> Error {
     let detail = ProviderErrorDetail {
         message,
         provider,
@@ -349,7 +349,7 @@ pub fn error_from_grpc_status(
         "DEADLINE_EXCEEDED" => {
             return Error::RequestTimeout {
                 message: detail.message,
-                source:  None,
+                source: None,
             };
         }
         _ => ProviderErrorKind::Server,
@@ -362,7 +362,6 @@ pub fn error_from_grpc_status(
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
-pub type SdkError = Error;
 
 #[cfg(test)]
 mod tests {
@@ -372,8 +371,8 @@ mod tests {
 
     #[test]
     fn retryable_classification() {
-        let auth_err = SdkError::Provider {
-            kind:   ProviderErrorKind::Authentication,
+        let auth_err = Error::Provider {
+            kind: ProviderErrorKind::Authentication,
             detail: Box::new(ProviderErrorDetail {
                 status_code: Some(401),
                 ..ProviderErrorDetail::new("bad key", "openai")
@@ -381,8 +380,8 @@ mod tests {
         };
         assert!(!auth_err.retryable());
 
-        let rate_err = SdkError::Provider {
-            kind:   ProviderErrorKind::RateLimit,
+        let rate_err = Error::Provider {
+            kind: ProviderErrorKind::RateLimit,
             detail: Box::new(ProviderErrorDetail {
                 status_code: Some(429),
                 retry_after: Some(2.0),
@@ -392,8 +391,8 @@ mod tests {
         assert!(rate_err.retryable());
         assert_eq!(rate_err.retry_after(), Some(2.0));
 
-        let server_err = SdkError::Provider {
-            kind:   ProviderErrorKind::Server,
+        let server_err = Error::Provider {
+            kind: ProviderErrorKind::Server,
             detail: Box::new(ProviderErrorDetail {
                 status_code: Some(500),
                 ..ProviderErrorDetail::new("internal error", "anthropic")
@@ -401,21 +400,21 @@ mod tests {
         };
         assert!(server_err.retryable());
 
-        let timeout = SdkError::RequestTimeout {
+        let timeout = Error::RequestTimeout {
             message: "timed out".into(),
-            source:  None,
+            source: None,
         };
         assert!(!timeout.retryable());
 
-        let network = SdkError::Network {
+        let network = Error::Network {
             message: "connection refused".into(),
-            source:  None,
+            source: None,
         };
         assert!(network.retryable());
 
-        let config = SdkError::Configuration {
+        let config = Error::Configuration {
             message: "missing provider".into(),
-            source:  None,
+            source: None,
         };
         assert!(!config.retryable());
     }
@@ -424,38 +423,38 @@ mod tests {
     fn non_retryable_provider_errors() {
         let detail = || Box::new(ProviderErrorDetail::new("error", "openai"));
 
-        let access_denied = SdkError::Provider {
-            kind:   ProviderErrorKind::AccessDenied,
+        let access_denied = Error::Provider {
+            kind: ProviderErrorKind::AccessDenied,
             detail: detail(),
         };
         assert!(!access_denied.retryable());
 
-        let not_found = SdkError::Provider {
-            kind:   ProviderErrorKind::NotFound,
+        let not_found = Error::Provider {
+            kind: ProviderErrorKind::NotFound,
             detail: detail(),
         };
         assert!(!not_found.retryable());
 
-        let invalid_req = SdkError::Provider {
-            kind:   ProviderErrorKind::InvalidRequest,
+        let invalid_req = Error::Provider {
+            kind: ProviderErrorKind::InvalidRequest,
             detail: detail(),
         };
         assert!(!invalid_req.retryable());
 
-        let ctx_length = SdkError::Provider {
-            kind:   ProviderErrorKind::ContextLength,
+        let ctx_length = Error::Provider {
+            kind: ProviderErrorKind::ContextLength,
             detail: detail(),
         };
         assert!(!ctx_length.retryable());
 
-        let quota = SdkError::Provider {
-            kind:   ProviderErrorKind::QuotaExceeded,
+        let quota = Error::Provider {
+            kind: ProviderErrorKind::QuotaExceeded,
             detail: detail(),
         };
         assert!(!quota.retryable());
 
-        let content_filter = SdkError::Provider {
-            kind:   ProviderErrorKind::ContentFilter,
+        let content_filter = Error::Provider {
+            kind: ProviderErrorKind::ContentFilter,
             detail: detail(),
         };
         assert!(!content_filter.retryable());
@@ -463,17 +462,17 @@ mod tests {
 
     #[test]
     fn non_retryable_sdk_errors() {
-        let invalid_tool = SdkError::InvalidToolCall {
+        let invalid_tool = Error::InvalidToolCall {
             message: "bad tool".into(),
         };
         assert!(!invalid_tool.retryable());
 
-        let no_object = SdkError::NoObjectGenerated {
+        let no_object = Error::NoObjectGenerated {
             message: "no output".into(),
         };
         assert!(!no_object.retryable());
 
-        let interrupt = SdkError::Interrupt {
+        let interrupt = Error::Interrupt {
             message: "interrupted".into(),
         };
         assert!(!interrupt.retryable());
@@ -489,32 +488,44 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(err, SdkError::Provider {
-            kind: ProviderErrorKind::Authentication,
-            ..
-        }));
+        assert!(matches!(
+            err,
+            Error::Provider {
+                kind: ProviderErrorKind::Authentication,
+                ..
+            }
+        ));
         assert!(!err.retryable());
 
         let err =
             error_from_status_code(403, "forbidden".into(), "openai".into(), None, None, None);
-        assert!(matches!(err, SdkError::Provider {
-            kind: ProviderErrorKind::AccessDenied,
-            ..
-        }));
+        assert!(matches!(
+            err,
+            Error::Provider {
+                kind: ProviderErrorKind::AccessDenied,
+                ..
+            }
+        ));
 
         let err =
             error_from_status_code(404, "not found".into(), "openai".into(), None, None, None);
-        assert!(matches!(err, SdkError::Provider {
-            kind: ProviderErrorKind::NotFound,
-            ..
-        }));
+        assert!(matches!(
+            err,
+            Error::Provider {
+                kind: ProviderErrorKind::NotFound,
+                ..
+            }
+        ));
 
         let err =
             error_from_status_code(400, "bad request".into(), "openai".into(), None, None, None);
-        assert!(matches!(err, SdkError::Provider {
-            kind: ProviderErrorKind::InvalidRequest,
-            ..
-        }));
+        assert!(matches!(
+            err,
+            Error::Provider {
+                kind: ProviderErrorKind::InvalidRequest,
+                ..
+            }
+        ));
 
         let err = error_from_status_code(
             422,
@@ -524,20 +535,26 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(err, SdkError::Provider {
-            kind: ProviderErrorKind::InvalidRequest,
-            ..
-        }));
+        assert!(matches!(
+            err,
+            Error::Provider {
+                kind: ProviderErrorKind::InvalidRequest,
+                ..
+            }
+        ));
 
         let err = error_from_status_code(408, "timeout".into(), "openai".into(), None, None, None);
-        assert!(matches!(err, SdkError::RequestTimeout { .. }));
+        assert!(matches!(err, Error::RequestTimeout { .. }));
 
         let err =
             error_from_status_code(413, "too large".into(), "openai".into(), None, None, None);
-        assert!(matches!(err, SdkError::Provider {
-            kind: ProviderErrorKind::ContextLength,
-            ..
-        }));
+        assert!(matches!(
+            err,
+            Error::Provider {
+                kind: ProviderErrorKind::ContextLength,
+                ..
+            }
+        ));
 
         let err = error_from_status_code(
             429,
@@ -547,26 +564,35 @@ mod tests {
             None,
             Some(5.0),
         );
-        assert!(matches!(err, SdkError::Provider {
-            kind: ProviderErrorKind::RateLimit,
-            ..
-        }));
+        assert!(matches!(
+            err,
+            Error::Provider {
+                kind: ProviderErrorKind::RateLimit,
+                ..
+            }
+        ));
         assert!(err.retryable());
         assert_eq!(err.retry_after(), Some(5.0));
 
         let err = error_from_status_code(500, "internal".into(), "openai".into(), None, None, None);
-        assert!(matches!(err, SdkError::Provider {
-            kind: ProviderErrorKind::Server,
-            ..
-        }));
+        assert!(matches!(
+            err,
+            Error::Provider {
+                kind: ProviderErrorKind::Server,
+                ..
+            }
+        ));
         assert!(err.retryable());
 
         let err =
             error_from_status_code(502, "bad gateway".into(), "openai".into(), None, None, None);
-        assert!(matches!(err, SdkError::Provider {
-            kind: ProviderErrorKind::Server,
-            ..
-        }));
+        assert!(matches!(
+            err,
+            Error::Provider {
+                kind: ProviderErrorKind::Server,
+                ..
+            }
+        ));
 
         let err = error_from_status_code(
             529,
@@ -576,10 +602,13 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(err, SdkError::Provider {
-            kind: ProviderErrorKind::Server,
-            ..
-        }));
+        assert!(matches!(
+            err,
+            Error::Provider {
+                kind: ProviderErrorKind::Server,
+                ..
+            }
+        ));
         assert!(err.retryable());
     }
 
@@ -593,10 +622,13 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(err, SdkError::Provider {
-            kind: ProviderErrorKind::ContextLength,
-            ..
-        }));
+        assert!(matches!(
+            err,
+            Error::Provider {
+                kind: ProviderErrorKind::ContextLength,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -609,10 +641,13 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(err, SdkError::Provider {
-            kind: ProviderErrorKind::ContextLength,
-            ..
-        }));
+        assert!(matches!(
+            err,
+            Error::Provider {
+                kind: ProviderErrorKind::ContextLength,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -625,10 +660,13 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(err, SdkError::Provider {
-            kind: ProviderErrorKind::ContentFilter,
-            ..
-        }));
+        assert!(matches!(
+            err,
+            Error::Provider {
+                kind: ProviderErrorKind::ContentFilter,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -641,10 +679,13 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(err, SdkError::Provider {
-            kind: ProviderErrorKind::ContentFilter,
-            ..
-        }));
+        assert!(matches!(
+            err,
+            Error::Provider {
+                kind: ProviderErrorKind::ContentFilter,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -657,10 +698,13 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(err, SdkError::Provider {
-            kind: ProviderErrorKind::NotFound,
-            ..
-        }));
+        assert!(matches!(
+            err,
+            Error::Provider {
+                kind: ProviderErrorKind::NotFound,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -673,10 +717,13 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(err, SdkError::Provider {
-            kind: ProviderErrorKind::NotFound,
-            ..
-        }));
+        assert!(matches!(
+            err,
+            Error::Provider {
+                kind: ProviderErrorKind::NotFound,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -689,10 +736,13 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(err, SdkError::Provider {
-            kind: ProviderErrorKind::Authentication,
-            ..
-        }));
+        assert!(matches!(
+            err,
+            Error::Provider {
+                kind: ProviderErrorKind::Authentication,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -705,10 +755,13 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(err, SdkError::Provider {
-            kind: ProviderErrorKind::Authentication,
-            ..
-        }));
+        assert!(matches!(
+            err,
+            Error::Provider {
+                kind: ProviderErrorKind::Authentication,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -721,10 +774,13 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(err, SdkError::Provider {
-            kind: ProviderErrorKind::NotFound,
-            ..
-        }));
+        assert!(matches!(
+            err,
+            Error::Provider {
+                kind: ProviderErrorKind::NotFound,
+                ..
+            }
+        ));
 
         let err = error_from_grpc_status(
             "RESOURCE_EXHAUSTED",
@@ -734,10 +790,13 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(err, SdkError::Provider {
-            kind: ProviderErrorKind::RateLimit,
-            ..
-        }));
+        assert!(matches!(
+            err,
+            Error::Provider {
+                kind: ProviderErrorKind::RateLimit,
+                ..
+            }
+        ));
         assert!(err.retryable());
 
         let err = error_from_grpc_status(
@@ -748,10 +807,13 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(err, SdkError::Provider {
-            kind: ProviderErrorKind::Authentication,
-            ..
-        }));
+        assert!(matches!(
+            err,
+            Error::Provider {
+                kind: ProviderErrorKind::Authentication,
+                ..
+            }
+        ));
 
         let err = error_from_grpc_status(
             "DEADLINE_EXCEEDED",
@@ -761,7 +823,7 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(err, SdkError::RequestTimeout { .. }));
+        assert!(matches!(err, Error::RequestTimeout { .. }));
 
         let err = error_from_grpc_status(
             "UNKNOWN_CODE",
@@ -771,16 +833,19 @@ mod tests {
             None,
             None,
         );
-        assert!(matches!(err, SdkError::Provider {
-            kind: ProviderErrorKind::Server,
-            ..
-        }));
+        assert!(matches!(
+            err,
+            Error::Provider {
+                kind: ProviderErrorKind::Server,
+                ..
+            }
+        ));
     }
 
     #[test]
     fn error_display_messages() {
-        let err = SdkError::Provider {
-            kind:   ProviderErrorKind::Authentication,
+        let err = Error::Provider {
+            kind: ProviderErrorKind::Authentication,
             detail: Box::new(ProviderErrorDetail {
                 status_code: Some(401),
                 ..ProviderErrorDetail::new("invalid api key", "openai")
@@ -791,17 +856,17 @@ mod tests {
             "Authentication error for openai: invalid api key"
         );
 
-        let err = SdkError::Configuration {
+        let err = Error::Configuration {
             message: "no provider".into(),
-            source:  None,
+            source: None,
         };
         assert_eq!(err.to_string(), "Configuration error: no provider");
     }
 
     #[test]
     fn status_code_accessor() {
-        let err = SdkError::Provider {
-            kind:   ProviderErrorKind::Server,
+        let err = Error::Provider {
+            kind: ProviderErrorKind::Server,
             detail: Box::new(ProviderErrorDetail {
                 status_code: Some(503),
                 ..ProviderErrorDetail::new("error", "openai")
@@ -809,17 +874,17 @@ mod tests {
         };
         assert_eq!(err.status_code(), Some(503));
 
-        let err = SdkError::Network {
+        let err = Error::Network {
             message: "refused".into(),
-            source:  None,
+            source: None,
         };
         assert_eq!(err.status_code(), None);
     }
 
     #[test]
     fn provider_name_from_provider_variant() {
-        let err = SdkError::Provider {
-            kind:   ProviderErrorKind::Authentication,
+        let err = Error::Provider {
+            kind: ProviderErrorKind::Authentication,
             detail: Box::new(ProviderErrorDetail::new("bad key", "openai")),
         };
         assert_eq!(err.provider_name(), "openai");
@@ -827,9 +892,9 @@ mod tests {
 
     #[test]
     fn provider_name_defaults_to_unknown() {
-        let err = SdkError::Network {
+        let err = Error::Network {
             message: "refused".into(),
-            source:  None,
+            source: None,
         };
         assert_eq!(err.provider_name(), "unknown");
     }
@@ -839,24 +904,24 @@ mod tests {
         let detail = || Box::new(ProviderErrorDetail::new("error", "openai"));
 
         assert!(
-            SdkError::Provider {
-                kind:   ProviderErrorKind::RateLimit,
+            Error::Provider {
+                kind: ProviderErrorKind::RateLimit,
                 detail: detail(),
             }
             .failover_eligible()
         );
 
         assert!(
-            SdkError::Provider {
-                kind:   ProviderErrorKind::Server,
+            Error::Provider {
+                kind: ProviderErrorKind::Server,
                 detail: detail(),
             }
             .failover_eligible()
         );
 
         assert!(
-            SdkError::Provider {
-                kind:   ProviderErrorKind::QuotaExceeded,
+            Error::Provider {
+                kind: ProviderErrorKind::QuotaExceeded,
                 detail: detail(),
             }
             .failover_eligible()
@@ -866,25 +931,25 @@ mod tests {
     #[test]
     fn failover_eligible_transient_non_provider_errors() {
         assert!(
-            SdkError::RequestTimeout {
+            Error::RequestTimeout {
                 message: "timed out".into(),
-                source:  None,
+                source: None,
             }
             .failover_eligible()
         );
 
         assert!(
-            SdkError::Network {
+            Error::Network {
                 message: "refused".into(),
-                source:  None,
+                source: None,
             }
             .failover_eligible()
         );
 
         assert!(
-            SdkError::Stream {
+            Error::Stream {
                 message: "broken".into(),
-                source:  None,
+                source: None,
             }
             .failover_eligible()
         );
@@ -895,32 +960,32 @@ mod tests {
         let detail = || Box::new(ProviderErrorDetail::new("error", "openai"));
 
         assert!(
-            !SdkError::Provider {
-                kind:   ProviderErrorKind::Authentication,
+            !Error::Provider {
+                kind: ProviderErrorKind::Authentication,
                 detail: detail(),
             }
             .failover_eligible()
         );
 
         assert!(
-            !SdkError::Provider {
-                kind:   ProviderErrorKind::InvalidRequest,
+            !Error::Provider {
+                kind: ProviderErrorKind::InvalidRequest,
                 detail: detail(),
             }
             .failover_eligible()
         );
 
         assert!(
-            !SdkError::Provider {
-                kind:   ProviderErrorKind::ContextLength,
+            !Error::Provider {
+                kind: ProviderErrorKind::ContextLength,
                 detail: detail(),
             }
             .failover_eligible()
         );
 
         assert!(
-            !SdkError::Provider {
-                kind:   ProviderErrorKind::ContentFilter,
+            !Error::Provider {
+                kind: ProviderErrorKind::ContentFilter,
                 detail: detail(),
             }
             .failover_eligible()
@@ -930,36 +995,36 @@ mod tests {
     #[test]
     fn failover_not_eligible_non_provider_errors() {
         assert!(
-            !SdkError::Configuration {
+            !Error::Configuration {
                 message: "bad".into(),
-                source:  None,
+                source: None,
             }
             .failover_eligible()
         );
 
         assert!(
-            !SdkError::Interrupt {
+            !Error::Interrupt {
                 message: "cancelled".into(),
             }
             .failover_eligible()
         );
 
         assert!(
-            !SdkError::InvalidToolCall {
+            !Error::InvalidToolCall {
                 message: "bad".into(),
             }
             .failover_eligible()
         );
 
         assert!(
-            !SdkError::NoObjectGenerated {
+            !Error::NoObjectGenerated {
                 message: "none".into(),
             }
             .failover_eligible()
         );
 
         assert!(
-            !SdkError::UnsupportedToolChoice {
+            !Error::UnsupportedToolChoice {
                 message: "nope".into(),
             }
             .failover_eligible()
@@ -968,8 +1033,8 @@ mod tests {
 
     #[test]
     fn failure_signature_hint_provider_transient() {
-        let err = SdkError::Provider {
-            kind:   ProviderErrorKind::RateLimit,
+        let err = Error::Provider {
+            kind: ProviderErrorKind::RateLimit,
             detail: Box::new(ProviderErrorDetail::new("too fast", "openai")),
         };
         assert_eq!(
@@ -977,8 +1042,8 @@ mod tests {
             "api_transient|openai|rate_limited"
         );
 
-        let err = SdkError::Provider {
-            kind:   ProviderErrorKind::Server,
+        let err = Error::Provider {
+            kind: ProviderErrorKind::Server,
             detail: Box::new(ProviderErrorDetail::new("500", "anthropic")),
         };
         assert_eq!(
@@ -989,8 +1054,8 @@ mod tests {
 
     #[test]
     fn failure_signature_hint_provider_deterministic() {
-        let err = SdkError::Provider {
-            kind:   ProviderErrorKind::Authentication,
+        let err = Error::Provider {
+            kind: ProviderErrorKind::Authentication,
             detail: Box::new(ProviderErrorDetail::new("bad key", "openai")),
         };
         assert_eq!(
@@ -998,8 +1063,8 @@ mod tests {
             "api_deterministic|openai|authentication"
         );
 
-        let err = SdkError::Provider {
-            kind:   ProviderErrorKind::AccessDenied,
+        let err = Error::Provider {
+            kind: ProviderErrorKind::AccessDenied,
             detail: Box::new(ProviderErrorDetail::new("denied", "anthropic")),
         };
         assert_eq!(
@@ -1007,8 +1072,8 @@ mod tests {
             "api_deterministic|anthropic|access_denied"
         );
 
-        let err = SdkError::Provider {
-            kind:   ProviderErrorKind::NotFound,
+        let err = Error::Provider {
+            kind: ProviderErrorKind::NotFound,
             detail: Box::new(ProviderErrorDetail::new("missing", "openai")),
         };
         assert_eq!(
@@ -1016,8 +1081,8 @@ mod tests {
             "api_deterministic|openai|not_found"
         );
 
-        let err = SdkError::Provider {
-            kind:   ProviderErrorKind::InvalidRequest,
+        let err = Error::Provider {
+            kind: ProviderErrorKind::InvalidRequest,
             detail: Box::new(ProviderErrorDetail::new("bad", "openai")),
         };
         assert_eq!(
@@ -1025,8 +1090,8 @@ mod tests {
             "api_deterministic|openai|invalid_request"
         );
 
-        let err = SdkError::Provider {
-            kind:   ProviderErrorKind::ContentFilter,
+        let err = Error::Provider {
+            kind: ProviderErrorKind::ContentFilter,
             detail: Box::new(ProviderErrorDetail::new("blocked", "openai")),
         };
         assert_eq!(
@@ -1034,8 +1099,8 @@ mod tests {
             "api_deterministic|openai|content_filter"
         );
 
-        let err = SdkError::Provider {
-            kind:   ProviderErrorKind::ContextLength,
+        let err = Error::Provider {
+            kind: ProviderErrorKind::ContextLength,
             detail: Box::new(ProviderErrorDetail::new("too long", "openai")),
         };
         assert_eq!(
@@ -1043,8 +1108,8 @@ mod tests {
             "api_deterministic|openai|context_length"
         );
 
-        let err = SdkError::Provider {
-            kind:   ProviderErrorKind::QuotaExceeded,
+        let err = Error::Provider {
+            kind: ProviderErrorKind::QuotaExceeded,
             detail: Box::new(ProviderErrorDetail::new("out of quota", "openai")),
         };
         assert_eq!(
@@ -1056,60 +1121,60 @@ mod tests {
     #[test]
     fn failure_signature_hint_non_provider_variants() {
         assert_eq!(
-            SdkError::RequestTimeout {
+            Error::RequestTimeout {
                 message: "timed out".into(),
-                source:  None,
+                source: None,
             }
             .failure_signature_hint(),
             "api_transient|unknown|timeout"
         );
         assert_eq!(
-            SdkError::Network {
+            Error::Network {
                 message: "refused".into(),
-                source:  None,
+                source: None,
             }
             .failure_signature_hint(),
             "api_transient|unknown|network"
         );
         assert_eq!(
-            SdkError::Stream {
+            Error::Stream {
                 message: "broken".into(),
-                source:  None,
+                source: None,
             }
             .failure_signature_hint(),
             "api_transient|unknown|stream"
         );
         assert_eq!(
-            SdkError::Interrupt {
+            Error::Interrupt {
                 message: "cancelled".into(),
             }
             .failure_signature_hint(),
             "api_canceled|unknown|interrupt"
         );
         assert_eq!(
-            SdkError::Configuration {
+            Error::Configuration {
                 message: "bad".into(),
-                source:  None,
+                source: None,
             }
             .failure_signature_hint(),
             "api_deterministic|unknown|configuration"
         );
         assert_eq!(
-            SdkError::InvalidToolCall {
+            Error::InvalidToolCall {
                 message: "bad".into(),
             }
             .failure_signature_hint(),
             "api_deterministic|unknown|invalid_tool_call"
         );
         assert_eq!(
-            SdkError::NoObjectGenerated {
+            Error::NoObjectGenerated {
                 message: "none".into(),
             }
             .failure_signature_hint(),
             "api_deterministic|unknown|no_object"
         );
         assert_eq!(
-            SdkError::UnsupportedToolChoice {
+            Error::UnsupportedToolChoice {
                 message: "nope".into(),
             }
             .failure_signature_hint(),
@@ -1120,14 +1185,14 @@ mod tests {
     #[test]
     fn sdk_error_source_chaining() {
         let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
-        let err = SdkError::network("connection failed", io_err);
+        let err = Error::network("connection failed", io_err);
         assert!(err.source().is_some());
     }
 
     #[test]
     fn sdk_error_source_chain_walkable() {
         let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
-        let err = SdkError::network("connection failed", io_err);
+        let err = Error::network("connection failed", io_err);
         // The source chain is walkable — the Arc wrapper preserves the inner error's
         // display
         let source = err.source().unwrap();
@@ -1137,9 +1202,9 @@ mod tests {
     #[test]
     fn sdk_error_serde_roundtrip_without_source() {
         let io_err = std::io::Error::other("boom");
-        let err = SdkError::network("network failed", io_err);
+        let err = Error::network("network failed", io_err);
         let json = serde_json::to_string(&err).unwrap();
-        let deserialized: SdkError = serde_json::from_str(&json).unwrap();
+        let deserialized: Error = serde_json::from_str(&json).unwrap();
         // source is lost through serde, message is preserved
         assert!(deserialized.source().is_none());
         assert_eq!(deserialized.to_string(), "Network error: network failed");

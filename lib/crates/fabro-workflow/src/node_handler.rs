@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use fabro_core::error::{CoreError, HandlerErrorDetail, Result as CoreResult};
+use fabro_core::error::{Error as CoreError, HandlerErrorDetail, Result as CoreResult};
 use fabro_core::handler::NodeHandler;
 use fabro_core::outcome::FailureCategory;
 use fabro_core::retry::RetryPolicy as CoreRetryPolicy;
@@ -13,7 +13,7 @@ use tokio::time::timeout;
 
 use crate::artifact;
 use crate::context::Context;
-use crate::error::FabroError;
+use crate::error::Error;
 use crate::graph::{WorkflowGraph, WorkflowNode};
 use crate::handler::{EngineServices, dispatch_handler, format_panic_message};
 use crate::outcome::{Outcome, StageStatus};
@@ -26,8 +26,8 @@ use crate::retry::build_retry_policy;
 /// then diffs and applies changes back.
 pub(crate) struct WorkflowNodeHandler {
     pub services: Arc<EngineServices>,
-    pub run_dir:  PathBuf,
-    pub graph:    Arc<GvGraph>,
+    pub run_dir: PathBuf,
+    pub graph: Arc<GvGraph>,
 }
 
 #[async_trait]
@@ -50,9 +50,9 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
         .await
         .map_err(|err| {
             CoreError::handler(HandlerErrorDetail {
-                message:   err.to_string(),
+                message: err.to_string(),
                 retryable: true,
-                category:  Some(FailureCategory::TransientInfra),
+                category: Some(FailureCategory::TransientInfra),
                 signature: None,
             })
         })?;
@@ -78,9 +78,9 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
                 Ok(inner) => inner,
                 Err(_elapsed) => {
                     return Err(CoreError::handler(HandlerErrorDetail {
-                        message:   format!("handler timed out after {}ms", duration.as_millis()),
+                        message: format!("handler timed out after {}ms", duration.as_millis()),
                         retryable: true,
-                        category:  Some(FailureCategory::TransientInfra),
+                        category: Some(FailureCategory::TransientInfra),
                         signature: None,
                     }));
                 }
@@ -101,7 +101,7 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
 
         match timed_result {
             Ok(Ok(wf_outcome)) => Ok(wf_outcome),
-            Ok(Err(FabroError::Cancelled)) => Err(CoreError::Cancelled),
+            Ok(Err(Error::Cancelled)) => Err(CoreError::Cancelled),
             Ok(Err(fabro_err)) => {
                 let retryable = handler.should_retry(&fabro_err);
                 Err(CoreError::handler(HandlerErrorDetail {
@@ -114,9 +114,9 @@ impl NodeHandler<WorkflowGraph> for WorkflowNodeHandler {
             Err(panic_payload) => {
                 let msg = format_panic_message(&panic_payload);
                 Err(CoreError::handler(HandlerErrorDetail {
-                    message:   msg,
+                    message: msg,
                     retryable: false,
-                    category:  Some(FailureCategory::Deterministic),
+                    category: Some(FailureCategory::Deterministic),
                     signature: None,
                 }))
             }

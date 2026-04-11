@@ -15,9 +15,9 @@ use stage_display::StageDisplay;
 
 pub(crate) struct ProgressUI {
     renderer: ProgressRenderer,
-    stage:    StageDisplay,
-    setup:    SetupDisplay,
-    info:     InfoDisplay,
+    stage: StageDisplay,
+    setup: SetupDisplay,
+    info: InfoDisplay,
 }
 
 impl ProgressUI {
@@ -484,22 +484,25 @@ mod tests {
 
     fn stage_started(node_id: &str, name: &str) -> Event {
         Event::StageStarted {
-            node_id:      node_id.into(),
-            name:         name.into(),
-            index:        0,
+            node_id: node_id.into(),
+            name: name.into(),
+            index: 0,
             handler_type: String::new(),
-            attempt:      1,
+            attempt: 1,
             max_attempts: 1,
         }
     }
 
     fn assistant_message(stage: &str, model: &str) -> Event {
-        agent_event(stage, AgentEvent::AssistantMessage {
-            text:            "done".into(),
-            model:           model.into(),
-            usage:           TokenCounts::default(),
-            tool_call_count: 0,
-        })
+        agent_event(
+            stage,
+            AgentEvent::AssistantMessage {
+                text: "done".into(),
+                model: model.into(),
+                usage: TokenCounts::default(),
+                tool_call_count: 0,
+            },
+        )
     }
 
     fn stage_completed(node_id: &str, name: &str) -> Event {
@@ -544,20 +547,26 @@ mod tests {
         assert!(ui.stage.active_stages.contains_key("fork1"));
         assert!(ui.stage.parallel_parent.is_none());
 
-        emit(&mut ui, Event::ParallelStarted {
-            node_id:      "fork1".into(),
-            visit:        1,
-            branch_count: 2,
-            join_policy:  "wait_all".into(),
-        });
+        emit(
+            &mut ui,
+            Event::ParallelStarted {
+                node_id: "fork1".into(),
+                visit: 1,
+                branch_count: 2,
+                join_policy: "wait_all".into(),
+            },
+        );
         assert_eq!(ui.stage.parallel_parent.as_deref(), Some("fork1"));
 
-        emit(&mut ui, Event::ParallelBranchStarted {
-            parallel_group_id:  StageId::new("fork1", 1),
-            parallel_branch_id: ParallelBranchId::new(StageId::new("fork1", 1), 0),
-            branch:             "security".into(),
-            index:              0,
-        });
+        emit(
+            &mut ui,
+            Event::ParallelBranchStarted {
+                parallel_group_id: StageId::new("fork1", 1),
+                parallel_branch_id: ParallelBranchId::new(StageId::new("fork1", 1), 0),
+                branch: "security".into(),
+                index: 0,
+            },
+        );
         let stage = &ui.stage.active_stages["fork1"];
         assert_eq!(stage.tool_calls.len(), 1);
         assert_eq!(stage.tool_calls[0].tool_call_id, "security");
@@ -566,15 +575,18 @@ mod tests {
             ToolCallStatus::Running
         ));
 
-        emit(&mut ui, Event::ParallelBranchCompleted {
-            parallel_group_id:  StageId::new("fork1", 1),
-            parallel_branch_id: ParallelBranchId::new(StageId::new("fork1", 1), 0),
-            branch:             "security".into(),
-            index:              0,
-            duration_ms:        2000,
-            status:             "success".into(),
-            head_sha:           None,
-        });
+        emit(
+            &mut ui,
+            Event::ParallelBranchCompleted {
+                parallel_group_id: StageId::new("fork1", 1),
+                parallel_branch_id: ParallelBranchId::new(StageId::new("fork1", 1), 0),
+                branch: "security".into(),
+                index: 0,
+                duration_ms: 2000,
+                status: "success".into(),
+                head_sha: None,
+            },
+        );
         let stage = &ui.stage.active_stages["fork1"];
         assert!(matches!(
             stage.tool_calls[0].status,
@@ -587,18 +599,24 @@ mod tests {
         let mut ui = ProgressUI::new(true, false);
 
         emit(&mut ui, stage_started("fork1", "Fork"));
-        emit(&mut ui, Event::ParallelStarted {
-            node_id:      "fork1".into(),
-            visit:        1,
-            branch_count: 1,
-            join_policy:  "wait_all".into(),
-        });
-        emit(&mut ui, Event::ParallelBranchStarted {
-            parallel_group_id:  StageId::new("fork1", 1),
-            parallel_branch_id: ParallelBranchId::new(StageId::new("fork1", 1), 0),
-            branch:             "security".into(),
-            index:              0,
-        });
+        emit(
+            &mut ui,
+            Event::ParallelStarted {
+                node_id: "fork1".into(),
+                visit: 1,
+                branch_count: 1,
+                join_policy: "wait_all".into(),
+            },
+        );
+        emit(
+            &mut ui,
+            Event::ParallelBranchStarted {
+                parallel_group_id: StageId::new("fork1", 1),
+                parallel_branch_id: ParallelBranchId::new(StageId::new("fork1", 1), 0),
+                branch: "security".into(),
+                index: 0,
+            },
+        );
 
         let stage = &ui.stage.active_stages["fork1"];
         let message = stage.tool_calls[0].bar.message();
@@ -617,21 +635,27 @@ mod tests {
 
         emit(
             &mut ui,
-            agent_event("s1", AgentEvent::CompactionStarted {
-                estimated_tokens:    5000,
-                context_window_size: 8000,
-            }),
+            agent_event(
+                "s1",
+                AgentEvent::CompactionStarted {
+                    estimated_tokens: 5000,
+                    context_window_size: 8000,
+                },
+            ),
         );
         assert!(ui.stage.active_stages["s1"].compaction_bar.is_some());
 
         emit(
             &mut ui,
-            agent_event("s1", AgentEvent::CompactionCompleted {
-                original_turn_count:    20,
-                preserved_turn_count:   6,
-                summary_token_estimate: 500,
-                tracked_file_count:     3,
-            }),
+            agent_event(
+                "s1",
+                AgentEvent::CompactionCompleted {
+                    original_turn_count: 20,
+                    preserved_turn_count: 6,
+                    summary_token_estimate: 500,
+                    tracked_file_count: 3,
+                },
+            ),
         );
         assert!(ui.stage.active_stages["s1"].compaction_bar.is_none());
     }
@@ -650,86 +674,101 @@ mod tests {
         let events = vec![
             stage_started("code", "Code"),
             Event::SandboxInitialized {
-                working_directory:      "/home/daytona/workspace".into(),
-                provider:               "daytona".into(),
-                identifier:             None,
+                working_directory: "/home/daytona/workspace".into(),
+                provider: "daytona".into(),
+                identifier: None,
                 host_working_directory: None,
-                container_mount_point:  None,
+                container_mount_point: None,
             },
-            agent_event("code", AgentEvent::ToolCallStarted {
-                tool_name:    "read_file".into(),
-                tool_call_id: "tc1".into(),
-                arguments:    serde_json::json!({
-                    "file_path": "/home/daytona/workspace/src/main.rs"
-                }),
-            }),
+            agent_event(
+                "code",
+                AgentEvent::ToolCallStarted {
+                    tool_name: "read_file".into(),
+                    tool_call_id: "tc1".into(),
+                    arguments: serde_json::json!({
+                        "file_path": "/home/daytona/workspace/src/main.rs"
+                    }),
+                },
+            ),
             assistant_message("code", "gpt-5-mini"),
             Event::EdgeSelected {
-                from_node:          "code".into(),
-                to_node:            "review".into(),
-                label:              Some("ship".into()),
-                condition:          None,
-                reason:             "condition".into(),
-                preferred_label:    None,
+                from_node: "code".into(),
+                to_node: "review".into(),
+                label: Some("ship".into()),
+                condition: None,
+                reason: "condition".into(),
+                preferred_label: None,
                 suggested_next_ids: Vec::new(),
-                stage_status:       "success".into(),
-                is_jump:            false,
+                stage_status: "success".into(),
+                is_jump: false,
             },
             Event::StageRetrying {
-                node_id:      "code".into(),
-                name:         "Code".into(),
-                index:        0,
-                attempt:      2,
+                node_id: "code".into(),
+                name: "Code".into(),
+                index: 0,
+                attempt: 2,
                 max_attempts: 3,
-                delay_ms:     1500,
+                delay_ms: 1500,
             },
-            agent_event("code", AgentEvent::Warning {
-                kind:    "context_window".into(),
-                message: "high usage".into(),
-                details: serde_json::json!({"usage_percent": 92}),
-            }),
-            agent_event("code", AgentEvent::LlmRetry {
-                provider:   "openai".into(),
-                model:      "gpt-5-mini".into(),
-                attempt:    2,
-                delay_secs: 1.5,
-                error:      fabro_llm::error::SdkError::Configuration {
-                    message: "busy".into(),
-                    source:  None,
+            agent_event(
+                "code",
+                AgentEvent::Warning {
+                    kind: "context_window".into(),
+                    message: "high usage".into(),
+                    details: serde_json::json!({"usage_percent": 92}),
                 },
-            }),
-            agent_event("code", AgentEvent::SubAgentSpawned {
-                agent_id: "a1".into(),
-                depth:    1,
-                task:     "review recent changes".into(),
-            }),
-            agent_event("code", AgentEvent::SubAgentCompleted {
-                agent_id:   "a1".into(),
-                depth:      1,
-                success:    true,
-                turns_used: 3,
-            }),
+            ),
+            agent_event(
+                "code",
+                AgentEvent::LlmRetry {
+                    provider: "openai".into(),
+                    model: "gpt-5-mini".into(),
+                    attempt: 2,
+                    delay_secs: 1.5,
+                    error: fabro_llm::Error::Configuration {
+                        message: "busy".into(),
+                        source: None,
+                    },
+                },
+            ),
+            agent_event(
+                "code",
+                AgentEvent::SubAgentSpawned {
+                    agent_id: "a1".into(),
+                    depth: 1,
+                    task: "review recent changes".into(),
+                },
+            ),
+            agent_event(
+                "code",
+                AgentEvent::SubAgentCompleted {
+                    agent_id: "a1".into(),
+                    depth: 1,
+                    success: true,
+                    turns_used: 3,
+                },
+            ),
             Event::SetupStarted { command_count: 1 },
             Event::SetupCommandCompleted {
-                command:     "bun install".into(),
-                index:       0,
-                exit_code:   0,
+                command: "bun install".into(),
+                index: 0,
+                exit_code: 0,
                 duration_ms: 2200,
             },
             Event::SetupCompleted { duration_ms: 2200 },
             Event::DevcontainerLifecycleStarted {
-                phase:         "postCreate".into(),
+                phase: "postCreate".into(),
                 command_count: 1,
             },
             Event::DevcontainerLifecycleCommandCompleted {
-                phase:       "postCreate".into(),
-                command:     "npm run setup".into(),
-                index:       0,
-                exit_code:   0,
+                phase: "postCreate".into(),
+                command: "npm run setup".into(),
+                index: 0,
+                exit_code: 0,
                 duration_ms: 1400,
             },
             Event::DevcontainerLifecycleCompleted {
-                phase:       "postCreate".into(),
+                phase: "postCreate".into(),
                 duration_ms: 1400,
             },
         ];
@@ -756,20 +795,26 @@ mod tests {
         emit(&mut ui, assistant_message("plan", "gpt-5-mini"));
         emit(
             &mut ui,
-            agent_event("plan", AgentEvent::ToolCallStarted {
-                tool_name:    "read_file".into(),
-                tool_call_id: "tc1".into(),
-                arguments:    serde_json::json!({"path": "src/main.rs"}),
-            }),
+            agent_event(
+                "plan",
+                AgentEvent::ToolCallStarted {
+                    tool_name: "read_file".into(),
+                    tool_call_id: "tc1".into(),
+                    arguments: serde_json::json!({"path": "src/main.rs"}),
+                },
+            ),
         );
         emit(
             &mut ui,
-            agent_event("plan", AgentEvent::ToolCallCompleted {
-                tool_name:    "read_file".into(),
-                tool_call_id: "tc1".into(),
-                output:       serde_json::json!({"ok": true}),
-                is_error:     false,
-            }),
+            agent_event(
+                "plan",
+                AgentEvent::ToolCallCompleted {
+                    tool_name: "read_file".into(),
+                    tool_call_id: "tc1".into(),
+                    output: serde_json::json!({"ok": true}),
+                    is_error: false,
+                },
+            ),
         );
         emit(&mut ui, stage_completed("plan", "Plan"));
 
@@ -780,47 +825,68 @@ mod tests {
     fn plain_default_setup_snapshot() {
         let (mut ui, buffer) = capture_ui(false);
 
-        emit(&mut ui, Event::Sandbox {
-            event: SandboxEvent::Initializing {
-                provider: "daytona".into(),
+        emit(
+            &mut ui,
+            Event::Sandbox {
+                event: SandboxEvent::Initializing {
+                    provider: "daytona".into(),
+                },
             },
-        });
-        emit(&mut ui, Event::Sandbox {
-            event: SandboxEvent::Ready {
-                provider:    "daytona".into(),
-                duration_ms: 2500,
-                name:        Some("sandbox-1".into()),
-                cpu:         Some(4.0),
-                memory:      Some(8.0),
-                url:         None,
+        );
+        emit(
+            &mut ui,
+            Event::Sandbox {
+                event: SandboxEvent::Ready {
+                    provider: "daytona".into(),
+                    duration_ms: 2500,
+                    name: Some("sandbox-1".into()),
+                    cpu: Some(4.0),
+                    memory: Some(8.0),
+                    url: None,
+                },
             },
-        });
-        emit(&mut ui, Event::SshAccessReady {
-            ssh_command: "ssh daytona@example".into(),
-        });
+        );
+        emit(
+            &mut ui,
+            Event::SshAccessReady {
+                ssh_command: "ssh daytona@example".into(),
+            },
+        );
         emit(&mut ui, Event::SetupStarted { command_count: 2 });
         emit(&mut ui, Event::SetupCompleted { duration_ms: 8200 });
-        emit(&mut ui, Event::CliEnsureCompleted {
-            cli_name:          "gh".into(),
-            provider:          "github".into(),
-            already_installed: false,
-            node_installed:    false,
-            duration_ms:       600,
-        });
-        emit(&mut ui, Event::DevcontainerResolved {
-            dockerfile_lines:        24,
-            environment_count:       3,
-            lifecycle_command_count: 2,
-            workspace_folder:        "/workspace".into(),
-        });
-        emit(&mut ui, Event::DevcontainerLifecycleStarted {
-            phase:         "postCreate".into(),
-            command_count: 2,
-        });
-        emit(&mut ui, Event::DevcontainerLifecycleCompleted {
-            phase:       "postCreate".into(),
-            duration_ms: 1800,
-        });
+        emit(
+            &mut ui,
+            Event::CliEnsureCompleted {
+                cli_name: "gh".into(),
+                provider: "github".into(),
+                already_installed: false,
+                node_installed: false,
+                duration_ms: 600,
+            },
+        );
+        emit(
+            &mut ui,
+            Event::DevcontainerResolved {
+                dockerfile_lines: 24,
+                environment_count: 3,
+                lifecycle_command_count: 2,
+                workspace_folder: "/workspace".into(),
+            },
+        );
+        emit(
+            &mut ui,
+            Event::DevcontainerLifecycleStarted {
+                phase: "postCreate".into(),
+                command_count: 2,
+            },
+        );
+        emit(
+            &mut ui,
+            Event::DevcontainerLifecycleCompleted {
+                phase: "postCreate".into(),
+                duration_ms: 1800,
+            },
+        );
 
         insta::assert_snapshot!(rendered(&buffer), @r"
             Sandbox: daytona (ready in 2s)
@@ -840,104 +906,140 @@ mod tests {
         let (mut ui, buffer) = capture_ui(true);
 
         emit(&mut ui, stage_started("code", "Code"));
-        emit(&mut ui, Event::SandboxInitialized {
-            working_directory:      "/home/daytona/workspace".into(),
-            provider:               "daytona".into(),
-            identifier:             None,
-            host_working_directory: None,
-            container_mount_point:  None,
-        });
         emit(
             &mut ui,
-            agent_event("code", AgentEvent::ToolCallStarted {
-                tool_name:    "read_file".into(),
-                tool_call_id: "tc1".into(),
-                arguments:    serde_json::json!({
-                    "file_path": "/home/daytona/workspace/src/main.rs"
-                }),
-            }),
+            Event::SandboxInitialized {
+                working_directory: "/home/daytona/workspace".into(),
+                provider: "daytona".into(),
+                identifier: None,
+                host_working_directory: None,
+                container_mount_point: None,
+            },
+        );
+        emit(
+            &mut ui,
+            agent_event(
+                "code",
+                AgentEvent::ToolCallStarted {
+                    tool_name: "read_file".into(),
+                    tool_call_id: "tc1".into(),
+                    arguments: serde_json::json!({
+                        "file_path": "/home/daytona/workspace/src/main.rs"
+                    }),
+                },
+            ),
         );
         emit(&mut ui, assistant_message("code", "gpt-5-mini"));
-        emit(&mut ui, Event::EdgeSelected {
-            from_node:          "code".into(),
-            to_node:            "review".into(),
-            label:              Some("ship".into()),
-            condition:          None,
-            reason:             "condition".into(),
-            preferred_label:    None,
-            suggested_next_ids: Vec::new(),
-            stage_status:       "success".into(),
-            is_jump:            false,
-        });
-        emit(&mut ui, Event::StageRetrying {
-            node_id:      "code".into(),
-            name:         "Code".into(),
-            index:        0,
-            attempt:      2,
-            max_attempts: 3,
-            delay_ms:     1500,
-        });
         emit(
             &mut ui,
-            agent_event("code", AgentEvent::Warning {
-                kind:    "context_window".into(),
-                message: "high usage".into(),
-                details: serde_json::json!({"usage_percent": 92}),
-            }),
+            Event::EdgeSelected {
+                from_node: "code".into(),
+                to_node: "review".into(),
+                label: Some("ship".into()),
+                condition: None,
+                reason: "condition".into(),
+                preferred_label: None,
+                suggested_next_ids: Vec::new(),
+                stage_status: "success".into(),
+                is_jump: false,
+            },
         );
         emit(
             &mut ui,
-            agent_event("code", AgentEvent::LlmRetry {
-                provider:   "openai".into(),
-                model:      "gpt-5-mini".into(),
-                attempt:    2,
-                delay_secs: 1.5,
-                error:      fabro_llm::error::SdkError::Configuration {
-                    message: "busy".into(),
-                    source:  None,
+            Event::StageRetrying {
+                node_id: "code".into(),
+                name: "Code".into(),
+                index: 0,
+                attempt: 2,
+                max_attempts: 3,
+                delay_ms: 1500,
+            },
+        );
+        emit(
+            &mut ui,
+            agent_event(
+                "code",
+                AgentEvent::Warning {
+                    kind: "context_window".into(),
+                    message: "high usage".into(),
+                    details: serde_json::json!({"usage_percent": 92}),
                 },
-            }),
+            ),
         );
         emit(
             &mut ui,
-            agent_event("code", AgentEvent::SubAgentSpawned {
-                agent_id: "a1".into(),
-                depth:    1,
-                task:     "review recent changes".into(),
-            }),
+            agent_event(
+                "code",
+                AgentEvent::LlmRetry {
+                    provider: "openai".into(),
+                    model: "gpt-5-mini".into(),
+                    attempt: 2,
+                    delay_secs: 1.5,
+                    error: fabro_llm::Error::Configuration {
+                        message: "busy".into(),
+                        source: None,
+                    },
+                },
+            ),
         );
         emit(
             &mut ui,
-            agent_event("code", AgentEvent::SubAgentCompleted {
-                agent_id:   "a1".into(),
-                depth:      1,
-                success:    true,
-                turns_used: 3,
-            }),
+            agent_event(
+                "code",
+                AgentEvent::SubAgentSpawned {
+                    agent_id: "a1".into(),
+                    depth: 1,
+                    task: "review recent changes".into(),
+                },
+            ),
+        );
+        emit(
+            &mut ui,
+            agent_event(
+                "code",
+                AgentEvent::SubAgentCompleted {
+                    agent_id: "a1".into(),
+                    depth: 1,
+                    success: true,
+                    turns_used: 3,
+                },
+            ),
         );
         emit(&mut ui, Event::SetupStarted { command_count: 1 });
-        emit(&mut ui, Event::SetupCommandCompleted {
-            command:     "bun install".into(),
-            index:       0,
-            exit_code:   0,
-            duration_ms: 2200,
-        });
+        emit(
+            &mut ui,
+            Event::SetupCommandCompleted {
+                command: "bun install".into(),
+                index: 0,
+                exit_code: 0,
+                duration_ms: 2200,
+            },
+        );
         emit(&mut ui, Event::SetupCompleted { duration_ms: 2200 });
-        emit(&mut ui, Event::DevcontainerLifecycleStarted {
-            phase:         "postCreate".into(),
-            command_count: 1,
-        });
-        emit(&mut ui, Event::DevcontainerLifecycleCommandCompleted {
-            phase:       "postCreate".into(),
-            command:     "npm run setup".into(),
-            index:       0,
-            exit_code:   0,
-            duration_ms: 1400,
-        });
-        emit(&mut ui, Event::DevcontainerLifecycleCompleted {
-            phase:       "postCreate".into(),
-            duration_ms: 1400,
-        });
+        emit(
+            &mut ui,
+            Event::DevcontainerLifecycleStarted {
+                phase: "postCreate".into(),
+                command_count: 1,
+            },
+        );
+        emit(
+            &mut ui,
+            Event::DevcontainerLifecycleCommandCompleted {
+                phase: "postCreate".into(),
+                command: "npm run setup".into(),
+                index: 0,
+                exit_code: 0,
+                duration_ms: 1400,
+            },
+        );
+        emit(
+            &mut ui,
+            Event::DevcontainerLifecycleCompleted {
+                phase: "postCreate".into(),
+                duration_ms: 1400,
+            },
+        );
         emit(&mut ui, stage_completed("code", "Code"));
 
         insta::assert_snapshot!(rendered(&buffer), @r#"
@@ -960,24 +1062,33 @@ mod tests {
     fn plain_notice_snapshot() {
         let (mut ui, buffer) = capture_ui(false);
 
-        emit(&mut ui, Event::RunNotice {
-            level:   RunNoticeLevel::Warn,
-            code:    "sandbox_cleanup_failed".into(),
-            message: "sandbox cleanup failed".into(),
-        });
-        emit(&mut ui, Event::PullRequestCreated {
-            pr_url:      "https://github.com/fabro-sh/fabro/pull/42".into(),
-            pr_number:   42,
-            owner:       "fabro-sh".into(),
-            repo:        "fabro".into(),
-            base_branch: "main".into(),
-            head_branch: "fabro/run/42".into(),
-            title:       "Ship the change".into(),
-            draft:       true,
-        });
-        emit(&mut ui, Event::PullRequestFailed {
-            error: "auth token expired".into(),
-        });
+        emit(
+            &mut ui,
+            Event::RunNotice {
+                level: RunNoticeLevel::Warn,
+                code: "sandbox_cleanup_failed".into(),
+                message: "sandbox cleanup failed".into(),
+            },
+        );
+        emit(
+            &mut ui,
+            Event::PullRequestCreated {
+                pr_url: "https://github.com/fabro-sh/fabro/pull/42".into(),
+                pr_number: 42,
+                owner: "fabro-sh".into(),
+                repo: "fabro".into(),
+                base_branch: "main".into(),
+                head_branch: "fabro/run/42".into(),
+                title: "Ship the change".into(),
+                draft: true,
+            },
+        );
+        emit(
+            &mut ui,
+            Event::PullRequestFailed {
+                error: "auth token expired".into(),
+            },
+        );
 
         insta::assert_snapshot!(rendered(&buffer), @r"
             Warning: sandbox cleanup failed [sandbox_cleanup_failed]
@@ -991,27 +1102,36 @@ mod tests {
         let mut ui = ProgressUI::new(true, false);
 
         emit(&mut ui, stage_started("fork1", "Fork"));
-        emit(&mut ui, Event::ParallelStarted {
-            node_id:      "fork1".into(),
-            visit:        1,
-            branch_count: 1,
-            join_policy:  "wait_all".into(),
-        });
-        emit(&mut ui, Event::ParallelBranchStarted {
-            parallel_group_id:  StageId::new("fork1", 1),
-            parallel_branch_id: ParallelBranchId::new(StageId::new("fork1", 1), 0),
-            branch:             "security".into(),
-            index:              0,
-        });
-        emit(&mut ui, Event::ParallelBranchCompleted {
-            parallel_group_id:  StageId::new("fork1", 1),
-            parallel_branch_id: ParallelBranchId::new(StageId::new("fork1", 1), 0),
-            branch:             "security".into(),
-            index:              0,
-            duration_ms:        500,
-            status:             "success".into(),
-            head_sha:           None,
-        });
+        emit(
+            &mut ui,
+            Event::ParallelStarted {
+                node_id: "fork1".into(),
+                visit: 1,
+                branch_count: 1,
+                join_policy: "wait_all".into(),
+            },
+        );
+        emit(
+            &mut ui,
+            Event::ParallelBranchStarted {
+                parallel_group_id: StageId::new("fork1", 1),
+                parallel_branch_id: ParallelBranchId::new(StageId::new("fork1", 1), 0),
+                branch: "security".into(),
+                index: 0,
+            },
+        );
+        emit(
+            &mut ui,
+            Event::ParallelBranchCompleted {
+                parallel_group_id: StageId::new("fork1", 1),
+                parallel_branch_id: ParallelBranchId::new(StageId::new("fork1", 1), 0),
+                branch: "security".into(),
+                index: 0,
+                duration_ms: 500,
+                status: "success".into(),
+                head_sha: None,
+            },
+        );
 
         let stage = &ui.stage.active_stages["fork1"];
         assert_eq!(stage.tool_calls[0].bar.prefix(), "500ms");
@@ -1031,11 +1151,11 @@ mod tests {
         let stage_started = serde_json::to_string(&to_run_event_at(
             &fixtures::RUN_1,
             &Event::StageStarted {
-                node_id:      "code".into(),
-                name:         "Code".into(),
-                index:        0,
+                node_id: "code".into(),
+                name: "Code".into(),
+                index: 0,
                 handler_type: "agent".into(),
-                attempt:      1,
+                attempt: 1,
                 max_attempts: 1,
             },
             started_ts,
@@ -1044,23 +1164,29 @@ mod tests {
         .unwrap();
         let tool_started = serde_json::to_string(&to_run_event_at(
             &fixtures::RUN_1,
-            &agent_event("code", AgentEvent::ToolCallStarted {
-                tool_name:    "read_file".into(),
-                tool_call_id: "tc1".into(),
-                arguments:    serde_json::json!({"path": "src/main.rs"}),
-            }),
+            &agent_event(
+                "code",
+                AgentEvent::ToolCallStarted {
+                    tool_name: "read_file".into(),
+                    tool_call_id: "tc1".into(),
+                    arguments: serde_json::json!({"path": "src/main.rs"}),
+                },
+            ),
             started_ts,
             None,
         ))
         .unwrap();
         let tool_completed = serde_json::to_string(&to_run_event_at(
             &fixtures::RUN_1,
-            &agent_event("code", AgentEvent::ToolCallCompleted {
-                tool_name:    "read_file".into(),
-                tool_call_id: "tc1".into(),
-                output:       serde_json::json!({"ok": true}),
-                is_error:     false,
-            }),
+            &agent_event(
+                "code",
+                AgentEvent::ToolCallCompleted {
+                    tool_name: "read_file".into(),
+                    tool_call_id: "tc1".into(),
+                    output: serde_json::json!({"ok": true}),
+                    is_error: false,
+                },
+            ),
             completed_ts,
             None,
         ))

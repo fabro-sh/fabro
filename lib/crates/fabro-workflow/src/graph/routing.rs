@@ -9,7 +9,7 @@ use crate::outcome::{Outcome, StageStatus};
 
 /// Result of edge selection: the chosen edge and the reason it was selected.
 pub(crate) struct SelectedGraphEdge<'a> {
-    pub(crate) edge:   &'a GvEdge,
+    pub(crate) edge: &'a GvEdge,
     pub(crate) reason: &'static str,
 }
 

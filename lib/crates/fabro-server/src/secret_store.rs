@@ -4,14 +4,14 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SecretEntry {
-    pub value:      String,
+    pub value: String,
     pub created_at: String,
     pub updated_at: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SecretMetadata {
-    pub name:       String,
+    pub name: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -51,7 +51,7 @@ impl From<serde_json::Error> for SecretStoreError {
 
 #[derive(Debug)]
 pub struct SecretStore {
-    path:    PathBuf,
+    path: PathBuf,
     entries: HashMap<String, SecretEntry>,
 }
 
@@ -75,7 +75,7 @@ impl SecretStore {
             .get(name)
             .map_or_else(|| now.clone(), |entry| entry.created_at.clone());
         let entry = SecretEntry {
-            value:      value.to_string(),
+            value: value.to_string(),
             created_at: created_at.clone(),
             updated_at: now.clone(),
         };
@@ -103,7 +103,7 @@ impl SecretStore {
             .entries
             .iter()
             .map(|(name, entry)| SecretMetadata {
-                name:       name.clone(),
+                name: name.clone(),
                 created_at: entry.created_at.clone(),
                 updated_at: entry.updated_at.clone(),
             })

@@ -27,9 +27,9 @@ pub enum SandboxSpec {
     },
     #[cfg(feature = "daytona")]
     Daytona {
-        config:       DaytonaConfig,
-        github_app:   Option<GitHubAppCredentials>,
-        run_id:       Option<RunId>,
+        config: DaytonaConfig,
+        github_app: Option<GitHubAppCredentials>,
+        run_id: Option<RunId>,
         clone_branch: Option<String>,
     },
 }
@@ -156,15 +156,15 @@ impl SandboxSpec {
             #[cfg(feature = "docker")]
             Self::Docker { config } => {
                 let mut sandbox = DockerSandbox::new(DockerSandboxOptions {
-                    image:                  config.image.clone(),
+                    image: config.image.clone(),
                     host_working_directory: config.host_working_directory.clone(),
-                    container_mount_point:  config.container_mount_point.clone(),
-                    network_mode:           config.network_mode.clone(),
-                    extra_mounts:           config.extra_mounts.clone(),
-                    memory_limit:           config.memory_limit,
-                    cpu_quota:              config.cpu_quota,
-                    auto_pull:              config.auto_pull,
-                    env_vars:               config.env_vars.clone(),
+                    container_mount_point: config.container_mount_point.clone(),
+                    network_mode: config.network_mode.clone(),
+                    extra_mounts: config.extra_mounts.clone(),
+                    memory_limit: config.memory_limit,
+                    cpu_quota: config.cpu_quota,
+                    auto_pull: config.auto_pull,
+                    env_vars: config.env_vars.clone(),
                 })
                 .map_err(|e| anyhow!("Failed to create Docker sandbox: {e}"))?;
                 if let Some(callback) = event_callback {

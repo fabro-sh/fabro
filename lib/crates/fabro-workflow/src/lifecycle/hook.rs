@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use fabro_core::error::{CoreError, Result as CoreResult};
+use fabro_core::error::{Error as CoreError, Result as CoreResult};
 use fabro_core::lifecycle::{
     AttemptContext, EdgeContext, EdgeDecision, NodeDecision, RunLifecycle,
 };
@@ -22,11 +22,11 @@ type WfNodeDecision = NodeDecision<Option<BilledModelUsage>>;
 
 /// Sub-lifecycle responsible for running workflow hooks.
 pub(crate) struct HookLifecycle {
-    pub hook_runner:   Option<Arc<HookRunner>>,
-    pub sandbox:       Arc<dyn Sandbox>,
+    pub hook_runner: Option<Arc<HookRunner>>,
+    pub sandbox: Arc<dyn Sandbox>,
     pub hook_work_dir: Option<PathBuf>,
-    pub run_id:        RunId,
-    pub graph_name:    String,
+    pub run_id: RunId,
+    pub graph_name: String,
 }
 
 impl HookLifecycle {

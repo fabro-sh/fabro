@@ -120,12 +120,12 @@ mod tests {
         let pem = test_rsa_private_key();
         let mut state = AppState::new();
         state.register_app(AppOptions {
-            app_id:          "12345".to_string(),
-            slug:            "my-app".to_string(),
-            owner_login:     "my-org".to_string(),
-            public:          true,
+            app_id: "12345".to_string(),
+            slug: "my-app".to_string(),
+            owner_login: "my-org".to_string(),
+            public: true,
             private_key_pem: pem.to_string(),
-            webhook_secret:  None,
+            webhook_secret: None,
         });
         let server = TestServer::start(state).await;
 
@@ -152,12 +152,12 @@ mod tests {
         let pem = test_rsa_private_key();
         let mut state = AppState::new();
         state.register_app(AppOptions {
-            app_id:          "12345".to_string(),
-            slug:            "my-app".to_string(),
-            owner_login:     "my-org".to_string(),
-            public:          true,
+            app_id: "12345".to_string(),
+            slug: "my-app".to_string(),
+            owner_login: "my-org".to_string(),
+            public: true,
             private_key_pem: pem.to_string(),
-            webhook_secret:  None,
+            webhook_secret: None,
         });
         let server = TestServer::start(state).await;
 
@@ -178,12 +178,12 @@ mod tests {
         let pem = test_rsa_private_key();
         let mut state = AppState::new();
         state.register_app(AppOptions {
-            app_id:          "12345".to_string(),
-            slug:            "my-app".to_string(),
-            owner_login:     "my-org".to_string(),
-            public:          true,
+            app_id: "12345".to_string(),
+            slug: "my-app".to_string(),
+            owner_login: "my-org".to_string(),
+            public: true,
             private_key_pem: pem.to_string(),
-            webhook_secret:  None,
+            webhook_secret: None,
         });
         let server = TestServer::start(state).await;
 
@@ -209,12 +209,12 @@ mod tests {
         let pem = test_rsa_private_key();
         let mut state = AppState::new();
         state.register_app(AppOptions {
-            app_id:          "12345".to_string(),
-            slug:            "private-app".to_string(),
-            owner_login:     "my-org".to_string(),
-            public:          false,
+            app_id: "12345".to_string(),
+            slug: "private-app".to_string(),
+            owner_login: "my-org".to_string(),
+            public: false,
             private_key_pem: pem.to_string(),
-            webhook_secret:  None,
+            webhook_secret: None,
         });
         let server = TestServer::start(state).await;
 

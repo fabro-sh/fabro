@@ -32,7 +32,7 @@ use fabro_types::settings::run::{RunArtifactsLayer, RunLayer};
 use fabro_types::{RunEvent, RunId, StageId};
 use fabro_validate::{Severity, validate, validate_or_raise};
 use fabro_workflow::context::Context;
-use fabro_workflow::error::{FabroError, FailureSignatureExt};
+use fabro_workflow::error::{Error, FailureSignatureExt};
 use fabro_workflow::event::{Emitter, Event};
 use fabro_workflow::handler::agent::{AgentHandler, CodergenBackend, CodergenResult};
 use fabro_workflow::handler::command::CommandHandler;
@@ -123,7 +123,7 @@ fn load_run_checkpoint(run_dir: &Path) -> Result<Checkpoint, Box<dyn std::error:
                     for attempt in 0..20 {
                         let state = run.state().await?;
                         if state.checkpoint.is_some() || attempt == 19 {
-                            return Ok::<_, fabro_store::StoreError>(state);
+                            return Ok::<_, fabro_store::Error>(state);
                         }
                         tokio::time::sleep(Duration::from_millis(10)).await;
                     }
@@ -161,7 +161,7 @@ fn load_run_checkpoint(run_dir: &Path) -> Result<Checkpoint, Box<dyn std::error:
             for attempt in 0..20 {
                 let state = run.state().await?;
                 if state.checkpoint.is_some() || attempt == 19 {
-                    return Ok::<_, fabro_store::StoreError>(state);
+                    return Ok::<_, fabro_store::Error>(state);
                 }
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
@@ -337,17 +337,17 @@ async fn end_to_end_linear_pipeline() {
         local_env(),
     );
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -466,17 +466,17 @@ async fn end_to_end_branching_pipeline() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -571,9 +571,9 @@ async fn end_to_end_human_gate_pipeline() {
 
     // Pre-fill the queue with an answer selecting "R"
     let answers = VecDeque::from([Answer {
-        value:           AnswerValue::Selected("R".to_string()),
+        value: AnswerValue::Selected("R".to_string()),
         selected_option: None,
-        text:            None,
+        text: None,
     }]);
     let interviewer = Arc::new(QueueInterviewer::new(answers));
 
@@ -585,17 +585,17 @@ async fn end_to_end_human_gate_pipeline() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -680,17 +680,17 @@ async fn human_gate_interrupted_input_fails_closed_without_fail_route() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -790,17 +790,17 @@ async fn human_gate_interrupted_input_routes_via_outcome_fail_condition() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -837,7 +837,7 @@ impl Handler for AlwaysFailHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &fabro_workflow::handler::EngineServices,
-    ) -> Result<Outcome, fabro_workflow::error::FabroError> {
+    ) -> Result<Outcome, fabro_workflow::error::Error> {
         Ok(Outcome::fail_classify(format!(
             "forced failure for {}",
             node.id
@@ -903,17 +903,17 @@ async fn goal_gate_routes_to_retry_target_on_failure() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let result = engine.run(&graph, &run_options).await;
     assert!(
@@ -962,7 +962,7 @@ async fn goal_gate_routes_to_retry_target_when_present() {
             _graph: &Graph,
             _run_dir: &Path,
             _services: &fabro_workflow::handler::EngineServices,
-        ) -> Result<Outcome, fabro_workflow::error::FabroError> {
+        ) -> Result<Outcome, fabro_workflow::error::Error> {
             let count = self
                 .call_count
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -1023,17 +1023,17 @@ async fn goal_gate_routes_to_retry_target_when_present() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -1279,7 +1279,7 @@ async fn retry_on_failure_then_succeed() {
             _graph: &Graph,
             _run_dir: &Path,
             _services: &fabro_workflow::handler::EngineServices,
-        ) -> Result<Outcome, FabroError> {
+        ) -> Result<Outcome, Error> {
             let count = self
                 .call_count
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -1337,17 +1337,17 @@ async fn retry_on_failure_then_succeed() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine
         .run(&graph, &run_options)
@@ -1411,17 +1411,17 @@ async fn pipeline_with_many_nodes() {
         local_env(),
     );
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -1500,15 +1500,15 @@ impl CodergenBackend for MockCodergenBackend {
         _emitter: &Arc<Emitter>,
         _sandbox: &Arc<dyn fabro_agent::Sandbox>,
         _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-    ) -> Result<CodergenResult, FabroError> {
+    ) -> Result<CodergenResult, Error> {
         Ok(CodergenResult::Text {
-            text:              format!(
+            text: format!(
                 "Response for {}: processed prompt '{}'",
                 node.id,
                 &prompt[..prompt.len().min(50)]
             ),
-            usage:             None,
-            files_touched:     Vec::new(),
+            usage: None,
+            files_touched: Vec::new(),
             last_file_touched: None,
         })
     }
@@ -1533,7 +1533,7 @@ impl Handler for CounterHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &fabro_workflow::handler::EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         let count = self
             .call_count
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -1559,7 +1559,7 @@ impl Handler for LargeOutputHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &fabro_workflow::handler::EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         let mut outcome = Outcome::success();
         // 150KB string — well above the 100KB artifact threshold
         let large_value = "x".repeat(150 * 1024);
@@ -1574,7 +1574,7 @@ impl Handler for LargeOutputHandler {
 #[derive(Clone)]
 struct ContextValueCaptureHandler {
     values: Arc<std::sync::Mutex<Vec<String>>>,
-    key:    String,
+    key: String,
 }
 
 #[async_trait::async_trait]
@@ -1586,7 +1586,7 @@ impl Handler for ContextValueCaptureHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &fabro_workflow::handler::EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         let value = context
             .get(&self.key)
             .and_then(|value| value.as_str().map(ToOwned::to_owned))
@@ -1608,7 +1608,7 @@ impl Handler for ContextSetterHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &fabro_workflow::handler::EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         let mut outcome = Outcome::success();
         outcome
             .context_updates
@@ -1757,17 +1757,17 @@ async fn smoke_test_with_mock_codergen_backend() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -1858,17 +1858,17 @@ async fn end_to_end_parallel_fan_out_fan_in() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -1970,17 +1970,17 @@ async fn resume_from_checkpoint_completes_pipeline() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_from_checkpoint_with_state(&graph, &run_options, &checkpoint)
@@ -2068,17 +2068,17 @@ async fn resume_from_checkpoint_preserves_goal_gate_outcomes() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     // This should succeed because goal gate for gated_work is satisfied
     // via restored outcomes
@@ -2110,17 +2110,17 @@ async fn graph_goal_in_context() {
         local_env(),
     );
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (_outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -2148,17 +2148,17 @@ async fn event_streaming_lifecycle() {
     let events = collect_events(&emitter);
     let engine = WorkflowRunner::new(make_linear_registry(), Arc::new(emitter), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &run_options).await.expect("run");
 
@@ -2227,17 +2227,17 @@ async fn context_flow_between_stages() {
         local_env(),
     );
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (_outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -2282,17 +2282,17 @@ async fn tool_handler_e2e() {
         local_env(),
     );
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, _state) = engine
         .run_with_state(&graph, &run_options)
@@ -2356,17 +2356,17 @@ async fn auto_approve_interviewer_e2e() {
         local_env(),
     );
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, _state) = engine
         .run_with_state(&graph, &run_options)
@@ -2395,17 +2395,17 @@ async fn codergen_without_backend_simulated() {
         local_env(),
     );
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (_outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -2442,7 +2442,7 @@ async fn branching_loop_back_on_failure() {
             _graph: &Graph,
             _run_dir: &Path,
             _services: &fabro_workflow::handler::EngineServices,
-        ) -> Result<Outcome, FabroError> {
+        ) -> Result<Outcome, Error> {
             let count = self
                 .call_count
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -2499,17 +2499,17 @@ async fn branching_loop_back_on_failure() {
     );
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, _state) = engine
         .run_with_state(&graph, &run_options)
@@ -2565,14 +2565,14 @@ async fn human_gate_loops_back() {
 
     let answers = VecDeque::from([
         Answer {
-            value:           AnswerValue::Selected("F".to_string()),
+            value: AnswerValue::Selected("F".to_string()),
             selected_option: None,
-            text:            None,
+            text: None,
         },
         Answer {
-            value:           AnswerValue::Selected("A".to_string()),
+            value: AnswerValue::Selected("A".to_string()),
             selected_option: None,
-            text:            None,
+            text: None,
         },
     ]);
     let interviewer = Arc::new(QueueInterviewer::new(answers));
@@ -2584,17 +2584,17 @@ async fn human_gate_loops_back() {
     registry.register("human", Box::new(HumanHandler::new(interviewer)));
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, _state) = engine
         .run_with_state(&graph, &run_options)
@@ -2648,17 +2648,17 @@ async fn scenario_ship_a_feature() {
         local_env(),
     );
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, _state) = engine
         .run_with_state(&graph, &run_options)
@@ -2732,17 +2732,17 @@ async fn scenario_parallel_expert_review() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -2777,7 +2777,7 @@ async fn scenario_node_retries_on_retry_status() {
             _graph: &Graph,
             _run_dir: &Path,
             _services: &fabro_workflow::handler::EngineServices,
-        ) -> Result<Outcome, FabroError> {
+        ) -> Result<Outcome, Error> {
             let count = self
                 .call_count
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -2818,17 +2818,17 @@ async fn scenario_node_retries_on_retry_status() {
     );
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -2882,17 +2882,17 @@ async fn scenario_loop_restart_resets_context() {
     );
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -2949,17 +2949,17 @@ async fn scenario_bug_triage_router() {
     registry.register("conditional", Box::new(ConditionalHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -3010,17 +3010,17 @@ async fn scenario_crash_recovery() {
     registry.register("exit", Box::new(ExitHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_from_checkpoint_with_state(&graph, &run_options, &checkpoint)
@@ -3049,7 +3049,7 @@ async fn manager_loop_stop_condition_satisfied_e2e() {
             _graph: &Graph,
             _run_dir: &Path,
             _services: &fabro_workflow::handler::EngineServices,
-        ) -> Result<Outcome, FabroError> {
+        ) -> Result<Outcome, Error> {
             let mut outcome = Outcome::success();
             outcome
                 .context_updates
@@ -3070,7 +3070,7 @@ async fn manager_loop_stop_condition_satisfied_e2e() {
             _graph: &Graph,
             _run_dir: &Path,
             _services: &fabro_workflow::handler::EngineServices,
-        ) -> Result<Outcome, FabroError> {
+        ) -> Result<Outcome, Error> {
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
             Ok(Outcome::success())
         }
@@ -3119,17 +3119,17 @@ async fn manager_loop_stop_condition_satisfied_e2e() {
     registry.register("stack.manager_loop", Box::new(SubWorkflowHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -3163,7 +3163,7 @@ async fn manager_loop_max_cycles_exceeded_e2e() {
             _graph: &Graph,
             _run_dir: &Path,
             _services: &fabro_workflow::handler::EngineServices,
-        ) -> Result<Outcome, FabroError> {
+        ) -> Result<Outcome, Error> {
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
             Ok(Outcome::success())
         }
@@ -3200,17 +3200,17 @@ async fn manager_loop_max_cycles_exceeded_e2e() {
     registry.register("stack.manager_loop", Box::new(SubWorkflowHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -3340,17 +3340,17 @@ async fn conditional_branching_success_fail_paths() {
     registry.register("always_fail", Box::new(AlwaysFailHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -3395,17 +3395,17 @@ async fn edge_selection_condition_match_wins_over_weight() {
     registry.register("exit", Box::new(ExitHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (_outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -3444,17 +3444,17 @@ async fn edge_selection_weight_breaks_ties() {
     registry.register("exit", Box::new(ExitHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (_outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -3485,17 +3485,17 @@ async fn edge_selection_lexical_tiebreak() {
     registry.register("exit", Box::new(ExitHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (_outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -3545,17 +3545,17 @@ async fn context_updates_visible_across_nodes() {
     registry.register("context_setter", Box::new(ContextSetterHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (_outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -3591,17 +3591,17 @@ async fn stylesheet_applies_model_override() {
         local_env(),
     );
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -3620,7 +3620,7 @@ async fn custom_handler_registration_and_execution() {
             _graph: &Graph,
             _run_dir: &Path,
             _services: &fabro_workflow::handler::EngineServices,
-        ) -> Result<Outcome, FabroError> {
+        ) -> Result<Outcome, Error> {
             let mut outcome = Outcome::success();
             outcome
                 .context_updates
@@ -3646,17 +3646,17 @@ async fn custom_handler_registration_and_execution() {
     registry.register("my_custom", Box::new(CustomHandler));
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (_outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -3723,17 +3723,17 @@ async fn integration_smoke_plan_implement_review_done() {
         local_env(),
     );
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -3814,17 +3814,17 @@ async fn manager_loop_runs_child_engine_e2e() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -3870,7 +3870,7 @@ async fn manager_loop_context_flows_e2e() {
             _graph: &Graph,
             _run_dir: &Path,
             _services: &fabro_workflow::handler::EngineServices,
-        ) -> Result<Outcome, FabroError> {
+        ) -> Result<Outcome, Error> {
             let target = context.get_string("review.target", "");
             let mut outcome = Outcome::success();
             outcome
@@ -3896,7 +3896,7 @@ async fn manager_loop_context_flows_e2e() {
             _graph: &Graph,
             _run_dir: &Path,
             _services: &fabro_workflow::handler::EngineServices,
-        ) -> Result<Outcome, FabroError> {
+        ) -> Result<Outcome, Error> {
             let mut outcome = Outcome::success();
             outcome.context_updates.insert(
                 "review.target".to_string(),
@@ -3947,17 +3947,17 @@ async fn manager_loop_context_flows_e2e() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -4022,17 +4022,17 @@ async fn manager_loop_child_dotfile_e2e() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);
@@ -4081,14 +4081,17 @@ async fn import_e2e_through_engine() {
         }"#,
     )
     .expect("parse should succeed");
-    let transformed = transform(parsed, &TransformOptions {
-        current_dir:       Some(dir.path().to_path_buf()),
-        file_resolver:     Some(std::sync::Arc::new(
-            fabro_workflow::file_resolver::FilesystemFileResolver::new(None),
-        )),
-        inputs:            std::collections::HashMap::new(),
-        custom_transforms: vec![],
-    })
+    let transformed = transform(
+        parsed,
+        &TransformOptions {
+            current_dir: Some(dir.path().to_path_buf()),
+            file_resolver: Some(std::sync::Arc::new(
+                fabro_workflow::file_resolver::FilesystemFileResolver::new(None),
+            )),
+            inputs: std::collections::HashMap::new(),
+            custom_transforms: vec![],
+        },
+    )
     .unwrap();
     let validated = validate(transformed, &[]);
     validated
@@ -4125,17 +4128,17 @@ async fn import_e2e_through_engine() {
         local_env(),
     );
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -4197,7 +4200,7 @@ type SharedVec<T> = Arc<std::sync::Mutex<Vec<T>>>;
 struct FidelityCaptures {
     fidelities: SharedVec<(String, String)>,
     thread_ids: SharedVec<(String, Option<String>)>,
-    preambles:  SharedVec<(String, String)>,
+    preambles: SharedVec<(String, String)>,
 }
 
 impl FidelityCaptures {
@@ -4205,7 +4208,7 @@ impl FidelityCaptures {
         Self {
             fidelities: Arc::new(std::sync::Mutex::new(Vec::new())),
             thread_ids: Arc::new(std::sync::Mutex::new(Vec::new())),
-            preambles:  Arc::new(std::sync::Mutex::new(Vec::new())),
+            preambles: Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
 }
@@ -4225,7 +4228,7 @@ impl Handler for FidelityCapturingHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &fabro_workflow::handler::EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         let fidelity = context.get_string("internal.fidelity", "none");
         self.captures
             .fidelities
@@ -4279,17 +4282,17 @@ async fn fidelity_default_is_compact() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &run_options).await.expect("run");
 
@@ -4335,17 +4338,17 @@ async fn fidelity_graph_default_applied() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &run_options).await.expect("run");
 
@@ -4387,17 +4390,17 @@ async fn fidelity_node_overrides_graph_default() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &run_options).await.expect("run");
 
@@ -4445,17 +4448,17 @@ async fn fidelity_edge_overrides_node_and_graph() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &run_options).await.expect("run");
 
@@ -4493,17 +4496,17 @@ async fn fidelity_full_produces_empty_preamble() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &run_options).await.expect("run");
 
@@ -4551,17 +4554,17 @@ async fn fidelity_truncate_preamble_minimal() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &run_options).await.expect("run");
 
@@ -4622,17 +4625,17 @@ async fn fidelity_summary_low_mode() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &run_options).await.expect("run");
 
@@ -4688,17 +4691,17 @@ async fn fidelity_summary_medium_mode() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &run_options).await.expect("run");
 
@@ -4754,17 +4757,17 @@ async fn fidelity_summary_high_mode() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &run_options).await.expect("run");
 
@@ -4813,17 +4816,17 @@ async fn fidelity_full_sets_thread_id_in_context() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &run_options).await.expect("run");
 
@@ -4883,17 +4886,17 @@ async fn fidelity_full_nodes_share_thread_id() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &run_options).await.expect("run");
 
@@ -4963,17 +4966,17 @@ async fn fidelity_resume_degrades_full_to_summary_high() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine
         .run_from_checkpoint(&graph, &run_options, &checkpoint)
@@ -5059,17 +5062,17 @@ async fn fidelity_resume_degrade_only_affects_first_hop() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine
         .run_from_checkpoint(&graph, &run_options, &checkpoint)
@@ -5142,17 +5145,17 @@ async fn fidelity_resume_no_degrade_when_not_full() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine
         .run_from_checkpoint(&graph, &run_options, &checkpoint)
@@ -5183,17 +5186,17 @@ async fn fidelity_stored_in_checkpoint_context() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (_outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -5275,17 +5278,17 @@ async fn fidelity_precedence_multi_node_pipeline() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &run_options).await.expect("run");
 
@@ -5342,17 +5345,17 @@ async fn fidelity_compact_preamble_includes_completed_stages_and_context() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &run_options).await.expect("run");
 
@@ -5416,17 +5419,17 @@ async fn fidelity_summary_low_excludes_context_values_in_pipeline() {
     );
     let engine_low = WorkflowRunner::new(registry_low, Arc::new(Emitter::default()), local_env());
     let run_options_low = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir_low.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir_low.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine_low
         .run(&graph_low, &run_options_low)
@@ -5482,17 +5485,17 @@ async fn fidelity_summary_low_excludes_context_values_in_pipeline() {
     );
     let engine_med = WorkflowRunner::new(registry_med, Arc::new(Emitter::default()), local_env());
     let run_options_med = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir_med.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir_med.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine_med
         .run(&graph_med, &run_options_med)
@@ -5553,17 +5556,17 @@ async fn fidelity_thread_id_fallback_to_previous_node_in_pipeline() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &run_options).await.expect("run");
 
@@ -5606,17 +5609,17 @@ async fn fidelity_thread_id_from_node_class_in_pipeline() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &run_options).await.expect("run");
 
@@ -5662,17 +5665,17 @@ async fn fidelity_edge_thread_id_override_in_pipeline() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &run_options).await.expect("run");
 
@@ -5719,17 +5722,17 @@ async fn fidelity_full_without_explicit_thread_id_uses_previous_node() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &run_options).await.expect("run");
 
@@ -5786,17 +5789,17 @@ async fn fidelity_from_parsed_dot_pipeline() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &run_options).await.expect("run");
 
@@ -5834,17 +5837,17 @@ async fn fidelity_checkpoint_roundtrip_preserves_fidelity() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (_outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -5906,17 +5909,17 @@ async fn fidelity_node_thread_id_overrides_edge_thread_id_in_pipeline() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     engine.run(&graph, &run_options).await.expect("run");
 
@@ -5992,17 +5995,17 @@ async fn fidelity_resume_preserves_context_values_across_checkpoint() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (_outcome, state) = engine
         .run_from_checkpoint_with_state(&graph, &run_options, &checkpoint)
@@ -6039,12 +6042,12 @@ mod real_llm {
     use fabro_llm::types::{Message, Request};
     use fabro_types::settings::SettingsLayer;
     use fabro_workflow::context::Context;
-    use fabro_workflow::error::FabroError;
+    use fabro_workflow::error::Error;
     use fabro_workflow::handler::agent::{AgentHandler, CodergenBackend, CodergenResult};
 
     struct LlmCodergenBackend {
-        client:   Arc<Client>,
-        model:    String,
+        client: Arc<Client>,
+        model: String,
         provider: String,
     }
 
@@ -6059,7 +6062,7 @@ mod real_llm {
             _emitter: &Arc<Emitter>,
             _sandbox: &Arc<dyn fabro_agent::Sandbox>,
             _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-        ) -> Result<CodergenResult, FabroError> {
+        ) -> Result<CodergenResult, Error> {
             self.complete(prompt).await
         }
 
@@ -6068,38 +6071,38 @@ mod real_llm {
             _node: &Node,
             prompt: &str,
             _system_prompt: Option<&str>,
-        ) -> Result<CodergenResult, FabroError> {
+        ) -> Result<CodergenResult, Error> {
             self.complete(prompt).await
         }
     }
 
     impl LlmCodergenBackend {
-        async fn complete(&self, prompt: &str) -> Result<CodergenResult, FabroError> {
+        async fn complete(&self, prompt: &str) -> Result<CodergenResult, Error> {
             let request = Request {
-                model:            self.model.clone(),
-                messages:         vec![Message::user(prompt)],
-                provider:         Some(self.provider.clone()),
-                tools:            None,
-                tool_choice:      None,
-                response_format:  None,
-                temperature:      Some(0.0),
-                top_p:            None,
-                max_tokens:       Some(200),
-                stop_sequences:   None,
+                model: self.model.clone(),
+                messages: vec![Message::user(prompt)],
+                provider: Some(self.provider.clone()),
+                tools: None,
+                tool_choice: None,
+                response_format: None,
+                temperature: Some(0.0),
+                top_p: None,
+                max_tokens: Some(200),
+                stop_sequences: None,
                 reasoning_effort: None,
-                speed:            None,
-                metadata:         None,
+                speed: None,
+                metadata: None,
                 provider_options: None,
             };
             let response = self
                 .client
                 .complete(&request)
                 .await
-                .map_err(|e| FabroError::handler(e.to_string()))?;
+                .map_err(|e| Error::handler(e.to_string()))?;
             Ok(CodergenResult::Text {
-                text:              response.text(),
-                usage:             None,
-                files_touched:     Vec::new(),
+                text: response.text(),
+                usage: None,
+                files_touched: Vec::new(),
                 last_file_touched: None,
             })
         }
@@ -6228,17 +6231,17 @@ mod real_llm {
 
         let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
         let run_options = RunOptions {
-            settings:         SettingsLayer::default(),
-            run_dir:          dir.path().to_path_buf(),
-            cancel_token:     None,
-            run_id:           test_run_id("test-run"),
-            labels:           std::collections::HashMap::new(),
-            workflow_slug:    None,
-            github_app:       None,
-            base_branch:      None,
+            settings: SettingsLayer::default(),
+            run_dir: dir.path().to_path_buf(),
+            cancel_token: None,
+            run_id: test_run_id("test-run"),
+            labels: std::collections::HashMap::new(),
+            workflow_slug: None,
+            github_app: None,
+            base_branch: None,
             display_base_sha: None,
-            host_repo_path:   None,
-            git:              None,
+            host_repo_path: None,
+            git: None,
         };
         let (outcome, state) = tokio::time::timeout(
             std::time::Duration::from_secs(120),
@@ -6336,17 +6339,17 @@ mod real_llm {
 
         let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
         let run_options = RunOptions {
-            settings:         SettingsLayer::default(),
-            run_dir:          dir.path().to_path_buf(),
-            cancel_token:     None,
-            run_id:           test_run_id("test-run"),
-            labels:           std::collections::HashMap::new(),
-            workflow_slug:    None,
-            github_app:       None,
-            base_branch:      None,
+            settings: SettingsLayer::default(),
+            run_dir: dir.path().to_path_buf(),
+            cancel_token: None,
+            run_id: test_run_id("test-run"),
+            labels: std::collections::HashMap::new(),
+            workflow_slug: None,
+            github_app: None,
+            base_branch: None,
             display_base_sha: None,
-            host_repo_path:   None,
-            git:              None,
+            host_repo_path: None,
+            git: None,
         };
         let outcome = tokio::time::timeout(
             std::time::Duration::from_secs(120),
@@ -6468,17 +6471,17 @@ mod real_llm {
 
         let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
         let run_options = RunOptions {
-            settings:         SettingsLayer::default(),
-            run_dir:          dir.path().to_path_buf(),
-            cancel_token:     None,
-            run_id:           test_run_id("test-run"),
-            labels:           std::collections::HashMap::new(),
-            workflow_slug:    None,
-            github_app:       None,
-            base_branch:      None,
+            settings: SettingsLayer::default(),
+            run_dir: dir.path().to_path_buf(),
+            cancel_token: None,
+            run_id: test_run_id("test-run"),
+            labels: std::collections::HashMap::new(),
+            workflow_slug: None,
+            github_app: None,
+            base_branch: None,
             display_base_sha: None,
-            host_repo_path:   None,
-            git:              None,
+            host_repo_path: None,
+            git: None,
         };
         let outcome = tokio::time::timeout(
             std::time::Duration::from_secs(120),
@@ -6568,17 +6571,17 @@ mod real_llm {
 
         let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
         let run_options = RunOptions {
-            settings:         SettingsLayer::default(),
-            run_dir:          dir.path().to_path_buf(),
-            cancel_token:     None,
-            run_id:           test_run_id("test-run"),
-            labels:           std::collections::HashMap::new(),
-            workflow_slug:    None,
-            github_app:       None,
-            base_branch:      None,
+            settings: SettingsLayer::default(),
+            run_dir: dir.path().to_path_buf(),
+            cancel_token: None,
+            run_id: test_run_id("test-run"),
+            labels: std::collections::HashMap::new(),
+            workflow_slug: None,
+            github_app: None,
+            base_branch: None,
             display_base_sha: None,
-            host_repo_path:   None,
-            git:              None,
+            host_repo_path: None,
+            git: None,
         };
         let (outcome, state) = tokio::time::timeout(
             std::time::Duration::from_secs(30),
@@ -6661,17 +6664,17 @@ async fn human_gate_freeform_only_routes_text() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -6777,9 +6780,9 @@ async fn human_gate_freeform_with_fixed_choice_match() {
 
     // Answer selects "A" which matches the Approve choice
     let answers = VecDeque::from([Answer {
-        value:           AnswerValue::Selected("A".to_string()),
+        value: AnswerValue::Selected("A".to_string()),
         selected_option: None,
-        text:            None,
+        text: None,
     }]);
     let interviewer = Arc::new(QueueInterviewer::new(answers));
 
@@ -6791,17 +6794,17 @@ async fn human_gate_freeform_with_fixed_choice_match() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -6907,17 +6910,17 @@ async fn human_gate_freeform_fallback_on_unmatched_text() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -7018,9 +7021,9 @@ async fn human_gate_freeform_sets_allow_freeform_on_question() {
     graph.edges.push(Edge::new("freeform_target", "exit"));
 
     let answers = VecDeque::from([Answer {
-        value:           AnswerValue::Selected("A".to_string()),
+        value: AnswerValue::Selected("A".to_string()),
         selected_option: None,
-        text:            None,
+        text: None,
     }]);
     let inner = QueueInterviewer::new(answers);
     let recorder = Arc::new(RecordingInterviewer::new(Box::new(inner)));
@@ -7034,17 +7037,17 @@ async fn human_gate_freeform_sets_allow_freeform_on_question() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine
         .run(&graph, &run_options)
@@ -7126,9 +7129,9 @@ async fn human_gate_without_freeform_sets_allow_freeform_false() {
     graph.edges.push(Edge::new("reject", "exit"));
 
     let answers = VecDeque::from([Answer {
-        value:           AnswerValue::Selected("A".to_string()),
+        value: AnswerValue::Selected("A".to_string()),
         selected_option: None,
-        text:            None,
+        text: None,
     }]);
     let inner = QueueInterviewer::new(answers);
     let recorder = Arc::new(RecordingInterviewer::new(Box::new(inner)));
@@ -7142,17 +7145,17 @@ async fn human_gate_without_freeform_sets_allow_freeform_false() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine
         .run(&graph, &run_options)
@@ -7378,12 +7381,12 @@ fn hook_runner_from_defs(hooks: Vec<fabro_hooks::HookDefinition>) -> Arc<fabro_h
 }
 
 struct HookTestRunner {
-    emitter:     Arc<Emitter>,
+    emitter: Arc<Emitter>,
     hook_runner: Arc<fabro_hooks::HookRunner>,
 }
 
 impl HookTestRunner {
-    async fn run(&self, graph: &Graph, run_options: &RunOptions) -> Result<Outcome, FabroError> {
+    async fn run(&self, graph: &Graph, run_options: &RunOptions) -> Result<Outcome, Error> {
         run_graph_with_hooks(
             make_linear_registry(),
             Arc::clone(&self.emitter),
@@ -7400,7 +7403,7 @@ impl HookTestRunner {
         &self,
         graph: &Graph,
         run_options: &RunOptions,
-    ) -> Result<(Outcome, fabro_store::RunProjection), FabroError> {
+    ) -> Result<(Outcome, fabro_store::RunProjection), Error> {
         Box::pin(
             fabro_workflow::test_support::run_graph_with_hooks_and_state(
                 make_linear_registry(),
@@ -7424,7 +7427,7 @@ fn emitter_with_events() -> (Arc<Emitter>, Arc<std::sync::Mutex<Vec<RunEvent>>>)
 
 fn engine_with_hooks(hooks: Vec<fabro_hooks::HookDefinition>) -> HookTestRunner {
     HookTestRunner {
-        emitter:     Arc::new(Emitter::default()),
+        emitter: Arc::new(Emitter::default()),
         hook_runner: hook_runner_from_defs(hooks),
     }
 }
@@ -7444,17 +7447,17 @@ fn engine_with_hooks_and_events(
 
 fn make_run_options(dir: &std::path::Path) -> RunOptions {
     RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("hook-test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("hook-test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     }
 }
 
@@ -8039,26 +8042,26 @@ async fn hook_config_merge_concatenates() {
 
     let server_hooks = HookSettings {
         hooks: vec![HookDefinition {
-            name:       Some("server-hook".into()),
-            event:      HookEvent::RunStart,
-            command:    Some("exit 0".into()),
-            hook_type:  None,
-            matcher:    None,
-            blocking:   None,
+            name: Some("server-hook".into()),
+            event: HookEvent::RunStart,
+            command: Some("exit 0".into()),
+            hook_type: None,
+            matcher: None,
+            blocking: None,
             timeout_ms: None,
-            sandbox:    Some(false),
+            sandbox: Some(false),
         }],
     };
     let run_hooks = HookSettings {
         hooks: vec![HookDefinition {
-            name:       Some("run-hook".into()),
-            event:      HookEvent::StageComplete,
-            command:    Some("exit 0".into()),
-            hook_type:  None,
-            matcher:    None,
-            blocking:   None,
+            name: Some("run-hook".into()),
+            event: HookEvent::StageComplete,
+            command: Some("exit 0".into()),
+            hook_type: None,
+            matcher: None,
+            blocking: None,
             timeout_ms: None,
-            sandbox:    Some(false),
+            sandbox: Some(false),
         }],
     };
 
@@ -8074,26 +8077,26 @@ async fn hook_config_merge_run_overrides_by_name() {
 
     let server_hooks = HookSettings {
         hooks: vec![HookDefinition {
-            name:       Some("shared".into()),
-            event:      HookEvent::RunStart,
-            command:    Some("exit 1".into()), // would block
-            hook_type:  None,
-            matcher:    None,
-            blocking:   None,
+            name: Some("shared".into()),
+            event: HookEvent::RunStart,
+            command: Some("exit 1".into()), // would block
+            hook_type: None,
+            matcher: None,
+            blocking: None,
             timeout_ms: None,
-            sandbox:    Some(false),
+            sandbox: Some(false),
         }],
     };
     let run_hooks = HookSettings {
         hooks: vec![HookDefinition {
-            name:       Some("shared".into()),
-            event:      HookEvent::RunStart,
-            command:    Some("exit 0".into()), // allows
-            hook_type:  None,
-            matcher:    None,
-            blocking:   None,
+            name: Some("shared".into()),
+            event: HookEvent::RunStart,
+            command: Some("exit 0".into()), // allows
+            hook_type: None,
+            matcher: None,
+            blocking: None,
             timeout_ms: None,
-            sandbox:    Some(false),
+            sandbox: Some(false),
         }],
     };
 
@@ -8382,17 +8385,17 @@ async fn run_fidelity_prompt_pipeline(fidelity: &str) -> String {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (_outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -8583,17 +8586,17 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
     let events = collect_events(&emitter);
     let engine = WorkflowRunner::new(registry, Arc::new(emitter), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, _state) = engine
         .run_with_state(&graph, &run_options)
@@ -8642,16 +8645,16 @@ async fn large_context_values_are_offloaded_to_artifact_store() {
 /// A mock sandbox where `file_exists` always returns false,
 /// simulating a remote container that doesn't have local artifact files.
 struct RemoteMockEnv {
-    working_dir:    String,
-    written:        std::sync::Mutex<Vec<(String, String)>>,
+    working_dir: String,
+    written: std::sync::Mutex<Vec<(String, String)>>,
     existing_paths: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 impl RemoteMockEnv {
     fn new(working_dir: &str) -> Self {
         Self {
-            working_dir:    working_dir.to_string(),
-            written:        std::sync::Mutex::new(Vec::new()),
+            working_dir: working_dir.to_string(),
+            written: std::sync::Mutex::new(Vec::new()),
             existing_paths: std::sync::Mutex::new(std::collections::HashSet::new()),
         }
     }
@@ -8787,17 +8790,17 @@ async fn artifact_pointers_rewritten_for_remote_sandbox() {
     let remote_env = Arc::new(RemoteMockEnv::new("/sandbox"));
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), remote_env.clone());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, _state) = engine
         .run_with_state(&graph, &run_options)
@@ -8868,23 +8871,23 @@ async fn downstream_local_execution_materializes_blob_refs_to_runtime_files() {
         "capture_context",
         Box::new(ContextValueCaptureHandler {
             values: Arc::clone(&captured),
-            key:    "response.big_output".to_string(),
+            key: "response.big_output".to_string(),
         }),
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, _state) = engine
         .run_with_state(&graph, &run_options)
@@ -8954,24 +8957,24 @@ async fn downstream_remote_execution_materializes_blob_refs_to_sandbox_files() {
         "capture_context",
         Box::new(ContextValueCaptureHandler {
             values: Arc::clone(&captured),
-            key:    "response.big_output".to_string(),
+            key: "response.big_output".to_string(),
         }),
     );
 
     let remote_env = Arc::new(RemoteMockEnv::new("/sandbox"));
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), remote_env.clone());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, _state) = engine
         .run_with_state(&graph, &run_options)
@@ -9026,7 +9029,7 @@ async fn node_dir_uses_visit_count_on_revisit() {
             _graph: &Graph,
             _run_dir: &Path,
             _services: &fabro_workflow::handler::EngineServices,
-        ) -> Result<Outcome, fabro_workflow::error::FabroError> {
+        ) -> Result<Outcome, fabro_workflow::error::Error> {
             let n = self
                 .call_count
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -9091,17 +9094,17 @@ async fn node_dir_uses_visit_count_on_revisit() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -9136,25 +9139,25 @@ async fn node_dir_uses_visit_count_on_revisit() {
 /// responses based on command content.
 struct CliTestEnv {
     /// All commands passed to exec_command, in order.
-    commands:            std::sync::Mutex<Vec<String>>,
+    commands: std::sync::Mutex<Vec<String>>,
     /// All (path, content) pairs from write_file.
-    written_files:       std::sync::Mutex<Vec<(String, String)>>,
+    written_files: std::sync::Mutex<Vec<(String, String)>>,
     /// The stdout to return when the CLI command (not git) is executed.
-    cli_stdout:          String,
+    cli_stdout: String,
     /// Files returned by "git diff --name-only" AFTER the CLI runs.
     /// First call returns empty (before), second returns these (after).
     git_diff_call_count: std::sync::atomic::AtomicU32,
-    git_diff_after:      String,
+    git_diff_after: String,
 }
 
 impl CliTestEnv {
     fn new(cli_stdout: &str) -> Self {
         Self {
-            commands:            std::sync::Mutex::new(Vec::new()),
-            written_files:       std::sync::Mutex::new(Vec::new()),
-            cli_stdout:          cli_stdout.to_string(),
+            commands: std::sync::Mutex::new(Vec::new()),
+            written_files: std::sync::Mutex::new(Vec::new()),
+            cli_stdout: cli_stdout.to_string(),
             git_diff_call_count: std::sync::atomic::AtomicU32::new(0),
-            git_diff_after:      String::new(),
+            git_diff_after: String::new(),
         }
     }
 
@@ -9241,10 +9244,10 @@ impl fabro_agent::Sandbox for CliTestEnv {
         // Background launch: return PID
         if command.contains("echo $!") {
             return Ok(fabro_agent::ExecResult {
-                stdout:      "12345\n".into(),
-                stderr:      String::new(),
-                exit_code:   0,
-                timed_out:   false,
+                stdout: "12345\n".into(),
+                stderr: String::new(),
+                exit_code: 0,
+                timed_out: false,
                 duration_ms: 1,
             });
         }
@@ -9252,10 +9255,10 @@ impl fabro_agent::Sandbox for CliTestEnv {
         // Poll for completion: return exit code 0 immediately
         if command.contains("exit_code") && command.contains("echo running") {
             return Ok(fabro_agent::ExecResult {
-                stdout:      "0\n".into(),
-                stderr:      String::new(),
-                exit_code:   0,
-                timed_out:   false,
+                stdout: "0\n".into(),
+                stderr: String::new(),
+                exit_code: 0,
+                timed_out: false,
                 duration_ms: 1,
             });
         }
@@ -9263,10 +9266,10 @@ impl fabro_agent::Sandbox for CliTestEnv {
         // Read stdout file
         if command.starts_with("cat") && command.contains("stdout.log") {
             return Ok(fabro_agent::ExecResult {
-                stdout:      self.cli_stdout.clone(),
-                stderr:      String::new(),
-                exit_code:   0,
-                timed_out:   false,
+                stdout: self.cli_stdout.clone(),
+                stderr: String::new(),
+                exit_code: 0,
+                timed_out: false,
                 duration_ms: 1,
             });
         }
@@ -9274,10 +9277,10 @@ impl fabro_agent::Sandbox for CliTestEnv {
         // Read stderr file
         if command.starts_with("cat") && command.contains("stderr.log") {
             return Ok(fabro_agent::ExecResult {
-                stdout:      String::new(),
-                stderr:      String::new(),
-                exit_code:   0,
-                timed_out:   false,
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: 0,
+                timed_out: false,
                 duration_ms: 1,
             });
         }
@@ -9285,20 +9288,20 @@ impl fabro_agent::Sandbox for CliTestEnv {
         // Cleanup temp files
         if command.starts_with("rm -f") {
             return Ok(fabro_agent::ExecResult {
-                stdout:      String::new(),
-                stderr:      String::new(),
-                exit_code:   0,
-                timed_out:   false,
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: 0,
+                timed_out: false,
                 duration_ms: 1,
             });
         }
 
         // Fallback
         Ok(fabro_agent::ExecResult {
-            stdout:      self.cli_stdout.clone(),
-            stderr:      String::new(),
-            exit_code:   0,
-            timed_out:   false,
+            stdout: self.cli_stdout.clone(),
+            stderr: String::new(),
+            exit_code: 0,
+            timed_out: false,
             duration_ms: 100,
         })
     }
@@ -9534,48 +9537,48 @@ async fn cli_backend_run_fails_on_nonzero_exit() {
         ) -> Result<fabro_agent::ExecResult, String> {
             if command.starts_with("git") {
                 return Ok(fabro_agent::ExecResult {
-                    stdout:      String::new(),
-                    stderr:      String::new(),
-                    exit_code:   0,
-                    timed_out:   false,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    timed_out: false,
                     duration_ms: 0,
                 });
             }
             // Background launch: return PID
             if command.contains("echo $!") {
                 return Ok(fabro_agent::ExecResult {
-                    stdout:      "12345\n".into(),
-                    stderr:      String::new(),
-                    exit_code:   0,
-                    timed_out:   false,
+                    stdout: "12345\n".into(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    timed_out: false,
                     duration_ms: 0,
                 });
             }
             // Poll: return non-zero exit code
             if command.contains("exit_code") && command.contains("echo running") {
                 return Ok(fabro_agent::ExecResult {
-                    stdout:      "127\n".into(),
-                    stderr:      String::new(),
-                    exit_code:   0,
-                    timed_out:   false,
+                    stdout: "127\n".into(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    timed_out: false,
                     duration_ms: 0,
                 });
             }
             // Read stderr file
             if command.starts_with("cat") && command.contains("stderr.log") {
                 return Ok(fabro_agent::ExecResult {
-                    stdout:      "command not found: claude".into(),
-                    stderr:      String::new(),
-                    exit_code:   0,
-                    timed_out:   false,
+                    stdout: "command not found: claude".into(),
+                    stderr: String::new(),
+                    exit_code: 0,
+                    timed_out: false,
                     duration_ms: 0,
                 });
             }
             Ok(fabro_agent::ExecResult {
-                stdout:      String::new(),
-                stderr:      String::new(),
-                exit_code:   0,
-                timed_out:   false,
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: 0,
+                timed_out: false,
                 duration_ms: 0,
             })
         }
@@ -9961,17 +9964,17 @@ async fn full_pipeline_with_cli_backend_node() {
     let dir = tempfile::tempdir().unwrap();
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), env);
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -10079,17 +10082,17 @@ async fn stylesheet_backend_property_routes_to_cli() {
     let dir = tempfile::tempdir().unwrap();
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), env);
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine
         .run_with_state(&graph, &run_options)
@@ -10170,14 +10173,14 @@ impl Handler for FileWriterHandler {
         _graph: &Graph,
         _run_dir: &Path,
         services: &fabro_workflow::handler::EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         let work_dir = services.sandbox.working_directory().to_string();
         let file_path = format!("{}/{}.txt", work_dir, node.id);
         services
             .sandbox
             .write_file(&file_path, &format!("written by {}", node.id))
             .await
-            .map_err(|e| FabroError::handler(format!("write_file failed: {e}")))?;
+            .map_err(|e| Error::handler(format!("write_file failed: {e}")))?;
         Ok(Outcome::success())
     }
 }
@@ -10274,19 +10277,19 @@ async fn git_checkpoint_host_emits_events_and_diff_patch() {
     let engine = WorkflowRunner::new(registry, Arc::new(emitter), env);
 
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          run_dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-docker"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: run_dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-docker"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   Some(worktree_path.clone()),
-        git:              Some(GitCheckpointOptions {
-            base_sha:    Some(base_sha.clone()),
-            run_branch:  Some(run_branch),
+        host_repo_path: Some(worktree_path.clone()),
+        git: Some(GitCheckpointOptions {
+            base_sha: Some(base_sha.clone()),
+            run_branch: Some(run_branch),
             meta_branch: None,
         }),
     };
@@ -10452,8 +10455,8 @@ async fn git_checkpoint_host_writes_shadow_branch() {
         display_base_sha: None,
         host_repo_path: Some(worktree_path.clone()),
         git: Some(GitCheckpointOptions {
-            base_sha:    Some(base_sha),
-            run_branch:  Some(format!("fabro/run/{run_id}")),
+            base_sha: Some(base_sha),
+            run_branch: Some(format!("fabro/run/{run_id}")),
             meta_branch: Some(meta_branch),
         }),
     };
@@ -10651,8 +10654,8 @@ async fn parallel_git_branching_host_e2e() {
         display_base_sha: None,
         host_repo_path: Some(worktree_path.clone()),
         git: Some(GitCheckpointOptions {
-            base_sha:    Some(base_sha.clone()),
-            run_branch:  Some(run_branch.clone()),
+            base_sha: Some(base_sha.clone()),
+            run_branch: Some(run_branch.clone()),
             meta_branch: None,
         }),
     };
@@ -10889,19 +10892,19 @@ async fn git_checkpoint_host_skips_empty_diff_patch() {
     let engine = WorkflowRunner::new(registry, Arc::new(emitter), env);
 
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          run_dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("empty-diff"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: run_dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("empty-diff"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   Some(worktree_path.clone()),
-        git:              Some(GitCheckpointOptions {
-            base_sha:    Some(base_sha.clone()),
-            run_branch:  Some(run_branch),
+        host_repo_path: Some(worktree_path.clone()),
+        git: Some(GitCheckpointOptions {
+            base_sha: Some(base_sha.clone()),
+            run_branch: Some(run_branch),
             meta_branch: None,
         }),
     };
@@ -10945,7 +10948,7 @@ impl Handler for DeterministicFailHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &fabro_workflow::handler::EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         Ok(Outcome::fail_classify(&self.reason))
     }
 }
@@ -10962,7 +10965,7 @@ impl Handler for TransientInfraFailHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &fabro_workflow::handler::EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         Ok(Outcome::fail_classify("connection refused"))
     }
 }
@@ -10980,7 +10983,7 @@ impl Handler for SignatureHintHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &fabro_workflow::handler::EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         Ok(
             Outcome::fail_classify("error at line 42 in commit abc123def0")
                 .with_signature(Some("custom-grouping-key")),
@@ -11016,7 +11019,7 @@ impl Handler for VaryingReasonFailHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &fabro_workflow::handler::EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         let n = self
             .counter
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst) as usize;
@@ -11030,7 +11033,7 @@ impl Handler for VaryingReasonFailHandler {
 /// before that.
 struct SucceedOnNthHandler {
     succeed_on: u32,
-    counter:    std::sync::atomic::AtomicU32,
+    counter: std::sync::atomic::AtomicU32,
 }
 
 #[async_trait::async_trait]
@@ -11042,7 +11045,7 @@ impl Handler for SucceedOnNthHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &fabro_workflow::handler::EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         let n = self
             .counter
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -11259,17 +11262,17 @@ async fn e2e_circuit_breaker_deterministic_self_loop() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("e2e-circuit-breaker"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("e2e-circuit-breaker"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let result = engine.run(&graph, &run_options).await;
     assert!(result.is_err(), "pipeline should abort, not loop forever");
@@ -11305,17 +11308,17 @@ async fn e2e_circuit_breaker_custom_limit() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("e2e-custom-limit"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("e2e-custom-limit"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let result = engine.run(&graph, &run_options).await;
     assert!(result.is_err());
@@ -11344,17 +11347,17 @@ async fn e2e_circuit_breaker_ignores_transient_failures() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("e2e-transient-no-breaker"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("e2e-transient-no-breaker"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let result = engine.run(&graph, &run_options).await;
     assert!(result.is_err());
@@ -11390,17 +11393,17 @@ async fn e2e_circuit_breaker_different_reasons_separate_counters() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("e2e-varying-reasons"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("e2e-varying-reasons"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let result = engine.run(&graph, &run_options).await;
     assert!(result.is_err());
@@ -11429,17 +11432,17 @@ async fn e2e_circuit_breaker_loop_restart() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("e2e-restart-breaker"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("e2e-restart-breaker"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let result = engine.run(&graph, &run_options).await;
     assert!(
@@ -11491,17 +11494,17 @@ async fn e2e_failure_signature_persisted_in_context() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("e2e-sig-context"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("e2e-sig-context"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine.run_with_state(&graph, &run_options).await.unwrap();
     // Pipeline reaches exit (terminal) with goal gates satisfied.
@@ -11554,17 +11557,17 @@ async fn e2e_failure_signature_hint_overrides_reason_in_context() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("e2e-sig-hint"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("e2e-sig-hint"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (_outcome, state) = engine.run_with_state(&graph, &run_options).await.unwrap();
 
@@ -11605,23 +11608,23 @@ async fn e2e_signature_maps_persist_in_checkpoint() {
         "test_handler",
         Box::new(SucceedOnNthHandler {
             succeed_on: 3,
-            counter:    std::sync::atomic::AtomicU32::new(0),
+            counter: std::sync::atomic::AtomicU32::new(0),
         }),
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("e2e-sig-persist"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("e2e-sig-persist"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine.run_with_state(&graph, &run_options).await.unwrap();
     assert_eq!(outcome.status, StageStatus::Success);
@@ -11738,17 +11741,17 @@ async fn e2e_circuit_breaker_emits_events_before_abort() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(emitter), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("e2e-events"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("e2e-events"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let result = engine.run(&graph, &run_options).await;
     assert!(result.is_err());
@@ -11798,23 +11801,23 @@ async fn e2e_circuit_breaker_does_not_fire_below_limit() {
         "test_handler",
         Box::new(SucceedOnNthHandler {
             succeed_on: 4,
-            counter:    std::sync::atomic::AtomicU32::new(0),
+            counter: std::sync::atomic::AtomicU32::new(0),
         }),
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("e2e-below-limit"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("e2e-below-limit"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let (outcome, state) = engine.run_with_state(&graph, &run_options).await.unwrap();
     assert_eq!(
@@ -11899,17 +11902,17 @@ async fn e2e_circuit_breaker_multi_stage_impl_verify_cycle() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("e2e-impl-verify-cycle"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("e2e-impl-verify-cycle"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let result = engine.run(&graph, &run_options).await;
     assert!(
@@ -11933,8 +11936,8 @@ async fn e2e_circuit_breaker_multi_stage_impl_verify_cycle() {
 /// Nth call.
 struct ClassifiedFailHandler {
     failure_class: &'static str,
-    succeed_on:    u32,
-    counter:       std::sync::atomic::AtomicU32,
+    succeed_on: u32,
+    counter: std::sync::atomic::AtomicU32,
 }
 
 impl ClassifiedFailHandler {
@@ -11964,7 +11967,7 @@ impl Handler for ClassifiedFailHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &fabro_workflow::handler::EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         let n = self
             .counter
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -11996,17 +11999,17 @@ async fn e2e_loop_restart_blocked_for_deterministic_failure() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("e2e-restart-blocked-det"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("e2e-restart-blocked-det"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let result = engine.run(&graph, &run_options).await;
     assert!(
@@ -12035,17 +12038,17 @@ async fn e2e_loop_restart_blocked_for_structural_failure() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("e2e-restart-blocked-struct"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("e2e-restart-blocked-struct"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let result = engine.run(&graph, &run_options).await;
     assert!(
@@ -12074,17 +12077,17 @@ async fn e2e_loop_restart_blocked_for_budget_exhausted_failure() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("e2e-restart-blocked-budget"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("e2e-restart-blocked-budget"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let result = engine.run(&graph, &run_options).await;
     assert!(
@@ -12113,17 +12116,17 @@ async fn e2e_loop_restart_blocked_for_canceled_failure() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("e2e-restart-blocked-canceled"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("e2e-restart-blocked-canceled"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let result = engine.run(&graph, &run_options).await;
     assert!(result.is_err(), "canceled failure should not loop_restart");
@@ -12149,17 +12152,17 @@ async fn e2e_loop_restart_blocked_for_compilation_loop_failure() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("e2e-restart-blocked-comploop"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("e2e-restart-blocked-comploop"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let result = engine.run(&graph, &run_options).await;
     assert!(
@@ -12189,17 +12192,17 @@ async fn e2e_loop_restart_allowed_for_transient_infra() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("e2e-restart-allowed-transient"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("e2e-restart-allowed-transient"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let result = engine.run(&graph, &run_options).await;
     assert!(
@@ -12225,7 +12228,7 @@ impl Handler for HangingHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &fabro_workflow::handler::EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
         Ok(Outcome::success())
     }
@@ -12234,7 +12237,7 @@ impl Handler for HangingHandler {
 /// Handler that emits keepalive events periodically, then succeeds.
 struct KeepaliveHandler {
     interval_ms: u64,
-    total_ms:    u64,
+    total_ms: u64,
 }
 
 #[async_trait::async_trait]
@@ -12246,17 +12249,17 @@ impl Handler for KeepaliveHandler {
         _graph: &Graph,
         _run_dir: &Path,
         services: &fabro_workflow::handler::EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         let start = std::time::Instant::now();
         while start.elapsed() < std::time::Duration::from_millis(self.total_ms) {
             tokio::time::sleep(std::time::Duration::from_millis(self.interval_ms)).await;
             services.emitter.emit(&Event::Prompt {
-                stage:    node.id.clone(),
-                visit:    1,
-                text:     "keepalive".to_string(),
-                mode:     None,
+                stage: node.id.clone(),
+                visit: 1,
+                text: "keepalive".to_string(),
+                mode: None,
                 provider: None,
-                model:    None,
+                model: None,
             });
         }
         Ok(Outcome::success())
@@ -12296,17 +12299,17 @@ async fn e2e_stall_watchdog_triggers_from_dot_parsed_pipeline() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(emitter), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("stall-e2e"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("stall-e2e"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let result = engine.run(&graph, &run_options).await;
     assert!(result.is_err(), "expected stall watchdog error");
@@ -12345,23 +12348,23 @@ async fn e2e_stall_watchdog_kept_alive_by_handler_events() {
         "keepalive",
         Box::new(KeepaliveHandler {
             interval_ms: 10,
-            total_ms:    50,
+            total_ms: 50,
         }),
     );
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("stall-alive-e2e"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("stall-alive-e2e"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine
         .run(&graph, &run_options)
@@ -12396,17 +12399,17 @@ async fn e2e_stall_watchdog_disabled_with_zero_timeout() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("stall-disabled-e2e"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("stall-disabled-e2e"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine
         .run(&graph, &run_options)
@@ -12430,7 +12433,7 @@ impl Handler for SlowTestHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &fabro_workflow::handler::EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         tokio::time::sleep(std::time::Duration::from_millis(self.sleep_ms)).await;
         Ok(Outcome::success())
     }
@@ -12461,17 +12464,17 @@ async fn e2e_stall_watchdog_with_explicit_timeout_override() {
 
     let engine = WorkflowRunner::new(registry, Arc::new(Emitter::default()), local_env());
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("stall-override-e2e"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("stall-override-e2e"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let start = std::time::Instant::now();
     let result = engine.run(&graph, &run_options).await;
@@ -12518,7 +12521,7 @@ impl Handler for AssetCreatorHandler {
         _graph: &Graph,
         _run_dir: &Path,
         services: &fabro_workflow::handler::EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         // Create artifact files via the sandbox's exec_command
         let script = concat!(
             "mkdir -p test-results && ",
@@ -12529,7 +12532,7 @@ impl Handler for AssetCreatorHandler {
             .sandbox
             .exec_command(script, 30_000, None, None, None)
             .await
-            .map_err(|e| FabroError::handler(format!("exec failed: {e}")))?;
+            .map_err(|e| Error::handler(format!("exec failed: {e}")))?;
 
         if self.should_fail {
             Ok(Outcome::fail_classify("intentional failure"))
@@ -12593,7 +12596,7 @@ async fn asset_collection_local_sandbox_success() {
     graph.edges.push(Edge::new("create_assets", "exit"));
 
     let run_options = RunOptions {
-        settings:         SettingsLayer {
+        settings: SettingsLayer {
             run: Some(RunLayer {
                 artifacts: Some(RunArtifactsLayer {
                     include: vec!["test-results/**".to_string()],
@@ -12602,16 +12605,16 @@ async fn asset_collection_local_sandbox_success() {
             }),
             ..SettingsLayer::default()
         },
-        run_dir:          run_dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("artifact-test-local"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        run_dir: run_dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("artifact-test-local"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine
         .run(&graph, &run_options)
@@ -12725,7 +12728,7 @@ async fn asset_collection_local_sandbox_on_failure() {
     graph.edges.push(Edge::new("create_assets", "exit"));
 
     let run_options = RunOptions {
-        settings:         SettingsLayer {
+        settings: SettingsLayer {
             run: Some(RunLayer {
                 artifacts: Some(RunArtifactsLayer {
                     include: vec!["test-results/**".to_string()],
@@ -12734,16 +12737,16 @@ async fn asset_collection_local_sandbox_on_failure() {
             }),
             ..SettingsLayer::default()
         },
-        run_dir:          run_dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("artifact-test-fail"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        run_dir: run_dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("artifact-test-fail"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine
         .run(&graph, &run_options)
@@ -12830,7 +12833,7 @@ async fn asset_collection_docker_sandbox() {
     graph.edges.push(Edge::new("create_assets", "exit"));
 
     let run_options = RunOptions {
-        settings:         SettingsLayer {
+        settings: SettingsLayer {
             run: Some(RunLayer {
                 artifacts: Some(RunArtifactsLayer {
                     include: vec!["test-results/**".to_string()],
@@ -12839,16 +12842,16 @@ async fn asset_collection_docker_sandbox() {
             }),
             ..SettingsLayer::default()
         },
-        run_dir:          run_dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("artifact-test-docker"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        run_dir: run_dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("artifact-test-docker"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine
         .run(&graph, &run_options)
@@ -12906,17 +12909,17 @@ async fn wait_timer_e2e() {
         local_env(),
     );
     let run_options = RunOptions {
-        settings:         SettingsLayer::default(),
-        run_dir:          dir.path().to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id("test-run"),
-        labels:           std::collections::HashMap::new(),
-        workflow_slug:    None,
-        github_app:       None,
-        base_branch:      None,
+        settings: SettingsLayer::default(),
+        run_dir: dir.path().to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id("test-run"),
+        labels: std::collections::HashMap::new(),
+        workflow_slug: None,
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        host_repo_path:   None,
-        git:              None,
+        host_repo_path: None,
+        git: None,
     };
     let outcome = engine.run(&graph, &run_options).await.expect("run");
     assert_eq!(outcome.status, StageStatus::Success);

@@ -24,7 +24,7 @@ fn format_path_suffix(path: Option<&PathBuf>) -> String {
 pub enum Error {
     #[error("reading config file {path}: {source}")]
     ReadFile {
-        path:   PathBuf,
+        path: PathBuf,
         #[source]
         source: std::io::Error,
     },
@@ -32,14 +32,14 @@ pub enum Error {
     #[error("{context}{}: {source}", format_path_suffix(.path.as_ref()))]
     ParseSettings {
         context: &'static str,
-        path:    Option<PathBuf>,
+        path: Option<PathBuf>,
         #[source]
-        source:  ParseError,
+        source: ParseError,
     },
 
     #[error("parsing TOML config at {path}: {source}")]
     TomlParse {
-        path:   PathBuf,
+        path: PathBuf,
         #[source]
         source: TomlError,
     },
@@ -47,13 +47,13 @@ pub enum Error {
     #[error("{context}:\n{}", format_resolve_errors(.errors))]
     Resolve {
         context: &'static str,
-        errors:  Vec<ResolveError>,
+        errors: Vec<ResolveError>,
     },
 
     #[error("missing required environment variable {var} for {field}")]
     MissingEnvVar {
-        field:  String,
-        var:    String,
+        field: String,
+        var: String,
         #[source]
         source: std::env::VarError,
     },

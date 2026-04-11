@@ -5,7 +5,7 @@ use fabro_graphviz::graph::{Graph, Node};
 
 use super::{EngineServices, Handler};
 use crate::context::Context;
-use crate::error::FabroError;
+use crate::error::Error;
 use crate::outcome::Outcome;
 
 /// No-op handler for pipeline entry point. Returns SUCCESS immediately.
@@ -20,7 +20,7 @@ impl Handler for StartHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         Ok(Outcome::success())
     }
 }

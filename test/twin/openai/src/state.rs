@@ -31,25 +31,25 @@ pub struct DebugSnapshot {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct NamespaceSnapshot {
-    pub key:          String,
-    pub scenarios:    Vec<ScenarioSnapshot>,
+    pub key: String,
+    pub scenarios: Vec<ScenarioSnapshot>,
     pub request_logs: Vec<RequestLog>,
 }
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ScenarioSnapshot {
-    pub endpoint:       String,
-    pub model:          Option<String>,
-    pub stream:         Option<bool>,
+    pub endpoint: String,
+    pub model: Option<String>,
+    pub stream: Option<bool>,
     pub input_contains: Option<String>,
-    pub metadata:       serde_json::Map<String, Value>,
-    pub script_kind:    String,
+    pub metadata: serde_json::Map<String, Value>,
+    pub script_kind: String,
 }
 
 #[derive(Clone, Debug)]
 pub struct AppState {
     pub config: Config,
-    inner:      Arc<AppStateInner>,
+    inner: Arc<AppStateInner>,
 }
 
 #[derive(Debug)]
@@ -60,16 +60,16 @@ struct AppStateInner {
 #[derive(Debug)]
 struct NamespaceState {
     next_response_number: u64,
-    scenarios:            Vec<Scenario>,
-    request_logs:         Vec<RequestLog>,
+    scenarios: Vec<Scenario>,
+    request_logs: Vec<RequestLog>,
 }
 
 impl Default for NamespaceState {
     fn default() -> Self {
         Self {
             next_response_number: 1,
-            scenarios:            Vec::new(),
-            request_logs:         Vec::new(),
+            scenarios: Vec::new(),
+            request_logs: Vec::new(),
         }
     }
 }
@@ -125,11 +125,11 @@ impl AppState {
             .or_default()
             .request_logs
             .push(RequestLog {
-                endpoint:   request.endpoint,
-                model:      request.model,
-                stream:     request.stream,
+                endpoint: request.endpoint,
+                model: request.model,
+                stream: request.stream,
                 input_text: request.input_text,
-                metadata:   request.metadata,
+                metadata: request.metadata,
             });
     }
 
@@ -156,17 +156,17 @@ impl AppState {
         let mut result = Vec::new();
         for (key, ns) in namespaces.iter() {
             result.push(NamespaceSnapshot {
-                key:          key.to_string(),
-                scenarios:    ns
+                key: key.to_string(),
+                scenarios: ns
                     .scenarios
                     .iter()
                     .map(|s| ScenarioSnapshot {
-                        endpoint:       s.matcher.endpoint.clone(),
-                        model:          s.matcher.model.clone(),
-                        stream:         s.matcher.stream,
+                        endpoint: s.matcher.endpoint.clone(),
+                        model: s.matcher.model.clone(),
+                        stream: s.matcher.stream,
                         input_contains: s.matcher.input_contains.clone(),
-                        metadata:       s.matcher.metadata.clone(),
-                        script_kind:    s.script.script_kind().to_owned(),
+                        metadata: s.matcher.metadata.clone(),
+                        script_kind: s.script.script_kind().to_owned(),
                     })
                     .collect(),
                 request_logs: ns.request_logs.clone(),

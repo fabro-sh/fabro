@@ -15,14 +15,14 @@ use crate::git::Store;
 /// (`fabro/meta/{run_id}`) so that runs can be resumed from git alone.
 pub struct MetadataStore {
     repo_path: PathBuf,
-    author:    GitAuthor,
+    author: GitAuthor,
 }
 
 impl MetadataStore {
     pub fn new(repo_path: impl Into<PathBuf>, author: &GitAuthor) -> Self {
         Self {
             repo_path: repo_path.into(),
-            author:    author.clone(),
+            author: author.clone(),
         }
     }
 
@@ -364,10 +364,11 @@ mod tests {
         let checkpoint_json =
             serde_json::to_vec_pretty(&test_checkpoint("node_a", Vec::new(), None)).unwrap();
         store
-            .write_checkpoint(&run_id, &checkpoint_json, &[(
-                "artifacts/response.plan.json",
-                artifact_data.as_slice(),
-            )])
+            .write_checkpoint(
+                &run_id,
+                &checkpoint_json,
+                &[("artifacts/response.plan.json", artifact_data.as_slice())],
+            )
             .unwrap();
 
         let read_back = MetadataStore::read_artifact(dir.path(), &run_id, "response.plan")
@@ -428,10 +429,10 @@ mod tests {
         let run_id = fixtures::RUN_6.to_string();
         let store = MetadataStore::new(dir.path(), &GitAuthor::default());
         let start_record = StartRecord {
-            run_id:     fixtures::RUN_6,
+            run_id: fixtures::RUN_6,
             start_time: Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).single().unwrap(),
             run_branch: Some("fabro/run/test".to_string()),
-            base_sha:   None,
+            base_sha: None,
         };
         let bytes = serde_json::to_vec_pretty(&start_record).unwrap();
         store.init_run(&run_id, &[("start.json", &bytes)]).unwrap();

@@ -11,7 +11,7 @@ use tokio::time::sleep;
 
 use super::super::agent::{CodergenBackend, CodergenResult};
 use crate::context::Context;
-use crate::error::FabroError;
+use crate::error::Error;
 use crate::event::{Emitter, Event, StageScope};
 use crate::outcome::billed_model_usage_from_llm;
 
@@ -63,7 +63,7 @@ async fn ensure_cli(
     provider: Provider,
     sandbox: &Arc<dyn Sandbox>,
     emitter: &Arc<Emitter>,
-) -> Result<(), FabroError> {
+) -> Result<(), Error> {
     let start = std::time::Instant::now();
     let cli_name = cli.name();
     let provider_str = provider.as_str();
@@ -84,7 +84,7 @@ async fn ensure_cli(
             None,
         )
         .await
-        .map_err(|e| FabroError::handler(format!("Failed to check {cli_name} version: {e}")))?;
+        .map_err(|e| Error::handler(format!("Failed to check {cli_name} version: {e}")))?;
 
     if version_check.exit_code == 0 {
         let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
@@ -109,7 +109,7 @@ async fn ensure_cli(
     let install_result = sandbox
         .exec_command(&install_cmd, 180_000, None, None, None)
         .await
-        .map_err(|e| FabroError::handler(format!("Failed to install {cli_name}: {e}")))?;
+        .map_err(|e| Error::handler(format!("Failed to install {cli_name}: {e}")))?;
 
     let node_installed = true;
     if install_result.exit_code != 0 {
@@ -137,7 +137,7 @@ async fn ensure_cli(
             error: error_msg.clone(),
             duration_ms,
         });
-        return Err(FabroError::handler(error_msg));
+        return Err(Error::handler(error_msg));
     }
 
     let duration_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
@@ -210,8 +210,8 @@ pub fn cli_command_for_provider(provider: Provider, model: &str, prompt_file: &s
 /// Parsed response from a CLI tool invocation.
 #[derive(Debug)]
 pub struct CliResponse {
-    pub text:          String,
-    pub input_tokens:  i64,
+    pub text: String,
+    pub input_tokens: i64,
     pub output_tokens: i64,
 }
 
@@ -376,9 +376,9 @@ fn shell_escape(val: &str) -> String {
 /// CLI backend that invokes external CLI tools (claude, codex, gemini) via
 /// `exec_command()`.
 pub struct AgentCliBackend {
-    model:         String,
-    provider:      Provider,
-    env:           HashMap<String, String>,
+    model: String,
+    provider: Provider,
+    env: HashMap<String, String>,
     poll_interval: std::time::Duration,
 }
 
@@ -467,7 +467,7 @@ impl CodergenBackend for AgentCliBackend {
         emitter: &Arc<Emitter>,
         sandbox: &Arc<dyn Sandbox>,
         _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-    ) -> Result<CodergenResult, FabroError> {
+    ) -> Result<CodergenResult, Error> {
         // 1. Snapshot git state before the CLI run
         let files_before = self.detect_changed_files(sandbox).await;
 
@@ -483,7 +483,7 @@ impl CodergenBackend for AgentCliBackend {
         sandbox
             .write_file(&prompt_path, prompt)
             .await
-            .map_err(|e| FabroError::handler(format!("Failed to write prompt file: {e}")))?;
+            .map_err(|e| Error::handler(format!("Failed to write prompt file: {e}")))?;
 
         // 3. Build CLI command
         let model = node.model().unwrap_or(&self.model);
@@ -500,12 +500,12 @@ impl CodergenBackend for AgentCliBackend {
         let stage_scope = StageScope::for_handler(context, &node.id);
         emitter.emit_scoped(
             &Event::AgentCliStarted {
-                node_id:  node.id.clone(),
-                visit:    stage_scope.visit,
-                mode:     "cli".to_string(),
+                node_id: node.id.clone(),
+                visit: stage_scope.visit,
+                mode: "cli".to_string(),
                 provider: provider.as_str().to_string(),
-                model:    model.to_string(),
-                command:  command.clone(),
+                model: model.to_string(),
+                command: command.clone(),
             },
             &stage_scope,
         );
@@ -537,7 +537,7 @@ impl CodergenBackend for AgentCliBackend {
                 let login_result = sandbox
                     .exec_command(&login_cmd, 30_000, None, None, None)
                     .await
-                    .map_err(|e| FabroError::handler(format!("codex login failed: {e}")))?;
+                    .map_err(|e| Error::handler(format!("codex login failed: {e}")))?;
                 if login_result.exit_code != 0 {
                     tracing::warn!(
                         exit_code = login_result.exit_code,
@@ -560,7 +560,7 @@ impl CodergenBackend for AgentCliBackend {
             sandbox
                 .write_file(&env_path, &env_lines.join("\n"))
                 .await
-                .map_err(|e| FabroError::handler(format!("Failed to write env file: {e}")))?;
+                .map_err(|e| Error::handler(format!("Failed to write env file: {e}")))?;
         }
 
         // 3a. Disable auto-stop so the sandbox stays alive during long CLI runs
@@ -587,7 +587,7 @@ impl CodergenBackend for AgentCliBackend {
         let launch_result = sandbox
             .exec_command(&bg_command, 30_000, None, launch_env_ref, None)
             .await
-            .map_err(|e| FabroError::handler(format!("Failed to launch CLI command: {e}")))?;
+            .map_err(|e| Error::handler(format!("Failed to launch CLI command: {e}")))?;
         let pid = launch_result.stdout.trim();
         tracing::info!(pid, "CLI process launched in background");
 
@@ -601,7 +601,7 @@ impl CodergenBackend for AgentCliBackend {
             let poll_result = sandbox
                 .exec_command(&poll_command, 30_000, None, None, None)
                 .await
-                .map_err(|e| FabroError::handler(format!("Failed to poll CLI command: {e}")))?;
+                .map_err(|e| Error::handler(format!("Failed to poll CLI command: {e}")))?;
             let status = poll_result.stdout.trim();
 
             if status != "running" {
@@ -614,11 +614,11 @@ impl CodergenBackend for AgentCliBackend {
         let stdout_result = sandbox
             .exec_command(&format!("cat {stdout_path}"), 60_000, None, None, None)
             .await
-            .map_err(|e| FabroError::handler(format!("Failed to read stdout: {e}")))?;
+            .map_err(|e| Error::handler(format!("Failed to read stdout: {e}")))?;
         let stderr_result = sandbox
             .exec_command(&format!("cat {stderr_path}"), 60_000, None, None, None)
             .await
-            .map_err(|e| FabroError::handler(format!("Failed to read stderr: {e}")))?;
+            .map_err(|e| Error::handler(format!("Failed to read stderr: {e}")))?;
 
         let result = ExecResult {
             stdout: stdout_result.stdout,
@@ -629,10 +629,10 @@ impl CodergenBackend for AgentCliBackend {
         };
         emitter.emit_scoped(
             &Event::AgentCliCompleted {
-                node_id:     node.id.clone(),
-                stdout:      result.stdout.clone(),
-                stderr:      result.stderr.clone(),
-                exit_code:   result.exit_code,
+                node_id: node.id.clone(),
+                stdout: result.stdout.clone(),
+                stderr: result.stderr.clone(),
+                exit_code: result.exit_code,
                 duration_ms: result.duration_ms,
             },
             &stage_scope,
@@ -661,7 +661,7 @@ impl CodergenBackend for AgentCliBackend {
                 (true, false) => format!("stdout: {stdout_tail}"),
                 (true, true) => format!("command: {command}"),
             };
-            return Err(FabroError::handler(format!(
+            return Err(Error::handler(format!(
                 "CLI command exited with code {}: {detail}",
                 result.exit_code,
             )));
@@ -669,7 +669,7 @@ impl CodergenBackend for AgentCliBackend {
 
         // 4. Parse the CLI output
         let parsed = parse_cli_response(provider, &result.stdout)
-            .ok_or_else(|| FabroError::handler("Failed to parse CLI output".to_string()))?;
+            .ok_or_else(|| Error::handler("Failed to parse CLI output".to_string()))?;
 
         // 5. Detect changed files
         let files_after = self.detect_changed_files(sandbox).await;
@@ -699,12 +699,16 @@ impl CodergenBackend for AgentCliBackend {
             }
         };
 
-        let stage_usage =
-            billed_model_usage_from_llm(model, provider, node.speed(), &TokenCounts {
+        let stage_usage = billed_model_usage_from_llm(
+            model,
+            provider,
+            node.speed(),
+            &TokenCounts {
                 input_tokens: parsed.input_tokens,
                 output_tokens: parsed.output_tokens,
                 ..TokenCounts::default()
-            });
+            },
+        );
 
         Ok(CodergenResult::Text {
             text: parsed.text,
@@ -760,7 +764,7 @@ impl CodergenBackend for BackendRouter {
         emitter: &Arc<Emitter>,
         sandbox: &Arc<dyn Sandbox>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-    ) -> Result<CodergenResult, FabroError> {
+    ) -> Result<CodergenResult, Error> {
         if self.should_use_cli(node) {
             self.cli_backend
                 .run(
@@ -781,7 +785,7 @@ impl CodergenBackend for BackendRouter {
         node: &Node,
         prompt: &str,
         system_prompt: Option<&str>,
-    ) -> Result<CodergenResult, FabroError> {
+    ) -> Result<CodergenResult, Error> {
         // CLI backend doesn't support one_shot, always route to API
         self.api_backend.one_shot(node, prompt, system_prompt).await
     }
@@ -834,7 +838,7 @@ mod tests {
 
     /// Mock sandbox that returns pre-configured ExecResults in FIFO order.
     struct CliMockSandbox {
-        results:  Mutex<VecDeque<ExecResult>>,
+        results: Mutex<VecDeque<ExecResult>>,
         commands: Arc<Mutex<Vec<String>>>,
     }
 
@@ -927,20 +931,20 @@ mod tests {
 
     fn ok_result() -> ExecResult {
         ExecResult {
-            exit_code:   0,
-            stdout:      String::new(),
-            stderr:      String::new(),
-            timed_out:   false,
+            exit_code: 0,
+            stdout: String::new(),
+            stderr: String::new(),
+            timed_out: false,
             duration_ms: 10,
         }
     }
 
     fn fail_result(code: i32) -> ExecResult {
         ExecResult {
-            exit_code:   code,
-            stdout:      String::new(),
-            stderr:      "error".to_string(),
-            timed_out:   false,
+            exit_code: code,
+            stdout: String::new(),
+            stderr: "error".to_string(),
+            timed_out: false,
             duration_ms: 10,
         }
     }
@@ -1202,11 +1206,11 @@ mod tests {
             _emitter: &Arc<Emitter>,
             _sandbox: &Arc<dyn Sandbox>,
             _tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-        ) -> Result<CodergenResult, FabroError> {
+        ) -> Result<CodergenResult, Error> {
             Ok(CodergenResult::Text {
-                text:              "stub".to_string(),
-                usage:             None,
-                files_touched:     Vec::new(),
+                text: "stub".to_string(),
+                usage: None,
+                files_touched: Vec::new(),
                 last_file_touched: None,
             })
         }

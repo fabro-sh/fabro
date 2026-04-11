@@ -13,26 +13,26 @@ use crate::run_status::{RunStatus, StatusReason};
 
 #[derive(Debug, Clone)]
 struct RunLocalState {
-    dir_name:      String,
+    dir_name: String,
     start_time_dt: Option<DateTime<Utc>>,
-    end_time:      Option<DateTime<Utc>>,
-    path:          PathBuf,
-    is_orphan:     bool,
+    end_time: Option<DateTime<Utc>>,
+    path: PathBuf,
+    is_orphan: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RunInfo {
     #[serde(skip)]
-    summary:           Option<RunSummary>,
-    pub dir_name:      String,
+    summary: Option<RunSummary>,
+    pub dir_name: String,
     #[serde(skip)]
     pub start_time_dt: Option<DateTime<Utc>>,
     #[serde(skip)]
-    pub end_time:      Option<DateTime<Utc>>,
+    pub end_time: Option<DateTime<Utc>>,
     #[serde(skip)]
-    pub path:          PathBuf,
+    pub path: PathBuf,
     #[serde(skip)]
-    pub is_orphan:     bool,
+    pub is_orphan: bool,
 }
 
 impl RunInfo {
@@ -170,13 +170,16 @@ fn scan_orphan_runs(base: &Path) -> Result<Vec<RunInfo>> {
             .and_then(|m| m.modified().ok())
             .map(|time| -> DateTime<Utc> { time.into() });
 
-        runs.push(RunInfo::new(None, RunLocalState {
-            dir_name,
-            start_time_dt: mtime_dt,
-            end_time: None,
-            path,
-            is_orphan: true,
-        }));
+        runs.push(RunInfo::new(
+            None,
+            RunLocalState {
+                dir_name,
+                start_time_dt: mtime_dt,
+                end_time: None,
+                path,
+                is_orphan: true,
+            },
+        ));
     }
 
     runs.sort_by(|a, b| {
@@ -240,13 +243,16 @@ fn run_info_from_summary(summary: &RunSummary, scratch_base: &Path) -> Option<Ru
         None
     };
 
-    Some(RunInfo::new(Some(summary.clone()), RunLocalState {
-        dir_name,
-        start_time_dt: Some(start_time_dt),
-        end_time,
-        path,
-        is_orphan: false,
-    }))
+    Some(RunInfo::new(
+        Some(summary.clone()),
+        RunLocalState {
+            dir_name,
+            start_time_dt: Some(start_time_dt),
+            end_time,
+            path,
+            is_orphan: false,
+        },
+    ))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -410,18 +416,18 @@ mod tests {
 
     fn sample_run_record() -> RunRecord {
         RunRecord {
-            run_id:            fixtures::RUN_1,
-            settings:          SettingsLayer::default(),
-            graph:             Graph::new("test"),
-            workflow_slug:     Some("test".to_string()),
+            run_id: fixtures::RUN_1,
+            settings: SettingsLayer::default(),
+            graph: Graph::new("test"),
+            workflow_slug: Some("test".to_string()),
             working_directory: PathBuf::from("/tmp/project"),
-            host_repo_path:    Some("/tmp/project".to_string()),
-            repo_origin_url:   None,
-            base_branch:       Some("main".to_string()),
-            labels:            HashMap::new(),
-            provenance:        None,
-            manifest_blob:     None,
-            definition_blob:   None,
+            host_repo_path: Some("/tmp/project".to_string()),
+            repo_origin_url: None,
+            base_branch: Some("main".to_string()),
+            labels: HashMap::new(),
+            provenance: None,
+            manifest_blob: None,
+            definition_blob: None,
         }
     }
 
@@ -434,29 +440,37 @@ mod tests {
         let store = memory_store();
         let run_record = sample_run_record();
         let run_store = store.create_run(&fixtures::RUN_1).await.unwrap();
-        append_event(&run_store, &fixtures::RUN_1, &Event::RunCreated {
-            run_id:            fixtures::RUN_1,
-            settings:          serde_json::to_value(&run_record.settings).unwrap(),
-            graph:             serde_json::to_value(&run_record.graph).unwrap(),
-            workflow_source:   None,
-            workflow_config:   None,
-            labels:            run_record.labels.clone().into_iter().collect(),
-            run_dir:           run_dir.display().to_string(),
-            working_directory: run_record.working_directory.display().to_string(),
-            host_repo_path:    run_record.host_repo_path.clone(),
-            repo_origin_url:   run_record.repo_origin_url.clone(),
-            base_branch:       run_record.base_branch.clone(),
-            workflow_slug:     run_record.workflow_slug.clone(),
-            db_prefix:         None,
-            provenance:        run_record.provenance.clone(),
-            manifest_blob:     None,
-        })
+        append_event(
+            &run_store,
+            &fixtures::RUN_1,
+            &Event::RunCreated {
+                run_id: fixtures::RUN_1,
+                settings: serde_json::to_value(&run_record.settings).unwrap(),
+                graph: serde_json::to_value(&run_record.graph).unwrap(),
+                workflow_source: None,
+                workflow_config: None,
+                labels: run_record.labels.clone().into_iter().collect(),
+                run_dir: run_dir.display().to_string(),
+                working_directory: run_record.working_directory.display().to_string(),
+                host_repo_path: run_record.host_repo_path.clone(),
+                repo_origin_url: run_record.repo_origin_url.clone(),
+                base_branch: run_record.base_branch.clone(),
+                workflow_slug: run_record.workflow_slug.clone(),
+                db_prefix: None,
+                provenance: run_record.provenance.clone(),
+                manifest_blob: None,
+            },
+        )
         .await
         .unwrap();
-        append_event(&run_store, &fixtures::RUN_1, &Event::RunSubmitted {
-            reason:          None,
-            definition_blob: None,
-        })
+        append_event(
+            &run_store,
+            &fixtures::RUN_1,
+            &Event::RunSubmitted {
+                reason: None,
+                definition_blob: None,
+            },
+        )
         .await
         .unwrap();
 

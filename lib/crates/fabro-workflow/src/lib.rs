@@ -72,15 +72,15 @@ pub fn build_completed_stages(cp: &records::Checkpoint, run_failed: bool) -> Vec
             last.failed = true;
         } else {
             stages.push(CompletedStage {
-                node_id:            "unknown".to_string(),
-                status:             "fail".to_string(),
-                succeeded:          false,
-                failed:             true,
-                retries:            0,
+                node_id: "unknown".to_string(),
+                status: "fail".to_string(),
+                succeeded: false,
+                failed: true,
+                retries: 0,
                 billing_usd_micros: None,
-                notes:              None,
-                failure_reason:     None,
-                files_touched:      vec![],
+                notes: None,
+                failure_reason: None,
+                files_touched: vec![],
             });
         }
     }
@@ -139,9 +139,7 @@ pub(crate) mod run_dir;
 pub mod run_dump;
 pub mod run_lookup;
 
-pub use error::{
-    Error, FabroError, FailureCategory, FailureSignature, FailureSignatureExt, Result,
-};
+pub use error::{Error, FailureCategory, FailureSignature, FailureSignatureExt, Result};
 pub mod run_materialization;
 pub mod run_options;
 pub mod run_status;

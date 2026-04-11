@@ -7,36 +7,36 @@ use fabro_graphviz::parser;
 use fabro_template::{TemplateContext, render as render_template};
 
 use super::{FileInliningTransform, Transform};
-use crate::error::FabroError;
+use crate::error::Error;
 use crate::file_resolver::{FileResolver, ResolvedFile};
 
 pub struct ImportTransform {
     current_dir: PathBuf,
-    resolver:    Arc<dyn FileResolver>,
-    inputs:      HashMap<String, toml::Value>,
+    resolver: Arc<dyn FileResolver>,
+    inputs: HashMap<String, toml::Value>,
 }
 
 struct PlaceholderOptions {
-    default_attrs:    HashMap<String, AttrValue>,
-    class_names:      Vec<String>,
+    default_attrs: HashMap<String, AttrValue>,
+    class_names: Vec<String>,
     normalized_class: String,
 }
 
 struct PreparedImport {
-    graph:               Graph,
-    start_id:            String,
-    exit_id:             String,
-    entry_id:            String,
+    graph: Graph,
+    start_id: String,
+    exit_id: String,
+    entry_id: String,
     exit_predecessor_id: String,
 }
 
 enum ImportPrepareError {
-    Hard(FabroError),
+    Hard(Error),
     Soft(String),
 }
 
-impl From<FabroError> for ImportPrepareError {
-    fn from(error: FabroError) -> Self {
+impl From<Error> for ImportPrepareError {
+    fn from(error: Error) -> Self {
         Self::Hard(error)
     }
 }
@@ -75,7 +75,7 @@ impl ImportTransform {
         import_path: &str,
         current_base_dir: &Path,
         import_stack: &mut Vec<PathBuf>,
-    ) -> Result<(), FabroError> {
+    ) -> Result<(), Error> {
         if !graph.nodes.contains_key(placeholder_id) {
             return Ok(());
         }
@@ -162,9 +162,7 @@ impl ImportTransform {
                         .with_goal("{{ goal }}")
                         .with_inputs(self.inputs.clone()),
                 )
-                .map_err(|error| {
-                    ImportPrepareError::Hard(FabroError::Validation(error.to_string()))
-                })?;
+                .map_err(|error| ImportPrepareError::Hard(Error::Validation(error.to_string())))?;
 
                 let mut graph = parser::parse(&rendered_source).map_err(|error| {
                     ImportPrepareError::Soft(format!(
@@ -597,7 +595,7 @@ impl PreparedImport {
 }
 
 impl Transform for ImportTransform {
-    fn apply(&self, graph: Graph) -> Result<Graph, FabroError> {
+    fn apply(&self, graph: Graph) -> Result<Graph, Error> {
         let mut graph = graph;
         let imports = Self::collect_import_nodes(&graph);
         let mut import_stack = Vec::new();

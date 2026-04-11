@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use tracing::debug;
 
-use crate::error::SdkError;
+use crate::error::Error;
 use crate::middleware::{Middleware, NextFn, NextStreamFn};
 use crate::provider::{ProviderAdapter, StreamEventStream};
 use crate::providers;
@@ -12,9 +12,9 @@ use crate::types::{Request, Response};
 /// The core client that routes requests to provider adapters (Section 2.2, 3).
 #[derive(Clone)]
 pub struct Client {
-    providers:        HashMap<String, Arc<dyn ProviderAdapter>>,
+    providers: HashMap<String, Arc<dyn ProviderAdapter>>,
     default_provider: Option<String>,
-    middleware:       Vec<Arc<dyn Middleware>>,
+    middleware: Vec<Arc<dyn Middleware>>,
 }
 
 impl Client {
@@ -38,8 +38,8 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// Returns `SdkError` if any provider adapter fails to initialize.
-    pub async fn from_env() -> Result<Self, SdkError> {
+    /// Returns `Error` if any provider adapter fails to initialize.
+    pub async fn from_env() -> Result<Self, Error> {
         Self::from_lookup(|name| std::env::var(name).ok()).await
     }
 
@@ -48,14 +48,14 @@ impl Client {
     /// This is useful when credentials come from a source other than process
     /// environment variables, while still preserving the env-style provider
     /// configuration surface.
-    pub async fn from_lookup<F>(lookup: F) -> Result<Self, SdkError>
+    pub async fn from_lookup<F>(lookup: F) -> Result<Self, Error>
     where
         F: Fn(&str) -> Option<String>,
     {
         let mut client = Self {
-            providers:        HashMap::new(),
+            providers: HashMap::new(),
             default_provider: None,
-            middleware:       Vec::new(),
+            middleware: Vec::new(),
         };
 
         // Register providers whose API keys are present in the environment.
@@ -134,11 +134,11 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// Returns `SdkError` if the adapter's `initialize()` method fails.
+    /// Returns `Error` if the adapter's `initialize()` method fails.
     pub async fn register_provider(
         &mut self,
         adapter: Arc<dyn ProviderAdapter>,
-    ) -> Result<(), SdkError> {
+    ) -> Result<(), Error> {
         adapter.initialize().await?;
         let name = adapter.name().to_string();
         if self.default_provider.is_none() {
@@ -155,7 +155,7 @@ impl Client {
     }
 
     /// Resolve the provider for a request.
-    fn resolve_provider(&self, request: &Request) -> Result<Arc<dyn ProviderAdapter>, SdkError> {
+    fn resolve_provider(&self, request: &Request) -> Result<Arc<dyn ProviderAdapter>, Error> {
         let catalog_provider = fabro_model::Catalog::builtin()
             .get(&request.model)
             .map(|info| info.provider.to_string());
@@ -165,17 +165,17 @@ impl Client {
             .as_deref()
             .or(catalog_provider.as_deref())
             .or(self.default_provider.as_deref())
-            .ok_or_else(|| SdkError::Configuration {
+            .ok_or_else(|| Error::Configuration {
                 message: "No provider specified and no default provider set".into(),
-                source:  None,
+                source: None,
             })?;
 
         self.providers
             .get(provider_name)
             .cloned()
-            .ok_or_else(|| SdkError::Configuration {
+            .ok_or_else(|| Error::Configuration {
                 message: format!("Provider '{provider_name}' not registered"),
-                source:  None,
+                source: None,
             })
     }
 
@@ -183,10 +183,10 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// Returns `SdkError::Configuration` if no provider is specified or
+    /// Returns `Error::Configuration` if no provider is specified or
     /// registered, or any provider/middleware error encountered during the
     /// request.
-    pub async fn complete(&self, request: &Request) -> Result<Response, SdkError> {
+    pub async fn complete(&self, request: &Request) -> Result<Response, Error> {
         let provider = self.resolve_provider(request)?;
 
         if self.middleware.is_empty() {
@@ -216,10 +216,10 @@ impl Client {
     ///
     /// # Errors
     ///
-    /// Returns `SdkError::Configuration` if no provider is specified or
+    /// Returns `Error::Configuration` if no provider is specified or
     /// registered, or any provider/middleware error encountered during the
     /// request.
-    pub async fn stream(&self, request: &Request) -> Result<StreamEventStream, SdkError> {
+    pub async fn stream(&self, request: &Request) -> Result<StreamEventStream, Error> {
         let provider = self.resolve_provider(request)?;
 
         if self.middleware.is_empty() {
@@ -250,7 +250,7 @@ impl Client {
     /// # Errors
     ///
     /// Returns any error from a provider adapter's `close()` method.
-    pub async fn close(&self) -> Result<(), SdkError> {
+    pub async fn close(&self) -> Result<(), Error> {
         for provider in self.providers.values() {
             provider.close().await?;
         }
@@ -301,25 +301,25 @@ mod tests {
             &self.provider_name
         }
 
-        async fn complete(&self, _request: &Request) -> Result<Response, SdkError> {
+        async fn complete(&self, _request: &Request) -> Result<Response, Error> {
             Ok(Response {
-                id:            "resp_mock".into(),
-                model:         "mock-model".into(),
-                provider:      self.provider_name.clone(),
-                message:       Message::assistant(&self.response_text),
+                id: "resp_mock".into(),
+                model: "mock-model".into(),
+                provider: self.provider_name.clone(),
+                message: Message::assistant(&self.response_text),
                 finish_reason: FinishReason::Stop,
-                usage:         TokenCounts {
+                usage: TokenCounts {
                     input_tokens: 10,
                     output_tokens: 20,
                     ..Default::default()
                 },
-                raw:           None,
-                warnings:      vec![],
-                rate_limit:    None,
+                raw: None,
+                warnings: vec![],
+                rate_limit: None,
             })
         }
 
-        async fn stream(&self, _request: &Request) -> Result<StreamEventStream, SdkError> {
+        async fn stream(&self, _request: &Request) -> Result<StreamEventStream, Error> {
             let text = self.response_text.clone();
             let provider = self.provider_name.clone();
             let events = vec![
@@ -346,19 +346,19 @@ mod tests {
 
     fn test_request() -> Request {
         Request {
-            model:            "mock-model".into(),
-            messages:         vec![Message::user("Hello")],
-            provider:         None,
-            tools:            None,
-            tool_choice:      None,
-            response_format:  None,
-            temperature:      None,
-            top_p:            None,
-            max_tokens:       None,
-            stop_sequences:   None,
+            model: "mock-model".into(),
+            messages: vec![Message::user("Hello")],
+            provider: None,
+            tools: None,
+            tool_choice: None,
+            response_format: None,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            stop_sequences: None,
             reasoning_effort: None,
-            speed:            None,
-            metadata:         None,
+            speed: None,
+            metadata: None,
             provider_options: None,
         }
     }
@@ -399,10 +399,7 @@ mod tests {
         let client = Client::new(HashMap::new(), None, vec![]);
         let result = client.complete(&test_request()).await;
         assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            SdkError::Configuration { .. }
-        ));
+        assert!(matches!(result.unwrap_err(), Error::Configuration { .. }));
     }
 
     #[tokio::test]
@@ -417,10 +414,7 @@ mod tests {
         req.provider = Some("nonexistent".into());
         let result = client.complete(&req).await;
         assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            SdkError::Configuration { .. }
-        ));
+        assert!(matches!(result.unwrap_err(), Error::Configuration { .. }));
     }
 
     #[tokio::test]
@@ -480,11 +474,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl Middleware for UppercaseMiddleware {
-        async fn handle_complete(
-            &self,
-            request: Request,
-            next: NextFn,
-        ) -> Result<Response, SdkError> {
+        async fn handle_complete(&self, request: Request, next: NextFn) -> Result<Response, Error> {
             let mut response = next(request).await?;
             let text = response.text().to_uppercase();
             response.message = Message::assistant(text);
@@ -495,7 +485,7 @@ mod tests {
             &self,
             request: Request,
             next: NextStreamFn,
-        ) -> Result<StreamEventStream, SdkError> {
+        ) -> Result<StreamEventStream, Error> {
             next(request).await
         }
     }

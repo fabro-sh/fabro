@@ -1,5 +1,4 @@
 pub type Result<T> = std::result::Result<T, Error>;
-pub type StoreError = Error;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

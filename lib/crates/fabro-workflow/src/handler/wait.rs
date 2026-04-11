@@ -6,7 +6,7 @@ use tokio::time::sleep;
 
 use super::{EngineServices, Handler};
 use crate::context::Context;
-use crate::error::FabroError;
+use crate::error::Error;
 use crate::outcome::Outcome;
 
 /// Sleeps for a configured duration before proceeding.
@@ -21,13 +21,13 @@ impl Handler for WaitHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         let duration = node
             .attrs
             .get("duration")
             .and_then(AttrValue::as_duration)
             .ok_or_else(|| {
-                FabroError::Validation(format!(
+                Error::Validation(format!(
                     "wait node {:?} is missing a valid `duration` attribute",
                     node.id
                 ))

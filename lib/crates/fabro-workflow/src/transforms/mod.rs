@@ -1,11 +1,11 @@
 use fabro_graphviz::graph::Graph;
 
-use crate::error::FabroError;
+use crate::error::Error;
 
 /// A transform that modifies the pipeline graph after parsing and before
 /// validation.
 pub trait Transform {
-    fn apply(&self, graph: Graph) -> Result<Graph, FabroError>;
+    fn apply(&self, graph: Graph) -> Result<Graph, Error>;
 }
 
 mod file_inlining;

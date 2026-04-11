@@ -4,21 +4,21 @@ use chrono::{DateTime, Utc};
 use fabro_types::{RunControlAction, RunEvent, RunId, RunStatus, StatusReason};
 use serde::{Deserialize, Serialize};
 
-use crate::{Result, StoreError};
+use crate::{Error, Result};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunSummary {
-    pub run_id:           RunId,
-    pub workflow_name:    Option<String>,
-    pub workflow_slug:    Option<String>,
-    pub goal:             Option<String>,
-    pub labels:           HashMap<String, String>,
-    pub host_repo_path:   Option<String>,
-    pub start_time:       Option<DateTime<Utc>>,
-    pub status:           Option<RunStatus>,
-    pub status_reason:    Option<StatusReason>,
-    pub pending_control:  Option<RunControlAction>,
-    pub duration_ms:      Option<u64>,
+    pub run_id: RunId,
+    pub workflow_name: Option<String>,
+    pub workflow_slug: Option<String>,
+    pub goal: Option<String>,
+    pub labels: HashMap<String, String>,
+    pub host_repo_path: Option<String>,
+    pub start_time: Option<DateTime<Utc>>,
+    pub status: Option<RunStatus>,
+    pub status_reason: Option<StatusReason>,
+    pub pending_control: Option<RunControlAction>,
+    pub duration_ms: Option<u64>,
     pub total_usd_micros: Option<i64>,
 }
 
@@ -34,15 +34,16 @@ impl EventPayload {
     }
 
     pub(crate) fn validate(&self, expected_run_id: &RunId) -> Result<()> {
-        let obj = self.0.as_object().ok_or_else(|| {
-            StoreError::InvalidEvent("event payload must be a JSON object".into())
-        })?;
+        let obj = self
+            .0
+            .as_object()
+            .ok_or_else(|| Error::InvalidEvent("event payload must be a JSON object".into()))?;
 
         for field in ["id", "ts", "run_id", "event"] {
             match obj.get(field) {
                 Some(serde_json::Value::String(_)) => {}
                 _ => {
-                    return Err(StoreError::InvalidEvent(format!(
+                    return Err(Error::InvalidEvent(format!(
                         "missing or non-string required field: {field}"
                     )));
                 }
@@ -53,10 +54,10 @@ impl EventPayload {
             Some(serde_json::Value::String(run_id)) if run_id == &expected_run_id.to_string() => {
                 Ok(())
             }
-            Some(serde_json::Value::String(run_id)) => Err(StoreError::InvalidEvent(format!(
+            Some(serde_json::Value::String(run_id)) => Err(Error::InvalidEvent(format!(
                 "payload run_id {run_id:?} does not match store run_id {expected_run_id:?}"
             ))),
-            _ => Err(StoreError::InvalidEvent(
+            _ => Err(Error::InvalidEvent(
                 "missing or non-string required field: run_id".into(),
             )),
         }
@@ -72,17 +73,17 @@ impl EventPayload {
 }
 
 impl TryFrom<&EventPayload> for RunEvent {
-    type Error = StoreError;
+    type Error = Error;
 
     fn try_from(value: &EventPayload) -> Result<Self> {
         Self::from_ref(value.as_value())
-            .map_err(|err| StoreError::InvalidEvent(format!("invalid stored event: {err}")))
+            .map_err(|err| Error::InvalidEvent(format!("invalid stored event: {err}")))
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EventEnvelope {
-    pub seq:     u32,
+    pub seq: u32,
     #[serde(flatten)]
     pub payload: EventPayload,
 }
@@ -98,27 +99,27 @@ mod tests {
     #[test]
     fn wire_event_envelope_round_trips() {
         let event = RunEvent {
-            id:                 "evt_1".to_string(),
-            ts:                 Utc.with_ymd_and_hms(2026, 4, 9, 12, 0, 0).unwrap(),
-            run_id:             fixtures::RUN_1,
-            node_id:            Some("code".to_string()),
-            node_label:         Some("Code".to_string()),
-            stage_id:           Some(StageId::new("code", 1)),
-            parallel_group_id:  None,
+            id: "evt_1".to_string(),
+            ts: Utc.with_ymd_and_hms(2026, 4, 9, 12, 0, 0).unwrap(),
+            run_id: fixtures::RUN_1,
+            node_id: Some("code".to_string()),
+            node_label: Some("Code".to_string()),
+            stage_id: Some(StageId::new("code", 1)),
+            parallel_group_id: None,
             parallel_branch_id: None,
-            session_id:         None,
-            parent_session_id:  None,
-            tool_call_id:       None,
-            actor:              None,
-            body:               EventBody::RunCompleted(RunCompletedProps {
-                duration_ms:          42,
-                artifact_count:       0,
-                status:               "success".to_string(),
-                reason:               None,
-                total_usd_micros:     None,
+            session_id: None,
+            parent_session_id: None,
+            tool_call_id: None,
+            actor: None,
+            body: EventBody::RunCompleted(RunCompletedProps {
+                duration_ms: 42,
+                artifact_count: 0,
+                status: "success".to_string(),
+                reason: None,
+                total_usd_micros: None,
                 final_git_commit_sha: None,
-                final_patch:          None,
-                billing:              None,
+                final_patch: None,
+                billing: None,
             }),
         };
         let payload = EventPayload::new(event.to_value().unwrap(), &fixtures::RUN_1).unwrap();
@@ -139,30 +140,30 @@ mod tests {
         let group = StageId::new("review", 2);
         let branch = ParallelBranchId::new(group.clone(), 3);
         let event = RunEvent {
-            id:                 "evt_2".to_string(),
-            ts:                 Utc.with_ymd_and_hms(2026, 4, 9, 13, 0, 0).unwrap(),
-            run_id:             fixtures::RUN_1,
-            node_id:            Some("review".to_string()),
-            node_label:         Some("Review".to_string()),
-            stage_id:           Some(StageId::new("review", 2)),
-            parallel_group_id:  Some(group),
+            id: "evt_2".to_string(),
+            ts: Utc.with_ymd_and_hms(2026, 4, 9, 13, 0, 0).unwrap(),
+            run_id: fixtures::RUN_1,
+            node_id: Some("review".to_string()),
+            node_label: Some("Review".to_string()),
+            stage_id: Some(StageId::new("review", 2)),
+            parallel_group_id: Some(group),
             parallel_branch_id: Some(branch),
-            session_id:         Some("ses_42".to_string()),
-            parent_session_id:  Some("ses_root".to_string()),
-            tool_call_id:       Some("tool_call_xyz".to_string()),
-            actor:              Some(ActorRef::agent(
+            session_id: Some("ses_42".to_string()),
+            parent_session_id: Some("ses_root".to_string()),
+            tool_call_id: Some("tool_call_xyz".to_string()),
+            actor: Some(ActorRef::agent(
                 Some("ses_42".to_string()),
                 Some("claude-sonnet".to_string()),
             )),
-            body:               EventBody::RunCompleted(RunCompletedProps {
-                duration_ms:          100,
-                artifact_count:       1,
-                status:               "success".to_string(),
-                reason:               None,
-                total_usd_micros:     None,
+            body: EventBody::RunCompleted(RunCompletedProps {
+                duration_ms: 100,
+                artifact_count: 1,
+                status: "success".to_string(),
+                reason: None,
+                total_usd_micros: None,
                 final_git_commit_sha: None,
-                final_patch:          None,
-                billing:              None,
+                final_patch: None,
+                billing: None,
             }),
         };
         let payload = EventPayload::new(event.to_value().unwrap(), &fixtures::RUN_1).unwrap();
