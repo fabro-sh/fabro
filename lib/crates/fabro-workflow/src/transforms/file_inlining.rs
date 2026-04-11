@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use fabro_graphviz::graph::{AttrValue, Graph};
 
+use crate::error::FabroError;
 use crate::file_resolver::FileResolver;
 
 use super::Transform;
@@ -38,7 +39,7 @@ impl FileInliningTransform {
 }
 
 impl Transform for FileInliningTransform {
-    fn apply(&self, graph: Graph) -> Result<Graph, crate::error::FabroError> {
+    fn apply(&self, graph: Graph) -> Result<Graph, FabroError> {
         let mut graph = graph;
 
         // Inline @file refs in node prompts

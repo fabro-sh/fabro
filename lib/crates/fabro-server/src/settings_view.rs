@@ -26,9 +26,9 @@
 //!
 //! - A literal non-secret value (storage root, scheduler limit, integration
 //!   slug, feature flag), OR
-//! - An [`InterpString`] containing `${env.NAME}` tokens. `InterpString`'s
+//! - An [`InterpString`] containing `{{ env.NAME }}` tokens. `InterpString`'s
 //!   default serialization preserves the *unresolved* template form, so the
-//!   wire payload surfaces `"Bearer ${env.TOKEN}"` instead of the resolved
+//!   wire payload surfaces `"Bearer {{ env.TOKEN }}"` instead of the resolved
 //!   secret value. No additional redaction pass is needed.
 //!
 //! Any future field that carries a raw secret in-band (without env
@@ -160,7 +160,7 @@ _version = 1
 [server.auth.web.providers.github]
 enabled = true
 client_id = "Iv1.abcdef"
-client_secret = "${env.GITHUB_OAUTH_SECRET}"
+client_secret = "{{ env.GITHUB_OAUTH_SECRET }}"
 "#,
         );
         let redacted = redact_for_api(&settings);
@@ -240,10 +240,10 @@ slug = "fabro-app"
 _version = 1
 
 [server.storage]
-root = "${env.FABRO_STORAGE_ROOT}"
+root = "{{ env.FABRO_STORAGE_ROOT }}"
 
 [server.integrations.slack]
-default_channel = "${env.SLACK_CHANNEL}"
+default_channel = "{{ env.SLACK_CHANNEL }}"
 "#,
         );
 
@@ -256,7 +256,7 @@ default_channel = "${env.SLACK_CHANNEL}"
                 .storage
                 .and_then(|storage| storage.root)
                 .map(|value| value.as_source()),
-            Some("${env.FABRO_STORAGE_ROOT}".to_string())
+            Some("{{ env.FABRO_STORAGE_ROOT }}".to_string())
         );
         assert_eq!(
             server
@@ -264,7 +264,7 @@ default_channel = "${env.SLACK_CHANNEL}"
                 .and_then(|integrations| integrations.slack)
                 .and_then(|slack| slack.default_channel)
                 .map(|value| value.as_source()),
-            Some("${env.SLACK_CHANNEL}".to_string())
+            Some("{{ env.SLACK_CHANNEL }}".to_string())
         );
     }
 }

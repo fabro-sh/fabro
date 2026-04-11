@@ -127,7 +127,7 @@ fn spawn_worker_control_stream(
     std::thread::Builder::new()
         .name("fabro-worker-control".to_string())
         .spawn(move || {
-            read_worker_control_stream_blocking(StdBufReader::new(std::io::stdin()), event_tx);
+            read_worker_control_stream_blocking(StdBufReader::new(std::io::stdin()), &event_tx);
         })
         .context("failed to spawn worker control reader thread")?;
     Ok(())
@@ -135,7 +135,7 @@ fn spawn_worker_control_stream(
 
 fn read_worker_control_stream_blocking<R>(
     mut reader: R,
-    event_tx: mpsc::UnboundedSender<WorkerControlStreamEvent>,
+    event_tx: &mpsc::UnboundedSender<WorkerControlStreamEvent>,
 ) where
     R: StdBufRead,
 {
@@ -143,7 +143,7 @@ fn read_worker_control_stream_blocking<R>(
     loop {
         line.clear();
         match reader.read_line(&mut line) {
-            Ok(0) => {
+            Ok(0) | Err(_) => {
                 let _ = event_tx.send(WorkerControlStreamEvent::Eof);
                 break;
             }
@@ -152,10 +152,6 @@ fn read_worker_control_stream_blocking<R>(
                 if event_tx.send(WorkerControlStreamEvent::Line(line)).is_err() {
                     break;
                 }
-            }
-            Err(_) => {
-                let _ = event_tx.send(WorkerControlStreamEvent::Eof);
-                break;
             }
         }
     }
@@ -722,7 +718,7 @@ mod tests {
             std::io::Cursor::new(
                 b"{\"v\":1,\"type\":\"run.cancel\"}\n{\"v\":1,\"type\":\"interview.answer\",\"qid\":\"q-1\",\"answer\":{\"kind\":\"yes\"}}\n",
             ),
-            event_tx,
+            &event_tx,
         );
 
         assert_eq!(

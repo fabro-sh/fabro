@@ -442,7 +442,7 @@ pub struct RunLayer {
 ///
 /// Relative paths inside the `file` variant are resolved against the
 /// directory of the config file that declared them at load time (see
-/// `fabro_config::resolve_goal_file_paths`). `${env.NAME}` interpolation is
+/// `fabro_config::resolve_goal_file_paths`). `{{ env.NAME }}` interpolation is
 /// supported inside the `file` path; env-tokenized relative paths stay
 /// unresolved until consume time and are then resolved against the run's
 /// effective working directory.

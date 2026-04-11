@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::error::FabroError;
 use crate::transforms::{
     FileInliningTransform, ImportTransform, ModelResolutionTransform,
     StylesheetApplicationTransform, TemplateTransform, Transform,
@@ -11,10 +12,7 @@ use super::types::{Parsed, TransformOptions, Transformed};
 ///
 /// Returns `Transformed` with a graph for post-transform adjustments
 /// (e.g. goal override) before validation.
-pub fn transform(
-    parsed: Parsed,
-    options: &TransformOptions,
-) -> Result<Transformed, crate::error::FabroError> {
+pub fn transform(parsed: Parsed, options: &TransformOptions) -> Result<Transformed, FabroError> {
     let Parsed { graph, source } = parsed;
 
     // Built-in transforms (PreambleTransform moved to engine execution time)

@@ -1,5 +1,7 @@
 use fabro_graphviz::graph::Graph;
 
+use crate::error::FabroError;
+
 use super::Transform;
 use super::stylesheet::{apply_stylesheet, parse_stylesheet};
 
@@ -7,7 +9,7 @@ use super::stylesheet::{apply_stylesheet, parse_stylesheet};
 pub struct StylesheetApplicationTransform;
 
 impl Transform for StylesheetApplicationTransform {
-    fn apply(&self, graph: Graph) -> Result<Graph, crate::error::FabroError> {
+    fn apply(&self, graph: Graph) -> Result<Graph, FabroError> {
         let mut graph = graph;
         let stylesheet_text = graph.model_stylesheet().to_string();
         if stylesheet_text.is_empty() {
