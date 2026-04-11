@@ -7,6 +7,7 @@ use dialoguer::{Confirm, Password};
 use fabro_llm::client::Client as LlmClient;
 use fabro_llm::generate::{GenerateParams, generate};
 use fabro_model::{Catalog, Provider};
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 use tokio::task::spawn_blocking;
 use tokio::time::timeout;
@@ -74,8 +75,12 @@ pub(crate) fn openai_oauth_env_pairs(
 
 /// Run the OpenAI OAuth browser flow, falling back to manual API key entry on
 /// failure. Returns the env-var pairs to persist.
-pub(crate) async fn run_openai_oauth_or_api_key(s: &Styles) -> Result<Vec<(String, String)>> {
-    eprintln!(
+pub(crate) async fn run_openai_oauth_or_api_key(
+    s: &Styles,
+    printer: Printer,
+) -> Result<Vec<(String, String)>> {
+    fabro_util::printerr!(
+        printer,
         "  {}",
         s.dim.apply_to("Opening browser for OpenAI login...")
     );
@@ -100,7 +105,8 @@ pub(crate) async fn run_openai_oauth_or_api_key(s: &Styles) -> Result<Vec<(Strin
                 .ok_or_else(|| anyhow::anyhow!("OpenAI did not return a refresh token"))?;
             let pairs =
                 openai_oauth_env_pairs(&tokens.access_token, refresh_token, account_id.as_deref());
-            eprintln!(
+            fabro_util::printerr!(
+                printer,
                 "  {} OpenAI configured via browser login",
                 s.green.apply_to("✔")
             );
@@ -108,12 +114,13 @@ pub(crate) async fn run_openai_oauth_or_api_key(s: &Styles) -> Result<Vec<(Strin
         }
         Err(e) => {
             tracing::warn!(error = %e, "OpenAI OAuth browser flow failed");
-            eprintln!("  Browser login failed: {e}");
-            eprintln!(
+            fabro_util::printerr!(printer, "  Browser login failed: {e}");
+            fabro_util::printerr!(
+                printer,
                 "  {}",
                 s.dim.apply_to("Falling back to manual API key entry.")
             );
-            let (env_var, key) = prompt_and_validate_key(Provider::OpenAi, s).await?;
+            let (env_var, key) = prompt_and_validate_key(Provider::OpenAi, s, printer).await?;
             Ok(vec![(env_var, key)])
         }
     }
@@ -173,10 +180,12 @@ pub(crate) async fn validate_api_key(provider: Provider, api_key: &str) -> Resul
 pub(crate) async fn prompt_and_validate_key(
     provider: Provider,
     s: &Styles,
+    printer: Printer,
 ) -> Result<(String, String)> {
     let env_var = provider.api_key_env_vars()[0];
     let url = provider_key_url(provider);
-    eprintln!(
+    fabro_util::printerr!(
+        printer,
         "  {}",
         s.dim.apply_to(format!("Get your API key at: {url}"))
     );
@@ -185,14 +194,14 @@ pub(crate) async fn prompt_and_validate_key(
         let prompt = env_var.to_string();
         let key: String = spawn_blocking(move || prompt_password(&prompt)).await??;
 
-        eprintln!("  {}", s.dim.apply_to("Validating API key..."));
+        fabro_util::printerr!(printer, "  {}", s.dim.apply_to("Validating API key..."));
         match validate_api_key(provider, &key).await {
             Ok(()) => {
-                eprintln!("  {} API key is valid", s.green.apply_to("✔"));
+                fabro_util::printerr!(printer, "  {} API key is valid", s.green.apply_to("✔"));
                 return Ok((env_var.to_string(), key));
             }
             Err(e) => {
-                eprintln!("  [error] API key validation failed: {e}");
+                fabro_util::printerr!(printer, "  [error] API key validation failed: {e}");
                 let retry =
                     spawn_blocking(|| prompt_confirm("Try again with a different key?", true))
                         .await??;

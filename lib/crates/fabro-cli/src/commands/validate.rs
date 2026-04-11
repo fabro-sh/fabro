@@ -2,6 +2,7 @@ use anyhow::bail;
 use fabro_config::load::load_settings_user;
 use fabro_config::user::active_settings_path;
 use fabro_types::settings::SettingsLayer;
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 
 use crate::args::{GlobalArgs, ValidateArgs};
@@ -14,8 +15,9 @@ pub(crate) async fn run(
     args: &ValidateArgs,
     styles: &Styles,
     globals: &GlobalArgs,
+    printer: Printer,
 ) -> anyhow::Result<()> {
-    let ctx = CommandContext::for_target(&args.target)?;
+    let ctx = CommandContext::for_target(&args.target, printer)?;
     let built = build_run_manifest(ManifestBuildInput {
         workflow:           args.workflow.clone(),
         cwd:                ctx.cwd().to_path_buf(),
@@ -47,7 +49,8 @@ pub(crate) async fn run(
         return Ok(());
     }
 
-    eprintln!(
+    fabro_util::printerr!(
+        printer,
         "{} ({} nodes, {} edges)",
         styles
             .bold
@@ -55,13 +58,14 @@ pub(crate) async fn run(
         response.workflow.nodes,
         response.workflow.edges,
     );
-    eprintln!(
+    fabro_util::printerr!(
+        printer,
         "{} {}",
         styles.dim.apply_to("Graph:"),
         styles.dim.apply_to(relative_path(&built.target_path)),
     );
 
-    print_diagnostics(&diagnostics, styles);
+    print_diagnostics(&diagnostics, styles, printer);
 
     if diagnostics
         .iter()
@@ -70,6 +74,6 @@ pub(crate) async fn run(
         bail!("Validation failed");
     }
 
-    eprintln!("Validation: {}", styles.green.apply_to("OK"));
+    fabro_util::printerr!(printer, "Validation: {}", styles.green.apply_to("OK"));
     Ok(())
 }

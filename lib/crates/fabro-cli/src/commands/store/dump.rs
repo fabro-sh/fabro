@@ -7,6 +7,7 @@ use bytes::Bytes;
 use fabro_store::{ArtifactStore, RunDatabase};
 use fabro_store::{EventEnvelope, RunProjection, StageId};
 use fabro_types::{RunBlobId, RunId};
+use fabro_util::printer::Printer;
 use fabro_workflow::run_dump::RunDump;
 use futures::future::BoxFuture;
 #[cfg(test)]
@@ -18,7 +19,11 @@ use crate::server_runs::ServerRunLookup;
 use crate::shared::{absolute_or_current, print_json_pretty};
 use crate::user_config::{load_settings_with_storage_dir, storage_dir};
 
-pub(crate) async fn dump_command(args: &StoreDumpArgs, globals: &GlobalArgs) -> Result<()> {
+pub(crate) async fn dump_command(
+    args: &StoreDumpArgs,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
     let cli_settings = load_settings_with_storage_dir(args.storage_dir.as_deref())?;
     let lookup = ServerRunLookup::connect(&storage_dir(&cli_settings)?).await?;
     let run = lookup.resolve(&args.run)?;
@@ -33,7 +38,8 @@ pub(crate) async fn dump_command(args: &StoreDumpArgs, globals: &GlobalArgs) -> 
             "file_count": file_count,
         }))?;
     } else {
-        println!(
+        fabro_util::printout!(
+            printer,
             "Exported {file_count} files for run {} to {}",
             run_id,
             args.output.display()

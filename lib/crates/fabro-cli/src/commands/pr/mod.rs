@@ -7,14 +7,19 @@ mod view;
 use anyhow::{Context, Result};
 use fabro_types::PullRequestRecord;
 use fabro_types::settings::InterpString;
+use fabro_util::printer::Printer;
 
 use crate::args::{GlobalArgs, PrCommand, PrNamespace, ServerTargetArgs};
 use crate::command_context::CommandContext;
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::github::build_github_app_credentials;
 
-pub(crate) async fn dispatch(ns: PrNamespace, globals: &GlobalArgs) -> Result<()> {
-    let ctx = CommandContext::base()?;
+pub(crate) async fn dispatch(
+    ns: PrNamespace,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
+    let ctx = CommandContext::base(printer)?;
     let server_settings =
         fabro_config::resolve_server_from_file(ctx.machine_settings()).map_err(|errors| {
             anyhow::anyhow!(
@@ -37,20 +42,21 @@ pub(crate) async fn dispatch(ns: PrNamespace, globals: &GlobalArgs) -> Result<()
     )?;
     match ns.command {
         PrCommand::Create(args) => {
-            Box::pin(create::create_command(args, github_app, globals)).await
+            Box::pin(create::create_command(args, github_app, globals, printer)).await
         }
-        PrCommand::List(args) => list::list_command(args, github_app, globals).await,
-        PrCommand::View(args) => view::view_command(args, github_app, globals).await,
-        PrCommand::Merge(args) => merge::merge_command(args, github_app, globals).await,
-        PrCommand::Close(args) => close::close_command(args, github_app, globals).await,
+        PrCommand::List(args) => list::list_command(args, github_app, globals, printer).await,
+        PrCommand::View(args) => view::view_command(args, github_app, globals, printer).await,
+        PrCommand::Merge(args) => merge::merge_command(args, github_app, globals, printer).await,
+        PrCommand::Close(args) => close::close_command(args, github_app, globals, printer).await,
     }
 }
 
 pub(crate) async fn load_pr_record(
     server: &ServerTargetArgs,
     run_id: &str,
+    printer: Printer,
 ) -> Result<(PullRequestRecord, fabro_types::RunId)> {
-    let ctx = CommandContext::for_target(server)?;
+    let ctx = CommandContext::for_target(server, printer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(run_id)?;
     let run_id = run.run_id();

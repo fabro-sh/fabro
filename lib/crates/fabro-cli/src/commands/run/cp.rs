@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use fabro_util::printer::Printer;
 use tokio::fs;
 use tracing::{debug, info};
 
@@ -24,7 +25,7 @@ enum CopyDirection {
     },
 }
 
-pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs) -> Result<()> {
+pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs, printer: Printer) -> Result<()> {
     let direction = parse_direction(&args.src, &args.dst)?;
 
     match direction {
@@ -33,7 +34,8 @@ pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs) -> Result<()>
             remote_path,
             local_path,
         } => {
-            let (client, run_id) = resolve_client_and_run_id(&args.server, &run_prefix).await?;
+            let (client, run_id) =
+                resolve_client_and_run_id(&args.server, &run_prefix, printer).await?;
 
             let file_count = if args.recursive {
                 Some(download_recursive(&client, &run_id, &remote_path, &local_path).await?)
@@ -63,7 +65,8 @@ pub(crate) async fn cp_command(args: CpArgs, globals: &GlobalArgs) -> Result<()>
             run_prefix,
             remote_path,
         } => {
-            let (client, run_id) = resolve_client_and_run_id(&args.server, &run_prefix).await?;
+            let (client, run_id) =
+                resolve_client_and_run_id(&args.server, &run_prefix, printer).await?;
 
             let file_count = if args.recursive {
                 Some(upload_recursive(&client, &run_id, &local_path, &remote_path).await?)
@@ -117,8 +120,9 @@ fn parse_direction(src: &str, dst: &str) -> Result<CopyDirection> {
 async fn resolve_client_and_run_id(
     server: &ServerTargetArgs,
     run_prefix: &str,
+    printer: Printer,
 ) -> Result<(ServerStoreClient, fabro_types::RunId)> {
-    let ctx = CommandContext::for_target(server)?;
+    let ctx = CommandContext::for_target(server, printer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(run_prefix)?;
     Ok((lookup.client().clone_for_reuse(), run.run_id()))

@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result, bail};
 use fabro_types::settings::{CliSettings, SettingsLayer};
+use fabro_util::printer::Printer;
 use tokio::sync::OnceCell;
 
 use crate::args::{ServerConnectionArgs, ServerTargetArgs};
@@ -22,6 +23,8 @@ pub(crate) enum ServerMode {
 }
 
 pub(crate) struct CommandContext {
+    #[allow(dead_code)]
+    printer:          Printer,
     cwd:              PathBuf,
     base_config_path: PathBuf,
     machine_settings: SettingsLayer,
@@ -31,24 +34,24 @@ pub(crate) struct CommandContext {
 }
 
 impl CommandContext {
-    pub(crate) fn base() -> Result<Self> {
-        Self::new(ServerMode::None)
+    pub(crate) fn base(printer: Printer) -> Result<Self> {
+        Self::new(printer, ServerMode::None)
     }
 
-    pub(crate) fn for_target(args: &ServerTargetArgs) -> Result<Self> {
-        Self::new(ServerMode::ByTarget {
+    pub(crate) fn for_target(args: &ServerTargetArgs, printer: Printer) -> Result<Self> {
+        Self::new(printer, ServerMode::ByTarget {
             target_override: args.server.clone(),
         })
     }
 
-    pub(crate) fn for_connection(args: &ServerConnectionArgs) -> Result<Self> {
-        Self::new(ServerMode::ByStorageDir {
+    pub(crate) fn for_connection(args: &ServerConnectionArgs, printer: Printer) -> Result<Self> {
+        Self::new(printer, ServerMode::ByStorageDir {
             target_override:      args.target.server.clone(),
             storage_dir_override: args.storage_dir.clone_path(),
         })
     }
 
-    fn new(server_mode: ServerMode) -> Result<Self> {
+    fn new(printer: Printer, server_mode: ServerMode) -> Result<Self> {
         let cwd = std::env::current_dir().context("Failed to get current directory")?;
         let base_config_path = user_config::active_settings_path(None);
         let machine_settings = match &server_mode {
@@ -61,6 +64,7 @@ impl CommandContext {
         let cli_settings = user_config::resolve_cli_settings(&machine_settings)?;
 
         Ok(Self {
+            printer,
             cwd,
             base_config_path,
             machine_settings,
@@ -68,6 +72,11 @@ impl CommandContext {
             server_mode,
             server: OnceCell::new(),
         })
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn printer(&self) -> Printer {
+        self.printer
     }
 
     pub(crate) fn cwd(&self) -> &Path {

@@ -1,5 +1,6 @@
 use anyhow::Result;
 use fabro_api::{Client, types};
+use fabro_util::printer::Printer;
 
 use crate::args::{GlobalArgs, SecretSetArgs};
 use crate::server_client;
@@ -9,6 +10,7 @@ pub(super) async fn set_command(
     client: &Client,
     args: &SecretSetArgs,
     globals: &GlobalArgs,
+    printer: Printer,
 ) -> Result<()> {
     let meta = client
         .set_secret()
@@ -23,7 +25,7 @@ pub(super) async fn set_command(
     if globals.json {
         print_json_pretty(&meta)?;
     } else {
-        eprintln!("Set {}", meta.name);
+        fabro_util::printerr!(printer, "Set {}", meta.name);
     }
     Ok(())
 }

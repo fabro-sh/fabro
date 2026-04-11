@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 use fabro_model::Catalog;
 use fabro_sandbox::daytona::detect_repo_info;
+use fabro_util::printer::Printer;
 use fabro_workflow::outcome::StageStatus;
 use fabro_workflow::pull_request::maybe_open_pull_request;
 use tracing::info;
@@ -16,8 +17,9 @@ pub(super) async fn create_command(
     args: PrCreateArgs,
     github_app: Option<fabro_github::GitHubAppCredentials>,
     globals: &GlobalArgs,
+    printer: Printer,
 ) -> Result<()> {
-    let ctx = CommandContext::for_target(&args.server)?;
+    let ctx = CommandContext::for_target(&args.server, printer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run_id)?;
     let run_id = run.run_id();
@@ -117,14 +119,14 @@ pub(super) async fn create_command(
             if globals.json {
                 print_json_pretty(&record)?;
             } else {
-                println!("{}", record.html_url);
+                fabro_util::printout!(printer, "{}", record.html_url);
             }
         }
         None => {
             if globals.json {
                 print_json_pretty(&serde_json::Value::Null)?;
             } else {
-                println!("No pull request created (empty diff).");
+                fabro_util::printout!(printer, "No pull request created (empty diff).");
             }
         }
     }

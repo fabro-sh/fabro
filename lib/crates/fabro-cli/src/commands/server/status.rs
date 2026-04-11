@@ -2,15 +2,16 @@ use std::path::Path;
 
 use anyhow::Result;
 use chrono::Utc;
+use fabro_util::printer::Printer;
 
 use super::record;
 
-pub(crate) fn execute(storage_dir: &Path, json: bool) -> Result<()> {
+pub(crate) fn execute(storage_dir: &Path, json: bool, printer: Printer) -> Result<()> {
     let Some(record) = record::active_server_record(storage_dir) else {
         if json {
-            println!(r#"{{"status":"stopped"}}"#);
+            fabro_util::printout!(printer, r#"{{"status":"stopped"}}"#);
         } else {
-            eprintln!("Server is not running");
+            fabro_util::printerr!(printer, "Server is not running");
         }
         std::process::exit(1);
     };
@@ -24,12 +25,15 @@ pub(crate) fn execute(storage_dir: &Path, json: bool) -> Result<()> {
             "started_at": record.started_at.to_rfc3339(),
             "uptime_seconds": uptime_seconds,
         });
-        println!("{}", serde_json::to_string_pretty(&output)?);
+        fabro_util::printout!(printer, "{}", serde_json::to_string_pretty(&output)?);
     } else {
         let uptime = format_uptime(Utc::now() - record.started_at);
-        eprintln!(
+        fabro_util::printerr!(
+            printer,
             "Server running (pid {}) on {}, started {} ago",
-            record.pid, record.bind, uptime
+            record.pid,
+            record.bind,
+            uptime
         );
     }
 

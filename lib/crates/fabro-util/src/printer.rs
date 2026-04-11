@@ -1,3 +1,31 @@
+/// Like `println!`, but respects the `Printer`'s verbosity level.
+///
+/// ```ignore
+/// printout!(printer, "Created workflow: {name}");
+/// ```
+#[macro_export]
+macro_rules! printout {
+    ($printer:expr, $($arg:tt)*) => {{
+        use ::std::fmt::Write as _;
+        let mut out = $printer.stdout_important();
+        let _ = writeln!(out, $($arg)*);
+    }};
+}
+
+/// Like `eprintln!`, but respects the `Printer`'s verbosity level.
+///
+/// ```ignore
+/// printerr!(printer, "Connecting to {url}…");
+/// ```
+#[macro_export]
+macro_rules! printerr {
+    ($printer:expr, $($arg:tt)*) => {{
+        use ::std::fmt::Write as _;
+        let mut out = $printer.stderr();
+        let _ = writeln!(out, $($arg)*);
+    }};
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Printer {
     /// Suppresses all output.

@@ -1,6 +1,7 @@
 use std::io::{self, IsTerminal, Write};
 
 use anyhow::{Context, Result, bail};
+use fabro_util::printer::Printer;
 use tracing::{debug, info};
 
 use crate::args::{DiffArgs, GlobalArgs};
@@ -9,9 +10,9 @@ use crate::server_client::RunProjection;
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
 
-pub(crate) async fn run(args: DiffArgs, globals: &GlobalArgs) -> Result<()> {
+pub(crate) async fn run(args: DiffArgs, globals: &GlobalArgs, printer: Printer) -> Result<()> {
     info!(run_id = %args.run, "Showing diff");
-    let ctx = CommandContext::for_target(&args.server)?;
+    let ctx = CommandContext::for_target(&args.server, printer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();

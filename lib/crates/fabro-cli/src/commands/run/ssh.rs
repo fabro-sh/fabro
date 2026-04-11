@@ -1,4 +1,5 @@
 use anyhow::{Result, bail};
+use fabro_util::printer::Printer;
 use tracing::info;
 
 use crate::args::{GlobalArgs, SshArgs};
@@ -6,12 +7,12 @@ use crate::command_context::CommandContext;
 use crate::server_runs::ServerSummaryLookup;
 use crate::shared::print_json_pretty;
 
-pub(crate) async fn run(args: SshArgs, globals: &GlobalArgs) -> Result<()> {
+pub(crate) async fn run(args: SshArgs, globals: &GlobalArgs, printer: Printer) -> Result<()> {
     if globals.json && !args.print {
         globals.require_no_json()?;
     }
 
-    let ctx = CommandContext::for_target(&args.server)?;
+    let ctx = CommandContext::for_target(&args.server, printer)?;
     let lookup = ServerSummaryLookup::from_client(ctx.server().await?).await?;
     let run = lookup.resolve(&args.run)?;
     let run_id = run.run_id();
@@ -26,7 +27,10 @@ pub(crate) async fn run(args: SshArgs, globals: &GlobalArgs) -> Result<()> {
         if globals.json {
             print_json_pretty(&serde_json::json!({ "command": ssh.command }))?;
         } else {
-            print!("{}", format_output(&ssh.command));
+            {
+                use std::fmt::Write as _;
+                let _ = write!(printer.stdout(), "{}", format_output(&ssh.command));
+            }
         }
     } else {
         exec_ssh(&ssh.command)?;

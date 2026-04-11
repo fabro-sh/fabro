@@ -5,6 +5,7 @@ use fabro_config::load::load_settings_user;
 use fabro_config::user::active_settings_path;
 use fabro_types::RunId;
 use fabro_types::settings::SettingsLayer;
+use fabro_util::printer::Printer;
 use fabro_util::terminal::Styles;
 
 use super::output::{api_diagnostics_to_local, print_preflight_workflow_summary};
@@ -29,6 +30,7 @@ pub(crate) async fn create_run(
     _cli_defaults: SettingsLayer,
     styles: &Styles,
     quiet: bool,
+    printer: Printer,
 ) -> anyhow::Result<CreatedRun> {
     let workflow_path = args
         .workflow
@@ -61,7 +63,12 @@ pub(crate) async fn create_run(
             .iter()
             .any(|diagnostic| diagnostic.severity == fabro_validate::Severity::Error)
         {
-            print_preflight_workflow_summary(&preflight.workflow, Some(&built.target_path), styles);
+            print_preflight_workflow_summary(
+                &preflight.workflow,
+                Some(&built.target_path),
+                styles,
+                printer,
+            );
         }
     }
 

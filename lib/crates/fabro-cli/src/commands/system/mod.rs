@@ -4,15 +4,20 @@ mod info;
 mod prune;
 
 use anyhow::Result;
+use fabro_util::printer::Printer;
 pub(crate) use prune::parse_duration;
 
 use crate::args::{GlobalArgs, SystemCommand, SystemNamespace};
 
-pub(crate) async fn dispatch(ns: SystemNamespace, globals: &GlobalArgs) -> Result<()> {
+pub(crate) async fn dispatch(
+    ns: SystemNamespace,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
     match ns.command {
-        SystemCommand::Info(args) => info::info_command(&args, globals).await,
-        SystemCommand::Prune(args) => prune::prune_command(&args, globals).await,
-        SystemCommand::Df(args) => df::df_command(&args, globals).await,
-        SystemCommand::Events(args) => events::events_command(&args, globals).await,
+        SystemCommand::Info(args) => info::info_command(&args, globals, printer).await,
+        SystemCommand::Prune(args) => prune::prune_command(&args, globals, printer).await,
+        SystemCommand::Df(args) => df::df_command(&args, globals, printer).await,
+        SystemCommand::Events(args) => events::events_command(&args, globals, printer).await,
     }
 }

@@ -1,12 +1,17 @@
 use anyhow::Result;
+use fabro_util::printer::Printer;
 use futures::StreamExt;
 
 use crate::args::{GlobalArgs, SystemEventsArgs};
 use crate::command_context::CommandContext;
 use crate::{server_client, sse};
 
-pub(super) async fn events_command(args: &SystemEventsArgs, globals: &GlobalArgs) -> Result<()> {
-    let ctx = CommandContext::for_connection(&args.connection)?;
+pub(super) async fn events_command(
+    args: &SystemEventsArgs,
+    globals: &GlobalArgs,
+    printer: Printer,
+) -> Result<()> {
+    let ctx = CommandContext::for_connection(&args.connection, printer)?;
     let server = ctx.server().await?;
 
     let mut request = server.api().attach_events();
