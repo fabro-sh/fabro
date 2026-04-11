@@ -11,9 +11,9 @@ struct JwtPayload {
     #[serde(default)]
     chatgpt_account_id: Option<String>,
     #[serde(default, rename = "https://api.openai.com/auth")]
-    auth_claim:         Option<AuthClaim>,
+    auth_claim: Option<AuthClaim>,
     #[serde(default)]
-    organizations:      Option<Vec<Organization>>,
+    organizations: Option<Vec<Organization>>,
 }
 
 #[derive(Deserialize)]

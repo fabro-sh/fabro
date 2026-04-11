@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use clap::{Args, Parser};
+use fabro_llm::Error as LlmError;
 use fabro_llm::client::Client;
-use fabro_llm::error::SdkError;
 use fabro_llm::middleware::{Middleware, NextFn, NextStreamFn};
 use fabro_llm::provider::StreamEventStream;
 use fabro_llm::types::{Request, Response};
@@ -303,7 +303,7 @@ struct DebugMiddleware {
 #[async_trait::async_trait]
 impl Middleware for DebugMiddleware {
     #[allow(clippy::print_stderr)]
-    async fn handle_complete(&self, request: Request, next: NextFn) -> Result<Response, SdkError> {
+    async fn handle_complete(&self, request: Request, next: NextFn) -> Result<Response, LlmError> {
         let s = self.styles;
         eprintln!(
             "{}",
@@ -333,7 +333,7 @@ impl Middleware for DebugMiddleware {
         &self,
         request: Request,
         next: NextStreamFn,
-    ) -> Result<StreamEventStream, SdkError> {
+    ) -> Result<StreamEventStream, LlmError> {
         next(request).await
     }
 }
@@ -346,7 +346,7 @@ struct VerboseMiddleware {
 #[async_trait::async_trait]
 impl Middleware for VerboseMiddleware {
     #[allow(clippy::print_stderr)]
-    async fn handle_complete(&self, request: Request, next: NextFn) -> Result<Response, SdkError> {
+    async fn handle_complete(&self, request: Request, next: NextFn) -> Result<Response, LlmError> {
         let s = self.styles;
         eprintln!(
             "{}\n{}",
@@ -368,7 +368,7 @@ impl Middleware for VerboseMiddleware {
         &self,
         request: Request,
         next: NextStreamFn,
-    ) -> Result<StreamEventStream, SdkError> {
+    ) -> Result<StreamEventStream, LlmError> {
         next(request).await
     }
 }

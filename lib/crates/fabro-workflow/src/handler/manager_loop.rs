@@ -15,7 +15,7 @@ use super::{EngineServices, Handler};
 use crate::artifact_upload::ArtifactSink;
 use crate::condition::evaluate_condition;
 use crate::context::{Context, WorkflowContext, keys};
-use crate::error::FabroError;
+use crate::error::Error;
 use crate::operations::{ValidateInput, WorkflowInput, validate};
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
 use crate::pipeline;
@@ -28,7 +28,7 @@ use crate::run_options::RunOptions;
 pub struct SubWorkflowHandler;
 
 struct ParsedChildWorkflow {
-    graph:         Graph,
+    graph: Graph,
     workflow_path: Option<PathBuf>,
 }
 
@@ -59,10 +59,7 @@ fn parse_duration_str(s: &str) -> Duration {
 /// `stack.child_workflow` / `stack.child_dotfile` (with file inlining).
 /// `stack.child_workflow` is preferred; `stack.child_dotfile` is kept for
 /// backward compatibility.
-fn parse_child_graph(
-    node: &Node,
-    services: &EngineServices,
-) -> Result<ParsedChildWorkflow, FabroError> {
+fn parse_child_graph(node: &Node, services: &EngineServices) -> Result<ParsedChildWorkflow, Error> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
     if let Some(dot) = node
@@ -71,12 +68,12 @@ fn parse_child_graph(
         .and_then(|v| v.as_str())
     {
         let validated = validate(ValidateInput {
-            workflow:          WorkflowInput::DotSource {
-                source:   dot.to_string(),
+            workflow: WorkflowInput::DotSource {
+                source: dot.to_string(),
                 base_dir: None,
             },
-            settings:          SettingsLayer::default(),
-            cwd:               cwd.clone(),
+            settings: SettingsLayer::default(),
+            cwd: cwd.clone(),
             custom_transforms: Vec::new(),
         })?;
         validated.raise_on_errors()?;
@@ -98,13 +95,13 @@ fn parse_child_graph(
                     .resolve_child(current_workflow_path, path)
                     .cloned()
                     .ok_or_else(|| {
-                        FabroError::handler(format!(
+                        Error::handler(format!(
                             "child workflow is not present in the persisted bundle: {path}"
                         ))
                     })?,
             ),
             (Some(_), None) => {
-                return Err(FabroError::engine(
+                return Err(Error::engine(
                     "workflow bundle is missing the current workflow path".to_string(),
                 ));
             }
@@ -128,7 +125,7 @@ fn parse_child_graph(
             workflow_path,
         });
     }
-    Err(FabroError::handler("No child workflow source".to_string()))
+    Err(Error::handler("No child workflow source".to_string()))
 }
 
 /// Compute the context diff: keys that changed or were added relative to
@@ -155,7 +152,7 @@ impl Handler for SubWorkflowHandler {
         _graph: &Graph,
         run_dir: &Path,
         services: &EngineServices,
-    ) -> Result<Outcome, FabroError> {
+    ) -> Result<Outcome, Error> {
         let poll_interval = node
             .attrs
             .get("manager.poll_interval")
@@ -204,18 +201,18 @@ impl Handler for SubWorkflowHandler {
         let child_cancel = Arc::clone(&cancel_token);
 
         let child_run_options = RunOptions {
-            settings:         SettingsLayer::default(),
-            run_dir:          child_logs,
-            cancel_token:     Some(cancel_token),
+            settings: SettingsLayer::default(),
+            run_dir: child_logs,
+            cancel_token: Some(cancel_token),
             // Child workflows are part of the parent run's event stream.
-            run_id:           services.emitter.run_id(),
-            labels:           HashMap::new(),
-            workflow_slug:    None,
-            github_app:       None,
-            base_branch:      None,
+            run_id: services.emitter.run_id(),
+            labels: HashMap::new(),
+            workflow_slug: None,
+            github_app: None,
+            base_branch: None,
             display_base_sha: None,
-            host_repo_path:   None,
-            git:              None,
+            host_repo_path: None,
+            git: None,
         };
 
         // Clone parent context for child; inject parent preamble
@@ -246,7 +243,7 @@ impl Handler for SubWorkflowHandler {
         let run_store = store
             .create_run(&child_run_options.run_id)
             .await
-            .map_err(|err| FabroError::engine(err.to_string()))?;
+            .map_err(|err| Error::engine(err.to_string()))?;
         let artifact_store = ArtifactStore::new(object_store, "artifacts");
 
         // Spawn child engine
@@ -275,7 +272,7 @@ impl Handler for SubWorkflowHandler {
                 provider: fabro_llm::Provider::Anthropic,
             };
             let executed = pipeline::execute(initialized).await;
-            Ok::<_, FabroError>((executed.outcome?, executed.final_context))
+            Ok::<_, Error>((executed.outcome?, executed.final_context))
         });
 
         // Poll loop
@@ -486,7 +483,7 @@ mod tests {
                 _graph: &Graph,
                 _run_dir: &Path,
                 _services: &EngineServices,
-            ) -> Result<Outcome, FabroError> {
+            ) -> Result<Outcome, Error> {
                 let target = context.get_string("review.target", "");
                 let mut outcome = Outcome::success();
                 outcome
@@ -594,8 +591,8 @@ mod tests {
             PathBuf::from("children/review.fabro"),
             BundledWorkflow {
                 logical_path: PathBuf::from("children/review.fabro"),
-                source:       child_dot_succeeds().to_string(),
-                files:        HashMap::new(),
+                source: child_dot_succeeds().to_string(),
+                files: HashMap::new(),
             },
         )]))));
 
@@ -671,7 +668,7 @@ mod tests {
                 _graph: &Graph,
                 _run_dir: &Path,
                 _services: &EngineServices,
-            ) -> Result<Outcome, FabroError> {
+            ) -> Result<Outcome, Error> {
                 tokio::time::sleep(Duration::from_secs(10)).await;
                 Ok(Outcome::success())
             }
@@ -724,7 +721,7 @@ mod tests {
                 _graph: &Graph,
                 _run_dir: &Path,
                 _services: &EngineServices,
-            ) -> Result<Outcome, FabroError> {
+            ) -> Result<Outcome, Error> {
                 tokio::time::sleep(Duration::from_secs(10)).await;
                 Ok(Outcome::success())
             }
@@ -878,7 +875,7 @@ mod tests {
                 _graph: &Graph,
                 _run_dir: &Path,
                 _services: &EngineServices,
-            ) -> Result<Outcome, FabroError> {
+            ) -> Result<Outcome, Error> {
                 let target = context.get_string("review.target", "");
                 let mut outcome = Outcome::success();
                 outcome
@@ -960,7 +957,7 @@ mod tests {
                 _graph: &Graph,
                 _run_dir: &Path,
                 _services: &EngineServices,
-            ) -> Result<Outcome, FabroError> {
+            ) -> Result<Outcome, Error> {
                 let parent_preamble = context.get_string(keys::INTERNAL_PARENT_PREAMBLE, "");
                 let mut outcome = Outcome::success();
                 outcome.context_updates.insert(

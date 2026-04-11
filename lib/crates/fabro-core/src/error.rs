@@ -22,9 +22,9 @@ impl fmt::Display for VisitLimitSource {
 /// to_fail_outcome().
 #[derive(Debug, Clone)]
 pub struct HandlerErrorDetail {
-    pub message:   String,
+    pub message: String,
     pub retryable: bool,
-    pub category:  Option<FailureCategory>,
+    pub category: Option<FailureCategory>,
     pub signature: Option<String>,
 }
 
@@ -48,9 +48,9 @@ pub enum Error {
         "node \"{node_id}\" visited {visits} times ({limit_source} limit {limit}); run is stuck in a cycle"
     )]
     VisitLimitExceeded {
-        node_id:      String,
-        visits:       usize,
-        limit:        usize,
+        node_id: String,
+        visits: usize,
+        limit: usize,
         limit_source: VisitLimitSource,
     },
     #[error("stall timeout on node \"{node_id}\"")]
@@ -81,8 +81,8 @@ impl Error {
             Self::Handler { detail } => Outcome {
                 status: StageStatus::Fail,
                 failure: Some(FailureDetail {
-                    message:   detail.message.clone(),
-                    category:  detail.category.unwrap_or(FailureCategory::Deterministic),
+                    message: detail.message.clone(),
+                    category: detail.category.unwrap_or(FailureCategory::Deterministic),
                     signature: detail.signature.clone(),
                 }),
                 ..Outcome::default()
@@ -93,7 +93,6 @@ impl Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
-pub type CoreError = Error;
 
 #[cfg(test)]
 mod tests {
@@ -119,9 +118,9 @@ mod tests {
         );
         assert_eq!(
             Error::VisitLimitExceeded {
-                node_id:      "n1".into(),
-                visits:       5,
-                limit:        3,
+                node_id: "n1".into(),
+                visits: 5,
+                limit: 3,
                 limit_source: VisitLimitSource::Node,
             }
             .to_string(),
@@ -143,17 +142,17 @@ mod tests {
     #[test]
     fn core_error_handler_is_retryable() {
         let retryable = Error::handler(HandlerErrorDetail {
-            message:   "timeout".into(),
+            message: "timeout".into(),
             retryable: true,
-            category:  None,
+            category: None,
             signature: None,
         });
         assert!(retryable.is_retryable());
 
         let not_retryable = Error::handler(HandlerErrorDetail {
-            message:   "bad input".into(),
+            message: "bad input".into(),
             retryable: false,
-            category:  None,
+            category: None,
             signature: None,
         });
         assert!(!not_retryable.is_retryable());
@@ -163,9 +162,9 @@ mod tests {
     fn core_error_handler_to_fail_outcome() {
         use crate::outcome::FailureCategory;
         let err = Error::handler(HandlerErrorDetail {
-            message:   "api down".into(),
+            message: "api down".into(),
             retryable: true,
-            category:  Some(FailureCategory::TransientInfra),
+            category: Some(FailureCategory::TransientInfra),
             signature: Some("sig123".into()),
         });
         let outcome: Outcome = err.to_fail_outcome();

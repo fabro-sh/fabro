@@ -29,12 +29,12 @@ async fn execute_github_graphql(
 ///
 /// Scoped to a single project board identified by `project_number`.
 pub struct GitHubTracker {
-    creds:           GitHubAppCredentials,
-    client:          reqwest::Client,
-    owner:           String,
-    repo:            String,
-    project_number:  u64,
-    base_url:        String,
+    creds: GitHubAppCredentials,
+    client: reqwest::Client,
+    owner: String,
+    repo: String,
+    project_number: u64,
+    base_url: String,
     project_node_id: OnceCell<String>,
 }
 
@@ -627,7 +627,7 @@ mod tests {
     fn mock_github_tracker(server_url: &str, pem: String) -> GitHubTracker {
         GitHubTracker::new(
             GitHubAppCredentials {
-                app_id:          "test-app".to_string(),
+                app_id: "test-app".to_string(),
                 private_key_pem: pem,
             },
             test_http_client(),
@@ -640,20 +640,20 @@ mod tests {
 
     fn make_test_issue(state: &str) -> Issue {
         Issue {
-            id:              "I_issue1".to_string(),
+            id: "I_issue1".to_string(),
             project_item_id: Some("PVTI_item1".to_string()),
-            identifier:      "#42".to_string(),
-            title:           "Fix bug".to_string(),
-            description:     None,
-            priority:        None,
-            state:           state.to_string(),
-            branch_name:     None,
-            url:             "https://github.com/owner/repo/issues/42".to_string(),
-            assignee_id:     None,
-            labels:          vec![],
-            blocked_by:      vec![],
-            created_at:      None,
-            updated_at:      None,
+            identifier: "#42".to_string(),
+            title: "Fix bug".to_string(),
+            description: None,
+            priority: None,
+            state: state.to_string(),
+            branch_name: None,
+            url: "https://github.com/owner/repo/issues/42".to_string(),
+            assignee_id: None,
+            labels: vec![],
+            blocked_by: vec![],
+            created_at: None,
+            updated_at: None,
         }
     }
 

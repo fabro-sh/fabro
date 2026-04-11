@@ -11,7 +11,7 @@ use futures::future::BoxFuture;
 use serde_json::Value;
 
 use crate::context::{self, Context};
-use crate::error::{FabroError, Result};
+use crate::error::{Error, Result};
 use crate::outcome::Outcome;
 use crate::records::Checkpoint;
 use crate::runtime_store::RunStoreHandle;
@@ -38,13 +38,13 @@ pub async fn offload_large_values(
 ) -> Result<()> {
     for value in updates.values_mut() {
         let bytes = serde_json::to_vec(&*value)
-            .map_err(|e| FabroError::engine(format!("artifact serialize failed: {e}")))?;
+            .map_err(|e| Error::engine(format!("artifact serialize failed: {e}")))?;
 
         if bytes.len() > BLOB_OFFLOAD_THRESHOLD {
             let blob_id = run_store
                 .write_blob(&bytes)
                 .await
-                .map_err(|e| FabroError::engine(format!("artifact blob write failed: {e}")))?;
+                .map_err(|e| Error::engine(format!("artifact blob write failed: {e}")))?;
             *value = Value::String(format_blob_ref(&blob_id));
         }
     }
@@ -168,14 +168,14 @@ pub async fn sync_artifacts_to_env(
             Ok(true) => continue,
             Ok(false) => {}
             Err(e) => {
-                return Err(FabroError::engine(format!(
+                return Err(Error::engine(format!(
                     "failed to check artifact existence: {e}"
                 )));
             }
         }
 
         let content = std::fs::read_to_string(&local_path).map_err(|e| {
-            FabroError::engine(format!("failed to read local artifact {local_path}: {e}"))
+            Error::engine(format!("failed to read local artifact {local_path}: {e}"))
         })?;
 
         let filename = std::path::Path::new(&local_path)
@@ -185,9 +185,9 @@ pub async fn sync_artifacts_to_env(
 
         let remote_path = format!("{}/.fabro/artifacts/{filename}", env.working_directory());
 
-        env.write_file(&remote_path, &content).await.map_err(|e| {
-            FabroError::engine(format!("failed to write artifact to remote env: {e}"))
-        })?;
+        env.write_file(&remote_path, &content)
+            .await
+            .map_err(|e| Error::engine(format!("failed to write artifact to remote env: {e}")))?;
 
         *value = Value::String(format!("{ARTIFACT_POINTER_PREFIX}{remote_path}"));
     }
@@ -275,8 +275,8 @@ async fn materialize_blob_ref(
     let bytes = run_store
         .read_blob(blob_id)
         .await
-        .map_err(|e| FabroError::engine(format!("artifact blob read failed: {e}")))?
-        .ok_or_else(|| FabroError::engine(format!("artifact blob missing: {blob_id}")))?;
+        .map_err(|e| Error::engine(format!("artifact blob read failed: {e}")))?
+        .ok_or_else(|| Error::engine(format!("artifact blob missing: {blob_id}")))?;
 
     if is_local_execution(env, run_dir).await? {
         let path = local_materialized_blob_path(run_dir, blob_id);
@@ -293,14 +293,13 @@ async fn materialize_blob_ref(
     if !env
         .file_exists(&remote_path)
         .await
-        .map_err(|e| FabroError::engine(format!("failed to check blob existence: {e}")))?
+        .map_err(|e| Error::engine(format!("failed to check blob existence: {e}")))?
     {
-        let content = String::from_utf8(bytes.to_vec()).map_err(|e| {
-            FabroError::engine(format!("artifact blob was not valid UTF-8 JSON: {e}"))
-        })?;
-        env.write_file(&remote_path, &content).await.map_err(|e| {
-            FabroError::engine(format!("failed to write artifact blob to sandbox: {e}"))
-        })?;
+        let content = String::from_utf8(bytes.to_vec())
+            .map_err(|e| Error::engine(format!("artifact blob was not valid UTF-8 JSON: {e}")))?;
+        env.write_file(&remote_path, &content)
+            .await
+            .map_err(|e| Error::engine(format!("failed to write artifact blob to sandbox: {e}")))?;
     }
 
     Ok(format!("{ARTIFACT_POINTER_PREFIX}{remote_path}"))
@@ -309,19 +308,18 @@ async fn materialize_blob_ref(
 async fn resolve_explicit_file_ref(value: &str, env: &dyn Sandbox) -> Result<String> {
     let local_path = value
         .strip_prefix(ARTIFACT_POINTER_PREFIX)
-        .ok_or_else(|| FabroError::engine(format!("invalid artifact pointer: {value}")))?;
+        .ok_or_else(|| Error::engine(format!("invalid artifact pointer: {value}")))?;
 
     if env
         .file_exists(local_path)
         .await
-        .map_err(|e| FabroError::engine(format!("failed to check artifact existence: {e}")))?
+        .map_err(|e| Error::engine(format!("failed to check artifact existence: {e}")))?
     {
         return Ok(value.to_string());
     }
 
-    let content = std::fs::read_to_string(local_path).map_err(|e| {
-        FabroError::engine(format!("failed to read local artifact {local_path}: {e}"))
-    })?;
+    let content = std::fs::read_to_string(local_path)
+        .map_err(|e| Error::engine(format!("failed to read local artifact {local_path}: {e}")))?;
     let filename = Path::new(local_path)
         .file_name()
         .and_then(|file| file.to_str())
@@ -331,11 +329,11 @@ async fn resolve_explicit_file_ref(value: &str, env: &dyn Sandbox) -> Result<Str
     if !env
         .file_exists(&remote_path)
         .await
-        .map_err(|e| FabroError::engine(format!("failed to check artifact existence: {e}")))?
+        .map_err(|e| Error::engine(format!("failed to check artifact existence: {e}")))?
     {
-        env.write_file(&remote_path, &content).await.map_err(|e| {
-            FabroError::engine(format!("failed to write artifact to remote env: {e}"))
-        })?;
+        env.write_file(&remote_path, &content)
+            .await
+            .map_err(|e| Error::engine(format!("failed to write artifact to remote env: {e}")))?;
     }
 
     Ok(format!("{ARTIFACT_POINTER_PREFIX}{remote_path}"))
@@ -344,7 +342,7 @@ async fn resolve_explicit_file_ref(value: &str, env: &dyn Sandbox) -> Result<Str
 async fn is_local_execution(env: &dyn Sandbox, run_dir: &Path) -> Result<bool> {
     env.file_exists(&run_dir.to_string_lossy())
         .await
-        .map_err(|e| FabroError::engine(format!("failed to inspect sandbox locality: {e}")))
+        .map_err(|e| Error::engine(format!("failed to inspect sandbox locality: {e}")))
 }
 
 fn local_materialized_blob_path(run_dir: &Path, blob_id: &RunBlobId) -> PathBuf {
@@ -475,11 +473,11 @@ mod tests {
     fn normalize_checkpoint_for_resume_converts_legacy_blob_file_refs_and_drops_preamble() {
         let blob_id = fabro_types::RunBlobId::new(b"legacy");
         let mut checkpoint = crate::records::Checkpoint {
-            timestamp:                  chrono::Utc::now(),
-            current_node:               "work".to_string(),
-            completed_nodes:            vec!["work".to_string()],
-            node_retries:               HashMap::new(),
-            context_values:             HashMap::from([
+            timestamp: chrono::Utc::now(),
+            current_node: "work".to_string(),
+            completed_nodes: vec!["work".to_string()],
+            node_retries: HashMap::new(),
+            context_values: HashMap::from([
                 (
                     crate::context::keys::CURRENT_PREAMBLE.to_string(),
                     serde_json::json!("runtime only"),
@@ -489,7 +487,7 @@ mod tests {
                     serde_json::json!(format!("file:///sandbox/.fabro/artifacts/{blob_id}.json")),
                 ),
             ]),
-            node_outcomes:              HashMap::from([(
+            node_outcomes: HashMap::from([(
                 "work".to_string(),
                 crate::outcome::Outcome {
                     context_updates: HashMap::from([(
@@ -501,11 +499,11 @@ mod tests {
                     ..crate::outcome::Outcome::success()
                 },
             )]),
-            next_node_id:               Some("exit".to_string()),
-            git_commit_sha:             None,
-            loop_failure_signatures:    HashMap::new(),
+            next_node_id: Some("exit".to_string()),
+            git_commit_sha: None,
+            loop_failure_signatures: HashMap::new(),
             restart_failure_signatures: HashMap::new(),
-            node_visits:                HashMap::new(),
+            node_visits: HashMap::new(),
         };
 
         normalize_checkpoint_for_resume(&mut checkpoint);
@@ -533,8 +531,8 @@ mod tests {
     use std::sync::Mutex;
 
     struct TestSyncEnv {
-        accessible:  bool,
-        written:     Mutex<Vec<(String, String)>>,
+        accessible: bool,
+        written: Mutex<Vec<(String, String)>>,
         working_dir: String,
     }
 

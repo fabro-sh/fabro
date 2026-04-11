@@ -280,8 +280,11 @@ async fn cancel_at_human_gate_persists_cancelled_terminal_event() {
         })
         .collect::<Vec<_>>();
 
-    assert_eq!(failed_reasons, vec![(
-        Some("cancelled".to_string()),
-        Some("Pipeline cancelled".to_string())
-    )]);
+    assert_eq!(
+        failed_reasons,
+        vec![(
+            Some("cancelled".to_string()),
+            Some("Pipeline cancelled".to_string())
+        )]
+    );
 }

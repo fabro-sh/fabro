@@ -12,15 +12,15 @@ use run_store::RunDatabaseInner;
 use slatedb::config::Settings;
 use tokio::sync::{Mutex, OnceCell};
 
-use crate::{ListRunsQuery, Result, RunSummary, StoreError, keys};
+use crate::{Error, ListRunsQuery, Result, RunSummary, keys};
 
 #[derive(Clone)]
 pub struct Database {
-    object_store:   Arc<dyn ObjectStore>,
-    base_prefix:    String,
+    object_store: Arc<dyn ObjectStore>,
+    base_prefix: String,
     flush_interval: Duration,
-    db:             Arc<OnceCell<slatedb::Db>>,
-    active_runs:    Arc<Mutex<HashMap<RunId, Arc<RunDatabaseInner>>>>,
+    db: Arc<OnceCell<slatedb::Db>>,
+    active_runs: Arc<Mutex<HashMap<RunId, Arc<RunDatabaseInner>>>>,
 }
 
 impl std::fmt::Debug for Database {
@@ -96,14 +96,14 @@ impl Database {
 
         if let Some(active) = self.get_active_run(run_id).await {
             if run_exists && !active.matches_run(run_id) {
-                return Err(StoreError::RunAlreadyExists(run_id.to_string()));
+                return Err(Error::RunAlreadyExists(run_id.to_string()));
             }
             catalog::write_index(&db, run_id).await?;
             return Ok(active);
         }
 
         if run_exists {
-            return Err(StoreError::RunAlreadyExists(run_id.to_string()));
+            return Err(Error::RunAlreadyExists(run_id.to_string()));
         }
 
         catalog::write_index(&db, run_id).await?;
@@ -116,14 +116,14 @@ impl Database {
         let db = self.open_db().await?;
         if let Some(active) = self.get_active_run(run_id).await {
             if !active.matches_run(run_id) {
-                return Err(StoreError::Other(format!(
+                return Err(Error::Other(format!(
                     "active run cache mismatch for run_id {run_id:?}"
                 )));
             }
             return Ok(active);
         }
         if !RunDatabase::has_any_events(&db, run_id).await? {
-            return Err(StoreError::RunNotFound(run_id.to_string()));
+            return Err(Error::RunNotFound(run_id.to_string()));
         }
         let run_store = RunDatabase::open_writer(*run_id, db).await?;
         self.cache_active_run(&run_store).await;
@@ -134,14 +134,14 @@ impl Database {
         let db = self.open_db().await?;
         if let Some(active) = self.get_active_run(run_id).await {
             if !active.matches_run(run_id) {
-                return Err(StoreError::Other(format!(
+                return Err(Error::Other(format!(
                     "active run cache mismatch for run_id {run_id:?}"
                 )));
             }
             return Ok(active.read_only_clone());
         }
         if !RunDatabase::has_any_events(&db, run_id).await? {
-            return Err(StoreError::RunNotFound(run_id.to_string()));
+            return Err(Error::RunNotFound(run_id.to_string()));
         }
         RunDatabase::open_reader(*run_id, db).await
     }
@@ -176,7 +176,7 @@ impl Database {
             let mut iter = db.scan_prefix(prefix.as_bytes()).await?;
             while let Some(entry) = iter.next().await? {
                 keys_to_delete.push(String::from_utf8(entry.key.to_vec()).map_err(|err| {
-                    StoreError::Other(format!("stored key is not valid UTF-8: {err}"))
+                    Error::Other(format!("stored key is not valid UTF-8: {err}"))
                 })?);
             }
         }
@@ -206,7 +206,7 @@ impl Runs {
     pub async fn find(&self, run_id: &RunId) -> Result<Option<RunSummary>> {
         match self.db.open_run_reader(run_id).await {
             Ok(run_db) => Ok(Some(run_db.state().await?.build_summary(run_id))),
-            Err(StoreError::RunNotFound(_)) => Ok(None),
+            Err(Error::RunNotFound(_)) => Ok(None),
             Err(err) => Err(err),
         }
     }
@@ -436,7 +436,7 @@ mod tests {
             ))
             .await
             .unwrap_err();
-        assert!(matches!(err, StoreError::ReadOnly));
+        assert!(matches!(err, Error::ReadOnly));
     }
 
     #[tokio::test]

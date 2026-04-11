@@ -160,7 +160,7 @@ async fn handle_enable_auto_merge(
                         }
                     }
                     pr.auto_merge = Some(AutoMerge {
-                        enabled_at:   now.clone(),
+                        enabled_at: now.clone(),
                         merge_method: method.clone(),
                     });
                     return (
@@ -665,12 +665,12 @@ mod tests {
         pem: &str,
     ) -> (TestServer, reqwest::Client, String) {
         state.register_app(AppOptions {
-            app_id:          "100".to_string(),
-            slug:            "test-app".to_string(),
-            owner_login:     "owner".to_string(),
-            public:          true,
+            app_id: "100".to_string(),
+            slug: "test-app".to_string(),
+            owner_login: "owner".to_string(),
+            public: true,
             private_key_pem: pem.to_string(),
-            webhook_secret:  None,
+            webhook_secret: None,
         });
         state.add_installation("100", "owner", vec!["repo".to_string()], false);
         state.add_repository("owner", "repo", vec!["main".to_string()], false);
@@ -717,23 +717,23 @@ mod tests {
             .entry(("owner".to_string(), "repo".to_string()))
             .or_default()
             .push(PullRequest {
-                number:        1,
-                node_id:       "PR_test123".to_string(),
-                title:         "Test".to_string(),
-                body:          String::new(),
-                state:         "open".to_string(),
-                draft:         false,
-                mergeable:     true,
-                additions:     10,
-                deletions:     5,
+                number: 1,
+                node_id: "PR_test123".to_string(),
+                title: "Test".to_string(),
+                body: String::new(),
+                state: "open".to_string(),
+                draft: false,
+                mergeable: true,
+                additions: 10,
+                deletions: 5,
                 changed_files: 2,
-                html_url:      "https://github.com/owner/repo/pull/1".to_string(),
-                user_login:    "test-bot[bot]".to_string(),
-                head_ref:      "feature".to_string(),
-                base_ref:      "main".to_string(),
-                created_at:    "2026-01-01T00:00:00Z".to_string(),
-                updated_at:    "2026-01-01T00:00:00Z".to_string(),
-                auto_merge:    None,
+                html_url: "https://github.com/owner/repo/pull/1".to_string(),
+                user_login: "test-bot[bot]".to_string(),
+                head_ref: "feature".to_string(),
+                base_ref: "main".to_string(),
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                updated_at: "2026-01-01T00:00:00Z".to_string(),
+                auto_merge: None,
             });
         let (server, client, token) = setup_with_token(&mut state, pem).await;
 
@@ -794,38 +794,38 @@ mod tests {
         let pem = test_rsa_private_key();
         let mut state = AppState::new();
         state.projects.push(crate::state::Project {
-            node_id:         "PVT_org123".to_string(),
-            number:          1,
-            owner:           "owner".to_string(),
-            owner_type:      crate::state::OwnerType::Organization,
+            node_id: "PVT_org123".to_string(),
+            number: 1,
+            owner: "owner".to_string(),
+            owner_type: crate::state::OwnerType::Organization,
             status_field_id: "PVTSSF_status1".to_string(),
-            status_options:  vec![
+            status_options: vec![
                 crate::state::StatusOption {
-                    id:   "opt1".to_string(),
+                    id: "opt1".to_string(),
                     name: "Todo".to_string(),
                 },
                 crate::state::StatusOption {
-                    id:   "opt2".to_string(),
+                    id: "opt2".to_string(),
                     name: "In Progress".to_string(),
                 },
                 crate::state::StatusOption {
-                    id:   "opt3".to_string(),
+                    id: "opt3".to_string(),
                     name: "Done".to_string(),
                 },
             ],
-            items:           vec![crate::state::ProjectItem {
-                id:      "PVTI_item1".to_string(),
-                status:  "Todo".to_string(),
+            items: vec![crate::state::ProjectItem {
+                id: "PVTI_item1".to_string(),
+                status: "Todo".to_string(),
                 content: crate::state::IssueContent {
-                    id:           "I_issue1".to_string(),
-                    number:       42,
-                    title:        "Fix bug".to_string(),
-                    body:         "Description".to_string(),
-                    url:          "https://github.com/owner/repo/issues/42".to_string(),
-                    created_at:   "2026-01-01T00:00:00Z".to_string(),
-                    updated_at:   "2026-01-02T00:00:00Z".to_string(),
+                    id: "I_issue1".to_string(),
+                    number: 42,
+                    title: "Fix bug".to_string(),
+                    body: "Description".to_string(),
+                    url: "https://github.com/owner/repo/issues/42".to_string(),
+                    created_at: "2026-01-01T00:00:00Z".to_string(),
+                    updated_at: "2026-01-02T00:00:00Z".to_string(),
                     assignee_ids: vec![],
-                    labels:       vec!["bug".to_string()],
+                    labels: vec!["bug".to_string()],
                 },
             }],
         });
@@ -864,25 +864,25 @@ mod tests {
         let pem = test_rsa_private_key();
         let mut state = AppState::new();
         state.projects.push(crate::state::Project {
-            node_id:         "PVT_test".to_string(),
-            number:          1,
-            owner:           "owner".to_string(),
-            owner_type:      crate::state::OwnerType::Organization,
+            node_id: "PVT_test".to_string(),
+            number: 1,
+            owner: "owner".to_string(),
+            owner_type: crate::state::OwnerType::Organization,
             status_field_id: "PVTSSF_s".to_string(),
-            status_options:  vec![],
-            items:           vec![crate::state::ProjectItem {
-                id:      "PVTI_1".to_string(),
-                status:  "Todo".to_string(),
+            status_options: vec![],
+            items: vec![crate::state::ProjectItem {
+                id: "PVTI_1".to_string(),
+                status: "Todo".to_string(),
                 content: crate::state::IssueContent {
-                    id:           "I_1".to_string(),
-                    number:       1,
-                    title:        "Issue 1".to_string(),
-                    body:         "Body".to_string(),
-                    url:          "https://github.com/owner/repo/issues/1".to_string(),
-                    created_at:   "2026-01-01T00:00:00Z".to_string(),
-                    updated_at:   "2026-01-01T00:00:00Z".to_string(),
+                    id: "I_1".to_string(),
+                    number: 1,
+                    title: "Issue 1".to_string(),
+                    body: "Body".to_string(),
+                    url: "https://github.com/owner/repo/issues/1".to_string(),
+                    created_at: "2026-01-01T00:00:00Z".to_string(),
+                    updated_at: "2026-01-01T00:00:00Z".to_string(),
                     assignee_ids: vec!["U_user1".to_string()],
-                    labels:       vec!["bug".to_string(), "urgent".to_string()],
+                    labels: vec!["bug".to_string(), "urgent".to_string()],
                 },
             }],
         });
@@ -948,34 +948,34 @@ mod tests {
         let pem = test_rsa_private_key();
         let mut state = AppState::new();
         state.projects.push(crate::state::Project {
-            node_id:         "PVT_test".to_string(),
-            number:          1,
-            owner:           "owner".to_string(),
-            owner_type:      crate::state::OwnerType::Organization,
+            node_id: "PVT_test".to_string(),
+            number: 1,
+            owner: "owner".to_string(),
+            owner_type: crate::state::OwnerType::Organization,
             status_field_id: "PVTSSF_s".to_string(),
-            status_options:  vec![
+            status_options: vec![
                 crate::state::StatusOption {
-                    id:   "opt1".to_string(),
+                    id: "opt1".to_string(),
                     name: "Todo".to_string(),
                 },
                 crate::state::StatusOption {
-                    id:   "opt2".to_string(),
+                    id: "opt2".to_string(),
                     name: "Done".to_string(),
                 },
             ],
-            items:           vec![crate::state::ProjectItem {
-                id:      "PVTI_1".to_string(),
-                status:  "Todo".to_string(),
+            items: vec![crate::state::ProjectItem {
+                id: "PVTI_1".to_string(),
+                status: "Todo".to_string(),
                 content: crate::state::IssueContent {
-                    id:           "I_1".to_string(),
-                    number:       1,
-                    title:        "Issue 1".to_string(),
-                    body:         String::new(),
-                    url:          "https://github.com/owner/repo/issues/1".to_string(),
-                    created_at:   "2026-01-01T00:00:00Z".to_string(),
-                    updated_at:   "2026-01-01T00:00:00Z".to_string(),
+                    id: "I_1".to_string(),
+                    number: 1,
+                    title: "Issue 1".to_string(),
+                    body: String::new(),
+                    url: "https://github.com/owner/repo/issues/1".to_string(),
+                    created_at: "2026-01-01T00:00:00Z".to_string(),
+                    updated_at: "2026-01-01T00:00:00Z".to_string(),
                     assignee_ids: vec![],
-                    labels:       vec![],
+                    labels: vec![],
                 },
             }],
         });

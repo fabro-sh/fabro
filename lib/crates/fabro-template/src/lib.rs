@@ -9,9 +9,9 @@ use thiserror::Error;
 
 #[derive(Debug, Default, Clone)]
 pub struct TemplateContext {
-    goal:   Option<String>,
+    goal: Option<String>,
     inputs: HashMap<String, toml::Value>,
-    env:    Option<Value>,
+    env: Option<Value>,
 }
 
 impl TemplateContext {
@@ -38,7 +38,7 @@ impl TemplateContext {
         E: Env + Clone + Send + Sync + fmt::Debug + 'static,
     {
         self.env = Some(Value::from_object(EnvLookup {
-            env:       env.clone(),
+            env: env.clone(),
             allowlist: None,
         }));
         self
@@ -50,7 +50,7 @@ impl TemplateContext {
         E: Env + Clone + Send + Sync + fmt::Debug + 'static,
     {
         self.env = Some(Value::from_object(EnvLookup {
-            env:       env.clone(),
+            env: env.clone(),
             allowlist: Some(allowlist.to_vec()),
         }));
         self
@@ -66,9 +66,9 @@ impl TemplateContext {
 
 #[derive(Debug, Clone)]
 struct RenderContext {
-    goal:   Option<Value>,
+    goal: Option<Value>,
     inputs: Value,
-    env:    Option<Value>,
+    env: Option<Value>,
 }
 
 impl Object for RenderContext {
@@ -84,7 +84,7 @@ impl Object for RenderContext {
 
 #[derive(Debug, Clone)]
 pub struct EnvLookup<E> {
-    env:       E,
+    env: E,
     allowlist: Option<Vec<String>>,
 }
 

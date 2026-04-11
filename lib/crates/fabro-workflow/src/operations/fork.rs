@@ -11,8 +11,8 @@ use crate::records::{Checkpoint, RunRecord, StartRecord};
 #[derive(Debug, Clone)]
 pub struct ForkRunInput {
     pub source_run_id: RunId,
-    pub target:        Option<RewindTarget>,
-    pub push:          bool,
+    pub target: Option<RewindTarget>,
+    pub push: bool,
 }
 
 /// Create a new run that branches from an existing run at a specific
@@ -89,10 +89,10 @@ fn fork_from_entry(
 
     let now = new_run_id.created_at();
     let start_record = StartRecord {
-        run_id:     new_run_id,
+        run_id: new_run_id,
         start_time: now,
         run_branch: Some(new_run_branch.clone()),
-        base_sha:   None,
+        base_sha: None,
     };
     let new_start_record_bytes =
         serde_json::to_vec_pretty(&start_record).context("failed to serialize new start.json")?;
@@ -243,11 +243,14 @@ mod tests {
         let source_run_id = parse_run_id("01ARZ3NDEKTSV4RRFFQ69G5FAV");
         let run_oids = setup_source_run(&store, &source_run_id, &["start", "build", "test"]);
 
-        let new_run_id = fork(&store, &ForkRunInput {
-            source_run_id,
-            target: Some(RewindTarget::from_str("@2").unwrap()),
-            push: false,
-        })
+        let new_run_id = fork(
+            &store,
+            &ForkRunInput {
+                source_run_id,
+                target: Some(RewindTarget::from_str("@2").unwrap()),
+                push: false,
+            },
+        )
         .unwrap();
 
         let new_run_branch = format!("{RUN_BRANCH_PREFIX}{new_run_id}");
@@ -287,11 +290,11 @@ mod tests {
             .write_entry("checkpoint.json", &cp, "checkpoint")
             .unwrap();
         let entry = TimelineEntry {
-            ordinal:             1,
-            node_name:           "start".to_string(),
-            visit:               1,
+            ordinal: 1,
+            node_name: "start".to_string(),
+            visit: 1,
             metadata_commit_oid: oid,
-            run_commit_sha:      None,
+            run_commit_sha: None,
         };
 
         let err = fork_from_entry(&store, &run_id, &entry, false)

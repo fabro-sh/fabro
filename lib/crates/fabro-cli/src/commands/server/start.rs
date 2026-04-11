@@ -69,15 +69,15 @@ fn ensure_server_running_with_bind(
     }
 
     let serve_args = ServeArgs {
-        bind:                None,
-        web:                 false,
-        no_web:              false,
-        model:               None,
-        provider:            None,
-        dry_run:             false,
-        sandbox:             None,
+        bind: None,
+        web: false,
+        no_web: false,
+        model: None,
+        provider: None,
+        dry_run: false,
+        sandbox: None,
         max_concurrent_runs: server_max_concurrent_runs_override(),
-        config:              Some(config_path.to_path_buf()),
+        config: Some(config_path.to_path_buf()),
     };
 
     let bind_request = match &bind {
@@ -148,12 +148,15 @@ async fn execute_foreground(
         styles,
         Some(storage_dir),
         move |resolved_bind| {
-            record::write_server_record(&record_path, &record::ServerRecord {
-                pid,
-                bind: resolved_bind.clone(),
-                log_path: log_path.clone(),
-                started_at: Utc::now(),
-            })
+            record::write_server_record(
+                &record_path,
+                &record::ServerRecord {
+                    pid,
+                    bind: resolved_bind.clone(),
+                    log_path: log_path.clone(),
+                    started_at: Utc::now(),
+                },
+            )
         },
     ))
     .await

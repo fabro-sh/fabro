@@ -6,14 +6,14 @@ use crate::event::Track;
 #[derive(Clone, Copy)]
 pub(crate) struct BufferPolicy {
     pub count_threshold: usize,
-    pub time_threshold:  Duration,
+    pub time_threshold: Duration,
 }
 
 impl Default for BufferPolicy {
     fn default() -> Self {
         Self {
             count_threshold: 20,
-            time_threshold:  Duration::from_secs(60),
+            time_threshold: Duration::from_secs(60),
         }
     }
 }
@@ -70,13 +70,13 @@ mod tests {
 
     fn make_track(event: &str) -> Track {
         Track {
-            user:       User::AnonymousId {
+            user: User::AnonymousId {
                 anonymous_id: "test".to_string(),
             },
-            event:      event.to_string(),
+            event: event.to_string(),
             properties: json!({}),
-            context:    None,
-            timestamp:  None,
+            context: None,
+            timestamp: None,
             message_id: format!("msg-{event}"),
         }
     }
@@ -98,7 +98,7 @@ mod tests {
             &rx,
             BufferPolicy {
                 count_threshold: 2,
-                time_threshold:  Duration::from_secs(60),
+                time_threshold: Duration::from_secs(60),
             },
             move |tracks| {
                 let events: Vec<String> = tracks.iter().map(|t| t.event.clone()).collect();
@@ -133,7 +133,7 @@ mod tests {
             &rx,
             BufferPolicy {
                 count_threshold: 2,
-                time_threshold:  Duration::from_secs(60),
+                time_threshold: Duration::from_secs(60),
             },
             move |_| {
                 *mid.lock().unwrap() = true;
@@ -164,7 +164,7 @@ mod tests {
                 &rx,
                 BufferPolicy {
                     count_threshold: 100, // won't trigger
-                    time_threshold:  Duration::from_millis(50),
+                    time_threshold: Duration::from_millis(50),
                 },
                 move |tracks| {
                     let events: Vec<String> = tracks.iter().map(|t| t.event.clone()).collect();
@@ -206,7 +206,7 @@ mod tests {
             &rx,
             BufferPolicy {
                 count_threshold: 100, // won't trigger
-                time_threshold:  Duration::from_secs(60),
+                time_threshold: Duration::from_secs(60),
             },
             move |tracks| {
                 let events: Vec<String> = tracks.iter().map(|t| t.event.clone()).collect();

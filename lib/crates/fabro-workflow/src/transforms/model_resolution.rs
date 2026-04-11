@@ -1,14 +1,14 @@
 use fabro_graphviz::graph::{AttrValue, Graph};
 
 use super::Transform;
-use crate::error::FabroError;
+use crate::error::Error;
 
 /// Resolves model aliases to canonical IDs and infers the provider from the
 /// model catalog.
 pub struct ModelResolutionTransform;
 
 impl Transform for ModelResolutionTransform {
-    fn apply(&self, graph: Graph) -> Result<Graph, FabroError> {
+    fn apply(&self, graph: Graph) -> Result<Graph, Error> {
         let mut graph = graph;
         for node in graph.nodes.values_mut() {
             let model = node

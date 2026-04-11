@@ -119,9 +119,9 @@ impl FailureCategory {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FailureDetail {
-    pub message:   String,
+    pub message: String,
     #[serde(rename = "failure_class")]
-    pub category:  FailureCategory,
+    pub category: FailureCategory,
     #[serde(
         rename = "failure_signature",
         default,
@@ -143,40 +143,40 @@ impl FailureDetail {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(bound = "M: OutcomeMeta")]
 pub struct Outcome<M: OutcomeMeta = ()> {
-    pub status:             StageStatus,
+    pub status: StageStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub preferred_label:    Option<String>,
+    pub preferred_label: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub suggested_next_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub context_updates:    HashMap<String, Value>,
+    pub context_updates: HashMap<String, Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub jump_to_node:       Option<String>,
+    pub jump_to_node: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub notes:              Option<String>,
+    pub notes: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub failure:            Option<FailureDetail>,
+    pub failure: Option<FailureDetail>,
     #[serde(default)]
-    pub usage:              M,
+    pub usage: M,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub files_touched:      Vec<String>,
+    pub files_touched: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub duration_ms:        Option<u64>,
+    pub duration_ms: Option<u64>,
 }
 
 impl<M: OutcomeMeta> Default for Outcome<M> {
     fn default() -> Self {
         Self {
-            status:             StageStatus::Success,
-            preferred_label:    None,
+            status: StageStatus::Success,
+            preferred_label: None,
             suggested_next_ids: Vec::new(),
-            context_updates:    HashMap::new(),
-            jump_to_node:       None,
-            notes:              None,
-            failure:            None,
-            usage:              M::default(),
-            files_touched:      Vec::new(),
-            duration_ms:        None,
+            context_updates: HashMap::new(),
+            jump_to_node: None,
+            notes: None,
+            failure: None,
+            usage: M::default(),
+            files_touched: Vec::new(),
+            duration_ms: None,
         }
     }
 }
@@ -190,8 +190,8 @@ impl<M: OutcomeMeta> Outcome<M> {
         Self {
             status: StageStatus::Fail,
             failure: Some(FailureDetail {
-                message:   message.to_string(),
-                category:  FailureCategory::Deterministic,
+                message: message.to_string(),
+                category: FailureCategory::Deterministic,
                 signature: None,
             }),
             ..Self::default()
@@ -209,9 +209,9 @@ impl<M: OutcomeMeta> Outcome<M> {
 
 #[derive(Debug, Clone)]
 pub struct NodeResult<M: OutcomeMeta = ()> {
-    pub outcome:      Outcome<M>,
-    pub duration:     Duration,
-    pub attempts:     u32,
+    pub outcome: Outcome<M>,
+    pub duration: Duration,
+    pub attempts: u32,
     pub max_attempts: u32,
 }
 

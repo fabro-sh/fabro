@@ -109,7 +109,7 @@ impl std::error::Error for ParseRunStatusError {}
 #[derive(Debug, Clone, PartialEq)]
 pub struct InvalidTransition {
     pub from: RunStatus,
-    pub to:   RunStatus,
+    pub to: RunStatus,
 }
 
 impl fmt::Display for InvalidTransition {
@@ -146,9 +146,9 @@ pub enum RunControlAction {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunStatusRecord {
-    pub status:     RunStatus,
+    pub status: RunStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason:     Option<StatusReason>,
+    pub reason: Option<StatusReason>,
     pub updated_at: DateTime<Utc>,
 }
 

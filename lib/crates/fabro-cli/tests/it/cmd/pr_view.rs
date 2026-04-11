@@ -98,14 +98,14 @@ fn pr_view_reads_pull_request_from_store_without_pull_request_json() {
             tool_call_id: None,
             actor: None,
             body: EventBody::PullRequestCreated(PullRequestCreatedProps {
-                pr_url:      "https://github.com/fabro-sh/fabro/pull/123".to_string(),
-                pr_number:   123,
-                owner:       "fabro-sh".to_string(),
-                repo:        "fabro".to_string(),
+                pr_url: "https://github.com/fabro-sh/fabro/pull/123".to_string(),
+                pr_number: 123,
+                owner: "fabro-sh".to_string(),
+                repo: "fabro".to_string(),
                 base_branch: "main".to_string(),
                 head_branch: "fabro/run/demo".to_string(),
-                title:       "Map the constellations".to_string(),
-                draft:       false,
+                title: "Map the constellations".to_string(),
+                draft: false,
             }),
         };
         client

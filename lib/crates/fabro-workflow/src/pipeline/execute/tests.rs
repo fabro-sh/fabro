@@ -19,7 +19,7 @@ use object_store::memory::InMemory;
 
 use super::*;
 use crate::context::{self, Context};
-use crate::error::FabroError;
+use crate::error::Error;
 use crate::event::{Emitter, StoreProgressLogger};
 use crate::handler::start::StartHandler;
 use crate::handler::{Handler as HandlerTrait, HandlerRegistry};
@@ -88,17 +88,17 @@ fn test_emitter_arc(label: &str) -> Arc<Emitter> {
 
 fn test_run_options(run_dir: &Path, run_id: &str) -> RunOptions {
     RunOptions {
-        run_dir:          run_dir.to_path_buf(),
-        cancel_token:     None,
-        run_id:           test_run_id(run_id),
-        settings:         SettingsLayer::default(),
-        git:              None,
-        host_repo_path:   None,
-        labels:           HashMap::new(),
-        github_app:       None,
-        base_branch:      None,
+        run_dir: run_dir.to_path_buf(),
+        cancel_token: None,
+        run_id: test_run_id(run_id),
+        settings: SettingsLayer::default(),
+        git: None,
+        host_repo_path: None,
+        labels: HashMap::new(),
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        workflow_slug:    None,
+        workflow_slug: None,
     }
 }
 
@@ -196,27 +196,27 @@ async fn execute_test_run_with_options(
                 working_directory: std::env::current_dir().unwrap(),
             },
             llm: LlmSpec {
-                model:          "test-model".to_string(),
-                provider:       fabro_llm::Provider::Anthropic,
+                model: "test-model".to_string(),
+                provider: fabro_llm::Provider::Anthropic,
                 fallback_chain: Vec::new(),
-                mcp_servers:    Vec::new(),
-                dry_run:        true,
+                mcp_servers: Vec::new(),
+                dry_run: true,
             },
             interviewer: Arc::new(AutoApproveInterviewer),
             lifecycle: LifecycleOptions {
-                setup_commands:           vec![],
+                setup_commands: vec![],
                 setup_command_timeout_ms: 1_000,
-                devcontainer_phases:      vec![],
+                devcontainer_phases: vec![],
             },
             run_options,
             workflow_path: None,
             workflow_bundle: None,
             hooks: HookSettings { hooks: vec![] },
             sandbox_env: SandboxEnvSpec {
-                devcontainer_env:   HashMap::new(),
-                toml_env:           HashMap::new(),
+                devcontainer_env: HashMap::new(),
+                toml_env: HashMap::new(),
                 github_permissions: None,
-                origin_url:         None,
+                origin_url: None,
             },
             devcontainer: None,
             git: git_options,
@@ -245,44 +245,44 @@ async fn execute_runs_start_to_exit_and_returns_final_context() {
     let initialized = initialize(
         persisted_workflow(graph, source, &run_dir, test_run_id("run-test")),
         InitOptions {
-            run_id:            test_run_id("run-test"),
-            run_store:         test_run_store(&test_run_id("run-test")).await.into(),
-            dry_run:           false,
-            emitter:           test_emitter_arc("run-test"),
-            sandbox:           SandboxSpec::Local {
+            run_id: test_run_id("run-test"),
+            run_store: test_run_store(&test_run_id("run-test")).await.into(),
+            dry_run: false,
+            emitter: test_emitter_arc("run-test"),
+            sandbox: SandboxSpec::Local {
                 working_directory: std::env::current_dir().unwrap(),
             },
-            llm:               LlmSpec {
-                model:          "test-model".to_string(),
-                provider:       fabro_llm::Provider::Anthropic,
+            llm: LlmSpec {
+                model: "test-model".to_string(),
+                provider: fabro_llm::Provider::Anthropic,
                 fallback_chain: Vec::new(),
-                mcp_servers:    Vec::new(),
-                dry_run:        true,
+                mcp_servers: Vec::new(),
+                dry_run: true,
             },
-            interviewer:       Arc::new(AutoApproveInterviewer),
-            lifecycle:         LifecycleOptions {
-                setup_commands:           vec![],
+            interviewer: Arc::new(AutoApproveInterviewer),
+            lifecycle: LifecycleOptions {
+                setup_commands: vec![],
                 setup_command_timeout_ms: 1_000,
-                devcontainer_phases:      vec![],
+                devcontainer_phases: vec![],
             },
-            run_options:       test_run_options(&run_dir, "run-test"),
-            workflow_path:     None,
-            workflow_bundle:   None,
-            hooks:             HookSettings { hooks: vec![] },
-            sandbox_env:       SandboxEnvSpec {
-                devcontainer_env:   HashMap::new(),
-                toml_env:           HashMap::new(),
+            run_options: test_run_options(&run_dir, "run-test"),
+            workflow_path: None,
+            workflow_bundle: None,
+            hooks: HookSettings { hooks: vec![] },
+            sandbox_env: SandboxEnvSpec {
+                devcontainer_env: HashMap::new(),
+                toml_env: HashMap::new(),
                 github_permissions: None,
-                origin_url:         None,
+                origin_url: None,
             },
-            devcontainer:      None,
-            git:               None,
-            worktree_mode:     None,
-            run_control:       None,
+            devcontainer: None,
+            git: None,
+            worktree_mode: None,
+            run_control: None,
             registry_override: None,
-            artifact_sink:     None,
-            checkpoint:        None,
-            seed_context:      None,
+            artifact_sink: None,
+            checkpoint: None,
+            seed_context: None,
         },
     )
     .await
@@ -309,7 +309,7 @@ async fn run_with_lifecycle(
     graph: &Graph,
     run_options: RunOptions,
     lifecycle: LifecycleOptions,
-) -> Result<Outcome, FabroError> {
+) -> Result<Outcome, Error> {
     std::fs::create_dir_all(&run_options.run_dir).unwrap();
     let run_dir = run_options.run_dir.clone();
     let run_id = run_options.run_id;
@@ -324,11 +324,11 @@ async fn run_with_lifecycle(
                 working_directory: PathBuf::from(sandbox.working_directory()),
             },
             llm: LlmSpec {
-                model:          "test-model".to_string(),
-                provider:       fabro_llm::Provider::Anthropic,
+                model: "test-model".to_string(),
+                provider: fabro_llm::Provider::Anthropic,
                 fallback_chain: Vec::new(),
-                mcp_servers:    Vec::new(),
-                dry_run:        true,
+                mcp_servers: Vec::new(),
+                dry_run: true,
             },
             interviewer: Arc::new(AutoApproveInterviewer),
             lifecycle,
@@ -337,10 +337,10 @@ async fn run_with_lifecycle(
             workflow_bundle: None,
             hooks: HookSettings { hooks: vec![] },
             sandbox_env: SandboxEnvSpec {
-                devcontainer_env:   HashMap::new(),
-                toml_env:           HashMap::new(),
+                devcontainer_env: HashMap::new(),
+                toml_env: HashMap::new(),
                 github_permissions: None,
-                origin_url:         None,
+                origin_url: None,
             },
             devcontainer: None,
             git: None,
@@ -367,7 +367,7 @@ impl HandlerTrait for AlwaysFailHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &crate::handler::EngineServices,
-    ) -> std::result::Result<Outcome, FabroError> {
+    ) -> std::result::Result<Outcome, Error> {
         Ok(Outcome::fail_classify("always fails"))
     }
 }
@@ -385,7 +385,7 @@ impl HandlerTrait for SlowHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &crate::handler::EngineServices,
-    ) -> std::result::Result<Outcome, FabroError> {
+    ) -> std::result::Result<Outcome, Error> {
         tokio::time::sleep(Duration::from_millis(self.sleep_ms)).await;
         Ok(Outcome::success())
     }
@@ -402,7 +402,7 @@ impl HandlerTrait for PanickingHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &crate::handler::EngineServices,
-    ) -> std::result::Result<Outcome, FabroError> {
+    ) -> std::result::Result<Outcome, Error> {
         panic!("test panic message");
     }
 }
@@ -420,9 +420,9 @@ impl HandlerTrait for FailOnceThenSucceedHandler {
         _graph: &Graph,
         _run_dir: &Path,
         _services: &crate::handler::EngineServices,
-    ) -> std::result::Result<Outcome, FabroError> {
+    ) -> std::result::Result<Outcome, Error> {
         if self.call_count.fetch_add(1, Ordering::Relaxed) == 0 {
-            Err(FabroError::handler("transient failure"))
+            Err(Error::handler("transient failure"))
         } else {
             Ok(Outcome::success())
         }
@@ -641,8 +641,8 @@ async fn execute_writes_start_json_and_node_status() {
     let dir = tempfile::tempdir().unwrap();
     let mut run_options = test_run_options(dir.path(), "test-run");
     run_options.git = Some(GitCheckpointOptions {
-        base_sha:    Some("abc123".into()),
-        run_branch:  Some(format!("fabro/run/{}", test_run_id("test-run"))),
+        base_sha: Some("abc123".into()),
+        run_branch: Some(format!("fabro/run/{}", test_run_id("test-run"))),
         meta_branch: None,
     });
 
@@ -750,7 +750,7 @@ async fn execute_cancelled_mid_run() {
         &run_options,
     )
     .await;
-    assert!(matches!(result, Err(FabroError::Cancelled)));
+    assert!(matches!(result, Err(Error::Cancelled)));
 }
 
 #[tokio::test]
@@ -781,7 +781,7 @@ async fn execute_cancelled_mid_run_persists_cancelled_status() {
 
     let executed = execute_test_run_with_options(run_options, g, Some(Arc::new(registry))).await;
 
-    assert!(matches!(executed.outcome, Err(FabroError::Cancelled)));
+    assert!(matches!(executed.outcome, Err(Error::Cancelled)));
     let status = executed.run_store.state().await.unwrap().status.unwrap();
     assert_eq!(status.status, RunStatus::Failed);
     assert_eq!(status.reason, Some(StatusReason::Cancelled));

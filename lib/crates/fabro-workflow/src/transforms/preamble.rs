@@ -1,14 +1,14 @@
 use fabro_graphviz::graph::{AttrValue, Graph};
 
 use super::Transform;
-use crate::error::FabroError;
+use crate::error::Error;
 
 /// For nodes whose fidelity is not `Full`, prepend a context mode preamble to
 /// the prompt.
 pub struct PreambleTransform;
 
 impl Transform for PreambleTransform {
-    fn apply(&self, graph: Graph) -> Result<Graph, FabroError> {
+    fn apply(&self, graph: Graph) -> Result<Graph, Error> {
         use crate::context::keys::Fidelity;
 
         let mut graph = graph;

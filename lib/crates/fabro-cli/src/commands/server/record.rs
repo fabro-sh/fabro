@@ -9,15 +9,15 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ServerRecord {
-    pub pid:        u32,
-    pub bind:       Bind,
-    pub log_path:   PathBuf,
+    pub pid: u32,
+    pub bind: Bind,
+    pub log_path: PathBuf,
     pub started_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct ActiveServerRecord {
-    pub record:      ServerRecord,
+    pub record: ServerRecord,
     pub record_path: PathBuf,
 }
 

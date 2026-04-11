@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 use super::types::{Executed, Initialized};
 use crate::artifact;
 use crate::context::{self, Context};
-use crate::error::FabroError;
+use crate::error::Error;
 use crate::event::Event;
 use crate::graph::WorkflowGraph;
 use crate::handler::EngineServices;
@@ -98,8 +98,8 @@ pub async fn execute(init: Initialized) -> Executed {
 
     let handler = Arc::new(WorkflowNodeHandler {
         services: shared_services,
-        run_dir:  run_options.run_dir.clone(),
-        graph:    Arc::clone(&graph_arc),
+        run_dir: run_options.run_dir.clone(),
+        graph: Arc::clone(&graph_arc),
     });
 
     let settings_arc = Arc::new(run_options.clone());
@@ -132,7 +132,7 @@ pub async fn execute(init: Initialized) -> Executed {
     }
 
     let state = if let Some(ref cp) = checkpoint {
-        match ExecutionState::new(&wf_graph).map_err(|e| FabroError::engine(e.to_string())) {
+        match ExecutionState::new(&wf_graph).map_err(|e| Error::engine(e.to_string())) {
             Ok(mut s) => {
                 for (k, v) in &cp.context_values {
                     s.context.set(k.clone(), v.clone());
@@ -180,7 +180,7 @@ pub async fn execute(init: Initialized) -> Executed {
             }
         }
     } else if let Some(seed) = seed_context {
-        match ExecutionState::new(&wf_graph).map_err(|e| FabroError::engine(e.to_string())) {
+        match ExecutionState::new(&wf_graph).map_err(|e| Error::engine(e.to_string())) {
             Ok(s) => {
                 for (k, v) in seed.snapshot() {
                     s.context.set(k, v);
@@ -205,7 +205,7 @@ pub async fn execute(init: Initialized) -> Executed {
             }
         }
     } else {
-        match ExecutionState::new(&wf_graph).map_err(|e| FabroError::engine(e.to_string())) {
+        match ExecutionState::new(&wf_graph).map_err(|e| Error::engine(e.to_string())) {
             Ok(s) => s,
             Err(err) => {
                 return Executed {
@@ -310,25 +310,25 @@ pub async fn execute(init: Initialized) -> Executed {
             };
             (Ok(result), ctx)
         }
-        Err(fabro_core::CoreError::StallTimeout { node_id }) => {
+        Err(fabro_core::Error::StallTimeout { node_id }) => {
             let stall_timeout = graph.stall_timeout().unwrap_or_default();
             let idle_secs = stall_timeout.as_secs();
             emitter.emit(&Event::StallWatchdogTimeout {
-                node:         node_id.clone(),
+                node: node_id.clone(),
                 idle_seconds: idle_secs,
             });
             (
-                Err(FabroError::engine(format!(
+                Err(Error::engine(format!(
                     "stall watchdog: node \"{node_id}\" had no activity for {idle_secs}s"
                 ))),
                 initial_context,
             )
         }
-        Err(fabro_core::CoreError::Cancelled) => (Err(FabroError::Cancelled), initial_context),
-        Err(fabro_core::CoreError::Blocked { message }) => {
-            (Err(FabroError::engine(message)), initial_context)
+        Err(fabro_core::Error::Cancelled) => (Err(Error::Cancelled), initial_context),
+        Err(fabro_core::Error::Blocked { message }) => {
+            (Err(Error::engine(message)), initial_context)
         }
-        Err(e) => (Err(FabroError::engine(e.to_string())), initial_context),
+        Err(e) => (Err(Error::engine(e.to_string())), initial_context),
     };
 
     let duration_ms = crate::millis_u64(start.elapsed());

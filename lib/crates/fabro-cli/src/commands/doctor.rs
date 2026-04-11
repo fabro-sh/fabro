@@ -22,11 +22,11 @@ use crate::command_context::CommandContext;
 use crate::shared::print_json_pretty;
 
 pub(crate) struct DepSpec {
-    pub name:        &'static str,
-    command:         &'static [&'static str],
-    pub required:    bool,
+    pub name: &'static str,
+    command: &'static [&'static str],
+    pub required: bool,
     pub min_version: Version,
-    pattern:         &'static LazyLock<Regex>,
+    pattern: &'static LazyLock<Regex>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -43,18 +43,18 @@ static DOT_RE: LazyLock<Regex> =
 
 pub(crate) const DEP_SPECS: &[DepSpec] = &[
     DepSpec {
-        name:        "openssl",
-        command:     &["openssl", "version"],
-        required:    true,
+        name: "openssl",
+        command: &["openssl", "version"],
+        required: true,
         min_version: Version::new(3, 0, 0),
-        pattern:     &OPENSSL_RE,
+        pattern: &OPENSSL_RE,
     },
     DepSpec {
-        name:        "dot",
-        command:     &["dot", "-V"],
-        required:    false,
+        name: "dot",
+        command: &["dot", "-V"],
+        required: false,
         min_version: Version::new(2, 0, 0),
-        pattern:     &DOT_RE,
+        pattern: &DOT_RE,
     },
 ];
 
@@ -156,31 +156,28 @@ pub(crate) fn check_config(
 ) -> CheckResult {
     match (settings_path, legacy_paths.is_empty()) {
         (Some(path), true) => CheckResult {
-            name:        "Configuration".to_string(),
-            status:      CheckStatus::Pass,
-            summary:     path.display().to_string(),
-            details:     vec![CheckDetail::new(format!("Loaded from {}", path.display()))],
+            name: "Configuration".to_string(),
+            status: CheckStatus::Pass,
+            summary: path.display().to_string(),
+            details: vec![CheckDetail::new(format!("Loaded from {}", path.display()))],
             remediation: None,
         },
         (Some(path), false) => CheckResult {
-            name:        "Configuration".to_string(),
-            status:      CheckStatus::Warning,
-            summary:     path.display().to_string(),
-            details:     std::iter::once(CheckDetail::new(format!(
-                "Loaded from {}",
-                path.display()
-            )))
-            .chain(legacy_paths.iter().map(|legacy| {
-                CheckDetail::new(format!("Ignoring legacy config file {}", legacy.display()))
-            }))
-            .collect(),
+            name: "Configuration".to_string(),
+            status: CheckStatus::Warning,
+            summary: path.display().to_string(),
+            details: std::iter::once(CheckDetail::new(format!("Loaded from {}", path.display())))
+                .chain(legacy_paths.iter().map(|legacy| {
+                    CheckDetail::new(format!("Ignoring legacy config file {}", legacy.display()))
+                }))
+                .collect(),
             remediation: Some("Delete or rename legacy config files".to_string()),
         },
         (None, false) => CheckResult {
-            name:        "Configuration".to_string(),
-            status:      CheckStatus::Warning,
-            summary:     "legacy config files ignored".to_string(),
-            details:     legacy_paths
+            name: "Configuration".to_string(),
+            status: CheckStatus::Warning,
+            summary: "legacy config files ignored".to_string(),
+            details: legacy_paths
                 .iter()
                 .map(|legacy| {
                     CheckDetail::new(format!("Found legacy config file {}", legacy.display()))
@@ -193,10 +190,10 @@ pub(crate) fn check_config(
             remediation: Some("Create ~/.fabro/settings.toml".to_string()),
         },
         (None, true) => CheckResult {
-            name:        "Configuration".to_string(),
-            status:      CheckStatus::Warning,
-            summary:     "no settings config file found".to_string(),
-            details:     vec![CheckDetail::new(
+            name: "Configuration".to_string(),
+            status: CheckStatus::Warning,
+            summary: "no settings config file found".to_string(),
+            details: vec![CheckDetail::new(
                 "Create ~/.fabro/settings.toml to configure Fabro".to_string(),
             )],
             remediation: Some("Create ~/.fabro/settings.toml".to_string()),
@@ -207,10 +204,10 @@ pub(crate) fn check_config(
 fn check_legacy_env(path: Option<PathBuf>) -> CheckResult {
     match path {
         Some(path) => CheckResult {
-            name:        "Legacy .env".to_string(),
-            status:      CheckStatus::Warning,
-            summary:     "legacy secrets file detected".to_string(),
-            details:     vec![CheckDetail::new(format!(
+            name: "Legacy .env".to_string(),
+            status: CheckStatus::Warning,
+            summary: "legacy secrets file detected".to_string(),
+            details: vec![CheckDetail::new(format!(
                 "{} is no longer read by fabro",
                 path.display()
             ))],
@@ -220,10 +217,10 @@ fn check_legacy_env(path: Option<PathBuf>) -> CheckResult {
             ),
         },
         None => CheckResult {
-            name:        "Legacy .env".to_string(),
-            status:      CheckStatus::Pass,
-            summary:     "not present".to_string(),
-            details:     Vec::new(),
+            name: "Legacy .env".to_string(),
+            status: CheckStatus::Pass,
+            summary: "not present".to_string(),
+            details: Vec::new(),
             remediation: None,
         },
     }
@@ -233,20 +230,20 @@ fn check_version_parity(server_version: &str) -> CheckResult {
     let cli_version = FABRO_VERSION;
     if server_version == cli_version {
         CheckResult {
-            name:        "Version parity".to_string(),
-            status:      CheckStatus::Pass,
-            summary:     cli_version.to_string(),
-            details:     vec![CheckDetail::new(format!(
+            name: "Version parity".to_string(),
+            status: CheckStatus::Pass,
+            summary: cli_version.to_string(),
+            details: vec![CheckDetail::new(format!(
                 "CLI and server are both {cli_version}"
             ))],
             remediation: None,
         }
     } else {
         CheckResult {
-            name:        "Version parity".to_string(),
-            status:      CheckStatus::Warning,
-            summary:     format!("CLI {cli_version}, server {server_version}"),
-            details:     vec![CheckDetail::new(format!(
+            name: "Version parity".to_string(),
+            status: CheckStatus::Warning,
+            summary: format!("CLI {cli_version}, server {server_version}"),
+            details: vec![CheckDetail::new(format!(
                 "CLI version {cli_version} does not match server version {server_version}"
             ))],
             remediation: Some(
@@ -269,15 +266,15 @@ fn convert_diagnostics_sections(sections: Vec<api_types::DiagnosticsSection>) ->
     sections
         .into_iter()
         .map(|section| CheckSection {
-            title:  section.title,
+            title: section.title,
             checks: section
                 .checks
                 .into_iter()
                 .map(|check| CheckResult {
-                    name:        check.name,
-                    status:      convert_diagnostics_status(check.status),
-                    summary:     check.summary,
-                    details:     check
+                    name: check.name,
+                    status: convert_diagnostics_status(check.status),
+                    summary: check.summary,
+                    details: check
                         .details
                         .into_iter()
                         .map(|detail| CheckDetail {
@@ -345,9 +342,9 @@ pub(crate) async fn run_doctor(
     };
 
     let mut report = CheckReport {
-        title:    "Fabro Doctor".to_string(),
+        title: "Fabro Doctor".to_string(),
         sections: vec![CheckSection {
-            title:  "Local".to_string(),
+            title: "Local".to_string(),
             checks: vec![
                 check_config(
                     settings_config_path
@@ -364,12 +361,12 @@ pub(crate) async fn run_doctor(
         Ok(ctx) => ctx,
         Err(err) => {
             report.sections.push(CheckSection {
-                title:  "Server".to_string(),
+                title: "Server".to_string(),
                 checks: vec![CheckResult {
-                    name:        "Fabro server".to_string(),
-                    status:      CheckStatus::Error,
-                    summary:     "settings resolution failed".to_string(),
-                    details:     vec![CheckDetail::new(err.to_string())],
+                    name: "Fabro server".to_string(),
+                    status: CheckStatus::Error,
+                    summary: "settings resolution failed".to_string(),
+                    details: vec![CheckDetail::new(err.to_string())],
                     remediation: Some(
                         "Fix the local CLI settings or provide `--server`, then run doctor again."
                             .to_string(),
@@ -394,12 +391,12 @@ pub(crate) async fn run_doctor(
         Ok(server) => server,
         Err(err) => {
             report.sections.push(CheckSection {
-                title:  "Server".to_string(),
+                title: "Server".to_string(),
                 checks: vec![CheckResult {
-                    name:        "Fabro server".to_string(),
-                    status:      CheckStatus::Error,
-                    summary:     "unreachable".to_string(),
-                    details:     vec![CheckDetail::new(err.to_string())],
+                    name: "Fabro server".to_string(),
+                    status: CheckStatus::Error,
+                    summary: "unreachable".to_string(),
+                    details: vec![CheckDetail::new(err.to_string())],
                     remediation: Some(
                         "Start or connect to the server with `--server` and run doctor again."
                             .to_string(),
@@ -424,12 +421,12 @@ pub(crate) async fn run_doctor(
         Ok(response) => response.into_inner(),
         Err(err) => {
             report.sections.push(CheckSection {
-                title:  "Server".to_string(),
+                title: "Server".to_string(),
                 checks: vec![CheckResult {
-                    name:        "Fabro server".to_string(),
-                    status:      CheckStatus::Error,
-                    summary:     "health check failed".to_string(),
-                    details:     vec![CheckDetail::new(err.to_string())],
+                    name: "Fabro server".to_string(),
+                    status: CheckStatus::Error,
+                    summary: "health check failed".to_string(),
+                    details: vec![CheckDetail::new(err.to_string())],
                     remediation: Some(
                         "Check that the server is reachable and responding to /health.".to_string(),
                     ),
@@ -462,12 +459,12 @@ pub(crate) async fn run_doctor(
         }
         Err(err) => {
             report.sections.push(CheckSection {
-                title:  "Server".to_string(),
+                title: "Server".to_string(),
                 checks: vec![CheckResult {
-                    name:        "Diagnostics".to_string(),
-                    status:      CheckStatus::Error,
-                    summary:     "probe failed".to_string(),
-                    details:     vec![CheckDetail::new(err.to_string())],
+                    name: "Diagnostics".to_string(),
+                    status: CheckStatus::Error,
+                    summary: "probe failed".to_string(),
+                    details: vec![CheckDetail::new(err.to_string())],
                     remediation: Some(
                         "Fix the server diagnostics failure and run `fabro doctor` again."
                             .to_string(),
@@ -553,14 +550,14 @@ mod tests {
     #[test]
     fn render_report_text_without_color_has_no_ansi() {
         let report = CheckReport {
-            title:    "Fabro Doctor".to_string(),
+            title: "Fabro Doctor".to_string(),
             sections: vec![CheckSection {
-                title:  "Local".to_string(),
+                title: "Local".to_string(),
                 checks: vec![CheckResult {
-                    name:        "Configuration".to_string(),
-                    status:      CheckStatus::Pass,
-                    summary:     "loaded".to_string(),
-                    details:     vec![CheckDetail::new(
+                    name: "Configuration".to_string(),
+                    status: CheckStatus::Pass,
+                    summary: "loaded".to_string(),
+                    details: vec![CheckDetail::new(
                         "Loaded from ~/.fabro/settings.toml".into(),
                     )],
                     remediation: None,

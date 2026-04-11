@@ -6,7 +6,7 @@ use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
 use crate::context::Context;
-use crate::error::{CoreError, Result, VisitLimitSource};
+use crate::error::{Error, Result, VisitLimitSource};
 use crate::graph::{EdgeSpec, Graph, NodeSpec};
 use crate::handler::NodeHandler;
 use crate::lifecycle::{
@@ -18,15 +18,15 @@ use crate::state::ExecutionState;
 
 #[derive(Default)]
 pub struct ExecutorOptions {
-    pub cancel_token:    Option<Arc<AtomicBool>>,
-    pub stall_token:     Option<CancellationToken>,
+    pub cancel_token: Option<Arc<AtomicBool>>,
+    pub stall_token: Option<CancellationToken>,
     pub max_node_visits: Option<usize>,
 }
 
 pub struct Executor<G: Graph> {
-    handler:   Arc<dyn NodeHandler<G>>,
+    handler: Arc<dyn NodeHandler<G>>,
     lifecycle: Box<dyn RunLifecycle<G>>,
-    options:   ExecutorOptions,
+    options: ExecutorOptions,
 }
 
 enum NextStep {
@@ -37,9 +37,9 @@ enum NextStep {
 }
 
 pub struct ExecutorBuilder<G: Graph> {
-    handler:   Arc<dyn NodeHandler<G>>,
+    handler: Arc<dyn NodeHandler<G>>,
     lifecycle: Option<Box<dyn RunLifecycle<G>>>,
-    options:   ExecutorOptions,
+    options: ExecutorOptions,
 }
 
 impl<G: Graph + 'static> ExecutorBuilder<G> {
@@ -77,9 +77,9 @@ impl<G: Graph + 'static> ExecutorBuilder<G> {
 
     pub fn build(self) -> Executor<G> {
         Executor {
-            handler:   self.handler,
+            handler: self.handler,
             lifecycle: self.lifecycle.unwrap_or_else(|| Box::new(NoopLifecycle)),
-            options:   self.options,
+            options: self.options,
         }
     }
 }
@@ -99,13 +99,13 @@ impl<G: Graph + 'static> Executor<G> {
                     state.cancelled = true;
                     let outcome = Outcome::fail("run cancelled");
                     self.lifecycle.on_run_end(&outcome, &state).await;
-                    return Err(CoreError::Cancelled);
+                    return Err(Error::Cancelled);
                 }
             }
 
             let node = state
                 .current_node(graph)
-                .ok_or_else(|| CoreError::NodeNotFound {
+                .ok_or_else(|| Error::NodeNotFound {
                     id: state.current_node_id.clone(),
                 })?;
 
@@ -154,7 +154,7 @@ impl<G: Graph + 'static> Executor<G> {
             let visits = state.increment_visits(node.id());
             if let Some(max) = node.max_visits() {
                 if visits >= max {
-                    return Err(CoreError::VisitLimitExceeded {
+                    return Err(Error::VisitLimitExceeded {
                         node_id: node.id().to_string(),
                         visits,
                         limit: max,
@@ -164,7 +164,7 @@ impl<G: Graph + 'static> Executor<G> {
             }
             if let Some(global_max) = self.options.max_node_visits {
                 if visits >= global_max {
-                    return Err(CoreError::VisitLimitExceeded {
+                    return Err(Error::VisitLimitExceeded {
                         node_id: node.id().to_string(),
                         visits,
                         limit: global_max,
@@ -183,7 +183,7 @@ impl<G: Graph + 'static> Executor<G> {
                     result
                 }
                 NodeDecision::Block(msg) => {
-                    return Err(CoreError::blocked(msg));
+                    return Err(Error::blocked(msg));
                 }
                 NodeDecision::Continue => {
                     // Execute with retry, racing against stall token
@@ -191,7 +191,7 @@ impl<G: Graph + 'static> Executor<G> {
                         tokio::select! {
                             r = self.execute_with_retry(&node, &state, graph) => r,
                             () = stall.cancelled() => {
-                                return Err(CoreError::StallTimeout {
+                                return Err(Error::StallTimeout {
                                     node_id: node.id().to_string(),
                                 });
                             }
@@ -201,11 +201,11 @@ impl<G: Graph + 'static> Executor<G> {
                     };
                     let mut result = match execution_result {
                         Ok(result) => result,
-                        Err(CoreError::Cancelled) => {
+                        Err(Error::Cancelled) => {
                             state.cancelled = true;
                             let outcome = Outcome::fail("run cancelled");
                             self.lifecycle.on_run_end(&outcome, &state).await;
-                            return Err(CoreError::Cancelled);
+                            return Err(Error::Cancelled);
                         }
                         Err(err) => return Err(err),
                     };
@@ -278,7 +278,7 @@ impl<G: Graph + 'static> Executor<G> {
             };
             match self.lifecycle.before_attempt(&attempt_ctx, state).await? {
                 NodeDecision::Skip(o) => return Ok(NodeResult::from_skip(*o)),
-                NodeDecision::Block(msg) => return Err(CoreError::blocked(msg)),
+                NodeDecision::Block(msg) => return Err(Error::blocked(msg)),
                 NodeDecision::Continue => {}
             }
 
@@ -344,7 +344,7 @@ impl<G: Graph + 'static> Executor<G> {
                     self.lifecycle.after_attempt(&ctx, state).await?;
                     sleep(delay).await;
                 }
-                Err(e @ CoreError::Handler { .. }) => {
+                Err(e @ Error::Handler { .. }) => {
                     // Convert handler failures to fail outcomes so routing continues.
                     let outcome = e.to_fail_outcome();
                     let result =
@@ -385,7 +385,7 @@ impl<G: Graph + 'static> Executor<G> {
             match self.lifecycle.on_edge_selected(&ctx, state).await? {
                 EdgeDecision::Continue => return Ok(NextStep::Jump(target.clone())),
                 EdgeDecision::Override(new_target) => return Ok(NextStep::Edge(new_target)),
-                EdgeDecision::Block(msg) => return Err(CoreError::blocked(msg)),
+                EdgeDecision::Block(msg) => return Err(Error::blocked(msg)),
             }
         }
 
@@ -411,7 +411,7 @@ impl<G: Graph + 'static> Executor<G> {
                     }
                 }
                 EdgeDecision::Override(new_target) => Ok(NextStep::Edge(new_target)),
-                EdgeDecision::Block(msg) => Err(CoreError::blocked(msg)),
+                EdgeDecision::Block(msg) => Err(Error::blocked(msg)),
             }
         } else {
             // No edge found
@@ -500,7 +500,7 @@ mod tests {
                 .cancel_token(token)
                 .build();
         let result = executor.run(&g, state).await;
-        assert!(matches!(result, Err(CoreError::Cancelled)));
+        assert!(matches!(result, Err(Error::Cancelled)));
     }
 
     // ---- Step 9: Terminal nodes, goal gates, visit limits ----
@@ -676,7 +676,7 @@ mod tests {
             ExecutorBuilder::new(Arc::new(AlwaysSucceedHandler) as Arc<dyn NodeHandler<TestGraph>>)
                 .build();
         let result = executor.run(&g, state).await;
-        assert!(matches!(result, Err(CoreError::VisitLimitExceeded { .. })));
+        assert!(matches!(result, Err(Error::VisitLimitExceeded { .. })));
     }
 
     #[tokio::test]
@@ -696,7 +696,7 @@ mod tests {
                 .max_node_visits(3)
                 .build();
         let result = executor.run(&g, state).await;
-        assert!(matches!(result, Err(CoreError::VisitLimitExceeded { .. })));
+        assert!(matches!(result, Err(Error::VisitLimitExceeded { .. })));
     }
 
     // ---- Step 10: Edge selection, jumps, loop restarts ----
@@ -922,19 +922,19 @@ mod tests {
         .cancel_token(token)
         .build();
         let result = executor.run(&g, state).await;
-        assert!(matches!(result, Err(CoreError::Cancelled)));
+        assert!(matches!(result, Err(Error::Cancelled)));
     }
 
     #[tokio::test]
     async fn executor_preserves_handler_returned_cancellation() {
-        let handler = Arc::new(CountingHandler::new(vec![Err(CoreError::Cancelled)]));
+        let handler = Arc::new(CountingHandler::new(vec![Err(Error::Cancelled)]));
         let g = linear_graph(&["start", "end"]);
         let state = ExecutionState::new(&g).unwrap();
         let executor = ExecutorBuilder::new(handler as Arc<dyn NodeHandler<TestGraph>>).build();
 
         let result = executor.run(&g, state).await;
 
-        assert!(matches!(result, Err(CoreError::Cancelled)));
+        assert!(matches!(result, Err(Error::Cancelled)));
     }
 
     #[tokio::test]
@@ -950,7 +950,7 @@ mod tests {
             }
         }
 
-        let handler = Arc::new(CountingHandler::new(vec![Err(CoreError::Cancelled)]));
+        let handler = Arc::new(CountingHandler::new(vec![Err(Error::Cancelled)]));
         let g = linear_graph(&["start", "end"]);
         let state = ExecutionState::new(&g).unwrap();
         let executor = ExecutorBuilder::new(handler as Arc<dyn NodeHandler<TestGraph>>)
@@ -959,7 +959,7 @@ mod tests {
 
         let result = executor.run(&g, state).await;
 
-        assert!(matches!(result, Err(CoreError::Cancelled)));
+        assert!(matches!(result, Err(Error::Cancelled)));
         assert_eq!(log.lock().unwrap().as_slice(), &[true]);
     }
 
@@ -969,27 +969,27 @@ mod tests {
     async fn executor_retry_on_retryable_error() {
         let handler = Arc::new(
             CountingHandler::new(vec![
-                Err(CoreError::handler(HandlerErrorDetail {
-                    message:   "fail1".into(),
+                Err(Error::handler(HandlerErrorDetail {
+                    message: "fail1".into(),
                     retryable: true,
-                    category:  None,
+                    category: None,
                     signature: None,
                 })),
-                Err(CoreError::handler(HandlerErrorDetail {
-                    message:   "fail2".into(),
+                Err(Error::handler(HandlerErrorDetail {
+                    message: "fail2".into(),
                     retryable: true,
-                    category:  None,
+                    category: None,
                     signature: None,
                 })),
                 Ok(Outcome::success()),
             ])
             .with_retry_policy(RetryPolicy {
                 max_attempts: 3,
-                backoff:      BackoffPolicy {
+                backoff: BackoffPolicy {
                     initial_delay: Duration::from_millis(1),
-                    factor:        1.0,
-                    max_delay:     Duration::from_millis(1),
-                    jitter:        false,
+                    factor: 1.0,
+                    max_delay: Duration::from_millis(1),
+                    jitter: false,
                 },
             }),
         );
@@ -1019,11 +1019,11 @@ mod tests {
             ])
             .with_retry_policy(RetryPolicy {
                 max_attempts: 3,
-                backoff:      BackoffPolicy {
+                backoff: BackoffPolicy {
                     initial_delay: Duration::from_millis(1),
-                    factor:        1.0,
-                    max_delay:     Duration::from_millis(1),
-                    jitter:        false,
+                    factor: 1.0,
+                    max_delay: Duration::from_millis(1),
+                    jitter: false,
                 },
             }),
         );
@@ -1040,10 +1040,10 @@ mod tests {
     #[tokio::test]
     async fn executor_retry_non_retryable_error_no_retry() {
         let handler = Arc::new(
-            CountingHandler::new(vec![Err(CoreError::handler(HandlerErrorDetail {
-                message:   "fatal".into(),
+            CountingHandler::new(vec![Err(Error::handler(HandlerErrorDetail {
+                message: "fatal".into(),
                 retryable: false,
-                category:  None,
+                category: None,
                 signature: None,
             }))])
             .with_retry_policy(RetryPolicy::with_max_attempts(3)),
@@ -1062,11 +1062,11 @@ mod tests {
     #[tokio::test]
     async fn executor_retry_no_retry_by_default() {
         // Default policy is RetryPolicy::none() (max_attempts=1)
-        let handler = Arc::new(CountingHandler::new(vec![Err(CoreError::handler(
+        let handler = Arc::new(CountingHandler::new(vec![Err(Error::handler(
             HandlerErrorDetail {
-                message:   "fail".into(),
+                message: "fail".into(),
                 retryable: true,
-                category:  None,
+                category: None,
                 signature: None,
             },
         ))]));
@@ -1099,11 +1099,11 @@ mod tests {
             fn retry_policy(&self, _n: &TestNode, _g: &TestGraph) -> RetryPolicy {
                 RetryPolicy {
                     max_attempts: 2,
-                    backoff:      BackoffPolicy {
+                    backoff: BackoffPolicy {
                         initial_delay: Duration::from_millis(1),
-                        factor:        1.0,
-                        max_delay:     Duration::from_millis(1),
-                        jitter:        false,
+                        factor: 1.0,
+                        max_delay: Duration::from_millis(1),
+                        jitter: false,
                     },
                 }
             }
@@ -1142,21 +1142,21 @@ mod tests {
         }
         let handler = Arc::new(
             CountingHandler::new(vec![
-                Err(CoreError::handler(HandlerErrorDetail {
-                    message:   "r".into(),
+                Err(Error::handler(HandlerErrorDetail {
+                    message: "r".into(),
                     retryable: true,
-                    category:  None,
+                    category: None,
                     signature: None,
                 })),
                 Ok(Outcome::success()),
             ])
             .with_retry_policy(RetryPolicy {
                 max_attempts: 3,
-                backoff:      BackoffPolicy {
+                backoff: BackoffPolicy {
                     initial_delay: Duration::from_millis(1),
-                    factor:        1.0,
-                    max_delay:     Duration::from_millis(1),
-                    jitter:        false,
+                    factor: 1.0,
+                    max_delay: Duration::from_millis(1),
+                    jitter: false,
                 },
             }),
         );
@@ -1186,21 +1186,21 @@ mod tests {
         }
         let handler = Arc::new(
             CountingHandler::new(vec![
-                Err(CoreError::handler(HandlerErrorDetail {
-                    message:   "r".into(),
+                Err(Error::handler(HandlerErrorDetail {
+                    message: "r".into(),
                     retryable: true,
-                    category:  None,
+                    category: None,
                     signature: None,
                 })),
                 Ok(Outcome::success()),
             ])
             .with_retry_policy(RetryPolicy {
                 max_attempts: 3,
-                backoff:      BackoffPolicy {
+                backoff: BackoffPolicy {
                     initial_delay: Duration::from_millis(1),
-                    factor:        1.0,
-                    max_delay:     Duration::from_millis(1),
-                    jitter:        false,
+                    factor: 1.0,
+                    max_delay: Duration::from_millis(1),
+                    jitter: false,
                 },
             }),
         );
@@ -1236,21 +1236,21 @@ mod tests {
         }
         let handler = Arc::new(
             CountingHandler::new(vec![
-                Err(CoreError::handler(HandlerErrorDetail {
-                    message:   "r".into(),
+                Err(Error::handler(HandlerErrorDetail {
+                    message: "r".into(),
                     retryable: true,
-                    category:  None,
+                    category: None,
                     signature: None,
                 })),
                 Ok(Outcome::success()), // should not be reached
             ])
             .with_retry_policy(RetryPolicy {
                 max_attempts: 3,
-                backoff:      BackoffPolicy {
+                backoff: BackoffPolicy {
                     initial_delay: Duration::from_millis(1),
-                    factor:        1.0,
-                    max_delay:     Duration::from_millis(1),
-                    jitter:        false,
+                    factor: 1.0,
+                    max_delay: Duration::from_millis(1),
+                    jitter: false,
                 },
             }),
         );
@@ -1278,11 +1278,11 @@ mod tests {
             ])
             .with_retry_policy(RetryPolicy {
                 max_attempts: 3,
-                backoff:      BackoffPolicy {
+                backoff: BackoffPolicy {
                     initial_delay: Duration::from_secs(5),
-                    factor:        2.0,
-                    max_delay:     Duration::from_secs(60),
-                    jitter:        false,
+                    factor: 2.0,
+                    max_delay: Duration::from_secs(60),
+                    jitter: false,
                 },
             }),
         );
@@ -1350,7 +1350,7 @@ mod tests {
                 .lifecycle(Box::new(Blocker))
                 .build();
         let result = executor.run(&g, state).await;
-        assert!(matches!(result, Err(CoreError::Blocked { .. })));
+        assert!(matches!(result, Err(Error::Blocked { .. })));
     }
 
     #[tokio::test]
@@ -1429,7 +1429,7 @@ mod tests {
                 .lifecycle(Box::new(EdgeBlocker))
                 .build();
         let result = executor.run(&g, state).await;
-        assert!(matches!(result, Err(CoreError::Blocked { .. })));
+        assert!(matches!(result, Err(Error::Blocked { .. })));
     }
 
     #[tokio::test]
@@ -1619,10 +1619,13 @@ mod tests {
         executor.run(&g, state).await.unwrap();
         let checkpoints = log.lock().unwrap().clone();
         // "start" checkpoints with next="work", "work" checkpoints with next="end"
-        assert_eq!(checkpoints, vec![
-            ("start".to_string(), Some("work".to_string())),
-            ("work".to_string(), Some("end".to_string())),
-        ]);
+        assert_eq!(
+            checkpoints,
+            vec![
+                ("start".to_string(), Some("work".to_string())),
+                ("work".to_string(), Some("end".to_string())),
+            ]
+        );
     }
 
     #[tokio::test]
@@ -1692,10 +1695,13 @@ mod tests {
 
         executor.run(&g, state).await.unwrap();
 
-        assert_eq!(*log.lock().unwrap(), vec![
-            "after_record:start:start:hello".to_string(),
-            "on_edge_selected:start:hello".to_string(),
-        ]);
+        assert_eq!(
+            *log.lock().unwrap(),
+            vec![
+                "after_record:start:start:hello".to_string(),
+                "on_edge_selected:start:hello".to_string(),
+            ]
+        );
     }
 
     #[tokio::test]
@@ -1744,10 +1750,10 @@ mod tests {
         .lifecycle(Box::new(GateTracker(log2.clone())))
         .build();
         executor2.run(&g2, state2).await.unwrap();
-        assert_eq!(log2.lock().unwrap().clone(), vec![(
-            "end".to_string(),
-            false
-        )]);
+        assert_eq!(
+            log2.lock().unwrap().clone(),
+            vec![("end".to_string(), false)]
+        );
     }
 
     #[tokio::test]
@@ -2006,7 +2012,7 @@ mod tests {
         .build();
         let result = executor.run(&g, state).await;
         match result {
-            Err(CoreError::StallTimeout { ref node_id }) => {
+            Err(Error::StallTimeout { ref node_id }) => {
                 assert_eq!(node_id, "start");
             }
             other => panic!("expected StallTimeout, got {other:?}"),
@@ -2035,10 +2041,10 @@ mod tests {
                 if c == 0 {
                     // First call: fail with retryable, then cancel stall during backoff
                     self.stall.cancel();
-                    Err(CoreError::handler(HandlerErrorDetail {
-                        message:   "transient".into(),
+                    Err(Error::handler(HandlerErrorDetail {
+                        message: "transient".into(),
                         retryable: true,
-                        category:  None,
+                        category: None,
                         signature: None,
                     }))
                 } else {
@@ -2048,11 +2054,11 @@ mod tests {
             fn retry_policy(&self, _n: &TestNode, _g: &TestGraph) -> RetryPolicy {
                 RetryPolicy {
                     max_attempts: 3,
-                    backoff:      BackoffPolicy {
+                    backoff: BackoffPolicy {
                         initial_delay: Duration::from_secs(60),
-                        factor:        1.0,
-                        max_delay:     Duration::from_secs(60),
-                        jitter:        false,
+                        factor: 1.0,
+                        max_delay: Duration::from_secs(60),
+                        jitter: false,
                     },
                 }
             }
@@ -2068,7 +2074,7 @@ mod tests {
         .build();
         let result = executor.run(&g, state).await;
         assert!(
-            matches!(result, Err(CoreError::StallTimeout { .. })),
+            matches!(result, Err(Error::StallTimeout { .. })),
             "expected StallTimeout, got {result:?}"
         );
     }
@@ -2102,7 +2108,7 @@ mod tests {
                 .build();
         let result = executor.run(&g, state).await;
         assert!(
-            matches!(result, Err(CoreError::StallTimeout { .. })),
+            matches!(result, Err(Error::StallTimeout { .. })),
             "expected StallTimeout, got {result:?}"
         );
     }

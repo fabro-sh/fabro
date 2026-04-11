@@ -17,19 +17,19 @@ use crate::tool_registry::ToolRegistry;
 /// `model()`, `tool_registry()`, and `tool_registry_mut()` to it.
 pub struct BaseProfile {
     pub provider: Provider,
-    pub model:    String,
+    pub model: String,
     pub registry: ToolRegistry,
 }
 
 /// Additional context for building environment blocks
 #[derive(Default)]
 pub struct EnvContext {
-    pub git_branch:         Option<String>,
-    pub is_git_repo:        bool,
-    pub current_date:       String,
-    pub model:              String,
-    pub knowledge_cutoff:   String,
-    pub git_status_short:   Option<String>,
+    pub git_branch: Option<String>,
+    pub is_git_repo: bool,
+    pub current_date: String,
+    pub model: String,
+    pub knowledge_cutoff: String,
+    pub git_status_short: Option<String>,
     pub git_recent_commits: Option<String>,
 }
 
@@ -133,12 +133,12 @@ mod tests {
     fn env_context_block_with_extra_context() {
         let env = MockSandbox::linux();
         let ctx = EnvContext {
-            git_branch:         Some("main".into()),
-            is_git_repo:        true,
-            current_date:       "2026-02-20".into(),
-            model:              "claude-opus-4-6".into(),
-            knowledge_cutoff:   "May 2025".into(),
-            git_status_short:   None,
+            git_branch: Some("main".into()),
+            is_git_repo: true,
+            current_date: "2026-02-20".into(),
+            model: "claude-opus-4-6".into(),
+            knowledge_cutoff: "May 2025".into(),
+            git_status_short: None,
             git_recent_commits: None,
         };
         let block = build_env_context_block_with(&env, &ctx);

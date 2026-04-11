@@ -3,7 +3,7 @@ mod routing;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use fabro_core::error::{CoreError, Result as CoreResult};
+use fabro_core::error::{Error as CoreError, Result as CoreResult};
 use fabro_core::graph::{EdgeSelection as CoreEdgeSelection, EdgeSpec, Graph, NodeSpec};
 use fabro_graphviz::graph::types::{Edge as GvEdge, Graph as GvGraph, Node as GvNode};
 
@@ -114,7 +114,7 @@ impl Graph for WorkflowGraph {
             node.inner().selection(),
         );
         selection.map(|sel| CoreEdgeSelection {
-            edge:   WorkflowEdge(Arc::new(sel.edge.clone())),
+            edge: WorkflowEdge(Arc::new(sel.edge.clone())),
             reason: sel.reason,
         })
     }

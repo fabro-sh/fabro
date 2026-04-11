@@ -157,17 +157,17 @@ fn make_registry() -> HandlerRegistry {
 
 fn test_run_options(run_dir: &Path) -> RunOptions {
     RunOptions {
-        run_dir:          run_dir.to_path_buf(),
-        cancel_token:     None,
-        run_id:           fixtures::RUN_2,
-        settings:         SettingsLayer::default(),
-        git:              None,
-        host_repo_path:   None,
-        labels:           HashMap::new(),
-        github_app:       None,
-        base_branch:      None,
+        run_dir: run_dir.to_path_buf(),
+        cancel_token: None,
+        run_id: fixtures::RUN_2,
+        settings: SettingsLayer::default(),
+        git: None,
+        host_repo_path: None,
+        labels: HashMap::new(),
+        github_app: None,
+        base_branch: None,
         display_base_sha: None,
-        workflow_slug:    None,
+        workflow_slug: None,
     }
 }
 
@@ -287,8 +287,8 @@ async fn git_checkpoint_skips_start_node() {
 
     let mut run_options = test_run_options(run_tmp.path());
     run_options.git = Some(GitCheckpointOptions {
-        base_sha:    Some(base_sha),
-        run_branch:  None,
+        base_sha: Some(base_sha),
+        run_branch: None,
         meta_branch: Some(MetadataStore::branch_name(&fixtures::RUN_2.to_string())),
     });
     run_options.host_repo_path = Some(PathBuf::from(repo));

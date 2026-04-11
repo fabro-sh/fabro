@@ -82,9 +82,9 @@ fn finalize_export(
 }
 
 struct DumpArtifact {
-    stage_id:      StageId,
+    stage_id: StageId,
     relative_path: String,
-    data:          Vec<u8>,
+    data: Vec<u8>,
 }
 
 trait DumpDataSource {
@@ -97,9 +97,9 @@ trait DumpDataSource {
 
 #[cfg(test)]
 struct LocalDumpSource<'a> {
-    run_store:      &'a RunDatabase,
+    run_store: &'a RunDatabase,
     artifact_store: &'a ArtifactStore,
-    run_id:         RunId,
+    run_id: RunId,
 }
 
 #[cfg(test)]
@@ -140,9 +140,9 @@ impl DumpDataSource for LocalDumpSource<'_> {
                         )
                     })?;
                 artifacts.push(DumpArtifact {
-                    stage_id:      asset.node,
+                    stage_id: asset.node,
                     relative_path: asset.filename,
-                    data:          data.to_vec(),
+                    data: data.to_vec(),
                 });
             }
             Ok(artifacts)
@@ -362,52 +362,49 @@ mod tests {
 
     fn sample_status() -> RunStatusRecord {
         RunStatusRecord {
-            status:     RunStatus::Running,
-            reason:     Some(StatusReason::SandboxInitializing),
+            status: RunStatus::Running,
+            reason: Some(StatusReason::SandboxInitializing),
             updated_at: dt("2026-03-27T12:05:00Z"),
         }
     }
 
     fn sample_checkpoint(current_node: &str, visit: u32) -> Checkpoint {
         Checkpoint {
-            timestamp:                  dt("2026-03-27T12:10:00Z"),
-            current_node:               current_node.to_string(),
-            completed_nodes:            vec!["plan".to_string()],
-            node_retries:               HashMap::from([(
-                current_node.to_string(),
-                visit.saturating_sub(1),
-            )]),
-            context_values:             HashMap::from([(
+            timestamp: dt("2026-03-27T12:10:00Z"),
+            current_node: current_node.to_string(),
+            completed_nodes: vec!["plan".to_string()],
+            node_retries: HashMap::from([(current_node.to_string(), visit.saturating_sub(1))]),
+            context_values: HashMap::from([(
                 "artifact".to_string(),
                 serde_json::json!({"kind": "summary"}),
             )]),
-            node_outcomes:              HashMap::new(),
-            next_node_id:               Some("review".to_string()),
-            git_commit_sha:             Some("def456".to_string()),
-            loop_failure_signatures:    HashMap::new(),
+            node_outcomes: HashMap::new(),
+            next_node_id: Some("review".to_string()),
+            git_commit_sha: Some("def456".to_string()),
+            loop_failure_signatures: HashMap::new(),
             restart_failure_signatures: HashMap::new(),
-            node_visits:                HashMap::from([(current_node.to_string(), visit as usize)]),
+            node_visits: HashMap::from([(current_node.to_string(), visit as usize)]),
         }
     }
 
     fn sample_conclusion() -> Conclusion {
         Conclusion {
-            timestamp:            dt("2026-03-27T12:15:00Z"),
-            status:               StageStatus::Success,
-            duration_ms:          3210,
-            failure_reason:       None,
+            timestamp: dt("2026-03-27T12:15:00Z"),
+            status: StageStatus::Success,
+            duration_ms: 3210,
+            failure_reason: None,
             final_git_commit_sha: Some("feedbeef".to_string()),
-            stages:               Vec::new(),
-            billing:              Some(BilledTokenCounts {
-                input_tokens:       10,
-                output_tokens:      20,
-                total_tokens:       150,
-                reasoning_tokens:   50,
-                cache_read_tokens:  30,
+            stages: Vec::new(),
+            billing: Some(BilledTokenCounts {
+                input_tokens: 10,
+                output_tokens: 20,
+                total_tokens: 150,
+                reasoning_tokens: 50,
+                cache_read_tokens: 30,
                 cache_write_tokens: 40,
-                total_usd_micros:   Some(1_250_000),
+                total_usd_micros: Some(1_250_000),
             }),
-            total_retries:        2,
+            total_retries: 2,
         }
     }
 
@@ -420,12 +417,12 @@ mod tests {
             smoothness: None,
             stages: Vec::new(),
             stats: AggregateStats {
-                total_duration_ms:        3210,
+                total_duration_ms: 3210,
                 total_billing_usd_micros: Some(1_250_000),
-                total_retries:            2,
-                files_touched:            vec!["src/lib.rs".to_string()],
-                stages_completed:         3,
-                stages_failed:            0,
+                total_retries: 2,
+                files_touched: vec!["src/lib.rs".to_string()],
+                stages_completed: 3,
+                stages_failed: 0,
             },
             intent: Some("ship the fix".to_string()),
             outcome: Some("done".to_string()),
@@ -437,11 +434,11 @@ mod tests {
 
     fn sample_sandbox() -> SandboxRecord {
         SandboxRecord {
-            provider:               "local".to_string(),
-            working_directory:      "/tmp/night-sky".to_string(),
-            identifier:             Some("sandbox-1".to_string()),
+            provider: "local".to_string(),
+            working_directory: "/tmp/night-sky".to_string(),
+            identifier: Some("sandbox-1".to_string()),
             host_working_directory: Some("/tmp/night-sky".to_string()),
-            container_mount_point:  None,
+            container_mount_point: None,
         }
     }
 
@@ -478,171 +475,223 @@ mod tests {
         );
 
         let node = StageId::new("code", 2);
-        append_event(&run, &run_id, &Event::RunCreated {
-            run_id,
-            settings: serde_json::to_value(&run_record.settings).unwrap(),
-            graph: serde_json::to_value(&run_record.graph).unwrap(),
-            workflow_source: Some("digraph night_sky {}".to_string()),
-            workflow_config: None,
-            labels: run_record.labels.clone().into_iter().collect(),
-            run_dir: "/tmp/night-sky-run".to_string(),
-            working_directory: run_record.working_directory.display().to_string(),
-            host_repo_path: run_record.host_repo_path.clone(),
-            repo_origin_url: run_record.repo_origin_url.clone(),
-            base_branch: run_record.base_branch.clone(),
-            workflow_slug: run_record.workflow_slug.clone(),
-            db_prefix: None,
-            provenance: run_record.provenance.clone(),
-            manifest_blob: None,
-        })
+        append_event(
+            &run,
+            &run_id,
+            &Event::RunCreated {
+                run_id,
+                settings: serde_json::to_value(&run_record.settings).unwrap(),
+                graph: serde_json::to_value(&run_record.graph).unwrap(),
+                workflow_source: Some("digraph night_sky {}".to_string()),
+                workflow_config: None,
+                labels: run_record.labels.clone().into_iter().collect(),
+                run_dir: "/tmp/night-sky-run".to_string(),
+                working_directory: run_record.working_directory.display().to_string(),
+                host_repo_path: run_record.host_repo_path.clone(),
+                repo_origin_url: run_record.repo_origin_url.clone(),
+                base_branch: run_record.base_branch.clone(),
+                workflow_slug: run_record.workflow_slug.clone(),
+                db_prefix: None,
+                provenance: run_record.provenance.clone(),
+                manifest_blob: None,
+            },
+        )
         .await
         .unwrap();
-        append_event(&run, &run_id, &Event::WorkflowRunStarted {
-            name: "night-sky".to_string(),
-            run_id,
-            base_branch: run_record.base_branch.clone(),
-            base_sha: start_record.base_sha.clone(),
-            run_branch: start_record.run_branch.clone(),
-            worktree_dir: None,
-            goal: Some("map the constellations".to_string()),
-        })
+        append_event(
+            &run,
+            &run_id,
+            &Event::WorkflowRunStarted {
+                name: "night-sky".to_string(),
+                run_id,
+                base_branch: run_record.base_branch.clone(),
+                base_sha: start_record.base_sha.clone(),
+                run_branch: start_record.run_branch.clone(),
+                worktree_dir: None,
+                goal: Some("map the constellations".to_string()),
+            },
+        )
         .await
         .unwrap();
-        append_event(&run, &run_id, &Event::RunRunning {
-            reason: status_record.reason,
-        })
+        append_event(
+            &run,
+            &run_id,
+            &Event::RunRunning {
+                reason: status_record.reason,
+            },
+        )
         .await
         .unwrap();
         for checkpoint in [&first_checkpoint, &second_checkpoint] {
-            append_event(&run, &run_id, &Event::CheckpointCompleted {
-                node_id: checkpoint.current_node.clone(),
-                status: "success".to_string(),
-                current_node: checkpoint.current_node.clone(),
-                completed_nodes: checkpoint.completed_nodes.clone(),
-                node_retries: checkpoint.node_retries.clone().into_iter().collect(),
-                context_values: checkpoint.context_values.clone().into_iter().collect(),
-                node_outcomes: checkpoint.node_outcomes.clone().into_iter().collect(),
-                next_node_id: checkpoint.next_node_id.clone(),
-                git_commit_sha: checkpoint.git_commit_sha.clone(),
-                loop_failure_signatures: checkpoint
-                    .loop_failure_signatures
-                    .clone()
-                    .into_iter()
-                    .map(|(signature, count)| (signature.to_string(), count))
-                    .collect(),
-                restart_failure_signatures: checkpoint
-                    .restart_failure_signatures
-                    .clone()
-                    .into_iter()
-                    .map(|(signature, count)| (signature.to_string(), count))
-                    .collect(),
-                node_visits: checkpoint.node_visits.clone().into_iter().collect(),
-                diff: None,
-            })
+            append_event(
+                &run,
+                &run_id,
+                &Event::CheckpointCompleted {
+                    node_id: checkpoint.current_node.clone(),
+                    status: "success".to_string(),
+                    current_node: checkpoint.current_node.clone(),
+                    completed_nodes: checkpoint.completed_nodes.clone(),
+                    node_retries: checkpoint.node_retries.clone().into_iter().collect(),
+                    context_values: checkpoint.context_values.clone().into_iter().collect(),
+                    node_outcomes: checkpoint.node_outcomes.clone().into_iter().collect(),
+                    next_node_id: checkpoint.next_node_id.clone(),
+                    git_commit_sha: checkpoint.git_commit_sha.clone(),
+                    loop_failure_signatures: checkpoint
+                        .loop_failure_signatures
+                        .clone()
+                        .into_iter()
+                        .map(|(signature, count)| (signature.to_string(), count))
+                        .collect(),
+                    restart_failure_signatures: checkpoint
+                        .restart_failure_signatures
+                        .clone()
+                        .into_iter()
+                        .map(|(signature, count)| (signature.to_string(), count))
+                        .collect(),
+                    node_visits: checkpoint.node_visits.clone().into_iter().collect(),
+                    diff: None,
+                },
+            )
             .await
             .unwrap();
         }
-        append_event(&run, &run_id, &Event::SandboxInitialized {
-            working_directory:      sandbox.working_directory.clone(),
-            provider:               sandbox.provider.clone(),
-            identifier:             sandbox.identifier.clone(),
-            host_working_directory: sandbox.host_working_directory.clone(),
-            container_mount_point:  sandbox.container_mount_point.clone(),
-        })
+        append_event(
+            &run,
+            &run_id,
+            &Event::SandboxInitialized {
+                working_directory: sandbox.working_directory.clone(),
+                provider: sandbox.provider.clone(),
+                identifier: sandbox.identifier.clone(),
+                host_working_directory: sandbox.host_working_directory.clone(),
+                container_mount_point: sandbox.container_mount_point.clone(),
+            },
+        )
         .await
         .unwrap();
-        append_event(&run, &run_id, &Event::Prompt {
-            stage:    "code".to_string(),
-            visit:    2,
-            text:     "Plan the fix".to_string(),
-            mode:     None,
-            provider: None,
-            model:    None,
-        })
+        append_event(
+            &run,
+            &run_id,
+            &Event::Prompt {
+                stage: "code".to_string(),
+                visit: 2,
+                text: "Plan the fix".to_string(),
+                mode: None,
+                provider: None,
+                model: None,
+            },
+        )
         .await
         .unwrap();
-        append_event(&run, &run_id, &Event::PromptCompleted {
-            node_id:  "code".to_string(),
-            response: "Implemented".to_string(),
-            model:    "gpt-5".to_string(),
-            provider: "openai".to_string(),
-            billing:  None,
-        })
+        append_event(
+            &run,
+            &run_id,
+            &Event::PromptCompleted {
+                node_id: "code".to_string(),
+                response: "Implemented".to_string(),
+                model: "gpt-5".to_string(),
+                provider: "openai".to_string(),
+                billing: None,
+            },
+        )
         .await
         .unwrap();
-        append_event(&run, &run_id, &Event::StageCompleted {
-            node_id: "code".to_string(),
-            name: "Code".to_string(),
-            index: 1,
-            duration_ms: 250,
-            status: "partial_success".to_string(),
-            preferred_label: None,
-            suggested_next_ids: Vec::new(),
-            billing: None,
-            failure: None,
-            notes: Some("captured output".to_string()),
-            files_touched: Vec::new(),
-            context_updates: None,
-            jump_to_node: None,
-            context_values: None,
-            node_visits: Some(std::collections::BTreeMap::from([(
-                "code".to_string(),
-                2usize,
-            )])),
-            loop_failure_signatures: None,
-            restart_failure_signatures: None,
-            response: Some("Implemented".to_string()),
-            attempt: 1,
-            max_attempts: 1,
-        })
+        append_event(
+            &run,
+            &run_id,
+            &Event::StageCompleted {
+                node_id: "code".to_string(),
+                name: "Code".to_string(),
+                index: 1,
+                duration_ms: 250,
+                status: "partial_success".to_string(),
+                preferred_label: None,
+                suggested_next_ids: Vec::new(),
+                billing: None,
+                failure: None,
+                notes: Some("captured output".to_string()),
+                files_touched: Vec::new(),
+                context_updates: None,
+                jump_to_node: None,
+                context_values: None,
+                node_visits: Some(std::collections::BTreeMap::from([(
+                    "code".to_string(),
+                    2usize,
+                )])),
+                loop_failure_signatures: None,
+                restart_failure_signatures: None,
+                response: Some("Implemented".to_string()),
+                attempt: 1,
+                max_attempts: 1,
+            },
+        )
         .await
         .unwrap();
-        append_event(&run, &run_id, &Event::CommandStarted {
-            node_id:    "code".to_string(),
-            script:     "echo hi".to_string(),
-            command:    "echo hi".to_string(),
-            language:   "sh".to_string(),
-            timeout_ms: None,
-        })
+        append_event(
+            &run,
+            &run_id,
+            &Event::CommandStarted {
+                node_id: "code".to_string(),
+                script: "echo hi".to_string(),
+                command: "echo hi".to_string(),
+                language: "sh".to_string(),
+                timeout_ms: None,
+            },
+        )
         .await
         .unwrap();
-        append_event(&run, &run_id, &Event::CommandCompleted {
-            node_id:     "code".to_string(),
-            stdout:      "stdout line".to_string(),
-            stderr:      String::new(),
-            exit_code:   Some(0),
-            duration_ms: 100,
-            timed_out:   false,
-        })
+        append_event(
+            &run,
+            &run_id,
+            &Event::CommandCompleted {
+                node_id: "code".to_string(),
+                stdout: "stdout line".to_string(),
+                stderr: String::new(),
+                exit_code: Some(0),
+                duration_ms: 100,
+                timed_out: false,
+            },
+        )
         .await
         .unwrap();
-        append_event(&run, &run_id, &Event::RetroStarted {
-            prompt:   Some("How did it go?".to_string()),
-            provider: None,
-            model:    None,
-        })
+        append_event(
+            &run,
+            &run_id,
+            &Event::RetroStarted {
+                prompt: Some("How did it go?".to_string()),
+                provider: None,
+                model: None,
+            },
+        )
         .await
         .unwrap();
-        append_event(&run, &run_id, &Event::RetroCompleted {
-            duration_ms: 50,
-            response:    Some("Smooth enough".to_string()),
-            retro:       Some(serde_json::to_value(&retro).unwrap()),
-        })
+        append_event(
+            &run,
+            &run_id,
+            &Event::RetroCompleted {
+                duration_ms: 50,
+                response: Some("Smooth enough".to_string()),
+                retro: Some(serde_json::to_value(&retro).unwrap()),
+            },
+        )
         .await
         .unwrap();
-        append_event(&run, &run_id, &Event::WorkflowRunCompleted {
-            duration_ms:          conclusion.duration_ms,
-            artifact_count:       0,
-            status:               "success".to_string(),
-            reason:               None,
-            total_usd_micros:     conclusion
-                .billing
-                .as_ref()
-                .and_then(|billing| billing.total_usd_micros),
-            final_git_commit_sha: conclusion.final_git_commit_sha.clone(),
-            final_patch:          None,
-            billing:              conclusion.billing.clone(),
-        })
+        append_event(
+            &run,
+            &run_id,
+            &Event::WorkflowRunCompleted {
+                duration_ms: conclusion.duration_ms,
+                artifact_count: 0,
+                status: "success".to_string(),
+                reason: None,
+                total_usd_micros: conclusion
+                    .billing
+                    .as_ref()
+                    .and_then(|billing| billing.total_usd_micros),
+                final_git_commit_sha: conclusion.final_git_commit_sha.clone(),
+                final_patch: None,
+                billing: conclusion.billing.clone(),
+            },
+        )
         .await
         .unwrap();
         run.append_event(

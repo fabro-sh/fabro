@@ -170,10 +170,10 @@ mod tests {
     #[test]
     fn billed_model_usage_from_llm_bills_anthropic_fast_mode_cache_write_pricing() {
         let usage = TokenCounts {
-            input_tokens:       100_000,
-            output_tokens:      10_000,
-            reasoning_tokens:   5_000,
-            cache_read_tokens:  20_000,
+            input_tokens: 100_000,
+            output_tokens: 10_000,
+            reasoning_tokens: 5_000,
+            cache_read_tokens: 20_000,
             cache_write_tokens: 30_000,
         };
         let billed = billed_model_usage_from_llm(
@@ -189,10 +189,10 @@ mod tests {
     #[test]
     fn billed_model_usage_round_trips_dense_token_counts() {
         let usage = TokenCounts {
-            input_tokens:       100,
-            output_tokens:      40,
-            reasoning_tokens:   5,
-            cache_read_tokens:  20,
+            input_tokens: 100,
+            output_tokens: 40,
+            reasoning_tokens: 5,
+            cache_read_tokens: 20,
             cache_write_tokens: 10,
         };
         let billed =

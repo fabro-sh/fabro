@@ -32,7 +32,7 @@ enum PendingTransport {
 /// MCP client wrapping the rmcp SDK. Handles stdio and HTTP transports.
 pub struct McpClient {
     server_name: String,
-    state:       Mutex<ClientState>,
+    state: Mutex<ClientState>,
 }
 
 impl McpClient {
@@ -101,7 +101,7 @@ impl McpClient {
 
         Ok(Self {
             server_name: config.name.clone(),
-            state:       Mutex::new(ClientState::Connecting(Some(transport))),
+            state: Mutex::new(ClientState::Connecting(Some(transport))),
         })
     }
 

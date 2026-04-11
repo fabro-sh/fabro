@@ -39,8 +39,8 @@ struct Claims {
 #[derive(Clone, Debug)]
 pub enum AuthStrategy {
     Jwt {
-        key:               Arc<DecodingKey>,
-        validation:        Arc<Validation>,
+        key: Arc<DecodingKey>,
+        validation: Arc<Validation>,
         allowed_usernames: Vec<String>,
     },
     Cookie,
@@ -99,9 +99,9 @@ pub fn resolve_auth_mode(settings: &ResolvedServerSettings) -> Result<AuthMode> 
 
 /// Describes which API auth strategies are enabled in resolved server settings.
 struct ResolvedAuthStrategies {
-    jwt_enabled:       bool,
-    mtls_enabled:      bool,
-    tls_present:       bool,
+    jwt_enabled: bool,
+    mtls_enabled: bool,
+    tls_present: bool,
     allowed_usernames: Vec<String>,
 }
 
@@ -177,8 +177,8 @@ where
             )
         })?;
         strategies.push(AuthStrategy::Jwt {
-            key:               Arc::new(key),
-            validation:        Arc::new(jwt_validation()),
+            key: Arc::new(key),
+            validation: Arc::new(jwt_validation()),
             allowed_usernames: allowed_usernames.clone(),
         });
     }
@@ -372,7 +372,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedService {
 
 /// Axum extractor that authenticates and extracts the request subject.
 pub struct AuthenticatedSubject {
-    pub login:       Option<String>,
+    pub login: Option<String>,
     pub auth_method: RunAuthMethod,
 }
 
@@ -388,7 +388,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedSubject {
         let strategies = match auth_mode {
             AuthMode::Disabled => {
                 return Ok(Self {
-                    login:       None,
+                    login: None,
                     auth_method: RunAuthMethod::Disabled,
                 });
             }
@@ -406,7 +406,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedSubject {
                 AuthStrategy::Cookie => {
                     if let Some(session) = parts.extensions.get::<SessionCookie>() {
                         return Ok(Self {
-                            login:       Some(session.login.clone()),
+                            login: Some(session.login.clone()),
                             auth_method: RunAuthMethod::Cookie,
                         });
                     }
@@ -420,7 +420,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedSubject {
                     if try_jwt(parts, key, validation, allowed_usernames).is_ok() {
                         if let Some(login) = extract_jwt_login(parts, key, validation) {
                             return Ok(Self {
-                                login:       Some(login),
+                                login: Some(login),
                                 auth_method: RunAuthMethod::Jwt,
                             });
                         }
@@ -431,7 +431,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedSubject {
                     if try_mtls(parts).is_ok() {
                         if let Some(login) = extract_mtls_cn(parts) {
                             return Ok(Self {
-                                login:       Some(login),
+                                login: Some(login),
                                 auth_method: RunAuthMethod::Mtls,
                             });
                         }
@@ -670,8 +670,8 @@ enabled = true
 
     fn jwt_mode(decoding: DecodingKey, allowed_usernames: Vec<&str>) -> AuthMode {
         AuthMode::Strategies(vec![AuthStrategy::Jwt {
-            key:               Arc::new(decoding),
-            validation:        Arc::new(jwt_validation()),
+            key: Arc::new(decoding),
+            validation: Arc::new(jwt_validation()),
             allowed_usernames: allowed_usernames.into_iter().map(String::from).collect(),
         }])
     }
@@ -1003,13 +1003,13 @@ enabled = true
             .body(Body::empty())
             .unwrap();
         req.extensions_mut().insert(SessionCookie {
-            login:      "brynary".to_string(),
-            name:       "Brynary".to_string(),
-            email:      "b@example.com".to_string(),
+            login: "brynary".to_string(),
+            name: "Brynary".to_string(),
+            email: "b@example.com".to_string(),
             avatar_url: "https://example.com/avatar.png".to_string(),
-            user_url:   "https://github.com/brynary".to_string(),
-            github_id:  1,
-            exp:        9_999_999_999,
+            user_url: "https://github.com/brynary".to_string(),
+            github_id: 1,
+            exp: 9_999_999_999,
         });
 
         let response = app.oneshot(req).await.unwrap();
@@ -1094,8 +1094,8 @@ enabled = true
         let (_, decoding) = generate_test_keypair();
         let mode = AuthMode::Strategies(vec![
             AuthStrategy::Jwt {
-                key:               Arc::new(decoding),
-                validation:        Arc::new(jwt_validation()),
+                key: Arc::new(decoding),
+                validation: Arc::new(jwt_validation()),
                 allowed_usernames: vec!["brynary".to_string()],
             },
             AuthStrategy::Mtls,
@@ -1112,11 +1112,14 @@ enabled = true
     #[tokio::test]
     async fn mtls_and_jwt_falls_back_to_jwt() {
         let (encoding, decoding) = generate_test_keypair();
-        let mode = AuthMode::Strategies(vec![AuthStrategy::Mtls, AuthStrategy::Jwt {
-            key:               Arc::new(decoding),
-            validation:        Arc::new(jwt_validation()),
-            allowed_usernames: vec!["brynary".to_string()],
-        }]);
+        let mode = AuthMode::Strategies(vec![
+            AuthStrategy::Mtls,
+            AuthStrategy::Jwt {
+                key: Arc::new(decoding),
+                validation: Arc::new(jwt_validation()),
+                allowed_usernames: vec!["brynary".to_string()],
+            },
+        ]);
         let app = test_router(mode);
 
         let token = sign_token(

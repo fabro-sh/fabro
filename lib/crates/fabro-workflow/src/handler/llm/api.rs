@@ -17,7 +17,7 @@ use tokio::sync::Mutex as TokioMutex;
 use super::super::agent::{CodergenBackend, CodergenResult};
 use crate::context::keys::Fidelity;
 use crate::context::{Context, WorkflowContext};
-use crate::error::FabroError;
+use crate::error::Error;
 use crate::event::{Emitter, Event, StageScope};
 use crate::outcome::billed_model_usage_from_llm;
 
@@ -41,7 +41,7 @@ struct FileTracking {
     /// Set of all file paths successfully written/edited.
     touched: HashSet<String>,
     /// Most recently modified file path.
-    last:    Option<String>,
+    last: Option<String>,
 }
 
 fn track_file_event(event: &AgentEvent, state: &mut FileTracking) {
@@ -98,10 +98,10 @@ fn spawn_event_forwarder(
             {
                 emitter.emit_scoped(
                     &Event::Agent {
-                        stage:             node_id.clone(),
-                        visit:             scope.visit,
-                        event:             event.event.clone(),
-                        session_id:        Some(event.session_id.clone()),
+                        stage: node_id.clone(),
+                        visit: scope.visit,
+                        event: event.event.clone(),
+                        session_id: Some(event.session_id.clone()),
                         parent_session_id: event.parent_session_id.clone(),
                     },
                     &scope,
@@ -116,12 +116,12 @@ fn spawn_event_forwarder(
 /// For `full` fidelity nodes sharing a thread key, sessions are cached
 /// and reused so the LLM sees the full conversation history.
 pub struct AgentApiBackend {
-    model:          String,
-    provider:       Provider,
+    model: String,
+    provider: Provider,
     fallback_chain: Vec<FallbackTarget>,
-    sessions:       Mutex<HashMap<String, Session>>,
-    env:            HashMap<String, String>,
-    mcp_servers:    Vec<McpServerSettings>,
+    sessions: Mutex<HashMap<String, Session>>,
+    env: HashMap<String, String>,
+    mcp_servers: Vec<McpServerSettings>,
 }
 
 impl AgentApiBackend {
@@ -154,7 +154,7 @@ impl AgentApiBackend {
         node: &Node,
         sandbox: &Arc<dyn Sandbox>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-    ) -> Result<Session, FabroError> {
+    ) -> Result<Session, Error> {
         let model = node.model().unwrap_or(&self.model);
         let provider = node
             .provider()
@@ -180,10 +180,10 @@ impl AgentApiBackend {
         env: &HashMap<String, String>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
         mcp_servers: Vec<McpServerSettings>,
-    ) -> Result<Session, FabroError> {
+    ) -> Result<Session, Error> {
         let client = Client::from_env()
             .await
-            .map_err(|e| FabroError::handler(format!("Failed to create LLM client: {e}")))?;
+            .map_err(|e| Error::handler(format!("Failed to create LLM client: {e}")))?;
 
         let mut profile = build_profile(model, provider);
 
@@ -263,10 +263,10 @@ impl CodergenBackend for AgentApiBackend {
         node: &Node,
         prompt: &str,
         system_prompt: Option<&str>,
-    ) -> Result<CodergenResult, FabroError> {
+    ) -> Result<CodergenResult, Error> {
         let client = Client::from_env()
             .await
-            .map_err(|e| FabroError::handler(format!("Failed to create LLM client: {e}")))?;
+            .map_err(|e| Error::handler(format!("Failed to create LLM client: {e}")))?;
 
         let model = node.model().unwrap_or(&self.model);
         let provider = node
@@ -367,16 +367,16 @@ impl CodergenBackend for AgentApiBackend {
                         Err(err) if err.failover_eligible() => {
                             last_err = err;
                         }
-                        Err(err) => return Err(FabroError::Llm(err)),
+                        Err(err) => return Err(Error::Llm(err)),
                     }
                 }
 
                 match found {
                     Some(triple) => triple,
-                    None => return Err(FabroError::Llm(last_err)),
+                    None => return Err(Error::Llm(last_err)),
                 }
             }
-            Err(sdk_err) => return Err(FabroError::Llm(sdk_err)),
+            Err(sdk_err) => return Err(Error::Llm(sdk_err)),
         };
 
         let actual_provider = actual_provider.parse::<Provider>().unwrap_or(self.provider);
@@ -388,9 +388,9 @@ impl CodergenBackend for AgentApiBackend {
         );
 
         Ok(CodergenResult::Text {
-            text:              response.text(),
-            usage:             Some(stage_usage),
-            files_touched:     Vec::new(),
+            text: response.text(),
+            usage: Some(stage_usage),
+            files_touched: Vec::new(),
             last_file_touched: None,
         })
     }
@@ -404,7 +404,7 @@ impl CodergenBackend for AgentApiBackend {
         emitter: &Arc<Emitter>,
         sandbox: &Arc<dyn Sandbox>,
         tool_hooks: Option<Arc<dyn fabro_agent::ToolHookCallback>>,
-    ) -> Result<CodergenResult, FabroError> {
+    ) -> Result<CodergenResult, Error> {
         let actual_model = node.model().unwrap_or(&self.model).to_string();
         let _actual_provider = node
             .provider()
@@ -449,7 +449,7 @@ impl CodergenBackend for AgentApiBackend {
         let file_tracking = Arc::new(Mutex::new(FileTracking {
             pending: HashMap::new(),
             touched: HashSet::new(),
-            last:    None,
+            last: None,
         }));
         let stage_scope = StageScope::for_handler(context, &node.id);
 
@@ -474,25 +474,25 @@ impl CodergenBackend for AgentApiBackend {
         // On failover-eligible error, try fallback providers.
         let result = match result {
             Ok(()) => Ok(()),
-            Err(fabro_agent::AgentError::Llm(ref sdk_err))
+            Err(fabro_agent::Error::Llm(ref sdk_err))
                 if sdk_err.failover_eligible() && !self.fallback_chain.is_empty() =>
             {
                 let error_msg = sdk_err.to_string();
                 let from_provider = self.provider.as_str().to_string();
                 let from_model = self.model.clone();
 
-                let mut last_err = FabroError::Llm(sdk_err.clone());
+                let mut last_err = Error::Llm(sdk_err.clone());
                 let mut succeeded = false;
 
                 for target in &self.fallback_chain {
                     emitter.emit_scoped(
                         &Event::Failover {
-                            stage:         node.id.clone(),
+                            stage: node.id.clone(),
                             from_provider: from_provider.clone(),
-                            from_model:    from_model.clone(),
-                            to_provider:   target.provider.clone(),
-                            to_model:      target.model.clone(),
-                            error:         error_msg.clone(),
+                            from_model: from_model.clone(),
+                            to_provider: target.provider.clone(),
+                            to_model: target.model.clone(),
+                            error: error_msg.clone(),
                         },
                         &stage_scope,
                     );
@@ -536,28 +536,24 @@ impl CodergenBackend for AgentApiBackend {
                             succeeded = true;
                             break;
                         }
-                        Err(fabro_agent::AgentError::Llm(err)) if err.failover_eligible() => {
-                            last_err = FabroError::Llm(err);
+                        Err(fabro_agent::Error::Llm(err)) if err.failover_eligible() => {
+                            last_err = Error::Llm(err);
                         }
-                        Err(fabro_agent::AgentError::Llm(err)) => return Err(FabroError::Llm(err)),
-                        Err(fabro_agent::AgentError::Interrupted(_)) => {
-                            return Err(FabroError::Cancelled);
+                        Err(fabro_agent::Error::Llm(err)) => return Err(Error::Llm(err)),
+                        Err(fabro_agent::Error::Interrupted(_)) => {
+                            return Err(Error::Cancelled);
                         }
                         Err(other) => {
-                            return Err(FabroError::handler(format!(
-                                "Agent session failed: {other}"
-                            )));
+                            return Err(Error::handler(format!("Agent session failed: {other}")));
                         }
                     }
                 }
 
                 if succeeded { Ok(()) } else { Err(last_err) }
             }
-            Err(fabro_agent::AgentError::Llm(sdk_err)) => Err(FabroError::Llm(sdk_err)),
-            Err(fabro_agent::AgentError::Interrupted(_)) => Err(FabroError::Cancelled),
-            Err(other) => Err(FabroError::handler(format!(
-                "Agent session failed: {other}"
-            ))),
+            Err(fabro_agent::Error::Llm(sdk_err)) => Err(Error::Llm(sdk_err)),
+            Err(fabro_agent::Error::Interrupted(_)) => Err(Error::Cancelled),
+            Err(other) => Err(Error::handler(format!("Agent session failed: {other}"))),
         };
 
         // On error, drop the session (don't cache failed state).
@@ -645,7 +641,7 @@ mod tests {
         FileTracking {
             pending: HashMap::new(),
             touched: HashSet::new(),
-            last:    None,
+            last: None,
         }
     }
 
@@ -661,9 +657,9 @@ mod tests {
 
         track_file_event(
             &AgentEvent::ToolCallStarted {
-                tool_name:    "write_file".to_string(),
+                tool_name: "write_file".to_string(),
                 tool_call_id: "tc1".to_string(),
-                arguments:    serde_json::Value::Object(args),
+                arguments: serde_json::Value::Object(args),
             },
             &mut state,
         );
@@ -672,9 +668,9 @@ mod tests {
         track_file_event(
             &AgentEvent::ToolCallCompleted {
                 tool_call_id: "tc1".to_string(),
-                tool_name:    "write_file".to_string(),
-                is_error:     false,
-                output:       serde_json::Value::String("ok".to_string()),
+                tool_name: "write_file".to_string(),
+                is_error: false,
+                output: serde_json::Value::String("ok".to_string()),
             },
             &mut state,
         );
@@ -694,9 +690,9 @@ mod tests {
 
         track_file_event(
             &AgentEvent::ToolCallStarted {
-                tool_name:    "edit_file".to_string(),
+                tool_name: "edit_file".to_string(),
                 tool_call_id: "tc-sub".to_string(),
-                arguments:    serde_json::Value::Object(args),
+                arguments: serde_json::Value::Object(args),
             },
             &mut state,
         );
@@ -705,9 +701,9 @@ mod tests {
         track_file_event(
             &AgentEvent::ToolCallCompleted {
                 tool_call_id: "tc-sub".to_string(),
-                tool_name:    "edit_file".to_string(),
-                is_error:     false,
-                output:       serde_json::Value::String("ok".to_string()),
+                tool_name: "edit_file".to_string(),
+                is_error: false,
+                output: serde_json::Value::String("ok".to_string()),
             },
             &mut state,
         );
@@ -727,9 +723,9 @@ mod tests {
 
         track_file_event(
             &AgentEvent::ToolCallStarted {
-                tool_name:    "edit_file".to_string(),
+                tool_name: "edit_file".to_string(),
                 tool_call_id: "tc-err".to_string(),
-                arguments:    serde_json::Value::Object(args),
+                arguments: serde_json::Value::Object(args),
             },
             &mut state,
         );
@@ -737,9 +733,9 @@ mod tests {
         track_file_event(
             &AgentEvent::ToolCallCompleted {
                 tool_call_id: "tc-err".to_string(),
-                tool_name:    "edit_file".to_string(),
-                is_error:     true,
-                output:       serde_json::Value::String("failed".to_string()),
+                tool_name: "edit_file".to_string(),
+                is_error: true,
+                output: serde_json::Value::String("failed".to_string()),
             },
             &mut state,
         );

@@ -4,7 +4,7 @@ use fabro_hooks::{HookContext, HookEvent, HookRunner};
 use fabro_types::BilledTokenCounts;
 
 use super::types::{Concluded, FinalizeOptions, Retroed};
-use crate::error::FabroError;
+use crate::error::Error;
 use crate::event::{Emitter, Event, RunNoticeLevel};
 use crate::git::MetadataStore;
 use crate::outcome::{Outcome, OutcomeExt, StageStatus};
@@ -29,7 +29,7 @@ fn emit_run_notice(
 }
 
 pub fn classify_engine_result(
-    engine_result: &Result<Outcome, FabroError>,
+    engine_result: &Result<Outcome, Error>,
 ) -> (StageStatus, Option<String>, RunStatus, Option<StatusReason>) {
     match engine_result {
         Ok(outcome) => {
@@ -48,7 +48,7 @@ pub fn classify_engine_result(
             };
             (status, failure_reason, run_status, status_reason)
         }
-        Err(FabroError::Cancelled) => (
+        Err(Error::Cancelled) => (
             StageStatus::Fail,
             Some("Cancelled".to_string()),
             RunStatus::Failed,
@@ -222,11 +222,8 @@ async fn cleanup_sandbox(
 ///
 /// # Errors
 ///
-/// Returns `FabroError` if persisting terminal state fails.
-pub async fn finalize(
-    retroed: Retroed,
-    options: &FinalizeOptions,
-) -> Result<Concluded, FabroError> {
+/// Returns `Error` if persisting terminal state fails.
+pub async fn finalize(retroed: Retroed, options: &FinalizeOptions) -> Result<Concluded, Error> {
     let Retroed {
         graph,
         outcome,
@@ -322,17 +319,17 @@ mod tests {
 
     fn test_run_options(run_dir: &std::path::Path) -> RunOptions {
         RunOptions {
-            settings:         SettingsLayer::default(),
-            run_dir:          run_dir.to_path_buf(),
-            cancel_token:     None,
-            run_id:           test_run_id(),
-            labels:           HashMap::new(),
-            workflow_slug:    None,
-            github_app:       None,
-            host_repo_path:   None,
-            base_branch:      None,
+            settings: SettingsLayer::default(),
+            run_dir: run_dir.to_path_buf(),
+            cancel_token: None,
+            run_id: test_run_id(),
+            labels: HashMap::new(),
+            workflow_slug: None,
+            github_app: None,
+            host_repo_path: None,
+            base_branch: None,
             display_base_sha: None,
-            git:              None,
+            git: None,
         }
     }
 
@@ -368,15 +365,18 @@ mod tests {
             retro: None,
         };
 
-        let concluded = finalize(retroed, &FinalizeOptions {
-            run_dir:          run_dir.clone(),
-            run_id:           test_run_id(),
-            run_store:        run_store.clone().into(),
-            workflow_name:    "test".to_string(),
-            hook_runner:      None,
-            preserve_sandbox: true,
-            last_git_sha:     None,
-        })
+        let concluded = finalize(
+            retroed,
+            &FinalizeOptions {
+                run_dir: run_dir.clone(),
+                run_id: test_run_id(),
+                run_store: run_store.clone().into(),
+                workflow_name: "test".to_string(),
+                hook_runner: None,
+                preserve_sandbox: true,
+                last_git_sha: None,
+            },
+        )
         .await
         .unwrap();
         store_logger.flush().await;

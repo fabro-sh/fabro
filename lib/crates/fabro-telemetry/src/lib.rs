@@ -24,11 +24,11 @@ pub enum TelemetryLevel {
 }
 
 struct Global {
-    sender:       Mutex<Option<mpsc::Sender<Track>>>,
+    sender: Mutex<Option<mpsc::Sender<Track>>>,
     anonymous_id: String,
-    context:      Value,
-    level:        TelemetryLevel,
-    thread:       Mutex<Option<JoinHandle<()>>>,
+    context: Value,
+    level: TelemetryLevel,
+    thread: Mutex<Option<JoinHandle<()>>>,
 }
 
 static GLOBAL: OnceLock<Global> = OnceLock::new();

@@ -9,7 +9,7 @@ use object_store::path::Path as ObjectPath;
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
 use tokio::io::AsyncWriteExt;
 
-use crate::{Result, StageId, StoreError};
+use crate::{Error, Result, StageId};
 
 const ARTIFACT_SEGMENT_ENCODE_SET: &AsciiSet =
     &NON_ALPHANUMERIC.remove(b'.').remove(b'_').remove(b'-');
@@ -17,15 +17,15 @@ const STREAM_BUFFER_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct NodeArtifact {
-    pub node:     StageId,
+    pub node: StageId,
     pub filename: String,
-    pub size:     u64,
+    pub size: u64,
 }
 
 #[derive(Clone)]
 pub struct ArtifactStore {
     object_store: Arc<dyn ObjectStore>,
-    prefix:       ObjectPath,
+    prefix: ObjectPath,
 }
 
 impl std::fmt::Debug for ArtifactStore {
@@ -84,12 +84,12 @@ impl ArtifactStore {
             writer
                 .write_all(&chunk)
                 .await
-                .map_err(|err| StoreError::Other(format!("artifact write failed: {err}")))?;
+                .map_err(|err| Error::Other(format!("artifact write failed: {err}")))?;
         }
         writer
             .shutdown()
             .await
-            .map_err(|err| StoreError::Other(format!("artifact finalize failed: {err}")))?;
+            .map_err(|err| Error::Other(format!("artifact finalize failed: {err}")))?;
         Ok(())
     }
 
@@ -177,13 +177,13 @@ impl ArtifactStore {
 
 fn validate_filename_segments(filename: &str) -> Result<Vec<&str>> {
     if filename.contains('\\') {
-        return Err(StoreError::Other(
+        return Err(Error::Other(
             "artifact filename must not contain backslashes".to_string(),
         ));
     }
     let segments = filename.split('/').collect::<Vec<_>>();
     if segments.is_empty() || segments.iter().any(|segment| segment.is_empty()) {
-        return Err(StoreError::Other(
+        return Err(Error::Other(
             "artifact filename must be a non-empty relative path".to_string(),
         ));
     }
@@ -191,7 +191,7 @@ fn validate_filename_segments(filename: &str) -> Result<Vec<&str>> {
         .iter()
         .any(|segment| matches!(*segment, "." | ".."))
     {
-        return Err(StoreError::Other(
+        return Err(Error::Other(
             "artifact filename must not contain '.' or '..' segments".to_string(),
         ));
     }
@@ -206,7 +206,7 @@ fn decode_path_segment(kind: &str, value: &str) -> Result<String> {
     percent_decode_str(value)
         .decode_utf8()
         .map(std::borrow::Cow::into_owned)
-        .map_err(|err| StoreError::Other(format!("invalid {kind}: {err}")))
+        .map_err(|err| Error::Other(format!("invalid {kind}: {err}")))
 }
 
 fn decode_artifact_location(
@@ -215,23 +215,23 @@ fn decode_artifact_location(
     size: u64,
 ) -> Result<NodeArtifact> {
     let mut parts = location.prefix_match(prefix).ok_or_else(|| {
-        StoreError::Other(format!(
+        Error::Other(format!(
             "artifact location {location} does not match expected prefix {prefix}"
         ))
     })?;
     let stage_part = parts.next().ok_or_else(|| {
-        StoreError::Other(format!(
+        Error::Other(format!(
             "artifact location {location} is missing a stage segment"
         ))
     })?;
     let (encoded_node_id, visit) = stage_part.as_ref().rsplit_once('@').ok_or_else(|| {
-        StoreError::Other(format!(
+        Error::Other(format!(
             "artifact location {location} has an invalid stage segment"
         ))
     })?;
     let node_id = decode_path_segment("artifact node id", encoded_node_id)?;
     let visit = visit.parse::<u32>().map_err(|err| {
-        StoreError::Other(format!(
+        Error::Other(format!(
             "artifact location {location} has an invalid visit number: {err}"
         ))
     })?;
@@ -239,7 +239,7 @@ fn decode_artifact_location(
         .map(|part| decode_path_segment("artifact filename segment", part.as_ref()))
         .collect::<Result<Vec<_>>>()?;
     if filename_segments.is_empty() {
-        return Err(StoreError::Other(format!(
+        return Err(Error::Other(format!(
             "artifact location {location} is missing a filename"
         )));
     }
@@ -252,7 +252,7 @@ fn decode_artifact_location(
 
 fn decode_filename(prefix: &ObjectPath, location: &ObjectPath) -> Result<String> {
     let mut parts = location.prefix_match(prefix).ok_or_else(|| {
-        StoreError::Other(format!(
+        Error::Other(format!(
             "artifact location {location} does not match expected prefix {prefix}"
         ))
     })?;
@@ -261,7 +261,7 @@ fn decode_filename(prefix: &ObjectPath, location: &ObjectPath) -> Result<String>
         .map(|part| decode_path_segment("artifact filename segment", part.as_ref()))
         .collect::<Result<Vec<_>>>()?;
     if filename_segments.is_empty() {
-        return Err(StoreError::Other(format!(
+        return Err(Error::Other(format!(
             "artifact location {location} is missing a filename"
         )));
     }
@@ -270,7 +270,7 @@ fn decode_filename(prefix: &ObjectPath, location: &ObjectPath) -> Result<String>
 
 fn parse_object_path(raw: &str) -> Result<ObjectPath> {
     ObjectPath::parse(raw)
-        .map_err(|err| StoreError::Other(format!("invalid artifact object path {raw:?}: {err}")))
+        .map_err(|err| Error::Other(format!("invalid artifact object path {raw:?}: {err}")))
 }
 
 #[cfg(test)]
@@ -299,16 +299,18 @@ mod tests {
             store.get(&run_id, &node, filename).await.unwrap(),
             Some(Bytes::from_static(b"hello"))
         );
-        assert_eq!(store.list_for_node(&run_id, &node).await.unwrap(), vec![
-            filename.to_string()
-        ]);
-        assert_eq!(store.list_for_run(&run_id).await.unwrap(), vec![
-            NodeArtifact {
+        assert_eq!(
+            store.list_for_node(&run_id, &node).await.unwrap(),
+            vec![filename.to_string()]
+        );
+        assert_eq!(
+            store.list_for_run(&run_id).await.unwrap(),
+            vec![NodeArtifact {
                 node,
                 filename: filename.to_string(),
                 size: 5,
-            }
-        ]);
+            }]
+        );
     }
 
     #[tokio::test]

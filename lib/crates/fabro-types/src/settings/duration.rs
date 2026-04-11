@@ -141,7 +141,7 @@ impl FromStr for Duration {
             other => {
                 return Err(ParseDurationError::InvalidUnit {
                     input: input.to_owned(),
-                    unit:  other.to_owned(),
+                    unit: other.to_owned(),
                 });
             }
         };

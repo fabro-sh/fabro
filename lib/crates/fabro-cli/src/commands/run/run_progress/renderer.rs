@@ -12,14 +12,14 @@ enum RendererInner {
 }
 
 pub(super) struct ProgressRenderer {
-    inner:  RendererInner,
+    inner: RendererInner,
     styles: Styles,
 }
 
 impl ProgressRenderer {
     pub(super) fn new_tty() -> Self {
         Self {
-            inner:  RendererInner::Tty {
+            inner: RendererInner::Tty {
                 multi: MultiProgress::new(),
             },
             styles: Styles::new(console::colors_enabled_stderr()),
@@ -28,7 +28,7 @@ impl ProgressRenderer {
 
     pub(super) fn new_plain(out: Box<dyn Write + Send>, colors: bool) -> Self {
         Self {
-            inner:  RendererInner::Plain {
+            inner: RendererInner::Plain {
                 out: Mutex::new(out),
             },
             styles: Styles::new(colors),

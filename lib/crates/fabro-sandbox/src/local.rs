@@ -14,8 +14,8 @@ use crate::{
 
 pub struct LocalSandbox {
     working_directory: PathBuf,
-    event_callback:    Option<SandboxEventCallback>,
-    rg_available:      std::sync::OnceLock<bool>,
+    event_callback: Option<SandboxEventCallback>,
+    rg_available: std::sync::OnceLock<bool>,
 }
 
 impl LocalSandbox {
@@ -795,10 +795,14 @@ mod tests {
 
         let env = LocalSandbox::new(dir.clone());
         let results = env
-            .grep("hello", "test.txt", &GrepOptions {
-                case_insensitive: true,
-                ..Default::default()
-            })
+            .grep(
+                "hello",
+                "test.txt",
+                &GrepOptions {
+                    case_insensitive: true,
+                    ..Default::default()
+                },
+            )
             .await
             .unwrap();
 
@@ -813,10 +817,14 @@ mod tests {
 
         let env = LocalSandbox::new(dir.clone());
         let results = env
-            .grep("match", "test.txt", &GrepOptions {
-                max_results: Some(2),
-                ..Default::default()
-            })
+            .grep(
+                "match",
+                "test.txt",
+                &GrepOptions {
+                    max_results: Some(2),
+                    ..Default::default()
+                },
+            )
             .await
             .unwrap();
 

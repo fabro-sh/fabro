@@ -180,11 +180,11 @@ mod tests {
     #[test]
     fn format_candidate_includes_retry() {
         let entry = super::super::ArtifactEntry {
-            node_slug:     "retry_assets".to_string(),
-            retry:         2,
-            stage_id:      fabro_types::StageId::new("retry_assets", 2),
+            node_slug: "retry_assets".to_string(),
+            retry: 2,
+            stage_id: fabro_types::StageId::new("retry_assets", 2),
             relative_path: "assets/retry/report.txt".to_string(),
-            size:          6,
+            size: 6,
         };
 
         assert_eq!(format_candidate(&entry), "retry_assets:retry_2");
