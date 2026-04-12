@@ -15,6 +15,10 @@ leak-timeout = "500ms"
     filter = "package(fabro-workflow) & kind(test)"
     slow-timeout = { period = "2s", terminate-after = 3 }
 
+    [[profile.default.overrides]]
+    filter = "package(twin-openai) & test(debug_page_renders_in_headless_chrome)"
+    slow-timeout = { period = "10s", terminate-after = 1 }
+
 [profile.e2e]
 # E2E (ignored) tests: flag SLOW after 10s, hard-kill after 30s
 slow-timeout = { period = "10s", terminate-after = 3 }
