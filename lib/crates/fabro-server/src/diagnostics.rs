@@ -19,6 +19,19 @@ use tokio::time::timeout;
 
 use crate::server::AppState;
 
+fn http_client_or_check(
+    name: &str,
+    status: CheckStatus,
+) -> Result<fabro_http::HttpClient, CheckResult> {
+    fabro_http::http_client().map_err(|err| CheckResult {
+        name: name.to_string(),
+        status,
+        summary: "client error".to_string(),
+        details: vec![CheckDetail::new(err.to_string())],
+        remediation: Some(err.to_string()),
+    })
+}
+
 #[derive(Debug, Serialize)]
 pub struct DiagnosticsReport {
     pub version:  String,
@@ -322,7 +335,10 @@ async fn check_github_app(state: &AppState) -> CheckResult {
             }
         };
 
-        let http = reqwest::Client::new();
+        let http = match http_client_or_check("GitHub CLI", CheckStatus::Error) {
+            Ok(http) => http,
+            Err(result) => return result,
+        };
         let probe = timeout(
             Duration::from_secs(15),
             http.get(format!("{}/user", fabro_github::github_api_base_url()))
@@ -341,7 +357,7 @@ async fn check_github_app(state: &AppState) -> CheckResult {
                 details:     Vec::new(),
                 remediation: None,
             },
-            Ok(Ok(response)) if response.status() == reqwest::StatusCode::UNAUTHORIZED => {
+            Ok(Ok(response)) if response.status() == fabro_http::StatusCode::UNAUTHORIZED => {
                 CheckResult {
                     name:        "GitHub CLI".to_string(),
                     status:      CheckStatus::Error,
@@ -462,7 +478,10 @@ async fn check_github_app(state: &AppState) -> CheckResult {
         }
     };
 
-    let http = reqwest::Client::new();
+    let http = match http_client_or_check("GitHub App", CheckStatus::Error) {
+        Ok(http) => http,
+        Err(result) => return result,
+    };
     let auth_result = timeout(
         Duration::from_secs(15),
         fabro_github::get_authenticated_app(&http, &jwt, &fabro_github::github_api_base_url()),
@@ -524,9 +543,13 @@ async fn check_brave_search(state: &AppState) -> CheckResult {
         };
     };
 
-    let probe = timeout(Duration::from_secs(15), async {
-        reqwest::Client::new()
-            .get("https://api.search.brave.com/res/v1/web/search?q=test&count=1")
+    let http = match http_client_or_check("Brave Search", CheckStatus::Warning) {
+        Ok(http) => http,
+        Err(result) => return result,
+    };
+
+    let probe = timeout(Duration::from_secs(15), async move {
+        http.get("https://api.search.brave.com/res/v1/web/search?q=test&count=1")
             .header("X-Subscription-Token", api_key)
             .send()
             .await

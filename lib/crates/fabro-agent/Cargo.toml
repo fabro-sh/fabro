@@ -31,6 +31,7 @@ fabro-model = { path = "../fabro-model" }
 fabro-mcp = { path = "../fabro-mcp" }
 fabro-sandbox = { path = "../fabro-sandbox" }
 fabro-util = { path = "../fabro-util" }
+fabro-http.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -40,7 +41,6 @@ futures.workspace = true
 async-trait.workspace = true
 jsonschema.workspace = true
 chrono.workspace = true
-reqwest.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
 dirs = "6"

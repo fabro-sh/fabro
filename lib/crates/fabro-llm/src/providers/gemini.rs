@@ -1,7 +1,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use fabro_http::HeaderMap;
 use futures::stream;
-use reqwest::header::HeaderMap;
 
 use crate::error::{
     Error, ProviderErrorDetail, ProviderErrorKind, error_from_grpc_status, error_from_status_code,
@@ -512,7 +512,7 @@ fn parse_usage(metadata: Option<&UsageMetadata>) -> TokenCounts {
 /// Like `send_and_read_response` but uses gRPC status code mapping when
 /// available.
 async fn send_gemini_response(
-    request: reqwest::RequestBuilder,
+    request: fabro_http::RequestBuilder,
 ) -> Result<(String, HeaderMap), Error> {
     let http_resp = request.send().await.map_err(|e| {
         if e.is_timeout() {
@@ -567,13 +567,13 @@ fn gemini_error(
     }
 }
 
-/// Send an HTTP request for streaming and return the `reqwest::Response`.
+/// Send an HTTP request for streaming and return the `fabro_http::Response`.
 ///
 /// Checks for HTTP errors before returning. On error, reads the body and
 /// maps it to `Error` using gRPC status code mapping when available.
 async fn send_streaming_request(
-    request: reqwest::RequestBuilder,
-) -> Result<reqwest::Response, Error> {
+    request: fabro_http::RequestBuilder,
+) -> Result<fabro_http::Response, Error> {
     let http_resp = request
         .send()
         .await
@@ -596,7 +596,7 @@ async fn send_streaming_request(
 /// Process a stream of SSE chunks from the Gemini `streamGenerateContent`
 /// endpoint and yield `StreamEvent` values.
 fn process_sse_stream(
-    http_resp: reqwest::Response,
+    http_resp: fabro_http::Response,
     model: String,
     rate_limit: Option<RateLimitInfo>,
     stream_read_timeout: Option<std::time::Duration>,
@@ -712,7 +712,7 @@ struct SseStreamState {
 
 impl SseStreamState {
     fn new(
-        http_resp: reqwest::Response,
+        http_resp: fabro_http::Response,
         model: String,
         rate_limit: Option<RateLimitInfo>,
         stream_read_timeout: Option<std::time::Duration>,

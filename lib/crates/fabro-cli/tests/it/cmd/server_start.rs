@@ -354,6 +354,7 @@ fn concurrent_autostart_converges_on_one_shared_daemon_and_cleans_up() {
             .env("HOME", home_dir)
             .env("FABRO_CONFIG", config_path)
             .env("FABRO_NO_UPGRADE_CHECK", "true")
+            .env("FABRO_HTTP_PROXY_POLICY", "disabled")
             .args(["ps", "-a", "--json"])
             .output()
             .expect("ps command should execute")
@@ -446,6 +447,7 @@ fn concurrent_autostart_converges_on_one_shared_daemon_and_cleans_up() {
         .env("NO_COLOR", "1")
         .env("FABRO_CONFIG", &config_path)
         .env("FABRO_NO_UPGRADE_CHECK", "true")
+        .env("FABRO_HTTP_PROXY_POLICY", "disabled")
         .args(["server", "stop", "--timeout", "0"])
         .output()
         .expect("server stop should execute");

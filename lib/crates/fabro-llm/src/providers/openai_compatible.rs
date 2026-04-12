@@ -54,8 +54,8 @@ impl Adapter {
         }
     }
 
-    /// Build a `reqwest::RequestBuilder` with default headers and auth.
-    fn build_request(&self, url: &str) -> reqwest::RequestBuilder {
+    /// Build a `fabro_http::RequestBuilder` with default headers and auth.
+    fn build_request(&self, url: &str) -> fabro_http::RequestBuilder {
         let mut req = self.http.client.post(url);
         // Apply default_headers first so adapter-specific headers can override
         for (key, value) in &self.http.default_headers {
@@ -688,7 +688,7 @@ struct StreamState {
 
 impl StreamState {
     fn new(
-        response: reqwest::Response,
+        response: fabro_http::Response,
         provider_name: String,
         model: String,
         rate_limit: Option<RateLimitInfo>,
@@ -969,7 +969,7 @@ mod tests {
     #[test]
     fn stream_state_process_text_chunks() {
         let http_resp =
-            reqwest::Response::from(http::Response::builder().status(200).body("").unwrap());
+            fabro_http::Response::from(http::Response::builder().status(200).body("").unwrap());
         let mut state = StreamState::new(
             http_resp,
             "test".into(),
@@ -1001,7 +1001,7 @@ mod tests {
     #[test]
     fn stream_state_process_tool_call_chunks() {
         let http_resp =
-            reqwest::Response::from(http::Response::builder().status(200).body("").unwrap());
+            fabro_http::Response::from(http::Response::builder().status(200).body("").unwrap());
         let mut state = StreamState::new(
             http_resp,
             "test".into(),
@@ -1032,7 +1032,7 @@ mod tests {
     #[test]
     fn stream_state_finish_events_text_only() {
         let http_resp =
-            reqwest::Response::from(http::Response::builder().status(200).body("").unwrap());
+            fabro_http::Response::from(http::Response::builder().status(200).body("").unwrap());
         let mut state = StreamState::new(
             http_resp,
             "test-provider".into(),
@@ -1075,7 +1075,7 @@ mod tests {
     #[test]
     fn stream_state_finish_events_with_tool_calls() {
         let http_resp =
-            reqwest::Response::from(http::Response::builder().status(200).body("").unwrap());
+            fabro_http::Response::from(http::Response::builder().status(200).body("").unwrap());
         let mut state = StreamState::new(
             http_resp,
             "test".into(),
@@ -1120,7 +1120,7 @@ mod tests {
     #[test]
     fn stream_state_uses_request_model_as_fallback() {
         let http_resp =
-            reqwest::Response::from(http::Response::builder().status(200).body("").unwrap());
+            fabro_http::Response::from(http::Response::builder().status(200).body("").unwrap());
         let mut state = StreamState::new(
             http_resp,
             "test".into(),

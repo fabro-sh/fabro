@@ -15,7 +15,7 @@ use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post, put};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use axum_extra::extract::cookie::Key;
 use base64::Engine as _;
@@ -26,16 +26,16 @@ pub use fabro_api::types::{
     ArtifactEntry, ArtifactListResponse, BilledTokenCounts as ApiBilledTokenCounts, BillingByModel,
     BillingStageRef, CompletionContentPart, CompletionMessage, CompletionMessageRole,
     CompletionResponse, CompletionToolChoiceMode, CompletionUsage, CreateCompletionRequest,
-    DiskUsageResponse, DiskUsageRunRow, DiskUsageSummaryRow, EventEnvelope as ApiEventEnvelope,
-    ModelReference, PaginatedEventList, PaginatedRunList, PaginationMeta, PreflightResponse,
-    PreviewUrlRequest, PreviewUrlResponse, PruneRunEntry, PruneRunsRequest, PruneRunsResponse,
-    QuestionType as ApiQuestionType, RenderWorkflowGraphDirection, RenderWorkflowGraphFormat,
-    RenderWorkflowGraphRequest, RunArtifactEntry, RunArtifactListResponse, RunBilling,
-    RunBillingStage, RunBillingTotals, RunControlAction as ApiRunControlAction, RunError,
-    RunManifest, RunStatus, RunStatusResponse, SandboxFileEntry, SandboxFileListResponse,
-    ServerSettings, SetSecretRequest, SshAccessRequest, SshAccessResponse, StartRunRequest,
-    StatusReason as ApiStatusReason, SubmitAnswerRequest, SystemInfoResponse, SystemRunCounts,
-    WriteBlobResponse,
+    CreateSecretRequest, DeleteSecretRequest, DiskUsageResponse, DiskUsageRunRow,
+    DiskUsageSummaryRow, EventEnvelope as ApiEventEnvelope, ModelReference, PaginatedEventList,
+    PaginatedRunList, PaginationMeta, PreflightResponse, PreviewUrlRequest, PreviewUrlResponse,
+    PruneRunEntry, PruneRunsRequest, PruneRunsResponse, QuestionType as ApiQuestionType,
+    RenderWorkflowGraphDirection, RenderWorkflowGraphFormat, RenderWorkflowGraphRequest,
+    RunArtifactEntry, RunArtifactListResponse, RunBilling, RunBillingStage, RunBillingTotals,
+    RunControlAction as ApiRunControlAction, RunError, RunManifest, RunStatus, RunStatusResponse,
+    SandboxFileEntry, SandboxFileListResponse, SecretType as ApiSecretType, ServerSettings,
+    SshAccessRequest, SshAccessResponse, StartRunRequest, StatusReason as ApiStatusReason,
+    SubmitAnswerRequest, SystemInfoResponse, SystemRunCounts, WriteBlobResponse,
 };
 use fabro_config::{Storage, resolve_server_from_file};
 use fabro_graphviz::render::GraphFormat;
@@ -112,7 +112,7 @@ use crate::error::ApiError;
 use crate::jwt_auth::{
     AuthMode, AuthenticatedService, AuthenticatedSubject, authenticate_service_parts,
 };
-use crate::secret_store::{SecretStore, SecretStoreError};
+use crate::secret_store::{SecretStore, SecretStoreError, SecretType as StoreSecretType};
 use crate::{demo, diagnostics, run_manifest, settings_view, static_files, web_auth};
 
 pub fn default_page_limit() -> u32 {
@@ -1027,10 +1027,11 @@ fn demo_routes() -> Router<Arc<AppState>> {
         .route("/insights/history", get(demo::list_query_history))
         .route("/models", get(list_models))
         .route("/models/{id}/test", post(test_model))
-        .route("/secrets", get(demo::list_secrets))
         .route(
-            "/secrets/{name}",
-            put(demo::set_secret).delete(demo::delete_secret),
+            "/secrets",
+            get(demo::list_secrets)
+                .post(demo::create_secret)
+                .delete(demo::delete_secret_by_name),
         )
         .route("/repos/github/{owner}/{name}", get(demo::get_github_repo))
         .route("/health/diagnostics", post(demo::run_diagnostics))
@@ -1106,8 +1107,12 @@ fn real_routes() -> Router<Arc<AppState>> {
         .route("/insights/history", get(not_implemented))
         .route("/models", get(list_models))
         .route("/models/{id}/test", post(test_model))
-        .route("/secrets", get(list_secrets))
-        .route("/secrets/{name}", put(set_secret).delete(delete_secret))
+        .route(
+            "/secrets",
+            get(list_secrets)
+                .post(create_secret)
+                .delete(delete_secret_by_name),
+        )
         .route("/repos/github/{owner}/{name}", get(get_github_repo))
         .route("/health/diagnostics", post(run_diagnostics))
         .route("/completions", post(create_completion))
@@ -1621,16 +1626,26 @@ async fn list_secrets(_auth: AuthenticatedService, State(state): State<Arc<AppSt
     (StatusCode::OK, Json(serde_json::json!({ "data": data }))).into_response()
 }
 
-async fn set_secret(
+fn secret_type_from_api(secret_type: ApiSecretType) -> StoreSecretType {
+    match secret_type {
+        ApiSecretType::Environment => StoreSecretType::Environment,
+        ApiSecretType::File => StoreSecretType::File,
+    }
+}
+
+async fn create_secret(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
-    Path(name): Path<String>,
-    Json(body): Json<SetSecretRequest>,
+    Json(body): Json<CreateSecretRequest>,
 ) -> Response {
+    let secret_type = secret_type_from_api(body.type_);
+    let name = body.name;
+    let value = body.value;
+    let description = body.description;
     let state_for_write = Arc::clone(&state);
     let result = spawn_blocking(move || {
         let mut store = state_for_write.secret_store.blocking_write();
-        store.set(&name, &body.value)
+        store.set(&name, &value, secret_type, description.as_deref())
     })
     .await;
 
@@ -1658,11 +1673,12 @@ async fn set_secret(
     }
 }
 
-async fn delete_secret(
+async fn delete_secret_by_name(
     _auth: AuthenticatedService,
     State(state): State<Arc<AppState>>,
-    Path(name): Path<String>,
+    Json(body): Json<DeleteSecretRequest>,
 ) -> Response {
+    let name = body.name;
     let state_for_write = Arc::clone(&state);
     let result = spawn_blocking(move || {
         let mut store = state_for_write.secret_store.blocking_write();
@@ -1708,7 +1724,7 @@ async fn get_github_repo(
     let settings = state.server_settings();
     let github_settings = &settings.integrations.github;
     let base_url = fabro_github::github_api_base_url();
-    let mut client = None;
+    let mut client: Option<fabro_http::HttpClient> = None;
     let token = match github_settings.strategy {
         GithubIntegrationStrategy::App => {
             let Some(app_id) = github_settings.app_id.as_ref() else {
@@ -1754,21 +1770,25 @@ async fn get_github_repo(
                 None => format!("https://github.com/organizations/{owner}/settings/installations"),
             };
 
-            let client_ref = client.get_or_insert_with(reqwest::Client::new);
-            let installed = match fabro_github::check_app_installed(
-                &*client_ref,
-                &jwt,
-                &owner,
-                &name,
-                &base_url,
-            )
-            .await
-            {
-                Ok(installed) => installed,
-                Err(err) => {
-                    return ApiError::new(StatusCode::BAD_GATEWAY, err).into_response();
-                }
-            };
+            if client.is_none() {
+                client = Some(match fabro_http::http_client() {
+                    Ok(http) => http,
+                    Err(err) => {
+                        return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.to_string())
+                            .into_response();
+                    }
+                });
+            }
+            let client_ref = client.as_ref().expect("client initialized above");
+            let installed =
+                match fabro_github::check_app_installed(client_ref, &jwt, &owner, &name, &base_url)
+                    .await
+                {
+                    Ok(installed) => installed,
+                    Err(err) => {
+                        return ApiError::new(StatusCode::BAD_GATEWAY, err).into_response();
+                    }
+                };
 
             if !installed {
                 return (
@@ -1787,7 +1807,7 @@ async fn get_github_repo(
             }
 
             match fabro_github::create_installation_access_token_with_permissions(
-                &*client_ref,
+                client_ref,
                 &jwt,
                 &owner,
                 &name,
@@ -1816,7 +1836,16 @@ async fn get_github_repo(
         },
     };
 
-    let client = client.unwrap_or_else(reqwest::Client::new);
+    let client = match client {
+        Some(client) => client,
+        None => match fabro_http::http_client() {
+            Ok(http) => http,
+            Err(err) => {
+                return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, err.to_string())
+                    .into_response();
+            }
+        },
+    };
     let repo_response = match client
         .get(format!("{base_url}/repos/{owner}/{name}"))
         .header("Authorization", format!("Bearer {token}"))
@@ -1830,7 +1859,7 @@ async fn get_github_repo(
             if github_settings.strategy == GithubIntegrationStrategy::GhCli
                 && matches!(
                     response.status(),
-                    reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::NOT_FOUND
+                    fabro_http::StatusCode::FORBIDDEN | fabro_http::StatusCode::NOT_FOUND
                 ) =>
         {
             return (
@@ -1849,7 +1878,7 @@ async fn get_github_repo(
         }
         Ok(response)
             if github_settings.strategy == GithubIntegrationStrategy::GhCli
-                && response.status() == reqwest::StatusCode::UNAUTHORIZED =>
+                && response.status() == fabro_http::StatusCode::UNAUTHORIZED =>
         {
             return ApiError::new(
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -6184,6 +6213,80 @@ mod tests {
 
     fn api(path: &str) -> String {
         format!("/api/v1{path}")
+    }
+
+    #[tokio::test]
+    async fn create_secret_stores_file_secret_and_excludes_it_from_snapshot() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri(api("/secrets"))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({
+                    "name": "/tmp/test.pem",
+                    "value": "pem-data",
+                    "type": "file",
+                    "description": "Test certificate",
+                }))
+                .unwrap(),
+            ))
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = body_json(response.into_body()).await;
+        assert_eq!(body["name"], "/tmp/test.pem");
+        assert_eq!(body["type"], "file");
+        assert_eq!(body["description"], "Test certificate");
+
+        let store = state.secret_store.read().await;
+        assert!(!store.snapshot().contains_key("/tmp/test.pem"));
+        assert_eq!(store.file_secrets(), vec![(
+            "/tmp/test.pem".to_string(),
+            "pem-data".to_string()
+        )]);
+    }
+
+    #[tokio::test]
+    async fn delete_secret_by_name_removes_file_secret() {
+        let state = create_app_state();
+        let app = build_router(Arc::clone(&state), AuthMode::Disabled);
+
+        let create_req = Request::builder()
+            .method("POST")
+            .uri(api("/secrets"))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({
+                    "name": "/tmp/test.pem",
+                    "value": "pem-data",
+                    "type": "file",
+                }))
+                .unwrap(),
+            ))
+            .unwrap();
+        let create_response = app.clone().oneshot(create_req).await.unwrap();
+        assert_eq!(create_response.status(), StatusCode::OK);
+
+        let delete_req = Request::builder()
+            .method("DELETE")
+            .uri(api("/secrets"))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_string(&serde_json::json!({
+                    "name": "/tmp/test.pem",
+                }))
+                .unwrap(),
+            ))
+            .unwrap();
+
+        let delete_response = app.oneshot(delete_req).await.unwrap();
+        assert_eq!(delete_response.status(), StatusCode::NO_CONTENT);
+        assert!(state.secret_store.read().await.list().is_empty());
     }
 
     #[tokio::test]

@@ -6,14 +6,14 @@ use std::time::Duration;
 use anyhow::{Context as _, Result, anyhow, bail};
 use bytes::Bytes;
 use fabro_api::types;
+use fabro_http::header::{CONTENT_LENGTH, CONTENT_TYPE};
+use fabro_http::multipart::{Form, Part};
 use fabro_server::bind::Bind;
 use fabro_store::{EventEnvelope, RunSummary, StageId};
 use fabro_types::settings::SettingsLayer;
 use fabro_types::{RunBlobId, RunEvent, RunId};
 use fabro_workflow::artifact_snapshot::CapturedArtifactInfo;
 use futures::StreamExt;
-use reqwest::header::{CONTENT_LENGTH, CONTENT_TYPE};
-use reqwest::multipart::{Form, Part};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::fs::File;
@@ -28,7 +28,7 @@ use crate::{sse, user_config};
 #[derive(Clone)]
 pub(crate) struct ServerStoreClient {
     client:      fabro_api::Client,
-    http_client: reqwest::Client,
+    http_client: fabro_http::HttpClient,
     base_url:    String,
 }
 
@@ -176,7 +176,7 @@ fn normalize_remote_server_target(api_url: &str) -> String {
         .to_string()
 }
 
-fn build_unix_socket_http_client(path: &Path) -> Result<reqwest::Client> {
+fn build_unix_socket_http_client(path: &Path) -> Result<fabro_http::HttpClient> {
     cli_http_client_builder()
         .unix_socket(path)
         .no_proxy()
@@ -184,7 +184,7 @@ fn build_unix_socket_http_client(path: &Path) -> Result<reqwest::Client> {
         .context("Failed to build Unix-socket HTTP client for fabro server")
 }
 
-fn unix_socket_api_client_bundle(http_client: reqwest::Client) -> ServerStoreClient {
+fn unix_socket_api_client_bundle(http_client: fabro_http::HttpClient) -> ServerStoreClient {
     let base_url = "http://fabro".to_string();
     let client = fabro_api::Client::new_with_client(&base_url, http_client.clone());
     ServerStoreClient {
@@ -206,7 +206,7 @@ async fn connect_unix_socket_api_client_bundle(path: &Path) -> Result<ServerStor
     Ok(unix_socket_api_client_bundle(http_client))
 }
 
-async fn check_server_ready(http_client: &reqwest::Client) -> Result<()> {
+async fn check_server_ready(http_client: &fabro_http::HttpClient) -> Result<()> {
     match http_client.get("http://fabro/health").send().await {
         Ok(response) if response.status().is_success() => Ok(()),
         Ok(response) => bail!("server health check returned status {}", response.status()),
@@ -214,7 +214,7 @@ async fn check_server_ready(http_client: &reqwest::Client) -> Result<()> {
     }
 }
 
-async fn wait_for_server_ready(http_client: &reqwest::Client) -> Result<()> {
+async fn wait_for_server_ready(http_client: &fabro_http::HttpClient) -> Result<()> {
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     let mut last_error = None;
 
@@ -270,7 +270,7 @@ impl ServerStoreClient {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn http_client(&self) -> &reqwest::Client {
+    pub(crate) fn http_client(&self) -> &fabro_http::HttpClient {
         &self.http_client
     }
 
@@ -586,8 +586,8 @@ impl ServerStoreClient {
         Ok(bytes)
     }
 
-    fn stage_artifacts_url(&self, run_id: &RunId, stage_id: &StageId) -> Result<reqwest::Url> {
-        let mut url = reqwest::Url::parse(&self.base_url)
+    fn stage_artifacts_url(&self, run_id: &RunId, stage_id: &StageId) -> Result<fabro_http::Url> {
+        let mut url = fabro_http::Url::parse(&self.base_url)
             .with_context(|| format!("invalid server base URL {}", self.base_url))?;
         url.path_segments_mut()
             .map_err(|()| anyhow!("server base URL cannot accept path segments"))?
@@ -622,7 +622,7 @@ impl ServerStoreClient {
             .await
             .with_context(|| format!("failed to stat artifact {}", path.display()))?
             .len();
-        let body = reqwest::Body::wrap_stream(ReaderStream::new(file));
+        let body = fabro_http::Body::wrap_stream(ReaderStream::new(file));
 
         let response = self
             .http_client
@@ -672,7 +672,7 @@ impl ServerStoreClient {
             file_parts.push((
                 part_name,
                 Part::stream_with_length(
-                    reqwest::Body::wrap_stream(ReaderStream::new(file)),
+                    fabro_http::Body::wrap_stream(ReaderStream::new(file)),
                     content_length,
                 )
                 .file_name(artifact.path.clone()),
@@ -821,7 +821,7 @@ where
     }
 }
 
-async fn ensure_raw_response_success(response: reqwest::Response) -> Result<()> {
+async fn ensure_raw_response_success(response: fabro_http::Response) -> Result<()> {
     if response.status().is_success() {
         return Ok(());
     }
@@ -853,10 +853,10 @@ where
 {
     match err {
         progenitor_client::Error::ErrorResponse(response) => {
-            response.status() == reqwest::StatusCode::NOT_FOUND
+            response.status() == fabro_http::StatusCode::NOT_FOUND
         }
         progenitor_client::Error::UnexpectedResponse(response) => {
-            response.status() == reqwest::StatusCode::NOT_FOUND
+            response.status() == fabro_http::StatusCode::NOT_FOUND
         }
         _ => false,
     }

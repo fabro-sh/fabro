@@ -1,6 +1,6 @@
 mod common;
 
-use reqwest::header::AUTHORIZATION;
+use fabro_http::header::AUTHORIZATION;
 use serde_json::json;
 
 #[tokio::test]

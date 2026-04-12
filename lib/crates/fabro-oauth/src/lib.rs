@@ -107,7 +107,7 @@ pub struct TokenResponse {
 // ---------------------------------------------------------------------------
 
 pub async fn exchange_code_for_tokens(
-    client: &reqwest::Client,
+    client: &fabro_http::HttpClient,
     issuer: &str,
     client_id: &str,
     code: &str,
@@ -154,7 +154,7 @@ pub async fn exchange_code_for_tokens(
 // ---------------------------------------------------------------------------
 
 pub async fn refresh_access_token(
-    client: &reqwest::Client,
+    client: &fabro_http::HttpClient,
     issuer: &str,
     client_id: &str,
     refresh_token: &str,
@@ -394,7 +394,7 @@ pub async fn run_browser_flow(
         .map_err(|_| "Did not receive authorization code".to_string())?
         .map_err(|e| format!("Authorization failed: {e}"))?;
 
-    let client = reqwest::Client::new();
+    let client = fabro_http::http_client().map_err(|e| e.to_string())?;
     exchange_code_for_tokens(
         &client,
         issuer,
@@ -414,8 +414,8 @@ pub async fn run_browser_flow(
 mod tests {
     use super::*;
 
-    fn test_http_client() -> reqwest::Client {
-        reqwest::Client::builder().no_proxy().build().unwrap()
+    fn test_http_client() -> fabro_http::HttpClient {
+        fabro_http::test_http_client().unwrap()
     }
 
     // -----------------------------------------------------------------------

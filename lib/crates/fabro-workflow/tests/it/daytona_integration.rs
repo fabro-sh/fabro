@@ -1716,7 +1716,7 @@ async fn daytona_toolbox_idle_diagnostic() {
 
                 // Diagnose with raw HTTP calls
                 let api_key = std::env::var("DAYTONA_API_KEY").unwrap_or_default();
-                let client = reqwest::Client::builder()
+                let client = fabro_http::HttpClientBuilder::new()
                     .timeout(std::time::Duration::from_secs(15))
                     .build()
                     .unwrap();

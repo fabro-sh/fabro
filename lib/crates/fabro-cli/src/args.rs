@@ -489,12 +489,22 @@ pub(crate) struct SecretRmArgs {
     pub(crate) key: String,
 }
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub(crate) enum SecretTypeArg {
+    Environment,
+    File,
+}
+
 #[derive(Args)]
 pub(crate) struct SecretSetArgs {
     /// Name of the secret
-    pub(crate) key:   String,
+    pub(crate) key:         String,
     /// Value to store
-    pub(crate) value: String,
+    pub(crate) value:       String,
+    #[arg(long, value_enum, default_value = "environment")]
+    pub(crate) r#type:      SecretTypeArg,
+    #[arg(long)]
+    pub(crate) description: Option<String>,
 }
 
 #[derive(Debug, Args)]

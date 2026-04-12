@@ -22,13 +22,15 @@ import { DUMMY_BASE_URL, assertParamExists, setApiKeyToObject, setBasicAuthToObj
 // @ts-ignore
 import { BASE_PATH, COLLECTION_FORMATS, type RequestArgs, BaseAPI, RequiredError, operationServerMap } from '../base';
 // @ts-ignore
+import type { CreateSecretRequest } from '../models';
+// @ts-ignore
+import type { DeleteSecretRequest } from '../models';
+// @ts-ignore
 import type { ErrorResponse } from '../models';
 // @ts-ignore
 import type { SecretListResponse } from '../models';
 // @ts-ignore
 import type { SecretMetadata } from '../models';
-// @ts-ignore
-import type { SetSecretRequest } from '../models';
 /**
  * SecretsApi - axios parameter creator
  */
@@ -36,16 +38,57 @@ export const SecretsApiAxiosParamCreator = function (configuration?: Configurati
     return {
         /**
          * 
-         * @summary Delete a stored secret
-         * @param {string} name 
+         * @summary Store or update a secret
+         * @param {CreateSecretRequest} createSecretRequest 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        deleteSecret: async (name: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'name' is not null or undefined
-            assertParamExists('deleteSecret', 'name', name)
-            const localVarPath = `/api/v1/secrets/{name}`
-                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
+        createSecret: async (createSecretRequest: CreateSecretRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'createSecretRequest' is not null or undefined
+            assertParamExists('createSecret', 'createSecretRequest', createSecretRequest)
+            const localVarPath = `/api/v1/secrets`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            // authentication mTLS required
+            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
+
+            // authentication BearerAuth required
+            // http bearer authentication required
+            await setBearerAuthToObject(localVarHeaderParameter, configuration)
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(createSecretRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * 
+         * @summary Delete a stored secret
+         * @param {DeleteSecretRequest} deleteSecretRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        deleteSecretByName: async (deleteSecretRequest: DeleteSecretRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'deleteSecretRequest' is not null or undefined
+            assertParamExists('deleteSecretByName', 'deleteSecretRequest', deleteSecretRequest)
+            const localVarPath = `/api/v1/secrets`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -64,11 +107,13 @@ export const SecretsApiAxiosParamCreator = function (configuration?: Configurati
             // http bearer authentication required
             await setBearerAuthToObject(localVarHeaderParameter, configuration)
 
+            localVarHeaderParameter['Content-Type'] = 'application/json';
             localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(deleteSecretRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -112,52 +157,6 @@ export const SecretsApiAxiosParamCreator = function (configuration?: Configurati
                 options: localVarRequestOptions,
             };
         },
-        /**
-         * 
-         * @summary Store or update a secret
-         * @param {string} name 
-         * @param {SetSecretRequest} setSecretRequest 
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        setSecret: async (name: string, setSecretRequest: SetSecretRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'name' is not null or undefined
-            assertParamExists('setSecret', 'name', name)
-            // verify required parameter 'setSecretRequest' is not null or undefined
-            assertParamExists('setSecret', 'setSecretRequest', setSecretRequest)
-            const localVarPath = `/api/v1/secrets/{name}`
-                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            // authentication mTLS required
-            await setApiKeyToObject(localVarHeaderParameter, "X-mTLS-Client-CN", configuration)
-
-            // authentication BearerAuth required
-            // http bearer authentication required
-            await setBearerAuthToObject(localVarHeaderParameter, configuration)
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(setSecretRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
     }
 };
 
@@ -169,15 +168,28 @@ export const SecretsApiFp = function(configuration?: Configuration) {
     return {
         /**
          * 
-         * @summary Delete a stored secret
-         * @param {string} name 
+         * @summary Store or update a secret
+         * @param {CreateSecretRequest} createSecretRequest 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async deleteSecret(name: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.deleteSecret(name, options);
+        async createSecret(createSecretRequest: CreateSecretRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SecretMetadata>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.createSecret(createSecretRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['SecretsApi.deleteSecret']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['SecretsApi.createSecret']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * 
+         * @summary Delete a stored secret
+         * @param {DeleteSecretRequest} deleteSecretRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async deleteSecretByName(deleteSecretRequest: DeleteSecretRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.deleteSecretByName(deleteSecretRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['SecretsApi.deleteSecretByName']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -192,20 +204,6 @@ export const SecretsApiFp = function(configuration?: Configuration) {
             const localVarOperationServerBasePath = operationServerMap['SecretsApi.listSecrets']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
-        /**
-         * 
-         * @summary Store or update a secret
-         * @param {string} name 
-         * @param {SetSecretRequest} setSecretRequest 
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async setSecret(name: string, setSecretRequest: SetSecretRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SecretMetadata>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.setSecret(name, setSecretRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['SecretsApi.setSecret']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
     }
 };
 
@@ -217,13 +215,23 @@ export const SecretsApiFactory = function (configuration?: Configuration, basePa
     return {
         /**
          * 
-         * @summary Delete a stored secret
-         * @param {string} name 
+         * @summary Store or update a secret
+         * @param {CreateSecretRequest} createSecretRequest 
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        deleteSecret(name: string, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.deleteSecret(name, options).then((request) => request(axios, basePath));
+        createSecret(createSecretRequest: CreateSecretRequest, options?: RawAxiosRequestConfig): AxiosPromise<SecretMetadata> {
+            return localVarFp.createSecret(createSecretRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * 
+         * @summary Delete a stored secret
+         * @param {DeleteSecretRequest} deleteSecretRequest 
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        deleteSecretByName(deleteSecretRequest: DeleteSecretRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.deleteSecretByName(deleteSecretRequest, options).then((request) => request(axios, basePath));
         },
         /**
          * Returns stored secret names and timestamps. Secret values are never exposed.
@@ -234,17 +242,6 @@ export const SecretsApiFactory = function (configuration?: Configuration, basePa
         listSecrets(options?: RawAxiosRequestConfig): AxiosPromise<SecretListResponse> {
             return localVarFp.listSecrets(options).then((request) => request(axios, basePath));
         },
-        /**
-         * 
-         * @summary Store or update a secret
-         * @param {string} name 
-         * @param {SetSecretRequest} setSecretRequest 
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        setSecret(name: string, setSecretRequest: SetSecretRequest, options?: RawAxiosRequestConfig): AxiosPromise<SecretMetadata> {
-            return localVarFp.setSecret(name, setSecretRequest, options).then((request) => request(axios, basePath));
-        },
     };
 };
 
@@ -254,13 +251,24 @@ export const SecretsApiFactory = function (configuration?: Configuration, basePa
 export class SecretsApi extends BaseAPI {
     /**
      * 
-     * @summary Delete a stored secret
-     * @param {string} name 
+     * @summary Store or update a secret
+     * @param {CreateSecretRequest} createSecretRequest 
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public deleteSecret(name: string, options?: RawAxiosRequestConfig) {
-        return SecretsApiFp(this.configuration).deleteSecret(name, options).then((request) => request(this.axios, this.basePath));
+    public createSecret(createSecretRequest: CreateSecretRequest, options?: RawAxiosRequestConfig) {
+        return SecretsApiFp(this.configuration).createSecret(createSecretRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * 
+     * @summary Delete a stored secret
+     * @param {DeleteSecretRequest} deleteSecretRequest 
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public deleteSecretByName(deleteSecretRequest: DeleteSecretRequest, options?: RawAxiosRequestConfig) {
+        return SecretsApiFp(this.configuration).deleteSecretByName(deleteSecretRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -271,18 +279,6 @@ export class SecretsApi extends BaseAPI {
      */
     public listSecrets(options?: RawAxiosRequestConfig) {
         return SecretsApiFp(this.configuration).listSecrets(options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * 
-     * @summary Store or update a secret
-     * @param {string} name 
-     * @param {SetSecretRequest} setSecretRequest 
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public setSecret(name: string, setSecretRequest: SetSecretRequest, options?: RawAxiosRequestConfig) {
-        return SecretsApiFp(this.configuration).setSecret(name, setSecretRequest, options).then((request) => request(this.axios, this.basePath));
     }
 }
 

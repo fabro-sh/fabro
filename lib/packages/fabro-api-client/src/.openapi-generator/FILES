@@ -42,6 +42,8 @@ models/completion-tool-choice.ts
 models/completion-tool-definition.ts
 models/completion-usage.ts
 models/create-completion-request.ts
+models/create-secret-request.ts
+models/delete-secret-request.ts
 models/diagnostics-check.ts
 models/diagnostics-detail.ts
 models/diagnostics-report.ts
@@ -142,7 +144,7 @@ models/save-query-request.ts
 models/saved-query.ts
 models/secret-list-response.ts
 models/secret-metadata.ts
-models/set-secret-request.ts
+models/secret-type.ts
 models/ssh-access-request.ts
 models/ssh-access-response.ts
 models/stage-status.ts

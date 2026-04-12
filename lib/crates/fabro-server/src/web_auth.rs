@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{debug, error, info, warn};
 
+use crate::secret_store::SecretType;
 use crate::server::AppState;
 
 pub const SESSION_COOKIE_NAME: &str = "__fabro_session";
@@ -207,7 +208,7 @@ async fn login_github(State(state): State<Arc<AppState>>) -> Response {
 
     let state_token = format!("fabro-{}", ulid::Ulid::new());
     let authorize_url =
-        reqwest::Url::parse_with_params("https://github.com/login/oauth/authorize", &[
+        fabro_http::Url::parse_with_params("https://github.com/login/oauth/authorize", &[
             ("client_id", client_id.as_str()),
             ("redirect_uri", &format!("{web_url}/auth/callback/github")),
             ("scope", "read:user user:email"),
@@ -286,7 +287,16 @@ async fn callback_github(
         }
     };
 
-    let http = reqwest::Client::new();
+    let http = match fabro_http::http_client() {
+        Ok(http) => http,
+        Err(err) => {
+            error!(error = %err, "OAuth callback failed: could not build GitHub HTTP client");
+            return json_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                json!({"error": format!("Failed to build GitHub HTTP client: {err}")}),
+            );
+        }
+    };
     let token = match http
         .post("https://github.com/login/oauth/access_token")
         .header(header::ACCEPT, "application/json")
@@ -522,10 +532,19 @@ async fn setup_register(
         .get(header::ORIGIN)
         .or_else(|| headers.get(header::REFERER))
         .and_then(|v| v.to_str().ok())
-        .and_then(|s| reqwest::Url::parse(s).ok())
+        .and_then(|s| fabro_http::Url::parse(s).ok())
         .map(|url| format!("{}://{}", url.scheme(), url.authority()));
 
-    let http = reqwest::Client::new();
+    let http = match fabro_http::http_client() {
+        Ok(http) => http,
+        Err(err) => {
+            error!(error = %err, "Setup register failed: could not build GitHub HTTP client");
+            return json_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                json!({"error": format!("Failed to build GitHub HTTP client: {err}")}),
+            );
+        }
+    };
     let response = match http
         .post(format!(
             "https://api.github.com/app-manifests/{}/conversions",
@@ -637,7 +656,7 @@ async fn setup_register(
     {
         let mut store = state.secret_store.write().await;
         for (name, value) in secret_updates {
-            if let Err(err) = store.set(name, &value) {
+            if let Err(err) = store.set(name, &value, SecretType::Environment, None) {
                 error!(error = %err, secret = name, "Setup register failed: could not save secret");
                 return json_response(
                     StatusCode::INTERNAL_SERVER_ERROR,

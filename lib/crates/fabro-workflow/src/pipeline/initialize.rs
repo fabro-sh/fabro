@@ -231,7 +231,7 @@ async fn mint_github_token(
     };
     let jwt = fabro_github::sign_app_jwt(&creds.app_id, &creds.private_key_pem)
         .map_err(|e| Error::engine(e.clone()))?;
-    let client = reqwest::Client::new();
+    let client = fabro_http::http_client().map_err(|e| Error::engine(e.to_string()))?;
     let perms_json = serde_json::to_value(permissions).map_err(|e| Error::engine(e.to_string()))?;
     fabro_github::create_installation_access_token_with_permissions(
         &client,

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use fabro_http::{HeaderMap, HeaderName, HeaderValue};
 use rmcp::model::{CallToolRequestParams, CallToolResult};
 use rmcp::service::{RoleClient, RunningService, serve_client};
 use rmcp::transport::StreamableHttpClientTransport;
@@ -26,7 +26,7 @@ enum ClientState {
 
 enum PendingTransport {
     Stdio(TokioChildProcess),
-    Http(StreamableHttpClientTransport<reqwest::Client>),
+    Http(StreamableHttpClientTransport<fabro_http::HttpClient>),
 }
 
 /// MCP client wrapping the rmcp SDK. Handles stdio and HTTP transports.
@@ -66,7 +66,7 @@ impl McpClient {
             McpTransport::Http { url, headers } => {
                 let http_config = StreamableHttpClientTransportConfig::with_uri(url.clone());
 
-                let mut builder = reqwest::Client::builder();
+                let mut builder = fabro_http::HttpClientBuilder::new();
                 if !headers.is_empty() {
                     let mut header_map = HeaderMap::new();
                     for (key, value) in headers {

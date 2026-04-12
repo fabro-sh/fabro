@@ -80,9 +80,9 @@ impl Adapter {
         }
     }
 
-    /// Build a `reqwest::RequestBuilder` with default headers, org/project
+    /// Build a `fabro_http::RequestBuilder` with default headers, org/project
     /// headers, and auth.
-    fn build_request(&self, url: &str) -> reqwest::RequestBuilder {
+    fn build_request(&self, url: &str) -> fabro_http::RequestBuilder {
         let mut req = self.http.client.post(url);
         // Apply default_headers first so adapter-specific headers can override
         for (key, value) in &self.http.default_headers {
@@ -1597,7 +1597,7 @@ mod tests {
 
     fn empty_sse_state() -> SseStreamState {
         let http_resp = http::Response::builder().status(200).body("").unwrap();
-        let response = reqwest::Response::from(http_resp);
+        let response = fabro_http::Response::from(http_resp);
         SseStreamState {
             line_reader:             LineReader::new(response, None),
             model:                   String::new(),

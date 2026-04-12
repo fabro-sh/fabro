@@ -47,7 +47,7 @@ fn test_secret_lifecycle() {
     // 2. list -> contains FOO
     secret(&["list"])
         .success()
-        .stdout(predicates::str::contains("FOO"));
+        .stdout(predicates::str::contains("FOO\tenvironment"));
 
     // 3. update FOO
     secret(&["set", "FOO", "updated"]).success();
@@ -90,7 +90,7 @@ fn test_secret_list_alias_ls() {
         .args(["ls"])
         .assert()
         .success()
-        .stdout(predicates::str::contains("X"));
+        .stdout(predicates::str::contains("X\tenvironment"));
 }
 
 #[test]
@@ -122,6 +122,36 @@ fn test_secret_value_with_equals() {
         .args(["list"])
         .assert()
         .success()
-        .stdout(predicates::str::contains("URL"))
+        .stdout(predicates::str::contains("URL\tenvironment"))
         .stdout(predicates::str::contains("https://x.com?a=1&b=2").not());
+}
+
+#[test]
+fn test_file_secret_lifecycle() {
+    let context = test_context!();
+
+    let secret =
+        |args: &[&str]| -> assert_cmd::assert::Assert { context.secret().args(args).assert() };
+
+    secret(&[
+        "set",
+        "/tmp/test.pem",
+        "pem-data",
+        "--type",
+        "file",
+        "--description",
+        "Test certificate",
+    ])
+    .success();
+
+    secret(&["list"])
+        .success()
+        .stdout(predicates::str::contains("/tmp/test.pem\tfile"))
+        .stdout(predicates::str::contains("pem-data").not());
+
+    secret(&["rm", "/tmp/test.pem"]).success();
+
+    secret(&["list"])
+        .success()
+        .stdout(predicates::str::contains("/tmp/test.pem").not());
 }

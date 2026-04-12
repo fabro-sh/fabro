@@ -19,11 +19,11 @@ const GITHUB_REPO: &str = "fabro-sh/fabro";
 
 enum Backend {
     Gh,
-    Http(reqwest::Client),
+    Http(fabro_http::HttpClient),
 }
 
-fn http_client() -> Result<reqwest::Client> {
-    reqwest::Client::builder()
+fn http_client() -> Result<fabro_http::HttpClient> {
+    fabro_http::HttpClientBuilder::new()
         .user_agent("fabro-cli")
         .build()
         .context("failed to build HTTP client")

@@ -128,7 +128,7 @@ fn normalize_issue(node: &Value) -> Result<Issue, String> {
 }
 
 async fn execute_graphql(
-    client: &reqwest::Client,
+    client: &fabro_http::HttpClient,
     config: &LinearOptions,
     query: &str,
     variables: Value,
@@ -155,12 +155,16 @@ fn extract_issues(response: &Value) -> Result<Vec<Issue>, String> {
 /// A `Tracker` implementation backed by Linear.
 pub struct LinearTracker {
     config:       LinearOptions,
-    client:       reqwest::Client,
+    client:       fabro_http::HttpClient,
     project_slug: String,
 }
 
 impl LinearTracker {
-    pub fn new(config: LinearOptions, client: reqwest::Client, project_slug: String) -> Self {
+    pub fn new(
+        config: LinearOptions,
+        client: fabro_http::HttpClient,
+        project_slug: String,
+    ) -> Self {
         Self {
             config,
             client,
@@ -355,8 +359,8 @@ impl Tracker for LinearTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn test_http_client() -> reqwest::Client {
-        reqwest::Client::builder().no_proxy().build().unwrap()
+    fn test_http_client() -> fabro_http::HttpClient {
+        fabro_http::test_http_client().unwrap()
     }
 
     fn mock_config(server_url: &str) -> LinearOptions {

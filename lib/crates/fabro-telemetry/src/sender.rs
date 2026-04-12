@@ -2,7 +2,6 @@ use std::path::Path;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use reqwest::blocking::Client as BlockingClient;
 use uuid::Uuid;
 
 use crate::event::Track;
@@ -102,7 +101,7 @@ pub fn upload_blocking(tracks: &[Track]) -> anyhow::Result<()> {
 
     let auth = STANDARD.encode(format!("{write_key}:"));
 
-    let resp = BlockingClient::new()
+    let resp = fabro_http::blocking_http_client()?
         .post(format!("{SEGMENT_BASE_URL}/v1/batch"))
         .header("Authorization", format!("Basic {auth}"))
         .json(&payload)
@@ -130,7 +129,7 @@ pub async fn upload(path: &Path) -> anyhow::Result<()> {
 
     let auth = STANDARD.encode(format!("{write_key}:"));
 
-    let resp = reqwest::Client::new()
+    let resp = fabro_http::http_client()?
         .post(format!("{SEGMENT_BASE_URL}/v1/batch"))
         .header("Authorization", format!("Basic {auth}"))
         .json(&payload)

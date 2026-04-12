@@ -110,7 +110,7 @@ struct TestServerRecord {
     bind: Bind,
 }
 
-fn server_endpoint(storage_dir: &Path) -> (reqwest::Client, String) {
+fn server_endpoint(storage_dir: &Path) -> (fabro_http::HttpClient, String) {
     let record_path = Storage::new(storage_dir).server_state().record_path();
     let record: TestServerRecord = serde_json::from_str(
         &std::fs::read_to_string(record_path).expect("server record should exist"),
@@ -118,7 +118,7 @@ fn server_endpoint(storage_dir: &Path) -> (reqwest::Client, String) {
     .expect("server record should parse");
     match record.bind {
         Bind::Unix(path) => (
-            reqwest::ClientBuilder::new()
+            fabro_http::HttpClientBuilder::new()
                 .unix_socket(path)
                 .no_proxy()
                 .build()
@@ -126,7 +126,7 @@ fn server_endpoint(storage_dir: &Path) -> (reqwest::Client, String) {
             "http://fabro".to_string(),
         ),
         Bind::Tcp(addr) => (
-            reqwest::ClientBuilder::new()
+            fabro_http::HttpClientBuilder::new()
                 .no_proxy()
                 .build()
                 .expect("test TCP HTTP client should build"),

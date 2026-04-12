@@ -11,6 +11,10 @@ pub fn github_api_base_url() -> String {
     std::env::var("GITHUB_BASE_URL").unwrap_or_else(|_| GITHUB_API_BASE_URL.to_string())
 }
 
+fn http_client() -> Result<fabro_http::HttpClient, String> {
+    fabro_http::http_client().map_err(|err| err.to_string())
+}
+
 /// Detailed information about a pull request from the GitHub API.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PullRequestDetail {
@@ -188,7 +192,7 @@ impl HttpResponse {
 
 /// Abstract HTTP client for GitHub API calls.
 ///
-/// Implemented for `reqwest::Client` in production; tests use a mock
+/// Implemented for `fabro_http::HttpClient` in production; tests use a mock
 /// to avoid TCP/process overhead.
 pub trait HttpClient: Send + Sync {
     fn request(
@@ -200,7 +204,7 @@ pub trait HttpClient: Send + Sync {
     ) -> impl std::future::Future<Output = Result<HttpResponse, String>> + Send;
 }
 
-impl HttpClient for reqwest::Client {
+impl HttpClient for fabro_http::HttpClient {
     async fn request(
         &self,
         method: HttpMethod,
@@ -476,7 +480,7 @@ pub async fn create_pull_request(
         node_id:  String,
     }
 
-    let client = reqwest::Client::new();
+    let client = http_client()?;
     let token = creds
         .resolve_bearer_token(
             &client,
@@ -573,7 +577,7 @@ pub async fn enable_auto_merge(
     merge_method: AutoMergeMethod,
     base_url: &str,
 ) -> Result<(), String> {
-    let client = reqwest::Client::new();
+    let client = http_client()?;
     let token = creds
         .resolve_bearer_token(
             &client,
@@ -699,15 +703,8 @@ pub async fn branch_exists(
     branch: &str,
     base_url: &str,
 ) -> Result<bool, String> {
-    branch_exists_with_client(
-        &reqwest::Client::new(),
-        creds,
-        owner,
-        repo,
-        branch,
-        base_url,
-    )
-    .await
+    let client = http_client()?;
+    branch_exists_with_client(&client, creds, owner, repo, branch, base_url).await
 }
 
 async fn branch_exists_with_client(
@@ -856,7 +853,7 @@ pub async fn resolve_clone_credentials(
     let token = match creds {
         GitHubCredentials::Token(token) => token.clone(),
         GitHubCredentials::App(_) => {
-            let client = reqwest::Client::new();
+            let client = http_client()?;
             creds
                 .resolve_bearer_token(
                     &client,
@@ -904,15 +901,8 @@ pub async fn get_pull_request(
     number: u64,
     base_url: &str,
 ) -> Result<PullRequestDetail, String> {
-    get_pull_request_with_client(
-        &reqwest::Client::new(),
-        creds,
-        owner,
-        repo,
-        number,
-        base_url,
-    )
-    .await
+    let client = http_client()?;
+    get_pull_request_with_client(&client, creds, owner, repo, number, base_url).await
 }
 
 async fn get_pull_request_with_client(
@@ -976,16 +966,8 @@ pub async fn merge_pull_request(
     method: &str,
     base_url: &str,
 ) -> Result<(), String> {
-    merge_pull_request_with_client(
-        &reqwest::Client::new(),
-        creds,
-        owner,
-        repo,
-        number,
-        method,
-        base_url,
-    )
-    .await
+    let client = http_client()?;
+    merge_pull_request_with_client(&client, creds, owner, repo, number, method, base_url).await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1047,15 +1029,8 @@ pub async fn close_pull_request(
     number: u64,
     base_url: &str,
 ) -> Result<(), String> {
-    close_pull_request_with_client(
-        &reqwest::Client::new(),
-        creds,
-        owner,
-        repo,
-        number,
-        base_url,
-    )
-    .await
+    let client = http_client()?;
+    close_pull_request_with_client(&client, creds, owner, repo, number, base_url).await
 }
 
 async fn close_pull_request_with_client(

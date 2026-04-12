@@ -5,4 +5,9 @@ disallowed-methods = [
   { path = "std::thread::spawn", reason = "Prefer Tokio task APIs on async paths; document intentional dedicated OS threads with #[expect(clippy::disallowed_methods, reason = \"...\")]" },
   { path = "std::thread::Builder::spawn", reason = "Prefer Tokio task APIs on async paths; document intentional dedicated OS threads with #[expect(clippy::disallowed_methods, reason = \"...\")]" },
   { path = "std::process::Command::new", reason = "Prefer tokio::process::Command on Tokio paths; document intentional synchronous subprocesses with #[expect(clippy::disallowed_methods, reason = \"...\")]" },
+  { path = "reqwest::Client::new", reason = "Use fabro_http::http_client() or fabro_http::test_http_client()", allow-invalid = true },
+  { path = "reqwest::Client::builder", reason = "Use fabro_http::HttpClientBuilder::new()", allow-invalid = true },
+  { path = "reqwest::blocking::Client::new", reason = "Use fabro_http::blocking_http_client() or fabro_http::blocking_test_http_client()", allow-invalid = true },
+  { path = "reqwest::blocking::Client::builder", reason = "Use fabro_http::BlockingHttpClientBuilder::new()", allow-invalid = true },
+  { path = "reqwest::get", reason = "Build a fabro_http client and send the request explicitly", allow-invalid = true },
 ]

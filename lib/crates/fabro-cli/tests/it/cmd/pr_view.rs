@@ -72,7 +72,7 @@ fn pr_view_reads_pull_request_from_store_without_pull_request_json() {
             serde_json::from_str(&std::fs::read_to_string(record_path).unwrap()).unwrap();
         let (client, base_url) = match record.bind {
             Bind::Unix(path) => (
-                reqwest::ClientBuilder::new()
+                fabro_http::HttpClientBuilder::new()
                     .unix_socket(path)
                     .no_proxy()
                     .build()
@@ -80,7 +80,10 @@ fn pr_view_reads_pull_request_from_store_without_pull_request_json() {
                 "http://fabro".to_string(),
             ),
             Bind::Tcp(addr) => (
-                reqwest::ClientBuilder::new().no_proxy().build().unwrap(),
+                fabro_http::HttpClientBuilder::new()
+                    .no_proxy()
+                    .build()
+                    .unwrap(),
                 format!("http://{addr}"),
             ),
         };

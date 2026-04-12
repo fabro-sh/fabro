@@ -69,7 +69,8 @@ async fn twin_doctor() {
     cmd.env_clear();
     cmd.env("NO_COLOR", "1");
     cmd.env("HOME", &context.home_dir);
-    cmd.env("FABRO_NO_UPGRADE_CHECK", "true");
+    cmd.env("FABRO_NO_UPGRADE_CHECK", "true")
+        .env("FABRO_HTTP_PROXY_POLICY", "disabled");
     cmd.env("FABRO_STORAGE_DIR", &context.storage_dir);
     cmd.env(
         "PATH",

@@ -46,9 +46,13 @@ pub(super) async fn login_command(
     for (name, value) in env_pairs {
         server
             .api()
-            .set_secret()
-            .name(name.clone())
-            .body(types::SetSecretRequest { value })
+            .create_secret()
+            .body(types::CreateSecretRequest {
+                name: name.clone(),
+                value,
+                type_: types::SecretType::Environment,
+                description: None,
+            })
             .send()
             .await?;
         fabro_util::printerr!(printer, "  {} Saved {}", s.green.apply_to("✔"), name);

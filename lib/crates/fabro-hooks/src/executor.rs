@@ -437,23 +437,23 @@ impl HookExecutorImpl {
         .await
     }
 
-    /// Build a reqwest client for the given TLS mode.
-    fn build_http_client(tls: TlsMode) -> reqwest::Client {
+    /// Build an HTTP client for the given TLS mode.
+    fn build_http_client(tls: TlsMode) -> fabro_http::HttpClient {
         let accept_invalid = matches!(tls, TlsMode::NoVerify | TlsMode::Off);
         #[cfg(test)]
         {
-            reqwest::Client::builder()
+            fabro_http::HttpClientBuilder::new()
                 .danger_accept_invalid_certs(accept_invalid)
                 .no_proxy()
                 .build()
-                .unwrap_or_default()
+                .expect("hook HTTP client should build")
         }
         #[cfg(not(test))]
         {
-            reqwest::Client::builder()
+            fabro_http::HttpClientBuilder::new()
                 .danger_accept_invalid_certs(accept_invalid)
                 .build()
-                .unwrap_or_default()
+                .expect("hook HTTP client should build")
         }
     }
 
@@ -461,7 +461,7 @@ impl HookExecutorImpl {
     /// Fail-open: non-2xx and connection errors return `Proceed`.
     #[allow(clippy::too_many_arguments)]
     async fn execute_http<E>(
-        client: &reqwest::Client,
+        client: &fabro_http::HttpClient,
         url: &str,
         headers: Option<&HashMap<String, String>>,
         allowed_env_vars: &[String],
@@ -560,9 +560,9 @@ impl HookExecutorImpl {
 
 /// Cached HTTP clients keyed by TLS mode.
 struct HttpClientCache {
-    verify:    reqwest::Client,
-    no_verify: reqwest::Client,
-    off:       reqwest::Client,
+    verify:    fabro_http::HttpClient,
+    no_verify: fabro_http::HttpClient,
+    off:       fabro_http::HttpClient,
 }
 
 impl HttpClientCache {
@@ -574,7 +574,7 @@ impl HttpClientCache {
         }
     }
 
-    fn get(&self, tls: TlsMode) -> &reqwest::Client {
+    fn get(&self, tls: TlsMode) -> &fabro_http::HttpClient {
         match tls {
             TlsMode::Verify => &self.verify,
             TlsMode::NoVerify => &self.no_verify,
@@ -704,7 +704,7 @@ mod tests {
         ))
     }
 
-    fn test_http_client() -> reqwest::Client {
+    fn test_http_client() -> fabro_http::HttpClient {
         HookExecutorImpl::build_http_client(TlsMode::Off)
     }
 
