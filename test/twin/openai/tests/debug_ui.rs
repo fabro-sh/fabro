@@ -300,14 +300,20 @@ async fn debug_page_renders_in_headless_chrome() {
         "/tmp/twin-openai-debug-screenshot-{}.png",
         std::process::id()
     );
-    let output = std::process::Command::new(chrome_binary)
-        .args([
-            "--headless",
-            "--disable-gpu",
-            &format!("--screenshot={screenshot_path}"),
-            "--window-size=1280,900",
-            &format!("{}/__debug", server.base_url),
-        ])
+    let mut command = std::process::Command::new(chrome_binary);
+    command.args([
+        "--headless",
+        "--disable-gpu",
+        &format!("--screenshot={screenshot_path}"),
+        "--window-size=1280,900",
+    ]);
+    if cfg!(target_os = "linux") {
+        // Ubuntu 24.04 GitHub runners block Chrome's default sandbox unless it
+        // is launched with a compatible user namespace or disabled explicitly.
+        command.arg("--no-sandbox");
+    }
+    let output = command
+        .arg(format!("{}/__debug", server.base_url))
         .output()
         .expect("Chrome should run");
 

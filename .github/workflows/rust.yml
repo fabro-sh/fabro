@@ -5,18 +5,22 @@ on:
     branches: [main]
     paths:
       - "lib/crates/**"
+      - "test/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".cargo/**"
+      - ".config/**"
       - "openapi/**"
       - ".github/workflows/rust.yml"
   pull_request:
     branches: [main]
     paths:
       - "lib/crates/**"
+      - "test/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".cargo/**"
+      - ".config/**"
       - "openapi/**"
       - ".github/workflows/rust.yml"
   workflow_dispatch:
