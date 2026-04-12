@@ -223,8 +223,10 @@ async fn main_inner() -> (String, Result<()>) {
                         .output
                         .verbosity
                         == OutputVerbosity::Verbose;
-                let exit_code =
-                    commands::doctor::run_doctor(&args, verbose, &globals, printer).await?;
+                let exit_code = Box::pin(commands::doctor::run_doctor(
+                    &args, verbose, &globals, printer,
+                ))
+                .await?;
                 std::process::exit(exit_code);
             }
             Commands::Discord => {
@@ -247,7 +249,7 @@ async fn main_inner() -> (String, Result<()>) {
             }
             Commands::Repo(ns) => commands::repo::dispatch(ns, &globals, printer).await?,
             Commands::Install(args) => {
-                commands::install::run_install(&args, &globals, printer).await?;
+                Box::pin(commands::install::run_install(&args, &globals, printer)).await?;
             }
             Commands::Uninstall(args) => {
                 commands::uninstall::run_uninstall(&args, &globals, printer).await?;
